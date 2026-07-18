@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Brokered run output publishing and worker lifecycle helpers."""
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from typing import Any
 
 from config import resolve_effective_cfg
 from core.helpers import get_log_session_id
+from services.runs.contracts import create_run_capture
 from services.runs.kinds import run_kind_for_cmd_type
 from services.runs.output_model import LineEvent, LineKind, LineRole, line_event_from_legacy
 
@@ -193,13 +197,13 @@ def brokered_synthetic_run(
     output_signal_classifier_cls: Callable[..., Any],
     publish_run_event_fn: Callable[[str, str, dict[str, Any]], Any],
     publish_broker_captured_line_fn: Callable[..., Any],
-    save_completed_run_fn: Callable[..., Any],
-    app_metrics_obj,
+    save_completed_run_fn: Callable[..., Any], app_metrics_obj,
+    run_created_hook: Callable[[str, object | None], None] | None = None,
 ) -> str:
     active_cfg = resolve_effective_cfg(cfg)
     run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
-    capture = run_output_capture_fn(run_id)
+    capture = create_run_capture(run_id, run_output_capture_fn, run_created_hook)
     signal_classifier = output_signal_classifier_cls(
         original_command,
         cmd_type=cmd_type,

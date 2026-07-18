@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Override any subset of darklab_shell's built-in application settings here.
+# Settings you omit keep their shipped values. Other supported local content
+# overrides use the same relative names under this deployment's conf/ directory.
+#
+# Built-in settings, defaults, and examples (reference only):
+# https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/app/conf/config.yaml
+# Operator guide:
+# https://gitlab.com/darklab.sh/darklab_shell/-/blob/v@RELEASE_VERSION@/CONFIGURATION.md
+#
+# Common optional feature switches for this Compose deployment live in ../.env:
+# WORKSPACE_ENABLED, INTERACTIVE_PTY_ENABLED, and RAW_PACKET_SCANNING_ENABLED.
+# Use this file for feature fine-tuning and settings without environment overrides.
+#
+# YAML settings use `key: value`, not `key = value`.
+# Example - remove the leading # to use it:
+# workspace_max_file_mb: 10

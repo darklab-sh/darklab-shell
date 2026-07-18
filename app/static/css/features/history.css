@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
 /* darklab_shell CSS module: history
    History drawer, History row cards, Run Details modal, and history actions. */
 
@@ -629,6 +632,24 @@ body #history-panel { background: var(--theme-chrome-bg); }
   width: fit-content;
 }
 
+.history-run-workflow-summary {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.history-run-workflow-label {
+  line-height: 1.3;
+}
+
+.history-run-workflow-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .history-run-section {
   display: flex;
   flex: 0 0 auto;
@@ -1192,6 +1213,15 @@ body #history-panel { background: var(--theme-chrome-bg); }
   color: var(--text);
   background: transparent;
   border-color: transparent;
+}
+.search-signal-compare {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 .tabbar-chrome:hover .search-signal-summary,
 #search-toggle-btn:hover + .search-signal-summary,

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Shared finding remediation and verification editor.
 // Loaded before shell_chrome.js; Projects and Atlas open it with a saved callback.
 import { apiFetch as importedApiFetch } from '../../session.js';

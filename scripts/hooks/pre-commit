@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Pre-commit checks: Ruff, bandit, pytest, pip-audit, eslint, npm audit,
-# shell script linting, hadolint, yamllint, jsonlint, markdownlint, vendor:check, assets:check
+# source-license notices, shell script linting, hadolint, yamllint, jsonlint,
+# markdownlint, vendor:check, assets:check
 # Install once with: git config core.hooksPath scripts/hooks
 
 set -uo pipefail
@@ -33,8 +37,9 @@ run_check() {
     fi
 }
 
-run_check "ruff"      "$PYTHON" -m ruff check --config .tooling/ruff.toml app/ tests/py/
+run_check "ruff"      "$PYTHON" -m ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/check_source_licenses.py
 run_check "bandit"    "$PYTHON" -m bandit -r app/ -ll -q
+run_check "licenses"  "$PYTHON" scripts/check_source_licenses.py
 run_check "pytest"    "$PYTHON" -m pytest tests/py/ -q --tb=short
 run_check "pip-audit" "$PYTHON" -m pip_audit -r app/requirements.txt -r requirements-dev.txt
 
@@ -53,14 +58,9 @@ fi
 # npm audit — JS dependency CVEs (fail on high/critical only)
 run_check "npm audit" npm --prefix "$REPO_ROOT" run audit:js
 
-# Shell script static analysis (skips non-shell .sh files)
-shell_scripts=$(find "$REPO_ROOT" -name '*.sh' -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f | while read -r f; do
-    head -1 "$f" | grep -qE '#!/.*(bash|sh)' && printf '%s ' "$f"
-done)
-if [ -n "$shell_scripts" ]; then
-    # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
-    run_check "shellcheck" shellcheck $shell_scripts
-fi
+# Shell script static analysis — use the package script so the hook and CI
+# cover the same shebang-selected .sh files and deployment templates.
+run_check "shellcheck" npm --prefix "$REPO_ROOT" run lint:shell
 
 # hadolint — Dockerfile linting
 if [ -f "$REPO_ROOT/Dockerfile" ]; then

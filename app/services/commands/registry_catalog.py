@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Command registry catalog and secret-consumer shaping."""
 
 from __future__ import annotations
@@ -5,6 +8,7 @@ from __future__ import annotations
 from typing import Callable, cast
 
 from services.commands import registry_loader
+from services.commands.features import suggestion_enabled_for_features
 from services.commands.registry_validation import command_root
 
 
@@ -68,21 +72,20 @@ def interactive_pty_spec_for_command(command: str, registry: dict) -> dict[str, 
     return None
 
 
-def _catalog_suggestions(items: object) -> list[dict[str, object]]:
+def _catalog_suggestions(items: object, cfg=None) -> list[dict[str, object]]:
     suggestions: list[dict[str, object]] = []
     seen = set()
     if not isinstance(items, list):
         return suggestions
     for item in items:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or not suggestion_enabled_for_features(item, cfg):
             continue
         value = str(item.get("value") or "").strip()
         if not value:
             continue
-        key = value.lower()
-        if key in seen:
+        if value.lower() in seen:
             continue
-        seen.add(key)
+        seen.add(value.lower())
         suggestion: dict[str, object] = {
             "value": value,
             "description": str(item.get("description") or "").strip(),
@@ -93,7 +96,7 @@ def _catalog_suggestions(items: object) -> list[dict[str, object]]:
     return suggestions
 
 
-def _catalog_autocomplete_spec(spec: object) -> dict[str, object]:
+def _catalog_autocomplete_spec(spec: object, cfg=None) -> dict[str, object]:
     autocomplete = cast(dict[str, object], spec) if isinstance(spec, dict) else {}
     raw_expects_value = autocomplete.get("expects_value")
     expects_value = {
@@ -104,18 +107,18 @@ def _catalog_autocomplete_spec(spec: object) -> dict[str, object]:
     raw_arg_hints = autocomplete.get("arg_hints")
     arg_hints = cast(dict[str, object], raw_arg_hints) if isinstance(raw_arg_hints, dict) else {}
     flags: list[dict[str, object]] = []
-    for item in _catalog_suggestions(autocomplete.get("flags")):
+    for item in _catalog_suggestions(autocomplete.get("flags"), cfg):
         flag = dict(item)
         value = str(flag.get("value") or "")
         if value in expects_value or item.get("takes_value"):
             flag["takes_value"] = True
-            hints = _catalog_suggestions(arg_hints.get(value))
+            hints = _catalog_suggestions(arg_hints.get(value), cfg)
             if hints:
                 flag["value_hints"] = hints
         flags.append(flag)
 
-    positional_hints = _catalog_suggestions(arg_hints.get("__positional__"))
-    examples = _catalog_suggestions(autocomplete.get("examples"))
+    positional_hints = _catalog_suggestions(arg_hints.get("__positional__"), cfg)
+    examples = _catalog_suggestions(autocomplete.get("examples"), cfg)
     subcommands: list[dict[str, object]] = []
     raw_subcommands = autocomplete.get("subcommands")
     if isinstance(raw_subcommands, dict):
@@ -123,7 +126,7 @@ def _catalog_autocomplete_spec(spec: object) -> dict[str, object]:
             sub_name = str(name or "").strip()
             if not sub_name:
                 continue
-            sub_catalog = _catalog_autocomplete_spec(sub_spec)
+            sub_catalog = _catalog_autocomplete_spec(sub_spec, cfg)
             if isinstance(sub_spec, dict):
                 description = str(sub_spec.get("description") or "").strip()
                 if description:
@@ -243,7 +246,7 @@ def command_secret_consumers(registry: dict) -> list[dict[str, object]]:
     return consumers
 
 
-def command_catalog_from_registry(registry: dict) -> list[dict[str, object]]:
+def command_catalog_from_registry(registry: dict, cfg=None) -> list[dict[str, object]]:
     """Return user-facing command reference data from the external command registry."""
     catalog = []
     for entry in registry.get("commands", []) or []:
@@ -261,7 +264,7 @@ def command_catalog_from_registry(registry: dict) -> list[dict[str, object]]:
         ]
         if not allowed:
             continue
-        autocomplete = _catalog_autocomplete_spec(entry.get("autocomplete"))
+        autocomplete = _catalog_autocomplete_spec(entry.get("autocomplete"), cfg)
         catalog.append({
             "root": root,
             "category": str(entry.get("category") or "Allowed commands").strip(),
@@ -329,13 +332,13 @@ def pipe_catalog_from_registry(registry: dict) -> list[dict[str, object]]:
     return catalog
 
 
-def command_catalog_entry(root: str, subcommand: str | None, registry: dict) -> dict[str, object] | None:
+def command_catalog_entry(root: str, subcommand: str | None, registry: dict, cfg=None) -> dict[str, object] | None:
     """Return catalog details for one command root, optionally scoped to a subcommand."""
     wanted_root = str(root or "").strip().lower()
     wanted_subcommand = str(subcommand or "").strip().lower()
     if not wanted_root:
         return None
-    for entry in command_catalog_from_registry(registry):
+    for entry in command_catalog_from_registry(registry, cfg):
         if str(entry.get("root") or "").lower() != wanted_root:
             continue
         if not wanted_subcommand:

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Operational audit event helpers."""
 
 from .models import AuditEventType, AuditTargetType, RecordingMode, event_spec

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Single source of truth for mobile bottom-sheet drag/tap/keyboard close
 // behavior. Every mobile sheet (menu, recents, history panel, workflows, FAQ,
 // options, kill, hist-del, share-redaction) is wired through bindMobileSheet

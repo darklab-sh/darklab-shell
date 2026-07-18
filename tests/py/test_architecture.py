@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Architecture boundary tests for the Python application layers."""
 
 from __future__ import annotations
@@ -22,6 +25,67 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi.py",
     "serialization.py",
 }
+
+_DIRECT_TEAM_RUN_PREDICATE_RE = re.compile(
+    r"\b(?:runs|r)\.session_id\s*=\s*\?.{0,240}\b(?:runs|r)\.team_id\s*=\s*\?"
+    r"|\b(?:runs|r)\.team_id\s*=\s*\?.{0,240}\b(?:runs|r)\.session_id\s*=\s*\?",
+    re.IGNORECASE | re.DOTALL,
+)
+_UNQUALIFIED_TEAM_RUN_PREDICATE_RE = re.compile(
+    r"\bsession_id\s*=\s*\?.{0,240}\bteam_id\s*=\s*\?"
+    r"|\bteam_id\s*=\s*\?.{0,240}\bsession_id\s*=\s*\?",
+    re.IGNORECASE | re.DOTALL,
+)
+_RUN_SQL_RE = re.compile(r"\b(?:FROM|JOIN)\s+runs\b|\bruns\.", re.IGNORECASE)
+
+
+def _stringish_source(node: ast.AST) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(
+            part.value
+            if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            else "{}"
+            for part in node.values
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _stringish_source(node.left) + _stringish_source(node.right)
+    return ""
+
+
+def _assignment_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _team_scope_sql_fragments(path: Path) -> list[tuple[int, str]]:
+    tree = ast.parse(path.read_text(), filename=str(path))
+    fragments: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            target_names = {_assignment_name(target) for target in node.targets}
+            if any(
+                name.endswith(("_sql", "_query", "_clause"))
+                or name in {"sql", "query"}
+                for name in target_names
+            ):
+                source = _stringish_source(node.value)
+                if source:
+                    fragments.append((node.lineno, source))
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"execute", "executemany"}
+            and node.args
+        ):
+            source = _stringish_source(node.args[0])
+            if source:
+                fragments.append((node.lineno, source))
+    return fragments
 
 
 @dataclass(frozen=True)
@@ -65,6 +129,7 @@ class ModuleSizeBudget:
 
 _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/registry.py", 1150, "split-target-phase1"),
+    ModuleSizeBudget("app/services/commands/registry_adaptations.py", 87, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_autocomplete.py", 564, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_cache.py", 104, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_catalog.py", 359, "split-package-ratchet"),
@@ -159,7 +224,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/process.py", 1170, "ratchet-only"),
     ModuleSizeBudget("app/services/metrics/__init__.py", 983, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/projects/auto_promote.py", 963, "cohesive-ratchet"),
-    ModuleSizeBudget("app/services/runs/broker_worker.py", 495, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/broker_worker.py", 496, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization.py", 1006, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
@@ -178,11 +243,15 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/broker.py", 716, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/comparison.py", 1263, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/runs/comparison_derived.py", 204, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/comparison_findings.py", 238, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/contracts.py", 41, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/kinds.py", 53, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/output_model.py", 534, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/output_store.py", 423, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/persistence.py", 161, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/runs/start.py", 230, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/private_data.py", 246, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/start.py", 219, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/streaming.py", 156, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/structured_filters.py", 317, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/structured_summary.py", 59, "split-package-ratchet"),
@@ -284,7 +353,13 @@ _BARE_DICT_CFG_SENTINEL_ALLOWLIST = frozenset({
 
 
 def _wc_line_count(path: Path) -> int:
-    return path.read_bytes().count(b"\n")
+    content = path.read_bytes()
+    line_count = content.count(b"\n")
+    header = b"\n".join(content.splitlines()[:12])
+    if b"SPDX-FileCopyrightText:" in header and b"SPDX-License-Identifier:" in header:
+        # The standard two-line notice plus its separator is file metadata, not module code.
+        line_count = max(0, line_count - 3)
+    return line_count
 
 
 _SQL_STRING_PATTERNS = tuple(
@@ -785,5 +860,29 @@ class TestPublicImportCompatibility:
 
         assert not issues, (
             "Public import compatibility drift detected for moved decomposition symbols.\n"
+            + "\n".join(issues)
+        )
+
+
+class TestTeamModeScopePredicates:
+    def test_direct_team_run_predicates_use_owner_scope_helpers(self):
+        issues = []
+        for path in sorted((_REPO_ROOT / "app").rglob("*.py")):
+            relative = path.relative_to(_REPO_ROOT)
+            for line_number, source in _team_scope_sql_fragments(path):
+                qualified_match = _DIRECT_TEAM_RUN_PREDICATE_RE.search(source)
+                unqualified_match = (
+                    _RUN_SQL_RE.search(source)
+                    and _UNQUALIFIED_TEAM_RUN_PREDICATE_RE.search(source)
+                )
+                if not (qualified_match or unqualified_match):
+                    continue
+                snippet = " ".join(source.split())[:180]
+                issues.append(f"  {relative}:{line_number}: {snippet}")
+
+        assert not issues, (
+            "Direct team run predicates can hide team-owned runs from other members. "
+            "Use owner_scope.predicate(), _run_owner_clause(), or another shared "
+            "owner-scope helper instead of combining session_id = ? with team_id = ? on runs:\n"
             + "\n".join(issues)
         )

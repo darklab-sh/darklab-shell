@@ -1,9 +1,56 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Fix /data ownership after Docker volume mount (which resets it to root)
 # and re-own any existing files (e.g. history.db created by a previous root run)
 # then drop to appuser to run Gunicorn
 chown -R appuser:appuser /data 2>/dev/null || true
 chmod 700 /data 2>/dev/null || true
+
+# Production installs keep the host overlay private (0700 directory, 0600
+# files). Root can read that bind mount, but the app workers cannot. Stage the
+# overlay tree into a private appuser-owned runtime directory before dropping
+# privileges so workers can read the complete startup snapshot.
+stage_local_config_overlays() {
+    source_dir="${APP_LOCAL_CONF_DIR:-}"
+    [ -n "$source_dir" ] || return
+
+    [ -e "$source_dir" ] || return
+    if [ ! -d "$source_dir" ] || [ -L "$source_dir" ]; then
+        echo "LOCAL_CONFIG_OVERLAY_INVALID path=$source_dir" >&2
+        exit 1
+    fi
+    invalid_entry=$(find "$source_dir" \( -type l -o \! -type d -a \! -type f \) -print -quit)
+    if [ -n "$invalid_entry" ]; then
+        echo "LOCAL_CONFIG_OVERLAY_INVALID path=$invalid_entry" >&2
+        exit 1
+    fi
+
+    runtime_dir="/tmp/darklab-runtime-conf"
+    rm -rf "$runtime_dir"
+    mkdir "$runtime_dir" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=mkdir path=$runtime_dir" >&2
+        exit 1
+    }
+    cp -R "${source_dir%/}/." "$runtime_dir/" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=copy path=$source_dir" >&2
+        exit 1
+    }
+    chown -R appuser:appuser "$runtime_dir" || {
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=chown path=$runtime_dir" >&2
+        exit 1
+    }
+    if ! find "$runtime_dir" -type d -exec chmod 700 {} \; \
+        || ! find "$runtime_dir" -type f -exec chmod 600 {} \;; then
+        echo "LOCAL_CONFIG_OVERLAY_STAGE_FAILED stage=chmod path=$runtime_dir" >&2
+        exit 1
+    fi
+    APP_LOCAL_CONF_DIR="$runtime_dir"
+    export APP_LOCAL_CONF_DIR
+}
+
+stage_local_config_overlays
 
 # Normalize the optional per-session workspace mount before dropping to
 # appuser. Bind mounts are commonly root-owned on first boot, so app-mediated
@@ -59,6 +106,9 @@ fi
 # (nuclei templates, ProjectDiscovery config, etc.) to the tmpfs mount
 chmod 1777 /tmp 2>/dev/null || true
 
+RAW_PACKET_FIREWALL_READY_FILE="/tmp/darklab-raw-packet-firewall.ready"
+rm -f "$RAW_PACKET_FIREWALL_READY_FILE"
+
 # prometheus_client multiprocess mode stores per-worker metric shards here.
 # The directory is on /tmp tmpfs in Compose; clear stale shards before Gunicorn
 # starts so an unclean container stop cannot double-count old workers.
@@ -75,35 +125,90 @@ mkdir -p /tmp/.config/nuclei /tmp/.config/uncover /tmp/.cache
 chown -R scanner:scanner /tmp/.config /tmp/.cache
 chmod -R 755 /tmp/.config /tmp/.cache
 
-# Block the scanner user from making outbound TCP connections to the app port.
-# This prevents commands run via the web shell from curling internal endpoints
-# like /diag, /config, or /history directly. The rule runs as root before the
-# gosu drop, so iptables is available. The || true keeps startup safe if the
-# kernel module is absent in unusual environments.
-iptables -A OUTPUT -m owner --uid-owner scanner -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null || true
+# Block the scanner user from reaching this container's app port without
+# reserving that same port on authorized remote targets. Prefer addrtype so
+# loopback and every address assigned to the container stay covered. Older
+# kernels fall back to explicit loopback and container addresses.
+add_scanner_local_app_port_rule() {
+    firewall_cmd="$1"
+    address_family="$2"
+    loopback_address="$3"
+    command -v "$firewall_cmd" >/dev/null 2>&1 || return
 
-# Optional operator-defined scanner egress block. This is the network-layer
-# backstop for targets that arrive through DNS, CNAMEs, tool-managed resolver
-# input, or raw workspace files where command parsing cannot prove intent.
-if [ -n "${RESTRICTED_COMMAND_INPUT_CIDRS:-}" ]; then
-    printf '%s\n' "$RESTRICTED_COMMAND_INPUT_CIDRS" | tr ',' '\n' | while IFS= read -r restricted_cidr; do
-        restricted_cidr="$(printf '%s' "$restricted_cidr" | xargs)"
-        [ -n "$restricted_cidr" ] || continue
-        case "$restricted_cidr" in
-            *:*)
-                if command -v ip6tables >/dev/null 2>&1; then
-                    ip6tables -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
-                        || ip6tables -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
-                        || echo "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" >&2
-                fi
-                ;;
-            *)
-                iptables -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
-                    || iptables -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
-                    || echo "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" >&2
-                ;;
+    if "$firewall_cmd" -C OUTPUT -m owner --uid-owner scanner -m addrtype --dst-type LOCAL \
+        -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null; then
+        return
+    fi
+    if "$firewall_cmd" -A OUTPUT -m owner --uid-owner scanner -m addrtype --dst-type LOCAL \
+        -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null; then
+        return
+    fi
+
+    rule_added=0
+    for local_address in "$loopback_address" $(hostname -i 2>/dev/null); do
+        case "$address_family:$local_address" in
+            ipv4:*:*) continue ;;
+            ipv6:*:*) ;;
+            ipv6:*) continue ;;
         esac
+        "$firewall_cmd" -C OUTPUT -m owner --uid-owner scanner -d "$local_address" \
+            -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null \
+            || "$firewall_cmd" -A OUTPUT -m owner --uid-owner scanner -d "$local_address" \
+                -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null \
+            || continue
+        rule_added=1
     done
+    [ "$rule_added" = "1" ] || echo "SCANNER_LOCAL_APP_PORT_RULE_FAILED family=$address_family" >&2
+}
+
+add_scanner_local_app_port_rule iptables ipv4 127.0.0.1
+add_scanner_local_app_port_rule ip6tables ipv6 ::1
+
+# Resolve the same normalized CIDR list the Flask app will enforce. This keeps
+# YAML/local-overlay configuration and environment overrides on one source of
+# truth before the root-only firewall setup drops privileges.
+if ! effective_restricted_cidrs="$(python -c '
+from config import CFG
+print("\n".join(str(value) for value in CFG.get("restricted_command_input_cidrs", [])))
+')"; then
+    echo "SCANNER_EGRESS_CONFIG_RESOLUTION_FAILED" >&2
+    exit 1
+fi
+
+add_scanner_egress_block_rule() {
+    restricted_cidr="$1"
+    case "$restricted_cidr" in
+        *:*) firewall_cmd="ip6tables" ;;
+        *) firewall_cmd="iptables" ;;
+    esac
+    command -v "$firewall_cmd" >/dev/null 2>&1 || return 1
+    "$firewall_cmd" -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+        || "$firewall_cmd" -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null \
+        || return 1
+    "$firewall_cmd" -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT 2>/dev/null
+}
+
+# Fail startup when the configured egress boundary cannot be installed. Raw
+# Nmap also verifies the root-owned marker below before it can become active.
+if [ -n "$effective_restricted_cidrs" ]; then
+    firewall_failed=0
+    previous_ifs="$IFS"
+    IFS='
+'
+    for restricted_cidr in $effective_restricted_cidrs; do
+        [ -n "$restricted_cidr" ] || continue
+        if ! add_scanner_egress_block_rule "$restricted_cidr"; then
+            echo "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" >&2
+            firewall_failed=1
+        fi
+    done
+    IFS="$previous_ifs"
+    if [ "$firewall_failed" != "0" ]; then
+        exit 1
+    fi
+    printf '%s\n' "$effective_restricted_cidrs" > "$RAW_PACKET_FIREWALL_READY_FILE"
+    chown root:root "$RAW_PACKET_FIREWALL_READY_FILE"
+    chmod 0444 "$RAW_PACKET_FIREWALL_READY_FILE"
 fi
 
 WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"

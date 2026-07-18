@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """YAML loading, normalization, and overlay merging for command registry files."""
 
 from __future__ import annotations
@@ -9,10 +12,16 @@ import os
 import re
 import yaml
 
+from services.commands.registry_adaptations import (
+    copy_environment_conditions,
+    copy_inject_conditions,
+    environment_merge_key,
+    inject_merge_key,
+)
+
 
 log = logging.getLogger("shell")
 SECRET_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
-
 
 # ── Knowledge field schema ─────────────────────────────────────────────────────
 # Phase 0 locked decisions — these constants are the contract that Phase 1
@@ -241,8 +250,7 @@ def normalize_runtime_inject_flags(items) -> list[dict[str, object]]:
         notice = str(item.get("notice") or item.get("output_notice") or "").strip()
         if notice:
             normalized["notice"] = notice
-        if item.get("requires_workspace"):
-            normalized["requires_workspace"] = True
+        copy_inject_conditions(item, normalized)
         result.append(normalized)
     return result
 
@@ -291,6 +299,7 @@ def normalize_runtime_environment(items) -> list[dict[str, object]]:
         managed_flag = str(item.get("managed_directory_flag") or "").strip()
         if managed_flag:
             normalized["managed_directory_flag"] = managed_flag
+        copy_environment_conditions(item, normalized)
         result.append(normalized)
     return result
 
@@ -585,33 +594,23 @@ def merge_command_registry_entries(
             )
         if overlay_runtime.get("inject_flags"):
             existing_inject = {
-                (
-                    tuple(item.get("flags", []) or []),
-                    item.get("position"),
-                    tuple(item.get("unless_any", []) or []),
-                    tuple(item.get("unless_any_regex", []) or []),
-                )
+                inject_merge_key(item)
                 for item in runtime_adaptations.setdefault("inject_flags", [])
                 if isinstance(item, dict)
             }
             for inject in overlay_runtime.get("inject_flags", []) or []:
-                key = (
-                    tuple(inject.get("flags", []) or []),
-                    inject.get("position"),
-                    tuple(inject.get("unless_any", []) or []),
-                    tuple(inject.get("unless_any_regex", []) or []),
-                )
+                key = inject_merge_key(inject)
                 if key not in existing_inject:
                     runtime_adaptations.setdefault("inject_flags", []).append(deepcopy(inject))
                     existing_inject.add(key)
         if overlay_runtime.get("environment"):
             existing_env = {
-                (item.get("name"), item.get("value"), item.get("managed_directory_flag"))
+                environment_merge_key(item)
                 for item in runtime_adaptations.setdefault("environment", [])
                 if isinstance(item, dict)
             }
             for env_item in overlay_runtime.get("environment", []) or []:
-                key = (env_item.get("name"), env_item.get("value"), env_item.get("managed_directory_flag"))
+                key = environment_merge_key(env_item)
                 if key not in existing_env:
                     runtime_adaptations.setdefault("environment", []).append(deepcopy(env_item))
                     existing_env.add(key)
@@ -737,8 +736,11 @@ def load_commands_registry(
     normalize_autocomplete: Callable[[str, object], dict],
     empty_autocomplete_entry: Callable[[], dict],
     merge_autocomplete_context: Callable[[dict, dict], dict],
+    *, local_path: str | None = None,
 ) -> dict:
     base = load_commands_registry_file(path, normalize_autocomplete)
-    root, ext = os.path.splitext(path)
-    local = load_commands_registry_file(f"{root}.local{ext}", normalize_autocomplete)
+    if local_path is None:
+        root, ext = os.path.splitext(path)
+        local_path = f"{root}.local{ext}"
+    local = load_commands_registry_file(local_path, normalize_autocomplete)
     return merge_commands_registry(base, local, empty_autocomplete_entry, merge_autocomplete_context)

@@ -22,7 +22,11 @@ tests/
 docs/
 examples/
 assets/
-scripts/
+scripts/*
+!scripts/backup_system.py
+!scripts/install_go_tool.sh
+!scripts/migrate_sqlite_to_postgres.py
+!scripts/restore_system.py
 config/
 data/
 
@@ -38,3 +42,7 @@ pyrightconfig.json
 # Compose and environment files
 docker-compose*.yml
 .env*
+
+# Operator-owned configuration must never be baked into a local image build.
+*.local.*
+**/*.local.*

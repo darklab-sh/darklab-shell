@@ -1,10 +1,7 @@
-"""
-Split run-output persistence helpers.
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
 
-Preview output stays in SQLite for fast history/permalink access.
-Optional full output is written to compressed artifact files under the
-configured data directory.
-"""
+"""Persist run previews in the database and optional full output in files."""
 
 from __future__ import annotations
 
@@ -79,7 +76,6 @@ class RunOutputCapture:
         self.full_output_bytes = 0
         self.artifact_rel_path: str | None = None
         self._artifact_file = None
-
         if self.persist_full_output:
             self.artifact_rel_path = artifact_rel_path_for_run(run_id)
 
@@ -215,6 +211,8 @@ class RunOutputCapture:
         entry = to_legacy_wire(storage_event)
         self.output_line_count += 1
 
+        if observer := getattr(self, "_event_observer", None):
+            observer(storage_event)
         self._append_preview_entry(entry)
 
         if not self.persist_full_output or not self._ensure_artifact_file():
@@ -373,6 +371,7 @@ def load_run_output_events_for_run(
     *,
     prefer_full: bool = True,
     log_event: str = "FULL_OUTPUT_LOAD_FAILED",
+    failure_log_extra: Mapping[str, object] | None = None,
 ) -> RunOutputLoadResult:
     unknown_collector = unknown_line_event_collector({
         "run_id": str(run.get("id") or ""),
@@ -387,12 +386,16 @@ def load_run_output_events_for_run(
                 truncated=bool(run.get("full_output_truncated")),
             )
         except (OSError, EOFError, UnicodeError, json.JSONDecodeError) as exc:
-            log.warning(log_event, extra={
+            log_extra: dict[str, object] = {
                 "run_id": str(run.get("id") or ""),
+                "reason": type(exc).__name__,
+            }
+            default_log_extra = {
                 "session": get_log_session_id(str(run.get("session_id") or "")),
                 "rel_path": rel_path,
-                "reason": type(exc).__name__,
-            })
+            }
+            log_extra.update(default_log_extra if failure_log_extra is None else failure_log_extra)
+            log.warning(log_event, extra=log_extra)
     return RunOutputLoadResult(
         events=preview_output_events_from_run(run, unknown_collector),
         source="preview",

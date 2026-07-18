@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
 
 let exportedDarklabProjectTargets = null;

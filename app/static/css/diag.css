@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
 /* darklab_shell CSS module: diag
    Diagnostics page layout, header, tables, chips, and responsive overrides. */
 
@@ -137,6 +140,7 @@ body.diag-page::before { display: none; }
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-areas:
     "app      db       redis    assets"
+    "raw      raw      raw      raw"
     "ai       ai       pty      pty"
     "classify classify classify classify"
     "drift    drift    drift    drift"
@@ -170,6 +174,7 @@ body.diag-page::before { display: none; }
 .diag-section.s-db       { grid-area: db; }
 .diag-section.s-redis    { grid-area: redis; }
 .diag-section.s-assets   { grid-area: assets; }
+.diag-section.s-raw-packets { grid-area: raw; }
 .diag-section.s-ai       { grid-area: ai; }
 .diag-section.s-db-details { grid-area: dbd; }
 .diag-section.s-redis-details { grid-area: redisd; }
@@ -872,6 +877,7 @@ body.diag-page::before { display: none; }
     grid-template-areas:
       "app       db"
       "redis     assets"
+      "raw       raw"
       "ai        pty"
       "classify  classify"
       "dbd       dbd"
@@ -944,6 +950,7 @@ body.diag-page::before { display: none; }
       "db"
       "redis"
       "assets"
+      "raw"
       "ai"
       "pty"
       "classify"

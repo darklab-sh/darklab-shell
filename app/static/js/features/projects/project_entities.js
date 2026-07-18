@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project Entities tab controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 import {
@@ -100,7 +103,7 @@ let exportedDarklabProjectEntities = null;
     bindPressable = null,
   }) {
     const row = document.createElement('article');
-    row.className = 'project-explorer-item panel-row project-entity-row';
+    row.className = 'project-explorer-item panel-row selection-row project-entity-row';
     row.classList.toggle('is-selected', !!selected);
     if (checkbox) row.appendChild(checkbox);
 
@@ -1588,11 +1591,13 @@ let exportedDarklabProjectEntities = null;
           const entityId = String(entity.id || '');
           const value = String(entity.canonical_value || entity.value || '');
           const label = document.createElement('label');
-          label.className = 'project-entity-picker-row panel-row';
+          const selected = state.selected.has(entityId);
+          label.className = 'project-entity-picker-row panel-row selection-row';
+          label.classList.toggle('is-selected', selected);
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
           checkbox.dataset.projectEntityPickerSelect = entityId;
-          checkbox.checked = state.selected.has(entityId);
+          checkbox.checked = selected;
           const textWrap = document.createElement('span');
           textWrap.className = 'project-entity-picker-row-text';
           const name = document.createElement('strong');

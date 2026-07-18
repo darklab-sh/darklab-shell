@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // darklab_shell Command Registry modal and command catalog helpers.
 import {
   commandCatalogBody as importedCommandCatalogBody,

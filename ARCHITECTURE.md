@@ -12,8 +12,9 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 - [System Structure](#system-structure)
 - [Request Flow Walkthroughs](#request-flow-walkthroughs)
 - [HTTP Route Inventory](#http-route-inventory)
-- [Frontend](#frontend)
+- [Front End Design](#front-end-design)
 - [Back-end Architecture](#back-end-architecture)
+- [Headless API Surface](#headless-api-surface)
 - [Run Lifecycle](#run-lifecycle)
 - [Secrets and Vault](#secrets-and-vault)
 - [Intel and Provider Integrations](#intel-and-provider-integrations)
@@ -135,6 +136,26 @@ This is the transport and boundary view. It focuses on stable communication path
 - command execution remains out-of-process, which keeps the Flask worker lifecycle separate from tool execution
 - outbound notification delivery runs in its own supervised process and claims queued delivery rows from the database, so Flask workers do not send external notifications inline
 - the scheduler runs in its own supervised process, uses an exclusive deployment-wide lock, and owns time-based schedule ticks outside the Flask worker lifecycle
+
+### Container And Release Boundary
+
+One multi-stage Dockerfile owns both runtime modes and produces one self-contained runtime image. Independent ProjectDiscovery, other Go, native, Ruby, wordlist, and script-asset builders feed the final stage, which contains the bundled tools and complete `/app` tree without their compilers, development packages, Go toolchain and caches, apt indexes, or source trees. The source-mounted development stack builds that same image and overlays `./app:/app:ro`; the production stack pulls `docker.io/darklabsh/darklab-shell:<version>` and never mounts `/app`.
+
+Release images are built once for `linux/amd64` from protected final or `-rc.N` tags. Tag pipelines skip the branch-only verification build, and the canonical AMD64 image builds beside the native ARM64 compatibility candidate when that gate is enabled. The AMD64 release build imports and exports a release-line-scoped registry layer cache with a scheduled warmer and serialized writer. The native ARM64 compatibility build stays uncached because importing and exporting the bundled scanner and SecLists layers exceeds the hosted small runner's storage budget. Builder-local cache mounts aren't used as evidence of cross-runner reuse. Volatile release labels remain the final Dockerfile instruction. The pipeline pins the Python base manifest, VirusTotal CLI, Nikto, SecLists, and other direct tool inputs, inventories build inputs and licenses, validates required notices and packaged dependencies, and treats each exact app tag as immutable. Nmap 7.95 has its own NPSL 0.95 inventory record and hash-pinned license text, both of which remain part of the public-image validation.
+
+CI publishes the canonical GitLab image, then starts its fixed-Critical vulnerability scan and the runtime compatibility checks in parallel. The ordinary branch image receives the same Syft/Grype policy before a release tag is created. The AMD64 smoke lane records the pull time and installed size while it performs the pull required for repository-free verification, so publication doesn't remove and repull the image before downstream jobs can start. Docker Hub promotion waits for the early scan and enabled compatibility lanes, copies the verified manifest by digest, and passes the retained SBOM and vulnerability report to provenance and signing. The release deployment then runs the normal multi-worker stack against bundled Postgres, round-trips API state through backup and restore, verifies signatures and durable `/data`, and records the release tooling plus CI configuration in signed evidence. Candidate tags exercise that chain, but only a final tag creates a GitLab Release.
+
+Protected-tag compatibility gates share the repository-free runtime verifier across Docker and Podman, accept only `amd64` or `arm64`, and can add private SELinux relabeling to the external mounts. The verifier binds test-owned host directories at `/config`, `/data`, and `/workspaces`, loads an overlay, writes durable app and workspace markers, restarts the container, and executes an unprivileged Nmap SYN probe with the production capabilities. A native GitLab-hosted ARM64 runner uses its isolated Docker-in-Docker service to build the candidate without a registry cache, then executes the bundled tools as the scanner user. Dedicated self-managed runner tags cover SELinux-enforcing Docker and rootless Podman startup. The checked-in variables default to disabled so missing infrastructure cannot block ordinary work; protected project variables enable all three gates for v2.6.0 release tags and make them blocking. The native ARM64, SELinux, and rootless Podman lanes passed the protected candidate chain, while production remains Linux AMD64 on Docker Compose until the published image and operator contract deliberately expand.
+
+The protected release jobs call `scripts/publish_release_artifacts.sh` for GitLab image publication, Docker Hub promotion, and installer-payload upload. The same entry points run under regression tests with local registry doubles, which keeps first publication, identical retries, conflicting immutable content, missing digests, and failed uploads aligned with the CI behavior.
+
+The deterministic deployment archive contains the production Compose contract, safe local-overlay starters, lifecycle helpers, licenses and notices, checksums, and the pulled-image verifier. Production publishes the app port on every host interface by default for direct remote access; the bind address remains an operator override, and firewall or reverse-proxy controls own the network boundary because the app doesn't provide user authentication. The surrounding payload carries the installer, SBOM, vulnerability report, provenance, build-input inventory, evidence index, and signed checksum bundle. Archive listing and extraction fail closed on incomplete or unsafe content; authenticated online upgrades accept only the archive named in the signed manifest, while offline archives require separate publisher-signature verification. [CONFIGURATION.md](CONFIGURATION.md) owns the operator install, verification, storage, backup, restore, upgrade, and removal procedures.
+
+darklab_shell's original source and documentation use `AGPL-3.0-only`. Project-owned source carries a near-top `SPDX-FileCopyrightText` notice and that exact `SPDX-License-Identifier`; `scripts/check_source_licenses.py` defines the ownership boundary and runs through local lint, pre-commit, and CI. Hashed bundles, generated theme examples, fonts, vendored browser libraries, and third-party license texts are excluded so they keep their generated or upstream identity. The module-size ratchet ignores the standard three notice-only lines. The root `LICENSE` remains the single complete project license rather than duplicating it under `LICENSES/`.
+
+The image records the same SPDX expression in its OCI metadata and carries the full license under `/usr/share/doc/darklab-shell/LICENSE`. One version-derived `PROJECT_SOURCE` value opens the exact GitLab source tag at its README from the rail footer, mobile menu footer, FAQ, and terminal help. A modified network deployment is responsible for pointing that value at its own corresponding source and prominently offering the source to every remote user at no charge through a standard or customary copying method; the official placements aren't treated as a universal compliance guarantee. The complete `LICENSE` text controls. Third-party tools and assets remain outside the project license and retain the terms recorded in `THIRD_PARTY_NOTICES.txt` and `container-licenses.json`.
+
+Shipped configuration stays inside the image at `/app/conf`, while `APP_LOCAL_CONF_DIR` points every supported local overlay at the operator root. One path resolver preserves each loader's established merge or replacement behavior, maps nested theme overlays safely, and includes both base and local command files in cache signatures. The root entrypoint rejects symlinks and special files before copying the mounted `/config` tree into a private `appuser`-owned runtime path, which preserves the host's `0700/0600` permissions. Source deployments with no separate local directory retain sibling overlay behavior. Package preset and report template files whose relative names contain `.local.` resolve from the operator root as complete replacement catalogs; tour content and the curated wordlist map remain image-owned. This separation lets image upgrades refresh commands, themes, workflows, and other shipped catalogs without an old host directory hiding them.
 
 ---
 
@@ -311,8 +332,8 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/stats` | Returns compact current-session counters for the Status Monitor dashboard. |
 | `GET` | `/history/insights` | Returns compact visual history data for Status Monitor constellation, heatmap, ticker, and command mix widgets. |
 | `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Status Monitor. |
-| `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous current-session runs for the History drawer's compare launcher. |
-| `GET` | `/history/compare` | Compares two current-session runs, optionally scoped by `project_id` / `baseline_label`, and returns metadata deltas, bounded output hunks, totals, limits, finding/entity/artifact object diffs, and derived tool-aware changes such as nmap port/service and web URL/status deltas. |
+| `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous completed external runs from the active personal/team owner scope for the shared compare launcher. |
+| `GET` | `/history/compare` | Compares two active-scope runs, optionally scoped by `project_id` / `baseline_label`, and returns metadata deltas, bounded output hunks, totals, limits, finding/entity/artifact object diffs, workflow ancestry when present, and derived tool-aware changes such as nmap port/service, web URL/status, discovered-host, and TLS deltas. Explicit `left`/`right` ids remain positional. |
 | `GET` | `/history/compare/lines` | Returns bounded filtered-output slices for lazy expansion of folded comparison hunks, using `left`/`right` run ids, `side`, `start`/`end`, and optional `project_id` scoping. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set, and includes same-session Atlas counts for source runs. |
 | `GET` | `/history/<run_id>/atlas-cleanup-preview` | Previews disposable, kept-by-default, and not-eligible Atlas rows before a run delete. |
@@ -333,14 +354,37 @@ Replace-line pairing is bounded by `COMPARE_REPLACE_PAIR_CANDIDATES` (32 nearest
 and accepts pairs at `COMPARE_REPLACE_PAIR_MIN_RATIO` (0.5), with a matching
 `COMPARE_REPLACE_PAIR_QUICK_RATIO` prefilter to avoid expensive full similarity checks when the
 cheap upper bound is already below the threshold. Transcript hunks preserve source output order.
-Finding and artifact object diffs are intentionally order-insensitive: finding keys normalize
-stored `raw_line` / `title` text with fingerprint fallback, while artifact keys prefer
+Finding and artifact object diffs are intentionally order-insensitive. Finding occurrences keep
+the severity and severity-neutral comparison identity observed by each run; exact severity matches
+pair first, then remaining rows with the same comparison identity become deterministic `changed`
+records with complete `before` / `after` objects and `changed_fields`. Rows without a usable
+comparison identity retain the generic added/removed fallback. Occurrence writers store the bounded
+raw identity components, so occurrences recorded after schema migration `0044` retain exact
+run-observed severity. Migration `0044` reconstructs older rows from retained canonical finding and
+snippet data; it cannot recover severity that was overwritten earlier, and best-effort rows fall
+back to added/removed findings when a dependable identity is unavailable. Comparison reads apply
+the current normalization rules consistently to all rows. Artifact keys prefer
 `content_sha256`, then workspace path, then artifact id.
 The compare payload also includes a bounded `derived_changes` block for tool-aware summaries.
 Its nmap port/service group reuses the shared diff classifier, while the web URL/status group
 uses line-attached URL entities plus confident `httpx`, `ffuf`, `gobuster`, and `katana` output
-parsers to report added, removed, and changed records. Derived records carry output-line pointers
-mapped through the same compare-line indexes used by finding jump actions.
+parsers to report added, removed, and changed records. Same-root host adapters cover discovery
+output without duplicating a confident `httpx` URL group, and the TLS adapter normalizes subject,
+issuer, alternative names, validity dates, SHA-256 fingerprint, and verification changes. Derived
+records carry output-line pointers when the parser can identify a reliable source line and preserve
+partial/truncated notes without suppressing the raw transcript diff.
+
+App-generated previous-run comparisons normalize `started` timestamps so the older baseline is
+left and the current run is right. This includes automatic/manual History launches and Project
+defaults; direct API callers that supply both ids keep their requested order. Every comparison read
+uses one resolved owner scope for runs, project links, findings, artifacts, workflow provenance, and
+lazy line slices. Comparison run cards add value-free workflow execution/step ancestry only when a
+run has it, and the browser hands **View playbook** back to the existing Workflows execution view.
+The dynamically mounted comparison dialog binds the shared focus trap when it is created and keeps
+an explicit launch control for focus restoration; mobile menu launches use the hamburger because
+the menu row is hidden before the dialog opens. Findings-only mode renders persisted
+changed/added/removed totals and finding rows without transcript navigation or line-anchor controls,
+because that view does not mount transcript panes.
 
 ### Atlas Routes
 
@@ -448,7 +492,7 @@ Client-visible error codes include `session_required`, `file_required`,
 | `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server. |
 | `GET` | `/session/recent-values` | Returns recent target values for the active personal/team scope and metadata-gated autocomplete suggestions. |
 | `POST` | `/session/recent-values` | Saves normalized recent values for the active personal/team scope and prunes each value kind to the autocomplete cap. |
-| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, project workspace records, recent values, and non-conflicting workspace paths between session IDs. |
+| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, completed personal workflow executions, project workspace records, recent values, and non-conflicting workspace paths between session IDs. Returns `409 active_workflow_execution` while the source identity has active workflow work. |
 | `GET` | `/session/secrets` | Lists encrypted secret names, consumer env bindings, and update timestamps for the active personal/team scope without returning values. |
 | `POST` | `/session/secrets` | Creates or replaces one encrypted personal/team secret value for the active scope. |
 | `POST` | `/session/secrets/rotate` | Re-wraps the active personal/team scope's encrypted secret rows under the active master key. |
@@ -486,6 +530,18 @@ Client-visible error codes include `session_required`, `file_required`,
 | `GET` | `/session/starred` | Returns the current session's starred command list. |
 | `POST` | `/session/starred` | Adds one command to the current session's starred list. |
 | `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session. |
+
+### Workflow Execution Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `POST` | `/workflow-executions` | Compiles a scoped workflow, validates typed inputs, snapshots the active workspace/project context, and starts the first durable v2 step. |
+| `GET` | `/workflow-executions` | Lists recent executions with ordered step summaries in the active personal/team scope, with an optional `workflow_id` filter for scoped workflow views. |
+| `GET` | `/workflow-executions/<execution_id>` | Returns one public execution summary plus ordered step, transition, capture-name, and linked-run state. |
+| `GET` | `/workflow-executions/<execution_id>/events` | Replays bounded lifecycle events after an integer cursor without returning commands or input/capture values. |
+| `POST` | `/workflow-executions/<execution_id>/cancel` | Cancels pending workflow work and signals every linked run made active by the canceled transition. |
+
+Workflow execution is bounded by `workflow_active_execution_limit` per personal/team owner and `workflow_execution_max_runtime_seconds` per execution. Postgres takes an owner-scoped transaction advisory lock around the active-count claim and insert. Before each step, the engine rechecks durable personal tokens plus the current team, initiating token, membership, and run capability. Create, list, detail, and cancel responses use one fixed public serializer that omits the definition snapshot, input and variable maps, workspace context, owner scope, actor context, and browser ownership hints for every role. Web startup follows an immutable `(created, id)` cursor through bounded pages of active execution rows after stale run metadata cleanup: unbound launch claims return to pending, completed linked runs advance from saved normalized output, live broker runs remain attached, and missing runs fail with bounded recovery metadata. A workflow-hook exception marks only the execution failed; the completed run remains saved.
 
 ### Project Routes
 
@@ -622,7 +678,7 @@ Saving the default empty payload deletes the stored triage row instead of keepin
 
 ---
 
-## Frontend
+## Front End Design
 
 This section is the browser-runtime home for page composition, prompt/composer state, mobile shell behavior, the helper layer that keeps the UI consistent, and the cross-cutting UI primitives that every surface in the shell composes against.
 
@@ -671,7 +727,7 @@ The frontend enters through ES module entry points and app-owned modules talk th
 
 Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
-The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, project run/entity capture toggles, run-notification state, HUD clock timezone mode), session-token shortcuts, encrypted secret management, team membership management, and outbound notification channels for the active session. The modal is split into a **Preferences** tab for display, identity, run, and compare controls, a **Secrets** tab for Provider Status, add/refresh actions, and the dynamic secret list, a **Teams** tab for create/join/member/invite/recovery flows plus personal/team scope switching, and a **Notifications** tab for session-owned delivery destinations; the selected tab is saved with the session preference snapshot. The modal feeds preference changes back into the browser runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, `secret set`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed history model as brokered `/runs`. `secret set NAME` opens the same replace-only Options value prompt and never accepts the value on the command line. `workflow run` uses that local command path for catalog lookup, input prompting, and queue setup, then submits the rendered workflow steps through the normal `/runs` execution path. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
+The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, project run/entity capture toggles, run-notification state, HUD clock timezone mode), session-token shortcuts, encrypted secret management, team membership management, and outbound notification channels for the active session. The modal is split into a **Preferences** tab for display, identity, run, and compare controls, a **Secrets** tab for Provider Status, add/refresh actions, and the dynamic secret list, a **Teams** tab for create/join/member/invite/recovery flows plus personal/team scope switching, and a **Notifications** tab for session-owned delivery destinations; the selected tab is saved with the session preference snapshot. The modal feeds preference changes back into the browser runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, `secret set`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed history model as brokered `/runs`. `secret set NAME` opens the same replace-only Options value prompt and never accepts the value on the command line. `workflow run` uses that local command path for catalog lookup and input prompting. Legacy workflows continue queuing their rendered commands through the browser. Explicit v2 playbooks instead submit `POST /workflow-executions`, then the server owns step launch and advancement and returns a durable id plus a `workflow status` hint without claiming that the initial step remains current. Panel-started v2 playbooks keep their progress in the Workflows surface and do not add partial state to the active terminal. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
 
 ### Browser Runtime
 
@@ -775,7 +831,7 @@ Session-scoped user preferences are normalized by `app/static/js/core/app_prefer
 - the browser fetches narrow typed endpoints such as `/welcome`, `/welcome/ascii`, `/welcome/ascii-mobile`, `/welcome/hints`, and `/config` rather than reading raw files directly
 - the same frontend-owned preference layer that controls timestamps and line numbers also controls welcome-intro behavior
 
-The detailed user-visible welcome behavior belongs in the README. Here, the important distinction is that welcome is a client-owned bootstrap experience built from server-normalized content routes, not a special command-execution transcript.
+The detailed user-visible welcome behavior belongs in [FEATURES.md](FEATURES.md#welcome-animation). Here, the important distinction is that welcome is a client-owned bootstrap experience built from server-normalized content routes, not a special command-execution transcript.
 
 ### Input Modes And Dropdown State Machines
 
@@ -811,7 +867,7 @@ All pressable primitives route through `bindPressable` in `app/static/js/ui/ui_p
 
 Modal and panel tabs use the shared `.tab-strip` / `.tab-strip-item` primitive pair. The primitive owns the horizontal overflow behavior, hidden scrollbar, top-border active tab treatment, non-active hover color, pressed-state cleanup, and focus styling. Surface classes such as `.atlas-tab`, `.history-run-tab`, `.project-explorer-tab`, and `.project-mobile-tab` remain as JS hooks or for small local count-chip/layout tweaks, but they don't redefine the tab chrome.
 
-Current consumers are Run Details, Atlas, Project desktop tabs, Project mobile tabs, Project entity-type tabs, and the Options modal tabs. Terminal document tabs keep their separate `.tab` contract because they are draggable workspace tabs rather than simple modal tabs.
+Current consumers are Run Details, Atlas, Project desktop tabs, Project mobile tabs, Project entity-type tabs, the Workflows workspace, and the Options modal tabs. Terminal document tabs keep their separate `.tab` contract because they are draggable workspace tabs rather than simple modal tabs.
 
 #### Dropdown/Menu Primitive Family
 
@@ -825,7 +881,7 @@ Current consumers are terminal/permalink/HUD Save menus, app-native selects, com
 
 Repeated list rows use shared row primitives instead of rebuilding background, divider, hover, and accent behavior per surface. `.chrome-row` is for shell-chrome lists such as History drawer rows, Status Monitor run rows, and mobile recents rows. `.chrome-row-clickable` adds the shared hover/focus state for rows that activate on click or keyboard. Accent classes such as `.row-accent-green` and `.row-accent-amber` are visual only; each component still decides when a run is active or a history row is starred.
 
-Modal and panel content uses `.panel-row` instead of `.chrome-row`. The Files modal composes `.panel-row` for file, folder, and empty-state rows so it gets consistent border/radius/focus treatment without visually becoming a History or Status Monitor chrome row. Rail navigation stays under the `.nav-item` primitive because selected navigation state and rail density are different from content-list row behavior.
+Modal and panel content uses `.panel-row` instead of `.chrome-row`. The Files modal composes `.panel-row` for file, folder, and empty-state rows so it gets consistent border/radius/focus treatment without visually becoming a History or Status Monitor chrome row. Rows that persist a current or checked selection also compose `.selection-row` and toggle `.is-selected`; the shared state owns the green border, quiet selected background, and inset leading marker. Workflows, Atlas entities and findings, Projects and its entity picker, Schedules, Watchers, and the team-scope selector all use that contract. Tabs, chips, theme cards, and rail navigation keep their separate selected-state primitives because their shapes and interaction roles differ from content-list rows.
 
 #### Chip And Badge Primitive Family
 
@@ -899,6 +955,7 @@ The Python backend is split into focused layers with acyclic dependencies:
 ```mermaid
 flowchart TB
   Config["config.py"]
+  StartupLogging["startup_logging.py"]
   Logging["logging_setup.py"]
 
   subgraph Infra["Infrastructure + Shared Helpers"]
@@ -929,7 +986,8 @@ flowchart TB
   Bootstrap["runtime_bootstrap.py"]
   Wsgi["wsgi.py"]
 
-  Config --> Logging
+  Config --> StartupLogging
+  StartupLogging --> Logging
   Logging --> Helpers
   Logging --> Database
   Logging --> Process
@@ -955,10 +1013,11 @@ flowchart TB
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
 - `commands.py` and `builtin_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
 - The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, headless API routes, workspace-file APIs, and project workspace APIs. `app.py` is the app assembly module and the local development entrypoint; `app_factory.py` stays piece-agnostic and builds a Flask app from explicitly supplied registrations.
-- AI assist service code keeps provider HTTP handling in `services.ai.client`, context assembly and redaction in `services.ai.context`, Redis-backed rate/concurrency coordination in `services.ai.coordination`, queue/cache persistence in `services.ai.storage`, route orchestration in `services.ai.assists`, suggestion validation in `services.ai.suggestions`, and the provider-call loop in `services.ai.worker`.
-- Shared diff service code keeps tool-aware classifier registration and parser helpers in `services.diff.classifiers` plus shared result constants in `services.diff.models`, so Watchers and run comparison can reuse the same per-tool diff logic instead of maintaining separate parser families.
-- History service code keeps run deletion and export mutations in `services.history.mutations`, snapshot persistence in `services.history.snapshots`, and cleanup INFO/audit field shaping in `services.history.cleanup_logging`; `services.history.mutations` re-exports the snapshot helpers for existing callers.
-- Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, cleanup INFO/audit field shaping in `services.projects.cleanup_logging`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package archive build job helpers in `services.projects.package_jobs`, evidence package preset catalog loading and validation helpers in `services.projects.package_presets`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, safe project-link provenance shaping helpers in `services.projects.provenance`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, personal/team project owner predicates in `services.projects.scope`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles. Engagement report draft, template, composition, rendering, redaction, storage, and async archive export helpers live in `services.reports`.
+- AI assist services separate provider transport, privacy-aware context assembly, Redis coordination, queue/cache persistence, route orchestration, suggestion validation, and the provider worker loop.
+- The shared diff layer owns tool-aware classifiers, parsers, and result contracts so Watchers and run comparison do not maintain separate parser families.
+- History services own run/snapshot mutations, owner-scoped comparison reads, and safe cleanup log/audit shaping. The route layer keeps authorization and request wiring separate from those persistence operations.
+- Run comparison services separate transcript assembly, finding identity and changed-finding pairing, and derived host/TLS adapters.
+- Project services are grouped by durable responsibilities: ownership and scope, CRUD and links, targets and findings, metadata and provenance, queries and payload shaping, artifacts and evidence packages, preferences and migration, reports, and background export jobs. Compatibility exports remain narrow and do not own new behavior.
 
 ### Flask Construction And Startup Contract
 
@@ -1001,6 +1060,16 @@ This boundary view answers a different question than the dependency graph above:
 - The configured database plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
+
+### Workflow Execution Runtime
+
+Legacy workflows remain browser-owned linear queues. Explicit v2 workflows are server-owned durable executions. `services.workflows.compiler` validates the complete graph, rejects capture use unless every incoming path has produced the value, and validates typed values. Runtime rendering fails closed if a saved snapshot still lacks a referenced variable. `services.workflows.storage` saves an immutable definition snapshot and one pending row per stable step id.
+
+`services.workflows.executions` claims one pending step with a compare-and-set update and renders two commands. The raw command quotes every substituted value as one shell scalar and is used for policy validation, rewriting, secret lookup, and process launch. The display command replaces sensitive inputs with `[redacted]` and earlier captures with named placeholders, then continues through active-run metadata, output classification, lifecycle logs, saved History command text, metrics, and notifications. `services.runs.private_data` owns private-value normalization, safe failure text, secret-environment lookup, and filtering for workspace notices and artifact summaries that would repeat a private value. Both command forms enter `services.runs.start.start_brokered_run()` through separate arguments so the normal run lifecycle owns the boundary. The generated run id is bound to the step before output begins. A bounded `WorkflowCaptureAccumulator` observes normalized `LineEvent` objects without changing transcript persistence. After normal run finalization has saved the run and structured metadata, the workflow hook claims that step exactly once, stores capture names and execution-local values, records the selected transition, and either launches the next step or marks the remaining branch rows skipped.
+
+The execution snapshot preserves the initiating personal/team scope, workspace folder, active project, actor role, browser ownership hints, and source workflow identity. Browser and terminal routes read a public projection rather than serializing that private row. The bounded events route derives replayable state from the durable rows, so a browser can resume from a cursor without another event store. History and project run payloads include a value-free workflow ancestry summary and sibling step links only after normal run authorization. Workflow lifecycle logs contain ids, counts, statuses, exit outcomes, and transition reasons; they don't include rendered commands, parameter values, captured values, targets, paths, or output text. Normal run logs and summaries receive only the display command; command output remains unchanged and can still contain a value printed by the tool itself.
+
+The Workflows surface keeps catalog identity/loading in `features/workflows/workflow_catalog.js`, typed values, source pickers, remembered state, and previews in `features/workflows/workflow_parameters.js`, definition authoring in `features/workflows/workflow_editor.js`, and durable requests plus Executions-tab rendering in `features/workflows/workflow_executions.js`. The remaining controller coordinates those modules with the terminal and modal bridges. Every browser entry point opens one workspace: the **Workflows** tab uses a searchable, source-filtered catalog with `panel-row` navigation and an unframed selected detail, while the **Executions** tab owns active-scope execution history and polling. Desktop keeps the catalog and detail side by side; mobile drills from the same catalog into the same detail and back without a separate workflow implementation. Selecting a rail workflow changes workspace selection only, so execution history never inherits stale definition filters. Deleting a definition refreshes the shared catalog/rail while leaving the workspace and historical executions available. The editor owns typed parameter rows, reorderable steps with stable IDs, success/failure destinations, repeatable exact-exit-code routes, bounded capture selectors, and field-level server errors. Route destinations follow step renames, remain stable across reordering, and show a missing-step choice after destination deletion so the user can repair or remove the route. Client validation rejects blank, non-integer, and duplicate exact codes before save; the compiler canonicalizes integer keys and applies the same field-level validation to every source. Sensitive fields use masked controls; terminal answers use the shared secret composer mode without transcript echo, and inline sensitive flags are rejected after redaction. Browser command previews render known inputs only; references to earlier captures remain visible and non-runnable until the server-owned playbook produces them. The shared desktop modal and mobile sheet read the same active-scope execution list, poll only while the Executions tab is visible, refresh on reopen and scope changes, and stop polling when that view closes without canceling server-owned work. Active linked runs attach through the runner's Status Monitor path; finished linked runs open through the shared Run Details boundary.
 
 ### AI Assist Runtime
 
@@ -1145,9 +1214,9 @@ These rewrites are declared in `app/conf/commands.yaml` under `runtime_adaptatio
 | --------- | --------- | -------- |
 | `curl` | Adds `--no-progress-meter` unless help, silent, or explicit progress flags are present | Keeps the terminal transcript readable when curl writes progress updates to stderr and the app streams stderr with stdout. Silent. |
 | `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
-| `nmap` | Adds `-sT` when no scan mode is explicit | Uses TCP connect scanning for reliable non-root container execution; `-sS` and `--privileged` are blocked. Silent. |
+| `nmap` | Adds `-sT` when raw readiness is inactive; adds trusted `NMAP_PRIVILEGED=1` when active | Keeps a reliable connect default while allowing operator-enabled capability-backed SYN/raw modes. User-supplied `--privileged` stays blocked. Silent. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates`; uses owner-scoped `XDG_CONFIG_HOME=<workspace>/tools` when Files are enabled | Redirects template storage to tmpfs while keeping useful ProjectDiscovery config/resume state under the active personal/team workspace's `tools/` folder. Output metadata records the template source for later Run Details, Atlas import, and evidence review. Silent. |
-| `naabu` | Adds `-scan-type c` | Uses TCP connect scanning instead of raw SYN mode for container reliability. Silent. |
+| `naabu` | Adds `-scan-type c` when raw readiness is inactive or `-scan-type s` when active | Keeps a connect fallback and selects SYN only after the operator opt-in and capability checks pass. Silent. |
 
 Session command variables are expanded inside the app before command policy validation and execution. `app/services/session/variables.py` owns the `[A-Z][A-Z0-9_]{0,31}` name rules, SQLite storage, and `$NAME` / `${NAME}` replacement. The run-start path keeps `var` itself unexpanded so `var set HOST ...` is data management, expands other commands before synthetic post-filter parsing, validates the expanded command, and still persists the typed command in history while emitting a transcript notice with the expanded form.
 
@@ -1285,7 +1354,7 @@ The Files workspace is the scratchpad that command rewrites, file built-ins, and
 
 Files routes resolve the same active personal/team request scope as the rest of Team-Mode. The browser Files panel reloads when active scope changes, keeps a per-scope folder position, and closes stale viewers/editors so a file opened in one owner scope is not acted on after switching to another. Team members can list, read, preview, and download team files. Team writes, moves, folder creates, and deletes require `manage_workspace_files`; archived teams intentionally stay readable through Files but reject mutations until reactivated. Workspace-file labels and notes use the active owner scope, so team-file metadata is visible to team members without leaking into personal Files.
 
-For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, and launches scanner commands with the shared `appuser` run group when executing user commands. The runtime still attempts to repair ownership and modes on startup, including files directly inside each `sess_*` directory, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. Permission-repair failures are warning-logged rather than swallowed. In Compose deployments, `WORKSPACE_ROOT` is both the entrypoint preparation path and the app-side `workspace_root` override, so the bind-mount path only needs one environment setting.
+For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, and launches scanner commands with the shared `appuser` run group when executing user commands. The runtime still attempts to repair ownership and modes on startup, including files directly inside each `sess_*` directory, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. Permission-repair failures are warning-logged rather than swallowed. Compose passes `WORKSPACE_ENABLED`, `WORKSPACE_BACKEND`, and `WORKSPACE_ROOT` through to the matching app settings, while the entrypoint also prepares `WORKSPACE_ROOT` before dropping privileges.
 
 Workspace cleanup is request-driven rather than a separate daemon. Each worker checks periodically before handling a request, then calls the backend cleanup helper when workspace storage is enabled. Cleanup evaluates the hashed session directory mtime as the workspace activity marker and only deletes resolved `sess_*` roots under the configured workspace root; team `team_*` roots are durable team data and are not removed by session-inactivity cleanup. Normal workspace path resolution rejects symlink components before use, and file reads/downloads also open the final component with no-follow semantics where the platform supports it so a same-principal symlink swap cannot escape the owner root between validation and open.
 
@@ -1327,7 +1396,7 @@ Atlas is the entity-first triage surface that turns saved external-run output in
 
 **Intel snapshots.** Per-entity cached intel data lives in `entity_intel_snapshots`, keyed `(entity_id, provider)` so refresh, expiry, and per-provider quota stories stay tractable. The refresh route writes through the same provider orchestration used by the terminal `intel` command — see **Intel and Provider Integrations**. Ports are intentionally excluded from provider refresh because they represent app-captured scan evidence.
 
-**Findings model.** `findings` is a single entity-owned table deduped across personal runs by session and across team runs by team using a stable signature; `findings_occurrences` records per-run sightings. The Projects modal, Run Details, and the Atlas Findings tab all read this same table so review state never drifts between surfaces. Project linkage for findings flows through linked source runs or linked Atlas entities, not separate finding membership rows. Remediation, verification steps, verification status, and verification notes live in `finding_triage_details`, scoped by the same personal/team owner model as labels and notes. List responses carry compact triage previews and flags, while the internal `/findings/<finding_id>/triage` route returns and saves the full text. Evidence package finding JSON and Markdown include remediation and verification steps/status for selected findings; verification notes are included only when private notes are enabled, and redacted packages scrub those fields before rendering.
+**Findings model.** `findings` is a single entity-owned table deduped across personal runs by session and across team runs by team using a stable signature; `findings_occurrences` records per-run sightings plus the severity and comparison identity observed at that time. Exact run-observed severity starts with schema migration `0044`; older rows carry a best-effort backfill from retained canonical finding and occurrence-snippet data, which cannot reconstruct severity overwritten before migration. Run comparison uses dependable occurrence snapshots for historical severity changes and otherwise keeps the finding pair as added/removed, while review state remains mutable canonical triage and is not presented as a run-observed change. The Projects modal, Run Details, and the Atlas Findings tab all read this same table so review state never drifts between surfaces. Project linkage for findings flows through linked source runs or linked Atlas entities, not separate finding membership rows. Remediation, verification steps, verification status, and verification notes live in `finding_triage_details`, scoped by the same personal/team owner model as labels and notes. List responses carry compact triage previews and flags, while the internal `/findings/<finding_id>/triage` route returns and saves the full text. Evidence package finding JSON and Markdown include remediation and verification steps/status for selected findings; verification notes are included only when private notes are enabled, and redacted packages scrub those fields before rendering.
 
 **Suppression model.** Atlas entities and findings both carry a reversible `suppressed` flag plus an optional reason and timestamp. Atlas and Projects hide suppressed rows by default, while Atlas can switch to **Show all** or **Only suppressed** for review and restoration. Suppression never deletes source runs, occurrences, labels, notes, project links, or cached intel.
 
@@ -1417,9 +1486,11 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, app-owned persistent tables, an FTS5 virtual table, and file-backed run-output artifacts. SQLite connections set `wal_autocheckpoint=1000`, and Flask workers periodically run `PRAGMA wal_checkpoint(TRUNCATE)` before requests so the WAL sidecar stays bounded during long-running containers. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, notification event storage, schedule storage and fire audits, audit event recording, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Fresh empty SQLite and Postgres schemas enter through the unified `0039` baseline path and record earlier migration versions as satisfied. The SQLite baseline definition (`core/migrations/baseline.py`) is the single source of truth for the shared schema, and the Postgres baseline is generated from it — translating the SQLite DDL, with a `_POSTGRES_COLUMN_OVERRIDES` table for the `BIGINT`/`JSONB`/`BYTEA` columns SQLite stores as plain integer/text/blob, plus explicit Postgres-only artifacts (`pg_trgm` indexes and triggers) — so fresh Postgres renders the shared tables and indexes from that source instead of replaying `0001` through `0038`. A normalized drift guard and a generated-vs-legacy equivalence test fail CI if the two backends' heads diverge, so the single definition cannot silently drift; forward schema changes are new `0040+` migrations rather than edits to the frozen baseline (see [CONTRIBUTING.md → Changing the Database Schema](CONTRIBUTING.md#changing-the-database-schema)). Ledgered SQLite startup no longer walks the retired compatibility ladder, current-head pre-ledger SQLite databases are verified against the shared schema manifest before they receive the unified `schema_migrations` ledger stamp, and unknown pre-ledger SQLite shapes fail closed before destructive mutation. `db_init()` routes both backends through the same schema-migration helper, then runs shared post-schema maintenance such as run-output summary population, URL-host linking, retention pruning, audit pruning, host-type audits, SQLite output-search text population, and watcher field inference. Postgres schema work still runs behind a transaction-scoped advisory lock; existing Postgres databases that already carry `0001` through `0038` advance by recording the `0039` reconciliation marker, while future `0040+` migrations execute normally after the frozen baseline on fresh databases. The reserved Postgres advisory-lock namespaces are `darklab_shell_migrations`, `darklab_shell_scheduler`, `darklab_shell_notification_worker`, `darklab_shell_notification_sweep`, and `darklab_shell_workspace`. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style, PostgreSQL JIT disabled by default for lower-latency interactive requests, and a narrow read-only transient-error retry.
+SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, app-owned persistent tables, an FTS5 virtual table, and file-backed run-output artifacts. SQLite connections set `wal_autocheckpoint=1000`, and Flask workers periodically run `PRAGMA wal_checkpoint(TRUNCATE)` before requests so the WAL sidecar stays bounded during long-running containers. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, notification event storage, schedule storage and fire audits, audit event recording, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Fresh empty SQLite and Postgres schemas enter through the unified `0039` baseline path and record earlier migration versions as satisfied. The SQLite baseline definition (`core/migrations/baseline.py`) is the single source of truth for the shared schema, and the Postgres baseline is generated from it — translating the SQLite DDL, with a `_POSTGRES_COLUMN_OVERRIDES` table for the `BIGINT`/`JSONB`/`BYTEA` columns SQLite stores as plain integer/text/blob, plus explicit Postgres-only artifacts (`pg_trgm` indexes and triggers) — so fresh Postgres renders the shared tables and indexes from that source instead of replaying `0001` through `0038`. A normalized drift guard and a generated-vs-legacy equivalence test fail CI if the two backends' heads diverge, so the single definition cannot silently drift; forward schema changes are new `0040+` migrations rather than edits to the frozen baseline (see [CONTRIBUTING.md → Changing the Database Schema](CONTRIBUTING.md#changing-the-database-schema)). Ledgered SQLite startup no longer walks the retired compatibility ladder, current-head pre-ledger SQLite databases are verified against the shared schema manifest before they receive the unified `schema_migrations` ledger stamp, and unknown pre-ledger SQLite shapes fail closed before destructive mutation. `db_init()` routes both backends through the same schema-migration helper, then runs shared post-schema maintenance such as run-output summary population, URL-host linking, retention pruning, audit pruning, host-type audits, SQLite output-search text population, and watcher field inference. Postgres schema branch detection stays read-only so concurrent web and background processes leave migration-ledger creation and all schema changes behind the transaction-scoped advisory lock; existing Postgres databases that already carry `0001` through `0038` advance by recording the `0039` reconciliation marker, while future `0040+` migrations execute normally after the frozen baseline on fresh databases. The reserved Postgres advisory-lock namespaces are `darklab_shell_migrations`, `darklab_shell_scheduler`, `darklab_shell_notification_worker`, `darklab_shell_notification_sweep`, and `darklab_shell_workspace`. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style, PostgreSQL JIT disabled by default for lower-latency interactive requests, and a narrow read-only transient-error retry.
 
-Operator backups are owned by `scripts/backup_system.py`, outside the Flask request path. The script validates requested input paths before it creates backup state, resolves the same app config, writes SQLite backups through SQLite's online backup API or Postgres backups through `pg_dump`, copies filesystem-backed `data_dir` state, and records both logical app paths and physical Docker/host sources in its manifest so restores can line up database rows with run artifacts and workspace files. Postgres auto mode selects Compose only when the configured URL names a service in the supplied stack. Checksums stream through bounded chunks, and final archives use collision-safe names plus no-replace publication. Retention is planned into the manifest before publication and applied afterward, with warning/summary output for cron; unexpected exceptions retain their tracebacks. Unreadable host bind sources fail with operator guidance instead of a raw Python permission error.
+Operator backups are owned by `scripts/backup_system.py`, outside the Flask request path. The script validates requested input paths before it creates backup state, resolves the same app config, writes SQLite backups through SQLite's online backup API or Postgres backups through `pg_dump`, copies filesystem-backed `data_dir` state, and records both logical app paths and physical Docker/host sources in its manifest so restores can line up database rows with run artifacts and workspace files. Explicit workspace sources take precedence over automatic feature-state detection because naming a physical source is an operator request to preserve it. Postgres auto mode selects Compose only when the configured URL names a service in the supplied stack. Checksums stream through bounded chunks, and final archives use collision-safe names plus no-replace publication. Retention is planned into the manifest before publication and applied afterward, with warning/summary output for cron; unexpected exceptions retain their tracebacks. Unreadable host bind sources fail with operator guidance instead of a raw Python permission error. Repository-free deployments run this helper from the release image through `darklab-deploy`, using a stable `operator/`, `data/`, `database/`, `workspaces/`, and `release/` archive layout. The managed wrapper always supplies `/workspaces` as an explicit bind source, so existing files remain in backups independently of current feature state or Compose-valid `.env` formatting. The image carries a PostgreSQL 18 client that matches the bundled database service. The wrapper requests the helper's path-only result contract, validates the returned `/backups` archive path, and formats the host path for operators instead of parsing human output. Relative restore archive paths are resolved to absolute host paths before Docker receives the bind mount. A backup against the bundled Postgres URL starts and health-checks the database service when needed, then stops it only when the wrapper started it; remote and already-running databases keep their existing lifecycle. `scripts/restore_system.py` accepts only that managed layout, rejects unsafe or special archive entries, verifies every checksum, and stages filesystem replacements inside their destination mounts. SQLite is staged with the data tree; Postgres restores use `pg_restore --single-transaction` before any staged files commit. Same-backend restores preserve the target backend and connection settings. An explicit fresh-host adoption can change a default SQLite target to the backup's Postgres backend while retaining the new host's generated Postgres connection settings; the wrapper starts the bundled service and the helper rejects any destination that already has user tables before `pg_restore`. Restored paths return to the invoking host UID/GID, and multi-path swaps retain rollback copies until every commit succeeds. Upgrade and restore both require a verified safety backup before they write deployment state, and a restore failure leaves the app stopped with an explicit recovery command.
+
+The restore wrapper compares `.env` before and after a successful restore, force-recreates the app when restored environment content changed, and waits for app health before returning. Managed SQLite-to-Postgres cutover uses the migration helper bundled in the release image: `darklab-deploy` verifies the app-owned SQLite file from inside the managed `/data` mount, stops SQLite writes, takes a verified backup, starts bundled Postgres, and inspects the destination through its local container socket before network authentication. An empty cluster has its role password synchronized with the current `.env`; a retained named volume with user tables fails closed without a credential change. The wrapper then initializes the fresh Postgres schema, copies app data without replacing the destination migration ledger, validates row counts and referenced artifacts, updates the backend and Compose profile settings, and recreates the app. The host command runs as the deployment owner rather than through `sudo`, so temporary and final environment files retain operator ownership. A failure before cutover keeps SQLite active and leaves the verified backup as the recovery point.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
@@ -1695,7 +1766,9 @@ erDiagram
 - `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
-- `user_workflows` — one row per saved workflow `(id, session_id, team_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, session-token migration, and shared team workflows.
+- `user_workflows` — one row per saved workflow `(id, session_id, team_id, definition_version, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, session-token migration, and shared team workflows.
+- `workflow_executions` — one immutable compiled workflow snapshot per durable run, including owner scope, source workflow, resolved inputs, execution-local variables, current state, workspace/project context, initiating actor, browser ownership hints, and bounded failure metadata. Route responses use a public field allowlist instead of returning this private row.
+- `workflow_execution_steps` — one ordered row per execution step with stable step id, unique linked run id, status, exit code, capture-name summary, selected transition/reason, and bounded error metadata.
 - `recent_values` — one row per recently used autocomplete value per personal/team scope `(session_id, team_id, kind, value, last_used, use_count)`. `kind` is one of `domain`, `ip`, `url`, or `port_set`; each kind is capped independently at 10 entries. URL recents keep the scheme, host, and path but drop query strings and fragments before storage.
 - `secrets` — one row per encrypted secret name per vault scope `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Personal scopes use the user's session token as the stored `session_token`; team scopes use the team id as the stored vault-scope id. Storage also rejects attempts to bind the same consumer env name to two different secrets in one scope, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session attribution, optional `team_id` ownership for shared team projects, display metadata, status, timestamps, and session/team-scoped slugs. Project notes are stored through `entity_notes` with `entity_type='project'`.
@@ -1705,7 +1778,7 @@ erDiagram
 - `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so Atlas detail views can render intel cards without re-querying providers on every open. When `intel_payload_inline_max_bytes` is set, oversized provider JSON moves to `data_dir/body-store` and detail reads resolve the pointer before rendering. Atlas derives compact `intel_summary` highlights from these rows at read time instead of storing duplicate summary columns. The refresh route writes through the same app-native intel provider orchestration used by the `intel` terminal command.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
 - `findings` — entity-owned finding rows deduped across runs by a stable signature within the active personal or team owner scope. Findings keep a primary Atlas entity when one is available, an unscoped subject key when one is not, first/last run IDs, first/last seen timestamps, occurrence count, severity, status, and lightweight title/raw-line context. The Projects modal, Run Details, and Atlas read the same table, so finding review state does not drift between surfaces.
-- `findings_occurrences` — per-run sightings for findings, keyed by finding, run, and line number. Run pruning removes these occurrence rows while leaving the parent finding row in place so labels, notes, and triage state can survive after the original transcript ages out.
+- `findings_occurrences` — per-run sightings for findings, keyed by finding, run, and line number, with an observed severity and severity-neutral comparison key for historical run comparison. Rows recorded before schema migration `0044` contain a best-effort backfill from retained finding and snippet data rather than guaranteed original severity. Run pruning removes these occurrence rows while leaving the parent finding row in place so labels, notes, and triage state can survive after the original transcript ages out.
 - `finding_triage_details` — one owner-scoped remediation and verification row per finding. Stores remediation text, verification steps, verification status, and optional verification notes separately from the deduped finding row so aggregate recalculation and re-observation can update finding counts without overwriting operator handoff text. The same table backs Atlas, Projects, evidence packages, and compact AI context.
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities, including Atlas entities, projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
 - `entity_notes` — one private note attached to each supported entity per session, including Atlas entities and project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
@@ -1774,384 +1847,11 @@ This section groups log emission, health/status surfaces, and the operator diagn
 
 ### Logging
 
-The application uses a dedicated `shell` logger configured by `logging_setup.py`. Logging is part of the runtime architecture rather than just a deployment concern because request hooks, run lifecycle handlers, diagnostics gates, and startup bootstrap all emit structured events that operators rely on for troubleshooting and auditing.
+The application uses a dedicated `shell` logger configured during runtime bootstrap. Configuration loading starts before the final logger exists, so `startup_logging.py` buffers records without attaching a handler; `configure_logging()` replays them once through the effective level and formatter. Fatal config failures use one bounded fallback record without file contents, values, parser details, or a traceback.
 
-Structured events use the `session` field for request correlation. Anonymous session IDs are logged as-is, while `tok_` session-token values are masked before logging because they are bearer credentials.
+The formatter supports human-readable `text` output and newline-delimited GELF 1.1 JSON. Application formatting is separate from the Docker logging driver, so operators can choose the event shape and the container transport independently. Request hooks, run lifecycles, workers, persistence, and diagnostics emit named events with structured context. Session tokens are masked, client detail uses a bounded allowlist, and cleanup/search/command content stays out of event fields unless an explicitly safe contract says otherwise.
 
-Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
-
-### Output Formats
-
-The logging layer supports two output formats selected by `log_format` in `config.yaml`:
-
-- `text`
-  - human-readable single-line logs for local development and plain `docker compose logs`
-  - output shape is `timestamp [LEVEL] EVENT key=value ...`
-  - extra fields are sorted alphabetically and appended after the event name
-  - string values containing spaces are repr-quoted so copy/paste remains readable
-- `gelf`
-  - newline-delimited GELF 1.1 JSON for Graylog-style aggregation
-  - `short_message` is the bare event name such as `RUN_START`
-  - event context is emitted as `_`-prefixed additional fields such as `_ip`, `_run_id`, and `_cmd`
-  - this makes the application logs directly indexable by a GELF-aware backend without extra parsing rules
-
-The Docker logging driver and the application formatter are intentionally separate controls. The production Compose override can ship container stdout over Docker GELF transport, while `log_format: gelf` controls whether the application itself emits GELF-shaped records or plain text.
-
-### Log Event Inventory
-
-The current event inventory is:
-
-| Level | Event | Where | Key extra fields |
-| ------- | ------- | ------- | ----------------- |
-| DEBUG | `REQUEST` | `before_request` | ip, request_id, method, path, qs |
-| DEBUG | `RESPONSE` | `after_request` | ip, request_id, method, path, status, size |
-| DEBUG | `REQUEST_SESSION_RESOLUTION_FAILED` | `errorhandler(500)` | method, path, request_id (+ traceback) |
-| DEBUG | `RUNTIME_BOOTSTRAP_STEP_STARTED` | runtime bootstrap | step, runtime |
-| DEBUG | `RUNTIME_BOOTSTRAP_STEP_COMPLETED` | runtime bootstrap | step, runtime |
-| DEBUG | `RUNTIME_BOOTSTRAP_STEP_SKIPPED` | runtime bootstrap | step, reason, runtime |
-| DEBUG | `PROCESS_RUNTIME_INIT_STARTED` | process tracking startup | force, redis_configured, fake_redis |
-| DEBUG | `PROCESS_RUNTIME_INIT_SKIPPED` | process tracking startup | reason, redis_mode |
-| DEBUG | `DB_INIT_LOCK_WAITING` | database startup lock | backend, lock_path |
-| DEBUG | `DB_INIT_LOCK_ACQUIRED` | database startup lock | backend, lock_path, wait_ms |
-| DEBUG | `DB_INIT_LOCK_RELEASED` | database startup lock | backend, lock_path |
-| DEBUG | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_SKIPPED` | active-run startup cleanup | reason, pid |
-| DEBUG | `KILL_MISS` | `kill_command` | ip, run_id, session, team_id, actor_member_id, team_role |
-| DEBUG | `HEALTH_OK` | `health()` | — |
-| DEBUG | `ACTIVE_RUNS_VIEWED` | `get_active_history_runs` | ip, session, count |
-| DEBUG | `HISTORY_DELETE_MISS` | `delete_run` | ip, run_id, session |
-| DEBUG | `THEME_SELECTED` | current theme resolution | ip, session, route, theme, source |
-| DEBUG | `CMD_PIPE` | `run_command` | ip, session, cmd, pipe_to |
-| DEBUG | `HISTORY_COMMANDS_VIEWED` | `get_history_commands` | ip, session, count, limit |
-| DEBUG | `SESSION_RUN_COUNT_VIEWED` | `session_run_count` | ip, session, session_kind, count |
-| DEBUG | `STARRED_COMMANDS_VIEWED` | `session_starred_list` | ip, session, session_kind, count |
-| DEBUG | `API_OPENAPI_FETCHED` | `api_openapi` | ip |
-| DEBUG | `API_RUN_STREAM_ATTACHED` | API run stream routes | ip, session, run_id, after_id, format |
-| DEBUG | `BROKER_STREAM_CLIENT_GONE` | `stream_run_events` | run_id, reason |
-| DEBUG | `BROKER_STREAM_REATTACHED` | `stream_run_events` | run_id, after_id |
-| DEBUG | `BROKER_REDIS_TRIM_RETRY` | broker Redis replay trimming | key, maxlen, reason |
-| DEBUG | `ADVISORY_LOCK_ACQUIRED` | Schema migration runner | namespace, lock_id |
-| DEBUG | `PTY_METRIC_WRITE_FAILED` | PTY service metrics writes | run_id, metric, error |
-| DEBUG | `PTY_CONTROL_APPLIED` | interactive PTY control handling | run_id, action, bytes/rows/cols |
-| DEBUG | `DIAG_REDIS_SCAN_KEY_FAILED` | `/diag` Redis probes | stage, error |
-| DEBUG | `METRICS_INTEL_CACHE_COLLECT_FAILED` | Prometheus runtime collector | (+ traceback) |
-| DEBUG | `METRICS_AI_ASSIST_COLLECT_FAILED` | Prometheus runtime collector | (+ traceback) |
-| DEBUG | `AI_WORKER_TICK` | AI worker loop | processed |
-| DEBUG | `AI_WORKER_DEPENDENCIES_LOADING` | AI worker startup | — |
-| DEBUG | `AI_WORKER_DEPENDENCIES_SKIPPED` | AI worker startup | reason |
-| DEBUG | `AI_ASSIST_PROGRESS_UPDATE_FAILED` | AI worker progress storage | assist_id, run_id (+ traceback) |
-| DEBUG | `AI_COORDINATION_LEGACY_SLOT_DELETE_FAILED` | AI Redis coordination cleanup | (+ traceback) |
-| DEBUG | `NOTIFICATION_WORKER_TICK` | notification worker | delivered, limit |
-| DEBUG | `NOTIFICATION_HTTP_REQUEST` | notification HTTP channels | label, host, timeout, test_send |
-| DEBUG | `NOTIFICATION_HTTP_RESPONSE` | notification HTTP channels | label, status, test_send |
-| DEBUG | `NOTIFICATION_SMTP_SEND_ATTEMPT` | notification email channel | host, port, tls_mode, timeout, channel_id |
-| DEBUG | `SCHEDULE_FIRE_CLAIMED` | scheduler dispatch | schedule_id, owner_kind, session, claimed, fired_at, command_root |
-| DEBUG | `BODY_STORE_DELETE_MISS` | large body storage | rel_path, kind |
-| DEBUG | `CONFIG_SOURCE_SELECTED` | config loading | conf_dir, local_overlay |
-| DEBUG | `CONFIG_OVERLAY_APPLIED` | config loading | source, known_keys, unknown_keys |
-| DEBUG | `CONFIG_ENV_OVERRIDES_APPLIED` | config loading | env_keys |
-| DEBUG | `CONFIG_LEGACY_KEY_MIGRATED` | config loading | legacy_key, target_key, source |
-| INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
-| INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
-| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_overlay, database_backend, workspace_enabled, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
-| INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
-| INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
-| INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
-| INFO | `DB_BACKEND_SELECTED` | `db_init` | backend |
-| INFO | `POSTGRES_POOL_OPENED` | Postgres backend pool | pool_min, pool_max, jit_enabled |
-| INFO | `POSTGRES_POOL_CLOSED` | Postgres backend pool | — |
-| INFO | `REDIS_CONNECTED` | process tracking startup | redis_scheme, redis_host, redis_port, redis_db |
-| INFO | `REDIS_FAKE_ENABLED` | process tracking startup | fallback |
-| INFO | `REDIS_FALLBACK_IN_PROCESS` | process tracking startup | redis_configured, workers, fallback |
-| INFO | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP` | active-run startup cleanup | metadata_removed, session_members_removed, team_members_removed, pid, cleanup_owner, lock_type |
-| INFO | `MIGRATION_APPLIED` | Schema migration runner | version, migration_name |
-| INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
-| INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
-| INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |
-| INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
-| INFO | `REQUEST_COMPLETED` | `after_request` | ip, session, request_id, method, path, endpoint, status, duration_ms |
-| INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
-| INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
-| INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
-| INFO | `RUN_OUTPUT_ARTIFACT_FINALIZED` | full-output artifact capture | run_id, rel_path, artifact_bytes, lines, truncated, available |
-| INFO | `PTY_SESSION_STARTED` | interactive PTY service | ip, run_id, session, pid, cmd, rows, cols, allow_input |
-| INFO | `PTY_SESSION_ENDED` | interactive PTY service | ip, run_id, session, exit_code, elapsed, cmd |
-| INFO | `PTY_OWNERSHIP_DISPLACED` | interactive PTY ownership claim | run_id, session, owner_client_id, owner_tab_id, displaced_client_id, displaced_tab_id |
-| INFO | `PTY_SNAPSHOT_PERSISTED` | interactive PTY service | run_id, session, rows, cols, forced |
-| INFO | `RUN_KILL` | `kill_command` | ip, run_id, session, team_id, actor_member_id, team_role, pid, pgid |
-| INFO | `TEAM_ACTION` | browser/API team management routes | action, team_id, session, ip, result, source, actor_member_id/target ids |
-| INFO | `DB_PRUNED` | `db_init` | runs, snapshots, retention_days |
-| INFO | `API_RUN_STARTED` | API run start routes | ip, session, run_id, cmd, cmd_type, project_id |
-| INFO | `API_ARTIFACT_DOWNLOADED` | API artifact download route | ip, session, run_id, artifact_id, byte_size |
-| INFO | `PACKAGE_BUILD_STARTED` | evidence package archive builder | session, project_id, package_id, redaction_mode |
-| INFO | `PACKAGE_BUILD_COMPLETED` | evidence package archive builder | session, project_id, package_id, archive_bytes, projected_bytes, duration_ms, skipped_items, redacted_artifacts |
-| INFO | `PAGE_LOAD` | `index` | ip, session, theme |
-| INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
-| INFO | `SESSION_TOKEN_GENERATED` | `session_token_generate` | ip, session, session_kind |
-| INFO | `SESSION_TOKEN_REVOKED` | `session_token_revoke` | ip, session, session_kind, revoked_current |
-| INFO | `SESSION_MIGRATED` | `session_migrate` | ip, session, from_session_kind, to_session_kind, migrated_runs, migrated_snapshots, migrated_stars, migrated_preferences |
-| INFO | `SESSION_PREFERENCES_SAVED` | `session_preferences_save` | ip, session, session_kind, key_count |
-| INFO | `STARRED_COMMAND_ADDED` | `session_starred_add` | ip, session, session_kind, command_root, changed |
-| INFO | `STARRED_COMMAND_REMOVED` | `session_starred_remove` | ip, session, session_kind, command_root, count |
-| INFO | `STARRED_COMMANDS_CLEARED` | `session_starred_remove` | ip, session, session_kind, count |
-| INFO | `SHARE_CREATED` | `save_share` | ip, session, share_id, label, redacted, run_id, included_artifacts, redaction_mode |
-| INFO | `SHARE_VIEWED` | `get_share` | ip, session, share_id, label |
-| INFO | `SHARE_DELETED` | `delete_share` | ip, session, share_id, deleted |
-| INFO | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
-| INFO | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, output_search, command_root, exit_code_filter, date_range |
-| INFO | `ATLAS_RUN_CLEANED` | Atlas cleanup route | ip, session, run_id, include_curated, detached_entities, detached_findings, deleted_entities, deleted_findings |
-| INFO | `ATLAS_ENTITY_SUPPRESSION_UPDATED` | Atlas suppression routes | ip, session, entity_id/count, suppressed, reason, bulk |
-| INFO | `ATLAS_FINDING_SUPPRESSION_UPDATED` | Atlas suppression routes | ip, session, finding_id/count, suppressed, reason, bulk |
-| INFO | `ATLAS_SAVED_VIEW_CREATED` | Atlas saved-view routes | ip, session, view_id, name |
-| INFO | `ATLAS_SAVED_VIEW_UPDATED` | Atlas saved-view routes | ip, session, view_id, name |
-| INFO | `ATLAS_SAVED_VIEW_DELETED` | Atlas saved-view routes | ip, session, view_id |
-| INFO | `ATLAS_IMPORT_PREVIEW_CREATED` | Atlas import preview workflow | session, team_id, actor_member_id, actor_role, draft_id, format_id, source_tool_key, upload_bytes, expires_at, has_filename, filename_present, rows/valid/skipped/warnings/new/updated/entity/finding/project-target counts |
-| INFO | `ATLAS_IMPORT_PREVIEW_SUCCEEDED` | Atlas import preview route | ip, session, team_id, actor_member_id, actor_role, draft_id, format_id, source_tool_key, has_file, filename_present, content_length, expires_at, rows/valid/skipped/warnings/new/updated/entity/finding/project-target counts |
-| INFO | `ATLAS_IMPORT_APPLIED` | Atlas import apply workflow | session, team_id, actor_member_id, actor_role, draft_id, batch_id, project_id, format_id, source_tool_key, required_capabilities, option_import_entities, option_import_findings, option_link_to_project, option_create_project_targets, entity/finding/source/project count fields |
-| INFO | `ATLAS_IMPORT_APPLY_SUCCEEDED` | Atlas import apply route | ip, session, team_id, actor_member_id, actor_role, draft_id, batch_id, project_id, already_applied, format_id, option_import_entities, option_import_findings, option_link_to_project, option_create_project_targets, entity/finding/source/project count fields |
-| INFO | `ATLAS_IMPORT_APPLY_REPLAYED` | Atlas import apply workflow | session, team_id, actor_member_id, actor_role, draft_id, batch_id, project_id, draft_status, option_import_entities, option_import_findings, option_link_to_project, option_create_project_targets, entity/finding/source/project count fields |
-| INFO | `ATLAS_IMPORT_DRAFTS_CLEANED` | Atlas import draft cleanup | previewed_count, applying_count, cutoff |
-| INFO | `SECRET_STORED` | secrets vault storage | session, secret_name, consumer_envs, is_new_secret |
-| INFO | `SECRET_RETRIEVED` | secrets vault storage | session, consumer_envs |
-| INFO | `VAULT_KEY_LOADED` | secrets vault | source |
-| INFO | `VAULT_KEY_ROTATION_COMPLETED` | secrets vault storage | session, count |
-| INFO | `INTEL_PROVIDER_LOOKUP_COMPLETED` | Atlas intel refresh | session, entity_id, provider, status |
-| INFO | `NOTIFICATION_ENQUEUED` | notification dispatcher | trigger, queued, run_id, session |
-| INFO | `NOTIFICATION_DISPATCHED` | notification dispatcher | event_id, channel_id, trigger, session |
-| INFO | `NOTIFICATION_DEFERRED` | notification dispatcher | event_id, channel_id, trigger, session, reason |
-| INFO | `NOTIFICATION_EVENTS_PRUNED` | notification dispatcher | count, retention_days |
-| DEBUG | `SCHEDULER_TICK` | scheduler worker | now, limit, due_count |
-| DEBUG | `SCHEDULE_FIRE_DISPATCH` | scheduler dispatch | schedule_id, owner_kind, session, team_id, fired_at, command_root |
-| DEBUG | `SCHEDULE_RUN_PREPARED` | scheduler dispatch | schedule_id, team_id, dispatch_path, command_root |
-| DEBUG | `SCHEDULE_PERSISTED` | scheduler storage | schedule_id, owner_kind, enabled, cron_expr, cadence_preset, timezone, next_run_at |
-| DEBUG | `SCHEDULE_STATE_UPDATED` | scheduler storage | schedule_id, owner_kind, enabled, cron_expr, cadence_preset, timezone, next_run_at |
-| DEBUG | `SCHEDULE_AFTER_FIRE_UPDATED` | scheduler storage | schedule_id, owner_kind, run_id, fired_at, next_run_at, consecutive_failures |
-| DEBUG | `SCHEDULE_PREVIEW_GENERATED` | browser schedule routes | ip, session, team_id, cron_expr, cadence_preset, timezone, next_fire_count |
-| DEBUG | `SCHEDULES_LISTED` | browser schedule routes | ip, session, team_id, count |
-| DEBUG | `SCHEDULE_FIRES_LISTED` | browser schedule routes | ip, session, team_id, schedule_id, count, total, limit, offset |
-| DEBUG | `API_SCHEDULES_LISTED` | API schedule routes | ip, session, team_id, count, limit, offset |
-| DEBUG | `API_SCHEDULE_FIRES_LISTED` | API schedule routes | ip, session, team_id, schedule_id, count, total, limit, offset |
-| DEBUG | `PROJECT_AUTO_PROMOTE_RULE_PREVIEWED` | Project auto-promote preview route | ip, session, team_id, actor_member_id, actor_role, project_id, target_entity_kind, match_mode, matched/new/promotable/quota/cap counts, limit, truncated |
-| DEBUG | `PROJECT_AUTO_PROMOTE_MATCH_SCAN` | Project auto-promote matching service | session, team_id, project_id, rule_id, target_entity_kind, match_mode, source filter counts, sql_matched, include_suppressed, scan/candidate/match/quota/cap counts, limit, truncated |
-| DEBUG | `PROJECT_AUTO_PROMOTE_LINK_DECISION_SUMMARY` | Project auto-promote apply service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, source filter counts, linked/promoted/already-linked/new/quota/cap counts, limit, truncated |
-| DEBUG | `OUTPUT_SIGNAL_PORT_ENTITY_SKIPPED` | output signal classifier | command_root, line_index, reason, port, proto, host_kind, host_hash |
-| DEBUG | `ATLAS_ENTITY_MATERIALIZATION_SUMMARY` | Atlas entity materializer | session, team_id, run_id, command_root, entity/occurrence/invalid/port/url/url-host/attribute/scan-observation counts |
-| INFO | `ATLAS_URL_HOST_BACKFILL_COMPLETED` | startup URL host-link backfill | backend, url_entity_count, updated_count, skipped_count |
-| WARN | `ATLAS_URL_HOST_BACKFILL_SKIPPED_ROWS` | startup URL host-link backfill | backend, url_entity_count, invalid_url_count, host_upsert_miss_count, update_miss_count |
-| ERROR | `ATLAS_URL_HOST_BACKFILL_ROW_FAILED` | startup URL host-link backfill | backend, stage, url_entity_id, session, team_id, host_entity_type |
-| DEBUG | `SCAN_TARGET_OBSERVATIONS_SKIPPED` | Atlas entity materializer | session, team_id, run_id, command_root, deleted_count, reason |
-| DEBUG | `ATLAS_ENTITY_ATTRIBUTES_DROPPED` | Atlas entity materializer | session, team_id, run_id, entity_id, entity_type, value_type, reason |
-| DEBUG | `ATLAS_IMPORT_PARSE_STARTED` | Atlas import parser | format_id, upload_bytes, max_rows, max_warnings, max_xml_elements |
-| DEBUG | `ATLAS_IMPORT_PARSE_COMPLETED` | Atlas import parser | format_id, upload_bytes, rows, entities, findings, skipped, warning_count, suppressed_warning_count, warning_codes, max_rows, max_warnings, max_xml_elements |
-| DEBUG | `AI_CONTEXT_BUILT` | AI context assembly | run_id, session, variant, output_source, output_truncated, max_input_chars, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes, useful, omitted_sections, section_count, context_hash |
-| DEBUG | `AI_SUGGESTION_VALIDATION_COMPLETED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
-| DEBUG | `AI_WORKER_BUSY` | AI worker coordination | max_concurrent |
-| INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
-| INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
-| INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, team_id, source, schedule_id, removed |
-| INFO | `PROJECT_AUTO_PROMOTE_RULE_CREATED` / `UPDATED` / `DELETED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, enabled, apply_on_run, target_entity_kind, match_mode |
-| INFO | `PROJECT_AUTO_PROMOTE_RULE_APPLIED` | Project auto-promote apply route | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, matched/linked/promoted/skipped/quota/cap counts, limit, truncated |
-| INFO | `PROJECT_AUTO_PROMOTE_RUN_APPLIED` | run finalization | run_id, session, team_id, project_ids, rule_ids, bounded rule_results, aggregate match/link/promote/quota/cap counts |
-| INFO | `ATLAS_ENTITIES_CAPTURED` | run finalization | run_id, session, team_id, count, entity_type_counts, port_entity_count, scan_observation_count |
-| INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, team_id, source, schedule_id, status, fired_at, run_id, last_error |
-| INFO | `API_SCHEDULE_CREATED` | API schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
-| INFO | `API_SCHEDULE_UPDATED` | API schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
-| INFO | `API_SCHEDULE_DELETED` | API schedule routes | ip, session, team_id, source, schedule_id, removed |
-| INFO | `API_SCHEDULE_RUN_NOW` | API schedule routes | ip, session, team_id, source, schedule_id, status, fired_at, run_id, last_error |
-| INFO | `BUILTIN_SCHEDULE_CREATED` | terminal schedule built-in | session, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
-| INFO | `BUILTIN_SCHEDULE_PAUSED` | terminal schedule built-in | session, source, schedule_id, enabled |
-| INFO | `BUILTIN_SCHEDULE_RESUMED` | terminal schedule built-in | session, source, schedule_id, enabled, next_run_at |
-| INFO | `BUILTIN_SCHEDULE_DELETED` | terminal schedule built-in | session, source, schedule_id, removed |
-| INFO | `BUILTIN_SCHEDULE_RUN_NOW` | terminal schedule built-in | session, source, schedule_id, status, fired_at, run_id, last_error |
-| INFO | `BUILTIN_NOTIFY_CREATED` | terminal notify built-in | session, source, channel_id, kind, muted |
-| INFO | `BUILTIN_NOTIFY_UPDATED` | terminal notify built-in | session, source, channel_id, muted |
-| INFO | `BUILTIN_NOTIFY_MUTED` | terminal notify built-in | session, source, channel_id |
-| INFO | `BUILTIN_NOTIFY_UNMUTED` | terminal notify built-in | session, source, channel_id |
-| INFO | `BUILTIN_NOTIFY_DELETED` | terminal notify built-in | session, source, channel_id, removed |
-| INFO | `SCHEDULE_FIRED` | scheduler dispatch | schedule_id, owner_kind, session, team_id, run_id, fired_at, next_run_at, command_root |
-| INFO | `SCHEDULE_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, session, team_id, run_id, fired_at, active_run_count, command_root |
-| INFO | `WATCHER_FIRED` | watcher scheduler hook | watcher_id, schedule_id, run_id, baseline_run_id, session, fired_at |
-| INFO | `WATCHER_SCHEDULE_FIRED` | scheduler dispatch | schedule_id, owner_kind, session, team_id, run_id, fired_at, command_root |
-| INFO | `WATCHER_UPDATED` | watcher service | watcher_id, schedule_id, session |
-| INFO | `WATCHER_BASELINE_ACCEPTED` | watcher service | watcher_id, baseline_run_id, session |
-| INFO | `WATCHER_CHANGED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
-| INFO | `WATCHER_RECOVERED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
-| INFO | `AI_RATE_LIMIT_SESSION_BYPASSED` | AI route rate limiting | ip, session, variant |
-| INFO | `AI_ASSIST_ENQUEUE_RESULT` | AI assist route enqueue | assist_id, run_id, session, variant, status, inserted, force, model, prompt_version, prompt_version_source, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes |
-| INFO | `AI_WORKER_DEPENDENCIES_LOADED` | AI worker startup | variants, metrics_initialized |
-| INFO | `AI_WORKER_STARTED` | AI worker startup | — |
-| INFO | `AI_ASSIST_PROVIDER_REQUEST` | AI provider call start | assist_id, run_id, variant, model, connect_timeout_seconds, read_timeout_seconds |
-| INFO | `AI_ASSIST_COMPLETED` | AI worker completion | assist_id, run_id, variant, duration_ms, context_hash, input_chars, output_chars, estimated_input_tokens, redacted_bytes, suggestion_count, rejected_count, provider timing fields |
-| INFO | `AI_ASSIST_SUMMARY_FALLBACK` | AI summary orchestration | assist_id, run_id, variant, reason |
-| INFO | `AI_ASSIST_NEXT_COMMANDS_FALLBACK` | AI next-command orchestration | assist_id, run_id, variant, reason |
-| INFO | `AI_WORKER_STOPPED` | AI worker shutdown | — |
-| INFO | `NOTIFICATION_WORKER_STARTED` | notification worker | pid, poll_seconds, limit |
-| INFO | `NOTIFICATION_WORKER_STOPPED` | notification worker | pid |
-| INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
-| INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
-| INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
-| INFO | `SCHEDULER_RECOVERY_APPLIED` | scheduler recovery | fired, skipped |
-| WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
-| INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session, cleanup flags, removed/curated/kept counts |
-| INFO | `PROJECT_LINK_REMOVED` | Project unlink route | project_id, entity_type, entity_id, cleanup flags, unlinked/curated/kept counts |
-| INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
-| INFO | `DIAG_VIEWED` | `diag()` | ip |
-| WARN | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
-| WARN | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
-| WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason, deny_kind, rule_id |
-| WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
-| WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, status |
-| WARN | `API_BROKER_UNAVAILABLE` | API run start routes | ip, reason |
-| WARN | `API_FULL_OUTPUT_LOAD_FAILED` | API output route | run_id, session, rel_path, error |
-| WARN | `RUN_FULL_OUTPUT_INDEX_FALLBACK` | run finalization | run_id, session, rel_path, error |
-| WARN | `BROKER_PUBLISH_FAILED` | broker event publish | run_id, event_type, reason, error |
-| WARN | `PTY_INPUT_DROPPED` | interactive PTY control handling | run_id, session, reason, bytes |
-| WARN | `PTY_INPUT_WRITE_FAILED` | interactive PTY control handling | run_id, session, bytes, error |
-| WARN | `PTY_RESIZE_IOCTL_FAILED` | interactive PTY control handling | fd, rows, cols, error |
-| WARN | `PTY_TERMINATE_FAILED` | interactive PTY cleanup | run_id, pid, cmd, error (+ traceback) |
-| WARN | `PTY_STARTUP_CLEANUP_FAILED` | interactive PTY startup cleanup | run_id, stage, error (+ traceback) |
-| WARN | `NOTIFICATION_CHANNEL_REGISTRY_MISS` | notification dispatcher | event_id, channel_id, kind |
-| WARN | `NOTIFICATION_RETRIED` | notification dispatcher | event_id, channel_id, trigger, session, attempts, next_attempt_at, retryable, age_expired, max_attempts, error |
-| WARN | `NOTIFICATION_DELIVERY_FAILED` | notification dispatcher | event_id, channel_id, trigger, session, attempts, retryable, age_expired, max_attempts, error |
-| WARN | `NOTIFICATION_WORKER_DATABASE_INTERRUPTED` | notification worker | phase, limit, poll_seconds, error_type, sqlstate |
-| WARN | `NOTIFICATION_HTTP_NETWORK_ERROR` | notification HTTP channels | label, host, error |
-| WARN | `NOTIFICATION_SMTP_SEND_FAILED` | notification email channel | host, port, tls_mode, channel_id, error |
-| WARN | `API_NOTIFICATION_CHANNEL_REJECTED` | API notification routes | ip, session, code, status, route, method |
-| WARN | `SCHEDULER_CONFIG_INVALID` | scheduler config readers | key, value, fallback |
-| WARN | `SCHEDULE_REQUEST_REJECTED` | browser schedule routes | ip, session, team_id, source, action, schedule_id, status, error |
-| WARN | `API_SCHEDULE_REJECTED` | API schedule routes | ip, session, team_id, code, status, route, method, error |
-| WARN | `BUILTIN_SCHEDULE_REJECTED` | terminal schedule built-in | session, source, subcommand, error |
-| WARN | `BUILTIN_NOTIFY_REJECTED` | terminal notify built-in | session, source, subcommand, error |
-| WARN | `SCHEDULE_DISABLED_REVOKED` | scheduler dispatch | schedule_id, owner_kind, session, team_id, fired_at, next_run_at, command_root |
-| WARN | `WATCHER_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, owner_kind, session, team_id, run_id, fired_at, active_run_count, command_root |
-| WARN | `WATCHER_ERROR` | watcher finalization | watcher_id, schedule_id, session, state, run_id, error, notification_count |
-| WARN | `WATCHER_DIFF_FAILED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, error |
-| WARN | `WATCHER_DISABLED_AFTER_ERRORS` | watcher finalization | watcher_id, schedule_id, session, state, run_id, consecutive_failures |
-| WARN | `WATCHER_BASELINE_DELETED` | run cleanup | watcher_id, baseline_run_id, session |
-| WARN | `AI_RATE_LIMIT_REJECTED` | AI route rate limiting | ip, session, variant, error_code, retry_after_seconds, bypass_session_limit |
-| WARN | `AI_ASSIST_JSON_DECODE_FAILED` | AI assist storage | assist_id, column |
-| WARN | `AI_BASE_URL_ALLOWED_CIDR_INVALID` | config loading | cidr |
-| WARN | `SCHEDULE_RECOVERY_SKIPPED_INVALID_NEXT_RUN` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at |
-| WARN | `SCHEDULE_RECOVERY_SKIPPED_STALE` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at, catchup_window_seconds |
-| WARN | `SCHEDULE_FIRE_CLAIM_TIME_INVALID` | scheduler dispatch | schedule_id, owner_kind, session, last_run_at, command_root |
-| WARN | `SCHEDULER_WORKER_DATABASE_INTERRUPTED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type, error_type, sqlstate |
-| WARN | `SCHEDULER_LOCK_RELEASE_SKIPPED` | scheduler worker | phase, error_type, sqlstate |
-| WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
-| WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
-| WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
-| WARN | `PACKAGE_PRESETS_OVERRIDE_INVALID` | evidence package preset catalog loader | path, fallback_path, error |
-| WARN | `PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED` / `CREATE_REJECTED` / `UPDATE_REJECTED` / `APPLY_REJECTED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, status, reason |
-| WARN | `PROJECT_AUTO_PROMOTE_RULE_UPDATE_MISS` / `DELETE_MISS` / `APPLY_MISS` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, status, reason |
-| WARN | `PROJECT_AUTO_PROMOTE_QUOTA_LIMITED` | Project auto-promote apply service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, quota_limited_count, linked_count, new_link_count, promoted_count |
-| WARN | `PROJECT_AUTO_PROMOTE_MATCH_CAP_LIMITED` | Project auto-promote matching service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, matched/candidate/cap counts, candidate_scan_limit, limit, truncated |
-| WARN | `PROJECT_AUTO_PROMOTE_RULE_CAP_LIMITED` | Project auto-promote run-finalization service | session, team_id, run_id, rule_cap_limited_count, candidate_rule_count, rule_limit |
-| WARN | `ATLAS_IMPORT_PREVIEW_REJECTED` | Atlas import routes/workflow | ip, session, team_id, actor_member_id, actor_role, draft_id, format_id, source_tool_key, has_file, filename_present, content_length, upload_bytes, max_upload_bytes, request_limit_bytes, stage, status, reason |
-| WARN | `ATLAS_IMPORT_APPLY_REJECTED` | Atlas import routes/workflow | ip, session, team_id, actor_member_id, actor_role, draft_id, batch_id, project_id, project_present, status, reason, draft_status, required_capabilities, option_import_entities, option_import_findings, option_link_to_project, option_create_project_targets |
-| WARN | `ATLAS_IMPORT_LIMIT_REJECTED` | Atlas import workflow guardrails | limit_key, configured_limit, actual_count, draft_id, format_id, team_id, stage |
-| WARN | `ATLAS_IMPORT_WARNINGS_TRUNCATED` | Atlas import parser | format_id, skipped, warning_count, suppressed_warning_count, max_warnings, warning_codes |
-| WARN | `ATLAS_IMPORT_APPLY_STALE_CLEANED` | Atlas import draft cleanup | previewed_count, applying_count, cutoff |
-| WARN | `ATLAS_IMPORT_CONFIG_LIMIT_INVALID` | Atlas import config readers | key, default, configured_type, configured_value |
-| WARN | `SCAN_TARGET_OBSERVATIONS_DROPPED` | Atlas entity materializer | session, team_id, run_id, command_root, deleted_count, reason |
-| WARN | `ATLAS_ENTITY_ATTRIBUTES_DECODE_FAILED` | Atlas entity materializer | session, team_id, entity_id, entity_type, value_type, reason |
-| WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
-| WARN | `DIAG_REDIS_SCAN_INCOMPLETE` | `/diag` Redis probes | stage, error |
-| WARN | `INTEL_PROVIDERS_DISABLED` | Atlas intel refresh | session, entity_id, entity_type |
-| WARN | `INTEL_PROVIDER_LOOKUP_SKIPPED` | Atlas intel refresh | session, entity_id, provider, status, provider_message |
-| WARN | `VAULT_DECRYPT_FAILED` | secrets vault | source |
-| WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, client_message |
-| WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
-| WARN | `SESSION_TOKEN_REVOKE_DENIED` | `session_token_revoke` | ip, session, reason |
-| WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
-| WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
-| WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
-| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, request_id, path, limit, scope |
-| WARN | `RATE_LIMIT_STORAGE_FALLBACK` | rate-limit storage setup | reason, fallback, redis_configured |
-| WARN | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
-| WARN | `CMD_TIMEOUT_TERMINATE_FAILED` | brokered run timeout cleanup | ip, run_id, session, cmd (+ traceback) |
-| WARN | `CLIENT_RUN_OUTPUT_INVALID` | client-side run persistence | ip, session, cmd, payload_type |
-| WARN | `CLIENT_RUN_OUTPUT_TRUNCATED` | client-side run persistence | ip, session, cmd, raw_line_count, stored_line_count, limit |
-| WARN | `RUN_OUTPUT_ARTIFACT_TRUNCATED` | full-output artifact capture | run_id, rel_path, artifact_bytes, limit, reason |
-| WARN | `RUN_OUTPUT_ARTIFACT_PARSE_FALLBACK` | full-output artifact loading | rel_path, row_index, reason, error |
-| WARN | `COMMAND_REGISTRY_LOCAL_OVERLAY_INVALID` | command registry loading | path, error |
-| WARN | `BODY_STORE_LOAD_FALLBACK` | large body storage | rel_path, kind, error |
-| WARN | `CONFIG_UNKNOWN_KEY_IGNORED` | config loading | key, source |
-| WARN | `CONFIG_VALUE_DROPPED` | config loading | key, source, reason, cidr/suffix |
-| WARN | `CONFIG_VALUE_DEFAULTED` | config loading | key, source, reason, fallback |
-| WARN | `CONFIG_VALUE_CLAMPED` | config loading | key, source, reason, minimum/maximum |
-| WARN | `POSTGRES_READ_RETRY` | Postgres backend read retry | sqlstate, operation, retry_delay_ms |
-| WARN | `REDIS_UNAVAILABLE` | process tracking startup | redis_scheme, redis_host, redis_port, redis_db, redis_configured, fallback |
-| WARN | `WORKSPACE_ROOT_MISMATCH` | runtime bootstrap | workspace_root_env, workspace_root_config |
-| WARN | `AI_SECRET_LOOKUP_FAILED` | AI provider credentials | secret_name (+ traceback) |
-| WARN | `AI_CONTEXT_SECRET_METADATA_LOAD_FAILED` | AI context redaction | session (+ traceback) |
-| WARN | `AI_CONTEXT_FULL_OUTPUT_LOAD_FAILED` | AI context assembly | run_id, rel_path, error |
-| WARN | `AI_PROVIDER_SCHEMA_RETRY` | AI provider JSON validation | variant, attempt, model, finish_reason, output_chars, error_type, provider_truncated |
-| WARN | `AI_SUGGESTION_SECRET_LOOKUP_FAILED` | AI suggestion validation | session, env, error_type (+ traceback) |
-| WARN | `AI_SUGGESTIONS_REJECTED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
-| WARN | `AI_DIAG_TEST_FAILED` | AI diagnostics test prompt | ip, provider, model, error_code, status |
-| WARN | `AI_PROVIDER_PROBE_FAILED` | AI provider diagnostics | provider, model, base_url_configured, error_code, status, latency_ms |
-| WARN | `AI_COORDINATION_RELEASE_SKIPPED` | AI Redis coordination release | reason |
-| WARN | `AI_COORDINATION_RELEASE_FAILED` | AI Redis coordination release | (+ traceback) |
-| WARN | `AI_COORDINATION_HEARTBEAT_FAILED` | AI Redis coordination heartbeat | (+ traceback) |
-| WARN | `AI_WORKER_COORDINATION_UNAVAILABLE` | AI worker coordination | error |
-| WARN | `AI_ASSIST_STALE_RECLAIMED` | AI worker queue recovery | count, stale_after_seconds |
-| WARN | `AI_ASSIST_FAILED` | AI worker completion | assist_id, run_id, session, variant, model, prompt_version, prompt_version_source, context_hash, error_code, error_message |
-| WARN | `AI_WORKER_DATABASE_INTERRUPTED` | AI worker database loop | error_type |
-| WARN | `ACTIVE_RUN_METADATA_DECODE_FAILED` | process tracking metadata | key, error |
-| WARN | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED` | active-run startup cleanup | reason, fallback, pid |
-| WARN | `REDIS_SESSION_SET_READ_FAILED` | process tracking metadata | key (+ traceback) |
-| WARN | `REDIS_SCAN_FAILED` | process tracking metadata | pattern (+ traceback) |
-| WARN | `METRICS_DB_COLLECT_FAILED` | Prometheus runtime collector | database_backend (+ traceback) |
-| WARN | `METRICS_REDIS_COLLECT_FAILED` | Prometheus runtime collector | (+ traceback) |
-| WARN | `BROKER_REPLAY_TRIMMED` | broker replay storage | run_id, mode, max_events, max_bytes, remaining_events |
-| WARN | `BROKER_PAYLOAD_DECODE_FAILED` | broker Redis stream decode | run_id, event_id, reason, error |
-| WARN | `BROKER_REDIS_TRIM_UNAVAILABLE` | broker Redis replay trimming | key, reason |
-| WARN | `PACKAGE_FULL_OUTPUT_PREVIEW_FALLBACK` | evidence package transcript rendering | run_id, rel_path, error |
-| WARN | `PACKAGE_TRANSCRIPT_CAPPED` | evidence package transcript rendering | run_id, max_lines, hidden_lines, include_companion |
-| WARN | `SHARE_REDACTION_RULE_INVALID` | share/export redaction config | label, pattern_hash, error |
-| WARN | `SHARE_REDACTION_RULE_FAILED` | share/export redaction application | label, pattern_hash, error |
-| WARN | `KILL_FAILED` | `kill_command` | ip, run_id, session, team_id, actor_member_id, team_role, pid, pgid, error |
-| WARN | `HEALTH_DEGRADED` | `health()` | db, redis |
-| ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
-| ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
-| ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
-| ERROR | `CONFIG_LOAD_FAILED` | config loading | phase, source, key, error (+ traceback when available) |
-| ERROR | `RUNTIME_BOOTSTRAP_FAILED` | runtime bootstrap | phase, runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs (+ traceback) |
-| ERROR | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR` | active-run startup cleanup | (+ traceback) |
-| ERROR | `DB_INIT_FAILED` | database startup | backend, phase, schema_action (+ traceback) |
-| ERROR | `METRICS_ENVIRONMENT_SETUP_FAILED` | metrics startup | prometheus_multiproc_dir, source (+ traceback) |
-| ERROR | `GUNICORN_WORKER_CLEANUP_FAILED` | Gunicorn worker hook | hook, pid (+ traceback) |
-| ERROR | `PROJECT_AUTO_PROMOTE_RUN_ERROR` | run finalization | run_id, session, team_id, cmd (+ traceback); per-rule context is logged by `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` |
-| ERROR | `WATCHER_FINALIZE_ERROR` | run finalization watcher hook | run_id, session (+ traceback) |
-| ERROR | `WATCHER_BASELINE_DELETE_HOOK_ERROR` | run cleanup watcher hook | (+ traceback) |
-| ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
-| ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
-| ERROR | `PACKAGE_PRESETS_LOAD_FAILED` | Project package preset route | ip, session, error |
-| ERROR | `ATLAS_IMPORT_PREVIEW_FAILED` | Atlas import preview workflow | session, team_id, actor_member_id, actor_role, format_id, source_tool_key, stage, upload_bytes, has_filename, filename_present (+ traceback) |
-| ERROR | `ATLAS_IMPORT_APPLY_FAILED` | Atlas import apply workflow | session, team_id, actor_member_id, actor_role, draft_id, batch_id, project_id, format_id, source_tool_key, stage, draft_status, required_capabilities, option_import_entities, option_import_findings, option_link_to_project, option_create_project_targets (+ traceback) |
-| ERROR | `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` | Project auto-promote run-finalization service | session, team_id, run_id, project_id, rule_id, target_entity_kind, match_mode, limit (+ traceback) |
-| ERROR | `NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR` | run finalization notification hook | run_id, session (+ traceback) |
-| ERROR | `NOTIFICATION_CHANNEL_SEND_EXCEPTION` | notification dispatcher | event_id, channel_id, kind, trigger (+ traceback) |
-| ERROR | `NOTIFICATION_WORKER_BOOTSTRAP_FAILED` | notification worker | phase (+ traceback) |
-| ERROR | `NOTIFICATION_WORKER_CRASHED` | notification worker | phase, limit, poll_seconds (+ traceback) |
-| ERROR | `POSTGRES_POOL_OPEN_FAILED` | Postgres backend pool | pool_min, pool_max, jit_enabled (+ traceback) |
-| ERROR | `SCHEDULE_FIRE_FAILED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, consecutive_failures, error, command_root (+ traceback) |
-| ERROR | `SCHEDULE_FAILURE_NOTIFICATION_ERROR` | scheduler dispatch | schedule_id (+ traceback) |
-| ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
-| ERROR | `SCHEDULER_WORKER_BOOTSTRAP_FAILED` | scheduler worker | phase, pid (+ traceback) |
-| ERROR | `AI_WORKER_BOOTSTRAP_FAILED` | AI worker startup | phase (+ traceback) |
-| ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
-| ERROR | `MIGRATION_FAILED` | Schema migration runner | version, migration_name, error (+ traceback) |
-| ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
-| ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
-| ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, request_id, method, path, status (+ traceback) |
-| CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
-
-### Logging Shape Notes
-
-- request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
-- run lifecycle logs intentionally carry `ip`, `session`, and `run_id` so start/end/kill/failure events can be correlated without reconstructing request flow from surrounding lines
-- web bootstrap runs active-run metadata cleanup through a Redis-backed ownership guard; no-Redis deployments keep the previous per-worker cleanup fallback, while multi-worker startup without Redis fails closed with `REDIS_REQUIRED_FOR_MULTI_WORKER`
-- diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the command-execution path
-- proxy-aware identity resolution is shared across logging, rate limiting, and diagnostics gating, so the logged `ip` field tracks the same resolved client identity used elsewhere in the runtime
+[Logging Reference](docs/logging.md) is the canonical event catalog for levels, names, fields, redaction rules, and troubleshooting. [CONFIGURATION.md](CONFIGURATION.md) owns `log_level`, `log_format`, GELF transport, and other operator settings; [DECISIONS.md](DECISIONS.md#structured-logging) owns the rationale.
 
 ---
 
@@ -2160,7 +1860,7 @@ The current event inventory is:
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
 - `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, database storage breakdowns, tool availability, activity summaries, AI provider status/test-prompt output, and a line classifier inspector without opening a shell session.
-- `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, Postgres pool health, AI provider duration/outcome/cache/suggestion metrics, durable AI queue-health gauges, AI Redis coordination key pressure, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
+- `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, durable workflow execution and step outcomes/durations, workflow capture failures/cancellations/recovery, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, Postgres pool health, AI provider duration/outcome/cache/suggestion metrics, durable AI queue-health gauges, AI Redis coordination key pressure, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
 
 These surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, operator diagnostics, and time-series monitoring.
 
@@ -2177,7 +1877,7 @@ Operationally, `/diag` sits on top of the same underlying sources described earl
 - the AI panel reads the same AI config used by route and worker code, probes `/v1/models` through the provider client, and can send a tiny JSON-only test prompt without attaching run output
 - config values reflect the browser/backend config split described in **Configuration Surfaces**
 - access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
-- Prometheus counters, histograms, label normalizers, cardinality policies, and multiprocess registry setup live in `app/services/metrics/__init__.py`; scrape-time collectors for database, Postgres pool state, Redis, AI Redis coordination key pressure, broker mode, workspace, intel cache size, Atlas, findings, snapshots, AI queue health, and provider-secret health live in `app/services/metrics/collectors.py`
+- Prometheus counters, histograms, label normalizers, cardinality policies, and multiprocess registry setup live in `app/services/metrics/__init__.py`; workflow outcome, duration, capture-failure, cancellation, and recovery metrics live in `app/services/metrics/workflows.py`; scrape-time collectors for database, Postgres pool state, Redis, AI Redis coordination key pressure, broker mode, workspace, intel cache size, Atlas, findings, snapshots, AI queue health, and provider-secret health live in `app/services/metrics/collectors.py`
 - the container entrypoint prepares `PROMETHEUS_MULTIPROC_DIR` under `/tmp/darklab_shell-prom`, clears stale worker shards on startup, keeps the directory ephemeral with the existing tmpfs runtime, and starts Gunicorn with `app/gunicorn_conf.py` so dead worker metric shards are removed when workers exit
 
 ---
@@ -2210,13 +1910,19 @@ Workspace-specific permission, bind-mount, and cleanup behavior are covered in *
 
 ### nmap Scan Mode Model
 
-`nmap` can use raw-socket-related Linux capabilities for SYN scans, OS fingerprinting, and similar features. In practice, those capabilities are not reliable for the app's unprivileged `scanner` execution path across Docker hosts and security profiles, even when the binary has file capabilities:
+`nmap` can use Linux file capabilities for SYN scans, OS fingerprinting, raw host discovery, UDP scanning, and traceroute while still running as the unprivileged `scanner` user:
 
 ```bash
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan
+setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu
 ```
 
-For predictable behavior, the app treats TCP connect scans as the supported `nmap` mode. `rewrite_command()` injects `-sT` when an `nmap` command does not already specify a scan mode. Command validation blocks `-sS` and explicit `--privileged` so users do not get confusing raw-socket `Operation not permitted` failures after launch.
+`raw_packet_scanning_enabled` is the deployment gate and defaults to `false`. `services.commands.raw_packets` combines that setting with Linux runtime checks for `CAP_NET_RAW` in the bounding set, `NoNewPrivs`, binary presence, and effective/permitted scanner file capabilities. Startup logs an aggregate state plus bounded per-tool state/reason fields, warns when an explicit opt-in cannot activate, and `/diag` exposes the same state without command text or targets.
+
+When readiness is inactive, `rewrite_command()` injects `-sT` when an Nmap command has no scan mode, and validation rejects raw-dependent scan, packet-shaping, OS, discovery, and traceroute options with a connect-mode alternative. When readiness is active, the same validator admits capability-gated options, command preparation wraps Nmap with `env NMAP_PRIVILEGED=1`, and the default scan type remains Nmap's SYN scan. Plain `-sT` remains unchanged, while mixed `-sT`/raw-option commands fail with a clear conflict. `--privileged`, source/decoy/MAC spoofing, and `--send-eth` are always blocked.
+
+The Docker bridge remains the supported network model. The root entrypoint loads the same effective normalized restricted CIDRs as the app, requires every scanner-user OUTPUT rule to install, and writes a protected readiness marker containing that exact list. Raw Nmap requires the marker to match before activation and adds `--send-ip`; `--send-eth` stays blocked. Packet-socket Naabu and Masscan are not activated alongside `restricted_command_input_cidrs`; externally managed host or bridge policies are not part of the readiness contract. The app-port firewall uses an address-type local-destination rule, with explicit IPv4/IPv6 address fallbacks, so it protects the local service without rejecting the same port on remote scan targets.
 
 ---
 
@@ -2226,7 +1932,7 @@ The Flask index route embeds the same normalized browser config payload that `/c
 
 Not every `config.yaml` key is exposed to the browser. Server-side persistence and storage controls such as `persist_full_run_output`, `full_output_max_mb`, and the `workspace_*` settings stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB values are converted to bytes internally before artifact or workspace quota logic runs.
 
-Backend config is loaded into one validated, pydantic-backed `AppConfig` object at startup. `config.yaml`, `config.local.yaml`, and supported environment variables feed that object in precedence order; known nested sections merge by field; unknown keys are warned and ignored; malformed YAML or invalid structural types stop startup before Flask or worker loops proceed. The public object remains mapping-compatible for older callers, attribute access exposes typed nested sections for new code, and `model_json_schema()` exposes the schema for tooling and tests.
+Backend config is loaded into one validated, pydantic-backed `AppConfig` object at startup. `config.yaml`, the resolved `config.local.yaml`, and supported environment variables feed that object in precedence order; known nested sections merge by field; unknown keys are warned and ignored; malformed YAML or invalid structural types stop startup before Flask or worker loops proceed. `APP_CONF_DIR` can replace the shipped base root for tests or nonstandard source deployments, while `APP_LOCAL_CONF_DIR` independently selects the directory that contains the main local overlay. When the local setting is absent, the overlay remains beside the base file. The public object remains mapping-compatible for older callers, attribute access exposes typed nested sections for new code, and `model_json_schema()` exposes the schema for tooling and tests.
 
 This is also where backend configuration crosses into presentation: the browser bootstrap payload, the resolved theme palette, and the frontend-owned preference layer all meet here, but they do not collapse into one generic config blob. The full theme contract lives in its own top-level section below.
 
@@ -2245,15 +1951,6 @@ The test stack is intentionally split into three layers:
 - `pytest` for backend contracts, route behavior, persistence, loaders, and logging
 - `Vitest` for client-side helpers and DOM-bound browser logic in jsdom
 - `Playwright` for the integrated browser UI against a live Flask server
-
-Current totals:
-
-- behavior tests: 4,046
-- docs/inventory meta-tests: 63
-- `pytest`: 2352 (2302 behavior + 50 meta)
-- `vitest`: 1485 (1472 behavior + 13 meta)
-- `playwright`: 272 behavior
-- total: 4,109
 
 ### Testing Architecture
 
@@ -2275,31 +1972,14 @@ The browser test harness mirrors production constraints rather than abstracting 
 - backend tests keep the app’s real relative-path assumptions by changing into `app/` before imports
 - the browser suite also carries focused regressions for the split welcome specs, pipe-stage autocomplete, and the responsive FAQ limits renderer because those are easiest to verify in the real UI
 
-Keep the detailed suite appendix, focused run commands, and maintenance notes in [tests/README.md](tests/README.md). Keep the rationale behind this layered split in [DECISIONS.md](DECISIONS.md).
+Keep suite purposes, live inventory commands, focused run commands, and maintenance notes in [tests/README.md](tests/README.md). Keep the rationale behind this layered split in [DECISIONS.md](DECISIONS.md).
 
 ---
 
 ## Related Docs
 
-- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](FEATURES.md) - full per-feature reference
-- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - backlog items, research notes, and known issues
-- [Atlas and Entity Model →  → Export Schema](#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
-- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [CONFIGURATION.md](CONFIGURATION.md) - operator settings and supported runtimes
+- [DECISIONS.md](DECISIONS.md) - rationale, tradeoffs, and durable design choices
+- [CONTRIBUTING.md](CONTRIBUTING.md) - contributor workflow and release checks
+- [FEATURES.md](FEATURES.md) - user-facing feature behavior
+- [tests/README.md](tests/README.md) - testing handbook and live suite listings

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared command execution + desktop input wrapper ──
 import { DarklabRunnerCore as importedRunnerCore } from './core/runner_core.js';
 import { DarklabRunOutputModel as importedRunOutputModel } from './core/run_output_model.js';
@@ -866,6 +869,7 @@ function _reattachActiveRunToTab(
   const runId = String(run.run_id || '');
   t.runId = runId;
   t.historyRunId = runId;
+  t.historyRunKind = 'external';
   t.scheduledRun = !!run.scheduled;
   t.scheduleId = String(run.schedule_id || '');
   t.reconnectedRun = true;
@@ -980,6 +984,7 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
   }
   t.runId = run.run_id;
   t.historyRunId = run.run_id;
+  t.historyRunKind = 'external';
   t.scheduledRun = !!run.scheduled;
   t.scheduleId = String(run.schedule_id || '');
   t.lastEventId = '';
@@ -1628,6 +1633,7 @@ function _markTabRunStarted(tabId, runId) {
   const sameRun = t.runId === runId || t.historyRunId === runId;
   t.runId = runId;
   t.historyRunId = runId;
+  t.historyRunKind = 'external';
   if (!sameRun) {
     t.lastEventId = '';
     t.streamRecoveryAttempts = 0;
@@ -2392,7 +2398,8 @@ async function _seedLocalStorageStarsToServer() {
 function _setPendingTerminalConfirm(config) {
   _pendingTerminalConfirm = config || null;
   if (typeof setComposerPromptMode === 'function') {
-    setComposerPromptMode(_pendingTerminalConfirm ? 'confirm' : null);
+    const mode = _pendingTerminalConfirm?.kind === 'secret' ? 'secret' : 'confirm';
+    setComposerPromptMode(_pendingTerminalConfirm ? mode : null);
   }
 }
 
@@ -2423,7 +2430,7 @@ function cancelPendingTerminalConfirm(tabId = _runnerActiveTabId()) {
   const cancelHandler = typeof pending.onCancel === 'function'
     ? pending.onCancel
     : (typeof pending.onNo === 'function' ? pending.onNo : null);
-  if (pending.kind === 'text') {
+  if (pending.kind === 'text' || pending.kind === 'secret') {
     Promise.resolve(typeof cancelHandler === 'function' ? cancelHandler() : undefined).catch((err) => {
       appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
       setStatus('fail');
@@ -3605,8 +3612,8 @@ function submitCommand(rawCmd) {
   if (_pendingTerminalConfirm) {
     const pending = _pendingTerminalConfirm;
     const promptTabId = pending.tabId || _runnerActiveTabId();
-    appendCommandEcho(cmd, promptTabId);
-    if (pending.kind === 'text') {
+    if (pending.kind !== 'secret') appendCommandEcho(cmd, promptTabId);
+    if (pending.kind === 'text' || pending.kind === 'secret') {
       _setPendingTerminalConfirm(null);
       Promise.resolve(typeof pending.onAnswer === 'function' ? pending.onAnswer(cmd) : undefined).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
@@ -3814,6 +3821,7 @@ function submitCommand(rawCmd) {
     _runTab.fullOutputAvailable = false;
     _runTab.fullOutputLoaded = false;
     _runTab.historyRunId = null;
+    _runTab.historyRunKind = '';
     _runTab.reconnectedRun = false;
     _runTab.commandOutcomeSummary = null;
     _runTab.lastEventId = '';

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Desktop UI module ──
 import {
   cmdInput as importedCmdInput,
@@ -928,6 +931,7 @@ function createTab(label) {
     command: '',
     runId: null,
     historyRunId: null,
+    historyRunKind: '',
     lastEventId: '',
     attachMode: '',
     reconnectedRun: false,
@@ -1119,6 +1123,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
       t.fullOutputAvailable = false;
       t.fullOutputLoaded = false;
       t.historyRunId = null;
+      t.historyRunKind = '';
       t.reconnectedRun = false;
       _clearTabRunningLabelTimer(t);
       t.runningLabel = '';

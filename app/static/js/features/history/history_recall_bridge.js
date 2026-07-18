@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral command-recall boundary for shared UI helpers.
 
 const HISTORY_RECALL_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;

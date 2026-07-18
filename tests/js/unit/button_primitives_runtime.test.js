@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve, dirname, join } from 'path'
@@ -367,10 +370,13 @@ describe('runtime button primitive contract', () => {
       .find(item => item.textContent === 'compare')
       ?.click()
 
-    expect(openHistoryCompareLauncher).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'run-1',
-      command: 'ping darklab.sh',
-    }))
+    expect(openHistoryCompareLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'run-1',
+        command: 'ping darklab.sh',
+      }),
+      { returnFocus: available.mobileRecentPeek },
+    )
     expect(document.getElementById('mobile-recents-sheet')?.classList.contains('u-hidden')).toBe(true)
   })
 

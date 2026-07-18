@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Mobile hamburger-menu action dispatch.
 //
 // controller.js owns the click wiring; this module owns the action body so the

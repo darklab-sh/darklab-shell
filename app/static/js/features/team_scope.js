@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { bindMobileSheet as importedBindMobileSheet } from '../ui/mobile_sheet.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../ui/overlay_actions_bridge.js';
 import { refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache } from './workspace/workspace_autocomplete_cache.js';
@@ -233,7 +236,7 @@ let DarklabTeamScope = null;
     const active = team ? team.id === activeTeamId : !activeTeamId;
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `dropdown-item dropdown-item-touch team-scope-option${active ? ' is-active' : ''}`;
+    button.className = `dropdown-item dropdown-item-touch selection-row team-scope-option${active ? ' is-selected' : ''}`;
     button.dataset.teamScopeOption = team ? team.id : PERSONAL_SCOPE_OPTION;
     button.setAttribute('role', 'option');
     button.setAttribute('aria-selected', active ? 'true' : 'false');
@@ -508,7 +511,7 @@ let DarklabTeamScope = null;
     showStatus('');
     render();
     if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
-    const active = listEl?.querySelector?.('.team-scope-option.is-active');
+    const active = listEl?.querySelector?.('.team-scope-option.is-selected');
     (active || closeBtn || modal)?.focus?.({ preventScroll: true });
     return true;
   }

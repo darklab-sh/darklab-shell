@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import {
   VISUAL_HISTORY_FIXTURE_NAME,
   VISUAL_HISTORY_MIN_ROOTS,

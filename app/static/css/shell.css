@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
 /* darklab_shell CSS module: shell
    Terminal frame, transcript surfaces, history row, utility buttons, and modals. */
 
@@ -2030,11 +2033,6 @@ body.mobile-terminal-mode .output-follow-btn {
   border-color: var(--green);
 }
 
-.team-scope-option.is-active {
-  border-color: var(--green);
-  box-shadow: inset 3px 0 0 var(--green);
-}
-
 .team-scope-option-main {
   display: flex;
   flex-direction: column;
@@ -2066,7 +2064,7 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--green);
 }
 
-.team-scope-option.is-active .team-scope-option-marker {
+.team-scope-option.is-selected .team-scope-option-marker {
   color: var(--green);
 }
 

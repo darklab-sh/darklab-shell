@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project list controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 
@@ -82,11 +85,12 @@ let exportedDarklabProjectList = null;
       const summary = ctx.projectSummary(projectId);
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'control-row project-workspace-row'
+      row.className = 'control-row selection-row project-workspace-row'
         + (projectId === activeId ? ' is-active' : '')
         + (projectId === ctx.selectedProjectId() ? ' is-selected' : '');
       row.dataset.projectId = projectId;
       row.dataset.projectAction = 'select';
+      if (projectId === ctx.selectedProjectId()) row.setAttribute('aria-current', 'true');
       ctx.bindProjectRuntimePressable(row);
 
       const main = document.createElement('div');
@@ -163,10 +167,11 @@ let exportedDarklabProjectList = null;
       const projectId = String(project.id || '');
       const summary = ctx.projectSummary(projectId);
       const row = document.createElement('article');
-      row.className = 'panel-row project-mobile-row'
+      row.className = 'panel-row selection-row project-mobile-row'
         + (projectId === activeId ? ' is-active' : '')
         + (projectId === ctx.selectedProjectId() ? ' is-selected' : '');
       row.dataset.projectId = projectId;
+      if (projectId === ctx.selectedProjectId()) row.setAttribute('aria-current', 'true');
 
       const main = document.createElement('button');
       main.type = 'button';

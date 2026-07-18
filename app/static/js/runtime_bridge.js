@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral runtime-service boundary for modules that would otherwise cycle
 // through session.js or status_monitor.js.
 

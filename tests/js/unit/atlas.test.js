@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
@@ -1803,6 +1806,7 @@ describe('Atlas overlay', () => {
     entityRow?.click()
     expect(document.querySelector('.atlas-row-select')?.checked).toBe(true)
     expect(document.querySelector('.atlas-entity-row')?.classList.contains('is-selected')).toBe(true)
+    expect(document.querySelector('.atlas-entity-row')?.classList.contains('selection-row')).toBe(true)
     expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/entities/ent_ip')).toHaveLength(
       entityDetailCallsBeforeSelect,
     )
@@ -1866,6 +1870,7 @@ describe('Atlas overlay', () => {
     findingRow?.click()
     expect(document.querySelector('.atlas-finding-select')?.checked).toBe(true)
     expect(document.querySelector('.atlas-finding-queue-row')?.classList.contains('is-selected')).toBe(true)
+    expect(document.querySelector('.atlas-finding-queue-row')?.classList.contains('selection-row')).toBe(true)
     expect(document.getElementById('atlas-detail')?.textContent).toBe(selectedFindingBeforeClick)
     document.getElementById('atlas-bulk-delete')?.click()
     await Promise.resolve()

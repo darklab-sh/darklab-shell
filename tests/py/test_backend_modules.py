@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Tests for pure utility functions across the app modules:
   - split_chained_commands      (commands.py)
@@ -20,6 +23,7 @@ import hashlib
 import io
 import importlib.util
 import json
+import logging
 import os
 import random
 import re
@@ -59,6 +63,7 @@ import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
 import config as app_config
+import config_paths
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
 import services.commands.registry_loader as registry_loader_module
 import services.commands.builtins as builtin_commands
@@ -2353,20 +2358,27 @@ class TestSplitChainedCommands:
 
 
 class TestLoadConfig:
-    def test_database_env_overrides_yaml_backend_settings(self):
+    def test_environment_overrides_yaml_backend_and_workspace_settings(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
             "DATABASE_BACKEND": "postgres",
             "DATABASE_URL": "postgresql://darklab:secret@postgres:5432/darklab_shell",
             "DATABASE_POOL_MIN": "2",
             "DATABASE_POOL_MAX": "4",
             "DATABASE_POSTGRES_JIT": "true",
+            "WORKSPACE_ENABLED": "true",
+            "WORKSPACE_BACKEND": "volume",
             "WORKSPACE_ROOT": "/env/workspaces",
+            "INTERACTIVE_PTY_ENABLED": "true",
             "PROMETHEUS_MULTIPROC_DIR": "/env/prometheus",
+            "RAW_PACKET_SCANNING_ENABLED": "true",
             "AI_BASE_URL_ALLOWED_CIDRS": "192.0.2.0/24,not-a-cidr",
         }):
             with open(os.path.join(tmp, "config.yaml"), "w") as f:
                 f.write(
+                    "workspace_enabled: false\n"
+                    "workspace_backend: tmpfs\n"
                     "workspace_root: /yaml/workspaces\n"
+                    "interactive_pty_enabled: false\n"
                     "prometheus_multiproc_dir: /yaml/prometheus\n"
                 )
             with mock.patch.object(app_config.log, "warning") as warning:
@@ -2377,9 +2389,14 @@ class TestLoadConfig:
         assert cfg["database_pool_min"] == 2
         assert cfg["database_pool_max"] == 4
         assert cfg["database_postgres_jit"] is True
+        assert cfg["workspace_enabled"] is True
+        assert cfg["workspace_backend"] == "volume"
         assert cfg["workspace_root"] == "/env/workspaces"
+        assert cfg["interactive_pty_enabled"] is True
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
+        assert cfg["raw_packet_scanning_enabled"] is True
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
+        assert app_config.get_config_load_summary()["warning_count"] == 1
         warning.assert_has_calls([
             mock.call(
                 "AI_BASE_URL_ALLOWED_CIDR_INVALID",
@@ -2575,6 +2592,135 @@ class TestLoadConfig:
         assert cfg["intel_negative_cache_urlscan_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_threatfox_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_securitytrails_quota_seconds"] == 21600
+        assert app_config.get_config_load_summary()["warning_count"] == 2
+
+    def test_separate_local_config_directory_overrides_shipped_config(self):
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            shipped_path = Path(shipped_tmp)
+            local_path = Path(local_tmp)
+            (shipped_path / "config.yaml").write_text(
+                "app_name: shipped-shell\nprompt_username: shipped\n",
+                encoding="utf-8",
+            )
+            (shipped_path / "config.local.yaml").write_text(
+                "prompt_username: sibling\n",
+                encoding="utf-8",
+            )
+            (local_path / "config.local.yaml").write_text(
+                "prompt_username: mounted\n",
+                encoding="utf-8",
+            )
+            (local_path / "commands.local.yaml").write_text(
+                "commands:\n  - root: should-not-load\n",
+                encoding="utf-8",
+            )
+
+            cfg = app_config.load_config(shipped_path, local_path)
+
+        assert cfg["app_name"] == "shipped-shell"
+        assert cfg["prompt_username"] == "mounted"
+        assert app_config.get_config_load_summary()["conf_dir"] == str(shipped_path)
+        assert app_config.get_config_load_summary()["local_conf_dir"] == str(local_path)
+        assert app_config.get_config_load_summary()["local_overlay"] is True
+        overlay_sources = [
+            item["source"] for item in app_config.get_config_load_summary()["overlays"]
+        ]
+        assert overlay_sources == [
+            str(shipped_path / "config.yaml"),
+            str(local_path / "config.local.yaml"),
+        ]
+        assert str(local_path / "commands.local.yaml") not in overlay_sources
+        assert app_config.get_config_load_summary()["present_local_overlays"] == [
+            "config.local.yaml",
+            "commands.local.yaml",
+        ]
+        with pytest.raises(ValueError, match="safe relative path"):
+            config_paths.config_asset_paths("../commands.yaml")
+
+    def test_app_local_conf_dir_selects_external_main_overlay(self):
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            shipped_path = Path(shipped_tmp)
+            local_path = Path(local_tmp)
+            (shipped_path / "config.yaml").write_text("app_name: shipped-shell\n", encoding="utf-8")
+            (local_path / "config.local.yaml").write_text("app_name: mounted-shell\n", encoding="utf-8")
+
+            with mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", str(local_path)):
+                cfg = app_config.load_config(shipped_path)
+
+        assert cfg["app_name"] == "mounted-shell"
+
+    def test_missing_or_comment_only_external_local_config_is_harmless(self):
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            shipped_path = Path(shipped_tmp)
+            local_path = Path(local_tmp)
+            (shipped_path / "config.yaml").write_text("app_name: shipped-shell\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(app_config.log, "debug") as debug,
+                mock.patch.object(app_config.log, "warning") as warning,
+            ):
+                missing_cfg = app_config.load_config(shipped_path, local_path / "missing")
+                missing_summary = app_config.get_config_load_summary()
+                (local_path / "config.local.yaml").write_text(
+                    "# Add local config overrides here.\n",
+                    encoding="utf-8",
+                )
+                comment_cfg = app_config.load_config(shipped_path, local_path)
+                comment_summary = app_config.get_config_load_summary()
+                unsafe_local_path = local_path / ("line\n" + "x" * 180)
+                unsafe_local_path.mkdir()
+                (unsafe_local_path / "config.local.yaml").write_text(
+                    "unknown_log_safety_key: true\n",
+                    encoding="utf-8",
+                )
+                app_config.load_config(shipped_path, unsafe_local_path)
+                unsafe_summary = app_config.get_config_load_summary()
+
+        assert missing_cfg["app_name"] == "shipped-shell"
+        assert comment_cfg["app_name"] == "shipped-shell"
+        expected_base_source = str(shipped_path / "config.yaml")
+        assert [item["source"] for item in missing_summary["overlays"]] == [expected_base_source]
+        assert [item["source"] for item in comment_summary["overlays"]] == [expected_base_source]
+        assert [item["source"] for item in unsafe_summary["overlays"]] == [expected_base_source]
+        checked = [
+            call.kwargs["extra"]
+            for call in debug.call_args_list
+            if call.args == ("CONFIG_OVERLAY_CHECKED",)
+        ]
+        assert any(
+            item["source"].endswith("missing/config.local.yaml") and item["present"] is False
+            for item in checked
+        )
+        assert any(
+            item["source"] == str(local_path / "config.local.yaml") and item["present"] is True
+            for item in checked
+        )
+        assert "\n" not in unsafe_summary["local_conf_dir"]
+        assert len(unsafe_summary["local_conf_dir"]) <= 240
+        unsafe_checked_source = checked[-1]["source"]
+        assert "\n" not in unsafe_checked_source
+        assert len(unsafe_checked_source) <= 240
+        unknown_warning = next(
+            call
+            for call in warning.call_args_list
+            if call.args == ("CONFIG_UNKNOWN_KEY_IGNORED",)
+        )
+        warning_source = unknown_warning.kwargs["extra"]["source"]
+        assert "\n" not in warning_source
+        assert len(warning_source) <= 240
+
+    def test_external_local_config_failure_reports_mounted_source(self):
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            shipped_path = Path(shipped_tmp)
+            local_path = Path(local_tmp)
+            (shipped_path / "config.yaml").write_text("app_name: shipped-shell\n", encoding="utf-8")
+            (local_path / "config.local.yaml").write_text("app_name: [\n", encoding="utf-8")
+
+            with mock.patch.object(app_config.log, "error") as error:
+                with pytest.raises(app_config.ConfigLoadError, match="Invalid YAML"):
+                    app_config.load_config(shipped_path, local_path)
+
+        assert error.call_args.kwargs["extra"]["source"] == str(local_path / "config.local.yaml")
 
     def test_unknown_yaml_keys_warn_and_are_ignored(self):
         app_config.CONFIG_LOAD_WARNINGS.clear()
@@ -2617,6 +2763,7 @@ class TestLoadConfig:
                     full_output_max_mb: 25mb
                     output_preview_max_mb: 2MB
                     ai_enabled: yes
+                    raw_packet_scanning_enabled: invalid
                     database_postgres_jit: "true"
                     ai_max_concurrent: "4"
                     audit_export_max_rows: 999999
@@ -2631,18 +2778,31 @@ class TestLoadConfig:
         assert cfg["output_preview_max_mb"] == 2
         assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
         assert cfg["ai_enabled"] is True
+        assert cfg["raw_packet_scanning_enabled"] is False
         assert cfg["database_postgres_jit"] is True
         assert cfg["ai_max_concurrent"] == 4
         assert cfg["audit_export_max_rows"] == 200000
-        warning.assert_called_once_with(
-            "CONFIG_VALUE_CLAMPED",
-            extra={
-                "key": "audit_export_max_rows",
-                "source": os.path.join(tmp, "config.yaml"),
-                "reason": "above_maximum",
-                "maximum": 200000,
-            },
-        )
+        assert app_config.get_config_load_summary()["warning_count"] == 2
+        warning.assert_has_calls([
+            mock.call(
+                "CONFIG_VALUE_CLAMPED",
+                extra={
+                    "key": "audit_export_max_rows",
+                    "source": os.path.join(tmp, "config.yaml"),
+                    "reason": "above_maximum",
+                    "maximum": 200000,
+                },
+            ),
+            mock.call(
+                "CONFIG_VALUE_DEFAULTED",
+                extra={
+                    "key": "raw_packet_scanning_enabled",
+                    "source": os.path.join(tmp, "config.yaml"),
+                    "reason": "invalid_bool",
+                    "fallback": False,
+                },
+            ),
+        ], any_order=True)
 
     def test_config_yaml_non_mapping_root_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2655,7 +2815,6 @@ class TestLoadConfig:
 
         error.assert_called_once_with(
             "CONFIG_LOAD_FAILED",
-            exc_info=False,
             extra={
                 "phase": "root_shape",
                 "source": os.path.join(tmp, "config.yaml"),
@@ -2675,9 +2834,9 @@ class TestLoadConfig:
 
         error.assert_called_once()
         assert error.call_args.args == ("CONFIG_LOAD_FAILED",)
-        assert error.call_args.kwargs["exc_info"] is True
         assert error.call_args.kwargs["extra"]["phase"] == "yaml_parse"
         assert error.call_args.kwargs["extra"]["source"] == os.path.join(tmp, "config.local.yaml")
+        assert error.call_args.kwargs["extra"]["error"] == "ParserError"
 
     def test_nested_overlay_deep_merges_section_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2983,6 +3142,7 @@ class TestLoadConfig:
         app_config.CONFIG_LOAD_WARNINGS[:] = [{"key": "unknown_key", "source": "/tmp/config.yaml"}]
         try:
             with mock.patch.object(runtime_bootstrap.log, "warning") as warning, \
+                 mock.patch.object(runtime_bootstrap.log, "debug") as debug, \
                  mock.patch.object(runtime_bootstrap.log, "info") as info:
                 runtime_bootstrap.log_loaded_config(build_test_config({"workspace_enabled": True}))
         finally:
@@ -2991,10 +3151,59 @@ class TestLoadConfig:
         warning.assert_not_called()
         info.assert_called_once()
         assert info.call_args.args == ("CONFIG_LOADED",)
+        assert "conf_dir" in info.call_args.kwargs["extra"]
+        assert "local_conf_dir" in info.call_args.kwargs["extra"]
+        assert "local_overlay" in info.call_args.kwargs["extra"]
+        assert "supported_local_overlays" in info.call_args.kwargs["extra"]
+        assert "present_local_overlays" not in info.call_args.kwargs["extra"]
+        assert "overlays" in info.call_args.kwargs["extra"]
+        inventory_call = next(
+            call for call in debug.call_args_list
+            if call.args == ("CONFIG_OVERLAY_INVENTORY",)
+        )
+        assert "present_local_overlays" in inventory_call.kwargs["extra"]
         assert info.call_args.kwargs["extra"]["workspace_enabled"] is True
+        assert info.call_args.kwargs["extra"]["raw_packet_scanning_configured"] is False
+        assert info.call_args.kwargs["extra"]["raw_packet_scanning_state"] == "disabled"
+        assert info.call_args.kwargs["extra"]["raw_packet_scanning_active_tools"] == ""
+        assert info.call_args.kwargs["extra"]["raw_packet_scanning_unavailable_tools"] == ""
+        assert info.call_args.kwargs["extra"]["raw_packet_nmap_reason"] == "disabled"
+        assert info.call_args.kwargs["extra"]["raw_packet_naabu_reason"] == "disabled"
+        assert info.call_args.kwargs["extra"]["raw_packet_masscan_reason"] == "disabled"
         assert "warning_count" in info.call_args.kwargs["extra"]
         assert "schema_field_count" in info.call_args.kwargs["extra"]
         assert "env_key_count" in info.call_args.kwargs["extra"]
+
+        statuses = {
+            "nmap": {"active": True, "reason": "ready", "availability_reason": "ready"},
+            "naabu": {
+                "active": False,
+                "reason": "scanner_binary_missing",
+                "availability_reason": "scanner_binary_missing",
+            },
+            "masscan": {
+                "active": False,
+                "reason": "packet_socket_egress_policy_required",
+                "availability_reason": "packet_socket_egress_policy_required",
+            },
+        }
+        with (
+            mock.patch.object(runtime_bootstrap.log, "warning") as warning,
+            mock.patch.object(runtime_bootstrap.log, "info") as info,
+            mock.patch(
+                "runtime_bootstrap.raw_packet_runtime_status",
+                side_effect=lambda _cfg, *, tool: statuses[tool],
+            ),
+        ):
+            runtime_bootstrap.log_loaded_config(build_test_config({"raw_packet_scanning_enabled": True}))
+
+        startup_extra = info.call_args.kwargs["extra"]
+        assert startup_extra["raw_packet_scanning_state"] == "partial"
+        assert startup_extra["raw_packet_scanning_active_tools"] == "nmap"
+        assert startup_extra["raw_packet_scanning_unavailable_tools"] == "naabu,masscan"
+        warnings = [call for call in warning.call_args_list if call.args == ("RAW_PACKET_SCANNING_UNAVAILABLE",)]
+        assert [call.kwargs["extra"]["tool"] for call in warnings] == ["naabu", "masscan"]
+        assert warnings[0].kwargs["extra"]["reason"] == "scanner_binary_missing"
 
     def test_startup_active_run_cleanup_uses_redis_lock(self, monkeypatch):
         class FalseyRedis(process._FakeRedisClient):
@@ -3232,6 +3441,13 @@ class TestPackagePresetCatalog:
         assert [preset["id"] for preset in catalog.presets] == ["evidence", "summary", "full", "redacted"]
         missing_warning.assert_called_once()
         assert missing_warning.call_args.kwargs["extra"]["path"] == str(Path(tmp) / "package_presets.yaml")
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            with mock.patch.object(package_presets._config, "APP_CONF_DIR", shipped_tmp), \
+                    mock.patch.object(package_presets._config, "APP_LOCAL_CONF_DIR", local_tmp):
+                local_catalog = package_presets.configured_package_presets_path({
+                    "package_presets_file": "package_presets.local.yaml",
+                })
+        assert local_catalog == Path(local_tmp) / "package_presets.local.yaml"
 
     def test_package_preset_loader_caps_display_lengths_and_default_labels(self):
         long_label = "l" * (package_presets.PACKAGE_PRESET_LABEL_MAX_LEN + 10)
@@ -5529,6 +5745,13 @@ class TestReportTemplateCatalog:
         warning.assert_called_once()
         assert warning.call_args.args == ("REPORT_TEMPLATES_OVERRIDE_INVALID",)
         assert warning.call_args.kwargs["extra"]["path"] == str(path)
+        with tempfile.TemporaryDirectory() as shipped_tmp, tempfile.TemporaryDirectory() as local_tmp:
+            with mock.patch.object(report_templates._config, "APP_CONF_DIR", shipped_tmp), \
+                    mock.patch.object(report_templates._config, "APP_LOCAL_CONF_DIR", local_tmp):
+                local_catalog = report_templates.configured_report_templates_path({
+                    "report_templates_file": "report_templates.local.yaml",
+                })
+        assert local_catalog == Path(local_tmp) / "report_templates.local.yaml"
 
     def test_report_draft_storage_handles_scope_and_conflicts(self, tmp_path):
         db_path = str(tmp_path / "reports.db")
@@ -6058,6 +6281,8 @@ class TestPostgresMigrations:
         "starred_commands",
         "session_variables",
         "user_workflows",
+        "workflow_execution_steps",
+        "workflow_executions",
         "recent_values",
         "secrets",
         "notification_channels",
@@ -6092,23 +6317,28 @@ class TestPostgresMigrations:
     @staticmethod
     def _postgres_table_columns(statements, table_name):
         create_re = re.compile(rf"CREATE TABLE IF NOT EXISTS {re.escape(table_name)}\s*\(", re.I)
+        alter_re = re.compile(
+            rf"ALTER TABLE {re.escape(table_name)} ADD COLUMN(?: IF NOT EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)",
+            re.I,
+        )
+        columns = set()
         for statement in statements:
-            if not create_re.search(statement):
-                continue
-            body = statement[statement.find("(") + 1:statement.rfind(")")]
-            columns = set()
-            for raw_line in body.splitlines():
-                line = raw_line.strip().rstrip(",")
-                if not line:
-                    continue
-                keyword = line.split()[0].upper()
-                if keyword.startswith("'"):
-                    continue
-                if keyword in {"PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"}:
-                    continue
-                columns.add(line.split()[0].strip('"'))
-            return columns
-        return set()
+            if create_re.search(statement):
+                body = statement[statement.find("(") + 1:statement.rfind(")")]
+                for raw_line in body.splitlines():
+                    line = raw_line.strip().rstrip(",")
+                    if not line:
+                        continue
+                    keyword = line.split()[0].upper()
+                    if keyword.startswith("'"):
+                        continue
+                    if keyword in {"PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"}:
+                        continue
+                    columns.add(line.split()[0].strip('"'))
+            alter_match = alter_re.search(statement)
+            if alter_match:
+                columns.add(alter_match.group(1))
+        return columns
 
     @staticmethod
     def _postgres_shared_index_names(statements):
@@ -6179,6 +6409,8 @@ class TestPostgresMigrations:
             "0040",
             "0041",
             "0042",
+            "0043",
+            "0044",
         ]
         for table_name in (
             "runs",
@@ -6519,7 +6751,7 @@ class TestPostgresMigrations:
         from core.database_backend import DatabaseBackend
         from core.migrations import MIGRATIONS
         from core.migrations.baseline import postgres_baseline_statements
-        from core.schema_manifest import SHARED_APP_TABLES, postgres_migration_schema_inventory
+        from core.schema_manifest import UNIFIED_BASELINE_APP_TABLES, postgres_migration_schema_inventory
 
         # Everything before the 0039 squash boundary is the authoritative pre-squash head.
         legacy_statements = [
@@ -6536,7 +6768,7 @@ class TestPostgresMigrations:
 
         column_diffs: list[str] = []
         constraint_diffs: list[str] = []
-        for table_name in sorted(SHARED_APP_TABLES):
+        for table_name in sorted(UNIFIED_BASELINE_APP_TABLES):
             legacy_table = legacy.tables.get(table_name)
             generated_table = generated.tables.get(table_name)
             assert legacy_table is not None, f"legacy v0001-v0038 head is missing shared table {table_name}"
@@ -6555,7 +6787,7 @@ class TestPostgresMigrations:
                     f"generated={sorted(generated_table.constraints)}"
                 )
 
-        shared = set(SHARED_APP_TABLES)
+        shared = set(UNIFIED_BASELINE_APP_TABLES)
         legacy_indexes = {name for name, index in legacy.indexes.items() if index.table_name in shared}
         generated_indexes = {name for name, index in generated.indexes.items() if index.table_name in shared}
 
@@ -6966,7 +7198,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0043",
+            "0044",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7018,7 +7250,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0042"
+        assert rows[-1]["version"] == "0044"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7407,13 +7639,15 @@ class TestPostgresMigrations:
         applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
         applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
-        assert applied == ["0039", "0040", "0041", "0042"]
+        assert applied == ["0039", "0040", "0041", "0042", "0043", "0044"]
         assert applied_again == []
         assert "0039" in conn.applied_versions
         assert "0040" in conn.applied_versions
         assert "0041" in conn.applied_versions
         assert "0042" in conn.applied_versions
-        assert conn.commit_count == 4
+        assert "0043" in conn.applied_versions
+        assert "0044" in conn.applied_versions
+        assert conn.commit_count == 6
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -7566,7 +7800,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0043",
+            "0045",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -7590,9 +7824,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0043"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0045"]
         assert table_exists is not None
-        assert "0043" in versions
+        assert "0045" in versions
 
     def test_migration_failure_logs_statement_context(self):
         from core.migrations.runner import Migration, apply_migration
@@ -7779,6 +8013,10 @@ class TestPostgresMigrations:
 
         assert fake_conn.committed is True
         assert fake_app_conn.committed is True
+        assert not any(
+            "CREATE TABLE IF NOT EXISTS schema_migrations" in str(sql)
+            for sql, _params in fake_conn.calls
+        )
         migration_runner.assert_called_once_with(fake_conn, database_backend.DatabaseBackend.POSTGRES)
         assert any(call[0] == "SELECT pg_advisory_xact_lock(?)" for call in fake_app_conn.calls)
         prune_retention.assert_called_once_with(fake_app_conn)
@@ -12091,6 +12329,7 @@ class TestPostgresMigrationHelper:
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL)")
+                conn.execute("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY)")
                 conn.execute("CREATE VIRTUAL TABLE runs_fts USING fts5(command)")
                 conn.execute("INSERT INTO runs (id, command) VALUES ('run-1', 'host darklab.sh')")
 
@@ -12100,6 +12339,7 @@ class TestPostgresMigrationHelper:
 
         assert [table.name for table in tables] == ["runs"]
         assert set(skipped) >= {
+            "schema_migrations",
             "runs_fts",
             "runs_fts_data",
             "runs_fts_idx",
@@ -13704,17 +13944,30 @@ class TestIntelServices:
         )
         provider = ShodanProvider(secret_getter=lambda session, env: None, client=mock.Mock())
 
-        result = lookup_entity(
-            "ip",
-            "8.8.8.8",
-            session_id="session-1",
-            provider_factories=[lambda: provider],
-            redis_client=redis,
-        )
+        shell_logger = logging.getLogger("shell")
+        previous_level = shell_logger.level
+        shell_logger.setLevel(logging.DEBUG)
+        try:
+            with mock.patch.object(shell_logger, "handle") as handle:
+                result = lookup_entity(
+                    "ip",
+                    "8.8.8.8",
+                    session_id="session-1",
+                    provider_factories=[lambda: provider],
+                    redis_client=redis,
+                )
+        finally:
+            shell_logger.setLevel(previous_level)
 
         assert result.providers[0].status == "missing_secret"
         assert result.providers[0].result is None
         provider.client.lookup_ip.assert_not_called()
+        missing_secret_record = next(
+            call.args[0]
+            for call in handle.call_args_list
+            if call.args[0].getMessage() == "INTEL_PROVIDER_MISSING_SECRET"
+        )
+        assert missing_secret_record.reason == "SHODAN_API_KEY is not configured"
 
     def test_lookup_entity_preflights_fofa_email_before_rate_limit_and_client_call(self):
         from services.intel.fofa import FofaProvider
@@ -15326,7 +15579,7 @@ class TestEntrypointWorkspaceRepair:
             assert state["metrics_module_loaded"] is False
 
         assert payload["factory_distinct"] is True
-        assert payload["factory_blueprint_count"] == 14
+        assert payload["factory_blueprint_count"] == 15
         assert payload["factory_override_false"] is False
         assert payload["factory_override_true"] is True
         assert payload["factory_testing_override"] is True
@@ -15382,12 +15635,23 @@ class TestEntrypointWorkspaceRepair:
         compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
         shell_env = TestAIRuntimeWiring._compose_environment(compose["services"]["shell"])
 
-        assert "RESTRICTED_COMMAND_INPUT_CIDRS" in entrypoint
-        assert "iptables -C OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
-        assert "iptables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
-        assert "ip6tables -A OUTPUT -m owner --uid-owner scanner -d \"$restricted_cidr\" -j REJECT" in entrypoint
+        assert 'from config import CFG' in entrypoint
+        assert 'CFG.get("restricted_command_input_cidrs", [])' in entrypoint
+        assert '*:*) firewall_cmd="ip6tables"' in entrypoint
+        assert '*) firewall_cmd="iptables"' in entrypoint
+        assert '"$firewall_cmd" -C OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT' in entrypoint
+        assert '"$firewall_cmd" -A OUTPUT -m owner --uid-owner scanner -d "$restricted_cidr" -j REJECT' in entrypoint
         assert "SCANNER_EGRESS_BLOCK_RULE_FAILED cidr=$restricted_cidr" in entrypoint
+        assert 'exit 1' in entrypoint
+        assert 'RAW_PACKET_FIREWALL_READY_FILE="/tmp/darklab-raw-packet-firewall.ready"' in entrypoint
+        assert 'chmod 0444 "$RAW_PACKET_FIREWALL_READY_FILE"' in entrypoint
         assert shell_env["RESTRICTED_COMMAND_INPUT_CIDRS"] == "${RESTRICTED_COMMAND_INPUT_CIDRS:-}"
+        assert shell_env["RAW_PACKET_SCANNING_ENABLED"] == "${RAW_PACKET_SCANNING_ENABLED:-false}"
+        assert "--dst-type LOCAL" in entrypoint
+        assert "add_scanner_local_app_port_rule iptables ipv4 127.0.0.1" in entrypoint
+        assert "add_scanner_local_app_port_rule ip6tables ipv6 ::1" in entrypoint
+        assert '-p tcp --dport "${APP_PORT:-8888}" -j REJECT' in entrypoint
+        assert 'scanner -p tcp --dport "${APP_PORT:-8888}"' not in entrypoint
 
     def test_docker_static_metadata_labels_match_runtime_config_contract(self):
         dockerfile = (REPO_ROOT / "Dockerfile").read_text()
@@ -15397,15 +15661,29 @@ class TestEntrypointWorkspaceRepair:
         build_args = {str(key): str(value) for key, value in shell_service["build"]["args"].items()}
         labels = {str(key): str(value) for key, value in shell_service["labels"].items()}
         package_version = json.loads((REPO_ROOT / "package.json").read_text())["version"]
-        python_image = re.search(r"^FROM python:(?P<version>[0-9.]+)-slim$", dockerfile, re.MULTILINE)
+        python_base_image = re.search(
+            r"^ARG PYTHON_BASE_IMAGE=python:(?P<version>[0-9.]+)-slim$",
+            dockerfile,
+            re.MULTILINE,
+        )
+        python_from_args = re.findall(
+            r"^FROM \$\{(?P<arg>[A-Z0-9_]+)\}(?: AS [A-Za-z0-9_-]+)?$",
+            dockerfile,
+            re.MULTILINE,
+        )
 
-        assert python_image is not None
+        assert python_base_image is not None
+        assert python_from_args
+        assert set(python_from_args) == {"PYTHON_BASE_IMAGE"}
         assert app_config.APP_VERSION == package_version
         assert f"ARG APP_VERSION={app_config.APP_VERSION}" in dockerfile
         assert build_args["APP_VERSION"] == f"${{APP_VERSION:-{app_config.APP_VERSION}}}"
         assert build_args["VCS_REF"] == "${GIT_SHA:-unknown}"
         assert build_args["BUILD_DATE"] == "${BUILD_DATE:-unknown}"
-        assert f"ARG PYTHON_VERSION={python_image.group('version')}" in dockerfile
+        assert "PYTHON_BASE_IMAGE" not in build_args
+        assert "PYTHON_BASE_DIGEST" not in build_args
+        assert "ARG PYTHON_BASE_DIGEST=unresolved" in dockerfile
+        assert f"ARG PYTHON_VERSION={python_base_image.group('version')}" in dockerfile
         for label in (
             'org.opencontainers.image.version="${APP_VERSION}"',
             'org.opencontainers.image.revision="${VCS_REF}"',
@@ -15413,6 +15691,7 @@ class TestEntrypointWorkspaceRepair:
             'sh.darklab.app.version="${APP_VERSION}"',
             'sh.darklab.git.revision="${VCS_REF}"',
             'sh.darklab.python.version="${PYTHON_VERSION}"',
+            'sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}"',
         ):
             assert label in dockerfile
         assert labels["sh.darklab.config.database_backend"] == shell_env["DATABASE_BACKEND"]
@@ -15448,6 +15727,11 @@ class TestEntrypointWorkspaceRepair:
         assert "FLASK_APP=wsgi.py" in server_helper
         assert "wsgi:application" in server_helper
         assert "app:app" not in server_helper
+        assert "from core.database import db_init; db_init()" in server_helper
+        assert '"$PYTHON_BIN" -c "import app"' not in server_helper
+        assert 'export APP_CONF_DIR="$SHIPPED_CONF_DIR"' in server_helper
+        assert 'export APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR"' in server_helper
+        assert 'cp "$APP_DIR/conf/config.yaml"' not in server_helper
 
 
 class TestAIRuntimeWiring:
@@ -15511,6 +15795,23 @@ class TestAIRuntimeWiring:
 
 
 class TestDerivedCommandRegistry:
+    @staticmethod
+    def _raw_packet_ready_status():
+        return {
+            "linux": True,
+            "cap_net_raw_bounded": True,
+            "no_new_privileges": False,
+            "tools": {
+                tool: {
+                    "available": True,
+                    "binary_present": True,
+                    "file_cap_net_raw": True,
+                    "path": f"/usr/bin/{tool}",
+                }
+                for tool in ("nmap", "naabu", "masscan")
+            },
+        }
+
     def test_commands_registry_loader_normalizes_policy_and_autocomplete(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "commands.yaml"
@@ -15853,8 +16154,12 @@ class TestDerivedCommandRegistry:
 
     def test_commands_registry_local_overlay_appends_policy_and_context(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = Path(tmp) / "commands.yaml"
-            local_path = Path(tmp) / "commands.local.yaml"
+            shipped_dir = Path(tmp) / "shipped"
+            local_dir = Path(tmp) / "local"
+            shipped_dir.mkdir()
+            local_dir.mkdir()
+            base_path = shipped_dir / "commands.yaml"
+            local_path = local_dir / "commands.local.yaml"
             base_path.write_text(textwrap.dedent("""
             version: 1
             commands:
@@ -15936,8 +16241,15 @@ class TestDerivedCommandRegistry:
                     - value: -i
                       description: Ignore case
             """))
-            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base_path)):
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base_path)), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", str(shipped_dir)), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", str(local_dir)):
                 registry = load_commands_registry()
+                local_path.write_text(
+                    local_path.read_text().replace("Network Diagnostics", "Updated Network", 1)
+                )
+                commands.clear_commands_registry_cache()
+                updated_registry = load_commands_registry()
 
         by_root = {entry["root"]: entry for entry in registry["commands"]}
         assert [entry["root"] for entry in registry["commands"]] == ["ping", "curl"]
@@ -15963,6 +16275,7 @@ class TestDerivedCommandRegistry:
         assert by_root["ping"]["autocomplete"]["subcommands"]["stats"]["flags"][0]["value"] == "--json"
         assert by_root["ping"]["autocomplete"]["arg_hints"]["__positional__"][0]["value"] == "stats"
         assert by_root["curl"]["policy"]["deny"] == ["curl -O"]
+        assert updated_registry["commands"][0]["category"] == "Updated Network"
         grep = registry["pipe_helpers"][0]
         assert grep["autocomplete"]["pipe_command"] is True
         assert grep["autocomplete"]["flags"][0]["value"] == "-i"
@@ -16582,6 +16895,7 @@ class TestDerivedCommandRegistry:
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = {
+                "raw_packet_scanning_enabled": True,
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": tmp,
@@ -16750,7 +17064,11 @@ class TestDerivedCommandRegistry:
             with mock.patch("services.commands.registry.load_command_policy", return_value=command_policy), \
                  mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=allow_grouping), \
                  mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=workspace_flags), \
-                 mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=runtime_adaptations):
+                 mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=runtime_adaptations), \
+                 mock.patch(
+                     "services.commands.raw_packets._raw_packet_system_readiness",
+                     return_value=self._raw_packet_ready_status(),
+                 ):
                 for command, (reads, writes) in cases.items():
                     result = commands.validate_command(command, session_id=session_id, cfg=cfg)
                     assert result.allowed, f"{command!r} should be workspace-allowed: {result.reason}"
@@ -16810,6 +17128,7 @@ class TestDerivedCommandRegistry:
         with tempfile.TemporaryDirectory() as tmp:
             workspace_root = Path(tmp) / "work space;$(subshell)&`tick`"
             cfg = {
+                "raw_packet_scanning_enabled": True,
                 "workspace_enabled": True,
                 "workspace_backend": "tmpfs",
                 "workspace_root": str(workspace_root),
@@ -16821,7 +17140,10 @@ class TestDerivedCommandRegistry:
             session_id = "quote-sensitive-paths"
             write_workspace_text_file(session_id, "targets & dollars $.txt", "ip.darklab.sh\n", cfg)
 
-            with _patched_command_validation_helpers():
+            with _patched_command_validation_helpers(), mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=self._raw_packet_ready_status(),
+            ):
                 result = commands.validate_command(
                     "masscan -iL 'targets & dollars $.txt' -oL 'masscan output $.txt' -p 80",
                     session_id=session_id,
@@ -17617,13 +17939,19 @@ class TestLoadFaq:
 
     def test_local_overlay_appends_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "faq.yaml")
-            local_path = os.path.join(tmp, "faq.local.yaml")
+            shipped_dir = os.path.join(tmp, "shipped")
+            local_dir = os.path.join(tmp, "local")
+            os.mkdir(shipped_dir)
+            os.mkdir(local_dir)
+            base_path = os.path.join(shipped_dir, "faq.yaml")
+            local_path = os.path.join(local_dir, "faq.local.yaml")
             with open(base_path, "w") as f:
                 f.write("- question: Base?\n  answer: Base answer.\n")
             with open(local_path, "w") as f:
                 f.write("- question: Local?\n  answer: Local answer.\n")
-            with mock.patch("services.commands.registry.FAQ_FILE", base_path):
+            with mock.patch("services.commands.registry.FAQ_FILE", base_path), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", shipped_dir), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", local_dir):
                 result = load_faq()
         assert [item["question"] for item in result] == ["Base?", "Local?"]
 
@@ -17775,7 +18103,17 @@ class TestThemeRegistry:
         themes_map = {theme["name"]: theme for theme in themes}
         assert "broken_theme" in themes_map
         assert themes_map["broken_theme"]["label"] == "Broken Theme"
-        assert app_config.load_theme("broken_theme")["bg"] == app_config._THEME_DEFAULTS["dark"]["bg"]
+        with mock.patch.object(app_config.log, "warning") as warning:
+            theme = app_config.load_theme("broken_theme")
+        assert theme["bg"] == app_config._THEME_DEFAULTS["dark"]["bg"]
+        warning.assert_called_once_with(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": str(theme_dir / "broken_theme.yaml"),
+                "source": "shipped",
+                "error_type": "ParserError",
+            },
+        )
 
     def test_single_theme_registry_loads_and_can_be_selected(self, tmp_path, monkeypatch):
         theme_dir, _ = self._write_theme(
@@ -17806,19 +18144,40 @@ class TestThemeRegistry:
             surface: "#1a1a1a"
             """,
         )
-        (theme_dir / "base_theme.local.yaml").write_text(textwrap.dedent(
+        local_theme_dir = tmp_path / "local" / "themes"
+        local_theme_dir.mkdir(parents=True)
+        (local_theme_dir / "base_theme.local.yaml").write_text(textwrap.dedent(
             """
             label: "Base Theme Local"
             bg: "#202020"
             """
         ))
+        monkeypatch.setattr(app_config, "_THEME_CONF_DIR", theme_dir.parent)
         monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+        monkeypatch.setattr(app_config, "APP_LOCAL_CONF_DIR", str(tmp_path / "local"))
 
         themes = app_config.load_theme_registry()
         assert [theme["name"] for theme in themes] == ["base_theme"]
         assert themes[0]["label"] == "Base Theme Local"
         assert app_config.load_theme("base_theme")["bg"] == "#202020"
         assert app_config.load_theme("base_theme")["surface"] == "#1a1a1a"
+        assert app_config._theme_file_candidates("../base_theme") == ()
+
+        secret_marker = "theme-secret-must-not-be-logged"
+        local_overlay = local_theme_dir / "base_theme.local.yaml"
+        local_overlay.write_text(f"bg: [\n# {secret_marker}\n", encoding="utf-8")
+        with mock.patch.object(app_config.log, "warning") as warning:
+            fallback_theme = app_config.load_theme("base_theme")
+        assert fallback_theme["bg"] == "#101010"
+        warning.assert_called_once_with(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": str(local_overlay),
+                "source": "local",
+                "error_type": "ParserError",
+            },
+        )
+        assert secret_marker not in repr(warning.call_args)
 
     def test_light_theme_uses_light_defaults_for_missing_keys(self, tmp_path, monkeypatch):
         theme_dir, _ = self._write_theme(
@@ -18054,32 +18413,36 @@ class TestThemeRegistry:
         assert categories["Custom question?"] == "Core features"
         assert categories["Unknown category?"] == "Other"
 
-    def test_load_all_faq_uses_project_readme_in_builtin_answer(self):
+    def test_load_all_faq_uses_project_source_in_builtin_answer(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("")
             path = f.name
         try:
             with mock.patch("services.commands.registry.FAQ_FILE", path):
-                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
+                result = load_all_faq("darklab_shell", "https://example.invalid/source#readme")
         finally:
             os.unlink(path)
-        assert "https://example.invalid/README.md" in cast(str, result[0]["answer"])
-        assert "https://example.invalid/README.md" in cast(str, result[0]["answer_html"])
+        assert "https://example.invalid/source#readme" in cast(str, result[0]["answer"])
+        assert "https://example.invalid/source#readme" in cast(str, result[0]["answer_html"])
+        assert "source code for this release" in cast(str, result[0]["answer"])
+        assert "darklab_shell GitLab repository" in cast(str, result[0]["answer_html"])
+        assert "Nmap Security Scanner" in cast(str, result[0]["answer"])
+        assert 'href="https://nmap.org/"' in cast(str, result[0]["answer_html"])
 
-    def test_load_all_faq_uses_config_project_readme_by_default(self):
+    def test_load_all_faq_uses_config_project_source_by_default(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("")
             path = f.name
         try:
             with mock.patch("services.commands.registry.FAQ_FILE", path), mock.patch(
-                "config.PROJECT_README",
-                "https://example.invalid/config-readme",
+                "config.PROJECT_SOURCE",
+                "https://example.invalid/config-source",
             ):
                 result = load_all_faq("darklab_shell")
         finally:
             os.unlink(path)
-        assert "https://example.invalid/config-readme" in cast(str, result[0]["answer"])
-        assert "https://example.invalid/config-readme" in cast(str, result[0]["answer_html"])
+        assert "https://example.invalid/config-source" in cast(str, result[0]["answer"])
+        assert "https://example.invalid/config-source" in cast(str, result[0]["answer_html"])
 
     def test_load_all_faq_promotes_workspace_builtin_entry_when_enabled(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -20220,13 +20583,19 @@ class TestWelcomeLoading:
 
     def test_local_overlay_appends_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "welcome.yaml")
-            local_path = os.path.join(tmp, "welcome.local.yaml")
+            shipped_dir = os.path.join(tmp, "shipped")
+            local_dir = os.path.join(tmp, "local")
+            os.mkdir(shipped_dir)
+            os.mkdir(local_dir)
+            base_path = os.path.join(shipped_dir, "welcome.yaml")
+            local_path = os.path.join(local_dir, "welcome.local.yaml")
             with open(base_path, "w") as f:
                 f.write("- cmd: ping\n  out: base\n")
             with open(local_path, "w") as f:
                 f.write("- cmd: curl\n  out: local\n")
-            with mock.patch("services.commands.registry.WELCOME_FILE", base_path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", base_path), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", shipped_dir), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", local_dir):
                 result = load_welcome()
         assert [item["cmd"] for item in result] == ["ping", "curl"]
 
@@ -20453,13 +20822,19 @@ class TestWelcomeAssetLoading:
 
     def test_ascii_art_local_overlay_replaces_base(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "ascii.txt")
-            local_path = os.path.join(tmp, "ascii.local.txt")
+            shipped_dir = os.path.join(tmp, "shipped")
+            local_dir = os.path.join(tmp, "local")
+            os.mkdir(shipped_dir)
+            os.mkdir(local_dir)
+            base_path = os.path.join(shipped_dir, "ascii.txt")
+            local_path = os.path.join(local_dir, "ascii.local.txt")
             with open(base_path, "w") as f:
                 f.write("base art")
             with open(local_path, "w") as f:
                 f.write("local art")
-            with mock.patch("services.commands.registry.ASCII_FILE", base_path):
+            with mock.patch("services.commands.registry.ASCII_FILE", base_path), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", shipped_dir), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", local_dir):
                 assert load_ascii_art() == "local art"
 
     def test_mobile_ascii_art_local_overlay_replaces_base(self):
@@ -20475,13 +20850,19 @@ class TestWelcomeAssetLoading:
 
     def test_local_hints_overlay_appends_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "app_hints.txt")
-            local_path = os.path.join(tmp, "app_hints.local.txt")
+            shipped_dir = os.path.join(tmp, "shipped")
+            local_dir = os.path.join(tmp, "local")
+            os.mkdir(shipped_dir)
+            os.mkdir(local_dir)
+            base_path = os.path.join(shipped_dir, "app_hints.txt")
+            local_path = os.path.join(local_dir, "app_hints.local.txt")
             with open(base_path, "w") as f:
                 f.write("Use the history panel.\n")
             with open(local_path, "w") as f:
                 f.write("Press Enter to run.\n")
-            with mock.patch("services.commands.registry.APP_HINTS_FILE", base_path):
+            with mock.patch("services.commands.registry.APP_HINTS_FILE", base_path), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", shipped_dir), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", local_dir):
                 assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
 
     def test_mobile_hints_overlay_appends_entries(self):
@@ -22837,13 +23218,25 @@ class TestWorkflowInputLoading:
             """
         )
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "workflows.yaml"
+            shipped_dir = Path(tmp) / "shipped"
+            local_dir = Path(tmp) / "local"
+            shipped_dir.mkdir()
+            local_dir.mkdir()
+            path = shipped_dir / "workflows.yaml"
             path.write_text(payload)
-            with mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)):
+            (local_dir / "workflows.local.yaml").write_text(textwrap.dedent(
+                """
+                - title: "Local workflow"
+                  steps:
+                    - cmd: "whois darklab.sh"
+                """
+            ))
+            with mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)), \
+                    mock.patch.object(app_config, "APP_CONF_DIR", str(shipped_dir)), \
+                    mock.patch.object(app_config, "APP_LOCAL_CONF_DIR", str(local_dir)):
                 result = load_workflows()
 
-        assert result == [
-            {
+        assert result[0] == {
                 "title": "DNS Workflow",
                 "description": "Custom workflow",
                 "inputs": [
@@ -22861,7 +23254,12 @@ class TestWorkflowInputLoading:
                     {"cmd": "dig {{domain}} A", "note": "Check the answer section."},
                 ],
             }
-        ]
+        assert result[1] == {
+            "title": "Local workflow",
+            "description": "",
+            "inputs": [],
+            "steps": [{"cmd": "whois darklab.sh", "note": ""}],
+        }
 
     def test_load_workflows_drops_steps_with_undeclared_tokens(self):
         payload = textwrap.dedent(
@@ -22903,6 +23301,80 @@ class TestWorkflowInputLoading:
                 ],
             }
         ]
+
+    def test_load_workflows_rejects_an_invalid_v2_entry_as_one_playbook(self):
+        payload = textwrap.dedent(
+            """
+            - version: 2
+              id: broken_playbook
+              title: "Broken playbook"
+              inputs:
+                - id: host
+                  type: host
+                  required: true
+              steps:
+                - id: probe
+                  cmd: "ping {{host}}"
+                  next:
+                    success: missing_step
+                    failure: stop
+                - id: fallback
+                  cmd: "host {{host}}"
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(payload)
+            with (
+                mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)),
+                mock.patch("services.workflows.catalog.log.warning") as warning,
+            ):
+                result = load_workflows()
+
+        assert result == []
+        warning.assert_called_once()
+        assert warning.call_args.args[0] == "WORKFLOW_DEFINITION_REJECTED"
+        assert warning.call_args.kwargs["extra"]["entry_index"] == 0
+
+        unsupported = textwrap.dedent(
+            """
+            - version: 3
+              id: future_playbook
+              title: Future playbook
+              steps:
+                - id: skipped
+                  cmd: "echo should-not-run"
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(unsupported, encoding="utf-8")
+            with (
+                mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)),
+                mock.patch("services.workflows.catalog.log.warning") as warning,
+            ):
+                result = load_workflows()
+
+        assert result == []
+        warning.assert_called_once()
+        assert warning.call_args.kwargs["extra"] == {
+            "source": "config",
+            "entry_index": 0,
+            "reason": "unsupported workflow version",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text("- version: [2\n", encoding="utf-8")
+            with (
+                mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)),
+                mock.patch("services.workflows.catalog.log.warning") as warning,
+            ):
+                result = load_workflows()
+
+        assert result == []
+        warning.assert_called_once()
+        assert warning.call_args.kwargs["extra"]["reason"] == "invalid_yaml"
 
     def test_load_all_workflows_filters_workspace_required_workflows(self):
         disabled = load_all_workflows({"workspace_enabled": False})
@@ -26574,6 +27046,12 @@ SQL syntax error near q</response>
             rows = conn.execute(
                 "SELECT entity_id, subject_key, raw_line, severity FROM findings ORDER BY line_number"
             ).fetchall()
+            occurrence_keys = [
+                row["comparison_key"]
+                for row in conn.execute(
+                    "SELECT comparison_key FROM findings_occurrences ORDER BY line_number"
+                ).fetchall()
+            ]
             entity_rows = conn.execute("SELECT id, type, canonical_value FROM entities ORDER BY canonical_value").fetchall()
             conn.close()
 
@@ -26595,6 +27073,7 @@ SQL syntax error near q</response>
         assert {(row["type"], row["canonical_value"]) for row in entity_rows} == {("ip", "192.168.1.5")}
         assert {row["entity_id"] for row in rows} == {entity_rows[0]["id"]}
         assert {row["subject_key"] for row in rows} == {"nmap-service:192.168.1.5:139 samba"}
+        assert occurrence_keys and all(key.startswith("raw:") for key in occurrence_keys)
 
     def test_record_run_findings_redacts_trufflehog_secret_values(self):
         from blueprints.run import _TruffleHogOutputFilter

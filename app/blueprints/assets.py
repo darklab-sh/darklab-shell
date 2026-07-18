@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Asset and ops routes: vendor JS/fonts, favicon, and the health-check endpoint.
 """
@@ -119,6 +122,7 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Run execution", (
         "command_timeout_seconds",
         "heartbeat_interval_seconds",
+        "raw_packet_scanning_enabled",
         "high_volume_output_line_threshold",
         "high_volume_output_status_interval_lines",
         "interactive_pty_buffer_limit",

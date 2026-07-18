@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Frozen unified schema baseline for fresh SQLite and Postgres databases."""
 
 from __future__ import annotations

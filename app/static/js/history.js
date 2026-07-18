@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared history drawer logic ──
 import {
   histClearAllBtn as importedHistClearAllBtn,
@@ -381,6 +384,7 @@ let _historyCompareState = {
   candidates: [],
   manualCandidates: [],
   manualLoaded: false,
+  launcherRequestId: 0,
   manualRequestId: 0,
   manualPage: 1,
   manualHasNext: false,
@@ -388,6 +392,7 @@ let _historyCompareState = {
   manualCollapsedGroups: new Set(),
   selected: null,
   manualQuery: '',
+  initialViewMode: '',
 };
 let _historyCompareRowPairSequence = 0;
 let _historyCompareUnitSequence = 0;

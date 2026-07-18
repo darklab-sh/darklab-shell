@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Session token routes: session token generation and session history migration.
 """
@@ -10,7 +13,9 @@ from flask import Blueprint, jsonify, request
 
 from services.commands.registry import load_tour
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
-from services.audit.context import request_audit_fields
+from services.audit.context import request_audit_fields, route_audit_fields
+from services.audit.models import AuditEventType
+from services.audit.recorder import record_event
 from services.session.storage import (
     RECENT_VALUE_KINDS,
     add_starred_command,
@@ -43,6 +48,7 @@ from services.workflows.user_workflows import (
     list_user_workflows,
     update_user_workflow,
 )
+from services.workflows.storage import active_execution_count_for_actor
 from services.workspace.files import InvalidWorkspacePath, migrate_session_workspace, workspace_usage
 
 log = logging.getLogger("shell")
@@ -376,6 +382,12 @@ def session_migrate():
             })
             return jsonify({"error": "destination token is not a known issued token"}), 400
 
+    if active_execution_count_for_actor(from_session_id):
+        return jsonify({
+            "error": "active_workflow_execution",
+            "message": "Cancel or wait for the active workflow execution before migrating this session.",
+        }), 409
+
     try:
         workspace_migration = migrate_session_workspace(from_session_id, to_session_id)
     except InvalidWorkspacePath as exc:
@@ -527,7 +539,13 @@ def session_workflows_create():
             team_id=scope.team_id if scope else "",
         )
     except UserWorkflowError as exc:
-        return jsonify({"error": str(exc)}), 400
+        log.warning("WORKFLOW_DEFINITION_VALIDATION_FAILED", extra={
+            "action": "create",
+            "error_count": len(exc.errors),
+            "team_id": scope.team_id if scope else "",
+            "session": get_log_session_id(session_id),
+        })
+        return jsonify({"error": str(exc), "errors": exc.errors}), 400
     log.info("USER_WORKFLOW_CREATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -535,6 +553,13 @@ def session_workflows_create():
         "team_id": scope.team_id if scope else "",
         "workflow_id": workflow["id"] if workflow else "",
     })
+    if scope and scope.is_team and workflow:
+        record_event(
+            AuditEventType.WORKFLOW_CREATE,
+            target_id=str(workflow["id"]),
+            details={"action": "create", "source": "team"},
+            **route_audit_fields(session_id, request, scope),
+        )
     return jsonify({"ok": True, "workflow": workflow}), 201
 
 
@@ -569,7 +594,13 @@ def session_workflows_update(workflow_id):
             team_id=scope.team_id if scope else "",
         )
     except UserWorkflowError as exc:
-        return jsonify({"error": str(exc)}), 400
+        log.warning("WORKFLOW_DEFINITION_VALIDATION_FAILED", extra={
+            "action": "update",
+            "error_count": len(exc.errors),
+            "team_id": scope.team_id if scope else "",
+            "session": get_log_session_id(session_id),
+        })
+        return jsonify({"error": str(exc), "errors": exc.errors}), 400
     if not workflow:
         return jsonify({"error": "workflow not found"}), 404
     log.info("USER_WORKFLOW_UPDATED", extra={
@@ -579,6 +610,13 @@ def session_workflows_update(workflow_id):
         "team_id": scope.team_id if scope else "",
         "workflow_id": workflow_id,
     })
+    if scope and scope.is_team:
+        record_event(
+            AuditEventType.WORKFLOW_UPDATE,
+            target_id=workflow_id,
+            details={"action": "update", "source": "team"},
+            **route_audit_fields(session_id, request, scope),
+        )
     return jsonify({"ok": True, "workflow": workflow})
 
 
@@ -601,6 +639,13 @@ def session_workflows_delete(workflow_id):
         "team_id": scope.team_id if scope else "",
         "workflow_id": workflow_id,
     })
+    if scope and scope.is_team:
+        record_event(
+            AuditEventType.WORKFLOW_DELETE,
+            target_id=workflow_id,
+            details={"action": "delete", "source": "team"},
+            **route_audit_fields(session_id, request, scope),
+        )
     return jsonify({"ok": True})
 
 

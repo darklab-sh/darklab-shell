@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 darklab_shell - Real-time bash command execution web app
 Run: python3 app.py
@@ -35,6 +38,7 @@ from blueprints.secrets import secrets_bp
 from blueprints.teams import teams_bp
 from blueprints.watchers import watchers_bp
 from blueprints.workspace import workspace_bp
+from blueprints.workflows import workflows_bp
 from blueprints.projects import projects_bp
 from core.http_rate_limit import check_dynamic_route_rate_limit
 from core.database_access import get_db_backend, get_db_connect
@@ -525,6 +529,7 @@ def create_app(config=None):
             teams_bp,
             watchers_bp,
             workspace_bp,
+            workflows_bp,
             projects_bp,
         ),
         error_handlers={

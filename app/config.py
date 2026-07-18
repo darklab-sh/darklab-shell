@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Application configuration and scanner-user setup.
 Imported by database, process, permalinks, and app modules.
@@ -10,22 +13,25 @@ import ipaddress
 import re
 from copy import deepcopy
 from collections.abc import Iterator, Mapping, MutableMapping
-from pathlib import Path
 from typing import Any, cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, ValidationError, create_model
+import config_paths
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
+from core.startup_logging import configure_config_log_fallback, install_config_log_buffer
 
-log = logging.getLogger("shell")
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 CONFIG_LOAD_SUMMARY: dict[str, Any] = {}
 
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.6.0"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 
-PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
+log = install_config_log_buffer(logging.getLogger("shell"), app_version=APP_VERSION)
+
+PROJECT_SOURCE = f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{APP_VERSION}#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
+APP_LOCAL_CONF_DIR = os.environ.get("APP_LOCAL_CONF_DIR", "")
 DEFAULT_PROMPT_IDENTITY = "anon@darklab.sh"
 
 _DERIVED_CONFIG_DEFAULTS = {
@@ -41,10 +47,24 @@ _SENSITIVE_URL_CONFIG_KEYS = {
     "database_url",
 }
 _MAX_CONFIG_ERROR_VALUE_CHARS = 120
+_MAX_CONFIG_LOG_PATH_CHARS = 240
 
 
 class ConfigLoadError(RuntimeError):
     """Raised when app config cannot be loaded into a valid model."""
+
+
+def _config_log_value(value: object, limit: int) -> str:
+    normalized = "".join(
+        character if character.isprintable() and character not in "\r\n" else "?"
+        for character in str(value)
+    )
+    return normalized[:limit]
+
+
+def _config_log_path(value: object) -> str:
+    """Return a bounded, single-line path for structured config logs."""
+    return _config_log_value(value, _MAX_CONFIG_LOG_PATH_CHARS)
 
 
 def _record_config_load_failure(
@@ -53,12 +73,12 @@ def _record_config_load_failure(
     source: str,
     key: str = "",
     error: object | None = None,
-    exc_info: bool = False,
 ) -> None:
-    extra = {"phase": phase, "source": source, "key": key}
+    extra = {"phase": phase, "source": _config_log_path(source), "key": key}
     if error is not None:
-        extra["error"] = str(error)[:_MAX_CONFIG_ERROR_VALUE_CHARS]
-    log.error("CONFIG_LOAD_FAILED", exc_info=exc_info, extra=extra)
+        safe_error = type(error).__name__ if isinstance(error, BaseException) else error
+        extra["error"] = _config_log_value(safe_error, _MAX_CONFIG_ERROR_VALUE_CHARS)
+    log.error("CONFIG_LOAD_FAILED", extra=extra)
 
 
 def get_config_load_summary() -> dict[str, Any]:
@@ -92,11 +112,15 @@ def _load_yaml_config(path):
         with open(path) as f:
             loaded = yaml.safe_load(f) or {}
     except yaml.YAMLError as exc:
-        _record_config_load_failure(phase="yaml_parse", source=str(path), error=exc, exc_info=True)
-        raise ConfigLoadError(f"Invalid YAML in {path}: {exc}") from exc
+        _record_config_load_failure(phase="yaml_parse", source=str(path), error=exc)
+        raise ConfigLoadError(
+            f"Invalid YAML in {_config_log_path(path)}: {type(exc).__name__}"
+        ) from None
     if not isinstance(loaded, dict):
         _record_config_load_failure(phase="root_shape", source=str(path), error="expected a mapping")
-        raise ConfigLoadError(f"Invalid config root in {path}: expected a mapping")
+        raise ConfigLoadError(
+            f"Invalid config root in {_config_log_path(path)}: expected a mapping"
+        )
     return loaded
 
 
@@ -191,15 +215,25 @@ def _parse_bool_value(value: Any) -> bool | None:
     return None
 
 
-def _normalize_app_name(value):
+def _normalize_app_name(value, provenance: Mapping[str, str]):
     raw = str(value or PROJECT_NAME).strip() or PROJECT_NAME
     normalized = " ".join(raw.split())
     if len(normalized) <= APP_NAME_MAX_CHARS:
         return normalized
-    log.warning(
-        "APP_NAME_TRUNCATED",
-        extra={"configured_chars": len(normalized), "max_chars": APP_NAME_MAX_CHARS},
-    )
+    source = _config_log_path(_config_source(provenance, "app_name"))
+    CONFIG_LOAD_WARNINGS.append({
+        "event": "APP_NAME_TRUNCATED",
+        "key": "app_name",
+        "source": source,
+        "reason": "above_maximum_chars",
+    })
+    log.warning("APP_NAME_TRUNCATED", extra={
+        "key": "app_name",
+        "source": source,
+        "reason": "above_maximum_chars",
+        "configured_chars": len(normalized),
+        "max_chars": APP_NAME_MAX_CHARS,
+    })
     return normalized[:APP_NAME_MAX_CHARS].rstrip() or PROJECT_NAME
 
 
@@ -221,12 +255,19 @@ def _warn_config_value_dropped(
     warning_event: str,
 ) -> None:
     bounded_value = value[:120]
+    source = _config_log_path(_config_source(provenance, key))
+    CONFIG_LOAD_WARNINGS.append({
+        "event": "CONFIG_VALUE_DROPPED",
+        "key": key,
+        "source": source,
+        "reason": reason,
+    })
     log.warning(warning_event, extra={value_field: bounded_value})
     log.warning(
         "CONFIG_VALUE_DROPPED",
         extra={
             "key": key,
-            "source": _config_source(provenance, key),
+            "source": source,
             "reason": reason,
             value_field: bounded_value,
         },
@@ -240,11 +281,18 @@ def _warn_config_value_defaulted(
     reason: str,
     fallback: Any,
 ) -> None:
+    source = _config_log_path(_config_source(provenance, key))
+    CONFIG_LOAD_WARNINGS.append({
+        "event": "CONFIG_VALUE_DEFAULTED",
+        "key": key,
+        "source": source,
+        "reason": reason,
+    })
     log.warning(
         "CONFIG_VALUE_DEFAULTED",
         extra={
             "key": key,
-            "source": _config_source(provenance, key),
+            "source": source,
             "reason": reason,
             "fallback": fallback,
         },
@@ -259,9 +307,16 @@ def _warn_config_value_clamped(
     minimum: Any | None = None,
     maximum: Any | None = None,
 ) -> None:
+    source = _config_log_path(_config_source(provenance, key))
+    CONFIG_LOAD_WARNINGS.append({
+        "event": "CONFIG_VALUE_CLAMPED",
+        "key": key,
+        "source": source,
+        "reason": reason,
+    })
     extra = {
         "key": key,
-        "source": _config_source(provenance, key),
+        "source": source,
         "reason": reason,
     }
     if minimum is not None:
@@ -409,6 +464,9 @@ class ProjectDigestsConfig(_ConfigModel):
 
 
 _FORGIVING_BOOL_KEYS = {
+    "workspace_enabled",
+    "interactive_pty_enabled",
+    "raw_packet_scanning_enabled",
     "database_postgres_jit",
     "audit_log_enabled",
     "ai_enabled",
@@ -417,6 +475,19 @@ _FORGIVING_BOOL_KEYS = {
     "ai_feature_summary",
     "ai_feature_next_commands",
     "ai_feature_run_suggestions",
+}
+_FORGIVING_BOOL_DEFAULTS = {
+    "workspace_enabled": False,
+    "interactive_pty_enabled": False,
+    "raw_packet_scanning_enabled": False,
+    "database_postgres_jit": False,
+    "audit_log_enabled": True,
+    "ai_enabled": False,
+    "ai_allow_full_output": False,
+    "ai_require_private_base_url": True,
+    "ai_feature_summary": False,
+    "ai_feature_next_commands": False,
+    "ai_feature_run_suggestions": False,
 }
 _FORGIVING_INT_KEYS = {
     "database_pool_min",
@@ -432,6 +503,8 @@ _FORGIVING_INT_KEYS = {
     "ai_max_queue_depth",
     "ai_rate_limit_per_session_hour",
     "ai_rate_limit_global_per_minute",
+    "workflow_active_execution_limit",
+    "workflow_execution_max_runtime_seconds",
 }
 _FORGIVING_INT_DEFAULTS: dict[str, tuple[int, int]] = {
     "database_pool_min": (1, 0),
@@ -447,6 +520,8 @@ _FORGIVING_INT_DEFAULTS: dict[str, tuple[int, int]] = {
     "ai_max_queue_depth": (20, 0),
     "ai_rate_limit_per_session_hour": (5, 1),
     "ai_rate_limit_global_per_minute": (2, 1),
+    "workflow_active_execution_limit": (3, 1),
+    "workflow_execution_max_runtime_seconds": (14400, 1),
 }
 _FORGIVING_MB_KEYS = {"output_preview_max_mb", "full_output_max_mb"}
 _NORMALIZED_LIST_KEYS = {
@@ -634,7 +709,10 @@ def _redact_config_mapping(data: Mapping[str, Any], prefix: str = "") -> dict[st
 def _warn_unknown_config_key(path: str, source: str) -> None:
     payload = {"key": path, "source": source}
     CONFIG_LOAD_WARNINGS.append(payload)
-    log.warning("CONFIG_UNKNOWN_KEY_IGNORED", extra=payload)
+    log.warning(
+        "CONFIG_UNKNOWN_KEY_IGNORED",
+        extra={"key": path, "source": _config_log_path(source)},
+    )
 
 
 def _merge_config_overlay(
@@ -757,7 +835,7 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
         raw_value = defaults.get(key)
         raw_source = _config_source(provenance, key)
         parsed_value = _parse_bool_value(raw_value)
-        fallback = bool(defaults[key])
+        fallback = _FORGIVING_BOOL_DEFAULTS[key]
         defaults[key] = _coerce_bool_value(raw_value, fallback)
         if _config_source_is_override(raw_source) and parsed_value is None:
             _warn_config_value_defaulted(key, provenance, reason="invalid_bool", fallback=fallback)
@@ -769,7 +847,7 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
             minimum=defaults["database_pool_min"] or 1,
         )
         defaults["database_pool_max"] = defaults["database_pool_min"] or 1
-    defaults["app_name"] = _normalize_app_name(defaults.get("app_name"))
+    defaults["app_name"] = _normalize_app_name(defaults.get("app_name"), provenance)
     legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)
     full_output_max_mb = _coerce_forgiving_mb_config_value(defaults, "full_output_max_mb", None)
     full_output_max_mb_source = provenance.get("full_output_max_mb", "built-in defaults")
@@ -781,7 +859,9 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
             extra={
                 "legacy_key": "full_output_max_bytes",
                 "target_key": "full_output_max_mb",
-                "source": provenance.get("full_output_max_bytes", "legacy full_output_max_bytes"),
+                "source": _config_log_path(
+                    provenance.get("full_output_max_bytes", "legacy full_output_max_bytes")
+                ),
             },
         )
         CONFIG_LOAD_SUMMARY["legacy_key_migrated"] = True
@@ -852,9 +932,10 @@ def _validate_config_model(defaults: dict[str, Any], provenance: dict[str, str],
             source=provenance.get(key, "effective config"),
             key=key,
             error=first_error.get("msg", "invalid value"),
-            exc_info=True,
         )
-        raise ConfigLoadError(f"Invalid app config: {_format_validation_error(exc, provenance, defaults)}") from exc
+        raise ConfigLoadError(
+            f"Invalid app config: {_format_validation_error(exc, provenance, defaults)}"
+        ) from None
     CONFIG_LOAD_SUMMARY.update({
         "schema_field_count": len(schema_fields),
         "derived_keys": len(_DERIVED_CONFIG_DEFAULTS),
@@ -871,7 +952,7 @@ def _validate_config_model(defaults: dict[str, Any], provenance: dict[str, str],
     return AppConfig(parsed, schema_model, provenance, schema_defaults)
 
 
-def load_config(conf_dir=None):
+def load_config(conf_dir=None, local_conf_dir=None):
     """Load config.yaml plus optional config.local.yaml overlays.
 
     config.local.yaml is read after config.yaml, so it can override selected
@@ -931,6 +1012,9 @@ def load_config(conf_dir=None):
         "ai_feature_next_commands":   False,
         "ai_feature_run_suggestions": False,
         "restricted_command_input_cidrs": [],
+        "raw_packet_scanning_enabled": False,
+        "workflow_active_execution_limit": 3,
+        "workflow_execution_max_runtime_seconds": 14400,
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
         "rate_limit_enabled":         True,
@@ -1159,41 +1243,84 @@ def load_config(conf_dir=None):
     allowed_paths.add("full_output_max_bytes")
     provenance: dict[str, str] = {}
     _record_default_provenance(defaults, provenance)
-    if conf_dir is not None:
-        conf_path = Path(conf_dir)
-    elif APP_CONF_DIR:
-        conf_path = Path(APP_CONF_DIR)
-    else:
-        conf_path = Path(__file__).resolve().parent / "conf"
-    local_overlay_path = conf_path / "config.local.yaml"
+    roots = config_paths.config_roots(
+        conf_dir if conf_dir is not None else APP_CONF_DIR or None,
+        local_conf_dir if local_conf_dir is not None else APP_LOCAL_CONF_DIR or None,
+    )
+    conf_path = roots.shipped
+    local_conf_path = roots.local
+    local_overlay_path = config_paths.config_asset_paths(
+        "config.yaml",
+        shipped_conf_dir=conf_path,
+        local_conf_dir=local_conf_path,
+    ).local
+    conf_log_path = _config_log_path(conf_path)
+    local_conf_log_path = _config_log_path(local_conf_path)
+    base_overlay_path = conf_path / "config.yaml"
+    base_overlay_log_path = _config_log_path(base_overlay_path)
+    local_overlay_log_path = _config_log_path(local_overlay_path)
+    local_overlay_present = local_overlay_path.exists()
     log.debug(
         "CONFIG_SOURCE_SELECTED",
-        extra={"conf_dir": str(conf_path), "local_overlay": local_overlay_path.exists()},
+        extra={
+            "conf_dir": conf_log_path,
+            "local_conf_dir": local_conf_log_path,
+            "local_overlay": local_overlay_present,
+        },
     )
     CONFIG_LOAD_SUMMARY.update({
-        "conf_dir": str(conf_path),
-        "local_overlay": local_overlay_path.exists(),
+        "conf_dir": conf_log_path,
+        "local_conf_dir": local_conf_log_path,
+        "local_overlay": local_overlay_present,
+        "supported_local_overlays": len(
+            config_paths.supported_overlay_assets(shipped_conf_dir=conf_path)
+        ),
+        "present_local_overlays": list(config_paths.present_local_overlays(
+            shipped_conf_dir=conf_path,
+            local_conf_dir=local_conf_path,
+        )),
         "overlays": [],
         "env_keys": [],
     })
-    base_overlay = _load_yaml_config(conf_path / "config.yaml")
+    base_overlay = _load_yaml_config(base_overlay_path)
     base_known_count, base_unknown_count = _overlay_path_counts(base_overlay, allowed_paths)
     _merge_config_overlay(
         defaults,
         base_overlay,
-        source=str(conf_path / "config.yaml"),
+        source=str(base_overlay_path),
         provenance=provenance,
         allowed_paths=allowed_paths,
     )
-    cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
-        "source": str(conf_path / "config.yaml"),
-        "known_keys": base_known_count,
-        "unknown_keys": base_unknown_count,
-    })
-    log.debug(
-        "CONFIG_OVERLAY_APPLIED",
-        extra={"source": str(conf_path / "config.yaml"), "known_keys": base_known_count, "unknown_keys": base_unknown_count},
+    configure_config_log_fallback(
+        log,
+        log_format=defaults.get("log_format", "text"),
+        app_name=defaults.get("app_name", PROJECT_NAME),
+        app_version=APP_VERSION,
     )
+    if base_known_count:
+        cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
+            "source": base_overlay_log_path,
+            "known_keys": base_known_count,
+            "unknown_keys": base_unknown_count,
+        })
+        log.debug(
+            "CONFIG_OVERLAY_APPLIED",
+            extra={
+                "source": base_overlay_log_path,
+                "known_keys": base_known_count,
+                "unknown_keys": base_unknown_count,
+            },
+        )
+    else:
+        log.debug(
+            "CONFIG_OVERLAY_CHECKED",
+            extra={
+                "source": base_overlay_log_path,
+                "present": base_overlay_path.exists(),
+                "known_keys": base_known_count,
+                "unknown_keys": base_unknown_count,
+            },
+        )
     local_overlay = _load_yaml_config_optional(local_overlay_path)
     local_known_count, local_unknown_count = _overlay_path_counts(local_overlay, allowed_paths)
     _merge_config_overlay(
@@ -1203,20 +1330,71 @@ def load_config(conf_dir=None):
         provenance=provenance,
         allowed_paths=allowed_paths,
     )
-    cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
-        "source": str(local_overlay_path),
-        "known_keys": local_known_count,
-        "unknown_keys": local_unknown_count,
-    })
-    log.debug(
-        "CONFIG_OVERLAY_APPLIED",
-        extra={"source": str(local_overlay_path), "known_keys": local_known_count, "unknown_keys": local_unknown_count},
+    configure_config_log_fallback(
+        log,
+        log_format=defaults.get("log_format", "text"),
+        app_name=defaults.get("app_name", PROJECT_NAME),
+        app_version=APP_VERSION,
     )
+    if local_known_count:
+        cast(list[dict[str, Any]], CONFIG_LOAD_SUMMARY["overlays"]).append({
+            "source": local_overlay_log_path,
+            "known_keys": local_known_count,
+            "unknown_keys": local_unknown_count,
+        })
+        log.debug(
+            "CONFIG_OVERLAY_APPLIED",
+            extra={
+                "source": local_overlay_log_path,
+                "known_keys": local_known_count,
+                "unknown_keys": local_unknown_count,
+            },
+        )
+    else:
+        log.debug(
+            "CONFIG_OVERLAY_CHECKED",
+            extra={
+                "source": local_overlay_log_path,
+                "present": local_overlay_present,
+                "known_keys": local_known_count,
+                "unknown_keys": local_unknown_count,
+            },
+        )
     applied_env_names: list[str] = []
+    env_workspace_enabled = str(os.environ.get("WORKSPACE_ENABLED") or "").strip()
+    if env_workspace_enabled:
+        _set_config_value(
+            defaults,
+            provenance,
+            "workspace_enabled",
+            env_workspace_enabled,
+            "WORKSPACE_ENABLED",
+        )
+        applied_env_names.append("WORKSPACE_ENABLED")
+    env_workspace_backend = str(os.environ.get("WORKSPACE_BACKEND") or "").strip()
+    if env_workspace_backend:
+        _set_config_value(
+            defaults,
+            provenance,
+            "workspace_backend",
+            env_workspace_backend,
+            "WORKSPACE_BACKEND",
+        )
+        applied_env_names.append("WORKSPACE_BACKEND")
     env_workspace_root = str(os.environ.get("WORKSPACE_ROOT") or "").strip()
     if env_workspace_root:
         _set_config_value(defaults, provenance, "workspace_root", env_workspace_root, "WORKSPACE_ROOT")
         applied_env_names.append("WORKSPACE_ROOT")
+    env_interactive_pty_enabled = str(os.environ.get("INTERACTIVE_PTY_ENABLED") or "").strip()
+    if env_interactive_pty_enabled:
+        _set_config_value(
+            defaults,
+            provenance,
+            "interactive_pty_enabled",
+            env_interactive_pty_enabled,
+            "INTERACTIVE_PTY_ENABLED",
+        )
+        applied_env_names.append("INTERACTIVE_PTY_ENABLED")
     env_prometheus_multiproc_dir = str(os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
     if env_prometheus_multiproc_dir:
         _set_config_value(
@@ -1241,6 +1419,16 @@ def load_config(conf_dir=None):
             "RESTRICTED_COMMAND_INPUT_CIDRS",
         )
         applied_env_names.append("RESTRICTED_COMMAND_INPUT_CIDRS")
+    env_raw_packet_scanning_enabled = str(os.environ.get("RAW_PACKET_SCANNING_ENABLED") or "").strip()
+    if env_raw_packet_scanning_enabled:
+        _set_config_value(
+            defaults,
+            provenance,
+            "raw_packet_scanning_enabled",
+            env_raw_packet_scanning_enabled,
+            "RAW_PACKET_SCANNING_ENABLED",
+        )
+        applied_env_names.append("RAW_PACKET_SCANNING_ENABLED")
     env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
     if env_database_backend:
         _set_config_value(defaults, provenance, "database_backend", env_database_backend, "DATABASE_BACKEND")
@@ -1570,7 +1758,7 @@ _THEME_DEFAULTS = {
     },
 }
 
-_THEME_CONF_DIR = Path(__file__).resolve().parent / "conf"
+_THEME_CONF_DIR = config_paths.config_roots(APP_CONF_DIR or None, APP_LOCAL_CONF_DIR or None).shipped
 _THEME_VARIANT_DIR = _THEME_CONF_DIR / "themes"
 _THEME_BASE_CSS_KEYS = (
     "bg",
@@ -1797,7 +1985,36 @@ def _theme_default_family(theme_data: dict) -> str:
 
 def _theme_file_candidates(name):
     stem = _theme_name_stem(name)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", stem):
+        return ()
     return (_THEME_VARIANT_DIR / f"{stem}.yaml",)
+
+
+def _load_theme_mapping(path, *, source):
+    try:
+        with open(path) as f:
+            loaded = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        log.warning(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": _config_log_path(path),
+                "source": source,
+                "error_type": type(exc).__name__,
+            },
+        )
+        return {}
+    if not isinstance(loaded, dict):
+        log.warning(
+            "THEME_OVERLAY_LOAD_FAILED",
+            extra={
+                "path": _config_log_path(path),
+                "source": source,
+                "error_type": "InvalidRootType",
+            },
+        )
+        return {}
+    return loaded
 
 
 def _load_theme_yaml(name):
@@ -1807,22 +2024,14 @@ def _load_theme_yaml(name):
     for theme_path in _theme_file_candidates(name):
         if not os.path.exists(theme_path):
             continue
-        try:
-            with open(theme_path) as f:
-                loaded = yaml.safe_load(f) or {}
-        except yaml.YAMLError:
-            loaded = {}
-        if isinstance(loaded, dict):
-            theme_data.update(loaded)
-        local_overlay = theme_path.with_name(f"{theme_path.stem}.local{theme_path.suffix}")
+        theme_data.update(_load_theme_mapping(theme_path, source="shipped"))
+        local_overlay = config_paths.local_overlay_path_for(
+            theme_path,
+            shipped_conf_dir=_THEME_CONF_DIR,
+            local_conf_dir=APP_LOCAL_CONF_DIR or None,
+        )
         if local_overlay.exists():
-            try:
-                with open(local_overlay) as f:
-                    local_loaded = yaml.safe_load(f) or {}
-            except yaml.YAMLError:
-                local_loaded = {}
-            if isinstance(local_loaded, dict):
-                theme_data.update(local_loaded)
+            theme_data.update(_load_theme_mapping(local_overlay, source="local"))
         return theme_data
     return {}
 

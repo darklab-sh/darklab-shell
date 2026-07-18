@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral overlay-action boundary for modules that need to close app-owned surfaces.
 
 let closeMajorOverlaysHandler = null;

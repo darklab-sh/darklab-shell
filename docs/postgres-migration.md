@@ -4,7 +4,7 @@ darklab_shell keeps SQLite as the default backend for local and single-user inst
 
 SQLite and Postgres share the same app-owned schema migration ledger. Fresh databases for either backend are initialized through the same migration runner and the frozen `0039` baseline, with later schema changes applied as versioned migrations. Backend-specific pieces stay explicit: SQLite creates its FTS tables and triggers, and Postgres creates `pg_trgm` plus its trigram indexes. Existing SQLite databases are verified against the current shared schema before they receive migration ledger rows. The supported bridge for pre-ledger SQLite files is `darklab_shell` 2.3.1: start older SQLite databases once with 2.3.1 so its compatibility ladder reaches the current head, then move to this release. Unsupported older shapes fail closed so you can restore from backup or use that bridge path instead of getting a partial rewrite.
 
-Use `scripts/migrate_sqlite_to_postgres.py` when you're ready to copy a stopped SQLite database into a fresh Postgres database.
+Repository-free installs use `./darklab-deploy migrate-to-postgres` to handle the complete cutover. Source checkouts can use `scripts/migrate_sqlite_to_postgres.py` directly when they need a custom Postgres target or Compose layout.
 
 Postgres backend configuration lives in [CONFIGURATION.md](../CONFIGURATION.md#database-backend-selection). Use this guide for SQLite-to-Postgres cutovers and bundled Postgres major-version upgrades, then switch `DATABASE_BACKEND` and `DATABASE_URL` after validation passes.
 
@@ -118,6 +118,35 @@ If `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` differ from the defaul
 
 Use these sections when you're moving an existing SQLite install into a fresh Postgres database.
 
+### Repository-Free Production Install
+
+Run the managed migration from the installation directory:
+
+```bash
+cd "$HOME/darklab-shell"
+./darklab-deploy migrate-to-postgres
+```
+
+Run this command as the user who owns the installation, without `sudo`. The app intentionally locks down `data/`, so the host user may not be able to inspect `data/history.db` directly. `darklab-deploy` checks and reads that database through a one-off Docker container instead; using `sudo` would risk replacing operator-owned files such as `.env` with root-owned copies.
+
+The command requires the current backend to be SQLite, the default `data/history.db` location, and the installer-generated connection settings for the bundled Postgres service. The Postgres destination must not contain user tables. Before it connects over the Compose network, the command checks Postgres through the container's local socket and synchronizes the configured role password only when the cluster is empty. This handles an empty `postgres-data` volume retained across a reinstall without weakening the non-empty-destination guard.
+
+Named volumes survive `docker compose down` and deletion of the installation directory. If a retained `postgres-data` volume contains tables from an earlier install, the command refuses to overwrite it. Back up that database if it matters, or intentionally remove only that stale volume before retrying the SQLite migration.
+
+The command stops SQLite writes and creates a verified complete backup before it changes either database. It then starts bundled Postgres, initializes the current app schema, copies the SQLite rows, verifies referenced output files and row counts, updates `DATABASE_BACKEND` and `COMPOSE_PROFILES` in `.env`, and force-recreates the app with Postgres active. The existing `data/history.db` stays in place as an additional rollback source, and the command prints the verified backup path when it finishes.
+
+If Postgres startup, schema setup, or data copy fails, the command keeps the original SQLite settings and restarts the app on SQLite. It also stops Postgres when it wasn't already running. Review the reported error before retrying; a target that already contains app data must be cleaned or replaced rather than merged accidentally.
+
+After the command succeeds, verify History, Atlas, Projects, Files, Secrets, session preferences, and a new command run. Keep the printed backup and the SQLite file until the Postgres deployment has handled normal use.
+
+To return to the untouched SQLite database before any new Postgres-only writes matter, set `DATABASE_BACKEND=sqlite` in `.env` and recreate the app:
+
+```bash
+docker compose up -d --force-recreate shell
+```
+
+Use `./darklab-deploy restore <backup-path>` when you need to restore the full pre-migration state instead of only changing the active backend.
+
 ### What The Helper Copies
 
 The migration helper:
@@ -153,7 +182,7 @@ Encrypted secrets need special care. The copied ciphertext only works if the Pos
 
 The `--artifact-root` value is the app data root, not the `run-output` folder itself. For the default container layout, use `/data`: the helper reads `history.db` from that root, checks full-run output under `/data/run-output`, and checks large body-store files under `/data/body-store`.
 
-### Run From The Compose Network
+### Source Checkout: Run From The Compose Network
 
 When using the bundled Compose stack, Postgres does not publish `5432` to the host. That's intentional. You do not need to add a temporary `ports:` entry for migration.
 
@@ -183,7 +212,7 @@ docker compose --profile postgres run --rm --no-deps --entrypoint python shell -
   --validate < scripts/migrate_sqlite_to_postgres.py
 ```
 
-The rebuild makes sure the `shell` image includes the current Python dependencies, including `psycopg[binary,pool]` for Postgres. The short migration-runner command applies the app-owned Postgres migrations before data is copied, and the follow-up check should print every migration version from `0001` through the current release. The one-off commands pass `DATABASE_BACKEND` and `DATABASE_URL` directly into the container instead of relying on Compose interpolation, which makes the migration path independent of any stale values in `.env`. These commands override the normal container entrypoint so they run Python directly instead of starting Gunicorn. The migration command pipes the checked-in helper into the one-off `shell` container because the normal app container only mounts `./app` and `./data`, not `./scripts`. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
+The rebuild makes sure the `shell` image includes the current Python dependencies, including `psycopg[binary,pool]` for Postgres. The short migration-runner command applies the app-owned Postgres migrations before data is copied, and the follow-up check should print every migration version from `0001` through the current release. The one-off commands pass `DATABASE_BACKEND` and `DATABASE_URL` directly into the container instead of relying on Compose interpolation, which makes the migration path independent of any stale values in `.env`. These commands override the normal container entrypoint so they run Python directly instead of starting Gunicorn. The migration command pipes the checked-in helper into the one-off `shell` container because source-mounted development doesn't mount `./scripts` into the app container. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
 
 Adjust the username, password, and database name if your `.env` overrides `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB`.
 
@@ -292,24 +321,7 @@ The `--compose` command starts the profile-gated `postgres` service, mounts the 
 
 ## Related Docs
 
-- [Default.md](../.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](../CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](../CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](../FEATURES.md) - full per-feature reference
-- [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
-- [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](../tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [../CONFIGURATION.md](../CONFIGURATION.md) - database backend and connection settings
+- [storage-scaling.md](storage-scaling.md) - storage sizing and growth guidance
+- [../ARCHITECTURE.md](../ARCHITECTURE.md#state-and-persistence) - persistence contracts
+- [../CONTRIBUTING.md](../CONTRIBUTING.md#changing-the-database-schema) - schema-change workflow

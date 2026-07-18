@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral share-redaction prompt boundary for tab export actions.
 
 let confirmPermalinkRedactionChoiceHandler = null;

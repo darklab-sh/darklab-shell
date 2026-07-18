@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { vi } from 'vitest'
@@ -549,6 +552,7 @@ describe('history panel actions', () => {
     openWatchersModalImpl = vi.fn(() => Promise.resolve()),
     downloadBlobAsAttachmentImpl = vi.fn(),
     emitUiEvent = vi.fn(),
+    logClientErrorImpl = vi.fn(),
     submitComposerCommandImpl = vi.fn(() => true),
     activeTeamScopeCanImpl = () => true,
     teamScopeDeniedMessageImpl = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
@@ -763,6 +767,7 @@ describe('history panel actions', () => {
     const harnessWindow = {
       open: windowOpen,
       downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
+      logClientError: logClientErrorImpl,
       APP_CONFIG: { recent_commands_limit: 50, history_panel_limit: 8, ...appConfig },
     }
     harnessWindow.apiFetch = apiFetch
@@ -831,6 +836,7 @@ describe('history panel actions', () => {
             if (typeof cmdInput.focus === 'function') cmdInput.focus()
           }),
           emitUiEvent,
+          logClientError: logClientErrorImpl,
           openAtlas: openAtlasImpl,
           openWatchersModal: openWatchersModalImpl,
           downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
@@ -863,7 +869,9 @@ describe('history panel actions', () => {
         _historyRunPrimary,
         _historyRunPlainExportText,
         _restoreBothHistoryCompareRuns,
+        fetchAndRenderHistoryComparison,
         _highlightRestoredHistoryLine,
+        openHistoryCompareLauncher,
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
         _saveStarred,
@@ -927,6 +935,8 @@ describe('history panel actions', () => {
       openWatchersModal: openWatchersModalImpl,
       downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
       emitUiEvent,
+      logClientError: logClientErrorImpl,
+      historyWindow: harnessWindow,
     }
   }
 
@@ -3303,6 +3313,7 @@ describe('history panel actions', () => {
   })
 
   it('opens the run comparison launcher from a history row', async () => {
+    let resolveStaleCandidates
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
@@ -3364,15 +3375,38 @@ describe('history panel actions', () => {
             }),
         })
       }
+      if (url === '/history/run-stale/compare-candidates') {
+        return new Promise(resolve => { resolveStaleCandidates = resolve })
+      }
+      if (url === '/history/run-latest/compare-candidates') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            source: { id: 'run-latest', command: 'latest command', started: '2026-01-01T00:00:06Z' },
+            candidates: [],
+          }),
+        })
+      }
+      if (url === '/history/run-failed/compare-candidates') {
+        return Promise.reject(new Error('candidate service unavailable'))
+      }
       return Promise.resolve({ json: () => Promise.resolve({ items: [], runs: [] }) })
     })
-    const { refreshHistoryPanel, bindDismissible, refocusComposerAfterAction } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const {
+      refreshHistoryPanel,
+      bindDismissible,
+      refocusComposerAfterAction,
+      openHistoryCompareLauncher,
+      logClientError,
+      historyWindow,
+    } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
-    document
-      .querySelector('#history-list .history-entry [data-action="compare"]')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const historyCompareAction = document.querySelector(
+      '#history-list .history-entry [data-action="compare"]',
+    )
+    historyCompareAction.focus()
+    historyCompareAction.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
@@ -3387,9 +3421,51 @@ describe('history panel actions', () => {
     expect(document.querySelector('.history-compare-primary')?.textContent).toBe(
       'Compare with suggested run',
     )
-    expect(document.querySelector('.history-compare-run-card')?.textContent).toContain('nmap darklab.sh')
+    const launcherCards = [...document.querySelectorAll('.history-compare-run-card')]
+    expect(launcherCards[0]?.textContent).toContain('Current run')
+    expect(launcherCards[1]?.textContent).toContain('Baseline')
+    expect(launcherCards[0]?.textContent).toContain('nmap darklab.sh')
     bindDismissible.mock.calls[0][1].onClose()
     expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
+    expect(document.activeElement).toBe(historyCompareAction)
+
+    openHistoryCompareLauncher({ id: 'run-stale', command: 'stale command' })
+    openHistoryCompareLauncher({ id: 'run-latest', command: 'latest command' })
+    await flushPromises()
+    expect(historyWindow._historyCompareState.source.id).toBe('run-latest')
+    resolveStaleCandidates({
+      json: () => Promise.resolve({
+        source: { id: 'run-stale', command: 'stale command' },
+        candidates: [{ id: 'run-older', command: 'older command' }],
+      }),
+    })
+    await flushPromises()
+    expect(historyWindow._historyCompareState.source.id).toBe('run-latest')
+    expect(document.querySelector('#history-compare-subtitle')?.textContent).toBe('latest command')
+    expect(document.querySelector('.history-compare-empty')?.textContent)
+      .toContain('No earlier similar run found. Choose a run manually.')
+    expect(document.querySelector('.history-compare-search')).not.toBeNull()
+
+    openHistoryCompareLauncher({ id: 'run-failed', command: 'failed command' })
+    await flushPromises(8)
+    expect(historyWindow._historyCompareState.source.id).toBe('run-failed')
+    expect(historyWindow._historyCompareState.candidates).toEqual([])
+    expect(document.querySelector('#history-compare-subtitle')?.textContent).toBe('failed command')
+    expect(document.getElementById('permalink-toast')?.textContent).toBe('Failed to load comparison choices')
+    expect(document.getElementById('permalink-toast')?.classList.contains('toast-error')).toBe(true)
+    expect(logClientError).toHaveBeenCalledWith(
+      'history compare candidates fetch failed',
+      expect.objectContaining({ name: 'Error', message: 'Request failed' }),
+      {
+        event: 'HISTORY_COMPARE_CANDIDATES_FETCH_FAILED',
+        level: 'error',
+        stage: 'request',
+        status: 0,
+        run_id: 'run-failed',
+        route: '/history/<run_id>/compare-candidates',
+      },
+    )
+    expect(JSON.stringify(logClientError.mock.calls)).not.toContain('failed command')
   })
 
   it('keeps the history drawer open when compare launcher is unavailable', async () => {
@@ -3471,10 +3547,22 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              source: { id: 'run-new', command: 'nmap darklab.sh', command_root: 'nmap' },
+              source: {
+                id: 'run-new',
+                command: 'nmap darklab.sh',
+                command_root: 'nmap',
+                started: '2026-01-01T00:00:04Z',
+              },
               suggested: { id: 'run-old', command: 'nmap darklab.sh', confidence_label: 'Exact command' },
               candidates: [{ id: 'run-old', command: 'nmap darklab.sh', confidence_label: 'Exact command' }],
             }),
+        })
+      }
+      if (typeof url === 'string' && url.includes('/history?') && url.includes('q=operator-secret')) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: 'search operator-secret was denied' }),
         })
       }
       if (typeof url === 'string' && url.includes('/history?') && url.includes('q=ssl') && url.includes('page=2')) {
@@ -3485,8 +3573,10 @@ describe('history panel actions', () => {
                 {
                   id: 'run-ssl-old',
                   type: 'run',
+                  run_kind: 'external',
                   command: 'sslscan old.darklab.sh',
                   started: '2025-12-31T12:00:02Z',
+                  finished: '2025-12-31T12:00:03Z',
                   exit_code: 0,
                 },
               ],
@@ -3503,8 +3593,10 @@ describe('history panel actions', () => {
                 {
                   id: 'run-ssl',
                   type: 'run',
+                  run_kind: 'external',
                   command: 'sslscan darklab.sh',
                   started: '2026-01-01T12:00:02Z',
+                  finished: '2026-01-01T12:00:03Z',
                   exit_code: 0,
                 },
               ],
@@ -3514,9 +3606,34 @@ describe('history panel actions', () => {
             }),
         })
       }
+      if (url === '/history/compare?left=run-new&right=run-ssl') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            left: { id: 'run-new', command: 'nmap darklab.sh', output_line_count: 0 },
+            right: { id: 'run-ssl', command: 'sslscan darklab.sh', output_line_count: 0 },
+            deltas: {},
+            totals: {
+              left_total_lines: 0,
+              right_total_lines: 0,
+              equal_line_count: 0,
+              changed_line_count: 0,
+              added_line_count: 0,
+              removed_line_count: 0,
+            },
+            hunks: [],
+            density_buckets: [],
+            objects: {
+              findings: { added: [], removed: [], changed: [] },
+              artifacts: { added: [], removed: [] },
+              entities: { added: [], removed: [] },
+            },
+            derived_changes: { groups: [] },
+          }),
+        })
+      }
       return Promise.resolve({ json: () => Promise.resolve({ items: [], runs: [] }) })
     })
-    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, logClientError } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
@@ -3561,6 +3678,28 @@ describe('history panel actions', () => {
     expect(document.querySelector('[data-compare-candidate-list="1"]')?.textContent || '').toContain(
       'sslscan old.darklab.sh',
     )
+
+    search.value = 'operator-secret'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await flushPromises()
+    expect(logClientError).toHaveBeenCalledWith(
+      'history compare manual candidates fetch failed',
+      expect.objectContaining({ name: 'Error', message: 'Request failed with status 403' }),
+      {
+        event: 'HISTORY_COMPARE_MANUAL_CANDIDATES_FETCH_FAILED',
+        level: 'warning',
+        stage: 'response',
+        status: 403,
+        run_id: 'run-new',
+        route: '/history',
+      },
+    )
+    expect(JSON.stringify(logClientError.mock.calls)).not.toContain('operator-secret')
+
+    document.querySelector('.history-compare-candidate').click()
+    await flushPromises()
+    expect(apiFetch).toHaveBeenCalledWith('/history/compare?left=run-new&right=run-ssl', undefined)
   })
 
   it('renders changed added and removed lines after choosing a comparison candidate', async () => {
@@ -3593,13 +3732,13 @@ describe('history panel actions', () => {
             }),
         })
       }
-      if (url === '/history/compare?left=run-new&right=run-old') {
+      if (url === '/history/compare?left=run-old&right=run-new') {
         return Promise.resolve({
           ok: true,
           json: () =>
             Promise.resolve({
-              left: { id: 'run-new', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 2 },
-              right: { id: 'run-old', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 2 },
+              left: { id: 'run-old', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 2 },
+              right: { id: 'run-new', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 2 },
               deltas: {
                 exit_code_changed: false,
                 exit_code: { left: 0, right: 0 },
@@ -3712,6 +3851,22 @@ describe('history panel actions', () => {
                     raw_line: '8080/tcp open http-proxy',
                     review_state: 'new',
                     compare_line_index: 1,
+                  }],
+                  changed: [{
+                    key: 'shared-service',
+                    changed_fields: ['severity'],
+                    before: {
+                      title: 'shared service',
+                      raw_line: '[low] shared service',
+                      severity: 'low',
+                      compare_line_index: 1,
+                    },
+                    after: {
+                      title: 'shared service',
+                      raw_line: '[high] shared service',
+                      severity: 'high',
+                      compare_line_index: 1,
+                    },
                   }],
                 },
                 artifacts: {
@@ -3868,6 +4023,9 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
 
+    expect(apiFetch.mock.calls.filter(([url]) => (
+      url === '/history/compare?left=run-old&right=run-new'
+    ))).toHaveLength(1)
     expect(document.querySelector('#history-compare-subtitle')?.textContent)
       .toBe('2 lines · 0 unchanged · 1 changed · 1 added · 1 removed')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('23:22 UTC')
@@ -3999,6 +4157,21 @@ describe('history panel actions', () => {
     document.querySelector('.history-compare-finding-marker.is-high').click()
     expect(emitUiEvent).not.toHaveBeenCalledWith('app:compare-anchor-scroll', expect.anything())
 
+    const viewSelect = document.querySelector('.history-compare-view-select')
+    viewSelect.value = 'findings_only'
+    viewSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    const metricLabels = [...document.querySelectorAll('.history-compare-metric-label')]
+      .map(label => label.textContent)
+    expect(metricLabels).toEqual(['Changed findings', 'Added findings', 'Removed findings'])
+    expect(document.querySelectorAll('.history-compare-nav-btn')).toHaveLength(0)
+    expect(document.querySelectorAll('.history-compare-split')).toHaveLength(0)
+    expect(document.querySelectorAll('.history-compare-finding-change-link')).toHaveLength(0)
+    expect(document.querySelectorAll('.history-compare-finding-change-value')).toHaveLength(2)
+    expect(document.querySelector(
+      '.history-compare-object-row[data-object-kind="finding"][data-compare-side="b"]',
+    ).tagName).toBe('DIV')
+    expect(document.querySelectorAll('.history-compare-object-row[data-object-kind="artifact"]')).toHaveLength(0)
+
     document.querySelector('.history-compare-actions-trigger').click()
     const restoreBoth = [...document.querySelectorAll('.history-compare-actions-menu .dropdown-item')]
       .find(button => button.textContent === 'Restore Both')
@@ -4011,15 +4184,31 @@ describe('history panel actions', () => {
     expect(createTab).toHaveBeenCalledWith('B: nmap darklab.sh')
     expect(appendCommandEcho).toHaveBeenCalledWith('nmap darklab.sh', 'tab-2')
     expect(appendCommandEcho).toHaveBeenCalledWith('nmap darklab.sh', 'tab-3')
-    expect(appendLine).toHaveBeenCalledWith('new output', '', 'tab-2')
-    expect(appendLine).toHaveBeenCalledWith('old output', '', 'tab-3')
+    expect(appendLine).toHaveBeenCalledWith('old output', '', 'tab-2')
+    expect(appendLine).toHaveBeenCalledWith('new output', '', 'tab-3')
     expect(activateTab).toHaveBeenCalledWith('tab-3', { focusComposer: false })
     expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
   }, 10_000)
 
   it('preflights Restore Both tab capacity before creating either tab', async () => {
-    const { _restoreBothHistoryCompareRuns, createTab } = loadHistoryPanel({
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/history/compare?')) {
+        return Promise.resolve({
+          ok: false,
+          status: 502,
+          json: () => Promise.resolve({ error: 'Comparison service unavailable' }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const {
+      _restoreBothHistoryCompareRuns,
+      createTab,
+      fetchAndRenderHistoryComparison,
+      logClientError,
+    } = loadHistoryPanel({
       appConfig: { max_tabs: 2 },
+      apiFetchImpl: apiFetch,
     })
 
     await expect(_restoreBothHistoryCompareRuns(
@@ -4031,6 +4220,25 @@ describe('history panel actions', () => {
     expect(document.getElementById('permalink-toast').textContent).toBe(
       'Not enough tab capacity to restore both runs',
     )
+
+    fetchAndRenderHistoryComparison('run-left', 'run-right', {
+      url: '/history/compare?left=run-left&right=run-right&token=operator-secret',
+    })
+    await flushPromises(8)
+    expect(logClientError).toHaveBeenCalledWith(
+      'history compare fetch failed',
+      expect.objectContaining({ compareRequestError: true, httpStatus: 502 }),
+      {
+        event: 'HISTORY_COMPARE_FETCH_FAILED',
+        level: 'error',
+        left_run_id: 'run-left',
+        right_run_id: 'run-right',
+        route: '/history/compare',
+        status: 502,
+        compare_request_error: true,
+      },
+    )
+    expect(JSON.stringify(logClientError.mock.calls)).not.toContain('operator-secret')
   })
 
   it('includes the history type filter in the request URL when snapshots are selected', () => {

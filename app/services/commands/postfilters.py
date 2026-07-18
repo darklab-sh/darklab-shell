@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Synthetic post-filter pipeline parsing for app-native pipe helpers."""
 
 from __future__ import annotations

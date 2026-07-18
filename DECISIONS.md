@@ -14,6 +14,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
   - [AI Assists: Private Provider, Worker, and Validation Boundary](#ai-assists-private-provider-worker-and-validation-boundary)
+  - [Durable Workflows: Server-Owned Steps and Bounded Captures](#durable-workflows-server-owned-steps-and-bounded-captures)
 - [Security and Isolation Decisions](#security-and-isolation-decisions)
   - [Cross-User Process Killing](#cross-user-process-killing)
   - [Two-User Security Model](#two-user-security-model)
@@ -24,6 +25,9 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Team Ownership: Session Tokens Stay Actors](#team-ownership-session-tokens-stay-actors)
   - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
 - [Deployment and Packaging Decisions](#deployment-and-packaging-decisions)
+  - [Network Copyleft with GNU AGPLv3](#network-copyleft-with-gnu-agplv3)
+  - [One Image, Two Compose Modes, and Dual Registry Publishing](#one-image-two-compose-modes-and-dual-registry-publishing)
+  - [Keep One Full Release Image](#keep-one-full-release-image)
   - [Startup Sequence (entrypoint.sh)](#startup-sequence-entrypointsh)
   - [nmap Capabilities](#nmap-capabilities)
   - [Go Binary Installation](#go-binary-installation)
@@ -129,6 +133,24 @@ The private-base-URL guard is intentionally conservative. The default use case i
 Suggestion validation sits outside the model. The model may propose only JSON, but the app still checks the command root, command policy, trusted target presence, known open ports for port-scoped suggestions, redaction sentinels, and a small denylist of known hallucinated flags. Accepted suggestions can be copied, and optional Run buttons still submit through the normal composer path so command policy gets the final say. Rejected suggestions are stored and displayed as blocked drafts because they are useful debugging evidence without becoming executable UI.
 
 AI payloads are stored separately from transcripts, findings, Atlas source text, search text, and comparisons. This keeps assistant text additive and auditable while preserving the original command output as the source of truth.
+
+### Durable Workflows: Server-Owned Steps and Bounded Captures
+
+**V2 workflow progress belongs to the server, while each command remains a normal run.**
+
+The original workflow runner queued rendered commands in one browser tab and advanced when that tab's status changed. That works for simple guided lists, but it can't reliably preserve branches, captures, cancellation, or progress after a reload. V2 definitions therefore compile into an immutable database snapshot with one state row per stable step id. The server claims and launches one step at a time through the existing run broker, then advances only after normal run finalization has saved the completed run.
+
+This design deliberately reuses the command lifecycle instead of introducing a second executor. Every rendered step crosses the same command policy, secret, workspace, team-scope, runtime-readiness, output, finding, artifact, and project-link boundaries as a command typed at the prompt. The execution ledger adds orchestration context and a unique run-to-step link; it doesn't replace run history.
+
+Template substitution is authoritative on the server and quotes each value as one shell scalar before policy validation. The renderer also produces a separate display command: sensitive inputs become `[redacted]`, and values captured by earlier steps become named placeholders. Only the raw command crosses validation and process launch; active-run metadata, saved History command text, logs, metrics, and notifications receive the display command. Captures observe normalized output with a small fixed selector set: eligible lines, structured entities, and JSON Pointer scalar values. Arbitrary expressions and regular expressions aren't accepted because they would add a second untrusted evaluation language and make runtime limits harder to guarantee. Captured values stay local to the execution and are omitted from workflow lifecycle logs.
+
+Exact-exit-code routing is part of the same editor contract as success and failure routing. Each code is a repeatable row with an integer and a stable destination ID, so users can see and remove every rule instead of carrying hidden definition state through saves. Step renames update those destination IDs, reordering leaves them unchanged, and deleting a destination keeps a visible invalid choice until the user repairs it. The compiler canonicalizes integer keys and rejects duplicates after canonicalization so values such as `2` and `02` can't create two rules for the same process result.
+
+Durability also needs a bounded recovery rule. Web startup reconciles active execution rows after stale run metadata is cleaned up: it reclaims a step that never reached run binding, advances a linked run that was saved before the workflow hook completed, leaves a still-live broker run alone, and fails a vanished run instead of guessing. The same execution path rechecks the current team, initiating member permission, and initiating session token before every launch. Per-owner concurrency and wall-clock limits keep playbooks from becoming a second way around normal run controls.
+
+Interactive PTY commands remain outside this model. Their completion depends on durable terminal-screen capture and input/replay state, not just a normal command exit and normalized line stream. The workflow launcher therefore detects registry-declared PTY trigger flags and fails that step before broker dispatch instead of silently running it through the wrong transport.
+
+Execution events are derived from the durable execution and step rows rather than copied into another event table. Stable logical ordering gives clients a replay cursor for start, step, capture-name, and terminal changes while keeping commands and values out of the feed. Create, list, detail, and cancel routes project the private execution record into a fixed public status shape, so even an authorized team viewer doesn't receive stored inputs, variables, snapshots, tokens, actor context, or browser ownership hints. The same privacy boundary applies to workflow audit rows, lifecycle logs, and metric labels: they carry bounded ids, counts, status, timing, exit, transition, and failure-class fields only.
 
 ---
 
@@ -317,6 +339,48 @@ Allow-listed tools can have specific flags blocked through `policy.deny` entries
 
 ## Deployment and Packaging Decisions
 
+### Network Copyleft with GNU AGPLv3
+
+**darklab_shell's original source code and documentation use `AGPL-3.0-only`.**
+
+MIT was considered because it is short and easy to adopt, but it would allow a proprietary fork to reuse the project without sharing its changes. GPLv3 would keep distributed derivatives under the GPL, but darklab_shell is mainly a network application: a modified hosted version could be used without distributing the program and therefore without returning its source. AGPLv3 adds the network source offer that matches the project goal.
+
+The license does not prohibit commercial use. Companies can run, host, support, and sell services around darklab_shell under the same terms. The boundary is openness, not payment: a modified network version must prominently offer every remote user its complete Corresponding Source at no charge through a standard or customary copying method. A noncommercial restriction was rejected because it would conflict with the project's open-source goals and make ordinary organizational use unclear. The complete `LICENSE` text controls.
+
+Official releases expose their matching source tag through the built-in **What is this?** FAQ entry, record `AGPL-3.0-only` in package and OCI metadata, and carry the complete license in the image and installer payload. That FAQ entry is the official build's default source link, not a declaration that one placement satisfies every modified service. Modified deployments must replace the official link and remain responsible for making their offer prominent to all remote users and providing their complete corresponding source at no charge. Bundled tools, libraries, fonts, and wordlists are not relicensed; their separate terms stay in `THIRD_PARTY_NOTICES.txt` and `container-licenses.json`.
+
+The bundled Debian Nmap package remains under NPSL 0.95. darklab_shell runs its executable as an external command and parses the resulting output; releases include the hash-pinned NPSL text, list Nmap in the third-party inventory and notices, and identify and link to the Nmap Security Scanner in the built-in FAQ. The project owner reviewed those terms and chose to distribute Nmap with this open-source application without making an upstream waiver, OEM license, or separate legal-approval record a release prerequisite. CI verifies the declared license, notice, and bundled text, but it does not enforce a separate redistribution-approval status. This packaging decision does not relicense Nmap or change the NPSL terms.
+
+Project-owned source uses short, machine-readable `SPDX-FileCopyrightText` and `SPDX-License-Identifier` notices instead of repeating the full multi-paragraph AGPL boilerplate in every file. This keeps the license attached when a file is copied without burying the source under legal text. Generated bundles and third-party material are explicitly excluded from the project header, and the lint guard fails when new project-owned source has no notice. The root `LICENSE` is the single full-text copy; a second `LICENSES/AGPL-3.0-only.txt` copy and a formal REUSE-compliance claim were deliberately left out.
+
+### One Image, Two Compose Modes, and Dual Registry Publishing
+
+**Released images contain the app, while development mounts the source tree over that same runtime.**
+
+The earlier Docker path required a repository checkout because the image contained the scanner toolchain but expected `./app:/app:ro` at runtime. That was useful for development, but it made production installation download the whole repository, find private overrides among shipped files, and build a large tool image locally.
+
+The Dockerfile copies `/app` after independent builder stages for ProjectDiscovery, other Go tools, native tools, Ruby tools, wordlists, and script assets. Those stages copy only the required binaries, runtime trees, and durable notices into one final image; compilers, development headers, Go caches, apt indexes, and build source trees stay behind. Development keeps the bind mount for a quick edit loop; production pulls the same final image and has no `/app` mount. Keeping one Dockerfile, runtime image, and entrypoint avoids a second production-only runtime that could drift in packages, capabilities, users, health behavior, or read-only filesystem assumptions.
+
+Shipped configuration and operator configuration are separate on purpose. The image owns `/app/conf`, while production mounts `./conf` at `/config`. A shared resolver maps supported `*.local.*` files to the operator root and preserves sibling behavior when no separate root is configured. The installer can therefore keep the host tree private while the root entrypoint validates and stages an `appuser`-readable runtime copy before dropping privileges. Mounting a whole host directory over `/app/conf` was rejected because an old deployment directory could hide new commands, themes, workflows, and defaults after an image upgrade.
+
+GitLab is the canonical registry because the source and release pipeline already live there. CI checks the release-specific third-party license inventory, builds once from a protected final or `-rc.N` semantic-version tag with a release-line-scoped AMD64 registry layer cache, verifies that canonical image, then performs a registry-to-registry carbon copy of the manifest to Docker Hub for the shorter public pull path used by production Compose. The AMD64 cache writer is serialized and scheduled warmers populate its reference. Native ARM64 compatibility builds stay uncached because registry-cache import and export for the bundled scanner and SecLists layers exceeds the hosted small runner's storage budget. BuildKit cache mounts remain a builder-local optimization rather than cross-runner evidence, so the AMD64 release contract depends on exported layer-cache hits from pinned stages. Pulling, retagging, and pushing through a daemon was rejected because an image store can translate OCI and Docker manifest media types and change the digest even when the layers are identical. Publishing a second build was rejected because build timestamps and network-resolved packages can produce different bytes under one release version. Promoting a commit-addressed branch candidate was also rejected: joining evidence from two pipelines makes protected-tag provenance, retry behavior, and the fail-closed path harder to understand than rebuilding the immutable tag from warm portable caches. Both registries use exact tags, and the publisher treats each candidate number as immutable even though candidate artifacts can be removed after validation. Digest equality is the release boundary. Measured transfer and unpacked sizes travel with the release manifest instead of becoming a stale number in Compose; cold-pull timing stays in a CI artifact because it varies by runner and retry.
+
+The installer is small and deliberately non-magical. A release-specific POSIX script downloads one deterministic exact-version archive, verifies its checksum and safe paths, validates the managed-file manifest and Compose, creates private operator paths, and prints the pull/start commands. It does not install Docker, use `sudo`, change firewall rules, generate the vault master key, or start services.
+
+After setup, `darklab-deploy` owns the release-managed side of the directory. The manifest and checksum list make local drift visible without treating `.env`, `conf/`, databases, workspaces, or backups as release files. Exact-release upgrades create and verify a backup before replacing managed files, refuse downgrades because image rollback cannot undo schema changes, and leave container startup as an explicit operator action. Backup and restore run the image's Python and Postgres tools in one-off Compose containers so the public host contract stays at POSIX shell, Docker, and Compose. Same-backend restore remains the default because silently changing storage targets is unsafe. A fresh replacement install can explicitly adopt a Postgres backup while preserving its new connection credentials, but only after the target database is proven empty. Managed backups preserve the installed workspace directory even when Files is disabled because feature state is not a data-retention policy. Removal stops the stack and deletes only managed files; migration help keeps clone-backed source files out of the managed directory.
+
+Release trust uses GitLab's keyless Sigstore identity instead of a long-lived private signing key. A protected tag job signs the immutable GitLab and Docker Hub digest references, and the payload job signs `SHA256SUMS`; operators verify the exact `.gitlab-ci.yml@refs/tags/vX.Y.Z` or `.gitlab-ci.yml@refs/tags/vX.Y.Z-rc.N` certificate identity with issuer `https://gitlab.com`. The Docker Hub repository overview publishes that issuer and stable certificate-identity pattern independently of each release payload, and the public smoke job refuses a final or candidate artifact when the live overview no longer contains them. Keeping the reviewed overview text in the repository makes the manual Docker Hub setting auditable without pretending that a checksum served beside the payload is a separate trust root. Syft and Grype scan the canonical GitLab image as soon as it is available, in parallel with compatibility checks; Docker Hub promotion and the later evidence/signing job consume that retained result instead of delaying the vulnerability decision. Ordinary branch images receive the same fixed-Critical gate before tagging, and a manual digest recheck can rerun image, tool, and scan verification without republishing. Blocking every High or unfixed finding was rejected because it turns upstream remediation lag into a permanent release outage; silent ad hoc suppressions were rejected because they erase the audit trail. SLSA provenance and the release evidence index bind the two registry names, shared digest, source commit, protected tag, pipeline, SBOM, and scan report. Release candidates exercise that entire chain and deliberately stop short of creating a GitLab Release, preserving the final release object as a user-facing milestone rather than a CI rehearsal artifact.
+
+Compatibility claims follow evidence from dedicated release gates. The normal protected-tag smoke job executes the bundled scanner tools as the unprivileged scanner user on Linux AMD64. Native ARM64 uses GitLab's hosted small ARM64 runner with an isolated Docker-in-Docker daemon, while SELinux-enforcing Docker and rootless Podman use self-managed hosts that expose those real host policies. Each has an opt-in protected CI variable so an available environment can block Docker Hub promotion when enabled. Passing source-level or emulated checks was rejected as proof of runtime support: production Compose remains pinned to Linux AMD64, and another platform joins the support matrix only after its native gate is provisioned and passes release images consistently.
+
+### Keep One Full Release Image
+
+**The measured v2.6.0 release stays as one complete image; it does not add a slim sibling that omits wordlists or tools.**
+
+The protected `v2.6.0-rc.23` pipeline measured the canonical AMD64 image at 1,450,481,244 compressed bytes and 1,450,509,512 installed bytes. Its representative cold pull took 39 seconds on the release runner. Four layers account for most of the transfer: SecLists is about 709 MB (49%), ProjectDiscovery tools are about 263 MB (18%), the other Go tools are about 159 MB (11%), and runtime packages are about 156 MB (11%). These numbers are release evidence rather than universal download-time promises; the manifest carries exact sizes for each release, while pull time depends on the host and network.
+
+SecLists is the only single exclusion that would cut the image nearly in half, but removing it would make documented wordlist paths, autocomplete, and scanner examples depend on which image an operator chose. Splitting tools into sidecars would also change command execution, capabilities, networking, licensing, upgrades, and support. Keeping one self-contained image preserves the same command surface everywhere and is worth the larger initial pull. A separate variant is justified only if sustained operator evidence shows that transfer or storage cost outweighs that consistency and the alternate image can keep a clear, supportable feature contract.
+
 ### Startup Sequence (entrypoint.sh)
 
 Container starts as root → `entrypoint.sh` runs → fixes `/data` ownership (Docker volume mounts reset ownership to the host user) → sets `/tmp` to `1777` → pre-creates `/tmp/.config/nuclei`, `/tmp/.config/uncover`, `/tmp/.cache` owned by scanner → `gosu appuser gunicorn ...`
@@ -329,7 +393,7 @@ Container starts as root → `entrypoint.sh` runs → fixes `/data` ownership (D
 
 ### nmap Capabilities
 
-**nmap file capabilities (`setcap`) are used instead of running the container privileged.**
+**Raw scanning is an operator opt-in built on file capabilities, not a privileged container.**
 
 nmap requires `CAP_NET_RAW` and `CAP_NET_ADMIN` for OS fingerprinting and SYN scans:
 
@@ -337,15 +401,17 @@ nmap requires `CAP_NET_RAW` and `CAP_NET_ADMIN` for OS fingerprinting and SYN sc
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 ```
 
-This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container.
+This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container. The container stays on its normal bridge network and never uses Docker `privileged: true`.
 
-The app now standardizes on TCP connect scans for nmap. `rewrite_command()` injects `-sT` when no scan mode is explicit, while command validation blocks `-sS` and nmap's own `--privileged` flag so users do not hit confusing raw-socket permission failures after launch.
+The default remains TCP connect scanning. `rewrite_command()` injects `-sT` when no scan mode is explicit unless `raw_packet_scanning_enabled` is configured and runtime checks confirm Linux `CAP_NET_RAW`, executable file capabilities, and a compatible executable policy. Ready deployments use a fixed `NMAP_PRIVILEGED=1` environment value so Nmap recognizes the file capabilities and keeps its SYN default. Explicit `-sT` stays unchanged, and user-supplied `--privileged` is always blocked.
+
+The scanner app-port firewall matches only destinations local to the container. A broad destination-port rule looked like a raw-socket failure during multi-host scans because it rejected every remote port `8888` send with `EPERM`. Restricted CIDRs come from the app's effective normalized config and use required scanner-user OUTPUT rules plus a matching root-owned readiness marker; raw Nmap forces `--send-ip`, while `--send-eth` stays blocked. Packet-socket Naabu and Masscan remain unavailable whenever restricted CIDRs are configured because those packets do not cross the owner-matched OUTPUT path. The app does not accept an operator attestation for separate host or bridge firewall rules.
 
 ### Go Binary Installation
 
-**Go tools are installed with `GOBIN=/usr/local/bin` so they are accessible to the `scanner` user.**
+**Go tools are built into a staged output directory and copied into the runtime for the `scanner` user.**
 
-Go tools such as `nuclei`, `subfinder`, `httpx`, `dnsx`, `naabu`, `katana`, `tlsx`, `cdncheck`, `amass`, `assetfinder`, `gobuster`, `ffuf`, `tcping`, `trufflehog`, and `puredns` are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
+Go tools such as `nuclei`, `subfinder`, `httpx`, `dnsx`, `naabu`, `katana`, `tlsx`, `cdncheck`, `amass`, `assetfinder`, `gobuster`, `ffuf`, `tcping`, `trufflehog`, and `puredns` build with `GOBIN=/out/usr/local/bin` in the Go stages. The final stage copies that output to `/usr/local/bin`, where the binaries are world-executable and accessible to `scanner`. Versioned installs use a short-lived main module that raises `golang.org/x/crypto` to the reviewed security baseline without changing each tool's pinned release. `gosu` builds from pinned source with the same current Go toolchain, so its embedded standard library doesn't lag behind the rest of the image. Reviewed Go and module licenses are copied to stable paths under `/usr/share/doc/darklab-shell/licenses`; the toolchain, module cache, compilation cache, and unrelated upstream executables never enter the runtime image or SBOM. Installing into `/root/go/bin` was rejected because that root-owned path is inaccessible to `scanner`, and symlinking it into `/usr/local/bin` would keep the same target-permission problem.
 
 ### TruffleHog Output Redaction
 
@@ -371,7 +437,7 @@ SQLite is the local, single-user, and default deployment backend. It keeps the o
 
 Postgres is the supported backend for heavier multi-user deployments that need a server database, connection pooling, trigram-backed search, and production-style storage operations. It is selected explicitly with `database_backend: postgres` plus `database_url`; normal app database calls then route through the Postgres compatibility wrapper and backend-aware SQL helpers.
 
-SQLite-to-Postgres data movement is a separate offline cutover, not an automatic startup conversion. Operators use `scripts/migrate_sqlite_to_postgres.py` and the guide in `docs/postgres-migration.md` to copy data into a fresh Postgres schema, validate counts and artifacts, and only then switch backend settings. Schema management is shared by the app-owned migration runner; data migration remains an explicit maintenance workflow.
+SQLite-to-Postgres data movement is a separate offline cutover, not an automatic startup conversion. Repository-free operators run `darklab-deploy migrate-to-postgres` as the deployment owner; it reaches the locked-down SQLite file through the managed Docker mount, requires a Postgres destination with no user tables, copies data into a fresh bundled schema, validates counts and artifacts, and only then switches backend settings. Because Compose named volumes outlive their installation directory, migration checks the cluster through its local socket and may synchronize the configured role password only while the destination is empty; a non-empty retained volume is never repurposed automatically. Source checkouts and custom Postgres targets use `scripts/migrate_sqlite_to_postgres.py` with the guide in `docs/postgres-migration.md`. Schema management is shared by the app-owned migration runner; data migration remains an explicit maintenance workflow.
 
 ### FTS5 Tokenizer: Trigram with Unicode61 Fallback
 
@@ -391,7 +457,7 @@ The `runs_fts` virtual table uses the FTS5 **trigram** tokenizer when available 
 1. Logging setup lived in the app assembly module, which made startup order fragile and tied logging to importing the Flask app.
 2. All log records were plain strings, incompatible with GELF structured log aggregation.
 
-**Solution:** `logging_setup.py` provides two formatters and a `configure_logging(cfg)` function. Runtime startup calls it through `runtime_bootstrap.configure_runtime_logging(...)` before process setup, database initialization, or app construction. This keeps `import app` side-effect-free while still ensuring Redis, database, worker, and request lifecycle logs use the configured formatter.
+**Solution:** `logging_setup.py` provides two formatters and a `configure_logging(cfg)` function. Runtime startup calls it through `runtime_bootstrap.configure_runtime_logging(...)` before process setup, database initialization, or app construction. Configuration records emitted during the earlier `config.py` import are held by `startup_logging.py` and replayed once after the effective level and formatter are known. A fatal load that prevents bootstrap uses the same temporary boundary for one redacted structured fallback. This keeps `import app` side-effect-free while ensuring configuration, Redis, database, worker, and request lifecycle logs use the intended contract.
 
 The `shell` logger is configured with `propagate = False` so records don't double-emit to the root logger. Werkzeug's own request lines are suppressed (`logging.getLogger("werkzeug").setLevel(ERROR)`) because request logging is handled by `before_request` / `after_request` hooks instead.
 
@@ -402,7 +468,7 @@ The `shell` logger is configured with `propagate = False` so records don't doubl
 
 Both formatters use a shared `_extra_fields(record)` helper that extracts caller-supplied fields from the LogRecord (anything not in `_STDLIB_ATTRS` and not underscore-prefixed).
 
-The concrete event inventory and the operator-facing description of the `text` and `gelf` output formats live in [ARCHITECTURE.md](ARCHITECTURE.md), since those are current-system details rather than decision history.
+The concrete event inventory, output formats, field contracts, redaction rules, and troubleshooting guidance live in [docs/logging.md](docs/logging.md). The formatter and bootstrap boundaries stay in [ARCHITECTURE.md](ARCHITECTURE.md#logging), since those are current-system details rather than decision history.
 
 **Timing note:** `client_ip` is captured once at the top of `run_command()` as a local variable before the `generate()` closure is defined. This avoids a hidden dependency on Flask's request context being active when the generator body runs during streaming. The same `client_ip` local is closed over in `generate()`.
 
@@ -539,7 +605,7 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 **sudo resets HOME.** `sudo -u scanner` resets the `HOME` environment variable to the target user's home directory from `/etc/passwd`. For `scanner` (a no-login system user) this is `/home/scanner`, which doesn't exist on the read-only filesystem. All tools that write config/cache to `$HOME` fail. The fix is `sudo -u scanner env HOME=/tmp` to explicitly set HOME before the command runs.
 
-**nmap --privileged vs Docker --privileged.** These are different things. nmap's `--privileged` flag tells nmap to assume it has raw socket access. Docker's `--privileged` gives the container full host access. We use nmap's flag (auto-injected) combined with `setcap` on the binary and `cap_add` in compose — not Docker's privileged mode.
+**NMAP_PRIVILEGED vs Docker --privileged.** These are different things. `NMAP_PRIVILEGED=1` tells Nmap to assume it has raw socket access from its existing file capabilities. Docker's `--privileged` gives the container broad host access. The app sets the Nmap environment value only after operator opt-in and readiness checks; Docker privileged mode and user-supplied Nmap `--privileged` remain off-limits.
 
 **`env` doesn't use `--` as a terminator.** `sudo -u scanner env HOME=/tmp -- sh -c "..."` fails because `env` treats `--` as a literal command name. The correct form is `sudo -u scanner env HOME=/tmp sh -c "..."`.
 
@@ -587,25 +653,8 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 ## Related Docs
 
-- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](FEATURES.md) - full per-feature reference
-- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](TODO.md) - backlog items, research notes, and known issues
-- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
-- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [ARCHITECTURE.md](ARCHITECTURE.md) - current runtime and design contracts
+- [CONFIGURATION.md](CONFIGURATION.md) - current operator settings
+- [FEATURES.md](FEATURES.md) - current user-facing behavior
+- [CONTRIBUTING.md](CONTRIBUTING.md) - contributor workflow
+- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation ownership and maintenance

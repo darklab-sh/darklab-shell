@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { defineConfig } from '@playwright/test'
 import { MOBILE_VISUAL_CONTRACT } from './playwright.visual.contracts.js'
 

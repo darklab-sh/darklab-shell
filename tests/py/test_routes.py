@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Integration tests for Flask routes using the test client.
 These tests exercise HTTP-level behaviour without starting a real server.
@@ -22,6 +25,7 @@ import time
 import uuid
 import zipfile
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 from datetime import datetime, timedelta, timezone
@@ -3771,6 +3775,15 @@ class TestTeamRoutes:
             assert admin_update.status_code == 200
             assert admin_update.get_json()["workflow"]["title"] == "Updated team DNS"
             assert admin_delete.status_code == 200
+            workflow_audit = _audit_event_rows(target_id=workflow["id"])
+            assert [row["event_type"] for row in workflow_audit] == [
+                "workflow.create",
+                "workflow.update",
+                "workflow.delete",
+            ]
+            assert {row["target_type"] for row in workflow_audit} == {"workflow"}
+            assert {row["details"]["source"] for row in workflow_audit} == {"team"}
+            assert "example.com" not in json.dumps(workflow_audit)
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -7999,6 +8012,10 @@ class TestProjectRoutes:
         right_run_id = self._seed_run(session_id, "httpx darklab.sh")
         unlinked_run_id = self._seed_run(session_id, "nuclei darklab.sh")
         other_run_id = self._seed_run(other_session, "nmap other.example")
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("UPDATE runs SET started = '2026-07-13T10:00:00Z' WHERE id = ?", (left_run_id,))
+            conn.execute("UPDATE runs SET started = '2026-07-13T11:00:00Z' WHERE id = ?", (right_run_id,))
+            conn.commit()
         self._link_run(client, session_id, project["id"], left_run_id)
 
         one_linked = client.get(
@@ -8013,6 +8030,20 @@ class TestProjectRoutes:
         assert removed_project_route.status_code == 404
 
         self._link_run(client, session_id, project["id"], right_run_id)
+        default_pair = client.get(
+            self._project_compare_url(project["id"]),
+            headers={"X-Session-ID": session_id},
+        )
+        assert default_pair.status_code == 200
+        assert default_pair.get_json()["left_run_id"] == left_run_id
+        assert default_pair.get_json()["right_run_id"] == right_run_id
+        explicit_reversed = client.get(
+            self._project_compare_url(project["id"], left=right_run_id, right=left_run_id),
+            headers={"X-Session-ID": session_id},
+        )
+        assert explicit_reversed.status_code == 200
+        assert explicit_reversed.get_json()["left_run_id"] == right_run_id
+        assert explicit_reversed.get_json()["right_run_id"] == left_run_id
         same_run = client.get(
             self._project_compare_url(project["id"], left=left_run_id, right=left_run_id),
             headers={"X-Session-ID": session_id},
@@ -8056,7 +8087,12 @@ class TestProjectRoutes:
         payload = json.loads(resp.data)
         assert "findings" not in payload
         assert "artifacts" not in payload
-        assert payload["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert payload["objects"]["findings"] == {
+            "added": [],
+            "removed": [],
+            "changed": [],
+            "unchanged_count": 0,
+        }
         assert payload["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert len(payload["density_buckets"]) == 256
         assert payload["density_buckets"][0] == {
@@ -8150,7 +8186,12 @@ class TestProjectRoutes:
         assert capped["right"]["artifact_count"] == 1
         assert "findings" not in capped
         assert "artifacts" not in capped
-        assert capped["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert capped["objects"]["findings"] == {
+            "added": [],
+            "removed": [],
+            "changed": [],
+            "unchanged_count": 0,
+        }
         assert capped["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert capped["truncated"] == {
             "left": True,
@@ -8257,11 +8298,12 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     session_id,
                     "nmap darklab.sh",
+                    "2026-07-11T00:02:00+00:00",
                     json.dumps([
                         {
                             "text": "443/tcp open https",
@@ -8283,22 +8325,24 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     baseline_run_id,
                     session_id,
                     "nmap darklab.sh",
+                    "2026-07-11T00:01:00+00:00",
                     json.dumps([{"text": "80/tcp open http", "cls": "", "line_index": 0}]),
                     1,
                 ),
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     outside_run_id,
                     session_id,
                     "httpx https://outside.darklab.sh",
+                    "2026-07-11T00:00:00+00:00",
                     json.dumps([{"text": "outside project", "cls": "", "line_index": 0}]),
                     1,
                 ),
@@ -8651,7 +8695,8 @@ class TestProjectRoutes:
             self._project_compare_url(project["id"], left=run_id, baseline_label="baseline"),
             headers={"X-Session-ID": session_id},
         ).data)
-        assert baseline_comparison["right_run_id"] == baseline_run_id
+        assert baseline_comparison["left_run_id"] == baseline_run_id
+        assert baseline_comparison["right_run_id"] == run_id
         assert baseline_comparison["baseline_label"] == "baseline"
         invalid_project_findings = client.get(
             f"/projects/{project['id']}/findings?review_state=maybe",
@@ -12278,8 +12323,12 @@ class TestClientLogRoute:
                     "module_keys": ["DarklabProjectWorkspaceShell", "helper"],
                     "operation": "loadProjectWorkspace",
                     "route": "/projects",
+                    "left_run_id": "run-left-123",
+                    "right_run_id": "run-right-456",
                     "status": 404,
+                    "compare_request_error": True,
                     "expected_global": True,
+                    "url_path": "/history/compare?q=sensitive-search",
                     "raw_artifact_path": "/private/workspace/secret.txt",
                 },
             })
@@ -12303,8 +12352,11 @@ class TestClientLogRoute:
             "page": "index",
             "phase": "load",
             "route": "/projects",
+            "left_run_id": "run-left-123",
+            "right_run_id": "run-right-456",
             "src": "/static/build/shell-bootstrap.123456789abc.js?v=abc123",
             "status": 404,
+            "compare_request_error": True,
             "expected_global": True,
         }
         assert "secret" not in json.dumps(extra)
@@ -12405,7 +12457,7 @@ class TestConfigRoute:
         client = get_client()
         data = json.loads(client.get("/config").data)
         for key in (
-            "app_name", "project_readme", "prompt_username", "prompt_domain", "default_theme",
+            "app_name", "project_source", "prompt_username", "prompt_domain", "default_theme",
             "max_tabs", "max_output_lines", "high_volume_output_line_threshold",
             "high_volume_output_status_interval_lines", "evidence_package_max_mb",
             "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
@@ -12505,11 +12557,16 @@ class TestConfigRoute:
         assert data["prompt_username"] == "ops"
         assert data["prompt_domain"] == "darklab"
 
-    def test_project_readme_is_constant(self):
+    def test_project_source_is_constant(self):
         client = get_client()
-        with mock.patch("config.PROJECT_README", "https://example.invalid/README.md"):
+        assert config.PROJECT_SOURCE == (
+            f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{config.APP_VERSION}#darklab_shell"
+        )
+        with mock.patch("config.PROJECT_SOURCE", "https://example.invalid/source"):
             data = json.loads(client.get("/config").data)
-        assert data["project_readme"] == "https://example.invalid/README.md"
+            body = client.get("/").get_data(as_text=True)
+        assert data["project_source"] == "https://example.invalid/source"
+        assert body.count('href="https://example.invalid/source"') == 2
 
     def test_welcome_timing_reflects_cfg(self):
         client = get_client()
@@ -12984,6 +13041,10 @@ class TestDiagRoute:
         assert '/static/css/core/base.css?v=' not in body
         assert '/static/css/terminal_export.css?v=' not in body
         assert '/static/css/diag.css?v=' not in body
+        diag_css = (Path(__file__).resolve().parents[2] / "app/static/css/diag.css").read_text()
+        assert '"raw      raw      raw      raw"' in diag_css
+        assert '"raw       raw"' in diag_css
+        assert '.diag-section.s-raw-packets { grid-area: raw; }' in diag_css
 
     def test_response_has_expected_top_level_keys(self):
         client = self._allowed_client()
@@ -13144,10 +13205,96 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         emitted = set(data["config"].keys())
+        assert data["raw_packets"]["configured"] is False
+        assert data["raw_packets"]["active"] is False
+        assert data["raw_packets"]["reason"] == "disabled"
+        assert set(data["raw_packets"]["tools"]) == {"nmap", "naabu", "masscan"}
         missing_from_groups = emitted - grouped
         assert not missing_from_groups, (
             f"config keys not in any group (would be invisible on /diag): {missing_from_groups}"
         )
+
+        ready = {
+            "linux": True,
+            "cap_net_raw_bounded": True,
+            "no_new_privileges": False,
+            "restricted_cidr_firewall_ready": True,
+            "restricted_cidr_firewall_cidrs": (),
+            "tools": {
+                tool: {
+                    "binary_present": True,
+                    "file_cap_net_raw": True,
+                    "path": f"/usr/bin/{tool}",
+                }
+                for tool in ("nmap", "naabu", "masscan")
+            },
+        }
+        enabled_cfg = {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "raw_packet_scanning_enabled": True,
+        }
+        with (
+            mock.patch.dict("config.CFG", enabled_cfg),
+            mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=ready,
+            ),
+        ):
+            ready_data = json.loads(client.get("/diag?format=json").data)
+            ready_body = client.get("/diag").get_data(as_text=True)
+        assert ready_data["raw_packets"]["configured"] is True
+        assert ready_data["raw_packets"]["available"] is True
+        assert ready_data["raw_packets"]["active"] is True
+        assert ready_data["raw_packets"]["reason"] == "ready"
+        assert re.search(r'class="diag-ok">ready</span>', ready_body)
+        for tool in ("nmap", "naabu", "masscan"):
+            assert re.search(fr'class="diag-ok">{tool} ready</span>', ready_body)
+
+        restricted_cfg = {
+            **enabled_cfg,
+            "restricted_command_input_cidrs": ["192.0.2.0/24"],
+        }
+        restricted_ready = {
+            **ready,
+            "restricted_cidr_firewall_cidrs": ("192.0.2.0/24",),
+        }
+        with (
+            mock.patch.dict("config.CFG", restricted_cfg),
+            mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=restricted_ready,
+            ),
+        ):
+            mixed_data = json.loads(client.get("/diag?format=json").data)
+            mixed_body = client.get("/diag").get_data(as_text=True)
+        assert mixed_data["raw_packets"]["active"] is True
+        assert mixed_data["raw_packets"]["tools"]["nmap"]["reason"] == "ready"
+        for tool in ("naabu", "masscan"):
+            assert mixed_data["raw_packets"]["tools"][tool]["active"] is False
+            assert mixed_data["raw_packets"]["tools"][tool]["reason"] == (
+                "packet_socket_egress_policy_required"
+            )
+            assert re.search(
+                fr'class="diag-muted">{tool} packet socket egress policy required</span>',
+                mixed_body,
+            )
+
+        unavailable = {**ready, "cap_net_raw_bounded": False}
+        with (
+            mock.patch.dict("config.CFG", enabled_cfg),
+            mock.patch(
+                "services.commands.raw_packets._raw_packet_system_readiness",
+                return_value=unavailable,
+            ),
+        ):
+            unavailable_data = json.loads(client.get("/diag?format=json").data)
+            unavailable_body = client.get("/diag").get_data(as_text=True)
+        assert unavailable_data["raw_packets"]["configured"] is True
+        assert unavailable_data["raw_packets"]["available"] is False
+        assert unavailable_data["raw_packets"]["active"] is False
+        assert unavailable_data["raw_packets"]["reason"] == "cap_net_raw_not_bounded"
+        assert re.search(r'class="diag-fail">unavailable</span>', unavailable_body)
+        assert "cap net raw not bounded" in unavailable_body
 
     def test_html_response_renders_config_group_labels(self):
         client = self._allowed_client()
@@ -13157,6 +13304,7 @@ class TestDiagRoute:
             assert label in body, f"config group label '{label}' not rendered"
         assert "diag-config-group-label" in body
         assert "AI Assists" in body
+        assert "Raw-packet Scanning" in body
         assert "data-diag-ai-test-form" in body
 
     def test_ai_test_route_runs_prompt_and_rate_limits_repeats(self):
@@ -17413,7 +17561,9 @@ class TestWorkspaceRoutes:
             assert created_data["file"] == {"path": file_path, "size": 11}
             assert created_data["workspace"]["usage"]["bytes_used"] == 11
 
-            listed = json.loads(client.get("/workspace/files", headers={"X-Session-ID": session}).data)
+            listed_response = client.get("/workspace/files", headers={"X-Session-ID": session})
+            assert listed_response.headers["Cache-Control"] == "no-store"
+            listed = json.loads(listed_response.data)
             assert listed["files"][0]["path"] == file_path
             assert listed["limits"]["max_files"] == 10
 
@@ -18163,14 +18313,23 @@ class TestRunRoute:
         assert json.loads(resp.data) == {"error": "blocked"}
         popen.assert_not_called()
 
-    def test_brokered_run_starts_real_process_and_registers_active_run(self):
+    def test_brokered_run_starts_real_process_and_registers_active_run(self, caplog):
+        from blueprints import run as run_routes
+
         client = get_client()
         fake_proc = _RouteFakeProc(pid=8765)
         _CapturedThread.instances = []
+        caplog.set_level(logging.DEBUG, logger="shell")
+        private_value = "workflow-private-value.example"
+        raw_workflow_command = f"printf '%s\\n' {private_value}"
+        display_workflow_command = "printf '%s\\n' [redacted]"
 
         with mock.patch("blueprints.run.broker_available", return_value=True), \
              mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.rewrite_command", return_value=("ping darklab.sh", "rewritten")), \
+             mock.patch(
+                 "blueprints.run.rewrite_command",
+                 side_effect=lambda command, **_kwargs: (command, "rewritten"),
+             ), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
              mock.patch("blueprints.run.pid_register") as pid_register, \
@@ -18184,31 +18343,73 @@ class TestRunRoute:
                 json={"command": "ping darklab.sh", "tab_id": "tab-1"},
                 headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
             )
+            workflow_handlers = replace(
+                run_routes._run_start_handlers(),
+                workspace_notice_lines=lambda _validation: [
+                    f"[workspace] reading {private_value}",
+                    "[workspace] writing public.txt",
+                ],
+                workspace_artifacts_from_validation=lambda *_args: [
+                    {
+                        "workspace_path": private_value,
+                        "display_name": private_value,
+                        "kind": "input",
+                    },
+                    {
+                        "workspace_path": "public.txt",
+                        "display_name": "public.txt",
+                        "kind": "output",
+                    },
+                ],
+            )
+            workflow_started = run_routes._start_brokered_run_service(
+                original_command=raw_workflow_command,
+                display_command=display_workflow_command,
+                session_id="session-1",
+                client_ip="127.0.0.1",
+                handlers=workflow_handlers,
+                owner_client_id="client-workflow",
+                owner_tab_id="tab-workflow",
+                private_values=(private_value,),
+                thread_name_prefix="workflow-run",
+            )
 
         assert resp.status_code == 202
         assert json.loads(resp.data) == {
             "run_id": "run-real",
             "stream": "/runs/run-real/stream",
         }
-        launched = popen.call_args.args[0]
+        launched = popen.call_args_list[0].args[0]
         assert launched[:3] == ["/usr/bin/stdbuf", "-oL", "-eL"]
         assert launched[-2:] == ["-c", "ping darklab.sh"]
-        pid_register.assert_called_once_with("run-real", 8765)
-        active_register.assert_called_once()
-        assert active_register.call_args.args[:4] == (
+        workflow_launched = popen.call_args_list[1].args[0]
+        assert workflow_launched[-2:] == ["-c", raw_workflow_command]
+        assert pid_register.call_count == 2
+        assert active_register.call_count == 2
+        assert active_register.call_args_list[0].args[:4] == (
             "run-real",
             8765,
             "session-1",
             "ping darklab.sh",
         )
-        assert active_register.call_args.kwargs == {
+        assert active_register.call_args_list[0].kwargs == {
             "owner_client_id": "client-1",
             "owner_tab_id": "tab-1",
         }
-        publish.assert_called_once()
-        assert publish.call_args.args[:2] == ("run-real", "started")
-        assert publish.call_args.args[2]["run_id"] == "run-real"
-        assert len(_CapturedThread.instances) == 1
+        assert active_register.call_args_list[1].args[:4] == (
+            "run-real",
+            8765,
+            "session-1",
+            display_workflow_command,
+        )
+        assert active_register.call_args_list[1].kwargs == {
+            "owner_client_id": "client-workflow",
+            "owner_tab_id": "tab-workflow",
+        }
+        assert publish.call_count == 2
+        assert publish.call_args_list[0].args[:2] == ("run-real", "started")
+        assert publish.call_args_list[0].args[2]["run_id"] == "run-real"
+        assert len(_CapturedThread.instances) == 2
         thread = _CapturedThread.instances[0]
         assert thread.started is True
         assert thread.daemon is True
@@ -18218,6 +18419,21 @@ class TestRunRoute:
         assert thread.kwargs["session_id"] == "session-1"
         assert thread.kwargs["original_command"] == "ping darklab.sh"
         assert thread.kwargs["rewrite_notice"] == "rewritten"
+        workflow_thread = _CapturedThread.instances[1]
+        assert workflow_started.run_id == "run-real"
+        assert workflow_thread.started is True
+        assert workflow_thread.name == "workflow-run-run-real"
+        assert workflow_thread.kwargs["original_command"] == display_workflow_command
+        assert workflow_thread.kwargs["workspace_notices"] == [
+            "[workspace] writing public.txt",
+        ]
+        assert workflow_thread.kwargs["workspace_artifacts"] == [{
+            "workspace_path": "public.txt",
+            "display_name": "public.txt",
+            "kind": "output",
+        }]
+        assert private_value not in json.dumps(workflow_thread.kwargs, default=str)
+        assert private_value not in caplog.text
 
     def test_interactive_pty_start_persists_team_scope(self):
         client = get_client()
@@ -20587,10 +20803,11 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            resp = client.get(
-                f"/history/compare?left={left_id}&right={right_id}",
-                headers={"X-Session-ID": session},
-            )
+            with mock.patch.object(history_routes.log, "info") as compare_log:
+                resp = client.get(
+                    f"/history/compare?left={left_id}&right={right_id}",
+                    headers={"X-Session-ID": session},
+                )
             data = json.loads(resp.data)
 
             assert resp.status_code == 200
@@ -20605,6 +20822,14 @@ class TestHistoryRoute:
             ]
             assert "left preview" in hunk_texts
             assert "right preview" in hunk_texts
+            viewed_event = next(
+                call for call in compare_log.call_args_list
+                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+            ).kwargs["extra"]
+            assert viewed_event["left_output_source"] == "preview"
+            assert viewed_event["right_output_source"] == "preview"
+            assert viewed_event["output_truncated"] is True
+            assert viewed_event["comparison_partial"] is True
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (left_id,))
@@ -21118,10 +21343,11 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            resp = client.get(
-                "/history/compare?left=cmp-left&right=cmp-right",
-                headers={"X-Session-ID": session},
-            )
+            with mock.patch.object(history_routes.log, "info") as compare_log:
+                resp = client.get(
+                    "/history/compare?left=cmp-left&right=cmp-right",
+                    headers={"X-Session-ID": session},
+                )
             data = json.loads(resp.data)
 
             assert resp.status_code == 200
@@ -21200,6 +21426,31 @@ class TestHistoryRoute:
             assert port_group["removed"][0]["key"] == "8080/tcp"
             assert port_group["removed"][0]["compare_line_index"] == 2
             assert port_group["removed"][0]["compare_side"] == "left"
+            viewed_call = next(
+                call for call in compare_log.call_args_list
+                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+            )
+            viewed_extra = viewed_call.kwargs["extra"]
+            assert viewed_extra == {
+                "owner_scope": "personal",
+                "project_scoped": False,
+                "left_run_id": "cmp-left",
+                "right_run_id": "cmp-right",
+                "duration_ms": viewed_extra["duration_ms"],
+                "left_output_source": "preview",
+                "right_output_source": "preview",
+                "findings_added": 1,
+                "findings_removed": 1,
+                "findings_changed": 0,
+                "derived_group_ids": "nmap_ports",
+                "output_truncated": False,
+                "changed_lines_truncated": False,
+                "findings_truncated": False,
+                "artifacts_truncated": False,
+                "derived_truncated": False,
+                "comparison_partial": False,
+            }
+            assert viewed_extra["duration_ms"] >= 0
 
             web_resp = client.get(
                 "/history/compare?left=cmp-web-left&right=cmp-web-right",
@@ -21227,7 +21478,10 @@ class TestHistoryRoute:
             assert web_data["objects"]["entities"]["added"][0]["canonical_value"] == "https://darklab.sh/admin"
             assert web_data["objects"]["entities"]["removed"][0]["canonical_value"] == "https://darklab.sh/login"
 
-            with mock.patch("services.runs.comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
+            with (
+                mock.patch("services.runs.comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0),
+                mock.patch.object(history_routes.log, "info") as capped_log,
+            ):
                 capped_resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
                     headers={"X-Session-ID": session},
@@ -21238,11 +21492,23 @@ class TestHistoryRoute:
             assert capped["right"]["persisted_finding_count"] == 1
             assert capped["left"]["artifact_count"] == 1
             assert capped["right"]["artifact_count"] == 1
-            assert capped["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+            assert capped["objects"]["findings"] == {
+                "added": [],
+                "removed": [],
+                "changed": [],
+                "unchanged_count": 0,
+            }
             assert capped["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
             assert capped["truncated"]["findings"] == {"left": True, "right": True}
             assert capped["truncated"]["artifacts"] == {"left": True, "right": True}
             assert capped["truncated"]["item_limit"] == 0
+            capped_event = next(
+                call for call in capped_log.call_args_list
+                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+            ).kwargs["extra"]
+            assert capped_event["findings_truncated"] is True
+            assert capped_event["artifacts_truncated"] is True
+            assert capped_event["comparison_partial"] is True
 
             with mock.patch("services.runs.comparison.COMPARE_MAX_CHANGED_LINES", 2):
                 line_limited_resp = client.get(
@@ -21322,6 +21588,7 @@ class TestHistoryRoute:
             assert identical_payload["objects"]["findings"] == {
                 "added": [],
                 "removed": [],
+                "changed": [],
                 "unchanged_count": 0,
             }
             assert identical_payload["objects"]["artifacts"] == {

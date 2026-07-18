@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 services:
   redis:
     image: redis:8-alpine
@@ -81,7 +84,7 @@ services:
       context: .
       args:
         APP_PORT: ${APP_PORT:-8888}
-        APP_VERSION: ${APP_VERSION:-2.5.0}
+        APP_VERSION: ${APP_VERSION:-2.6.0}
         VCS_REF: ${GIT_SHA:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     container_name: darklab_shell
@@ -133,13 +136,18 @@ services:
       - AI_FEATURE_SUMMARY=${AI_FEATURE_SUMMARY:-false}
       - AI_FEATURE_NEXT_COMMANDS=${AI_FEATURE_NEXT_COMMANDS:-false}
       - AI_FEATURE_RUN_SUGGESTIONS=${AI_FEATURE_RUN_SUGGESTIONS:-false}
-      # The entrypoint uses this path to normalize workspace permissions before
-      # dropping privileges. The app also treats WORKSPACE_ROOT as the runtime
-      # workspace_root override, so Compose deployments only need this setting.
+      # Compose operators can configure the complete Files storage contract in
+      # .env. The entrypoint also prepares WORKSPACE_ROOT before dropping privileges.
+      - WORKSPACE_ENABLED=${WORKSPACE_ENABLED:-false}
+      - WORKSPACE_BACKEND=${WORKSPACE_BACKEND:-tmpfs}
       - WORKSPACE_ROOT=${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}
+      - INTERACTIVE_PTY_ENABLED=${INTERACTIVE_PTY_ENABLED:-false}
       # Comma-separated CIDRs that command validation rejects and the scanner
       # user cannot reach at the container OUTPUT layer.
       - RESTRICTED_COMMAND_INPUT_CIDRS=${RESTRICTED_COMMAND_INPUT_CIDRS:-}
+      # Opt-in only. Runtime readiness still requires the container capability
+      # bounding set and scanner binary file capabilities to be intact.
+      - RAW_PACKET_SCANNING_ENABLED=${RAW_PACKET_SCANNING_ENABLED:-false}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s

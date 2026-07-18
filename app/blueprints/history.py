@@ -1,9 +1,13 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 History and share routes: run history, single-run permalinks, snapshot permalinks.
 """
 
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -18,14 +22,18 @@ from core.helpers import (
     get_session_id,
 )
 from services.history.permalinks import _format_duration, _permalink_error_page, _permalink_page
+from blueprints.history_compare_requests import resolve_compare_request as _resolve_compare_request
+from services.history.comparison_queries import (
+    compare_candidate_rows,
+    compare_persisted_objects,
+    compare_run_rows,
+)
+from services.history.comparison_logging import log_run_comparison_viewed
 from services.history.queries import (
     bulk_delete_runs,
     bulk_delete_snapshots,
     bulk_export_rows,
     clear_history_runs,
-    compare_candidate_rows,
-    compare_persisted_objects,
-    compare_run_rows,
     delete_history_run,
     delete_snapshot,
     history_insights,
@@ -56,12 +64,10 @@ from services.ai.assists import (
     enqueue_summary_assist,
     list_run_assists,
 )
-from services.projects.comparisons import compare_project_runs
 from services.projects.contracts import (
     BULK_AUDIT_FAILURE_LIMIT,
     MAX_BULK_RUN_ACTION_ITEMS,
     MAX_ENTITY_ID_LEN,
-    ProjectWorkspaceError,
 )
 from core.redaction import line_entries_from_events, omit_raw_only_line_entries, redact_line_entries
 from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
@@ -216,28 +222,6 @@ def _run_output_structured_summary(events):
                 "text": event.text[:160],
             })
     return summary
-
-
-def _resolve_compare_request(session_id, left_id, right_id, project_id="", baseline_label=""):
-    project_comparison = None
-    if project_id:
-        try:
-            project_comparison = compare_project_runs(session_id, project_id, {
-                "left_run_id": left_id,
-                "right_run_id": right_id,
-                "baseline_label": baseline_label,
-            })
-        except ProjectWorkspaceError as exc:
-            return "", "", None, (jsonify({"error": str(exc)}), 400)
-        if project_comparison is None:
-            return "", "", None, (jsonify({"error": "project not found"}), 404)
-        left_id = str(project_comparison.get("left_run_id") or "")
-        right_id = str(project_comparison.get("right_run_id") or "")
-    if not left_id or not right_id:
-        return "", "", None, (jsonify({"error": "left and right run ids are required"}), 400)
-    if left_id == right_id:
-        return "", "", None, (jsonify({"error": "Choose two different runs to compare"}), 400)
-    return left_id, right_id, project_comparison, None
 
 
 def _parse_compare_range_value(name):
@@ -427,8 +411,12 @@ def get_active_history_runs():
 def get_run_compare_candidates(run_id):
     """Return ranked previous runs that are plausible comparisons for a run."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        return _scope_error_response(exc)
     limit = _parse_history_int(request.args.get("limit"), 5, maximum=20)
-    source, rows = compare_candidate_rows(session_id, run_id)
+    source, rows = compare_candidate_rows(owner_scope, run_id)
     if not source:
         return jsonify({"error": "Run not found"}), 404
 
@@ -449,13 +437,18 @@ def get_run_compare_candidates(run_id):
 @history_bp.route("/history/compare")
 def compare_history_runs():
     """Compare two completed runs from the current session."""
+    comparison_started = time.perf_counter()
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        return _scope_error_response(exc)
     project_id = _normalize_history_filter_text(request.args.get("project_id"))
     baseline_label = _normalize_history_filter_text(request.args.get("baseline_label"))
     left_id = _normalize_history_filter_text(request.args.get("left") or request.args.get("left_run_id"))
     right_id = _normalize_history_filter_text(request.args.get("right") or request.args.get("right_run_id"))
     left_id, right_id, project_comparison, error = _resolve_compare_request(
-        session_id,
+        owner_scope,
         left_id,
         right_id,
         project_id,
@@ -464,7 +457,7 @@ def compare_history_runs():
     if error:
         return error
 
-    left_run, right_run = compare_run_rows(session_id, left_id, right_id)
+    left_run, right_run = compare_run_rows(owner_scope, left_id, right_id)
     if not left_run or not right_run:
         return jsonify({"error": "Run not found"}), 404
 
@@ -488,7 +481,7 @@ def compare_history_runs():
         left_artifact_count = int(project_comparison.get("left", {}).get("artifact_count") or 0)
         right_artifact_count = int(project_comparison.get("right", {}).get("artifact_count") or 0)
     else:
-        compare_objects = compare_persisted_objects(session_id, left_id, right_id)
+        compare_objects = compare_persisted_objects(owner_scope, left_id, right_id)
         finding_objects = compare_objects["finding_objects"]
         artifact_objects = compare_objects["artifact_objects"]
         left_persisted_finding_count = compare_objects["left_persisted_finding_count"]
@@ -558,6 +551,11 @@ def compare_history_runs():
     if project_comparison:
         payload["project_id"] = project_id
         payload["baseline_label"] = project_comparison.get("baseline_label", baseline_label)
+    log_run_comparison_viewed(
+        owner_scope=owner_scope, project_id=project_id, left_run_id=left_id, right_run_id=right_id,
+        left_output=left_output, right_output=right_output, finding_objects=finding_objects,
+        derived_changes=payload["derived_changes"], truncated=truncated, started_at=comparison_started,
+    )
     return jsonify(payload)
 
 
@@ -565,6 +563,10 @@ def compare_history_runs():
 def compare_history_lines():
     """Return a bounded filtered-output slice for lazy compare hunk expansion."""
     session_id = get_session_id()
+    try:
+        owner_scope = current_request_scope(session_id, request)
+    except RequestScopeError as exc:
+        return _scope_error_response(exc)
     project_id = _normalize_history_filter_text(request.args.get("project_id"))
     baseline_label = _normalize_history_filter_text(request.args.get("baseline_label"))
     left_id = _normalize_history_filter_text(request.args.get("left") or request.args.get("left_run_id"))
@@ -578,7 +580,7 @@ def compare_history_lines():
         return jsonify({"error": "start and end must define a valid range"}), 400
 
     left_id, right_id, _, error = _resolve_compare_request(
-        session_id,
+        owner_scope,
         left_id,
         right_id,
         project_id,
@@ -586,7 +588,7 @@ def compare_history_lines():
     )
     if error:
         return error
-    left_run, right_run = compare_run_rows(session_id, left_id, right_id)
+    left_run, right_run = compare_run_rows(owner_scope, left_id, right_id)
     if not left_run or not right_run:
         return jsonify({"error": "Run not found"}), 404
     selected_run = left_run if side == "a" else right_run
@@ -773,6 +775,7 @@ def get_run(run_id):
     notes_by_run = run_metadata["notes_by_run"]
     scheduled_by_run = run_metadata["scheduled_by_run"]
     if not include_private_metadata:
+        run.update({"workflow_execution": None, "workflow_execution_id": "", "workflow_step_id": ""})
         run["output_entries"] = line_entries_from_events(omit_raw_only_line_entries(run["output_entries"]))
         run["output"] = [
             str(entry.get("text", "")) if isinstance(entry, dict) else str(entry)

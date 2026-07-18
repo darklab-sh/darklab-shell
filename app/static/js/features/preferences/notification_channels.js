@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Options modal outbound-notification channel management.
 import { showToast as importedShowToast } from '../../core/utils.js';
 import { apiFetch as importedApiFetch } from '../../session.js';

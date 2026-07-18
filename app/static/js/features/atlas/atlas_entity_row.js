@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Shared Atlas entity row renderer used by Atlas and Project entity lists.
 
 function text(value, fallback = '') {
@@ -98,7 +101,7 @@ function renderAtlasEntityRow({
   const entityId = String(entity && entity.id || '');
   const valueText = textFn(entity && entity.canonical_value, entityId);
   const row = document.createElement('div');
-  row.className = `chrome-row chrome-row-clickable atlas-entity-row${mobile ? ' atlas-mobile-row' : ''}`;
+  row.className = `chrome-row chrome-row-clickable selection-row atlas-entity-row${mobile ? ' atlas-mobile-row' : ''}`;
   row.classList.toggle('is-selecting', !!selecting);
   row.classList.toggle('is-selected', !!selected);
   row.classList.toggle('is-suppressed', !!(entity && entity.suppressed));
@@ -107,6 +110,7 @@ function renderAtlasEntityRow({
   row.tabIndex = 0;
   row.setAttribute('role', selectMode ? 'checkbox' : 'button');
   if (selectMode) row.setAttribute('aria-checked', String(!!selected));
+  if (!selectMode && selected) row.setAttribute('aria-current', 'true');
   row.setAttribute('aria-label', `Open ${valueText || entityId}`);
 
   if (typeof appendSelectionControl === 'function') {
@@ -166,7 +170,7 @@ function renderProjectEntityRow({
   bindPressable = null,
 }) {
   const row = document.createElement('article');
-  row.className = 'project-explorer-item panel-row project-entity-row';
+  row.className = 'project-explorer-item panel-row selection-row project-entity-row';
   row.classList.toggle('is-selected', !!selected);
   if (checkbox) row.appendChild(checkbox);
 

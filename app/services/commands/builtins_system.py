@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Small system-style built-in command handlers."""
 
 from __future__ import annotations
@@ -7,7 +10,7 @@ from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as package_version
 import sys
 
-from config import APP_VERSION, PROJECT_README, resolve_effective_cfg
+from config import APP_VERSION, PROJECT_SOURCE, resolve_effective_cfg
 from services.commands.builtins_format import (
     ansi_underline as _ansi_underline,
     format_duration as _format_duration,
@@ -53,7 +56,7 @@ def run_builtin_whoami() -> list[dict[str, object]]:
         _output_line(_app_name(), "builtin-identity"),
         _output_line("A web terminal for remote diagnostics and security tooling against allowed commands.", "builtin-plain"),
         _output_line("", "builtin-spacer"),
-        _output_line(f"README: see the project README at {PROJECT_README}", "builtin-note"),
+        _output_line(f"README: see the project README at {PROJECT_SOURCE}", "builtin-note"),
     ]
 
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Session Entity Atlas overlay controller.
 import { downloadBlobAsAttachment as importedDownloadBlobAsAttachment, showToast as importedShowToast } from '../../core/utils.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
@@ -1727,15 +1730,14 @@ let exportedCycleAtlasTab = null;
 
   function findingRow(finding) {
     const row = document.createElement('div');
-    row.className = 'chrome-row chrome-row-clickable atlas-finding-queue-row';
+    row.className = 'chrome-row chrome-row-clickable selection-row atlas-finding-queue-row';
     row.classList.toggle('is-suppressed', !!finding.suppressed);
     row.classList.toggle('is-selecting', state.selectMode);
-    row.classList.toggle(
-      'is-selected',
-      state.selectMode
-        ? state.selectedFindingIds.has(String(finding.id || ''))
-        : finding.id === state.selectedFindingId,
-    );
+    const selected = state.selectMode
+      ? state.selectedFindingIds.has(String(finding.id || ''))
+      : finding.id === state.selectedFindingId;
+    row.classList.toggle('is-selected', selected);
+    if (!state.selectMode && selected) row.setAttribute('aria-current', 'true');
     row.classList.toggle('has-row-action', !state.selectMode);
     row.dataset.findingId = finding.id;
 

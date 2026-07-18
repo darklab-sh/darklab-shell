@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project Findings board view controller.
 // Loaded before shell_chrome.js; shell chrome supplies shared findings actions.
 

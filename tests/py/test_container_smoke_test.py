@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Opt-in regression for the built Docker image.
 
@@ -14,6 +17,7 @@ Run with:
 
 from __future__ import annotations
 
+import copy
 import json
 import hashlib
 import os
@@ -28,7 +32,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 from urllib.error import HTTPError
 
 import pytest
@@ -67,6 +71,29 @@ SMOKE_IMAGE_CACHE_KEY_LABEL = "org.darklab.shell.container-smoke.cache-key"
 
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
+
+
+class _ContainerSmokeEnvironment(str):
+    restricted_url: str
+    raw_target_ip: str
+    allowed_target_ip: str
+    compose: list[str]
+
+    def __new__(
+        cls,
+        base_url: str,
+        *,
+        restricted_url: str,
+        raw_target_ip: str,
+        allowed_target_ip: str,
+        compose: list[str],
+    ):
+        instance = str.__new__(cls, base_url)
+        instance.restricted_url = restricted_url
+        instance.raw_target_ip = raw_target_ip
+        instance.allowed_target_ip = allowed_target_ip
+        instance.compose = compose
+        return instance
 
 
 def _new_smoke_session_id() -> str:
@@ -149,13 +176,15 @@ def _hash_smoke_build_input(hasher: Any, path: Path) -> None:
 
 def _smoke_image_cache_key(build_context: Path, dockerfile_path: Path) -> str:
     hasher = hashlib.sha256()
-    hasher.update(b"container-smoke-cache-v1\0")
+    hasher.update(b"container-smoke-cache-v2\0")
     for path in (
         dockerfile_path,
-        build_context / "app" / "requirements.txt",
         build_context / "entrypoint.sh",
     ):
         _hash_smoke_build_input(hasher, path)
+    for path in sorted((build_context / "app").rglob("*")):
+        if path.is_file() and ".local." not in path.name:
+            _hash_smoke_build_input(hasher, path)
     return hasher.hexdigest()
 
 
@@ -536,10 +565,12 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     app_dir.mkdir()
     dockerfile = tmp_path / "Dockerfile"
     requirements = app_dir / "requirements.txt"
+    app_source = app_dir / "app.py"
     entrypoint = tmp_path / "entrypoint.sh"
 
     dockerfile.write_text("FROM python:3.14-slim\n", encoding="utf-8")
     requirements.write_text("flask==3.1.2\n", encoding="utf-8")
+    app_source.write_text("APP_VERSION = '1.0.0'\n", encoding="utf-8")
     entrypoint.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
 
     original_key = _smoke_image_cache_key(tmp_path, dockerfile)
@@ -552,8 +583,12 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     dockerfile_key = _smoke_image_cache_key(tmp_path, dockerfile)
     assert dockerfile_key != requirements_key
 
+    app_source.write_text("APP_VERSION = '1.0.1'\n", encoding="utf-8")
+    app_source_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert app_source_key != dockerfile_key
+
     entrypoint.write_text("#!/usr/bin/env sh\nexec \"$@\"\n", encoding="utf-8")
-    assert _smoke_image_cache_key(tmp_path, dockerfile) != dockerfile_key
+    assert _smoke_image_cache_key(tmp_path, dockerfile) != app_source_key
 
 
 def test_smoke_image_cache_status_requires_matching_label(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -857,6 +892,29 @@ def _json_request(
     except HTTPError as exc:
         body = exc.read().decode("utf-8")
         return exc.code, json.loads(body) if body else {}
+
+
+def _wait_for_workflow_execution(
+    base_url: str,
+    session_id: str,
+    execution_id: str,
+    *,
+    timeout: int = 30,
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout
+    last_payload: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        status, payload = _json_request(
+            f"{base_url}/workflow-executions/{execution_id}",
+            session_id=session_id,
+        )
+        assert status == 200, f"workflow status failed with HTTP {status}: {payload}"
+        last_payload = payload
+        execution = payload.get("execution")
+        if isinstance(execution, dict) and execution.get("status") in {"completed", "failed", "canceled"}:
+            return execution
+        time.sleep(0.1)
+    raise AssertionError(f"workflow execution did not finish within {timeout}s: {last_payload}")
 
 
 def _workspace_payload_or_skip(base_url: str, session_id: str) -> dict[str, object]:
@@ -1188,7 +1246,9 @@ def container_smoke_test():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
 
-        config_local = tmp_path / "config.local.yaml"
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        config_local = config_dir / "config.local.yaml"
         config_local.write_text(
             "rate_limit_enabled: false\n"
             "rate_limit_per_minute: 10000\n"
@@ -1238,6 +1298,41 @@ def container_smoke_test():
         if "/data" not in tmpfs_mounts:
             tmpfs_mounts.append("/data")
         shell["tmpfs"] = tmpfs_mounts
+        shell["environment"] = [
+            "RAW_PACKET_SCANNING_ENABLED=true"
+            if str(item).startswith("RAW_PACKET_SCANNING_ENABLED=")
+            else item
+            for item in shell.get("environment", [])
+        ]
+        shell["environment"].append("APP_LOCAL_CONF_DIR=/config")
+        compose_cfg["services"]["raw-target"] = {
+            "image": runtime_image_tag,
+            "entrypoint": ["python", "-m", "http.server", "8888", "--bind", "0.0.0.0"],
+            "read_only": True,
+            "tmpfs": ["/tmp"],
+            "healthcheck": {
+                "test": ["CMD", "curl", "-f", "http://localhost:8888/"],
+                "interval": "1s",
+                "timeout": "2s",
+                "retries": 30,
+            },
+        }
+        compose_cfg["services"]["allowed-target"] = copy.deepcopy(
+            compose_cfg["services"]["raw-target"]
+        )
+        shell.setdefault("depends_on", {})["raw-target"] = {"condition": "service_healthy"}
+        restricted_shell = copy.deepcopy(shell)
+        restricted_shell["ports"] = ["8888"]
+        restricted_shell.setdefault("depends_on", {})["allowed-target"] = {
+            "condition": "service_healthy"
+        }
+        restricted_shell["environment"] = [
+            "RESTRICTED_COMMAND_INPUT_CIDRS=198.18.0.1/32"
+            if str(item).startswith("RESTRICTED_COMMAND_INPUT_CIDRS=")
+            else item
+            for item in restricted_shell.get("environment", [])
+        ]
+        compose_cfg["services"]["restricted-shell"] = restricted_shell
 
         compose_file = tmp_path / "docker-compose.yml"
         compose_file.write_text(yaml.dump(compose_cfg))
@@ -1271,11 +1366,7 @@ def container_smoke_test():
                 print(f"[container-smoke-test] building runtime image: {runtime_image_tag}", flush=True)
                 _run(["docker", "create", "--name", runtime_container_name, image_tag], timeout=30)
                 _run(
-                    ["docker", "cp", f"{ROOT / 'app'}/.", f"{runtime_container_name}:/app"],
-                    timeout=120,
-                )
-                _run(
-                    ["docker", "cp", str(config_local), f"{runtime_container_name}:/app/conf/config.local.yaml"],
+                    ["docker", "cp", str(config_dir), f"{runtime_container_name}:/config"],
                     timeout=30,
                 )
                 _run(
@@ -1283,16 +1374,73 @@ def container_smoke_test():
                     timeout=DEFAULT_BUILD_TIMEOUT,
                 )
                 print(f"[container-smoke-test] starting services: {project}", flush=True)
-                _run(compose + ["up", "-d"], timeout=120)
+                _run(
+                    compose + ["up", "-d", "shell", "raw-target", "allowed-target", "redis"],
+                    timeout=120,
+                )
+
+                raw_target_container = _run(
+                    compose + ["ps", "-q", "raw-target"],
+                    timeout=30,
+                ).stdout.strip()
+                assert raw_target_container, "raw-target container id was not available"
+                raw_target_ip = _run(
+                    [
+                        "docker",
+                        "inspect",
+                        "--format",
+                        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                        raw_target_container,
+                    ],
+                    timeout=30,
+                ).stdout.strip()
+                assert raw_target_ip, "raw-target container address was not available"
+                allowed_target_container = _run(
+                    compose + ["ps", "-q", "allowed-target"],
+                    timeout=30,
+                ).stdout.strip()
+                assert allowed_target_container, "allowed-target container id was not available"
+                allowed_target_ip = _run(
+                    [
+                        "docker",
+                        "inspect",
+                        "--format",
+                        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                        allowed_target_container,
+                    ],
+                    timeout=30,
+                ).stdout.strip()
+                assert allowed_target_ip, "allowed-target container address was not available"
+                restricted_shell["environment"] = [
+                    f"RESTRICTED_COMMAND_INPUT_CIDRS={raw_target_ip}/32"
+                    if str(item).startswith("RESTRICTED_COMMAND_INPUT_CIDRS=")
+                    else item
+                    for item in restricted_shell.get("environment", [])
+                ]
+                compose_file.write_text(yaml.dump(compose_cfg))
+                _run(compose + ["up", "-d", "restricted-shell"], timeout=120)
 
                 host_port = _published_host_port(compose, "shell", 8888)
                 base_url = f"http://{reach_host}:{host_port}"
+                restricted_host_port = _published_host_port(compose, "restricted-shell", 8888)
+                restricted_url = f"http://{reach_host}:{restricted_host_port}"
                 print(f"[container-smoke-test] waiting for health check: {base_url}", flush=True)
                 _wait_for_health(base_url)
+                print(
+                    f"[container-smoke-test] waiting for restricted health check: {restricted_url}",
+                    flush=True,
+                )
+                _wait_for_health(restricted_url)
                 print(f"[container-smoke-test] container ready: {base_url}", flush=True)
             except AssertionError as exc:
                 pytest.exit(f"container setup failed — {exc}", returncode=1)
-            yield base_url
+            yield _ContainerSmokeEnvironment(
+                base_url,
+                restricted_url=restricted_url,
+                raw_target_ip=raw_target_ip,
+                allowed_target_ip=allowed_target_ip,
+                compose=compose,
+            )
         finally:
             logs = subprocess.run(compose + ["logs", "--no-color"], cwd=ROOT, capture_output=True, text=True)
             if logs.stdout.strip():
@@ -1375,6 +1523,245 @@ def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_
 
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
+
+
+def test_container_smoke_test_workflow_capture_feeds_linked_run(container_smoke_test):
+    session_id = _new_smoke_session_id()
+    definition = {
+        "version": 2,
+        "id": "container_capture",
+        "title": "Container capture",
+        "inputs": [{
+            "id": "service",
+            "label": "Service",
+            "type": "host",
+            "required": True,
+        }],
+        "steps": [
+            {
+                "id": "read_status",
+                "cmd": "curl -sS -I http://{{service}}:8888/",
+                "captures": [{
+                    "name": "status_line",
+                    "source": "first_nonempty_line",
+                    "required": True,
+                }],
+                "next": {"success": "send_status", "failure": "stop"},
+            },
+            {
+                "id": "send_status",
+                "cmd": "curl -sS -I -A {{status_line}} http://{{service}}:8888/",
+                "next": {"success": "complete", "failure": "stop"},
+            },
+        ],
+    }
+    created_status, created_payload = _json_request(
+        f"{container_smoke_test}/session/workflows",
+        session_id=session_id,
+        method="POST",
+        payload=definition,
+    )
+    assert created_status == 201, created_payload
+    workflow = cast(dict[str, Any], created_payload["workflow"])
+    started_status, started_payload = _json_request(
+        f"{container_smoke_test}/workflow-executions",
+        session_id=session_id,
+        method="POST",
+        payload={"workflow_id": workflow["id"], "inputs": {"service": "allowed-target"}},
+    )
+    assert started_status == 202, started_payload
+    started_execution = cast(dict[str, Any], started_payload["execution"])
+    execution_id = str(started_execution["id"])
+    execution = cast(
+        dict[str, Any],
+        _wait_for_workflow_execution(container_smoke_test, session_id, execution_id),
+    )
+
+    assert execution["status"] == "completed", execution
+    variables = cast(dict[str, Any], execution["variables"])
+    assert str(variables["status_line"]).startswith("HTTP/")
+    steps = cast(list[dict[str, Any]], execution["steps"])
+    assert [step["status"] for step in steps] == ["succeeded", "succeeded"]
+    assert steps[0]["capture_names"] == ["status_line"]
+    run_ids = [str(step["run_id"]) for step in steps]
+    assert all(run_ids)
+    for step_id, run_id in zip(("read_status", "send_status"), run_ids, strict=True):
+        history_status, history = _json_request(
+            f"{container_smoke_test}/history/{run_id}?json=1",
+            session_id=session_id,
+        )
+        assert history_status == 200, history
+        assert history["workflow_execution_id"] == execution_id
+        assert history["workflow_step_id"] == step_id
+        workflow_execution = cast(dict[str, Any], history["workflow_execution"])
+        execution_steps = cast(list[dict[str, Any]], workflow_execution["steps"])
+        assert [item["run_id"] for item in execution_steps] == run_ids
+
+
+def test_container_smoke_test_raw_syn_scan_reaches_remote_app_port(container_smoke_test):
+    command = "nmap -sS -Pn -p 6379,8888 --reason --packet-trace raw-target redis"
+    events, killed_early = _post_run(
+        container_smoke_test,
+        command,
+        _new_smoke_session_id(),
+        timeout=60,
+        stop_text=None,
+        stop_patterns=None,
+    )
+    visible = "\n".join(_collect_visible_lines(events, command))
+    exit_events = [event for event in events if event.get("type") == "exit"]
+
+    assert not killed_early
+    assert exit_events and exit_events[0].get("code") == 0
+    assert "SENT" in visible
+    assert "RCVD" in visible
+    assert "6379/tcp open" in visible
+    assert "8888/tcp open" in visible
+    assert "syn-ack" in visible
+    assert "Operation not permitted" not in visible
+    assert "Omitting future Sendto error messages" not in visible
+
+    local_command = "curl --max-time 2 http://shell:8888/health"
+    local_events, local_killed_early = _post_run(
+        container_smoke_test,
+        local_command,
+        _new_smoke_session_id(),
+        timeout=10,
+        stop_text=None,
+        stop_patterns=None,
+    )
+    local_visible = "\n".join(_collect_visible_lines(local_events, local_command))
+    local_exit_events = [event for event in local_events if event.get("type") == "exit"]
+    assert not local_killed_early
+    assert local_exit_events and local_exit_events[0].get("code") != 0
+    assert any(
+        message in local_visible
+        for message in ("Connection reset", "Failed to connect", "Could not connect")
+    )
+
+    local_raw_command = "nmap -sS -Pn --send-ip -p 8888 --reason --packet-trace shell"
+    local_raw_events, local_raw_killed_early = _post_run(
+        container_smoke_test,
+        local_raw_command,
+        _new_smoke_session_id(),
+        timeout=30,
+        stop_text=None,
+        stop_patterns=None,
+    )
+    local_raw_visible = "\n".join(_collect_visible_lines(local_raw_events, local_raw_command))
+    local_raw_exit_events = [event for event in local_raw_events if event.get("type") == "exit"]
+    assert not local_raw_killed_early
+    assert local_raw_exit_events and local_raw_exit_events[0].get("code") == 0
+    assert "8888/tcp open" not in local_raw_visible
+    assert "syn-ack" not in local_raw_visible
+
+    blocked_status, blocked_payload = _json_request(
+        f"{container_smoke_test}/runs",
+        session_id=_new_smoke_session_id(),
+        method="POST",
+        payload={"command": "nmap -sS -Pn --send-eth -p 8888 shell"},
+    )
+    assert blocked_status == 403
+    assert "link-layer sending bypasses" in json.dumps(blocked_payload)
+
+
+def test_container_smoke_test_raw_naabu_and_masscan_find_test_owned_port(container_smoke_test):
+    scanner_commands = (
+        (
+            f"naabu -host {container_smoke_test.raw_target_ip} -p 8888 -silent",
+            ("8888",),
+        ),
+        (
+            f"masscan -p 8888 --rate 100 {container_smoke_test.raw_target_ip}",
+            ("Discovered open port 8888/tcp", container_smoke_test.raw_target_ip),
+        ),
+    )
+    for command, expected_output in scanner_commands:
+        events, killed_early = _post_run(
+            container_smoke_test,
+            command,
+            _new_smoke_session_id(),
+            timeout=60,
+            stop_text=None,
+            stop_patterns=None,
+        )
+        visible = "\n".join(_collect_visible_lines(events, command))
+        exit_events = [event for event in events if event.get("type") == "exit"]
+        assert not killed_early, command
+        assert exit_events and exit_events[0].get("code") == 0, (command, visible)
+        assert all(expected in visible for expected in expected_output), (command, visible)
+        assert "Operation not permitted" not in visible
+        assert "permission denied" not in visible.lower()
+
+
+def test_container_smoke_test_restricted_hostname_raw_traffic_is_blocked(container_smoke_test):
+    restricted_session = _new_smoke_session_id()
+    restricted_command = "nmap -sS -Pn -p 8888 --reason --packet-trace raw-target"
+    restricted_events, restricted_killed_early = _post_run(
+        container_smoke_test.restricted_url,
+        restricted_command,
+        restricted_session,
+        timeout=30,
+        stop_text=None,
+        stop_patterns=None,
+    )
+    restricted_visible = "\n".join(_collect_visible_lines(restricted_events, restricted_command))
+    restricted_exit_events = [event for event in restricted_events if event.get("type") == "exit"]
+    assert not restricted_killed_early
+    assert restricted_exit_events and restricted_exit_events[0].get("code") == 0
+    assert "8888/tcp open" not in restricted_visible
+    assert "syn-ack" not in restricted_visible
+
+    allowed_command = "nmap -sS -Pn -p 8888 --reason --packet-trace allowed-target"
+    allowed_events, allowed_killed_early = _post_run(
+        container_smoke_test.restricted_url,
+        allowed_command,
+        _new_smoke_session_id(),
+        timeout=30,
+        stop_text=None,
+        stop_patterns=None,
+    )
+    allowed_visible = "\n".join(_collect_visible_lines(allowed_events, allowed_command))
+    allowed_exit_events = [event for event in allowed_events if event.get("type") == "exit"]
+    assert not allowed_killed_early
+    assert allowed_exit_events and allowed_exit_events[0].get("code") == 0
+    assert "8888/tcp open" in allowed_visible
+    assert "syn-ack" in allowed_visible
+
+    naabu_session = _new_smoke_session_id()
+    naabu_command = (
+        f"naabu -host {container_smoke_test.allowed_target_ip} -p 8888 -silent"
+    )
+    naabu_events, naabu_killed_early = _post_run(
+        container_smoke_test.restricted_url,
+        naabu_command,
+        naabu_session,
+        timeout=30,
+        stop_text=None,
+        stop_patterns=None,
+    )
+    naabu_exit_events = [event for event in naabu_events if event.get("type") == "exit"]
+    assert not naabu_killed_early
+    assert naabu_exit_events and naabu_exit_events[0].get("code") == 0
+    assert "8888" in "\n".join(_collect_visible_lines(naabu_events, naabu_command))
+
+    blocked_status, blocked_payload = _json_request(
+        f"{container_smoke_test.restricted_url}/runs",
+        session_id=_new_smoke_session_id(),
+        method="POST",
+        payload={"command": f"masscan -p 8888 {container_smoke_test.allowed_target_ip}"},
+    )
+    assert blocked_status == 403
+    assert "packet-socket traffic needs" in json.dumps(blocked_payload)
+
+    restricted_logs = _run(
+        container_smoke_test.compose + ["logs", "--no-color", "restricted-shell"],
+        timeout=30,
+    ).stdout
+    assert restricted_session in restricted_logs
+    assert naabu_session in restricted_logs
+    assert "scan_transport=raw" in restricted_logs
+    assert "scan_transport=connect" in restricted_logs
 
 
 def test_container_smoke_test_expectations_cover_all_user_facing_commands(container_smoke_test):

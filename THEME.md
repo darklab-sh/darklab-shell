@@ -98,7 +98,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ### 1. Load and merge
 
-`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml`, reads the `color_scheme` field (`dark` or `light`, defaulting to `dark`), merges the file values on top of the matching `_THEME_DEFAULTS` palette, and then applies an optional sibling `app/conf/themes/<name>.local.yaml` overlay if one exists. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. Any key absent from the file (and from the local overlay) retains the built-in default for the chosen palette family.
+`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml`, reads the `color_scheme` field (`dark` or `light`, defaulting to `dark`), merges the file values on top of the matching `_THEME_DEFAULTS` palette, and then applies an optional `themes/<name>.local.yaml` from the active operator config root. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. Any key absent from the file (and from the local overlay) retains the built-in default for the chosen palette family.
 
 ### 2. Export as CSS vars
 
@@ -124,7 +124,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 |------|------|
 | `app/conf/theme_dark.yaml.example` | Generated dark theme reference file built from `_THEME_DEFAULTS["dark"]` |
 | `app/conf/theme_light.yaml.example` | Generated light theme reference file built from `_THEME_DEFAULTS["light"]` |
-| `app/conf/themes/` | Additional named theme variants loaded into the runtime selector; sibling `.local.yaml` overlays merge into the matching base theme but are not listed separately |
+| `app/conf/themes/` | Named theme variants loaded into the runtime selector; operator-root `.local.yaml` files merge into matching base themes but are not listed separately |
 | `app/config.py` | Loads, validates, and resolves theme values |
 | `scripts/generate_theme_examples.py` | Regenerates the checked-in dark/light example files from `_THEME_DEFAULTS` |
 | `app/app.py` | Exposes `/themes` and injects the current theme into the main shell |
@@ -161,7 +161,7 @@ The current built-in selector ships 18 named themes:
 ### Authoring a theme
 
 - Copy `theme_dark.yaml.example` or `theme_light.yaml.example` into `app/conf/themes/<filename>.yaml` to expose it in the runtime selector. The loader reads the built-in reference files plus every YAML file in `app/conf/themes/`.
-- For a private overlay on an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges the overlay after the checked-in base file.
+- For a private overlay on an existing base theme, create `app/conf/themes/<filename>.local.yaml` in a source deployment or `conf/themes/<filename>.local.yaml` in a repository-free deployment. The loader merges it after the shipped base file.
 - Unknown keys are ignored — only keys present in `_THEME_DEFAULTS` (`app/config.py`) are accepted.
 - Values may be any valid CSS color, length, gradient, or shadow string, depending on the key.
 - To derive one value from another, use CSS custom-property references such as `var(--green)` or `color-mix(in srgb, var(--surface) 88%, #000)`. The loader preserves those strings exactly; the browser resolves them after injection.
@@ -196,6 +196,7 @@ There is no filename-based or palette-based group inference — `group` must be 
 ## Practical Notes
 
 - Theme YAML files are explicit and self-contained so operators can tune the shell without touching code.
+- Repository-free production resolves `themes/<name>.local.yaml` under mounted `/config`. An overlay can change a shipped named theme but doesn't add a new selector entry by itself. Restart the shell container after changing the host file because production stages a private overlay snapshot at startup.
 - Most values are safe to tweak live as long as they remain valid CSS values.
 - The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three.
 - If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.
@@ -393,25 +394,7 @@ Files drag-and-drop feedback does not introduce its own theme keys. The dragged 
 
 ## Related Docs
 
-- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
-- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
-- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](FEATURES.md) - full per-feature reference
-- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
-- [TODO.md](TODO.md) - backlog items, research notes, and known issues
-- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
-- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
-- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
-- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
-- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [CONFIGURATION.md](CONFIGURATION.md) - theme selection and operator settings
+- [ARCHITECTURE.md](ARCHITECTURE.md#theme-system) - runtime theme boundaries
+- [FEATURES.md](FEATURES.md) - user-facing theme behavior
+- [CONTRIBUTING.md](CONTRIBUTING.md) - contributor workflow

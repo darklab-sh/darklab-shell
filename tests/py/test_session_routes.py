@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Tests for session token routes: /session/token/generate and /session/migrate.
 """
@@ -910,6 +913,7 @@ class TestSessionWorkflows:
                     "placeholder": "example.com",
                     "default": "",
                     "help": "",
+                    "sensitive": True,
                 },
             ],
             "steps": [{"cmd": "dig {{domain}} A", "note": "resolve apex"}],
@@ -931,6 +935,7 @@ class TestSessionWorkflows:
         assert create_resp.status_code == 201
         assert created["source"] == "user"
         assert created["inputs"][0]["id"] == "domain"
+        assert created["inputs"][0]["sensitive"] is True
         assert listed[0]["id"] == created["id"]
 
     def test_rejects_undeclared_workflow_variables(self):
@@ -947,6 +952,105 @@ class TestSessionWorkflows:
 
         assert resp.status_code == 400
         assert "variables" in json.loads(resp.data)["error"]
+
+    def test_create_and_update_return_field_level_definition_errors(self):
+        client = get_client()
+        session_id = "workflow-fields-" + __import__("uuid").uuid4().hex[:8]
+        invalid_create = {
+            **self._payload(),
+            "version": 2,
+            "inputs": [{"id": "Bad ID", "type": "target"}],
+            "steps": [{"id": "resolve", "cmd": "dig darklab.sh", "note": ""}],
+        }
+
+        create_error = client.post(
+            "/session/workflows",
+            json=invalid_create,
+            headers={"X-Session-ID": session_id},
+        )
+        assert create_error.status_code == 400
+        assert create_error.get_json()["errors"] == [{
+            "field": "inputs.0.id",
+            "message": (
+                "parameter ID must start with a letter and use lowercase letters, "
+                "numbers, and underscores"
+            ),
+        }]
+
+        created = client.post(
+            "/session/workflows",
+            json=self._payload(),
+            headers={"X-Session-ID": session_id},
+        ).get_json()["workflow"]
+        invalid_update = {
+            **self._payload("Invalid graph"),
+            "version": 2,
+            "steps": [
+                {"id": "scan", "cmd": "dig {{domain}} A", "note": ""},
+                {"id": "scan", "cmd": "nmap {{domain}}", "note": ""},
+            ],
+        }
+        update_error = client.put(
+            f"/session/workflows/{created['id']}",
+            json=invalid_update,
+            headers={"X-Session-ID": session_id},
+        )
+        assert update_error.status_code == 400
+        assert update_error.get_json()["errors"] == [{
+            "field": "steps.1.id",
+            "message": "step ID must be unique",
+        }]
+
+        invalid_capture = {
+            **self._payload("Invalid capture"),
+            "version": 2,
+            "steps": [{
+                "id": "resolve",
+                "cmd": "dig {{domain}} A",
+                "note": "",
+                "captures": [{
+                    "name": "resolved_ip",
+                    "source": "json_pointer",
+                    "pointer": "result.ip",
+                }],
+            }],
+        }
+        capture_error = client.put(
+            f"/session/workflows/{created['id']}",
+            json=invalid_capture,
+            headers={"X-Session-ID": session_id},
+        )
+        assert capture_error.status_code == 400
+        assert capture_error.get_json()["errors"] == [{
+            "field": "steps.0.captures.0.pointer",
+            "message": "workflow capture JSON Pointer must start with /",
+        }]
+
+        invalid_sensitive = self._payload("Invalid sensitive flag")
+        invalid_sensitive["inputs"][0]["sensitive"] = "yes"
+        sensitive_error = client.put(
+            f"/session/workflows/{created['id']}",
+            json=invalid_sensitive,
+            headers={"X-Session-ID": session_id},
+        )
+        assert sensitive_error.status_code == 400
+        assert sensitive_error.get_json()["errors"] == [{
+            "field": "inputs.0.sensitive",
+            "message": "parameter sensitive state must be true or false",
+        }]
+
+        unsupported_version = self._payload("Unsupported version")
+        unsupported_version["version"] = 3
+        version_error = client.put(
+            f"/session/workflows/{created['id']}",
+            json=unsupported_version,
+            headers={"X-Session-ID": session_id},
+        )
+        assert version_error.status_code == 400
+        assert version_error.get_json()["errors"] == [{
+            "field": "version",
+            "message": "unsupported workflow version",
+        }]
 
     def test_update_and_delete_are_session_scoped(self):
         client = get_client()

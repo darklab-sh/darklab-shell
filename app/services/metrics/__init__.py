@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Prometheus metric definitions and instrumentation helpers."""
 
 from __future__ import annotations
@@ -449,8 +452,8 @@ UNHANDLED_EXCEPTIONS = Counter(
     "Unhandled server exceptions by Flask endpoint.",
     ("endpoint",),
 )
-
-
+from services.metrics import workflows as workflow_metrics  # noqa: E402
+LABEL_CARDINALITY_POLICIES.update(workflow_metrics.LABEL_CARDINALITY_POLICIES)
 METRIC_DEFINITIONS = (
     HTTP_REQUESTS,
     HTTP_REQUEST_DURATION,
@@ -495,9 +498,8 @@ METRIC_DEFINITIONS = (
     EVIDENCE_PACKAGE_SKIPPED_ITEMS,
     CLIENT_ERRORS,
     UNHANDLED_EXCEPTIONS,
+    *workflow_metrics.METRIC_DEFINITIONS,
 )
-
-
 HISTOGRAM_DEFINITIONS = (
     HTTP_REQUEST_DURATION,
     RUN_DURATION,
@@ -511,6 +513,7 @@ HISTOGRAM_DEFINITIONS = (
     AI_PROVIDER_PHASE_DURATION,
     EVIDENCE_PACKAGE_BUILD_DURATION,
     EVIDENCE_PACKAGE_ARCHIVE_BYTES,
+    *workflow_metrics.HISTOGRAM_DEFINITIONS,
 )
 
 

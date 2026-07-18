@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './extract.js'
 import { bindFocusTrap } from '../../../../app/static/js/ui/ui_focus_trap.js'
@@ -94,6 +97,8 @@ export async function loadAppFns({
   cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = vi.fn(() => []),
   getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride = vi.fn(() => []),
+  readProjectTargets: readProjectTargetsOverride = vi.fn(() => []),
+  readRecentValues: readRecentValuesOverride = vi.fn(() => ({})),
   getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride = undefined,
   workspaceCwd: workspaceCwdOverride = '',
   sessionVariables: sessionVariablesOverride = [],
@@ -410,6 +415,28 @@ export async function loadAppFns({
     </div>
     <div id="workflows-overlay"></div>
     <button class="workflows-close"></button>
+    <button id="workflow-new-btn"></button>
+    <button id="rail-workflow-new-btn"></button>
+    <div id="workflow-editor-overlay" class="u-hidden" aria-hidden="true">
+      <form id="workflow-editor-form">
+        <span id="workflow-editor-title"></span>
+        <button type="button" class="workflow-editor-close"></button>
+        <label data-workflow-field="title">
+          <input id="workflow-editor-title-input" />
+          <span class="form-error u-hidden"></span>
+        </label>
+        <input id="workflow-editor-description-input" />
+        <button type="button" id="workflow-editor-add-parameter"></button>
+        <div id="workflow-editor-parameters"></div>
+        <div data-workflow-field="steps">
+          <button type="button" id="workflow-editor-add-step"></button>
+          <div id="workflow-editor-steps"></div>
+          <span class="form-error u-hidden"></span>
+        </div>
+        <div id="workflow-editor-msg"></div>
+        <button type="submit" id="workflow-editor-save-btn"></button>
+      </form>
+    </div>
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="none" />
       </div>
@@ -443,7 +470,7 @@ export async function loadAppFns({
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -699,6 +726,10 @@ export async function loadAppFns({
       'app/static/js/features/workflows/workflows_bridge.js',
       'app/static/js/features/autocomplete/runtime_context.js',
       'app/static/js/features/tour/tour_cli.js',
+      'app/static/js/features/workflows/workflow_catalog.js',
+      'app/static/js/features/workflows/workflow_executions.js',
+      'app/static/js/features/workflows/workflow_editor.js',
+      'app/static/js/features/workflows/workflow_parameters.js',
       'app/static/js/features/workflows/workflows.js',
       'app/static/js/features/mobile/mobile_menu_actions.js',
       'app/static/js/features/shortcuts/global_shortcuts.js',
@@ -735,6 +766,8 @@ export async function loadAppFns({
       sessionVariables: sessionVariablesOverride,
       getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride,
       getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride,
+      _readProjectTargets: readProjectTargetsOverride,
+      _readRecentValues: readRecentValuesOverride,
       ...(getWorkspaceDirectoryEntriesOverride ? { getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride } : {}),
       _workspaceCwd: () => (
         typeof workspaceCwdOverride === 'function'
@@ -944,8 +977,16 @@ export async function loadAppFns({
     handleTourCommand,
     handleTabShortcut,
     renderWorkflowItems,
+    workflowInputSourceOptions,
+    renderWorkflowExecutionsSection,
+    createWorkflowExecutionController,
+    formatWorkflowExecutionElapsed,
+    refreshWorkflowExecutions,
     reloadWorkflowCatalog,
     ensureWorkflowCatalogLoaded,
+    openWorkflowEditor,
+    closeWorkflowEditor,
+    payloadFromEditor,
     handleWorkflowTerminalCommand,
     getRuntimeAutocompleteContext,
     getWorkspaceAutocompletePathHints,
@@ -1086,6 +1127,8 @@ export async function loadAppFns({
     openWorkspace: openWorkspaceOverride,
     closeWorkspace: closeWorkspaceOverride,
     isWorkspaceOverlayOpen: isWorkspaceOverlayOpenOverride,
+    _readProjectTargets: readProjectTargetsOverride,
+    _readRecentValues: readRecentValuesOverride,
   })
 
   if (typeof fns.activateFaqCommandChip === 'function') {

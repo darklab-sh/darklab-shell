@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 mmayhew -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -248,6 +251,22 @@
     'url': static_asset('/static/js/features/command-registry/command_registry.js'),
     'type': 'module'
   },
+  'workflow_catalog': {
+    'url': static_asset('/static/js/features/workflows/workflow_catalog.js'),
+    'type': 'module'
+  },
+  'workflow_executions': {
+    'url': static_asset('/static/js/features/workflows/workflow_executions.js'),
+    'type': 'module'
+  },
+  'workflow_editor': {
+    'url': static_asset('/static/js/features/workflows/workflow_editor.js'),
+    'type': 'module'
+  },
+  'workflow_parameters': {
+    'url': static_asset('/static/js/features/workflows/workflow_parameters.js'),
+    'type': 'module'
+  },
   'workflows': {
     'url': static_asset('/static/js/features/workflows/workflows.js'),
     'type': 'module'
@@ -440,6 +459,11 @@
             <span class="menu-item-icon" aria-hidden="true">⌫</span>
             <span class="menu-item-label">clear</span>
           </button>
+          <button type="button" class="menu-item nav-item u-hidden" data-menu-action="compare-active">
+            <span class="menu-item-icon" aria-hidden="true">⇄</span>
+            <span class="menu-item-label">compare active run</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           <button type="button" class="menu-item nav-item" data-menu-action="ln" aria-pressed="false">
             <span class="menu-item-icon" aria-hidden="true">#</span>
             <span class="menu-item-label">line numbers</span>
@@ -560,7 +584,7 @@
           </button>
         </div>
 
-        <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
+        <a class="menu-footer bottom-sheet-footer" href="{{ project_source or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
       </div>
     </div>
   </div>
@@ -633,7 +657,7 @@
         <button class="rail-nav-item nav-item rail-more-item" data-action="theme" type="button" role="menuitem" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
         <a class="rail-nav-item nav-item rail-more-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" role="menuitem" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
       </div>
-      <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
+      <a class="rail-nav-version" href="{{ project_source or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </nav>
 
     <div class="rail-resize-handle" id="rail-resize-handle" title="Drag to resize"></div>
@@ -961,7 +985,14 @@
         <button type="button" class="close-btn workflows-close" aria-label="Close workflows">✕</button>
       </div>
     </div>
-    <div class="workflows-body nice-scroll"></div>
+    <div id="workflows-tabs" class="workflows-tabs tab-strip" role="tablist" aria-label="Workflow sections">
+      <button type="button" id="workflows-tab-workflows" class="tab-strip-item is-active" data-workflows-view="workflows" role="tab" aria-selected="true" aria-controls="workflows-panel-workflows">Workflows</button>
+      <button type="button" id="workflows-tab-executions" class="tab-strip-item" data-workflows-view="executions" role="tab" aria-selected="false" aria-controls="workflows-panel-executions">Executions</button>
+    </div>
+    <div class="workflows-body">
+      <section id="workflows-panel-workflows" class="workflows-view-panel" data-workflows-panel="workflows" role="tabpanel" aria-labelledby="workflows-tab-workflows"></section>
+      <section id="workflows-panel-executions" class="workflows-view-panel workflows-executions-panel nice-scroll" data-workflows-panel="executions" role="tabpanel" aria-labelledby="workflows-tab-executions" hidden></section>
+    </div>
   </div>
 </div>
 
@@ -972,17 +1003,30 @@
       <button type="button" class="close-btn workflow-editor-close" aria-label="Close workflow editor">✕</button>
     </div>
     <div class="workflow-editor-body nice-scroll">
-      <label class="workflow-editor-field">
+      <label class="workflow-editor-field" data-workflow-field="title">
         <span class="workflow-input-label">Name</span>
-        <input id="workflow-editor-title-input" class="options-token-input" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" maxlength="120" required>
+        <input id="workflow-editor-title-input" class="form-control" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" maxlength="120" required>
+        <span class="form-error u-hidden" aria-live="polite"></span>
       </label>
       <label class="workflow-editor-field">
         <span class="workflow-input-label">Description</span>
-        <input id="workflow-editor-description-input" class="options-token-input" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" maxlength="1000">
+        <input id="workflow-editor-description-input" class="form-control" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" maxlength="1000">
       </label>
-      <div class="workflow-editor-help">Put {{variables}} in commands for values you want to fill in later, like {{domain}}. Each variable becomes a required input when the workflow runs.</div>
-      <div id="workflow-editor-steps" class="workflow-editor-steps"></div>
-      <button type="button" class="btn btn-ghost btn-compact workflow-editor-add-step" id="workflow-editor-add-step">+ step</button>
+      <section class="workflow-editor-section" aria-labelledby="workflow-editor-parameters-title">
+        <div class="workflow-editor-section-header">
+          <span class="workflow-editor-section-title" id="workflow-editor-parameters-title">Parameters</span>
+          <button type="button" class="btn btn-ghost btn-compact" id="workflow-editor-add-parameter">+ Parameter</button>
+        </div>
+        <div id="workflow-editor-parameters" class="workflow-editor-items"></div>
+      </section>
+      <section class="workflow-editor-section" aria-labelledby="workflow-editor-steps-title" data-workflow-field="steps">
+        <div class="workflow-editor-section-header">
+          <span class="workflow-editor-section-title" id="workflow-editor-steps-title">Steps</span>
+          <button type="button" class="btn btn-ghost btn-compact workflow-editor-add-step" id="workflow-editor-add-step">+ Step</button>
+        </div>
+        <div id="workflow-editor-steps" class="workflow-editor-items workflow-editor-steps"></div>
+        <span class="form-error u-hidden" aria-live="polite"></span>
+      </section>
       <div id="workflow-editor-msg" class="workflow-editor-msg" aria-live="polite"></div>
     </div>
     <div class="workflow-editor-footer">

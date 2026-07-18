@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared search logic ──
 
 import {
@@ -22,6 +25,7 @@ import { getOutput as importedGetOutput, updateTabbarChromeFit as importedUpdate
 import { setSearchHandlers as importedSetSearchHandlers } from './search_bridge.js';
 import { isSearchBarOpen as importedIsSearchBarOpen } from './ui/ui_helpers.js';
 import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from './features/run-comparison/history_compare_bridge.js';
 
 const SEARCH_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -245,6 +249,14 @@ function _formatFindingSummary(counts) {
   return _searchCore.formatFindingSummary(counts);
 }
 
+function _comparisonRunForSearchTab() {
+  const tab = _getTabById(_activeTabId());
+  const runId = String(tab?.historyRunId || '').trim();
+  const runKind = String(tab?.historyRunKind || '').trim();
+  if (!runId || tab?.st === 'running' || runKind !== 'external') return null;
+  return { id: runId };
+}
+
 function _renderCompactSignalSummary(container, counts) {
   if (!_isSearchElement(container)) return;
   container.replaceChildren();
@@ -269,6 +281,16 @@ function _renderCompactSignalSummary(container, counts) {
     button.setAttribute('aria-label', `${count} ${_searchScopeUnitLabel(scope, count)} available`);
     button.textContent = `${count}${short}`;
     container.appendChild(button);
+    if (scope === 'findings' && _comparisonRunForSearchTab()) {
+      const compare = document.createElement('button');
+      compare.type = 'button';
+      compare.className = 'btn btn-ghost btn-icon-only btn-compact search-signal-compare';
+      compare.dataset.searchCompareFindings = '1';
+      compare.setAttribute('aria-label', 'Compare findings with previous run');
+      compare.title = 'Compare findings with previous run';
+      compare.textContent = '⇄';
+      container.appendChild(compare);
+    }
   });
 }
 
@@ -443,6 +465,28 @@ function refreshSearchDiscoverabilityUi() {
           btn.addEventListener('click', activate);
         }
       });
+      const compareFindings = searchSignalSummary.querySelector('[data-search-compare-findings="1"]');
+      if (compareFindings) {
+        const activateCompare = () => {
+          const run = _comparisonRunForSearchTab();
+          if (run) {
+            importedOpenHistoryCompareLauncher?.(run, {
+              initialViewMode: 'findings_only',
+              returnFocus: compareFindings,
+            });
+          }
+        };
+        if (!_bindSearchPressable(compareFindings, {
+          refocusComposer: false,
+          onActivate: (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            activateCompare();
+          },
+        })) {
+          compareFindings.addEventListener('click', activateCompare);
+        }
+      }
     }
   }
   const searchSummaryBtn = _searchSummaryButton();

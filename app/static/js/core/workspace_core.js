@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Workspace pure helpers ────────────────────────────────────────────────
 // Loaded before workspace.js. Keep DOM/API behavior in workspace.js and share
 // small path/format transforms here.

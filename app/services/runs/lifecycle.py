@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Run command preparation and process lifecycle helpers."""
 
 from __future__ import annotations
@@ -21,14 +24,13 @@ from services.commands.registry import (
     CommandValidationResult,
     command_root,
     interactive_pty_spec_for_command,
-    is_help_invocation,
     parse_synthetic_postfilter,
-    required_secrets_for_command,
     rewrite_command,
     runtime_missing_command_name,
     runtime_missing_command_message,
     split_command_argv,
 )
+from services.commands.raw_packets import scan_transport_log_context
 from services.runs.broker_worker import (
     BrokerOutputBatcher,  # noqa: F401 - compatibility seam for blueprints.run/tests
     brokered_real_run_worker,  # noqa: F401 - compatibility seam for blueprints.run/tests
@@ -54,10 +56,16 @@ from services.runs.scope import (
     validate_command_for_run as validate_command_for_run,
     validate_command_with_effective_owner,
 )
-from services.runs.start import RunPreparationError, RunSpawnError
+from services.runs.start import (
+    RunPreparationError,
+    RunSpawnError,
+)
+from services.runs.private_data import (
+    contains_private_value,
+    redact_private_values,
+    resolve_secret_environment,
+)
 from services.secrets.audit import emit_secret_event
-from services.secrets.storage import InvalidSecretName, get_secret_value_for_env
-from services.secrets.vault import MasterKeyError, SecretDecryptError
 from services.session.variables import SessionVariableError, expand_session_variables
 from services.teams.scope import OwnerContext, owner_context_for_scope
 
@@ -84,6 +92,7 @@ class PreparedRealCommand:
     rewrite_notice: str | None
     validation: CommandValidationResult
     missing_runtime: str | None
+    display_missing_runtime: str | None
     env_overrides: dict[str, str]
     secret_env_names: list[str]
 
@@ -152,20 +161,20 @@ def variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> 
 
 def cmd_denied_log_extra(client_ip: str, session_id: str, command: str, reason: str) -> dict[str, Any]:
     reason_text = str(reason or "")
-    deny_kind = "policy"
-    if "secret" in reason_text.lower() or "vault" in reason_text.lower():
+    deny_kind, rule_id = "policy", ""
+    if "raw-packet" in (reason_lower := reason_text.lower()) or "nmap raw mode" in reason_lower or " is blocked:" in reason_lower:
+        deny_kind = "raw_packet"
+        rule_id = "raw_packet_policy" if " is blocked:" in reason_lower else "raw_packet_readiness"
+    elif "secret" in reason_lower or "vault" in reason_lower:
         deny_kind = "secret"
-    elif "workspace" in reason_text.lower() or "path" in reason_text.lower():
+    elif "workspace" in reason_lower or "path" in reason_lower:
         deny_kind = "workspace"
-    elif "shell operators" in reason_text.lower():
+    elif "shell operators" in reason_lower:
         deny_kind = "shell_operator"
     return {
-        "ip": client_ip,
-        "session": get_log_session_id(session_id),
-        "cmd": command,
-        "reason": reason_text,
-        "deny_kind": deny_kind,
-        "rule_id": "",
+        "ip": client_ip, "session": get_log_session_id(session_id),
+        "cmd": command, "reason": reason_text,
+        "deny_kind": deny_kind, "rule_id": rule_id,
     }
 
 
@@ -255,6 +264,8 @@ def prepare_command_input(
     session_id: str,
     client_ip: str,
     *,
+    display_command: str = "",
+    private_values: tuple[str, ...] = (),
     log_pipe: bool = False,
     command_root_fn: Callable[[str], str | None] = command_root,
     expand_session_variables_fn: Callable[..., Any] = expand_session_variables,
@@ -263,6 +274,7 @@ def prepare_command_input(
     variable_notice_line_fn: Callable[[str, tuple[str, ...]], str],
     cmd_denied_log_extra_fn: Callable[[str, str, str, str], dict[str, Any]],
 ) -> PreparedCommandInput:
+    safe_command = str(display_command or original_command)
     expanded_command = original_command
     variable_notice = ""
     if command_root_fn(original_command) != "var":
@@ -270,128 +282,35 @@ def prepare_command_input(
             expansion = expand_session_variables_fn(original_command, session_id)
             expanded_command = expansion.command
             if expanded_command != original_command:
-                variable_notice = variable_notice_line_fn(expanded_command, expansion.used_names)
+                safe_expansion = expand_session_variables_fn(safe_command, session_id)
+                variable_notice = variable_notice_line_fn(safe_expansion.command, expansion.used_names)
         except SessionVariableError as exc:
-            log.warning("CMD_DENIED", extra=cmd_denied_log_extra_fn(client_ip, session_id, original_command, str(exc)))
-            raise RunPreparationError(str(exc)) from exc
+            safe_error = redact_private_values(exc, private_values)
+            log.warning("CMD_DENIED", extra=cmd_denied_log_extra_fn(client_ip, session_id, safe_command, safe_error))
+            raise RunPreparationError(safe_error) from exc
 
     postfilter_spec, postfilter_error = parse_synthetic_postfilter_fn(expanded_command)
     if postfilter_error:
-        log.warning("CMD_DENIED", extra=cmd_denied_log_extra_fn(client_ip, session_id, original_command, postfilter_error))
-        raise RunPreparationError(postfilter_error)
+        safe_error = redact_private_values(postfilter_error, private_values)
+        log.warning("CMD_DENIED", extra=cmd_denied_log_extra_fn(client_ip, session_id, safe_command, safe_error))
+        raise RunPreparationError(safe_error)
     execution_command = postfilter_spec["base_command"] if postfilter_spec else expanded_command
     if log_pipe and postfilter_spec:
         stage_kinds = [stage.get("kind") for stage in postfilter_spec.get("stages", []) if stage.get("kind")]
         log.debug("CMD_PIPE", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
-            "cmd": original_command,
+            "cmd": safe_command,
             "kind": " -> ".join(stage_kinds) if stage_kinds else postfilter_spec.get("kind"),
         })
     try:
         postfilter = postfilter_processor_cls(postfilter_spec)
     except ValueError as exc:
-        raise RunPreparationError(str(exc)) from exc
+        raise RunPreparationError(redact_private_values(exc, private_values)) from exc
     return PreparedCommandInput(
         execution_command=execution_command,
         variable_notice=variable_notice,
         postfilter=postfilter,
     )
-
-
-def resolve_secret_environment(
-    command: str,
-    session_id: str,
-    *,
-    team_id: str = "",
-    is_help_invocation_fn: Callable[[str], bool] = is_help_invocation,
-    required_secrets_for_command_fn: Callable[[str], list[dict[str, Any]]] = required_secrets_for_command,
-    get_secret_value_for_env_fn: Callable[..., str | None] = get_secret_value_for_env,
-    command_root_fn: Callable[[str], str | None] = command_root,
-) -> tuple[dict[str, str], list[str]]:
-    if is_help_invocation_fn(command):
-        return {}, []
-    declarations = required_secrets_for_command_fn(command)
-    if not declarations:
-        return {}, []
-    if not session_id:
-        raise RunPreparationError(
-            "A valid session is required before commands can use encrypted secrets.",
-            status_code=401,
-        )
-
-    secret_scope_id = team_id or session_id
-    env_overrides: dict[str, str] = {}
-    missing_required: list[str] = []
-    missing_optional: list[str] = []
-    missing_labels: dict[str, str] = {}
-    for declaration in declarations:
-        env_name = str(declaration.get("env") or "").strip().upper()
-        if not env_name:
-            continue
-        inject_env_name = str(declaration.get("inject_env") or env_name).strip().upper()
-        if not inject_env_name:
-            continue
-        raw_fallback_envs = declaration.get("fallback_envs")
-        fallback_envs = [
-            str(item or "").strip().upper()
-            for item in (raw_fallback_envs if isinstance(raw_fallback_envs, list) else [])
-            if str(item or "").strip()
-        ]
-        lookup_env_names = [env_name, *[item for item in fallback_envs if item != env_name]]
-        try:
-            value = None
-            for lookup_env_name in lookup_env_names:
-                value = get_secret_value_for_env_fn(
-                    secret_scope_id,
-                    lookup_env_name,
-                    audit_session_id=session_id,
-                    team_id=team_id,
-                )
-                if value is not None:
-                    break
-        except (InvalidSecretName, MasterKeyError, SecretDecryptError) as exc:
-            log.error("SECRET_ENV_RESOLVE_FAILED", exc_info=True, extra={
-                "session": get_log_session_id(session_id),
-                "team_id": team_id,
-                "command_root": command_root_fn(command) or "",
-                "secret_name": env_name,
-                "lookup_env_names": lookup_env_names,
-                "error_type": type(exc).__name__,
-            })
-            raise RunPreparationError("Secrets vault unavailable. Check server logs.", status_code=503) from exc
-        if value is None:
-            missing_label = " or ".join(lookup_env_names)
-            if bool(declaration.get("optional", False)):
-                missing_optional.append(env_name)
-            else:
-                missing_required.append(env_name)
-                missing_labels[env_name] = missing_label
-            continue
-        env_overrides[inject_env_name] = value
-
-    if missing_required:
-        if len(missing_required) == 1:
-            subject = f"secret {missing_labels.get(missing_required[0], missing_required[0])}"
-            setup_hint = "Set it via \"secret set NAME\" or the Options > Secrets panel."
-            if team_id:
-                setup_hint = "Set it in Options > Secrets while the team scope is active."
-        else:
-            subject = "secrets " + ", ".join(missing_labels.get(env_name, env_name) for env_name in missing_required)
-            setup_hint = "Set each one via \"secret set NAME\" or the Options > Secrets panel."
-            if team_id:
-                setup_hint = "Set them in Options > Secrets while the team scope is active."
-        raise RunPreparationError(
-            f"Run requires {subject} which is not set. " +
-            setup_hint,
-            status_code=403,
-        )
-    for env_name in missing_optional:
-        log.warning("SECRET_OPTIONAL_MISSING", extra={
-            "session": get_log_session_id(session_id),
-            "secret_name": env_name,
-            "command_root": command_root_fn(command) or "",
-        })
-    return env_overrides, sorted(env_overrides)
 
 
 def prepare_real_command(
@@ -401,6 +320,8 @@ def prepare_real_command(
     client_ip: str,
     workspace_cwd: str = "",
     *,
+    display_command: str = "",
+    private_values: tuple[str, ...] = (),
     team_id: str = "",
     owner_context: OwnerContext | None = None,
     effective_owner_context_fn: Callable[[OwnerContext | None, str], OwnerContext | None],
@@ -412,6 +333,7 @@ def prepare_real_command(
     cmd_denied_log_extra_fn: Callable[[str, str, str, str], dict[str, Any]],
     cfg: Mapping[str, Any] | None = None,
 ) -> PreparedRealCommand:
+    safe_command = str(display_command or original_command)
     active_cfg = resolve_effective_cfg(cfg)
     registry_command = execution_command
     effective_context = effective_owner_context_fn(owner_context, session_id)
@@ -422,10 +344,18 @@ def prepare_real_command(
         owner_context=effective_context,
     )
     if not validation.allowed:
-        log.warning("CMD_DENIED", extra=cmd_denied_log_extra_fn(client_ip, session_id, original_command, validation.reason))
-        raise RunPreparationError(validation.reason)
+        safe_reason = redact_private_values(validation.reason, private_values)
+        log.warning(
+            "CMD_DENIED",
+            extra=cmd_denied_log_extra_fn(
+                client_ip,
+                session_id,
+                safe_command,
+                safe_reason,
+            ),
+        )
+        raise RunPreparationError(safe_reason)
     execution_command = validation.exec_command or execution_command
-
     if effective_context is not None:
         command, notice = rewrite_command_fn(
             execution_command,
@@ -439,28 +369,38 @@ def prepare_real_command(
         log.debug("CMD_REWRITE_APPLIED", extra={
             "ip": client_ip,
             "session": get_log_session_id(session_id),
-            "command_root": command_root_fn(original_command) or "",
-            "rewrite_notice": notice or "",
+            "command_root": command_root_fn(safe_command) or "",
+            "rewrite_notice": redact_private_values(notice or "", private_values),
             "workspace_read_count": len(validation.workspace_reads),
             "workspace_write_count": len(validation.workspace_writes),
             "workspace_exec_path_count": len(validation.workspace_exec_paths),
             "runtime_env_names": runtime_env_names(command),
         })
-
     missing_runtime = runtime_missing_command_name_fn(command)
+    display_missing_runtime = missing_runtime
+    if missing_runtime and safe_command != original_command:
+        display_missing_runtime = command_root_fn(safe_command) or "command"
     if missing_runtime:
         log.warning("CMD_MISSING", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
-            "cmd": original_command, "missing": missing_runtime,
+            "cmd": safe_command, "missing": display_missing_runtime,
         })
-    env_overrides, secret_env_names = resolve_secret_environment_fn(registry_command, session_id, team_id=team_id)
+    resolve_secret_kwargs: dict[str, object] = {"team_id": team_id}
+    if private_values:
+        resolve_secret_kwargs["display_command"] = safe_command
+    env_overrides, secret_env_names = resolve_secret_environment_fn(
+        registry_command,
+        session_id,
+        **resolve_secret_kwargs,
+    )
     return PreparedRealCommand(
         registry_command=registry_command,
         execution_command=execution_command,
         command=command,
-        rewrite_notice=notice,
+        rewrite_notice=redact_private_values(notice or "", private_values) or None,
         validation=validation,
         missing_runtime=missing_runtime,
+        display_missing_runtime=display_missing_runtime,
         env_overrides=env_overrides,
         secret_env_names=secret_env_names,
     )
@@ -528,6 +468,7 @@ def start_real_command_process(
     client_ip: str,
     prepared_real: PreparedRealCommand,
     *,
+    private_values: tuple[str, ...] = (),
     owner_client_id: str = "",
     owner_tab_id: str = "",
     team_id: str = "",
@@ -558,7 +499,7 @@ def start_real_command_process(
         output_entity_suffix_count = len(output_entity_suffixes) if hasattr(output_entity_suffixes, "__len__") else None
         capture = run_output_capture_fn(run_id)
         signal_classifier = output_signal_classifier_cls(
-            prepared_real.execution_command,
+            original_command,
             cmd_type="real",
             extra_domain_suffixes=output_entity_suffixes,
         )
@@ -566,6 +507,7 @@ def start_real_command_process(
         workspace_path_filter = workspace_path_filter_cls(session_id, active_cfg, owner_context=workspace_owner)
         env_overrides = dict(prepared_real.env_overrides)
     except Exception as exc:
+        safe_error = redact_private_values(exc, private_values)
         log.error("RUN_SPAWN_SETUP_FAILED", exc_info=True, extra={
             "run_id": run_id,
             "ip": client_ip,
@@ -576,7 +518,7 @@ def start_real_command_process(
             "workspace_filter": "init",
             "output_entity_suffix_count": output_entity_suffix_count,
         })
-        raise RunSpawnError(str(exc)) from exc
+        raise RunSpawnError(safe_error) from exc
     log.debug("RUN_SPAWN_SETUP_RESOLVED", extra={
         "run_id": run_id,
         "session": get_log_session_id(session_id),
@@ -608,10 +550,15 @@ def start_real_command_process(
             env=popen_env,
         )
     except Exception as exc:
-        log.error("RUN_SPAWN_ERROR", exc_info=True, extra={
+        safe_error = redact_private_values(exc, private_values)
+        safe_exc_info: object = True
+        if contains_private_value(exc, private_values):
+            safe_exception = RunSpawnError(safe_error)
+            safe_exc_info = (RunSpawnError, safe_exception, exc.__traceback__)
+        log.error("RUN_SPAWN_ERROR", exc_info=safe_exc_info, extra={
             "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
         })
-        raise RunSpawnError(str(exc)) from exc
+        raise RunSpawnError(safe_error) from exc
     finally:
         # Best-effort scrub of plaintext from the parent process after spawn.
         # Python strings are immutable, so this drops references rather than
@@ -641,6 +588,7 @@ def start_real_command_process(
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": proc.pid, "cmd": original_command, "cmd_type": "real",
+        **scan_transport_log_context(prepared_real.command, active_cfg),
     })
     if prepared_real.secret_env_names:
         emit_secret_event_fn(
@@ -648,7 +596,7 @@ def start_real_command_process(
             session_id,
             consumer_envs=prepared_real.secret_env_names,
             run_id=run_id,
-            command_root=command_root_fn(prepared_real.registry_command) or "",
+            command_root=command_root_fn(original_command) or "",
         )
     return StartedRealCommand(
         run_id=run_id,

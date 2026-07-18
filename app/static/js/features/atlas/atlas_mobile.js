@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Mobile Atlas controller — list-detail drill-in surface that composes
 // the same state, action handlers, and detail renderers as the desktop
 // Atlas overlay (atlas_overlay.js).
@@ -900,12 +903,16 @@ let exportedDarklabAtlasMobile = null;
 
   function renderFindingRow(finding, state) {
     const row = document.createElement('div');
-    row.className = 'chrome-row chrome-row-clickable atlas-finding-queue-row atlas-mobile-row';
-    if (String(finding.id) === String(state.selectedFindingId)) row.classList.add('is-selected');
+    row.className = 'chrome-row chrome-row-clickable selection-row atlas-finding-queue-row atlas-mobile-row';
+    const selected = state.selectMode
+      ? state.selectedFindingIds.has(String(finding.id || ''))
+      : String(finding.id) === String(state.selectedFindingId);
+    row.classList.toggle('is-selected', selected);
     row.dataset.atlasMobileFindingId = finding.id;
     row.tabIndex = 0;
     row.setAttribute('role', state.selectMode ? 'checkbox' : 'button');
     if (state.selectMode) row.setAttribute('aria-checked', String(state.selectedFindingIds.has(String(finding.id || ''))));
+    if (!state.selectMode && selected) row.setAttribute('aria-current', 'true');
     row.setAttribute('aria-label', `Open finding ${finding.title || finding.id}`);
 
     const main = document.createElement('span');

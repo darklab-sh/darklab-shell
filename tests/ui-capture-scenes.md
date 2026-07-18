@@ -92,7 +92,7 @@ scene where one of these appears to have drifted.
 - **Typography & rhythm** — prompt line, output line, header row, and sheet
   rows should sit on a consistent line-height grid across themes.
 
-## Desktop pack (40 scenes)
+## Desktop pack
 
 Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 
@@ -139,7 +139,7 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 39 | `status-monitor-active-telemetry` | `/` | Status Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
 | 40 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; refreshed-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
 
-## Mobile pack (33 scenes)
+## Mobile pack
 
 Order matches the scene array in `tests/js/e2e/ui-capture.mobile.capture.js`.
 Mobile viewport: iPhone 15 Pro Max–class (430 × 932 @ 3x, final images 1290 ×

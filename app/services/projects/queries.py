@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Project workspace read/query helpers.
 """
@@ -49,6 +52,7 @@ from services.projects.utils import (
 )
 from services.runs.kinds import RUN_KIND_EXTERNAL
 from services.storage.transactions import run_transaction
+from services.workflows.storage import apply_workflow_provenance, workflow_provenance_by_run
 
 _T = TypeVar("_T")
 
@@ -245,6 +249,12 @@ def _project_run_rows_to_items(conn, session_id, rows, *, team_id="", include_pr
     finding_counts, artifact_counts = _project_run_count_maps(conn, session_id, run_ids, team_id=team_id)
     run_labels = _entity_labels_by_id(conn, session_id, "run", run_ids, team_id=team_id)
     run_notes = _entity_notes_by_id(conn, session_id, "run", run_ids, team_id=team_id)
+    workflow_provenance = workflow_provenance_by_run(
+        conn,
+        [str(run_id) for run_id in run_ids],
+        session_id=session_id,
+        team_id=team_id,
+    )
     runs = []
     for row in rows:
         item = _row_to_project_run(row, include_provenance=include_provenance)
@@ -255,6 +265,7 @@ def _project_run_rows_to_items(conn, session_id, rows, *, team_id="", include_pr
         item["artifact_count"] = artifact_counts.get(run_id, int(item.get("artifact_count") or 0))
         item["labels"] = run_labels.get(run_id, [])
         item["note"] = run_notes.get(run_id)
+        apply_workflow_provenance(item, workflow_provenance.get(run_id))
         runs.append(item)
     return runs
 

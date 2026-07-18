@@ -1,10 +1,16 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Command autocomplete context normalization and feature filtering."""
 
 from __future__ import annotations
 
 from copy import deepcopy
 
-import config as app_config
+from services.commands.features import (
+    suggestion_enabled_for_features as _suggestion_enabled_for_features,
+    suggestion_required_features as _suggestion_required_features,
+)
 
 
 def _coerce_positive_int(value: object, default: int) -> int:
@@ -15,42 +21,11 @@ def _coerce_positive_int(value: object, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
-def _feature_enabled(feature, cfg=None):
-    normalized = str(feature or "").strip().lower()
-    if not normalized:
-        return True
-    active_cfg = app_config.CFG if cfg is None else cfg
-    if normalized == "tour":
-        return bool(active_cfg.get("tour_enabled", True))
-    if normalized == "workspace":
-        return bool(active_cfg.get("workspace_enabled", False))
-    if normalized in {"interactive_pty", "pty"}:
-        return bool(active_cfg.get("interactive_pty_enabled", False))
-    return True
-
-
 def _suggestion_interactive_enabled(item) -> bool:
     raw_interactive = item.get("interactive") if isinstance(item, dict) else None
     if isinstance(raw_interactive, str):
         return raw_interactive.strip().lower() in {"1", "true", "yes", "on"}
     return raw_interactive is True
-
-
-def _suggestion_required_features(item) -> list[str]:
-    if not isinstance(item, dict):
-        return []
-    feature_required = item.get("feature_required") or item.get("requires_feature") or item.get("feature")
-    required_features = []
-    if feature_required:
-        if isinstance(feature_required, (list, tuple, set)):
-            required_features.extend(str(value).strip().lower() for value in feature_required if str(value).strip())
-        else:
-            feature = str(feature_required).strip().lower()
-            if feature:
-                required_features.append(feature)
-    if _suggestion_interactive_enabled(item):
-        required_features.append("interactive_pty")
-    return list(dict.fromkeys(required_features))
 
 
 def _normalize_context_suggestion(item):
@@ -83,12 +58,8 @@ def _normalize_context_suggestion(item):
     value_type = str(item.get("value_type") or item.get("value_kind") or item.get("type") or "").strip().lower()
     if value_type:
         result["value_type"] = value_type
-    raw_position = (
-        item.get("position")
-        or item.get("order")
-        or item.get("argument_position")
-        or item.get("argument_order")
-    )
+    raw_position = item.get("position") or item.get("order") or item.get("argument_position")
+    raw_position = raw_position or item.get("argument_order")
     position = _coerce_positive_int(raw_position, 0)
     if position:
         result["position"] = position
@@ -131,15 +102,6 @@ def _normalize_smoke_metadata(raw_value):
     if "enabled" in raw_value:
         result["enabled"] = bool(raw_value["enabled"])
     return result or None
-
-
-def _suggestion_enabled_for_features(item, cfg=None) -> bool:
-    if not isinstance(item, dict):
-        return True
-    required_features = _suggestion_required_features(item)
-    if not required_features:
-        return True
-    return all(_feature_enabled(value, cfg) for value in required_features)
 
 
 def _filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:

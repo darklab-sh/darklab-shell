@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Completed-run finalization and output indexing helpers."""
 
 from __future__ import annotations
@@ -13,8 +16,7 @@ from typing import Any, Callable
 import config as app_config
 from core.helpers import get_log_session_id
 from core.output_signals import OutputSignalClassifier
-from core.redaction import REDACTED_ENTITY_SENTINEL
-from core.redaction import line_entries_from_events, redact_line_entries
+from core.redaction import REDACTED_ENTITY_SENTINEL, line_entries_from_events, redact_line_entries
 from services.atlas.materializer import materialize_run_entities
 from services.commands.registry import command_project_target_inputs
 from services.metrics_lazy import app_metrics
@@ -41,6 +43,7 @@ from services.runs.output_model import (
     line_event_from_legacy,
 )
 from services.runs.output_store import RunOutputCapture, load_full_output_entries, unknown_line_event_collector
+from services.workflows.hooks import finalize_workflow_run_safely
 from services.runs.persistence import (
     insert_run_row,
     run_finalize_savepoint,
@@ -54,7 +57,6 @@ from services.storage.body_store import inline_threshold_bytes, maybe_store_text
 from services.teams.scope import owner_context_for_scope
 
 log = logging.getLogger("shell")
-
 AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT = 10
 SEARCH_ENTITY_MAX_BYTES = 4096
 
@@ -950,6 +952,7 @@ def finalize_completed_run(
             "run_id": run_id,
             "session": get_log_session_id(session_id),
         })
+    finalize_workflow_run_safely(persisted, run_id, session_id, exit_code, capture)
     return {"elapsed": elapsed, "active_project_link": active_project_link, "finalize_summary": finalize_summary}
 
 

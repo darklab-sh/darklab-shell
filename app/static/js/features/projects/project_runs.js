@@ -1,8 +1,12 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
 import {
   fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison,
   hasHistoryCompareHandler as importedHasHistoryCompareHandler,
 } from '../run-comparison/history_compare_bridge.js';
+import { orderedRunIds as importedOrderedRunIds } from '../run-comparison/history_compare_core.js';
 
 let exportedDarklabProjectRuns = null;
 
@@ -263,13 +267,26 @@ let exportedDarklabProjectRuns = null;
         ? importedFetchAndRenderHistoryComparison
         : (typeof global.fetchAndRenderHistoryComparison === 'function' ? global.fetchAndRenderHistoryComparison : null);
       if (!compareFn) throw new Error('Run comparison is not available.');
+      let requestLeftId = normalizedLeftId;
+      let requestRightId = normalizedTarget;
+      if (normalizedMode === 'run' && controls) {
+        const runOptions = compareDatasetOptions(controls, 'projectCompareRunOptions');
+        const leftRun = runOptions.find(run => String(run?.value || '') === normalizedLeftId);
+        const rightRun = runOptions.find(run => String(run?.value || '') === normalizedTarget);
+        if (typeof importedOrderedRunIds === 'function') {
+          [requestLeftId, requestRightId] = importedOrderedRunIds(
+            leftRun || { value: normalizedLeftId },
+            rightRun || { value: normalizedTarget },
+          );
+        }
+      }
       const params = new URLSearchParams({
-        left: normalizedLeftId,
+        left: requestLeftId,
         project_id: normalizedProjectId,
       });
       if (normalizedMode === 'baseline') params.set('baseline_label', normalizedTarget);
-      else params.set('right', normalizedTarget);
-      compareFn(normalizedLeftId, normalizedMode === 'baseline' ? `baseline:${normalizedTarget}` : normalizedTarget, {
+      else params.set('right', requestRightId);
+      compareFn(requestLeftId, normalizedMode === 'baseline' ? `baseline:${normalizedTarget}` : requestRightId, {
         url: `/history/compare?${params.toString()}`,
       });
     }
@@ -301,6 +318,7 @@ let exportedDarklabProjectRuns = null;
           value: String(run.id || ''),
           label: compareOptionText(run),
           labels: ctx.entityLabelValues(run),
+          started: String(run.started || ''),
         });
         if (index === 0) leftSelect.value = String(run.id || '');
         if (index === 1) targetSelect.dataset.projectCompareRunValue = String(run.id || '');

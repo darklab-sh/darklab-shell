@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 mmayhew -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -259,6 +262,30 @@
         <span class="{{ 'diag-ok' if data.assets.ansi_up.ok else 'diag-fail' }}">ansi_up{% if data.assets.ansi_up.size %} {{ data.assets.ansi_up.size_human }}{% endif %}</span>
         <span class="{{ 'diag-ok' if data.assets.jspdf.ok else 'diag-fail' }}">jspdf{% if data.assets.jspdf.size %} {{ data.assets.jspdf.size_human }}{% endif %}</span>
         <span class="{{ 'diag-ok' if data.assets.fonts.ok else 'diag-fail' }}">fonts{% if data.assets.fonts.size %} {{ data.assets.fonts.size_human }}{% endif %}</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="diag-section diag-summary-card s-raw-packets">
+    <div class="diag-section-title">Raw-packet Scanning</div>
+    <div class="diag-summary-body">
+      <div class="diag-summary-value">
+        {% if data.raw_packets.active %}
+          <span class="diag-dot ok"></span><span class="diag-ok">ready</span>
+        {% elif data.raw_packets.configured %}
+          <span class="diag-dot fail"></span><span class="diag-fail">unavailable</span>
+        {% else %}
+          <span class="diag-dot warn"></span><span class="diag-warn">disabled</span>
+        {% endif %}
+      </div>
+      <div class="diag-summary-meta">
+        {{ data.raw_packets.reason|replace('_', ' ') }}
+        {% if not data.raw_packets.configured %} · runtime {{ 'available' if data.raw_packets.available else data.raw_packets.availability_reason|replace('_', ' ') }}{% endif %}
+      </div>
+      <div class="diag-summary-pills">
+        {% for tool, status in data.raw_packets.tools.items() %}
+          <span class="{{ 'diag-ok' if status.active else ('diag-warn' if status.available else 'diag-muted') }}">{{ tool }} {{ 'ready' if status.active else ('available' if status.available else status.availability_reason|replace('_', ' ')) }}</span>
+        {% endfor %}
       </div>
     </div>
   </section>

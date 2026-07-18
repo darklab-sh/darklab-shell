@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
 /* darklab_shell CSS module: shell-chrome
    Desktop shell: left rail, tabbar, and bottom HUD.
    Mobile uses the stacked layout in mobile.css. */
@@ -373,6 +376,11 @@
   }
   .rail-section-workflows .rail-item .drill-chev {
     flex: 0 0 auto;
+  }
+  .rail-section-workflows .rail-workflows-browse-all {
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--green);
+    font-weight: 700;
   }
   .rail-section-empty {
     padding: 5px 18px;

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Cron parsing and next-fire helpers for schedules."""
 
 from __future__ import annotations

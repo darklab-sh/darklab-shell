@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Autocomplete dropdown rendering and keyboard interaction.
 import { DarklabAutocompleteCore as importedAutocompleteCore } from './core/autocomplete_core.js';
 import {

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 from core.output_signals import SIGNAL_SCOPES
 from services.runs.output_model import LineSignal
 

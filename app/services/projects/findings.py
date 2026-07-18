@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Project finding query and row helpers.
 """
@@ -45,6 +48,7 @@ from services.projects.utils import (
     trim_text as _trim_text,
 )
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
+from services.runs.comparison_findings import severity_neutral_signal_key
 
 
 def row_to_finding(row):
@@ -1210,8 +1214,10 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
         signal_key = _normalize_finding_signal_key(raw_line)
         subject_key = _nmap_service_subject_from_entry(entry, tool_root)
         if not subject_key:
-            subject_key = entity_sig if entity_id else f"unscoped:{tool_root}:{signal_key}"
+            comparison_signal_key = severity_neutral_signal_key(raw_line)
+            subject_key = entity_sig if entity_id else f"unscoped:{tool_root}:{comparison_signal_key}"
         signature_hash = _finding_signature(tool_root, "finding", severity, signal_key, subject_key)
+        comparison_key = "raw:" + "\x1f".join((tool_root, "finding", subject_key, raw_line))
         if team_id:
             row = conn.execute(
                 "SELECT id FROM findings WHERE team_id = ? AND signature_hash = ?",
@@ -1264,12 +1270,16 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
                     created,
                 ),
             )
-        conn.execute(
-            "INSERT INTO findings_occurrences "
-            "(finding_id, run_id, line_number, snippet, seen_at) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(finding_id, run_id, line_number) DO NOTHING",
-            (finding_id, run_id, line_index, raw_line, created),
-        )
+        if row:
+            conn.execute(
+                "INSERT INTO findings_occurrences "
+                "(finding_id, run_id, line_number, snippet, seen_at, observed_severity, comparison_key) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(finding_id, run_id, line_number) DO UPDATE SET "
+                "snippet = excluded.snippet, seen_at = excluded.seen_at, "
+                "observed_severity = excluded.observed_severity, comparison_key = excluded.comparison_key",
+                (finding_id, run_id, line_index, raw_line, created, severity, comparison_key),
+            )
         recalculate_atlas_findings(conn, [finding_id])
         full_row = conn.execute(
             "SELECT f.id, f.session_id, f.team_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "

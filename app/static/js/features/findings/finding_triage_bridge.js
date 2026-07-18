@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Lightweight finding triage API. The full editor is loaded only when opened.
 import { loadFindingTriageEditor as importedLoadFindingTriageEditor } from '../../core/lazy_assets.js';
 

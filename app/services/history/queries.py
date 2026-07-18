@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """History query helpers owned by the service layer."""
 
 from __future__ import annotations
@@ -9,7 +12,6 @@ from hashlib import sha256
 from dataclasses import dataclass
 from typing import Any
 
-import services.runs.comparison as run_comparison
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, SQLiteOperationalError, dialect_for_backend
 from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE, get_log_session_id
@@ -39,6 +41,7 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.service import schedule_refs_by_run
+from services.workflows.storage import apply_workflow_provenance, workflow_provenance_by_run
 from services.history.insights import history_insights as history_insights
 from services.history import mutations as _history_mutations
 
@@ -575,6 +578,11 @@ def list_history_items(
         scheduled_by_run = schedule_refs_by_run(conn, run_ids)
         labels_by_run = entity_labels_by_entity_ids(conn, "run", run_ids)
         notes_by_run = entity_notes_by_entity_ids(conn, "run", run_ids)
+        workflow_provenance = workflow_provenance_by_run(
+            conn,
+            run_ids,
+            owner_scope=owner_scope,
+        )
         labels_by_snapshot = entity_labels_by_entity_ids(conn, "snapshot", snapshot_ids)
         notes_by_snapshot = entity_notes_by_entity_ids(conn, "snapshot", snapshot_ids)
         for item in paged_runs:
@@ -593,6 +601,7 @@ def list_history_items(
                 "atlas_finding_count": 0,
             }))
             _apply_schedule_ref(item, scheduled_by_run.get(str(item["id"])))
+            apply_workflow_provenance(item, workflow_provenance.get(str(item["id"])))
         for item in paged_snapshots:
             item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
             item["note"] = (notes_by_snapshot.get(str(item["id"]), []) or [None])[0]
@@ -749,114 +758,6 @@ def schedule_refs_for_active_runs(run_ids) -> dict[str, dict[str, str]]:
         return schedule_refs_by_run(conn, [str(run_id) for run_id in run_ids if str(run_id or "")])
 
 
-def compare_run_rows(session_id: str, left_id: str, right_id: str):
-    query_started = time.perf_counter()
-    with get_db_connect()() as conn:
-        rows = conn.execute(
-            "SELECT runs.*, art.rel_path "
-            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            "WHERE runs.session_id = ? AND runs.id IN (?, ?)",
-            (session_id, left_id, right_id),
-        ).fetchall()
-    app_metrics.record_db_query("history_compare_run_rows", time.perf_counter() - query_started)
-    by_id = {str(row["id"]): dict(row) for row in rows}
-    return by_id.get(left_id), by_id.get(right_id)
-
-
-def compare_candidate_rows(session_id: str, run_id: str):
-    with get_db_connect()() as conn:
-        source_row = conn.execute(
-            "SELECT runs.*, art.rel_path "
-            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            "WHERE runs.id = ? AND runs.session_id = ?",
-            (run_id, session_id),
-        ).fetchone()
-        if not source_row:
-            return None, []
-        source = dict(source_row)
-        source_started = str(source.get("started") or "")
-        rows = conn.execute(
-            "SELECT runs.*, art.rel_path "
-            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            "WHERE runs.session_id = ? AND runs.id != ? AND runs.started < ? "
-            "ORDER BY runs.started DESC "
-            "LIMIT 200",
-            (session_id, run_id, source_started),
-        ).fetchall()
-    return source, rows
-
-
-def compare_persisted_objects(session_id: str, left_id: str, right_id: str):
-    query_started = time.perf_counter()
-    with get_db_connect()() as conn:
-        left_findings, left_persisted_finding_count, left_findings_truncated = (
-            run_comparison.run_finding_compare_items(
-                conn,
-                session_id,
-                left_id,
-                include_line_number=True,
-                include_created=True,
-            )
-        )
-        right_findings, right_persisted_finding_count, right_findings_truncated = (
-            run_comparison.run_finding_compare_items(
-                conn,
-                session_id,
-                right_id,
-                include_line_number=True,
-                include_created=True,
-            )
-        )
-        left_artifacts, left_artifact_count, left_artifacts_truncated = (
-            run_comparison.run_artifact_compare_items(
-                conn,
-                session_id,
-                left_id,
-                include_display_name=True,
-                include_created=True,
-            )
-        )
-        right_artifacts, right_artifact_count, right_artifacts_truncated = (
-            run_comparison.run_artifact_compare_items(
-                conn,
-                session_id,
-                right_id,
-                include_display_name=True,
-                include_created=True,
-            )
-        )
-    app_metrics.record_db_query("history_compare_objects", time.perf_counter() - query_started)
-    project_truncated = {}
-    if any((
-        left_findings_truncated,
-        right_findings_truncated,
-        left_artifacts_truncated,
-        right_artifacts_truncated,
-    )):
-        project_truncated = {
-            "left": bool(left_findings_truncated or left_artifacts_truncated),
-            "right": bool(right_findings_truncated or right_artifacts_truncated),
-            "findings": {
-                "left": bool(left_findings_truncated),
-                "right": bool(right_findings_truncated),
-            },
-            "artifacts": {
-                "left": bool(left_artifacts_truncated),
-                "right": bool(right_artifacts_truncated),
-            },
-            "item_limit": run_comparison.compare_item_limit(),
-        }
-    return {
-        "finding_objects": run_comparison.compare_items(left_findings, right_findings),
-        "artifact_objects": run_comparison.compare_items(left_artifacts, right_artifacts),
-        "left_persisted_finding_count": left_persisted_finding_count,
-        "right_persisted_finding_count": right_persisted_finding_count,
-        "left_artifact_count": left_artifact_count,
-        "right_artifact_count": right_artifact_count,
-        "project_truncated": project_truncated,
-    }
-
-
 def history_run_row(run_id: str):
     with get_db_connect()() as conn:
         row = conn.execute(
@@ -865,7 +766,11 @@ def history_run_row(run_id: str):
             "WHERE runs.id = ?",
             (run_id,),
         ).fetchone()
-    return dict(row) if row else None
+        run = dict(row) if row else None
+        if run:
+            provenance = workflow_provenance_by_run(conn, [run_id], include_steps=True).get(run_id)
+            apply_workflow_provenance(run, provenance)
+    return run
 
 
 def history_run_private_metadata(run_id: str, session_id: str, run_team_id: str, *, include_private_metadata: bool):

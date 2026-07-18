@@ -132,25 +132,8 @@ Useful places to inspect scheduler behavior:
 
 ## Related Docs
 
-- [Default.md](../.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - runtime layers, scheduler process details, advisory locks, and persistence notes
-- [CHANGELOG.md](../CHANGELOG.md) - release-by-release changes
-- [CONFIGURATION.md](../CONFIGURATION.md) - operator config reference for scheduler settings
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
-- [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
-- [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
-- [FEATURES.md](../FEATURES.md) - user-facing scheduled-runs feature reference
-- [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
-- [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
-- [TODO.md](../TODO.md) - backlog items, research notes, and known issues
-- [ARCHITECTURE.md -> Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
-- [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
-- [docs/api.md](api.md) - API and `darklab schedule` CLI usage
-- [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
-- [docs/notifications.md](notifications.md) - outbound notification channels, triggers, and retry behavior
-- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover and Postgres major-version export/import workflow
-- [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
-- [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
-- [tests/README.md](../tests/README.md) - test coverage appendix and focused test commands
-- [tests/ui-capture-scenes.md](../tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
+- [watchers.md](watchers.md) - change-detection schedules
+- [notifications.md](notifications.md) - scheduled-run notification delivery
+- [workflows.md](workflows.md) - scheduled workflow execution
+- [../CONFIGURATION.md](../CONFIGURATION.md) - scheduler and worker settings
+- [api.md](api.md) - schedule API and CLI usage

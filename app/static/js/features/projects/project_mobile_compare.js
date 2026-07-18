@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project mobile run comparison sheet controller.
 // Loaded before shell_chrome.js; shell chrome supplies the surrounding Projects state.
 import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';

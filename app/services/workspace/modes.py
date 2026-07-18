@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Workspace filesystem mode constants."""
 
 WORKSPACE_DIR_MODE = 0o3730

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Output pure helpers ──────────────────────────────────────────────────
 // Loaded before output.js. DOM writes and batching stay in output.js; prompt
 // label, prefix, and signal-count transforms live here.

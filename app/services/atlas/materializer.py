@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Materialize normalized output entities into the Session Entity Atlas."""
 
 from __future__ import annotations

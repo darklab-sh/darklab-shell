@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Tab session persistence and restore ──
 
 import {
@@ -273,6 +276,7 @@ function _tabSessionSnapshot() {
       exitCode: tab.exitCode == null ? null : Number(tab.exitCode),
       runId: String(tab.runId || ''),
       historyRunId: String(tab.historyRunId || ''),
+      historyRunKind: String(tab.historyRunKind || ''),
       lastEventId: String(tab.lastEventId || ''),
       attachMode: String(tab.attachMode || ''),
       reconnectedRun: !!tab.reconnectedRun,
@@ -397,6 +401,7 @@ function restoreTabSessionState() {
       tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
       tab.runId = String(item && item.runId || '');
       tab.historyRunId = String(item && item.historyRunId || '');
+      tab.historyRunKind = String(item && item.historyRunKind || '');
       tab.lastEventId = String(item && item.lastEventId || '');
       tab.attachMode = String(item && item.attachMode || '');
       tab.reconnectedRun = !!(item && item.reconnectedRun);
@@ -433,6 +438,7 @@ function restoreTabSessionState() {
       tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
       tab.runId = String(item && item.runId || '');
       tab.historyRunId = String(item && item.historyRunId || '');
+      tab.historyRunKind = String(item && item.historyRunKind || '');
       tab.lastEventId = String(item && item.lastEventId || '');
       tab.attachMode = String(item && item.attachMode || '');
       tab.reconnectedRun = !!(item && item.reconnectedRun);

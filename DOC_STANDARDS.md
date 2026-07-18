@@ -15,8 +15,9 @@ For documentation cleanup backlog, see [TODO.md](TODO.md). This file is the stan
 - Keep prose where sequence matters. Request flows, rationale, and decision history should remain prose-first when order is part of the meaning.
 - Keep one idea per paragraph, bullet, or table row. Avoid mixing user-visible behavior, implementation detail, and validation notes unless they really belong together.
 - Match the doc to its reader. End-user/operator docs should not drift into internal implementation notes, and developer docs should not lose the technical detail they need.
+- Give detailed procedures, tables, and contracts one canonical home. Other docs may keep short audience-specific context or point-of-action warnings, then link to the canonical detail.
 - Write like a person. Use plain language, contractions, and a conversational tone when they make the text clearer. Prefer everyday words over jargon when the simpler word says the same thing.
-- Preserve anchors, cross-links, and doc-test expectations unless there is a strong reason to change them.
+- Preserve anchors, cross-links, and doc-test expectations unless there is a strong reason to change them. Add replacement checks before removing an existing documentation guard.
 
 ---
 
@@ -49,8 +50,9 @@ The lead should tell the reader what the section is about before the details beg
 
 ### Prefer stability
 
-- Keep tables of contents, heading anchors, and appendix structures stable when possible.
-- If a doc is covered by doc-drift or appendix tests, structural changes must still satisfy those tests.
+- Keep tables of contents and heading anchors stable when possible.
+- If a doc is covered by a documentation contract test, structural changes must still satisfy that contract or replace it with a more durable check first.
+- Keep permanent navigation focused on maintained project docs. Release drafts, merge-request drafts, and pre-merge review findings stay out of canonical indexes, but their local links must still resolve while they exist.
 
 ### When in doubt, leave as prose
 
@@ -188,13 +190,14 @@ Preferred order:
 
 **Limits:** {if applicable}
 **Configuration:** {if applicable}
-**Related files:** {if useful for contributors}
+**Learn more:** {if a focused user or operator guide adds useful detail}
 ```
 
 Must keep:
 
 - **Purpose:** is always present.
 - Other labeled fields are optional, but sibling sections that genuinely have limits or configuration must not silently skip them.
+- Keep implementation paths and test-file inventories out of feature entries. Put durable contributor contracts in architecture, contributing, or a focused contributor guide.
 - Detailed reference material (YAML examples, tables, long lists) sits below the labeled fields, not inline within them.
 
 ### T5. Testing overview shape
@@ -218,7 +221,7 @@ Note: the outer fence here is four backticks so the inner ```bash command block 
 
 Must keep:
 
-- Summary first — heavy detail belongs in the appendix, not the overview.
+- Summary first; use the live runner-listing commands when readers need the current inventory.
 - The command block is the canonical invocation reviewers will copy-paste.
 - Notes after the command cover config, artifacts, and gotchas — not implementation trivia.
 
@@ -242,6 +245,31 @@ Must keep:
 - Operator-facing references (config keys, routes, keyboard chords, tool names) are fine.
 - Framing paragraph leads; concrete improvements follow as bullets.
 
+### T7. Focused guide shape
+
+Use for a topic-specific guide under `docs/`.
+
+Preferred order:
+
+```md
+# {Guide name}
+{Who this guide is for and what it helps them do.}
+
+## {Task or reference section}
+{Direct guidance, table, or example.}
+
+## Related Docs
+- [{Nearest prerequisite or next step}](...)
+```
+
+Must keep:
+
+- State the audience and purpose before the detail.
+- Own one named topic instead of repeating broad README, feature, configuration, or architecture material.
+- Link to canonical configuration, architecture, or contributor contracts instead of copying them.
+- Keep Related Docs curated to the few pages a reader is most likely to need next.
+- Keep security, privacy, data-loss, licensing, and platform-limit warnings beside the action they constrain.
+
 ---
 
 ## Per-Document Guidance
@@ -249,23 +277,28 @@ Must keep:
 ### `README.md`
 
 - Keep it oriented to end-users and operators first.
-- Separate what the app does, how to run it, and where to look next.
-- Prefer lookup-friendly sections for configuration and project structure.
+- Treat it as the landing page: explain what the app does, how to start it, and where to look next.
+- Keep Quick Start focused on the normal release install. Put optional installer checksum and publisher-identity checks under Production Deployment, and keep repository-based workflows under Running in a Development Environment.
+- Keep Installed Tools aligned with the external commands in the base command registry. List executable command names, not upstream project names or internal dependencies; keep app-native built-ins and pipe helpers in the feature reference.
+- Keep the Repository Layout at directory level. The grouped Documentation Map is the exhaustive index of maintained project docs.
 
 ### `FEATURES.md`
 
 - Keep it as the high-detail feature reference.
 - Normalize feature sections where practical so readers can skim similar fields in similar order.
 - Separate examples and authoring notes from the core feature description when a section becomes too dense.
-- If `Behavior`, `Limits`, `Configuration`, or `Related files` starts carrying several parallel points, split that field into short child bullets instead of leaving it as one dense block.
+- If `Behavior`, `Limits`, `Configuration`, or `Learn more` starts carrying several parallel points, split that field into short child bullets instead of leaving it as one dense block.
+- Keep internal modules and test-file inventories out. Link focused user/operator guidance through `Learn more` and move durable contributor contracts to their owning technical guide.
 
 ### `ARCHITECTURE.md`
 
 - Keep deep technical detail.
+- Keep one stable `## Front End Design` section as the contributor-facing home for browser composition and design-system contracts.
 - Use short framing paragraphs plus bullets/tables for contracts and inventories.
 - Keep request flows and system narratives prose-first.
 - Prefer grouping related runtime concepts together rather than repeating small architecture notes across distant sections.
 - When a contract or inventory bullet becomes a dense reference blob, split it into child bullets instead of forcing readers through long mixed-purpose prose.
+- Keep current design and runtime contracts here. Put rationale, rejected alternatives, and durable tradeoffs in `DECISIONS.md`.
 
 ### `DECISIONS.md`
 
@@ -279,21 +312,33 @@ Must keep:
 - Keep it concise and workflow-focused.
 - Link out to deeper standards docs rather than embedding full style guidance inline.
 
+### `CONFIGURATION.md`
+
+- Keep operator settings, deployment choices, and the canonical Supported Runtimes table here.
+- Validate support claims against executable deployment and release contracts instead of comparing prose across documents.
+- Keep procedures beside the settings they affect and link to focused guides for longer workflows.
+
 ### `tests/README.md`
 
-- Keep the appendix exhaustive.
-- Keep overview sections handbook-like and summary-first.
-- Any structural changes must still pass `tests/py/test_docs.py`.
+- Keep it handbook-like and summary-first; don't maintain a table of every test or exact suite totals.
+- Keep the lightweight pytest, Vitest, and direct Playwright listing commands current. Use `bash scripts/run_playwright.sh ...` for actual browser runs, not simple listing.
+- Keep suite purpose, setup, workflow, layer selection, artifact, smoke-test, and convention guidance here.
+- Any structural changes must still pass the durable contracts in `tests/py/test_docs.py`.
 - If overview notes grow into several distinct caveats, configs, or artifact rules, split them into child bullets rather than one long note block.
 
 ### `CHANGELOG.md`
 
 - Favor skimmable bold-lead entries.
+- Include user/operator-visible outcomes, compatibility or support changes, security or privacy changes, data/schema/upgrade effects, and meaningful contributor contracts.
+- Fold routine file moves, generated-asset refreshes, test-only maintenance, count deltas, and minor visual polish into a relevant outcome or omit them.
+- Use one top-level entry per cohesive reader outcome. Summarize meaningful validation in a child bullet instead of listing every test or changed file.
 - Separate user-visible outcomes from internal implementation notes when possible.
 - Use T2 short for one-scope entries (≤4 sentences).
 - Use T2 long when the entry is ≥5 sentences or has distinct root-cause / implementation / tests concepts.
 - Use T1 only for broad subsystem umbrellas — not as a substitute for T2 long.
 - If a `Before` / `After` / `Fix` / `What` / `Tests` bullet still contains several distinct points, split it into one additional child-bullet level instead of leaving a paragraph-sized block.
+- Keep the active `Unreleased` section and the two newest dated releases in the root file. Move older entries intact to one archive per major version after the next active section is seeded.
+- Treat a change to an already published release as an explicit historical correction with separate review. Do not rewrite published sections during routine cleanup or archive rotation.
 
 ### `THEME.md`
 
@@ -304,6 +349,16 @@ Must keep:
 
 - Merge-request drafts must keep the required MR section contract.
 - Release-note drafts should stay user- and operator-facing, not turn into engineering change logs.
+- Keep drafts and pre-merge review findings out of the permanent Documentation Map and changelog archives.
+- Validate repository-relative links and heading fragments while drafts exist.
+
+### Focused guides under `docs/`
+
+- Each guide owns its named user, operator, or contributor topic.
+- Use T7 as the default shape and link back to canonical configuration, architecture, or feature material.
+- Do not create another broad overview when a focused task or reference page is enough.
+- Keep event names, levels, fields, redaction expectations, and troubleshooting in `docs/logging.md`; keep logging settings in `CONFIGURATION.md`, runtime boundaries in `ARCHITECTURE.md`, user-visible benefits in `FEATURES.md`, and rationale in `DECISIONS.md`.
+- Keep bundled-tool discovery and app-visible usage guidance in `docs/tools.md`; keep registry schema, rewrite/environment contracts, workspace validation, and integration checklists in `docs/external-command-integrations.md`.
 
 ---
 
@@ -319,6 +374,10 @@ Before finishing doc changes, check:
 - Was prose kept where sequencing or rationale matters?
 - Are sibling sections more consistent than before?
 - Do anchors and cross-links still resolve?
+- If the doc has a full table of contents, does it include every reader-facing H2 section?
+- Is detailed material in one canonical home, with only necessary context repeated elsewhere?
+- Are Related Docs limited to the few pages this reader is most likely to need next?
+- Does README's Documentation Map still list every maintained project Markdown document?
 - For CHANGELOG entries, does the T2 short vs T2 long choice match the ≥5-sentence / multi-concept threshold?
 - Does `python -m pytest tests/py/test_docs.py -q` still pass?
 - Does `npm run lint:md` still report zero errors?
@@ -335,7 +394,10 @@ Avoid these:
 - keeping paragraph-sized labeled bullets when the content is really a small list of parallel points
 - moving contributor-only details into end-user docs
 - adding implementation trivia to release notes
-- restructuring tested appendices or file trees casually without checking the doc gates
+- regenerating test inventories, exact test totals, or an exhaustive source-file tree in reader-facing docs
+- turning Related Docs into a mirror of every project document instead of a short next-step list
+- mirroring a current-state contract across several docs and comparing their wording in tests
+- creating a focused guide that copies another guide's procedures, tables, or implementation contract
 
 ---
 

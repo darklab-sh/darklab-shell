@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // darklab_shell session preference helpers and Options modal preference syncing.
 
 import { DarklabPreferenceCore as importedPreferenceCore } from '../../core/app_preferences_core.js';

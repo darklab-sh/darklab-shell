@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Run comparison pure helpers ──────────────────────────────────────────
 // Loaded before history.js. DOM rendering and route calls stay in history.js;
 // comparison formatting, preferences, and deterministic summary helpers live here.
@@ -22,6 +25,17 @@ var DarklabHistoryCompareCore = (function (global) {
 
   function compareDateGroupLabel(value) {
     return historyCore().compareDateGroupLabel(value);
+  }
+
+  function orderedRunIds(current, candidate) {
+    const currentId = String(current?.id || current?.value || '');
+    const candidateId = String(candidate?.id || candidate?.value || '');
+    const currentStarted = Date.parse(String(current?.started || current?.created || ''));
+    const candidateStarted = Date.parse(String(candidate?.started || candidate?.created || ''));
+    if (Number.isFinite(currentStarted) && Number.isFinite(candidateStarted) && currentStarted <= candidateStarted) {
+      return [currentId, candidateId];
+    }
+    return [candidateId, currentId];
   }
 
   function compareFormatDuration(seconds) {
@@ -178,6 +192,10 @@ var DarklabHistoryCompareCore = (function (global) {
     };
     (Array.isArray(findingObjects.added) ? findingObjects.added : []).forEach(item => addAnchor('b', item));
     (Array.isArray(findingObjects.removed) ? findingObjects.removed : []).forEach(item => addAnchor('a', item));
+    (Array.isArray(findingObjects.changed) ? findingObjects.changed : []).forEach(item => {
+      addAnchor('a', item?.before);
+      addAnchor('b', item?.after);
+    });
     return map;
   }
 
@@ -203,6 +221,7 @@ var DarklabHistoryCompareCore = (function (global) {
     lineLimit,
     number,
     omittedTotal,
+    orderedRunIds,
     resolveViewMode,
     storedContext,
     storedViewMode,
@@ -229,6 +248,7 @@ const {
   lineLimit,
   number,
   omittedTotal,
+  orderedRunIds,
   resolveViewMode,
   storedContext,
   storedViewMode,
@@ -254,6 +274,7 @@ export {
   lineLimit,
   number,
   omittedTotal,
+  orderedRunIds,
   resolveViewMode,
   storedContext,
   storedViewMode,

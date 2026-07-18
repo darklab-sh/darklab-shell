@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Shared run comparison helpers for history and project responses."""
 
 import re
@@ -20,8 +23,14 @@ from services.diff.models import DIFF_KIND_NONE
 from services.runs.output_model import LineEvent
 from services.runs.output_model import is_noise_event, noise_kind_for_event
 from services.runs.output_store import load_run_output_events_for_run
+from services.runs.comparison_findings import (
+    MAX_COMPARE_ITEMS_PER_SIDE,
+    compare_finding_items,
+    compare_item_limit as _finding_compare_item_limit,
+    run_finding_compare_items as _run_finding_compare_items,
+)
+from services.runs.comparison_derived import compare_additional_derived_groups
 
-MAX_COMPARE_ITEMS_PER_SIDE = 5000
 COMPARE_MAX_LINES = 20_000
 COMPARE_MAX_BYTES = 3 * 1024 * 1024
 COMPARE_MAX_CHANGED_LINES = 2_000
@@ -50,82 +59,48 @@ _GOBUSTER_COMPARE_RE = re.compile(
 _CLEAN_HTTP_URL_RE = re.compile(r"^https?://\S+$", re.I)
 _SHELL_TEMPLATE_URL_NOISE_RE = re.compile(r"(?:'\+|\+'\$|/\$1\b)")
 
+__all__ = [
+    "MAX_COMPARE_ITEMS_PER_SIDE",
+    "compare_finding_items",
+    "compare_item_limit",
+    "run_finding_compare_items",
+]
+
 
 def compare_item_limit(limit=None):
-    if limit is None:
-        limit = MAX_COMPARE_ITEMS_PER_SIDE
-    try:
-        return max(0, int(limit))
-    except (TypeError, ValueError):
-        return MAX_COMPARE_ITEMS_PER_SIDE
+    return _finding_compare_item_limit(MAX_COMPARE_ITEMS_PER_SIDE if limit is None else limit)
 
 
-def finding_compare_key(row):
-    for value in (row["raw_line"], row["title"]):
-        normalized = re.sub(r"\s+", " ", strip_ansi_codes(str(value or ""))).strip()
-        if normalized:
-            return normalized
-    return row["fingerprint"] or ""
-
-
-def run_finding_compare_items(
-    conn,
-    session_id,
-    run_id,
-    *,
-    include_line_number=False,
-    include_created=False,
-):
-    limit = compare_item_limit()
-    total = conn.execute(
-        "SELECT COUNT(*) AS count "
-        "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
-        "WHERE f.session_id = ? AND fo.run_id = ?",
-        (session_id, run_id),
-    ).fetchone()["count"]
-    rows = conn.execute(
-        "SELECT f.id, f.raw_line, f.title, f.severity, f.fingerprint, f.status AS review_state, "
-        "fo.line_number, f.created "
-        "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
-        "WHERE f.session_id = ? AND fo.run_id = ? ORDER BY fo.line_number ASC, f.id ASC LIMIT ?",
-        (session_id, run_id, limit),
-    ).fetchall()
-    items = []
-    for row in rows:
-        item = {
-            "key": finding_compare_key(row),
-            "id": row["id"],
-            "title": row["title"] or "",
-            "raw_line": row["raw_line"] or "",
-            "severity": row["severity"] or "",
-            "review_state": row["review_state"] or "",
-        }
-        if include_line_number:
-            item["line_number"] = row["line_number"]
-        if include_created:
-            item["created"] = row["created"]
-        items.append(item)
-    total = int(total or 0)
-    return items, total, total > len(items)
+def run_finding_compare_items(conn, owner_scope, run_id, **options):
+    return _run_finding_compare_items(
+        conn,
+        owner_scope,
+        run_id,
+        limit=compare_item_limit(),
+        **options,
+    )
 
 
 def run_artifact_compare_items(
     conn,
-    session_id,
+    owner_scope,
     run_id,
     *,
     include_display_name=False,
     include_created=False,
 ):
     limit = compare_item_limit()
+    run_scope_sql, run_scope_params = owner_scope.predicate(table_alias="r")
     total = conn.execute(
-        "SELECT COUNT(*) AS count FROM run_file_artifacts WHERE session_id = ? AND run_id = ?",
-        (session_id, run_id),
+        "SELECT COUNT(*) AS count FROM run_file_artifacts a JOIN runs r ON r.id = a.run_id "
+        "WHERE a.run_id = ? AND " + run_scope_sql,  # nosec
+        (run_id, *run_scope_params),
     ).fetchone()["count"]
     rows = conn.execute(
-        "SELECT id, workspace_path, display_name, kind, byte_size, detected_by, content_sha256, created "
-        "FROM run_file_artifacts WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC LIMIT ?",
-        (session_id, run_id, limit),
+        "SELECT a.id, a.workspace_path, a.display_name, a.kind, a.byte_size, a.detected_by, "
+        "a.content_sha256, a.created FROM run_file_artifacts a JOIN runs r ON r.id = a.run_id "
+        "WHERE a.run_id = ? AND " + run_scope_sql + " ORDER BY a.created ASC, a.id ASC LIMIT ?",  # nosec
+        (run_id, *run_scope_params, limit),
     ).fetchall()
     items = []
     for row in rows:
@@ -196,10 +171,18 @@ def _enrich_compare_line_indexes(items, index_by_output_line):
 def add_compare_line_indexes(finding_diff, left_entries, right_entries):
     left_index_by_line = compare_line_index_by_output_line(left_entries)
     right_index_by_line = compare_line_index_by_output_line(right_entries)
+    changed = []
+    for item in finding_diff.get("changed", []):
+        changed.append({
+            **item,
+            "before": _enrich_compare_line_indexes([item.get("before", {})], left_index_by_line)[0],
+            "after": _enrich_compare_line_indexes([item.get("after", {})], right_index_by_line)[0],
+        })
     return {
         **finding_diff,
         "added": _enrich_compare_line_indexes(finding_diff.get("added", []), right_index_by_line),
         "removed": _enrich_compare_line_indexes(finding_diff.get("removed", []), left_index_by_line),
+        "changed": changed,
     }
 
 
@@ -532,6 +515,13 @@ def compare_derived_changes(left_run, right_run, left_entries, right_entries):
     url_group = _compare_url_changes(left_run, right_run, left_entries, right_entries)
     if url_group is not None:
         groups.append(url_group)
+    groups.extend(compare_additional_derived_groups(
+        left_run,
+        right_run,
+        left_entries,
+        right_entries,
+        skip_hosts=bool(url_group and compare_run_root(right_run) == "httpx"),
+    ))
     total_change_count = sum(
         int(group.get("added_count") or 0)
         + int(group.get("removed_count") or 0)
@@ -581,7 +571,7 @@ def compare_run_summary(run):
     command = str(run.get("command") or "")
     root = compare_run_root(run)
     target = compare_run_target(run)
-    return {
+    summary = {
         "id": run.get("id"),
         "command": command,
         "command_root": root,
@@ -595,6 +585,12 @@ def compare_run_summary(run):
         "full_output_available": bool(run.get("full_output_available")),
         "full_output_truncated": bool(run.get("full_output_truncated")),
     }
+    provenance = run.get("workflow_execution")
+    if provenance:
+        summary["workflow_execution"] = provenance
+        summary["workflow_execution_id"] = str(run.get("workflow_execution_id") or "")
+        summary["workflow_step_id"] = str(run.get("workflow_step_id") or "")
+    return summary
 
 
 def candidate_confidence(source, candidate):

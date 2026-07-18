@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Session workspace routes for app-mediated file operations."""
 
 from __future__ import annotations
@@ -269,7 +272,9 @@ def workspace_files_list():
         return error
     assert scope is not None
     try:
-        return jsonify(_workspace_payload(scope))
+        response = jsonify(_workspace_payload(scope))
+        response.headers["Cache-Control"] = "no-store"
+        return response
     except Exception as exc:
         return _workspace_error_response(exc)
 

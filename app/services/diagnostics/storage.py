@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Shared database storage diagnostics for /diag and Prometheus."""
 
 from __future__ import annotations

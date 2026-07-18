@@ -1,6 +1,6 @@
 # External Command Integrations
 
-This document explains how darklab_shell adapts installed command-line tools so they work cleanly inside the web shell, container sandbox, and personal/team Files workspace model.
+This contributor guide explains how darklab_shell adapts installed command-line tools so they work cleanly inside the web shell, container sandbox, and personal/team Files workspace model. Users looking for command discovery, run modes, Files, Secrets, or provider setup should start with [Bundled Tools](tools.md).
 
 The goal is not to document every flag a tool supports. The goal is to make app-owned behavior visible: command rewrites, environment overrides, workspace file handling, permission assumptions, and validation rules.
 
@@ -34,7 +34,7 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The r
 | Tool | App adaptation | Why |
 | ---- | -------------- | --- |
 | `mtr` | Adds `--report-wide` when no report mode flag is present, unless the run is started through the Interactive PTY trigger. | Plain shell runs need clean line-oriented output for streaming and saved history; `mtr --interactive <host>` uses the PTY path for the live redraw view when the feature is enabled. |
-| `nmap` | Adds `-sT` when no scan mode is explicit. | TCP connect scans work reliably as the unprivileged `scanner` user; raw SYN scans (`-sS`) and explicit `--privileged` mode are blocked. |
+| `nmap` | Adds `-sT` while raw readiness is inactive. When the operator opt-in is ready, it adds trusted `NMAP_PRIVILEGED=1`, leaves the scan mode to Nmap, and reveals raw-only autocomplete choices. Restricted-CIDR deployments also require the matching root-owned firewall marker. | Connect scans remain the portable default, while Linux capability-backed deployments can use SYN, UDP, OS detection, traceroute, and raw host discovery without root or Docker privileged mode. Spoofing and link-layer bypass options remain blocked. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled, and declares workspace paths for response stores, Markdown/SARIF/JSON/JSONL exports, trace/error logs, resume files, and selected config/secret inputs. | Template storage must be writable under the read-only container filesystem, while useful evidence and logs should be visible in Files without exposing template caches as artifacts. |
 | `subfinder` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list input, per-domain output directories, resolver lists, config files, and provider config files. | Subfinder otherwise falls back to `$HOME/.config` under `/tmp`, hiding useful artifacts; provider configs can contain API keys and remain owner-scoped rather than share/export artifacts. |
 | `dnsx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list input, wordlists, and normal outputs. | DNSX shares the ProjectDiscovery config path conventions and should keep generated state under the active owner folder. |
@@ -43,7 +43,8 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The r
 | `cdncheck` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for resolver and output files. | CDN/cloud/WAF classifications are operator context rather than vulnerabilities, and saved JSONL rows should remain tied to the run workspace. |
 | `wget` | When Files are enabled, adds `-P <current workspace folder>` when no directory-prefix flag is present, and declares `-P` / `--directory-prefix` as workspace directory flags. | Default downloads land in the user's Files area instead of failing against the read-only container root, while explicit download folders still stay under the active workspace. |
 | `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled and declares workspace paths for list/config inputs, error logs, stored response directories, and stored field directories. | Katana can generate useful secondary request/response and field-extraction artifacts; keeping those directories in Files makes them inspectable and reusable. |
-| `naabu` | Adds `-scan-type c` when no scan type is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled, and declares workspace paths for host lists, exclude lists, ports files, and normal outputs. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state and secondary input lists should remain visible to the active owner. |
+| `naabu` | Adds `-scan-type c` while raw readiness is inactive or `-scan-type s` when active, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<active workspace>/tools` when Files are enabled, and declares workspace paths for host lists, exclude lists, ports files, and normal outputs. | Connect mode remains available everywhere; SYN mode is selected only after capability checks pass and is always inactive when restricted CIDRs are configured. |
+| `masscan` | Allows live and interactive scans only while Masscan's raw readiness is active; help remains available otherwise. Workspace target lists and outputs still use the normal managed file path. | Masscan has no connect fallback, and its packet-socket path remains unavailable whenever restricted CIDRs are configured. |
 | `trufflehog` | Allows workspace folder scans through `filesystem --directory`, allows HTTPS Git repository scans through `git`, declares include/exclude regex files as workspace inputs, and rejects non-HTTPS Git repository arguments before launch. | Secret scanning should not read arbitrary local paths, leave custom clone directories behind, or accept SSH/file Git URLs inside the web shell runtime. |
 | `puredns` | Allows `bruteforce` with the packaged SecLists DNS wordlist and declares resolver, trusted-resolver, domain-list, valid-domain, raw massdns, and wildcard output flags as workspace paths. | puredns should use explicit resolver files and save useful outputs in Files instead of relying on hidden home-directory defaults. |
 | `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir tools/amass` when absent, rewrites it to the active workspace, and launches with `XDG_CONFIG_HOME=<active workspace>/tools`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-owner database path instead of falling back to `$HOME/.config/amass`. |
@@ -82,6 +83,11 @@ runtime_adaptations:
     - flags: ["env", "XDG_CONFIG_HOME={session_workspace}/tools"]
       position: command_prefix
       requires_workspace: true
+    - flags: ["-sT"]
+      unless_raw_packets: true
+    - flags: ["env", "NMAP_PRIVILEGED=1"]
+      position: command_prefix
+      requires_raw_packets: true
   managed_workspace_directory:
     flag: -dir
     directory: tools/amass
@@ -94,11 +100,11 @@ runtime_adaptations:
       managed_directory_flag: -dir
 ```
 
-`inject_flags` rewrites command argv tokens with `shlex.join`, so injected values stay safely quoted when paths contain spaces or shell metacharacters. `position: prepend` inserts tokens after the command root, `position: append` adds trailing tokens, and `position: command_prefix` inserts tokens before the command root for wrappers such as `env NAME=value`. `unless_any` and `unless_any_regex` keep rewrites from duplicating flags and prevent help/version commands from being changed. `requires_workspace: true` skips the injection unless Files are enabled and an active workspace is available. Injected tokens may use `{session_workspace}` to point at the active personal/team hashed workspace directory. `notice` prints a short terminal message when a rewrite needs user-facing explanation.
+`inject_flags` rewrites command argv tokens with `shlex.join`, so injected values stay safely quoted when paths contain spaces or shell metacharacters. `position: prepend` inserts tokens after the command root, `position: append` adds trailing tokens, and `position: command_prefix` inserts tokens before the command root for wrappers such as `env NAME=value`. `unless_any` and `unless_any_regex` keep rewrites from duplicating flags and prevent help/version commands from being changed. `requires_workspace: true` skips the injection unless Files are enabled and an active workspace is available. `requires_raw_packets: true` and `unless_raw_packets: true` select adaptations from effective runtime readiness rather than the setting alone. Injected tokens may use `{session_workspace}` to point at the active personal/team hashed workspace directory. `notice` prints a short terminal message when a rewrite needs user-facing explanation.
 
 `managed_workspace_directory` is evaluated by workspace-aware validation. When it applies, the declared directory is injected if absent, rewritten through the same workspace directory helper as user-provided directory flags, and optionally rejects alternate user values so tool state does not split across multiple databases.
 
-`environment` wraps the final execution command with `env NAME=value ...` after workspace path rewriting. The current template used by shipped commands is `{managed_workspace_parent}`, which resolves from the declared managed directory flag.
+`environment` wraps the final execution command with `env NAME=value ...` after workspace path rewriting. Entries can use the same `requires_raw_packets` readiness gate and `unless_any` exclusions as flag injection. Nmap uses a command-prefix injection for the fixed `NMAP_PRIVILEGED=1` value so it composes with conditional scan flags; workspace-backed tools use `{managed_workspace_parent}`, which resolves from the declared managed directory flag.
 
 Encrypted credentials use a separate `requires_secrets` declaration instead of the `environment` wrapper. At launch, `/runs` looks up the current session's matching encrypted secrets, decrypts them in memory, and passes them through `subprocess.Popen(env=...)`. Secret values are never inserted into the shell command string. Required missing secrets block launch with a clear error; optional missing secrets log a warning and let the command run without that env var.
 
@@ -380,13 +386,15 @@ The first command should show files under the active `sess_*` workspace. The sec
 
 `nmap` can use raw-socket-related Linux capabilities for SYN scans, OS fingerprinting, and similar features.
 
-Container setup applies file capabilities:
+The bundled image applies the required file capabilities to all three approved raw scanners:
 
 ```bash
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan
+setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu
 ```
 
-Those raw-socket features are not reliable for the app's unprivileged `scanner` execution path across Docker hosts and security profiles, so the app standardizes on TCP connect scans. `rewrite_command()` injects `-sT` when an `nmap` command does not already specify a scan mode, and command validation blocks `-sS` plus explicit `--privileged` mode before launch.
+TCP connect scanning remains the default: `rewrite_command()` injects `-sT` when no scan mode is present. Operators can enable `raw_packet_scanning_enabled` on Linux Docker hosts. Once the runtime confirms `CAP_NET_RAW`, the effective/permitted Nmap file capability, and a compatible executable policy, command preparation adds `NMAP_PRIVILEGED=1` and leaves the scan mode to Nmap. Raw-dependent options fail with connect-mode guidance when readiness is inactive; plain `-sT` stays unchanged, mixed connect/raw options fail clearly, and spoofing/link-layer bypass options are always blocked. With restricted CIDRs configured, the adaptation adds `--send-ip` only after the matching root-owned firewall marker confirms the scanner-user OUTPUT boundary.
 
 Workspace integration is separate from the scan-mode rewrite:
 
@@ -397,7 +405,7 @@ Workspace integration is separate from the scan-mode rewrite:
 
 ## Naabu
 
-`naabu` defaults to SYN scanning, which relies on libpcap/gopacket and raw packet behavior that is not reliable across Docker Desktop, rootless runtimes, and production container hosts.
+`naabu` supports SYN scanning through libpcap/gopacket and TCP connect scanning as a portable fallback.
 
 The app injects:
 
@@ -405,12 +413,25 @@ The app injects:
 -scan-type c
 ```
 
-when neither `-scan-type` nor `-st` is present. This makes naabu use TCP connect mode, which is slower but much more predictable in the app runtime. Users can still explicitly request another scan type.
+when neither `-scan-type` nor `-st` is present and raw readiness is inactive. Ready deployments inject `-scan-type s` instead. An explicit connect choice is preserved in either mode. When `restricted_command_input_cidrs` is set, Naabu always remains on the connect path. Separate host or Docker bridge firewall rules do not change that readiness decision.
 
 Workspace integration covers list input and output files:
 
 - `-l`, `--list`, and `-list` can read active workspace files.
 - `-o` and `--output` can write active workspace files.
+
+---
+
+## Masscan
+
+`masscan` is raw-packet only and has no TCP connect fallback. Live and interactive scans are available only when the operator opt-in is enabled and Masscan's Linux capability, binary, and file-capability readiness checks pass. Its help path remains available when readiness is inactive; actual scans return a short readiness error with RustScan or `nmap -sT` as connect-mode alternatives.
+
+When `restricted_command_input_cidrs` is set, Masscan scans are always unavailable because its packet-socket traffic does not use the scanner-user OUTPUT boundary. Separate host or Docker bridge firewall rules do not reactivate it.
+
+Workspace integration covers target lists and output files:
+
+- `-iL` can read an active workspace target list.
+- `-oL`, `-oJ`, `-oX`, `-oG`, `-oB`, and `--output-filename` can write active workspace files.
 
 ---
 
@@ -432,3 +453,10 @@ Also check the command-specific surfaces that sit outside the registry:
 - AI follow-ups: update `app/services/ai/next_commands.py`, `app/services/ai/prompts.py`, and `app/services/ai/suggestions.py` when the tool should appear in next-command suggestions or needs special validation for targets, ports, scripts, wordlists, known-bad flags, duplicate-source commands, or packaged file paths.
 - Durable surfaces: confirm Project Findings, Atlas entities, History search, exports, and evidence packages still show the intended output shape when the command creates reusable findings or entities.
 - Tests: add focused output-signal tests for transcript parsing, registry/autocomplete/policy tests for command metadata, smoke coverage for visible examples, and AI validation/context tests when the tool can be suggested or rejected by AI.
+
+## Related Docs
+
+- [tools.md](tools.md) - user and operator guidance for bundled tools
+- [../CONTRIBUTING.md](../CONTRIBUTING.md#adding-external-commands) - contributor workflow for adding commands
+- [../ARCHITECTURE.md](../ARCHITECTURE.md#security-model) - command trust and process boundaries
+- [../tests/README.md](../tests/README.md) - test commands and layer guidance

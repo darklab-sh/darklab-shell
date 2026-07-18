@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { test, expect } from '@playwright/test'
 import { spawnSync } from 'child_process'
 import { existsSync, readFileSync, readdirSync } from 'fs'
@@ -19,7 +22,6 @@ import {
 // Use fake shell commands — they bypass the allowlist and complete instantly.
 const CMD_A = 'hostname'
 const CMD_B = 'date'
-const COMPARE_PANE_SCROLL_TEST_HEIGHT = '48px'
 
 function e2eDataDirForProject(testInfo) {
   const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
@@ -56,81 +58,6 @@ function pythonForE2EFixture() {
     }
   }
   throw new Error('Failed to find a Python executable with sqlite3 for the e2e comparison fixture')
-}
-
-function seedCompareFixture(testInfo, { sessionId }) {
-  const dataDir = e2eDataDirForProject(testInfo)
-  const script = String.raw`
-import json
-from pathlib import Path
-import sqlite3
-import sys
-import uuid
-
-data_dir, session_id = sys.argv[1:3]
-command = "nmap -p 80,443 compare.playwright.example"
-left_id = "run_cmp_left_" + uuid.uuid4().hex[:16]
-right_id = "run_cmp_right_" + uuid.uuid4().hex[:16]
-long_line = "compare-long-line-" + ("x" * 4200) + "-LONG-LINE-END"
-common_lines = [
-    "22/tcp filtered ssh",
-    "53/tcp open domain",
-    "80/tcp open http",
-    "111/tcp filtered rpcbind",
-    "135/tcp filtered msrpc",
-    "139/tcp filtered netbios-ssn",
-    "443/tcp open https",
-    "445/tcp filtered microsoft-ds",
-]
-
-def preview(lines):
-    return json.dumps([
-        {"text": "$ " + command, "cls": "prompt-echo", "line_index": 0},
-        *[
-            {"text": text, "cls": "", "line_index": index + 1}
-            for index, text in enumerate(lines)
-        ],
-        {"text": "[process exited with code 0]", "cls": "exit-ok", "line_index": len(lines) + 1},
-    ])
-
-left_lines = common_lines + ["8080/tcp open http-proxy old-build"]
-right_lines = common_lines + ["8080/tcp open http-proxy new-build", long_line]
-
-conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
-try:
-    conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
-        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
-        "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, ?, 0, 0)",
-        (left_id, session_id, command, preview(left_lines), len(left_lines) + 2),
-    )
-    conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
-        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
-        "VALUES (?, ?, 'external', ?, datetime('now', '-1 minute'), datetime('now', '-1 minute'), 0, ?, 0, ?, 0, 0)",
-        (right_id, session_id, command, preview(right_lines), len(right_lines) + 2),
-    )
-    conn.commit()
-finally:
-    conn.close()
-print(json.dumps({
-    "leftRunId": left_id,
-    "rightRunId": right_id,
-    "command": command,
-    "commonFoldedText": common_lines[3],
-    "leftChangedText": "old-build",
-    "rightChangedText": "new-build",
-    "longLineEnd": "LONG-LINE-END",
-}))
-`
-  const result = spawnSync(pythonForE2EFixture(), ['-c', script, dataDir, sessionId], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  })
-  if (result.status !== 0) {
-    throw new Error(`Failed to seed comparison fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
-  }
-  return JSON.parse(result.stdout)
 }
 
 function seedHistoryCleanupFixture(testInfo, { sessionId }) {
@@ -226,34 +153,6 @@ print(json.dumps({
   return JSON.parse(result.stdout)
 }
 
-async function createProjectWithLinkedRuns(page, name, runIds) {
-  return page.evaluate(async ({ projectName, linkedRunIds }) => {
-    const createdResp = await apiFetch('/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: projectName }),
-    })
-    if (!createdResp.ok) throw new Error(`Failed to create project: ${createdResp.status}`)
-    const created = await createdResp.json()
-    const project = created.project
-    const activeResp = await apiFetch('/projects/active', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: project.id }),
-    })
-    if (!activeResp.ok) throw new Error(`Failed to set active project: ${activeResp.status}`)
-    for (const runId of linkedRunIds) {
-      const linkResp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entity_type: 'run', entity_id: runId, source: 'manual' }),
-      })
-      if (!linkResp.ok) throw new Error(`Failed to link project run: ${linkResp.status}`)
-    }
-    return project
-  }, { projectName: name, linkedRunIds: runIds })
-}
-
 async function createActiveProject(page, name) {
   return page.evaluate(async ({ projectName }) => {
     const createdResp = await apiFetch('/projects', {
@@ -319,121 +218,6 @@ async function selectVisibleHistoryRuns(page, commands) {
     await checkbox.check()
     await expect(checkbox).toBeChecked()
   }
-}
-
-async function forceComparePaneOverflow(overlay) {
-  const panes = overlay.locator('.history-compare-pane')
-  await panes.evaluateAll((paneElements, height) => {
-    paneElements.forEach((pane) => {
-      pane.style.alignSelf = 'start'
-      pane.style.minHeight = '0'
-      pane.style.height = height
-      pane.style.maxHeight = height
-      pane.style.overflowY = 'auto'
-      let spacer = pane.querySelector(':scope > [data-e2e-compare-scroll-spacer]')
-      if (!spacer) {
-        spacer = document.createElement('div')
-        spacer.dataset.e2eCompareScrollSpacer = '1'
-        spacer.setAttribute('aria-hidden', 'true')
-        pane.appendChild(spacer)
-      }
-      // Keep overflow deterministic when flex rows settle differently on a loaded worker.
-      const spacerHeight = Math.max(160, pane.clientHeight * 2)
-      spacer.style.flex = `0 0 ${spacerHeight}px`
-      spacer.style.height = `${spacerHeight}px`
-    })
-  }, COMPARE_PANE_SCROLL_TEST_HEIGHT)
-  await expect.poll(() => panes.evaluateAll((paneElements) => (
-    paneElements.every((pane) => pane.scrollHeight > pane.clientHeight)
-  ))).toBe(true)
-}
-
-async function expectSplitPaneScrollSync(overlay) {
-  await forceComparePaneOverflow(overlay)
-  const scrollState = await overlay.locator('.history-compare-split').evaluate(async (split) => {
-    const left = split.querySelector('.history-compare-pane[data-side="a"]')
-    const right = split.querySelector('.history-compare-pane[data-side="b"]')
-    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
-    if (!left || !right) {
-      return {
-        actual: 0,
-        expected: 0,
-        leftScrollable: false,
-        mobileMode: false,
-        rightScrollable: false,
-      }
-    }
-    await nextFrame()
-    const mobileMode = typeof window.useMobileTerminalViewportMode === 'function'
-      ? window.useMobileTerminalViewportMode()
-      : false
-    const leftMax = Math.max(0, left.scrollHeight - left.clientHeight)
-    const rightMax = Math.max(0, right.scrollHeight - right.clientHeight)
-    const targetScrollTop = Math.min(48, Math.max(1, Math.min(leftMax, rightMax)))
-
-    left.scrollTop = 0
-    right.scrollTop = 0
-    left.dispatchEvent(new Event('scroll', { bubbles: true }))
-    right.dispatchEvent(new Event('scroll', { bubbles: true }))
-    await nextFrame()
-    await nextFrame()
-
-    left.scrollTop = targetScrollTop
-    left.dispatchEvent(new Event('scroll', { bubbles: true }))
-    await nextFrame()
-    await nextFrame()
-
-    return {
-      actual: right.scrollTop,
-      expected: left.scrollTop,
-      leftScrollable: leftMax > 0,
-      mobileMode,
-      rightScrollable: rightMax > 0,
-    }
-  })
-  expect(scrollState.mobileMode, 'split compare scroll sync is only active in desktop mode').toBe(false)
-  expect(scrollState.leftScrollable, 'left compare pane should be scrollable before testing sync').toBe(true)
-  expect(scrollState.rightScrollable, 'right compare pane should be scrollable before testing sync').toBe(true)
-  expect(scrollState.actual).toBe(scrollState.expected)
-}
-
-async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}) {
-  const overlay = page.locator('#history-compare-overlay')
-  await expect(overlay).toHaveClass(/\bopen\b/)
-  await expect(overlay.locator('.history-compare-pane')).toHaveCount(2)
-  await expect(overlay.locator('#history-compare-subtitle')).toContainText('8 unchanged')
-  await expect(overlay.locator('#history-compare-subtitle')).toContainText('1 changed')
-  await expect(overlay.locator('#history-compare-subtitle')).toContainText('1 added')
-  await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(fixture.leftChangedText)
-  await expect(overlay.locator('.history-compare-pane[data-side="b"]')).toContainText(fixture.rightChangedText)
-
-  await expectSplitPaneScrollSync(overlay)
-
-  const rightPane = overlay.locator('.history-compare-pane[data-side="b"]')
-  const foldButton = rightPane.getByRole('button', { name: /Show 2 unchanged line/ }).first()
-  await expect(foldButton).toBeVisible()
-  const lineResponses = Promise.all(['a', 'b'].map(side => page.waitForResponse((response) => {
-    const url = new URL(response.url())
-    return url.pathname === '/history/compare/lines'
-      && url.searchParams.get('side') === side
-      && (!projectId || url.searchParams.get('project_id') === projectId)
-  })))
-  await foldButton.click()
-  for (const response of await lineResponses) {
-    expect(response.ok()).toBe(true)
-  }
-  await expect(rightPane.getByRole('button', { name: /Hide unchanged lines/ }).first()).toBeVisible({
-    timeout: 10_000,
-  })
-  await expect(overlay.locator('.history-compare-pane[data-side="a"]')).toContainText(
-    fixture.commonFoldedText,
-    { timeout: 10_000 },
-  )
-
-  const expander = overlay.locator('.history-compare-line-expander').first()
-  await expect(expander).toBeVisible()
-  await expander.click()
-  await expect(overlay.locator('.history-compare-pane[data-side="b"]')).toContainText(fixture.longLineEnd)
 }
 
 test.describe('history drawer', () => {
@@ -1091,44 +875,4 @@ test.describe('history drawer', () => {
     })).filter(run => bulkCommands.includes(run.command)).length).toBe(0)
   })
 
-  test('run comparison split view works from history and project entry points', async ({ page }, testInfo) => {
-    test.setTimeout(60_000)
-    const sessionId = await browserSessionId(page)
-    const fixture = seedCompareFixture(testInfo, { sessionId })
-
-    await openHistoryWithEntries(page)
-    const sourceRow = page.locator('.history-entry').filter({ hasText: fixture.command }).first()
-    await expect(sourceRow).toBeVisible()
-    await clickHistoryRunMenuAction(sourceRow, 'compare')
-    const compareOverlay = page.locator('#history-compare-overlay')
-    await expect(compareOverlay).toHaveClass(/\bopen\b/)
-    await expect(compareOverlay.locator('.history-compare-primary')).toBeVisible()
-    await compareOverlay.locator('.history-compare-primary').click()
-    await expectSplitCompareRendered(page, fixture)
-    const historyCompareText = await compareOverlay.locator('.history-compare-split').textContent()
-    const historyCountsText = await compareOverlay.locator('#history-compare-subtitle').textContent()
-
-    await page.locator('.history-compare-close').click()
-    await expect(compareOverlay).not.toHaveClass(/\bopen\b/)
-    await closeHistory(page)
-
-    const project = await createProjectWithLinkedRuns(
-      page,
-      `Compare Project ${Date.now()}`,
-      [fixture.leftRunId, fixture.rightRunId],
-    )
-    await page.locator('.rail-nav [data-action="projects"]').click()
-    await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
-    await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
-    await page.locator('[data-project-tab="runs"]').click()
-    await expect(page.locator('#project-explorer-body')).toContainText(fixture.command)
-
-    await page.locator('[data-project-action="compare-runs"]').click()
-    await expect(compareOverlay).toHaveClass(/\bopen\b/)
-    await expectSplitCompareRendered(page, fixture, { projectId: project.id })
-    await expect(compareOverlay.locator('.history-compare-split')).toContainText(fixture.leftChangedText)
-    await expect(compareOverlay.locator('.history-compare-split')).toContainText(fixture.rightChangedText)
-    expect(await compareOverlay.locator('#history-compare-subtitle').textContent()).toBe(historyCountsText)
-    expect(await compareOverlay.locator('.history-compare-split').textContent()).toBe(historyCompareText)
-  })
 })

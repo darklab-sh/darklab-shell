@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // History run restore and source-line highlight helpers.
 import { getTab as importedGetTab, getTabs as importedGetTabs } from '../../core/state.js';
 import {
@@ -285,6 +288,7 @@ function restoreHistoryRunIntoTab(run, {
         t.command = fullRun.command;
         t.runId = null;
         t.historyRunId = fullRun.id || run.id;
+        t.historyRunKind = String(fullRun.run_kind || run.run_kind || '');
         t.exitCode = fullRun.exit_code;
         t.previewTruncated = !!previewNotice;
         t.fullOutputAvailable = !!fullRun.full_output_available;

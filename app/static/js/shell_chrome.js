@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shell chrome controller ──
 // Owns the desktop rail (Recent, Workflows, nav) and the bottom HUD.
 // Loaded after the shell core, the active-project HUD helpers, and controller.js.
@@ -26,6 +29,7 @@ import { openCommandRegistry as importedOpenCommandRegistry } from './features/c
 import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './features/history/history_recall.js';
 import { openHistoryRunDetails as importedOpenHistoryRunDetails } from './features/history/history_run_modal_state_bridge.js';
 import { restoreHistoryRunIntoTab as importedRestoreHistoryRunIntoTab } from './features/history/history_restore_bridge.js';
+import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from './features/run-comparison/history_compare_bridge.js';
 import { setProjectContextHandlers as importedSetProjectContextHandlers } from './features/projects/project_context_bridge.js';
 import { setProjectHudHandlers as importedSetProjectHudHandlers } from './features/projects/project_hud_bridge.js';
 import { DarklabProjectActiveContext as importedProjectActiveContext } from './features/projects/project_active_context.js';
@@ -742,6 +746,20 @@ let importedProjectWorkspaceShell;
     if (railWorkflowsCount) railWorkflowsCount.textContent = String(allWorkflows.length);
     if (!railWorkflowsBody) return;
     railWorkflowsBody.replaceChildren();
+    const browseRow = document.createElement('button');
+    browseRow.type = 'button';
+    browseRow.className = 'rail-item rail-workflows-browse-all';
+    browseRow.title = 'Browse all workflows';
+    const browseGlyph = document.createElement('span');
+    browseGlyph.className = 'drill-chev';
+    browseGlyph.setAttribute('aria-hidden', 'true');
+    browseGlyph.textContent = '›';
+    const browseText = document.createElement('span');
+    browseText.className = 'rail-item-text';
+    browseText.textContent = 'Browse all workflows';
+    browseRow.append(browseGlyph, browseText);
+    browseRow.addEventListener('click', () => openWorkflowWorkspace());
+    railWorkflowsBody.appendChild(browseRow);
     if (!allWorkflows.length) {
       const empty = document.createElement('div');
       empty.className = 'rail-section-empty';
@@ -764,21 +782,19 @@ let importedProjectWorkspaceShell;
       text.textContent = label;
       row.appendChild(glyph);
       row.appendChild(text);
-      row.addEventListener('click', () => openScopedWorkflow(idx));
+      row.addEventListener('click', () => openWorkflowWorkspace(wf.id));
       railWorkflowsBody.appendChild(row);
     });
   }
 
-  async function openScopedWorkflow(idx) {
-    const item = allWorkflows[idx];
-    if (!item) return;
+  async function openWorkflowWorkspace(selectedWorkflowId = '') {
     const loadWorkflowsFn = _shellFn('loadWorkflows');
     if (loadWorkflowsFn) {
       try { await loadWorkflowsFn(); } catch (_) { /* non-critical */ }
     }
     const openWorkflowsFn = _shellFn('openWorkflows', importedOpenWorkflows);
     if (openWorkflowsFn) {
-      openWorkflowsFn({ items: [item], emitCatalogEvent: false });
+      openWorkflowsFn({ selectedWorkflowId, view: 'workflows' });
     } else {
       _shellFn('showWorkflowsOverlay', importedShowWorkflowsOverlay)?.();
     }
@@ -1365,6 +1381,7 @@ let importedProjectWorkspaceShell;
   const hudActions = document.getElementById('hud-actions');
   let hudKillBtn = null;
   let hudShareSnapshotBtn = null;
+  let hudCompareBtn = null;
 
   function _currentTabId() {
     return _shellGetActiveTabId();
@@ -1419,6 +1436,13 @@ let importedProjectWorkspaceShell;
       : _hudShareSnapshotDeniedTitle();
   }
 
+  function _comparisonRunForTab(tab) {
+    const runId = String(tab?.historyRunId || '').trim();
+    const runKind = String(tab?.historyRunKind || '').trim();
+    if (!runId || tab?.st === 'running' || runKind !== 'external') return null;
+    return { id: runId };
+  }
+
   function buildHudActions() {
     if (!hudActions) return;
     hudActions.replaceChildren();
@@ -1445,6 +1469,12 @@ let importedProjectWorkspaceShell;
       if (id) confirmKill?.(id);
     }, 'btn btn-destructive btn-compact u-hidden', 'Kill current run');
     hudActions.appendChild(hudKillBtn);
+
+    hudCompareBtn = _makeHudBtn('compare', 'compare', () => {
+      const run = _comparisonRunForTab(_shellGetTab(_currentTabId()));
+      if (run) importedOpenHistoryCompareLauncher?.(run, { returnFocus: hudCompareBtn });
+    }, 'btn btn-secondary btn-compact u-hidden', 'Compare active run with a previous run');
+    hudActions.appendChild(hudCompareBtn);
 
     hudShareSnapshotBtn = _makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
@@ -1511,10 +1541,16 @@ let importedProjectWorkspaceShell;
     hudKillBtn.classList.toggle('u-hidden', !show);
   }
 
+  function _setHudCompareVisible(show) {
+    if (!hudCompareBtn) return;
+    hudCompareBtn.classList.toggle('u-hidden', !show);
+  }
+
   function refreshHudActions(tabId) {
     const id = tabId || _currentTabId();
     const tab = _shellGetTab(id);
     _setHudKillVisible(!!(tab && tab.st === 'running'));
+    _setHudCompareVisible(!!_comparisonRunForTab(tab));
     _refreshHudShareSnapshotState();
   }
 

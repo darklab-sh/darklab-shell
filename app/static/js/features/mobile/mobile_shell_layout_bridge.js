@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral mobile-shell layout boundary for UI helpers and runtime callers.
 
 const mobileShellLayoutHandlers = {

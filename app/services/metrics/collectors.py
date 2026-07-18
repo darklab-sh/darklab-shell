@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Scrape-time Prometheus collectors for runtime state."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Sanitizers for browser log reports."""
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ _CLIENT_LOG_STRING_DETAIL_LIMITS = {
     "error_name": 120,
     "export_name": 160,
     "fragment_name": 120,
+    "left_run_id": 160,
     "operation": 120,
     "page": 120,
     "package_id": 160,
@@ -26,6 +30,7 @@ _CLIENT_LOG_STRING_DETAIL_LIMITS = {
     "resource": 80,
     "role": 80,
     "route": 160,
+    "right_run_id": 160,
     "run_id": 160,
     "source": 120,
     "stage": 120,
@@ -35,6 +40,7 @@ _CLIENT_LOG_STRING_DETAIL_LIMITS = {
 }
 _CLIENT_LOG_INT_DETAIL_KEYS = frozenset({"duration_ms", "limit", "offset", "status", "total"})
 _CLIENT_LOG_BOOL_DETAIL_KEYS = frozenset({
+    "compare_request_error",
     "expected_global",
     "has_active_filter",
     "partial_summary_present",

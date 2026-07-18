@@ -1,5 +1,9 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 pytest==9.1.1
 bandit==1.9.4
 pip-audit==2.10.1
 yamllint==1.38.0
 ruff==0.15.21
+setuptools==83.0.0

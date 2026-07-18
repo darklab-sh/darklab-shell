@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import {
   hasHistoryRunModalStateHandler as importedHasHistoryRunModalStateHandler,
   openHistoryRunDetails as importedOpenHistoryRunDetails,
@@ -907,8 +910,8 @@ let exportedDarklabProjectMonitoring = null;
     }
 
     async function compareRuns(projectId, runId, baselineRunId) {
-      const left = String(runId || '').trim();
-      const right = String(baselineRunId || '').trim();
+      const left = String(baselineRunId || '').trim();
+      const right = String(runId || '').trim();
       if (!left || !right || left === right) return false;
       const hasImportedHandler = typeof importedHasHistoryCompareHandler === 'function'
         && importedHasHistoryCompareHandler('fetchAndRenderHistoryComparison');

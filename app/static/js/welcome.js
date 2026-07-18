@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Desktop UI module ──
 // Fetches welcome content from /welcome, /welcome/ascii, and /welcome/hints
 // for desktop, and from /welcome/ascii-mobile plus /welcome/hints-mobile for

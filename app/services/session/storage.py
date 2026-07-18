@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Session persistence helpers owned by the service layer."""
 
 from __future__ import annotations
@@ -525,25 +528,29 @@ def migrate_session_records(
         )
         dialect = dialect_for_backend(get_db_backend())
         stars_insert = conn.execute(
-            "INSERT INTO starred_commands (session_id, command) "  # nosec B608
+            "INSERT INTO starred_commands (session_id, command) "  # nosec
             "SELECT ?, command FROM starred_commands WHERE session_id = ? "
             + dialect.insert_or_ignore_clause(("session_id", "command")),
             (to_session_id, from_session_id),
         )
         prefs_insert = conn.execute(
-            "INSERT INTO session_preferences (session_id, preferences, updated) "  # nosec B608
+            "INSERT INTO session_preferences (session_id, preferences, updated) "  # nosec
             "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ? "
             + dialect.insert_or_ignore_clause(("session_id",)),
             (to_session_id, from_session_id),
         )
         vars_insert = conn.execute(
-            "INSERT INTO session_variables (session_id, name, value, updated) "  # nosec B608
+            "INSERT INTO session_variables (session_id, name, value, updated) "  # nosec
             "SELECT ?, name, value, updated FROM session_variables WHERE session_id = ? "
             + dialect.insert_or_ignore_clause(("session_id", "name")),
             (to_session_id, from_session_id),
         )
         workflows_result = conn.execute(
             "UPDATE user_workflows SET session_id = ? WHERE session_id = ?",
+            (to_session_id, from_session_id),
+        )
+        workflow_executions_result = conn.execute(
+            "UPDATE workflow_executions SET session_id = ? WHERE session_id = ? AND team_id = ''",
             (to_session_id, from_session_id),
         )
         project_migration = migrate_project_workspace_session(
@@ -566,6 +573,7 @@ def migrate_session_records(
             "migrated_preferences": int(prefs_insert.rowcount or 0),
             "migrated_variables": int(vars_insert.rowcount or 0),
             "migrated_workflows": int(workflows_result.rowcount or 0),
+            "migrated_workflow_executions": int(workflow_executions_result.rowcount or 0),
             **project_migration,
             **notification_migration,
             "migrated_recent_values": migrated_recent_values,
@@ -626,8 +634,10 @@ def session_counts(session_id: str) -> dict[str, int]:
             (session_id,),
         ).fetchone()
         workflow_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM user_workflows WHERE session_id = ?",
-            (session_id,),
+            "SELECT "
+            "(SELECT COUNT(*) FROM user_workflows WHERE session_id = ?) + "
+            "(SELECT COUNT(*) FROM workflow_executions WHERE session_id = ? AND team_id = '') AS n",
+            (session_id, session_id),
         ).fetchone()
         recent_value_row = conn.execute(
             "SELECT COUNT(*) AS n FROM recent_values WHERE session_id = ?",

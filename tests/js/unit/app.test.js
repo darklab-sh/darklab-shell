@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { readFileSync, readdirSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -655,6 +658,7 @@ describe('app helpers', () => {
       enabled: true,
     })
     expect(list.textContent).toContain('Hourly darklab')
+    expect(list.querySelector('.schedules-list-row.is-selected')?.classList.contains('selection-row')).toBe(true)
   })
 
   it('pauses resumes and fires schedules from the modal action buttons', async () => {
@@ -919,6 +923,7 @@ describe('app helpers', () => {
       options: { suppress_removals: true },
     })
     expect(list.textContent).toContain('Watch nmap')
+    expect(list.querySelector('.watchers-list-row.is-selected')?.classList.contains('selection-row')).toBe(true)
     expect(detail.textContent).toContain('Last diff')
     expect(detail.textContent).toContain('443/tcp')
     expect(detail.textContent).toContain('Findings: +2, -0, unchanged 14')
@@ -1226,7 +1231,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -1679,7 +1684,7 @@ describe('app helpers', () => {
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {
-    const { setComposerPromptMode } = await loadAppFns()
+    const { setComposerPromptMode, syncShellPrompt } = await loadAppFns()
     const shellPromptWrap = document.getElementById('shell-prompt-wrap')
     const promptPrefix = shellPromptWrap.querySelector('.prompt-prefix')
     const mobilePromptLabel = document.querySelector('#mobile-composer-row .mobile-prompt-label')
@@ -1696,12 +1701,21 @@ describe('app helpers', () => {
     expect(document.getElementById('mobile-cmd').placeholder).toBe('')
     expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(true)
 
+    setComposerPromptMode('secret')
+    document.getElementById('cmd').value = 'private-value'
+    syncShellPrompt()
+    expect(promptPrefix.textContent).toBe('[hidden]:')
+    expect(document.getElementById('cmd').type).toBe('password')
+    expect(document.getElementById('mobile-cmd').type).toBe('password')
+    expect(document.getElementById('shell-prompt-text').textContent).not.toContain('private-value')
+
     setComposerPromptMode(null)
     expect(promptPrefix.textContent).toBe('anon@darklab.sh:/ $')
     expect(mobilePromptLabel.textContent).toBe('')
     expect(mobilePromptLabel.hidden).toBe(true)
     expect(document.getElementById('mobile-cmd').placeholder).toBe('/ · type command')
     expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(false)
+    expect(document.getElementById('cmd').type).toBe('text')
   })
 
   it('applies the saved prompt username preference to the live prompt', async () => {
@@ -2497,17 +2511,159 @@ describe('app helpers', () => {
         source: 'user',
         title: 'DNS Check',
         description: 'Custom DNS workflow',
-        inputs: [{ id: 'domain', label: 'Domain', type: 'domain', required: true, placeholder: 'example.com', default: '', help: '' }],
-        steps: [{ cmd: 'dig {{domain}} A', note: '' }],
+        inputs: [
+          { id: 'domain', label: 'Domain', type: 'domain', required: true, placeholder: 'example.com', default: '', help: '' },
+          { id: 'ports', label: 'Ports', type: 'port_set', required: false, placeholder: '', default: '80,443', help: '' },
+          { id: 'wordlist', label: 'Wordlist', type: 'wordlist', required: false, placeholder: '', default: '', help: '' },
+          { id: 'input_file', label: 'Input file', type: 'workspace_path', required: false, placeholder: '', default: '', help: '' },
+        ],
+        steps: [{ cmd: 'dig {{domain}} A -p {{ports}} {{wordlist}} {{input_file}}', note: '' }],
       },
     ], { emitCatalogEvent: false })
 
     const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
-    expect(context.workflow.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'show', 'run'])
+    expect(context.workflow.arg_hints.__positional__.map(item => item.value)).toEqual([
+      'list', 'show', 'run', 'runs', 'status', 'cancel',
+    ])
     expect(context.workflow.arg_hints.run.map(item => item.value)).toEqual(['dns-check'])
-    expect(context.workflow.sequence_arg_hints['run dns-check'].map(item => item.value)).toEqual(['--domain'])
+    expect(context.workflow.sequence_arg_hints['run dns-check'].map(item => item.value)).toEqual([
+      '--domain', '--ports', '--wordlist', '--input-file',
+    ])
     expect(context.workflow.arg_hints['--domain'][0].value_type).toBe('domain')
+    expect(context.workflow.arg_hints['--ports'][0].value_type).toBe('port_set')
+    expect(context.workflow.arg_hints['--wordlist'][0].value_type).toBe('wordlist')
+    expect(context.workflow.arg_hints['--input-file'][0].value_type).toBe('workspace_path')
+  })
+
+  it('offers project, recent, Files, and packaged wordlist values for workflow parameters', async () => {
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { renderWorkflowItems, workflowInputSourceOptions } = await loadAppFns({
+      refreshWorkspaceFileCache,
+      readProjectTargets: () => [
+        { type: 'domain', value: 'project.darklab.sh' },
+        { type: 'cidr', value: '192.0.2.0/24' },
+      ],
+      readRecentValues: () => ({
+        domain: ['recent.darklab.sh'],
+        ip: ['192.0.2.10'],
+        url: [],
+        port_set: [],
+      }),
+      getWorkspaceAutocompleteFileHints: () => [{ value: 'lists/hosts.txt' }],
+    })
+    window.APP_STATE_API.getState().acWordlists = [{
+      value: '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
+      description: 'Installed wordlist',
+    }]
+    expect(workflowInputSourceOptions({ type: 'target' }).map(item => item.value)).toEqual([
+      'project.darklab.sh', '192.0.2.0/24', 'recent.darklab.sh', '192.0.2.10',
+    ])
+    document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
+    renderWorkflowItems([{
+      id: 'usr_parameter_sources',
+      source: 'user',
+      version: 2,
+      title: 'Parameter sources',
+      description: '',
+      inputs: [
+        { id: 'target', label: 'Target', type: 'target', required: true },
+        { id: 'wordlist', label: 'Wordlist', type: 'wordlist', required: true },
+      ],
+      steps: [{
+        id: 'scan',
+        cmd: 'dnsx -d {{target}} -w {{wordlist}}',
+        next: { success: 'complete', failure: 'stop' },
+      }],
+    }], { emitCatalogEvent: false })
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-workflow-input-id="target"]')
+        .closest('.workflow-input-field').querySelector('.workflow-input-source-picker')).toBeTruthy()
+    })
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-workflow-input-id="wordlist"]')
+        .closest('.workflow-input-field').querySelector('.workflow-input-source-picker')).toBeTruthy()
+    })
+    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    const pickers = document.querySelectorAll('.workflow-input-source-picker')
+    expect([...pickers[0].options].map(option => option.value)).toEqual([
+      '', 'project.darklab.sh', '192.0.2.0/24', 'recent.darklab.sh', '192.0.2.10',
+    ])
+    expect([...pickers[1].options].map(option => option.value)).toEqual([
+      '',
+      'lists/hosts.txt',
+      '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
+    ])
+
+    pickers[0].value = 'project.darklab.sh'
+    pickers[0].dispatchEvent(new Event('change', { bubbles: true }))
+    expect(document.querySelector('[data-workflow-input-id="target"]').value).toBe('project.darklab.sh')
+  })
+
+  it('scopes remembered workflow values and never stores sensitive parameters', async () => {
+    const { DarklabTeamScope, renderWorkflowItems, storage } = await loadAppFns()
+    const workflow = {
+      id: 'usr_remembered_values',
+      source: 'user',
+      version: 2,
+      title: 'Remembered values',
+      description: '',
+      inputs: [
+        { id: 'target', label: 'Target', type: 'target', required: true, sensitive: true },
+        { id: 'port', label: 'Port', type: 'port', required: true, default: '80' },
+      ],
+      steps: [{
+        id: 'scan',
+        cmd: 'nmap -p {{port}} {{target}}',
+        next: { success: 'complete', failure: 'stop' },
+      }],
+    }
+    const render = (item = workflow) => {
+      document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
+      renderWorkflowItems([item], { emitCatalogEvent: false })
+    }
+
+    storage.setItem('workflow_input_state_v1', JSON.stringify({ stale: { target: 'old.example' } }))
+    render()
+    const target = document.querySelector('[data-workflow-input-id="target"]')
+    const port = document.querySelector('[data-workflow-input-id="port"]')
+    expect(target.type).toBe('password')
+    expect(port.type).toBe('text')
+    target.value = 'private.example'
+    target.dispatchEvent(new Event('input', { bubbles: true }))
+    port.value = '443'
+    port.dispatchEvent(new Event('input', { bubbles: true }))
+
+    const preview = document.querySelector('.workflow-step-cmd')
+    const stepRun = document.querySelector('.workflow-step-run')
+    expect(preview.textContent).toBe('nmap -p 443 [hidden]')
+    expect(preview.textContent).not.toContain('private.example')
+    expect(preview.dataset.faqCommand).toBeUndefined()
+    expect(stepRun.disabled).toBe(true)
+    expect(stepRun.title).toBe('Sensitive values run only with Run all')
+
+    expect(storage.getItem('workflow_input_state_v1')).toBeNull()
+    expect(JSON.parse(storage.getItem('workflow_input_state_v2'))).toEqual({
+      'personal:session-old::usr_remembered_values': { port: '443' },
+    })
+
+    DarklabTeamScope.setActiveTeamId('team_test', {
+      persist: false,
+      emit: false,
+      allowPending: true,
+    })
+    render()
+    expect(document.querySelector('[data-workflow-input-id="target"]').value).toBe('')
+    expect(document.querySelector('[data-workflow-input-id="port"]').value).toBe('80')
+
+    DarklabTeamScope.setActiveTeamId('', { persist: false, emit: false })
+    render()
+    expect(document.querySelector('[data-workflow-input-id="target"]').value).toBe('')
+    expect(document.querySelector('[data-workflow-input-id="port"]').value).toBe('443')
+
+    render({ ...workflow, inputs: workflow.inputs.slice(0, 1) })
+    expect(JSON.parse(storage.getItem('workflow_input_state_v2'))).toEqual({})
   })
 
   it('deduplicates workflow subcommands that share runtime insert text', async () => {
@@ -2531,32 +2687,55 @@ describe('app helpers', () => {
 
     const context = getRuntimeAutocompleteContext(registry)
 
-    expect(context.workflow.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'show', 'run'])
+    expect(context.workflow.arg_hints.__positional__.map(item => item.value)).toEqual([
+      'list', 'show', 'run', 'runs', 'status', 'cancel',
+    ])
     expect(context.workflow.arg_hints.run.map(item => item.value)).toEqual(['dns-check'])
   })
 
-  it('renders user workflows above built-ins with edit actions', async () => {
+  it('renders saved workflows above built-ins and keeps the workspace open after deletion', async () => {
+    let deleted = false
+    const showConfirm = vi.fn(async () => 'delete')
+    const showToast = vi.fn()
+    const builtIns = [
+      {
+        id: 'builtin:dns',
+        source: 'builtin',
+        title: 'DNS Troubleshooting',
+        description: '',
+        inputs: [],
+        steps: [{ cmd: 'dig darklab.sh A', note: '' }],
+      },
+      {
+        id: 'builtin:http',
+        source: 'builtin',
+        title: 'HTTP Triage',
+        description: '',
+        inputs: [],
+        steps: [{ cmd: 'curl -I https://darklab.sh', note: '' }],
+      },
+    ]
     const apiFetch = vi.fn((url) => {
       if (url === '/workflows') {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({
-            items: [
-              {
-                id: 'builtin:dns',
-                source: 'builtin',
-                title: 'DNS Troubleshooting',
-                description: '',
-                inputs: [],
-                steps: [{ cmd: 'dig darklab.sh A', note: '' }],
-              },
-            ],
-          }),
+          json: () => Promise.resolve({ items: builtIns }),
         })
+      }
+      if (url === '/session/workflows/usr_saved') {
+        deleted = true
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ deleted: true }) })
+      }
+      if (url.startsWith('/workflow-executions?')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ executions: [] }) })
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { renderWorkflowItems, ensureWorkflowCatalogLoaded } = await loadAppFns({ apiFetch })
+    const { renderWorkflowItems, ensureWorkflowCatalogLoaded } = await loadAppFns({
+      apiFetch,
+      showConfirm,
+      showToast,
+    })
     document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
 
     renderWorkflowItems([
@@ -2568,28 +2747,485 @@ describe('app helpers', () => {
         inputs: [],
         steps: [{ cmd: 'whois darklab.sh', note: '' }],
       },
-      {
-        id: 'builtin:dns',
-        source: 'builtin',
-        title: 'DNS Troubleshooting',
-        description: '',
-        inputs: [],
-        steps: [{ cmd: 'dig darklab.sh A', note: '' }],
-      },
+      ...builtIns,
     ], { emitCatalogEvent: false })
 
     const labels = [...document.querySelectorAll('.workflow-section-label')].map(el => el.textContent)
-    const titles = [...document.querySelectorAll('.workflow-title')].map(el => el.textContent)
+    const titles = [...document.querySelectorAll('.workflow-catalog-item-title')].map(el => el.textContent)
     expect(labels).toEqual(['My workflows', 'Built-ins'])
-    expect(titles).toEqual(['Saved Recon', 'DNS Troubleshooting'])
+    expect(titles).toEqual(['Saved Recon', 'DNS Troubleshooting', 'HTTP Triage'])
+    expect(document.querySelector('.workflow-catalog-item.is-selected')?.classList.contains('selection-row')).toBe(true)
     expect(document.querySelector('.is-user-workflow .workflow-edit-btn')).toBeTruthy()
     const workflowFetchesBefore = apiFetch.mock.calls.filter(([url]) => url === '/workflows').length
     await ensureWorkflowCatalogLoaded()
     const workflowFetchesAfter = apiFetch.mock.calls.filter(([url]) => url === '/workflows').length
     expect(workflowFetchesAfter).toBe(workflowFetchesBefore)
+
+    const overlay = document.getElementById('workflows-overlay')
+    overlay.classList.add('open')
+    overlay.classList.remove('u-hidden')
+    const renderedItems = []
+    document.addEventListener('app:workflows-rendered', event => {
+      renderedItems.push(event.detail.items)
+    }, { once: true })
+    document.querySelector('.workflow-delete-btn').click()
+
+    await vi.waitFor(() => expect(deleted).toBe(true))
+    await vi.waitFor(() => expect(renderedItems).toHaveLength(1))
+    expect(renderedItems[0].map(item => item.id)).toEqual(['builtin:dns', 'builtin:http'])
+    expect(overlay.classList.contains('open')).toBe(true)
+    expect(document.querySelector('.workflow-title').textContent).toBe('DNS Troubleshooting')
+    expect(document.querySelector('[data-workflow-id="usr_saved"]')).toBeNull()
+    expect(showConfirm).toHaveBeenCalledOnce()
+    expect(showToast).toHaveBeenCalledWith('Workflow deleted')
   })
 
-  it('runs a workflow from the terminal command with flag-provided inputs', async () => {
+  it('authors explicit typed parameters and stable step transitions in the workflow editor', async () => {
+    const { openWorkflowEditor, payloadFromEditor } = await loadAppFns()
+    openWorkflowEditor()
+
+    document.getElementById('workflow-editor-title-input').value = 'Resolve and scan'
+    document.getElementById('workflow-editor-add-parameter').click()
+    const parameter = document.querySelector('[data-workflow-editor-parameter]')
+    parameter.querySelector('.workflow-editor-parameter-id').value = 'target'
+    parameter.querySelector('.workflow-editor-parameter-label').value = 'Target'
+    parameter.querySelector('.workflow-editor-parameter-type').value = 'target'
+    parameter.querySelector('.workflow-editor-parameter-required').checked = true
+    parameter.querySelector('.workflow-editor-parameter-sensitive').checked = true
+    parameter.querySelector('.workflow-editor-parameter-help').value = 'Domain or IP address'
+
+    const firstStep = document.querySelector('[data-workflow-editor-step]')
+    firstStep.querySelector('.workflow-editor-step-id').value = 'resolve'
+    firstStep.querySelector('.workflow-editor-step-id').dispatchEvent(new Event('input', { bubbles: true }))
+    firstStep.querySelector('.workflow-editor-step-command').value = 'dig +short A {{target}}'
+    firstStep.querySelector('.workflow-editor-add-capture').click()
+    const capture = firstStep.querySelector('[data-workflow-editor-capture]')
+    capture.querySelector('.workflow-editor-capture-name').value = 'resolved_ip'
+    capture.querySelector('.workflow-editor-capture-required-input').checked = true
+    document.getElementById('workflow-editor-add-step').click()
+    const secondStep = document.querySelectorAll('[data-workflow-editor-step]')[1]
+    secondStep.querySelector('.workflow-editor-step-id').value = 'scan'
+    secondStep.querySelector('.workflow-editor-step-id').dispatchEvent(new Event('input', { bubbles: true }))
+    secondStep.querySelector('.workflow-editor-step-command').value = 'nmap -sV {{resolved_ip}}'
+    firstStep.querySelector('.workflow-editor-add-exit-code').click()
+    const exactRoute = firstStep.querySelector('[data-workflow-editor-exit-code]')
+    exactRoute.querySelector('.workflow-editor-exit-code').value = '2'
+    exactRoute.querySelector('.workflow-editor-exit-code-destination').value = 'scan'
+
+    const payload = payloadFromEditor()
+    expect(payload.version).toBe(2)
+    expect(payload.inputs).toEqual([{
+      id: 'target',
+      label: 'Target',
+      type: 'target',
+      required: true,
+      sensitive: true,
+      default: '',
+      placeholder: '',
+      help: 'Domain or IP address',
+    }])
+    expect(payload.steps.map(step => step.id)).toEqual(['resolve', 'scan'])
+    expect(payload.steps[0].captures).toEqual([{
+      name: 'resolved_ip',
+      source: 'first_nonempty_line',
+      required: true,
+    }])
+    expect(payload.steps[0].next).toEqual({
+      success: 'scan',
+      failure: 'stop',
+      codes: { 2: 'scan' },
+    })
+    expect(payload.steps[1].next).toEqual({ success: 'complete', failure: 'stop' })
+  })
+
+  it('keeps exact exit-code routes visible through step edits and validates route fields', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ items: [] }),
+    }))
+    const { openWorkflowEditor, payloadFromEditor } = await loadAppFns({ apiFetch })
+    const initialApiCallCount = apiFetch.mock.calls.length
+    openWorkflowEditor({
+      id: 'usr_exact_routes',
+      source: 'user',
+      version: 2,
+      title: 'Exact routes',
+      description: '',
+      inputs: [],
+      steps: [
+        {
+          id: 'probe',
+          cmd: 'intel unsupported value',
+          next: { codes: { 1: 'inspect', 7: 'stop' }, success: 'complete', failure: 'stop' },
+        },
+        { id: 'inspect', cmd: 'help', next: { success: 'complete', failure: 'stop' } },
+        { id: 'archive', cmd: 'status', next: { success: 'complete', failure: 'stop' } },
+      ],
+    })
+
+    const probe = document.querySelectorAll('[data-workflow-editor-step]')[0]
+    const routes = probe.querySelectorAll('[data-workflow-editor-exit-code]')
+    expect([...routes].map(row => row.querySelector('.workflow-editor-exit-code').value))
+      .toEqual(['1', '7'])
+    expect(routes[0].querySelector('.workflow-editor-exit-code-destination').value).toBe('inspect')
+
+    const inspect = document.querySelectorAll('[data-workflow-editor-step]')[1]
+    inspect.querySelector('.workflow-editor-step-id').value = 'analyze'
+    inspect.querySelector('.workflow-editor-step-id').dispatchEvent(new Event('input', { bubbles: true }))
+    expect(routes[0].querySelector('.workflow-editor-exit-code-destination').value).toBe('analyze')
+    inspect.querySelector('.workflow-editor-move-down').click()
+    expect(payloadFromEditor().steps.map(step => step.id)).toEqual(['probe', 'archive', 'analyze'])
+    expect(payloadFromEditor().steps[0].next.codes).toEqual({ 1: 'analyze', 7: 'stop' })
+    routes[1].querySelector('.workflow-editor-exit-code').value = '9'
+    routes[1].querySelector('.workflow-editor-exit-code-destination').value = 'archive'
+    expect(payloadFromEditor().steps[0].next.codes).toEqual({ 1: 'analyze', 9: 'archive' })
+    routes[1].querySelector('.workflow-editor-exit-code').value = '7'
+    routes[1].querySelector('.workflow-editor-exit-code-destination').value = 'stop'
+
+    inspect.querySelector('.workflow-editor-remove-step').click()
+    const missingDestination = routes[0].querySelector('.workflow-editor-exit-code-destination')
+    expect(missingDestination.value).toBe('analyze')
+    expect(missingDestination.selectedOptions[0].textContent).toBe('Missing step (analyze)')
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(apiFetch).toHaveBeenCalledTimes(initialApiCallCount)
+    expect(missingDestination.getAttribute('aria-invalid')).toBe('true')
+    expect(routes[0].querySelector('[data-workflow-field$="destination"] .form-error').textContent)
+      .toBe('Choose an available destination or remove this route.')
+
+    routes[0].querySelector('.workflow-editor-remove-exit-code').click()
+    probe.querySelector('.workflow-editor-add-exit-code').click()
+    const duplicate = probe.querySelectorAll('[data-workflow-editor-exit-code]')[1]
+    duplicate.querySelector('.workflow-editor-exit-code').value = '+07'
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(apiFetch).toHaveBeenCalledTimes(initialApiCallCount)
+    expect(duplicate.querySelector('[data-workflow-field$="code"] .form-error').textContent)
+      .toBe('Exit codes must be unique within a step.')
+
+    duplicate.querySelector('.workflow-editor-exit-code').value = 'not-a-code'
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(duplicate.querySelector('[data-workflow-field$="code"] .form-error').textContent)
+      .toBe('Enter a whole-number exit code.')
+    duplicate.querySelector('.workflow-editor-remove-exit-code').click()
+    expect(payloadFromEditor().steps[0].next.codes).toEqual({ 7: 'stop' })
+  })
+
+  it('marks workflow capture-fed command previews as available only during the playbook', async () => {
+    const { renderWorkflowItems } = await loadAppFns()
+    document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
+    renderWorkflowItems([{
+      id: 'usr_capture_preview',
+      source: 'user',
+      version: 2,
+      title: 'Resolve and scan',
+      description: '',
+      inputs: [],
+      steps: [
+        {
+          id: 'resolve',
+          cmd: 'dig +short A darklab.sh',
+          note: '',
+          captures: [{ name: 'resolved_ip', source: 'first_nonempty_line', required: true }],
+          next: { success: 'scan', failure: 'stop' },
+        },
+        {
+          id: 'scan',
+          cmd: 'nmap -sV {{resolved_ip}}',
+          note: '',
+          next: { success: 'complete', failure: 'stop' },
+        },
+      ],
+    }], { emitCatalogEvent: false })
+
+    const steps = document.querySelectorAll('.workflow-step')
+    expect(steps[0].querySelector('.workflow-step-preview-state').textContent).toBe('Inputs known')
+    expect(steps[1].querySelector('.workflow-step-cmd').textContent).toBe('nmap -sV {{resolved_ip}}')
+    expect(steps[1].querySelector('.workflow-step-preview-state').textContent)
+      .toBe('During playbook: {{resolved_ip}}')
+    expect(steps[1].querySelector('.workflow-step-run').disabled).toBe(true)
+  })
+
+  it('places structured workflow save errors beside the matching editor field', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({
+        error: 'parameter ID is invalid',
+        errors: [
+          { field: 'inputs.0.id', message: 'Use lowercase letters and underscores.' },
+          { field: 'steps.0.next.codes', message: 'Exit-code routes are invalid.' },
+        ],
+      }),
+    }))
+    const { openWorkflowEditor } = await loadAppFns({ apiFetch })
+    openWorkflowEditor()
+    document.getElementById('workflow-editor-title-input').value = 'Invalid workflow'
+    document.querySelector('.workflow-editor-step-command').value = 'dig darklab.sh'
+    document.getElementById('workflow-editor-add-parameter').click()
+    document.querySelector('.workflow-editor-parameter-id').value = 'Bad ID'
+    document.querySelector('.workflow-editor-add-exit-code').click()
+    document.querySelector('.workflow-editor-exit-code').value = '1'
+
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalled())
+    await vi.waitFor(() => {
+      expect(document.querySelector('.workflow-editor-parameter-id').getAttribute('aria-invalid')).toBe('true')
+    })
+    expect(document.querySelector('[data-workflow-field="inputs.0.id"] .form-error').textContent)
+      .toBe('Use lowercase letters and underscores.')
+    expect(document.querySelector('[data-workflow-field="steps.0.next.codes"] > .form-error').textContent)
+      .toBe('Exit-code routes are invalid.')
+  })
+
+  it('renders recent workflow execution progress, branches, captures, and linked runs', async () => {
+    const { renderWorkflowExecutionsSection, formatWorkflowExecutionElapsed } = await loadAppFns()
+    const body = document.createElement('div')
+    body.className = 'workflows-body'
+    document.body.appendChild(body)
+    const finished = Date.UTC(2026, 6, 12, 10, 1, 5)
+
+    renderWorkflowExecutionsSection(body, {
+      executions: [{
+        id: 'wfx_recent_1',
+        title: 'Resolve and scan',
+        status: 'completed',
+        current_step_id: '',
+        created: '2026-07-12 10:00:00',
+        finished: '2026-07-12 10:01:05',
+        steps: [{
+          step_id: 'resolve',
+          status: 'succeeded',
+          run_id: 'run-resolve-1',
+          selected_transition: 'scan',
+          transition_reason: 'success',
+          capture_names: ['resolved_ip'],
+        }],
+      }],
+    }, { nowMs: finished })
+
+    expect(formatWorkflowExecutionElapsed({
+      created: '2026-07-12 10:00:00',
+      finished: '2026-07-12 10:01:05',
+    }, finished)).toBe('1m 05s')
+    expect(body.querySelector('.workflow-execution-row').dataset.workflowExecutionId).toBe('wfx_recent_1')
+    expect(body.querySelector('.workflow-execution-row').tabIndex).toBe(-1)
+    expect(body.textContent).toContain('Resolve and scan')
+    expect(body.textContent).toContain('Elapsed: 1m 05s')
+    expect(body.textContent).toContain('to scan (success)')
+    expect(body.textContent).toContain('Captured: resolved_ip')
+    expect(body.textContent).toContain('run-resolve-1')
+  })
+
+  it('shows playbook ancestry on history rows and links sibling step runs', () => {
+    const { _createHistoryEntry, _historyRunWorkflowSummary } = fromDomScripts(
+      [
+        'app/static/js/core/history_core.js',
+        'app/static/js/features/history/history_rows.js',
+        'app/static/js/features/history/history_run_details.js',
+      ],
+      { document, window },
+      '({ _createHistoryEntry, _historyRunWorkflowSummary })',
+    )
+    const run = {
+      id: 'run-resolve',
+      command: 'dig example.com',
+      started: '2026-07-12T10:00:00Z',
+      finished: '2026-07-12T10:00:01Z',
+      exit_code: 0,
+      workflow_execution_id: 'wfx_history_1',
+      workflow_step_id: 'resolve',
+      workflow_execution: {
+        execution_id: 'wfx_history_1',
+        title: 'Resolve and scan',
+        step: { step_id: 'resolve', run_id: 'run-resolve' },
+        steps: [
+          { step_id: 'resolve', run_id: 'run-resolve' },
+          { step_id: 'scan', run_id: 'run-scan' },
+        ],
+      },
+    }
+
+    const entry = _createHistoryEntry(run, false)
+    const summary = _historyRunWorkflowSummary(run)
+
+    expect(entry.querySelector('.history-entry-kind-workflow').textContent).toBe('playbook')
+    expect(entry.querySelector('.history-entry-kind-workflow').title).toContain('step resolve')
+    expect(summary.textContent).toContain('Resolve and scan · resolve')
+    expect(summary.querySelector('[data-history-run-action="open-workflow-execution"]')).not.toBeNull()
+    expect(summary.querySelector('[data-history-run-action="open-workflow-run:run-scan"]').textContent).toBe('scan')
+  })
+
+  it('wires workflow execution attach, open, cancel, and refresh actions', async () => {
+    const { renderWorkflowExecutionsSection } = await loadAppFns()
+    const body = document.createElement('div')
+    body.className = 'workflows-body'
+    document.body.appendChild(body)
+    const onAttachRun = vi.fn()
+    const onOpenRun = vi.fn()
+    const onCancel = vi.fn()
+    const onRefresh = vi.fn()
+
+    renderWorkflowExecutionsSection(body, {
+      executions: [
+        {
+          id: 'wfx_running',
+          title: 'Running workflow',
+          status: 'running',
+          current_step_id: 'scan',
+          created: '2026-07-12 10:00:00',
+          steps: [{ step_id: 'scan', status: 'running', run_id: 'run-active' }],
+        },
+        {
+          id: 'wfx_done',
+          title: 'Finished workflow',
+          status: 'completed',
+          created: '2026-07-12 09:00:00',
+          finished: '2026-07-12 09:00:10',
+          steps: [{ step_id: 'resolve', status: 'succeeded', run_id: 'run-finished' }],
+        },
+      ],
+    }, { onAttachRun, onOpenRun, onCancel, onRefresh })
+
+    const button = label => [...body.querySelectorAll('button')].find(item => item.textContent === label)
+    button('Attach').click()
+    button('Open').click()
+    button('Cancel').click()
+    body.querySelector('.workflow-executions-refresh').click()
+    await Promise.resolve()
+
+    expect(onAttachRun).toHaveBeenCalledWith('run-active')
+    expect(onOpenRun).toHaveBeenCalledWith('run-finished')
+    expect(onCancel).toHaveBeenCalledWith(expect.objectContaining({ id: 'wfx_running' }))
+    expect(onRefresh).toHaveBeenCalledOnce()
+  })
+
+  it('coordinates active workflow attachment and confirmed server cancellation', async () => {
+    let listReads = 0
+    const apiFetch = vi.fn((url) => {
+      if (url.startsWith('/workflow-executions?')) {
+        listReads += 1
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            executions: listReads === 1 ? [{
+              id: 'wfx_active',
+              title: 'Active workflow',
+              status: 'running',
+              current_step_id: 'scan',
+              created: '2026-07-12 10:00:00',
+              steps: [{ step_id: 'scan', status: 'running', run_id: 'run-active' }],
+            }] : [],
+          }),
+        })
+      }
+      if (url === '/history/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ runs: [{ run_id: 'run-active', command: 'nmap example.com' }] }),
+        })
+      }
+      if (url === '/workflow-executions/wfx_active/cancel') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ execution: { status: 'canceled' } }) })
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'unexpected request' }) })
+    })
+    const attachActiveRun = vi.fn(async () => true)
+    const closeOverlays = vi.fn()
+    const showConfirm = vi.fn(async () => 'cancel-execution')
+    const showToast = vi.fn()
+    const { createWorkflowExecutionController } = await loadAppFns()
+    const overlay = document.getElementById('workflows-overlay')
+    overlay.classList.add('open')
+    overlay.innerHTML = '<div class="workflows-body"></div>'
+    const controller = createWorkflowExecutionController({
+      apiFetch,
+      attachActiveRun,
+      closeOverlays,
+      showConfirm,
+      showToast,
+      setTimer: vi.fn(() => 1),
+      clearTimer: vi.fn(),
+    })
+
+    await controller.refresh()
+    const button = label => [...overlay.querySelectorAll('button')].find(item => item.textContent === label)
+    button('Attach').click()
+    await vi.waitFor(() => expect(attachActiveRun).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run-active' }),
+    ))
+    button('Cancel').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/workflow-executions/wfx_active/cancel',
+      { method: 'POST' },
+    ))
+
+    expect(showConfirm).toHaveBeenCalledOnce()
+    expect(closeOverlays).toHaveBeenCalledOnce()
+    expect(showToast).toHaveBeenCalledWith('Workflow execution canceled', '')
+  })
+
+  it('keeps recent execution history global when workflow selection changes', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url.startsWith('/workflow-executions?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            executions: [{
+              id: 'wfx_all',
+              workflow_id: 'workflow_a',
+              title: 'Workflow A',
+              status: 'completed',
+              created: '2026-07-12 10:00:00',
+              finished: '2026-07-12 10:00:01',
+              steps: [],
+            }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const {
+      getRuntimeAutocompleteContext,
+      renderWorkflowItems,
+      refreshWorkflowExecutions,
+    } = await loadAppFns({ apiFetch })
+    const overlay = document.getElementById('workflows-overlay')
+    overlay.classList.add('open')
+    overlay.dataset.workflowView = 'executions'
+    overlay.dataset.workflowId = 'workflow_a'
+    overlay.innerHTML = '<div class="workflows-body"></div>'
+
+    renderWorkflowItems([], { emitCatalogEvent: false })
+    await refreshWorkflowExecutions()
+    await vi.waitFor(() => expect(overlay.textContent).toContain('Workflow A'))
+    overlay.dataset.workflowId = 'workflow_b'
+    await refreshWorkflowExecutions()
+
+    expect(overlay.textContent).toContain('Workflow A')
+    const executionReads = apiFetch.mock.calls
+      .map(([url]) => url)
+      .filter(url => url.startsWith('/workflow-executions?'))
+    expect(executionReads).toEqual([
+      '/workflow-executions?limit=10',
+      '/workflow-executions?limit=10',
+    ])
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+    expect(context.workflow.arg_hints.status.map(item => item.value)).toEqual(['wfx_all'])
+  })
+
+  it('keeps panel launches out of the terminal and handles workflow run inputs', async () => {
     const submitComposerCommand = vi.fn()
     const workflow = {
       id: 'builtin:dns',
@@ -2599,14 +3235,34 @@ describe('app helpers', () => {
       inputs: [{ id: 'domain', label: 'Domain', type: 'domain', required: true, placeholder: 'example.com', default: '', help: '' }],
       steps: [{ cmd: 'dig {{domain}} A', note: '' }],
     }
-    const { renderWorkflowItems, handleWorkflowTerminalCommand, appendCommandEcho } = await loadAppFns({
+    const apiFetch = vi.fn((url) => {
+      if (url === '/workflows') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [workflow] }) })
+      }
+      if (url === '/workflow-executions') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            execution: {
+              id: 'wfx_terminal_test',
+              current_step_id: 'step_1',
+              status: 'running',
+            },
+          }),
+        })
+      }
+      if (url.startsWith('/workflow-executions?')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ executions: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const {
+      renderWorkflowItems,
+      handleWorkflowTerminalCommand,
+      appendCommandEcho,
+    } = await loadAppFns({
       submitComposerCommand,
-      apiFetch: (url) => {
-        if (url === '/workflows') {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [workflow] }) })
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
-      },
+      apiFetch,
     })
     renderWorkflowItems([workflow], { emitCatalogEvent: false })
 
@@ -2617,6 +3273,132 @@ describe('app helpers', () => {
       'tab-1',
     )
     expect(document.body.textContent).toContain('[workflow] DNS Troubleshooting: 1 step(s) queued.')
+
+    const durableWorkflow = {
+      ...workflow,
+      id: 'builtin:durable-dns',
+      version: 2,
+      title: 'Durable DNS',
+      inputs: [{ ...workflow.inputs[0], default: 'darklab.sh' }],
+      steps: [
+        { id: 'resolve', cmd: 'dig {{domain}} A', next: { success: 'inspect', failure: 'stop' } },
+        { id: 'inspect', cmd: 'host {{domain}}', next: { success: 'complete', failure: 'stop' } },
+      ],
+    }
+    document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
+    document.getElementById('workflows-overlay').classList.add('open')
+    renderWorkflowItems([durableWorkflow], { emitCatalogEvent: false })
+    document.querySelector('.workflow-run-all').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/workflow-executions',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    await vi.waitFor(() => {
+      expect(document.getElementById('workflows-overlay').dataset.workflowView).toBe('executions')
+    })
+    expect(document.body.textContent).not.toContain('wfx_terminal_test')
+
+    await handleWorkflowTerminalCommand('workflow run durable-dns --domain darklab.sh', 'tab-1')
+    await vi.waitFor(() => expect(document.body.textContent).toContain(
+      '[workflow] Durable DNS: execution wfx_terminal_test started with 1 input. '
+        + 'Check progress with workflow status wfx_terminal_test.',
+    ))
+    expect(document.body.textContent).not.toContain('step_1')
+
+    const sensitiveWorkflow = {
+      ...workflow,
+      id: 'builtin:authenticated-dns',
+      title: 'Authenticated DNS',
+      inputs: [{ id: 'token', label: 'Token', type: 'text', required: true, sensitive: true }],
+      steps: [{ cmd: 'echo {{token}}', note: '' }],
+    }
+    renderWorkflowItems([sensitiveWorkflow], { emitCatalogEvent: false })
+    await handleWorkflowTerminalCommand(
+      'workflow run authenticated-dns --token super-secret-value',
+      'tab-1',
+    )
+
+    expect(appendCommandEcho).toHaveBeenLastCalledWith(
+      'workflow run authenticated-dns --token [redacted]',
+      'tab-1',
+    )
+    expect(document.body.textContent).not.toContain('super-secret-value')
+    expect(document.body.textContent).toContain("Sensitive parameters can't be supplied inline")
+  })
+
+  it('handles workflow runs, status, and cancel terminal commands without exposing inputs', async () => {
+    const privateValue = 'terminal-private-value'
+    const execution = {
+      id: 'wfx_cli_test',
+      title: 'CLI playbook',
+      status: 'running',
+      current_step_id: 'inspect',
+      input_values: { token: privateValue },
+      variables: { token: privateValue, captured: privateValue },
+      steps: [{
+        step_id: 'inspect',
+        status: 'running',
+        run_id: 'run-cli-test',
+        selected_transition: 'complete',
+        transition_reason: 'success',
+        capture_names: ['captured'],
+      }],
+    }
+    const apiFetch = vi.fn((url, options) => {
+      if (url.startsWith('/workflow-executions?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ executions: [execution] }),
+        })
+      }
+      if (url === '/workflow-executions/wfx_cli_test' && !options) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ execution }),
+        })
+      }
+      if (url === '/workflow-executions/wfx_cli_test/cancel' && options?.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ execution: { ...execution, status: 'canceled' } }),
+        })
+      }
+      if (url === '/workflow-executions/not-visible') {
+        return Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({ error: 'workflow execution not found' }),
+        })
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'unexpected request' }) })
+    })
+    const workflow = {
+      id: 'builtin:cli-playbook',
+      source: 'builtin',
+      title: 'CLI playbook',
+      inputs: [],
+      steps: [{ cmd: 'echo ready' }],
+    }
+    const { renderWorkflowItems, handleWorkflowTerminalCommand } = await loadAppFns({ apiFetch })
+    renderWorkflowItems([workflow], { emitCatalogEvent: false })
+
+    await handleWorkflowTerminalCommand('workflow runs', 'tab-1')
+    await handleWorkflowTerminalCommand('workflow status wfx_cli_test', 'tab-1')
+    await handleWorkflowTerminalCommand('workflow cancel wfx_cli_test', 'tab-1')
+    await handleWorkflowTerminalCommand('workflow status', 'tab-1')
+    await handleWorkflowTerminalCommand('workflow status not-visible', 'tab-1')
+
+    expect(document.body.textContent).toContain('Recent workflow executions:')
+    expect(document.body.textContent).toContain('wfx_cli_test')
+    expect(document.body.textContent).toContain('CLI playbook (running, step inspect)')
+    expect(document.body.textContent).toContain('inspect: running, run run-cli-test, next complete (success), captures captured')
+    expect(document.body.textContent).toContain('[workflow] wfx_cli_test canceled.')
+    expect(document.body.textContent).toContain('[workflow] execution id is required')
+    expect(document.body.textContent).toContain('[workflow] workflow execution not found')
+    expect(document.body.textContent).not.toContain(privateValue)
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/workflow-executions/wfx_cli_test/cancel',
+      { method: 'POST' },
+    )
   })
 
   it('serves runtime autocomplete context for built-in command lookup helpers', async () => {
@@ -3262,6 +4044,7 @@ describe('app helpers', () => {
         st: 'idle',
         exitCode: null,
         historyRunId: '',
+        historyRunKind: '',
         previewTruncated: false,
         fullOutputAvailable: false,
         fullOutputLoaded: false,
@@ -3277,6 +4060,7 @@ describe('app helpers', () => {
         st: 'running',
         exitCode: null,
         historyRunId: 'run-1',
+        historyRunKind: 'external',
         previewTruncated: false,
         fullOutputAvailable: false,
         fullOutputLoaded: false,
@@ -3301,6 +4085,7 @@ describe('app helpers', () => {
       st: 'running',
       runId: '',
       historyRunId: 'run-1',
+      historyRunKind: 'external',
     })
   })
 
@@ -3447,6 +4232,7 @@ describe('app helpers', () => {
             st: 'idle',
             exitCode: null,
             historyRunId: '',
+            historyRunKind: '',
             previewTruncated: false,
             fullOutputAvailable: false,
             fullOutputLoaded: false,
@@ -3460,6 +4246,7 @@ describe('app helpers', () => {
             st: 'fail',
             exitCode: 1,
             historyRunId: 'run-2',
+            historyRunKind: 'external',
             previewTruncated: false,
             fullOutputAvailable: true,
             fullOutputLoaded: true,
@@ -3475,6 +4262,8 @@ describe('app helpers', () => {
     expect(createTab).toHaveBeenCalledTimes(2)
     expect(getTab('tab-2')?.draftInput).toBe('ffuf -u https://target/FUZZ')
     expect(getTab('tab-2')?.renamed).toBe(true)
+    expect(getTab('tab-2')?.historyRunId).toBe('run-2')
+    expect(getTab('tab-2')?.historyRunKind).toBe('external')
     expect(activateTab).toHaveBeenCalledWith('tab-2', { focusComposer: false })
   })
 
@@ -5963,7 +6752,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -6040,7 +6829,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -6134,7 +6923,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -6658,7 +7447,7 @@ describe('app helpers', () => {
               prompt_username: 'anon',
               prompt_domain: 'darklab.sh',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
+              project_source: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],

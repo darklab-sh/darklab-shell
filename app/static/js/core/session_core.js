@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Session identity pure helpers ─────────────────────────────────────────
 // Loaded before session.js. Kept in a small namespace so unit tests and the
 // classic browser bundle can share the same pure transforms without extracting

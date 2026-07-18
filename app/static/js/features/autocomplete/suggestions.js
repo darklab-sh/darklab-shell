@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared autocomplete logic ──
 import { DarklabAutocompleteCore as importedAutocompleteCore } from '../../core/autocomplete_core.js';
 import { APP_STATE_API as importedAppStateApi, onUiEvent as importedOnUiEvent } from '../../core/state.js';
@@ -1637,6 +1640,7 @@ if (typeof window !== 'undefined') {
 
 export {
   _readRecentValues,
+  _readProjectTargets,
   _readAutocompleteProjects,
   _readAutocompleteSchedules,
   _readAutocompleteWatchers,

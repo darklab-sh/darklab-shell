@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Seed the configured history database with realistic runs for a UUID or tok_ session.
 
 Useful for exercising user-facing flows that only reveal themselves with a
@@ -82,9 +85,8 @@ VISUAL_HISTORY_FIXTURES = {
 def _resolve_db_path() -> str:
     """Mirror app/core/database.py's DB_PATH resolution without importing it.
 
-    Importing core.database runs db_init() at module load, which itself opens
-    the DB and writes (DROP/CREATE TRIGGER, possibly FTS rebuild). We want
-    this script to be a pure data-only writer.
+    Keep this script as a pure data-only writer instead of coupling it to the
+    runtime database module and its initialization helpers.
     """
     app_dir = ROOT / "app"
     if app_dir.exists() and str(app_dir) not in sys.path:

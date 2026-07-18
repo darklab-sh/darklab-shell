@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Watcher fire hook used by scheduler-owned watcher schedules."""
 
 from __future__ import annotations

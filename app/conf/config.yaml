@@ -1,12 +1,16 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # darklab_shell — Configuration
 # ----------------------------------
 # Changes to this file take effect after a container restart (docker compose restart).
 # No rebuild is needed.
-# Optional: add sibling *.local.* files for untracked server-specific overrides.
-# Examples: app/conf/config.local.yaml, app/conf/commands.local.yaml,
-# app/conf/ascii.local.txt,
-# app/conf/app_hints.local.txt, app/conf/faq.local.yaml,
-# app/conf/welcome.local.yaml, app/conf/themes/<name>.local.yaml.
+# Optional: add *.local.* files for untracked server-specific overrides.
+# Source deployments keep them beside these files. Repository-free installs
+# keep the same relative names under mounted ./conf (the /config container path).
+# Examples: config.local.yaml, commands.local.yaml, ascii.local.txt,
+# app_hints.local.txt, faq.local.yaml, welcome.local.yaml,
+# themes/<name>.local.yaml.
 # If present, each local overlay is applied after its checked-in base file.
 # Text/config lists append local entries; ASCII art files use the local file if
 # present; YAML config dictionaries merge key-by-key.
@@ -545,6 +549,15 @@
 # restricted_command_input_cidrs:
 #   - 169.254.169.254/32
 
+# ── Raw-packet scanning ─────────────────────────────────────────────────────
+
+# Opt in to capability-backed raw-packet modes for approved scanners. The app
+# keeps TCP-connect defaults unless both this setting and runtime capability
+# checks pass. This does not enable Docker privileged mode.
+# Server default if unset: false
+# In Compose deployments, RAW_PACKET_SCANNING_ENABLED overrides this value.
+# raw_packet_scanning_enabled: false
+
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
 # Whether the shared HTTP rate limiter is active at all. Set to false for
@@ -806,6 +819,15 @@
 # Server default if unset: 3600
 # command_timeout_seconds: 3600
 
+# Maximum number of active workflow executions for one personal session or team.
+# Server default if unset: 3
+# workflow_active_execution_limit: 3
+
+# Maximum total lifetime of one workflow execution, in seconds. The server
+# checks the limit before launching or advancing each step.
+# Server default if unset: 14400
+# workflow_execution_max_runtime_seconds: 14400
+
 # How often (in seconds) to send a heartbeat comment on idle SSE connections
 # to prevent nginx and the browser from dropping the connection.
 # Server default if unset: 20
@@ -858,6 +880,7 @@
 # output, input, and resize events can be brokered across workers. Without
 # Redis, this mode is limited to single-worker local/dev deployments.
 # Server default if unset: false
+# In Compose deployments, INTERACTIVE_PTY_ENABLED overrides this value.
 # interactive_pty_enabled: false
 
 # Maximum lifetime for an interactive PTY command before the server terminates

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared entity metadata client ──
 import { apiFetch as importedApiFetch } from '../session.js';
 

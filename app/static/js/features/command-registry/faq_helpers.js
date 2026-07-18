@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // FAQ and allowed-command helpers kept eager so boot-time FAQ rendering stays small.
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
 import { faqBody as importedFaqBody } from '../../core/dom.js';

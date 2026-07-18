@@ -7,20 +7,24 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Repository-free production installation](#repository-free-production-installation)
+  - [Shorten release image builds and failure feedback](#shorten-release-image-builds-and-failure-feedback)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
+  - [Reduce pytest feedback time without weakening release coverage](#reduce-pytest-feedback-time-without-weakening-release-coverage)
+  - [Organize script entrypoints and implementation helpers](#organize-script-entrypoints-and-implementation-helpers)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
-  - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
-  - [Run comparison enhancements](#run-comparison-enhancements)
+  - [Run comparison enhancements — deferred pieces](#run-comparison-enhancements--deferred-pieces)
   - [Bulk history export and share](#bulk-history-export-and-share)
   - [Mobile share ergonomics](#mobile-share-ergonomics)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
+  - [Native ticketing integrations](#native-ticketing-integrations)
+  - [Operator-extensible signal and parser rules](#operator-extensible-signal-and-parser-rules)
 - [Architecture](#architecture)
-  - [Right-size project documentation](#right-size-project-documentation)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
   - [Lightweight Jinja base template](#lightweight-jinja-base-template)
@@ -30,9 +34,37 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+### Repository-free production installation
 
----
+**Outcome:** Operators can install and run a released darklab_shell stack from a small, versioned deployment directory without cloning the source repository or building the image locally. Developers keep the current source-mounted workflow. CI publishes the canonical self-contained image to the GitLab Container Registry first, then promotes that exact image to Docker Hub for the public, user-facing pull path used by production deployments.
+
+- [ ] Publish the protected `v2.6.0` tag and confirm the final-only `release-create` job plus the complete image, compatibility, supply-chain, installer, bundled-Postgres, and anonymous public smoke chain pass. Verify the final GitLab Release links, matching registry digest, setup files, checksums, signatures, notices, SBOM, provenance, and a healthy clean install, then remove this completed plan.
+
+### Shorten release image builds and failure feedback
+
+**Outcome:** Release candidates keep the full image, compatibility, supply-chain, and publication gates, but repeated runs reuse portable architecture-specific caches and report image-content failures as soon as the canonical GitLab image is available. The final runtime image remains self-contained without the toolchains, caches, development packages, apt indexes, or source trees used to build it.
+
+Keep one runtime image. Separate published runtime containers would complicate command execution, networking, Compose, licensing, upgrades, and support.
+
+#### Measure and make cache behavior visible
+
+- [ ] Record the AMD64 and ARM64 clean-build time, repeated-build time, cache import/export time, image pull time, and time to the first actionable image failure. Use `--progress=plain` or equivalent retained logs so cache-manifest imports and `CACHED` steps are visible.
+- [ ] Confirm the AMD64 release builder consistently imports and exports its registry-backed `mode=max` cache. Use architecture- and release-line-scoped cache references so unrelated or concurrent writers don't overwrite the same cache location.
+- [ ] Keep the native ARM64 release smoke uncached on the current 30 GB hosted runner. Restore a portable ARM64 cache only after a larger runner or a smaller image provides enough headroom for cache import, export, and runtime verification in one job.
+- [ ] Record when a refreshed Python base-image platform digest invalidates the complete image. Keep security-driven base refreshes intentional and visible rather than hiding them to preserve an old cache.
+- [ ] Measure registry layer caching and `RUN --mount=type=cache` separately. Cross-runner acceptance depends on exported layer-cache hits from stable stages and pinned inputs; cache mounts are builder-local acceleration and must not be counted as portable reuse on a fresh DinD daemon or another runner.
+
+#### Validate and tune the multi-stage build
+
+- [ ] Add BuildKit cache mounts for Go modules and compilation output, apt metadata/packages, pip downloads, and RubyGems only where they provide measured benefit on a persistent builder. Preserve reproducibility, don't let mutable cache contents replace pinned versions or checksum validation, and don't expect cache-mount contents to satisfy cross-runner registry-cache acceptance.
+- [ ] Compare the multi-stage clean build, repeated build, compressed image size, unpacked size, SBOM package count/size, and Critical/High and total fixed-vulnerability counts with the single-stage baseline. Confirm the runtime scan no longer attributes findings to build-only toolchains or caches.
+- [ ] Keep the multi-stage Dockerfile hadolint-clean and run the full container smoke, bundled-tool, license, AMD64, native ARM64, SELinux, rootless Podman, SBOM/vulnerability, and release checks before adopting it.
+- [ ] Consider a separately published, digest-pinned scanner-toolchain base image only if architecture-specific registry caches and multi-stage builds still leave release iteration unacceptably slow. If adopted, give it its own versioning, retention, provenance, SBOM, vulnerability, license, and multi-architecture contracts.
+
+#### End-state acceptance criteria
+
+- [ ] Two consecutive RC-equivalent AMD64 builds with unchanged pinned toolchain inputs visibly reuse the exported layer cache across fresh builders instead of recompiling the scanner suite; builder-local cache mounts aren't evidence for this criterion. Apply the same criterion to ARM64 only after that job has enough storage for a portable cache.
+- [ ] The measured repeated-pipeline feedback time is materially lower than the current 80–90-minute loop, and the retained logs make remaining cache misses and pull/build costs attributable.
 
 ## Known Issues
 
@@ -42,7 +74,37 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-No open Technical Debt items are currently tracked.
+### Reduce pytest feedback time without weakening release coverage
+
+The backend suite now takes about 150 seconds even though collecting its roughly 2,400 cases takes only about a second. A July 2026 profiling pass found three costs worth addressing:
+
+- Ordinary route tests build a fresh Flask app for nearly every test client. `create_app()` takes about 59 ms under the test configuration, and the suite has roughly 770 direct or helper-mediated app construction sites.
+- `TestProjectStructureCoverage.test_asset_build_output_does_not_depend_on_cwd` runs the complete ESM asset build twice and takes about 25 seconds. Each build also creates the production Brotli and gzip sidecars.
+- `test_production_install.py` takes about 23 seconds because it exercises archive, signing, publication, installer, upgrade, and restore flows through subprocesses.
+
+- [ ] Reuse a module- or session-scoped Flask app for ordinary route tests, with deliberate cleanup of mutable config, extension, database, and request state between cases. Keep focused factory tests that build independent apps and verify application-factory isolation.
+- [ ] Make the asset working-directory determinism check exercise the generated asset graph without paying for production precompression twice. A no-precompression build mode plus focused Brotli/gzip coverage is the preferred starting point; the full committed-asset check must remain in CI.
+- [ ] Give the production installer and release-publication scenarios an explicit integration/slow marker and a dedicated full-suite lane. Keep a fast developer pytest command for routine feedback while CI and release validation continue to run the complete coverage.
+- [ ] Publish a pytest duration report in CI so new slow tests and file-level runtime changes are visible before they accumulate.
+- [ ] Reconsider parallel pytest execution only after mutable application config, SQLite state, logging globals, and extension state are isolated well enough to avoid order-dependent failures.
+
+**Done when:** the documented fast pytest path is materially quicker, the complete suite still covers fresh application factories, production asset output, and release installation, and CI makes future runtime regressions easy to spot.
+
+### Organize script entrypoints and implementation helpers
+
+The `scripts/` directory has 34 tracked files covering operator workflows, test runners, release publication, container construction, generated artifacts, frontend assets, and demo capture. Most still live at the top level, which makes supported commands hard to distinguish from internal helpers.
+
+Keep `scripts/` as the home for executable project tooling, but organize internal files by purpose rather than programming language or whether CI happens to call them. Treat top-level scripts as stable, supported entrypoints and keep commonly documented commands such as `run_playwright.sh`, `run_postgres_tests.sh`, and `run_pytest.sh` at their current paths.
+
+- [ ] Classify each current script as a stable entrypoint or an internal helper. Preserve documented operator and developer commands with their current path or a thin forwarding wrapper; don't create a permanent file-by-file documentation inventory.
+- [ ] Introduce purpose-based directories for `operations/`, `release/`, `container/`, `frontend/`, `generate/`, `development/`, and `test-support/`. Keep `hooks/`, and place Playwright server lifecycle helpers under the test-support boundary while retaining `scripts/run_playwright.sh` as the public runner.
+- [ ] Move scripts one purpose group at a time without renaming them in the same change. Start with release and container internals, then frontend and generators, followed by development, media-capture, and test-support helpers.
+- [ ] Keep backup, restore, and SQLite-to-Postgres migration commands easy for operators to find. If their implementation moves under `operations/`, preserve any documented source-checkout commands with forwarding entrypoints until the documentation and supported command contract deliberately change.
+- [ ] Update `.gitlab-ci.yml`, `package.json`, `Dockerfile`, `.dockerignore`, the pre-commit hook, release-evidence collection, project documentation, and tests after each group moves. Check scripts that derive the repository root from `Path.parents[...]`, `dirname`, or relative `../` paths from their new depth.
+- [ ] Keep script names action-oriented within each directory: `build_*` creates artifacts, `generate_*` refreshes checked-in output, `check_*` performs static validation, `verify_*` exercises built artifacts, and `run_*` remains a user-facing wrapper.
+- [ ] Add focused path and invocation coverage for Docker-only helpers, release jobs, stable wrappers, and generated-artifact commands before removing old paths. Run the full lint, test, container smoke, and release checks after the final cluster moves.
+
+**Done when:** the top level of `scripts/` contains only stable commands and clearly named purpose directories, existing documented command lines still work, internal helpers are easy to locate by responsibility, and local, CI, container-build, and release workflows pass without compatibility shims that no longer serve a supported path.
 
 ---
 
@@ -50,6 +112,12 @@ No open Technical Debt items are currently tracked.
 
 These are possible future improvements, split by whether they look worth carrying forward.
 
+- **Publish one release image for Linux AMD64 and Linux ARM64.**
+  - Start after the current AMD64-only release pipeline has been fully validated. Build each architecture on a native Linux runner, push immutable architecture-specific staging references, verify both, and create the canonical GitLab multi-architecture index only after every gate passes. Promote that complete index to Docker Hub instead of publishing one architecture and later changing the tag.
+  - Record the index digest, both platform digests, and both Python base-image digests in the release evidence. Generate SBOM and vulnerability results for each platform, and make signatures, attestations, retry handling, and tag-immutability checks understand the index and its platform images.
+  - Pull the canonical index on native AMD64 and ARM64 runners and run the repository-free startup, bundled-tool, capability, durable-restart, architecture-label, and registry-parity checks against the platform image Docker actually selects.
+  - Remove the production Compose and installer AMD64 pin, make installation and verification architecture-aware, and confirm required Redis and Postgres images resolve on both supported platforms.
+  - Update the support matrix and release documentation to advertise Linux AMD64 and Linux ARM64 only after the published ARM64 path passes consistently. Keep macOS testing as useful development coverage without presenting Docker Desktop as a native production target.
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
   - Worth scoping once outbound notifications and external automation mature. The headless API is the right place to receive webhooks that auto-create or update projects.
 - **Cross-session Atlas view.**
@@ -61,6 +129,11 @@ These are possible future improvements, split by whether they look worth carryin
 - **Project Monitoring CLI surface.**
   - Possible future `darklab monitoring <project_id>` and `darklab monitoring ack <project_id> <fire_id> --state STATE [--note NOTE]` commands could expose the Project Monitoring dashboard, rollups, and fire triage flow without opening the browser.
   - Keep this lower priority than watcher creation, Project assignment, policy controls, and baseline acceptance, which are already available through `darklab watch`.
+- **Headless API and CLI follow-through.**
+  - Let scripts and CI start, inspect, cancel, and follow durable workflows through token-authenticated API routes and matching `darklab workflow` commands. Expose saved-run comparison through the same headless surface once its permission, team-scope, and bounded-output contracts are defined.
+  - Put the workflow execution event cursor to work for browser refresh or headless replay, or retire it if execution polling remains the supported path.
+  - Add `darklab --version` for the installed client. Treat connected-server version and client/server compatibility reporting as a separate decision.
+  - Bring the existing API v1 AI assists to the CLI with summary and next-command commands that handle cached, queued, in-progress, disabled, and failed states cleanly.
 - **Revisit PTY transport after real usage.**
   - The current Redis-brokered SSE plus POST endpoints keep deployment simple, but WebSockets may be worth it if latency, throughput, or bidirectional control becomes a real limitation.
 - **Split `pty.js` and `pty_service.py` if PTY work grows again.**
@@ -78,41 +151,19 @@ No research items are currently tracked.
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
 
-### Workflows v2 — playbooks with parameters
-- Evolve workflows from saved command lists into reusable runbooks.
-- Add typed parameters such as target, port set, and wordlist reference, then prompt for those values at execute time.
-- Add conditional next-step behavior based on exit code.
-- Let each step capture selected output into named variables that later steps can consume.
-- Build on the existing session-variable and workflow foundations so operators can turn repeat scans into parameterized profiles without rewriting commands by hand.
-
 ### Run replay / scrubbable event stream
 - Turn completed runs into replayable structured event logs, building on the Structured Output Model.
 - Support a scrub timeline, bookmarks, per-line comments, and command-by-command playback.
 - Keep replay integrated with findings, Atlas entities, summaries, and run comparison rather than treating it as a separate asciinema-style recording.
 
-### Run comparison enhancements
-- Future-state enhancements after the shared split-pane comparison flow has real use.
-  - Finding-level diffs using persisted signal/finding metadata:
-    - New findings.
-    - Disappeared findings.
-    - Unchanged findings.
-    - Changed severity or changed metadata.
-  - Tool-aware diffs for common scanner outputs:
-    - `nmap`: ports, protocols, services, versions, and state changes.
-    - URL/status/title lists: new URLs, disappeared URLs, status changes, title changes.
-    - Subdomain lists: new and disappeared names.
-    - TLS/certificate output: issuer, subject, SAN, validity, and fingerprint changes.
-  - Keep tool-aware parsers additive; raw changed/added/removed output should remain the fallback.
-- Future entry points and packaging:
-  - Active tab `Compare` action for restored/completed runs.
-  - Findings strip action such as `Compare findings with previous run`.
-  - Workflow provenance in comparison summaries once workflow-linked runs exist.
-  - Snapshot/permalink compare if the run-vs-run model continues to work well.
-  - `Export comparison` once share/export packages have a stable artifact model.
-- Future UX/testing:
-  - Consider date-range filters in the manual compare picker if day grouping plus `Load More` is not enough for deep history.
-  - Broaden Playwright coverage for edge/mobile layout paths after the UI settles.
-  - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
+### Run comparison enhancements — deferred pieces
+- Run comparison now covers finding severity changes, discovered hosts, TLS fields, workflow context, and completed-tab launch points. The remaining ideas are:
+  - Snapshot/permalink compare, once the compare route can resolve snapshot/permalink ids instead of only live `runs` rows.
+  - `Export comparison`, once share/export packages have one unified, stable artifact schema version rather than several independent `schema_version` fields.
+  - Unifying the comparison-local URL/status/title parsing (`httpx`/`ffuf`/`gobuster`/`katana`) with the shared tool-aware classifier registry that ports/hosts/tls already use.
+  - Date-range filters in the manual compare picker, if day grouping plus `Load More` is not enough for deep history.
+  - Broader Playwright coverage for additional edge and mobile layout paths.
+  - Focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
 
 ### Bulk history export and share
 - The history drawer can delete all, delete non-favorites, export selected history as text/JSONL, and use visible-page multi-select for bulk project add/remove plus selected-item delete. Bulk share/permalink bundles would close the remaining gap when packaging selected history items after an engagement.
@@ -171,13 +222,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Right-size project documentation
-- Problem: several docs are treated as append-only logs and have grown past the point of being read or kept accurate — `CHANGELOG.md` (~792K), `README.md` (~127K), `ARCHITECTURE.md` (~280K), `FEATURES.md` (~188K). Documentation this large drifts from reality and buries the parts newcomers actually need.
-- Approach:
-  - Keep the README navigational and short; let it point into deeper docs rather than duplicating them.
-  - Make `ARCHITECTURE.md` and `FEATURES.md` describe current state concisely, and confine chronological history to `CHANGELOG.md`.
-  - Align with the existing documentation standards work so state docs stay free of migration/phase narrative that belongs in the changelog.
 
 ### Unified terminal built-in lifecycle
 - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/runs`.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral Runner boundary for UI modules that would otherwise cycle through
 // runner.js.
 //

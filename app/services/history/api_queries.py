@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """API-facing history and run query helpers owned by the history service."""
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.service import schedule_refs_by_run
+from services.workflows.storage import apply_workflow_provenance, workflow_provenance_by_run
 
 log = logging.getLogger("shell")
 
@@ -327,7 +331,7 @@ def history_rows(
                 total = len(matching_runs)
                 runs = matching_runs[offset:offset + limit]
             else:
-                total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
+                total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec
                 total = int(total_row["count"] or 0) if total_row else 0
                 rows = conn.execute(
                     "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
@@ -339,7 +343,7 @@ def history_rows(
                 ).fetchall()
                 runs = [dict(row) for row in rows]
         else:
-            total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
+            total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec
             total = int(total_row["count"] or 0) if total_row else 0
             rows = conn.execute(
                 "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
@@ -355,12 +359,19 @@ def history_rows(
         metadata = run_metadata_counts_by_run(conn, run_ids)
         atlas = run_atlas_counts_by_run(conn, session_id, run_ids, team_id=team_id)
         scheduled = schedule_refs_by_run(conn, run_ids)
+        workflow_provenance = workflow_provenance_by_run(
+            conn,
+            run_ids,
+            session_id=session_id,
+            team_id=team_id,
+        )
     for run in runs:
         run_id = str(run["id"])
         run["artifact_count"] = len(artifacts.get(run_id, []))
         run.update(metadata.get(run_id, {}))
         run.update(atlas.get(run_id, {}))
         apply_schedule_ref(run, scheduled.get(run_id))
+        apply_workflow_provenance(run, workflow_provenance.get(run_id))
     log.debug("API_HISTORY_DATA_ACCESS", extra={
         "session": get_log_session_id(session_id),
         "team_scope": bool(team_id),
@@ -393,6 +404,14 @@ def load_run_detail(session_id: str, team_id: str, run_id: str) -> dict[str, Any
         run.update(run_metadata_counts_by_run(conn, [run_id]).get(run_id, {}))
         run.update(run_atlas_counts_by_run(conn, session_id, [run_id], team_id=team_id).get(run_id, {}))
         apply_schedule_ref(run, schedule_refs_by_run(conn, [run_id]).get(run_id))
+        provenance = workflow_provenance_by_run(
+            conn,
+            [run_id],
+            include_steps=True,
+            session_id=session_id,
+            team_id=team_id,
+        ).get(run_id)
+        apply_workflow_provenance(run, provenance)
     return run
 
 

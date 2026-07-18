@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Workspace-terminal command parsing and path helpers used by runner.js.
 
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';

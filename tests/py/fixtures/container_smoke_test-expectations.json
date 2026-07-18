@@ -705,7 +705,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nmap -sT -A -T4 ip.darklab.sh",
+      "command": "nmap -sT -sV --script default -T4 ip.darklab.sh",
       "expected_text": [
         "Starting Nmap"
       ]

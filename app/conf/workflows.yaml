@@ -1,30 +1,48 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Custom workflow entries for this instance.
-# Each entry requires 'title', 'description', and 'steps'.
-# Entries may also declare optional 'inputs' for UI-rendered workflow forms.
-# Each input supports:
-#   - id
-#   - label
-#   - type: domain | host | url | port | path
-#   - required
-#   - placeholder
-#   - default
-#   - help
-# Each step requires 'cmd' and optionally 'note'.
-# Use {{input_id}} in cmd/note strings to render user-provided values.
-# Custom entries are appended after the built-in workflows.
-# Changes take effect immediately — no restart needed.
+# Entries are appended after the built-in catalog and reloaded without a restart.
+# Legacy entries can keep their linear title/inputs/steps shape. New playbooks
+# should use version: 2 plus a stable lowercase id.
+#
+# Supported parameter types are text, target, domain, host, url, port,
+# port_set, workspace_path, and wordlist. The old path type remains an alias
+# for workspace_path. Set sensitive: true when a value shouldn't be remembered
+# by the browser.
+#
+# Every v2 step needs a stable id and cmd. Transitions can point to another step,
+# complete, or stop. Quoted next.codes keys take precedence over success/failure.
+# Captures can select the first useful line, the first line containing literal
+# text, a structured entity, or a scalar reached through JSON Pointer.
 #
 # Example:
-# - title: "DNS Troubleshooting"
-#   description: "Diagnose why a domain isn't resolving."
+# - version: 2
+#   id: resolve_and_scan
+#   title: "Resolve and scan"
+#   description: "Resolve a domain, then scan the chosen ports."
 #   inputs:
 #     - id: domain
 #       label: Domain
 #       type: domain
 #       required: true
 #       placeholder: example.com
+#     - id: ports
+#       label: Ports
+#       type: port_set
+#       default: "80,443"
 #   steps:
-#     - cmd: "dig {{domain}} A"
-#       note: "Does it resolve? Check the ANSWER section."
-#     - cmd: "dig @8.8.8.8 {{domain}} A"
-#       note: "Does a public resolver see it differently?"
+#     - id: resolve
+#       cmd: "dig +short A {{domain}}"
+#       captures:
+#         - name: resolved_ip
+#           source: first_nonempty_line
+#           required: true
+#       next:
+#         success: scan
+#         failure: stop
+#     - id: scan
+#       cmd: "nmap -sV -p {{ports}} {{resolved_ip}}"
+#       next:
+#         success: complete
+#         failure: stop

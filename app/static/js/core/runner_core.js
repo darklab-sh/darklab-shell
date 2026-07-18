@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Runner pure helpers ──────────────────────────────────────────────────
 // Loaded before runner.js. DOM, stream, and tab orchestration stay in
 // runner.js; small command/duration transforms live here so unit tests can

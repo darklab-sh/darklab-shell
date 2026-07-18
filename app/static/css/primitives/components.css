@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
 /* darklab_shell CSS module: components
    Reusable shell components: tabs, search, toast, permalink/history surfaces, and menus. */
 
@@ -525,7 +528,8 @@ body #search-toggle-btn.search-discover-pulse {
   border-color: var(--green-dim);
 }
 
-.form-control[aria-invalid="true"] {
+.form-control[aria-invalid="true"],
+.form-select[aria-invalid="true"] {
   border-color: color-mix(in srgb, var(--red) 72%, var(--border-bright));
 }
 
@@ -1491,4 +1495,16 @@ body.permalink-page .permalink-error-state {
   border-bottom-color: var(--tab-strip-active-bg);
   background: var(--tab-strip-active-bg);
   color: var(--green);
+}
+
+/* Keep persistent row selection above role-specific hover/press treatments. */
+.selection-row.is-selected,
+.selection-row.is-selected:focus,
+.selection-row.is-selected:focus-visible,
+.selection-row.is-selected:focus-within,
+.selection-row.is-selected:hover:not([aria-disabled="true"]):not(:disabled),
+.selection-row.is-selected:active:not([aria-disabled="true"]):not(:disabled) {
+  border-color: color-mix(in srgb, var(--green) 58%, var(--border));
+  background: var(--theme-button-ghost-hover-bg);
+  box-shadow: inset 3px 0 0 var(--green);
 }

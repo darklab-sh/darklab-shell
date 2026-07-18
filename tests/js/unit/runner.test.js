@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { fromScript, fromDomScript, fromDomScripts, MemoryStorage } from './helpers/extract.js'
 
 const { DarklabRunnerCore } = fromScript('app/static/js/core/runner_core.js', 'DarklabRunnerCore')
@@ -978,6 +981,7 @@ function loadRunnerFns({
     interruptPromptLine,
     hasPendingTerminalConfirm,
     cancelPendingTerminalConfirm,
+    _setPendingTerminalConfirm,
     runCommand,
     attachActiveRunFromMonitor,
     killActiveRunFromMonitor,
@@ -1161,6 +1165,7 @@ describe('runner helpers', () => {
     await flushPromises()
 
     expect(tabs[0].historyRunId).toBe('run-1')
+    expect(tabs[0].historyRunKind).toBe('external')
     expect(tabs[0].lastEventId).toBe('')
     expect(tabs[0].reconnectedRun).toBe(false)
     expect(tabs[0].st).toBe('ok')
@@ -2328,21 +2333,31 @@ describe('runner helpers', () => {
     const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
     const appendLine = vi.fn()
     const welcomeOwnsTab = vi.fn(() => true)
-    const { runCommand, cancelWelcome, clearTab } = loadRunnerFns({
+    const loaded = loadRunnerFns({
       cmdValue: 'echo hello',
-      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      tabs: [{
+        id: 'tab-1',
+        st: 'idle',
+        runId: null,
+        historyRunId: 'run-before-command',
+        historyRunKind: 'external',
+        killed: false,
+        pendingKill: false,
+      }],
       apiFetch,
       appendLine,
       welcomeOwnsTab,
     })
 
-    runCommand()
+    loaded.runCommand()
     await Promise.resolve()
     await Promise.resolve()
 
     expect(welcomeOwnsTab).toHaveBeenCalledWith('tab-1')
-    expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
-    expect(clearTab).toHaveBeenCalledWith('tab-1')
+    expect(loaded.cancelWelcome).toHaveBeenCalledWith('tab-1')
+    expect(loaded.clearTab).toHaveBeenCalledWith('tab-1')
+    expect(loaded.tabs[0].historyRunId).toBeNull()
+    expect(loaded.tabs[0].historyRunKind).toBe('')
     expect(apiFetch).toHaveBeenCalledWith(
       '/runs',
       expect.objectContaining({
@@ -4156,7 +4171,12 @@ describe('session-token set pending prompt', () => {
     const setComposerPromptMode = vi.fn()
     const updateSessionId = vi.fn()
     const reloadSessionHistory = vi.fn(() => Promise.resolve())
-    const { submitCommand, storage } = loadRunnerFns({
+    const {
+      _setPendingTerminalConfirm,
+      cancelPendingTerminalConfirm,
+      submitCommand,
+      storage,
+    } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       appendLine,
       addToHistory,
@@ -4268,6 +4288,24 @@ describe('session-token set pending prompt', () => {
     expect(addToHistory).toHaveBeenCalledTimes(1)
     expect(setComposerPromptMode).toHaveBeenCalledTimes(1)
     expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+
+    cancelPendingTerminalConfirm('tab-1')
+    appendLine.mockClear()
+    const secretAnswer = vi.fn()
+    _setPendingTerminalConfirm({
+      kind: 'secret',
+      tabId: 'tab-1',
+      onAnswer: secretAnswer,
+    })
+    await submitCommand('workflow-secret-value')
+
+    expect(setComposerPromptMode).toHaveBeenCalledWith('secret')
+    expect(secretAnswer).toHaveBeenCalledWith('workflow-secret-value')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      'workflow-secret-value',
+      'prompt-echo',
+      'tab-1',
+    )
   })
 
   it('treats Ctrl+C as cancel and aborts the session-token set flow', async () => {

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // darklab_shell history action helpers.
 // Loaded before history.js so the drawer and Run Details modal can share the
 // same starred-cache and overflow-menu helpers.

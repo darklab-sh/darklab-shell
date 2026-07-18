@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -551,9 +554,9 @@ describe('project monitoring controller', () => {
     const compare = container.querySelector('[data-project-monitoring-action="compare"][data-run-id="run_current"]')
     await controller.handleClick({ target: compare, preventDefault: vi.fn(), stopPropagation: vi.fn() })
     expect(globalThis.fetchAndRenderHistoryComparison).toHaveBeenCalledWith(
-      'run_current',
       'run_base',
-      { url: '/history/compare?left=run_current&right=run_base&project_id=prj_1' },
+      'run_current',
+      { url: '/history/compare?left=run_base&right=run_current&project_id=prj_1' },
     )
 
     const settings = container.querySelector('[data-project-monitoring-action="settings"][data-watcher-id="wtr_1"]')
@@ -586,9 +589,9 @@ describe('project monitoring controller', () => {
     const compare = container.querySelector('[data-project-monitoring-action="compare"][data-run-id="run_current"]')
     await controller.handleClick({ target: compare, preventDefault: vi.fn(), stopPropagation: vi.fn() })
     expect(globalThis.fetchAndRenderHistoryComparison).toHaveBeenCalledWith(
-      'run_current',
       'run_base',
-      { url: '/history/compare?left=run_current&right=run_base&project_id=prj_1' },
+      'run_current',
+      { url: '/history/compare?left=run_base&right=run_current&project_id=prj_1' },
     )
     expect(ctx.setProjectWorkspaceMessage).not.toHaveBeenCalledWith(
       'Run comparison is unavailable.',

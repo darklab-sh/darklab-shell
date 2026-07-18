@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared UI state ──
 // Shared storage lives here; modules should use the explicit API below instead
 // of top-level window state names.

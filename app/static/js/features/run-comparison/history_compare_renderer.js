@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Run comparison result renderer ─────────────────────────────────────
 // Transcript hunk rendering, object diff sections, restore actions, and compare fetch flow.
 import { getTabs as importedGetTabs } from '../../core/state.js';
@@ -82,9 +85,9 @@ function _historyCompareRendererApiFetch(url, options, details = {}) {
     _historyCompareRendererLogClientError('history compare apiFetch fallback', null, {
       event: 'HISTORY_COMPARE_API_FETCH_FALLBACK',
       level: 'warning',
-      left_id: String(details.leftId || ''),
-      right_id: String(details.rightId || ''),
-      url_path: _historyCompareRendererUrlPath(url),
+      left_run_id: String(details.leftId || ''),
+      right_run_id: String(details.rightId || ''),
+      route: _historyCompareRendererUrlPath(url),
     });
   }
   return fetch(url, options);
@@ -93,9 +96,9 @@ function _historyCompareRendererApiFetch(url, options, details = {}) {
 function _historyCompareRendererUrlPath(url) {
   try {
     const parsed = new URL(String(url || ''), 'http://localhost/');
-    return `${parsed.pathname}${parsed.search}`;
+    return parsed.pathname;
   } catch (_) {
-    return String(url || '').split('#', 1)[0].slice(0, 300);
+    return String(url || '').split(/[?#]/, 1)[0].slice(0, 300);
   }
 }
 
@@ -1135,7 +1138,7 @@ function _historyCompareObjectMeta(item, kind) {
   ].filter(Boolean).join(' · ');
 }
 
-function _renderHistoryCompareObjectSection(title, items, kind, sign) {
+function _renderHistoryCompareObjectSection(title, items, kind, sign, options = {}) {
   const safeItems = Array.isArray(items) ? items : [];
   const section = document.createElement('details');
   section.className = 'history-compare-lines history-compare-object-section';
@@ -1155,7 +1158,8 @@ function _renderHistoryCompareObjectSection(title, items, kind, sign) {
   safeItems.forEach(item => {
     const compareLineIndex = _historyCompareRendererNumber(item?.compare_line_index);
     const compareSide = sign === '+' ? 'b' : 'a';
-    const row = compareLineIndex === null ? document.createElement('div') : document.createElement('button');
+    const canFollowLine = options.allowLineNavigation !== false && compareLineIndex !== null;
+    const row = canFollowLine ? document.createElement('button') : document.createElement('div');
     if (row.tagName === 'BUTTON') {
       row.type = 'button';
       row.addEventListener('click', () => {
@@ -1163,10 +1167,10 @@ function _renderHistoryCompareObjectSection(title, items, kind, sign) {
       });
       _historyCompareRendererBindPressable(row);
     }
-    row.className = `history-compare-line history-compare-object-row${compareLineIndex === null ? '' : ' control-row'}`;
+    row.className = `history-compare-line history-compare-object-row${canFollowLine ? ' control-row' : ''}`;
     row.dataset.objectKind = kind;
     row.dataset.compareSide = compareSide;
-    if (compareLineIndex !== null) {
+    if (canFollowLine) {
       row.dataset.compareLineIndex = String(compareLineIndex);
       row.classList.add('is-anchorable');
     }
@@ -1186,6 +1190,62 @@ function _renderHistoryCompareObjectSection(title, items, kind, sign) {
       metaEl.textContent = meta;
       content.appendChild(metaEl);
     }
+    row.appendChild(content);
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  return section;
+}
+
+function _renderHistoryCompareChangedFindingSection(items, options = {}) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const section = document.createElement('details');
+  section.className = 'history-compare-lines history-compare-object-section history-compare-changed-findings';
+  section.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = `Changed findings (${safeItems.length})`;
+  section.appendChild(summary);
+  const list = document.createElement('div');
+  list.className = 'history-compare-line-list';
+  safeItems.forEach(item => {
+    const before = item?.before || {};
+    const after = item?.after || {};
+    const row = document.createElement('div');
+    row.className = 'history-compare-line history-compare-object-row';
+    row.dataset.objectKind = 'finding-change';
+    const mark = document.createElement('span');
+    mark.className = 'history-compare-derived-change-mark';
+    mark.textContent = '~';
+    row.appendChild(mark);
+    const content = document.createElement('div');
+    content.className = 'history-compare-object-content';
+    const primary = document.createElement('code');
+    primary.textContent = _historyCompareObjectText(after, 'finding')
+      || _historyCompareObjectText(before, 'finding');
+    content.appendChild(primary);
+    const changes = document.createElement('div');
+    changes.className = 'history-compare-finding-change-actions';
+    [
+      ['a', 'Baseline', before],
+      ['b', 'Current', after],
+    ].forEach(([side, label, finding]) => {
+      const index = _historyCompareRendererNumber(finding?.compare_line_index);
+      const canFollowLine = options.allowLineNavigation !== false && index !== null;
+      const control = canFollowLine ? document.createElement('button') : document.createElement('span');
+      if (control.tagName === 'BUTTON') {
+        control.type = 'button';
+        control.className = 'btn btn-ghost btn-compact history-compare-finding-change-link';
+        control.addEventListener('click', () => {
+          _historyCompareRendererScrollToLine(side, index, { emit: true });
+        });
+        _historyCompareRendererBindPressable(control);
+      } else {
+        control.className = 'history-compare-finding-change-value';
+      }
+      control.textContent = `${label}: ${finding?.severity || 'unclassified'}`;
+      changes.appendChild(control);
+    });
+    content.appendChild(changes);
     row.appendChild(content);
     list.appendChild(row);
   });
@@ -1474,35 +1534,35 @@ function _renderHistoryComparison(data) {
   const totals = data.totals || {};
   const changedOutputCount = _historyCompareRendererTotalChangedLines(totals);
   subtitle.textContent = viewMode === 'findings_only'
-    ? 'Changed findings and artifacts'
+    ? 'Changed, added, and removed findings'
     : (changedOutputCount ? _historyCompareCountsSubtitle(totals) : 'Changed findings and artifacts');
 
   const runs = document.createElement('div');
   runs.className = 'history-compare-run-grid';
-  runs.appendChild(_historyCompareRendererRunCard(data.left, 'Run A'));
-  runs.appendChild(_historyCompareRendererRunCard(data.right, 'Run B'));
+  runs.appendChild(_historyCompareRendererRunCard(data.left, 'Baseline'));
+  runs.appendChild(_historyCompareRendererRunCard(data.right, 'Current run'));
   body.appendChild(runs);
 
   const deltas = data.deltas || {};
   const metrics = document.createElement('div');
   metrics.className = 'history-compare-metrics';
-  if (deltas.exit_code) {
+  if (viewMode !== 'findings_only' && deltas.exit_code) {
     metrics.appendChild(_compareMetricCell(
       'Exit',
       deltas.exit_code_changed ? `${deltas.exit_code.left} -> ${deltas.exit_code.right}` : `unchanged · ${deltas.exit_code?.right ?? 'n/a'}`,
       deltas.exit_code_changed ? 'is-changed' : '',
     ));
   }
-  if (deltas.duration_seconds) {
+  if (viewMode !== 'findings_only' && deltas.duration_seconds) {
     metrics.appendChild(_compareMetricCell('Duration', _historyCompareRendererFormatDelta(deltas.duration_seconds.delta || 0, 's')));
   }
-  if (deltas.output_lines) {
+  if (viewMode !== 'findings_only' && deltas.output_lines) {
     metrics.appendChild(_compareMetricCell('Lines', _historyCompareRendererFormatDelta(deltas.output_lines.delta || 0)));
   }
-  if (deltas.findings) {
+  if (viewMode !== 'findings_only' && deltas.findings) {
     metrics.appendChild(_compareMetricCell('Findings', _historyCompareRendererFormatDelta(deltas.findings.delta || 0)));
   }
-  if (data.left && data.right && (
+  if (viewMode !== 'findings_only' && data.left && data.right && (
     Number.isFinite(Number(data.left.persisted_finding_count))
     || Number.isFinite(Number(data.right.persisted_finding_count))
   )) {
@@ -1511,7 +1571,14 @@ function _renderHistoryComparison(data) {
       _historyCompareRendererFormatDelta(Number(data.right.persisted_finding_count || 0) - Number(data.left.persisted_finding_count || 0)),
     ));
   }
-  if (data.left && data.right && (
+  if (viewMode === 'findings_only') {
+    const findings = data.objects?.findings || {};
+    const findingCount = key => (Array.isArray(findings[key]) ? findings[key].length : 0);
+    metrics.appendChild(_compareMetricCell('Changed findings', String(findingCount('changed'))));
+    metrics.appendChild(_compareMetricCell('Added findings', String(findingCount('added'))));
+    metrics.appendChild(_compareMetricCell('Removed findings', String(findingCount('removed'))));
+  }
+  if (viewMode !== 'findings_only' && data.left && data.right && (
     Number.isFinite(Number(data.left.artifact_count))
     || Number.isFinite(Number(data.right.artifact_count))
   )) {
@@ -1521,9 +1588,9 @@ function _renderHistoryComparison(data) {
     ));
   }
   body.appendChild(metrics);
-  const omittedNote = _renderHistoryCompareOmittedNote(data.truncated || {});
+  const omittedNote = viewMode === 'findings_only' ? null : _renderHistoryCompareOmittedNote(data.truncated || {});
   if (omittedNote) body.appendChild(omittedNote);
-  const noiseNote = _renderHistoryCompareNoiseNote(data);
+  const noiseNote = viewMode === 'findings_only' ? null : _renderHistoryCompareNoiseNote(data);
   if (noiseNote) body.appendChild(noiseNote);
 
   const findingsTruncated = !!(
@@ -1536,29 +1603,34 @@ function _renderHistoryComparison(data) {
     && data.truncated.artifacts
     && (data.truncated.artifacts.left || data.truncated.artifacts.right)
   );
-  if (data.truncated && (
-    data.truncated.left
-    || data.truncated.right
-    || data.truncated.changed_lines
-    || findingsTruncated
-    || artifactsTruncated
-  )) {
+  const comparisonTruncated = viewMode === 'findings_only'
+    ? findingsTruncated
+    : !!(data.truncated && (
+        data.truncated.left
+        || data.truncated.right
+        || data.truncated.changed_lines
+        || findingsTruncated
+        || artifactsTruncated
+      ));
+  if (comparisonTruncated) {
     const note = document.createElement('div');
     note.className = 'history-compare-truncation';
     const limit = Number(data.truncated.item_limit || 0);
-    note.textContent = findingsTruncated || artifactsTruncated
+    note.textContent = findingsTruncated || (viewMode !== 'findings_only' && artifactsTruncated)
       ? `Comparison is partial because project findings or artifacts exceeded the per-run compare limit${limit ? ` of ${limit.toLocaleString()} items` : ''}.`
       : 'Comparison is partial because one or both outputs were truncated or the changed-line list hit its display limit.';
     body.appendChild(note);
   }
-  const derivedChangesSection = _renderHistoryCompareDerivedChanges(data.derived_changes || {});
+  const derivedChangesSection = viewMode === 'findings_only'
+    ? null
+    : _renderHistoryCompareDerivedChanges(data.derived_changes || {});
   if (derivedChangesSection) body.appendChild(derivedChangesSection);
 
   const toolbar = document.createElement('div');
   toolbar.className = 'history-compare-toolbar';
   toolbar.appendChild(_historyCompareRendererDisplayControls(data, viewMode));
   toolbar.appendChild(_historyCompareRendererActionsMenu(data, deltas));
-  toolbar.appendChild(_historyCompareRendererNav(data));
+  if (viewMode !== 'findings_only') toolbar.appendChild(_historyCompareRendererNav(data));
   body.appendChild(toolbar);
   if (viewMode !== 'findings_only') {
     body.appendChild(_renderHistoryCompareSplitPane(data, {
@@ -1573,28 +1645,45 @@ function _renderHistoryComparison(data) {
   const entityObjects = objects.entities || {};
   const addedFindings = Array.isArray(findingObjects.added) ? findingObjects.added : [];
   const removedFindings = Array.isArray(findingObjects.removed) ? findingObjects.removed : [];
+  const changedFindings = Array.isArray(findingObjects.changed) ? findingObjects.changed : [];
   const addedArtifacts = Array.isArray(artifactObjects.added) ? artifactObjects.added : [];
   const removedArtifacts = Array.isArray(artifactObjects.removed) ? artifactObjects.removed : [];
   const addedEntities = Array.isArray(entityObjects.added) ? entityObjects.added : [];
   const removedEntities = Array.isArray(entityObjects.removed) ? entityObjects.removed : [];
   const hasDerivedChanges = !!derivedChangesSection;
-  if (addedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Added findings', addedFindings, 'finding', '+'));
-  if (removedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Removed findings', removedFindings, 'finding', '-'));
-  if (addedEntities.length) body.appendChild(_renderHistoryCompareObjectSection('Added entities', addedEntities, 'entity', '+'));
-  if (removedEntities.length) body.appendChild(_renderHistoryCompareObjectSection('Removed entities', removedEntities, 'entity', '-'));
-  if (addedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Added artifacts', addedArtifacts, 'artifact', '+'));
-  if (removedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Removed artifacts', removedArtifacts, 'artifact', '-'));
+  const findingSectionOptions = { allowLineNavigation: viewMode !== 'findings_only' };
+  if (changedFindings.length) {
+    body.appendChild(_renderHistoryCompareChangedFindingSection(changedFindings, findingSectionOptions));
+  }
+  if (addedFindings.length) {
+    body.appendChild(_renderHistoryCompareObjectSection(
+      'Added findings', addedFindings, 'finding', '+', findingSectionOptions,
+    ));
+  }
+  if (removedFindings.length) {
+    body.appendChild(_renderHistoryCompareObjectSection(
+      'Removed findings', removedFindings, 'finding', '-', findingSectionOptions,
+    ));
+  }
+  if (viewMode !== 'findings_only') {
+    if (addedEntities.length) body.appendChild(_renderHistoryCompareObjectSection('Added entities', addedEntities, 'entity', '+'));
+    if (removedEntities.length) body.appendChild(_renderHistoryCompareObjectSection('Removed entities', removedEntities, 'entity', '-'));
+    if (addedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Added artifacts', addedArtifacts, 'artifact', '+'));
+    if (removedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Removed artifacts', removedArtifacts, 'artifact', '-'));
+  }
   _syncHistoryCompareFindingMarkers(data);
   if (
-    !changedOutputCount
+    (viewMode === 'findings_only' || !changedOutputCount)
     && !hasDerivedChanges
-    && !addedFindings.length && !removedFindings.length
-    && !addedEntities.length && !removedEntities.length
-    && !addedArtifacts.length && !removedArtifacts.length
+    && !changedFindings.length && !addedFindings.length && !removedFindings.length
+    && (viewMode === 'findings_only' || (!addedEntities.length && !removedEntities.length))
+    && (viewMode === 'findings_only' || (!addedArtifacts.length && !removedArtifacts.length))
   ) {
     const empty = document.createElement('div');
     empty.className = 'history-compare-empty';
-    empty.textContent = 'No changed output, findings, entities, or artifacts.';
+    empty.textContent = viewMode === 'findings_only'
+      ? 'No changed, added, or removed findings.'
+      : 'No changed output, findings, entities, or artifacts.';
     body.appendChild(empty);
   }
 }
@@ -1622,6 +1711,9 @@ function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
       return data;
     }))
     .then(data => {
+      if (options.initialViewMode) {
+        data._compareViewModeRaw = _historyCompareRendererCoerceViewMode(options.initialViewMode);
+      }
       _renderHistoryComparison(data);
     })
     .catch(err => {
@@ -1631,9 +1723,9 @@ function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
       _historyCompareRendererLogClientError('history compare fetch failed', err, {
         event: 'HISTORY_COMPARE_FETCH_FAILED',
         level: 'error',
-        left_id: String(leftId || ''),
-        right_id: String(rightId || ''),
-        url_path: _historyCompareRendererUrlPath(url),
+        left_run_id: String(leftId || ''),
+        right_run_id: String(rightId || ''),
+        route: _historyCompareRendererUrlPath(url),
         status: Number(err && err.httpStatus || 0) || null,
         compare_request_error: err?.compareRequestError === true,
       });

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared PDF export helpers ─────────────────────────────────────────────────
 // Single source of truth for terminal PDF export. Both save-from-tab (tabs.js)
 // and save-from-permalink (permalink.html) funnel through here.

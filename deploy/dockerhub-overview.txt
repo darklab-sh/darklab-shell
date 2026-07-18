@@ -1,0 +1,58 @@
+# darklab_shell
+
+darklab_shell is a self-hosted browser shell for network diagnostics and security reconnaissance. The production image contains the application and its approved scanner toolchain, so operators can run a released stack without cloning or building the source repository.
+
+Source, documentation, and release history: https://gitlab.com/darklab.sh/darklab_shell
+
+Production installation starts from the versioned, checksummed setup files attached to each final GitLab release. The public Compose path uses immutable semantic-version tags from `docker.io/darklabsh/darklab-shell`; `latest` is not part of the supported release flow. Release-candidate tags use `X.Y.Z-rc.N`, are intended for validation, and may be removed after testing.
+
+## Install
+
+Follow the [Quick Start](https://gitlab.com/darklab.sh/darklab_shell/-/blob/main/README.md#quick-start) to download and run the production Compose bundle. No source checkout or local image build is required.
+
+## Release Candidates
+
+For `X.Y.Z-rc.N`, use the instructions from that exact candidate tag:
+
+```text
+https://gitlab.com/darklab.sh/darklab_shell/-/blob/vX.Y.Z-rc.N/README.md#quick-start
+```
+
+The matching setup files, checksums, signature bundle, and deployment archive use the same version in GitLab's Generic Package Registry:
+
+```text
+https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/X.Y.Z-rc.N/
+```
+
+Candidate tags are for release validation and may be removed after testing.
+
+## Verify The Publisher
+
+Protected GitLab tag pipelines keylessly sign this Docker Hub image, the canonical GitLab registry image, and the release checksum manifest with Sigstore/Cosign.
+
+Expected OIDC issuer:
+
+```text
+https://gitlab.com
+```
+
+Expected certificate identity regular expression:
+
+```text
+^https://gitlab\.com/darklab\.sh/darklab_shell//\.gitlab-ci\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$
+```
+
+Verify an immutable image digest with:
+
+```sh
+cosign verify \
+  --certificate-identity-regexp '^https://gitlab\.com/darklab\.sh/darklab_shell//\.gitlab-ci\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+  --certificate-oidc-issuer 'https://gitlab.com' \
+  'docker.io/darklabsh/darklab-shell@sha256:RELEASE_DIGEST'
+```
+
+Replace `RELEASE_DIGEST` with the digest recorded in that release's `release-manifest.json`. The GitLab and Docker Hub references must report the same digest.
+
+## License
+
+darklab_shell is licensed under GNU AGPLv3. Bundled scanners and libraries keep their own licenses and notices; released images include the reviewed inventory under `/usr/share/doc/darklab-shell/`.

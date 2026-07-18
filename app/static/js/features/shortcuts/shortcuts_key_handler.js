@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Global shortcuts-overlay keyboard handler.
 //
 // Opens the shortcuts overlay with "?" when the current text field is empty,

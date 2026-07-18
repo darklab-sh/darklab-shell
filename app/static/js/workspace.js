@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Session workspace UI ──
 // App-mediated file helper only. This does not expose shell navigation,
 // redirection, or arbitrary host paths.
@@ -1343,7 +1346,7 @@ async function loadWorkspaceFilesPayload(options = {}) {
   if (!isWorkspaceEnabled()) throw new Error('Files are disabled on this instance');
   if (_workspaceFilesLoadPromise && options.force !== true) return _workspaceFilesLoadPromise;
   const request = (async () => {
-    const resp = await _workspaceApiFetch()('/workspace/files');
+    const resp = await _workspaceApiFetch()('/workspace/files', { cache: 'no-store' });
     const data = await _workspaceJson(resp);
     renderWorkspaceFiles(data);
     return data;

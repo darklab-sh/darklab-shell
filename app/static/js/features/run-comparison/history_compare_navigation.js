@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Run comparison navigation ────────────────────────────────────────────
 // Row targeting, minimap movement, and previous/next controls for the compare
 // result viewer. Loaded after history.js so it can reuse existing helpers.

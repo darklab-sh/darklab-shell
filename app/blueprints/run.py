@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """
 Execution routes: /runs (brokered command streaming), /run/client, and /kill.
 
@@ -19,9 +22,7 @@ from services.commands.registry import (
     command_root,
     interactive_pty_spec_for_command,
     is_command_allowed,
-    is_help_invocation,
     parse_synthetic_postfilter,
-    required_secrets_for_command,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
@@ -517,6 +518,7 @@ def _prepare_command_input(
     client_ip: str,
     *,
     log_pipe: bool = False,
+    **private_kwargs,
 ) -> _PreparedCommandInput:
     return run_lifecycle.prepare_command_input(
         original_command,
@@ -529,25 +531,21 @@ def _prepare_command_input(
         postfilter_processor_cls=_SyntheticPostFilterProcessor,
         variable_notice_line_fn=_variable_notice_line,
         cmd_denied_log_extra_fn=_cmd_denied_log_extra,
+        **private_kwargs,
     )
 
 
-def _filter_builtin_command_events(events, variable_notice: str, postfilter: _SyntheticPostFilterProcessor):
-    return run_lifecycle.filter_builtin_command_events(events, variable_notice, postfilter)
-
-
+_filter_builtin_command_events = run_lifecycle.filter_builtin_command_events
 _runtime_env_names = run_lifecycle.runtime_env_names
 
 
-def _resolve_secret_environment(command: str, session_id: str, *, team_id: str = "") -> tuple[dict[str, str], list[str]]:
+def _resolve_secret_environment(command: str, session_id: str, *, team_id: str = "", **private_kwargs) -> tuple[dict[str, str], list[str]]:  # noqa: E501
     return run_lifecycle.resolve_secret_environment(
         command,
         session_id,
         team_id=team_id,
-        is_help_invocation_fn=is_help_invocation,
-        required_secrets_for_command_fn=required_secrets_for_command,
         get_secret_value_for_env_fn=get_secret_value_for_env,
-        command_root_fn=command_root,
+        **private_kwargs,
     )
 
 
@@ -560,6 +558,7 @@ def _prepare_real_command(
     *,
     team_id: str = "",
     owner_context: OwnerContext | None = None,
+    **private_kwargs,
 ) -> _PreparedRealCommand:
     return run_lifecycle.prepare_real_command(
         original_command,
@@ -577,6 +576,7 @@ def _prepare_real_command(
         command_root_fn=command_root,
         cmd_denied_log_extra_fn=_cmd_denied_log_extra,
         cfg=CFG,
+        **private_kwargs,
     )
 
 
@@ -608,6 +608,7 @@ def _start_real_command_process(
     owner_tab_id: str = "",
     team_id: str = "",
     owner_context: OwnerContext | None = None,
+    **private_kwargs,
 ) -> _StartedRealCommand:
     return run_lifecycle.start_real_command_process(
         original_command,
@@ -633,6 +634,7 @@ def _start_real_command_process(
         stdbuf_bin=STDBUF_BIN,
         shell_bin=SHELL_BIN,
         datetime_cls=datetime,
+        **private_kwargs,
     )
 
 
@@ -673,7 +675,7 @@ def _brokered_synthetic_run(
     *,
     cmd_type="builtin",
     owner_tab_id="",
-    team_id="",
+    team_id="", **kwargs,
 ):
     return run_lifecycle.brokered_synthetic_run(
         original_command,
@@ -690,7 +692,7 @@ def _brokered_synthetic_run(
         publish_run_event_fn=publish_run_event,
         publish_broker_captured_line_fn=_publish_broker_captured_line,
         save_completed_run_fn=_save_completed_run,
-        app_metrics_obj=app_metrics,
+        app_metrics_obj=app_metrics, **kwargs,
     )
 
 

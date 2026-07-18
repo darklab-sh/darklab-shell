@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
@@ -24,7 +27,7 @@ function loadTabsFns({
   maxTabs = 3,
   maxOutputLines = 100,
   version = undefined,
-  projectReadme = undefined,
+  projectSource = undefined,
   shareRedactionEnabled = true,
   shareRedactionRules = [],
   confirmPermalinkRedactionChoice = () =>
@@ -103,7 +106,7 @@ function loadTabsFns({
         share_redaction_enabled: shareRedactionEnabled,
         share_redaction_rules: shareRedactionRules,
         ...(version !== undefined && { version }),
-        ...(projectReadme !== undefined && { project_readme: projectReadme }),
+        ...(projectSource !== undefined && { project_source: projectSource }),
       },
       setStatus: () => {},
       clearSearch: () => {},
@@ -480,6 +483,7 @@ describe('tabs helpers', () => {
     tab.st = 'running'
     tab.runId = 'run-1'
     tab.historyRunId = 'history-1'
+    tab.historyRunKind = 'external'
     tab.followOutput = false
 
     clearTab(id, { preserveRunState: true })
@@ -488,6 +492,7 @@ describe('tabs helpers', () => {
     expect(tab.st).toBe('running')
     expect(tab.runId).toBe('run-1')
     expect(tab.historyRunId).toBe('history-1')
+    expect(tab.historyRunKind).toBe('external')
     expect(tab.followOutput).toBe(true)
     expect(document.querySelector(`.tab-panel[data-id="${id}"]`).contains(shellPromptWrap)).toBe(
       false,
@@ -505,11 +510,15 @@ describe('tabs helpers', () => {
     cmdInput.value = 'pending command'
     mobileCmdInput.value = 'pending mobile command'
     tab.rawLines = [{ text: 'before', cls: '', tsC: '', tsE: '' }]
+    tab.historyRunId = 'history-before-clear'
+    tab.historyRunKind = 'external'
 
     clearTab(id)
 
     expect(output.innerHTML).toBe('')
     expect(tab.rawLines).toEqual([])
+    expect(tab.historyRunId).toBeNull()
+    expect(tab.historyRunKind).toBe('')
     expect(cmdInput.value).toBe('')
 
     document.body.classList.add('mobile-terminal-mode')

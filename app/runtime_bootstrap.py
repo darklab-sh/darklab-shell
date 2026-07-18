@@ -1,22 +1,35 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Explicit runtime startup steps for web and worker processes."""
 
 from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
-from config import APP_CONF_DIR, get_config_load_summary, resolve_effective_cfg
+from config import get_config_load_summary, resolve_effective_cfg
 from core.logging_setup import configure_logging
 from services.metrics_environment import setup_prometheus_multiproc_dir
+from services.commands.raw_packets import RAW_PACKET_TOOLS, raw_packet_runtime_status
 
 log = logging.getLogger("shell")
 
 _ACTIVE_RUN_STARTUP_CLEANUP_LOCK_KEY = "active-run-metadata:startup-cleanup"
 _ACTIVE_RUN_STARTUP_CLEANUP_LOCK_TTL_SECONDS = 60
+_MAX_CONFIG_LOG_FIELD_CHARS = 240
+
+
+def _bounded_config_log_field(value: object) -> str:
+    normalized = "".join(
+        character if character.isprintable() and character not in "\r\n" else "?"
+        for character in str(value or "")
+    )
+    return normalized[:_MAX_CONFIG_LOG_FIELD_CHARS]
 
 
 def configure_runtime_logging(cfg: Mapping[str, Any] | None = None) -> None:
@@ -25,15 +38,61 @@ def configure_runtime_logging(cfg: Mapping[str, Any] | None = None) -> None:
 
 def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
     active_cfg = resolve_effective_cfg(cfg)
-    conf_dir = Path(APP_CONF_DIR) if APP_CONF_DIR else Path(__file__).resolve().parent / "conf"
     load_summary = get_config_load_summary()
+    raw_packet_statuses = {
+        tool: raw_packet_runtime_status(active_cfg, tool=tool)
+        for tool in RAW_PACKET_TOOLS
+    }
+    raw_packet_configured = bool(active_cfg.get("raw_packet_scanning_enabled", False))
+    active_tools = [tool for tool, status in raw_packet_statuses.items() if status["active"]]
+    unavailable_tools = [
+        tool for tool, status in raw_packet_statuses.items()
+        if raw_packet_configured and not status["active"]
+    ]
+    if not raw_packet_configured:
+        raw_packet_state = "disabled"
+    elif len(active_tools) == len(RAW_PACKET_TOOLS):
+        raw_packet_state = "ready"
+    elif active_tools:
+        raw_packet_state = "partial"
+    else:
+        raw_packet_state = "unavailable"
+    log.debug(
+        "CONFIG_OVERLAY_INVENTORY",
+        extra={
+            "supported_local_overlays": int(load_summary.get("supported_local_overlays") or 0),
+            "present_local_overlays": ",".join(
+                _bounded_config_log_field(value)
+                for value in load_summary.get("present_local_overlays") or []
+            ),
+        },
+    )
+    raw_packet_fields = {
+        f"raw_packet_{tool}_{field}": (
+            bool(status[field]) if field == "active" else str(status[field])
+        )
+        for tool, status in raw_packet_statuses.items()
+        for field in ("active", "reason")
+    }
     log.info(
         "CONFIG_LOADED",
         extra={
-            "conf_dir": str(conf_dir),
-            "local_overlay": (conf_dir / "config.local.yaml").exists(),
+            "conf_dir": _bounded_config_log_field(load_summary.get("conf_dir")),
+            "local_conf_dir": _bounded_config_log_field(load_summary.get("local_conf_dir")),
+            "local_overlay": bool(load_summary.get("local_overlay", False)),
+            "supported_local_overlays": int(load_summary.get("supported_local_overlays") or 0),
+            "overlays": ",".join(
+                _bounded_config_log_field(item.get("source"))
+                for item in load_summary.get("overlays") or []
+                if isinstance(item, Mapping)
+            ),
             "database_backend": str(active_cfg.get("database_backend") or ""),
             "workspace_enabled": bool(active_cfg.get("workspace_enabled")),
+            "raw_packet_scanning_configured": raw_packet_configured,
+            "raw_packet_scanning_state": raw_packet_state,
+            "raw_packet_scanning_active_tools": ",".join(active_tools),
+            "raw_packet_scanning_unavailable_tools": ",".join(unavailable_tools),
+            **raw_packet_fields,
             "log_level": str(active_cfg.get("log_level") or ""),
             "log_format": str(active_cfg.get("log_format") or ""),
             "warning_count": int(load_summary.get("warning_count") or 0),
@@ -42,6 +101,17 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
             "legacy_key_migrated": bool(load_summary.get("legacy_key_migrated", False)),
         },
     )
+    if raw_packet_configured:
+        for tool in unavailable_tools:
+            status = raw_packet_statuses[tool]
+            log.warning(
+                "RAW_PACKET_SCANNING_UNAVAILABLE",
+                extra={
+                    "tool": tool,
+                    "reason": str(status["reason"]),
+                    "availability_reason": str(status["availability_reason"]),
+                },
+            )
 
 
 def setup_metrics_environment(cfg: Mapping[str, Any] | None = None) -> str:
@@ -155,6 +225,20 @@ def cleanup_active_run_metadata_on_startup() -> None:
         )
 
 
+def recover_workflow_executions_on_startup() -> None:
+    from services.workflows.executions import recover_workflow_executions  # noqa: PLC0415
+
+    try:
+        recover_workflow_executions()
+    except Exception:
+        log.error("WORKFLOW_RECOVERY_ERROR", exc_info=True, extra={
+            "execution_id": "",
+            "stage": "recovery_batch",
+            "pid": os.getpid(),
+            "recovery_owner": True,
+        })
+
+
 def _bootstrap_step_flags(
     *,
     init_metrics: bool,
@@ -215,6 +299,7 @@ def bootstrap_runtime(
         ("process", init_process, lambda: init_process_runtime(active_cfg)),
         ("database", init_db, init_database),
         ("active_run_cleanup", cleanup_active_runs, cleanup_active_run_metadata_on_startup),
+        ("workflow_recovery", cleanup_active_runs, recover_workflow_executions_on_startup),
     )
     for step, enabled, func in steps:
         if not enabled:

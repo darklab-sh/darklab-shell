@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 import {
@@ -371,6 +374,7 @@ describe('Mobile Atlas controller', () => {
     document.querySelector('.atlas-mobile-row')?.click()
 
     expect(state.selectedEntityIds.has('ent_ip')).toBe(true)
+    expect(document.querySelector('.atlas-mobile-row.is-selected')?.classList.contains('selection-row')).toBe(true)
     expect(controller.selectEntity).not.toHaveBeenCalled()
 
     document.querySelector('#atlas-mobile-bulk-bar .btn-danger')?.click()

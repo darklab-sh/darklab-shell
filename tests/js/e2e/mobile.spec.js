@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { test, expect } from '@playwright/test'
 import {
   createShareSnapshot,
@@ -61,6 +64,15 @@ async function openMobileProjects(page) {
   await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
   await expect(page.locator('#project-mobile-root')).toBeVisible()
   await expect(page.locator('#project-mobile-body')).not.toContainText('Loading projects...')
+}
+
+async function openMobileWorkflows(page) {
+  await page.locator('#hamburger-btn').click()
+  await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+  const overlay = page.locator('#workflows-overlay')
+  await expect(overlay).toHaveClass(/\bopen\b/)
+  await expect(overlay).toHaveAttribute('data-interaction-ready', '1', { timeout: 15_000 })
+  return overlay
 }
 
 async function createMobileProject(page, name) {
@@ -808,8 +820,7 @@ test.beforeEach(async ({ page }) => {
     // header visible and making the grab and close button unreachable.
     // bindMobileSheet now watches the sheet's visibility and scrubs any stale
     // inline styles the moment the sheet becomes hidden.
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+    await openMobileWorkflows(page)
     await expect(page.locator('#workflows-modal')).toBeVisible()
     await page.waitForFunction(() => {
       const body = document.querySelector('#workflows-modal .workflows-body')
@@ -839,14 +850,114 @@ test.beforeEach(async ({ page }) => {
     expect(leakedStyle).not.toContain('translateY')
 
     // Reopen and confirm the modal renders at normal height, not pinned low.
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+    await openMobileWorkflows(page)
     await expect(page.locator('#workflows-modal')).toBeVisible()
     const box = await page.locator('#workflows-modal').boundingBox()
     const viewport = page.viewportSize()
     // The sheet renders roughly 88svh tall; it must occupy the majority of
     // the viewport, not collapse to a sliver at the bottom.
     expect(box.height).toBeGreaterThan(viewport.height * 0.5)
+  })
+
+  test('workflow exact exit-code routes stack cleanly in the mobile editor', async ({ page }) => {
+    await openMobileWorkflows(page)
+    await page.locator('#workflow-new-btn').click()
+    await expect(page.locator('#workflow-editor-overlay')).toHaveClass(/\bopen\b/)
+    const firstStep = page.locator('[data-workflow-editor-step]').first()
+    await firstStep.locator('.workflow-editor-add-exit-code').click()
+    const route = firstStep.locator('[data-workflow-editor-exit-code]').first()
+    await expect(route.locator('.workflow-editor-exit-code')).toBeVisible()
+    await expect(route.locator('.workflow-editor-exit-code-destination')).toBeVisible()
+
+    const layout = await route.evaluate((row) => {
+      const codeField = row.querySelector('[data-workflow-field$="code"]')?.getBoundingClientRect()
+      const destinationField = row.querySelector('[data-workflow-field$="destination"]')?.getBoundingClientRect()
+      const routeBox = row.getBoundingClientRect()
+      return {
+        codeWidth: codeField?.width || 0,
+        destinationWidth: destinationField?.width || 0,
+        routeWidth: routeBox.width,
+        codeBottom: codeField?.bottom || 0,
+        destinationTop: destinationField?.top || 0,
+      }
+    })
+    expect(layout.codeWidth).toBeGreaterThan(layout.routeWidth * 0.8)
+    expect(layout.destinationWidth).toBeGreaterThan(layout.routeWidth * 0.8)
+    expect(layout.destinationTop).toBeGreaterThanOrEqual(layout.codeBottom)
+    await route.locator('.workflow-editor-remove-exit-code').click()
+    await expect(firstStep.locator('[data-workflow-editor-exit-code]')).toHaveCount(0)
+  })
+
+  test('workflows sheet exposes the shared recent execution controls', async ({ page }) => {
+    let listReads = 0
+    let canceled = false
+    await page.route('**/history/active**', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          runs: [{
+            run_id: 'run-mobile',
+            command: 'nmap -sV mobile.playwright.example',
+            started: '2026-07-12T10:00:00Z',
+            last_event_id: '',
+          }],
+        }),
+      })
+    })
+    await page.route('**/workflow-executions?*', async (route) => {
+      listReads += 1
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          executions: [{
+            id: 'wfx_mobile_active',
+            title: 'Mobile playbook',
+            status: canceled ? 'canceled' : 'running',
+            current_step_id: canceled ? '' : 'inspect',
+            created: '2026-07-12 10:00:00',
+            steps: [{
+              step_id: 'inspect',
+              status: canceled ? 'canceled' : 'running',
+              run_id: 'run-mobile',
+              capture_names: ['service'],
+              selected_transition: 'complete',
+              transition_reason: 'success',
+            }],
+          }],
+        }),
+      })
+    })
+    await page.route('**/workflow-executions/wfx_mobile_active/cancel', async (route) => {
+      canceled = true
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ execution: { id: 'wfx_mobile_active', status: 'canceled' } }),
+      })
+    })
+
+    await openMobileWorkflows(page)
+    const executionsTab = page.locator('[data-workflows-view="executions"]')
+    await executionsTab.click()
+    await expect(executionsTab).toHaveAttribute('aria-selected', 'true')
+    const execution = page.locator('[data-workflow-execution-id="wfx_mobile_active"]')
+    await expect(execution).toBeVisible()
+    await expect(execution).toContainText('Current step: inspect')
+    await expect(execution).toContainText('Captured: service')
+    await execution.getByRole('button', { name: 'Attach to run run-mobile' }).click()
+    await expect(page.locator('#workflows-modal')).toBeHidden()
+    await expect(page.locator('.tab-panel.active .output')).toContainText(
+      '[attached to active run started at',
+    )
+
+    await openMobileWorkflows(page)
+    await page.locator('[data-workflows-view="executions"]').click()
+    await expect(execution).toBeVisible()
+    await execution.getByRole('button', { name: 'Cancel Mobile playbook' }).click()
+    await expect(page.getByRole('button', { name: 'Cancel execution' })).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel execution' }).click()
+    await expect(execution).toContainText('Canceled')
+    await expect(execution.getByRole('button', { name: 'Cancel Mobile playbook' })).toHaveCount(0)
+    expect(listReads).toBeGreaterThan(0)
   })
 
   test('mobile Projects creates, links, drills by count chip, and opens row actions', async ({ page }, testInfo) => {
@@ -1005,33 +1116,31 @@ test.beforeEach(async ({ page }) => {
     await expect(page.locator('#project-mobile-detail-topbar')).toContainText(projectName)
   })
 
-  test('workflows sheet starts collapsed and wraps commands inside cards', async ({ page }) => {
+  test('workflows sheet browses the catalog and drills into wrapped command details', async ({ page }) => {
     await page.setViewportSize(MOBILE)
     await page.goto('/')
 
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+    await openMobileWorkflows(page)
     await expect(page.locator('#workflows-modal')).toBeVisible()
-    await page.waitForFunction(() => document.querySelectorAll('#workflows-modal .workflow-card').length > 0)
+    const catalog = page.locator('#workflows-modal .workflow-catalog-pane')
+    const detail = page.locator('#workflows-modal .workflow-detail-pane')
+    await expect(catalog).toBeVisible()
+    await expect(detail).toBeHidden()
+    const sourceFilterValue = catalog.locator('.workflow-catalog-toolbar .app-select-value')
+    await expect(sourceFilterValue).toHaveText('All sources')
+    expect(await sourceFilterValue.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
+    await page.locator('#workflows-modal .workflow-catalog-item').first().click()
+    await expect(catalog).toBeHidden()
+    await expect(detail).toBeVisible()
+    await expect(detail.locator('.workflow-step').first()).toBeVisible()
 
-    const cards = page.locator('#workflows-modal .workflow-card')
-    await expect(cards.first()).toHaveClass(/\bis-collapsed\b/)
-    await expect(cards.first().locator('.workflow-step').first()).toBeHidden()
-
-    await cards.first().locator('.workflow-card-toggle').click()
-    await expect(cards.first()).not.toHaveClass(/\bis-collapsed\b/)
-    await expect(cards.first().locator('.workflow-step').first()).toBeVisible()
-
-    await page.locator('#workflows-modal .workflow-card-toggle').evaluateAll(buttons => {
-      buttons.forEach(button => {
-        const card = button.closest('.workflow-card')
-        if (card?.classList.contains('is-collapsed')) button.click()
-      })
-    })
     const overflowingChipCount = await page
       .locator('#workflows-modal .workflow-step-cmd')
       .evaluateAll(chips => chips.filter(chip => chip.scrollWidth > chip.clientWidth + 1).length)
     expect(overflowingChipCount).toBe(0)
+    await detail.locator('.workflow-detail-back').click()
+    await expect(catalog).toBeVisible()
+    await expect(detail).toBeHidden()
   })
 
   test('mobile recent peek summarizes recent runs and opens the full history panel on tap', async ({
@@ -1120,9 +1229,7 @@ test.beforeEach(async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await waitForHistoryRuns(page, 1)
 
-    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
-    await page.locator('#mobile-recent-peek').click()
-    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
+    await openFullMobileHistoryPanel(page)
 
     const timeEl = page.locator('#history-list .history-entry').first().locator('.history-entry-meta span').nth(1)
     await expect(timeEl).not.toHaveText('')

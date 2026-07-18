@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { DarklabHistoryCore as importedHistoryCore } from '../../core/history_core.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
 import { showToast as importedShowToast } from '../../core/utils.js';
@@ -265,6 +268,14 @@ function _createHistoryEntry(run, isStarred, options = {}) {
       );
     }
     meta.appendChild(scheduledBadge);
+  }
+  if (run.workflow_execution_id) {
+    const workflowBadge = _historyMetaKindBadge('workflow', 'playbook');
+    const stepId = String(run.workflow_step_id || '').trim();
+    workflowBadge.title = stepId
+      ? `Workflow ${run.workflow_execution_id}, step ${stepId}`
+      : `Workflow ${run.workflow_execution_id}`;
+    meta.appendChild(workflowBadge);
   }
   _appendHistoryMetadataBadges(meta, run);
   const timeEl = document.createElement('span');

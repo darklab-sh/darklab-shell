@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Interactive PTY support for allowlisted screen tools. The backend owns the
 // PTY process; xterm.js owns terminal rendering, keyboard input, and paste.
 
@@ -1237,6 +1240,7 @@ function _prepareAttachedInteractivePtyTab(run, tabId) {
   }
   tab.runId = run.run_id;
   tab.historyRunId = run.run_id;
+  tab.historyRunKind = 'external';
   tab.lastEventId = '';
   tab.attachMode = 'attached';
   tab.reconnectedRun = true;
@@ -1382,6 +1386,7 @@ async function _ptyHandleStreamEndedWithoutExit(tabId, session) {
   if (active && tab && !tab.killed) {
     tab.reconnectedRun = true;
     tab.historyRunId = tab.historyRunId || runId;
+    tab.historyRunKind = 'external';
     tab.interactivePtyActive = false;
     tab.ptyTerminal = null;
     if (session && session.screen && session.screen.dataset) session.screen.dataset.ptyActive = '0';
@@ -1572,6 +1577,7 @@ function _prepareInteractivePtyTab(cmd, tabId) {
     tab.fullOutputAvailable = false;
     tab.fullOutputLoaded = false;
     tab.historyRunId = null;
+    tab.historyRunKind = '';
     tab.reconnectedRun = false;
     tab.lastEventId = '';
     tab.attachMode = '';

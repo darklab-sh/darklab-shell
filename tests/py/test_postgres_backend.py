@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 import gzip
 import hashlib
 import importlib.util
@@ -272,9 +275,94 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations.runner import run_migrations_with_advisory_lock
 
     conn = postgres_schema.conn
-    applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    pre_comparison_migrations = tuple(
+        migration for migration in MIGRATIONS if migration.version < "0044"
+    )
+    comparison_migrations = tuple(
+        migration for migration in MIGRATIONS if migration.version == "0044"
+    )
+    applied = run_migrations_with_advisory_lock(conn, pre_comparison_migrations)
+    conn.execute(
+        "INSERT INTO runs (id, session_id, command, started) VALUES (%s, %s, %s, %s)",
+        ("run-before-0044", "migration-session", "scanner darklab.sh", "2026-07-13T09:00:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, run_id, line_number, severity, tool_root, kind, subject_key, "
+        "raw_line, created) VALUES (%s, %s, '', 2, 'high', 'scanner', 'finding', %s, %s, %s)",
+        (
+            "finding-before-0044",
+            "migration-session",
+            "domain:darklab.sh",
+            "[high] exposed service",
+            "2026-07-13T09:00:00Z",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO findings_occurrences "
+        "(finding_id, run_id, line_number, snippet, seen_at) VALUES (%s, %s, 2, %s, %s)",
+        (
+            "finding-before-0044",
+            "run-before-0044",
+            "[high] exposed service",
+            "2026-07-13T09:00:00Z",
+        ),
+    )
+    applied.extend(run_migrations_with_advisory_lock(conn, comparison_migrations))
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
+
+    backfilled_occurrence = conn.execute(
+        "SELECT observed_severity, comparison_key FROM findings_occurrences "
+        "WHERE finding_id = %s",
+        ("finding-before-0044",),
+    ).fetchone()
+    assert backfilled_occurrence["observed_severity"] == "high"
+    assert backfilled_occurrence["comparison_key"] == (
+        "raw:scanner\x1ffinding\x1fdomain:darklab.sh\x1f[high] exposed service"
+    )
+    conn.execute(
+        "INSERT INTO runs (id, session_id, command, started) VALUES (%s, %s, %s, %s)",
+        ("run-after-0044", "migration-session", "scanner darklab.sh", "2026-07-13T10:00:00Z"),
+    )
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, run_id, line_number, scope, review_state, severity, tool_root, kind, "
+        "subject_key, fingerprint, raw_line, created) "
+        "VALUES (%s, %s, %s, 4, 'finding', 'important', 'critical', 'scanner', 'finding', "
+        "%s, %s, %s, %s)",
+        (
+            "finding-after-0044",
+            "migration-session",
+            "run-after-0044",
+            "domain:darklab.sh",
+            "fingerprint-after-0044",
+            "[critical] exposed service",
+            "2026-07-13T10:00:00Z",
+        ),
+    )
+    triggered_occurrence = conn.execute(
+        "SELECT observed_severity, comparison_key FROM findings_occurrences "
+        "WHERE finding_id = %s",
+        ("finding-after-0044",),
+    ).fetchone()
+    triggered_finding = conn.execute(
+        "SELECT first_run_id, last_run_id, occurrence_count, status, kind, signature_hash "
+        "FROM findings WHERE id = %s",
+        ("finding-after-0044",),
+    ).fetchone()
+    assert triggered_occurrence["observed_severity"] == "critical"
+    assert triggered_occurrence["comparison_key"] == (
+        "raw:scanner\x1ffinding\x1fdomain:darklab.sh\x1f[critical] exposed service"
+    )
+    assert triggered_finding == {
+        "first_run_id": "run-after-0044",
+        "last_run_id": "run-after-0044",
+        "occurrence_count": 1,
+        "status": "important",
+        "kind": "finding",
+        "signature_hash": "fingerprint-after-0044",
+    }
 
     assert applied == [
         "0001",
@@ -319,6 +407,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0040",
         "0041",
         "0042",
+        "0043",
+        "0044",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -1630,8 +1720,16 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
 
 
 @pytest.mark.postgres
-def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema):
+def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, postgres_schema):
     from app import create_app
+    from blueprints import workflows as workflow_routes
+    from services.workflows.storage import (
+        active_execution_page_for_recovery,
+        bind_step_run,
+        claim_step_for_launch,
+        create_execution,
+        finalize_run_step,
+    )
     app = create_app()
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
@@ -1640,6 +1738,38 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema)
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
+    workflow_column_rows = conn.execute(
+        "SELECT table_name, column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND "
+        "((table_name = 'workflow_executions' AND column_name IN "
+        "('definition_snapshot', 'input_values', 'variables')) OR "
+        "(table_name = 'workflow_execution_steps' AND column_name = 'capture_names'))"
+    ).fetchall()
+    workflow_column_types = {
+        (row["table_name"], row["column_name"]): row["data_type"]
+        for row in workflow_column_rows
+    }
+    assert workflow_column_types == {
+        ("workflow_executions", "definition_snapshot"): "jsonb",
+        ("workflow_executions", "input_values"): "jsonb",
+        ("workflow_executions", "variables"): "jsonb",
+        ("workflow_execution_steps", "capture_names"): "jsonb",
+    }
+    workflow_index_names = {
+        row["indexname"]
+        for row in conn.execute(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() "
+            "AND tablename IN ('workflow_executions', 'workflow_execution_steps')"
+        ).fetchall()
+    }
+    assert {
+        "idx_workflow_executions_personal_updated",
+        "idx_workflow_executions_team_updated",
+        "idx_workflow_executions_active",
+        "idx_workflow_execution_steps_execution_step",
+        "idx_workflow_execution_steps_execution_order",
+        "idx_workflow_execution_steps_run",
+    } <= workflow_index_names
 
     @contextmanager
     def _postgres_db_connect():
@@ -1647,6 +1777,11 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema)
 
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(
+        workflow_routes,
+        "launch_execution_step",
+        lambda execution_id: {"execution_id": execution_id},
+    )
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
@@ -1686,6 +1821,70 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema)
             "steps": [{"cmd": "host {{domain}}", "note": "resolve"}],
         },
     )
+    playbook_resp = client.post(
+        "/session/workflows",
+        headers={"X-Session-ID": session_id},
+        json={
+            "version": 2,
+            "id": "postgres_playbook",
+            "title": "Postgres playbook",
+            "inputs": [{"id": "target", "type": "domain", "required": True}],
+            "steps": [{
+                "id": "resolve",
+                "cmd": "host {{target}}",
+                "captures": [{
+                    "name": "resolved_host",
+                    "source": "first_nonempty_line",
+                    "required": True,
+                }],
+                "next": {"success": "inspect", "failure": "stop"},
+            }, {
+                "id": "inspect",
+                "cmd": "echo {{resolved_host}}",
+                "next": {"codes": {"2": "complete"}, "success": "complete", "failure": "stop"},
+            }],
+        },
+    )
+    playbook = json.loads(playbook_resp.data)["workflow"]
+    execution_resp = client.post(
+        "/workflow-executions",
+        headers={"X-Session-ID": session_id},
+        json={"workflow_id": playbook["id"], "inputs": {"target": "darklab.sh"}},
+    )
+    execution = json.loads(execution_resp.data)["execution"]
+    initial_recovery_page = active_execution_page_for_recovery()
+    assert [item[0] for item in initial_recovery_page] == [execution["id"]]
+    assert active_execution_page_for_recovery(
+        after_created=initial_recovery_page[0][1],
+        after_id=execution["id"],
+    ) == []
+    execution_run_id = "run-pg-workflow-resolve-" + uuid.uuid4().hex
+    inspect_run_id = "run-pg-workflow-inspect-" + uuid.uuid4().hex
+    assert claim_step_for_launch(execution["id"], "resolve") is not None
+    assert bind_step_run(execution["id"], "resolve", execution_run_id) is True
+    finalized = finalize_run_step(
+        execution_run_id,
+        0,
+        captures={"resolved_host": "darklab.sh"},
+    )
+    assert finalized is not None and finalized["destination"] == "inspect"
+    assert finalize_run_step(execution_run_id, 0) is None
+    assert claim_step_for_launch(execution["id"], "inspect") is not None
+    assert bind_step_run(execution["id"], "inspect", inspect_run_id) is True
+    finalized = finalize_run_step(inspect_run_id, 2)
+    assert finalized is not None and finalized["destination"] == "complete"
+    execution_list_resp = client.get(
+        "/workflow-executions?limit=10",
+        headers={"X-Session-ID": session_id},
+    )
+    filtered_execution_list_resp = client.get(
+        f"/workflow-executions?limit=10&workflow_id={playbook['id']}",
+        headers={"X-Session-ID": session_id},
+    )
+    unrelated_execution_list_resp = client.get(
+        "/workflow-executions?limit=10&workflow_id=unrelated_playbook",
+        headers={"X-Session-ID": session_id},
+    )
     prefs_row = conn.execute(
         "SELECT preferences FROM session_preferences WHERE session_id = %s",
         (session_id,),
@@ -1704,12 +1903,131 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema)
     assert starred_resp.status_code == 200
     assert duplicate_starred_resp.status_code == 200
     assert workflow_resp.status_code == 201
+    assert playbook_resp.status_code == 201
+    assert execution_resp.status_code == 202
+    listed_executions = json.loads(execution_list_resp.data)["executions"]
+    filtered_executions = json.loads(filtered_execution_list_resp.data)["executions"]
+    unrelated_executions = json.loads(unrelated_execution_list_resp.data)["executions"]
+    assert [item["id"] for item in filtered_executions] == [execution["id"]]
+    assert unrelated_executions == []
+    assert [step["step_id"] for step in listed_executions[0]["steps"]] == ["resolve", "inspect"]
+    assert listed_executions[0]["status"] == "completed"
+    assert listed_executions[0]["steps"][0]["run_id"] == execution_run_id
+    assert listed_executions[0]["steps"][0]["status"] == "succeeded"
+    assert listed_executions[0]["steps"][0]["capture_names"] == ["resolved_host"]
+    assert listed_executions[0]["steps"][1]["run_id"] == inspect_run_id
+    assert listed_executions[0]["steps"][1]["status"] == "failed"
+    assert listed_executions[0]["steps"][1]["transition_reason"] == "exit_code:2"
     assert prefs_row["preferences"]["pref_theme_name"] == "darklab_obsidian.yaml"
     assert json.loads(recent_resp.data)["values"]["domain"] == ["darklab.sh"]
     assert int(starred_count) == 1
     assert workflows_row["inputs"][0]["id"] == "domain"
     assert workflows_row["steps"][0]["cmd"] == "host {{domain}}"
     assert json.loads(workflow_resp.data)["workflow"]["steps"][0]["cmd"] == "host {{domain}}"
+
+    from core.database import delete_run_artifacts
+    from services.workflows.storage import get_execution, list_executions
+
+    delete_run_artifacts(PostgresSqliteCompatConnection(conn), [execution_run_id])
+    conn.commit()
+    after_run_delete = get_execution(session_id, execution["id"])
+    assert after_run_delete is not None
+    assert after_run_delete["steps"][0]["run_id"] == ""
+    assert after_run_delete["steps"][1]["run_id"] == inspect_run_id
+
+    team_execution = create_execution(
+        session_id=session_id,
+        team_id="team-postgres-workflow",
+        workflow_id="postgres_team_playbook",
+        workflow_source="team",
+        definition={
+            "version": 2,
+            "id": "postgres_team_playbook",
+            "title": "Postgres team playbook",
+            "inputs": [],
+            "steps": [{"id": "run", "cmd": "echo team"}],
+        },
+        inputs={},
+    )
+    assert [
+        item["id"]
+        for item in list_executions("another-actor", team_id="team-postgres-workflow")
+    ] == [team_execution["id"]]
+    assert team_execution["id"] not in {
+        item["id"] for item in list_executions(session_id)
+    }
+
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    import psycopg
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
+    from services.workflows.storage import (
+        bind_step_run,
+        cancel_execution,
+        claim_step_for_launch,
+        create_execution,
+    )
+
+    postgres_schema.conn.commit()
+    schema_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    psycopg_connect = cast(Any, psycopg.connect)
+
+    @contextmanager
+    def _concurrent_postgres_connect():
+        with psycopg_connect(schema_dsn, row_factory=dict_row) as raw_conn:
+            yield PostgresSqliteCompatConnection(raw_conn)
+
+    monkeypatch.setattr(core_database, "db_connect", _concurrent_postgres_connect)
+    barrier = Barrier(2)
+    concurrent_session_id = str(uuid.uuid4())
+    definition = {
+        "version": 2,
+        "id": "concurrent_limit",
+        "title": "Concurrent limit",
+        "inputs": [],
+        "steps": [{"id": "run", "cmd": "echo ready"}],
+    }
+
+    def create_concurrently() -> str:
+        barrier.wait()
+        try:
+            create_execution(
+                session_id=concurrent_session_id,
+                team_id="",
+                workflow_id="concurrent_limit",
+                workflow_source="config",
+                definition=definition,
+                inputs={},
+                max_active=1,
+            )
+        except WorkflowActiveExecutionLimitExceeded:
+            return "limited"
+        return "created"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = sorted(pool.map(lambda _index: create_concurrently(), range(2)))
+
+    assert outcomes == ["created", "limited"]
+
+    cancel_session_id = str(uuid.uuid4())
+    cancel_target = create_execution(
+        session_id=cancel_session_id,
+        team_id="",
+        workflow_id="postgres_cancel",
+        workflow_source="config",
+        definition=definition,
+        inputs={},
+    )
+    cancel_run_id = "run-pg-workflow-cancel-" + uuid.uuid4().hex
+    assert claim_step_for_launch(cancel_target["id"], "run") is not None
+    assert bind_step_run(cancel_target["id"], "run", cancel_run_id) is True
+    canceled = cancel_execution(cancel_session_id, cancel_target["id"])
+    assert canceled is not None
+    assert canceled["status"] == "canceled"
+    assert canceled["_canceled_run_ids"] == [cancel_run_id]
 
 
 @pytest.mark.postgres
@@ -1774,6 +2092,37 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     ))
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+
+    from services.workflows.storage import (
+        bind_step_run,
+        claim_step_for_launch,
+        create_execution,
+        finalize_run_step,
+        get_execution,
+    )
+
+    workflow_execution = create_execution(
+        session_id=source_session_id,
+        team_id="",
+        workflow_id="postgres_migrated_execution",
+        workflow_source="personal",
+        definition={
+            "version": 2,
+            "id": "postgres_migrated_execution",
+            "title": "Postgres migrated execution",
+            "inputs": [],
+            "steps": [{
+                "id": "finish",
+                "cmd": "true",
+                "next": {"success": "complete", "failure": "stop"},
+            }],
+        },
+        inputs={},
+    )
+    workflow_run_id = "run-postgres-migrated-" + uuid.uuid4().hex
+    assert claim_step_for_launch(workflow_execution["id"], "finish") is not None
+    assert bind_step_run(workflow_execution["id"], "finish", workflow_run_id)
+    assert finalize_run_step(workflow_run_id, 0) is not None
 
     client = app.test_client()
     token_resp = client.get("/session/token/generate", headers={"X-Session-ID": source_session_id})
@@ -1846,6 +2195,8 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
         "SELECT COUNT(*) AS count FROM session_variables WHERE session_id = %s",
         (destination_token,),
     ).fetchone()["count"]
+    source_workflow_execution = get_execution(source_session_id, workflow_execution["id"])
+    migrated_workflow_execution = get_execution(destination_token, workflow_execution["id"])
 
     assert token_resp.status_code == 200
     assert info_resp.status_code == 200
@@ -1862,6 +2213,7 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert json.loads(migrate_resp.data)["migrated_preferences"] == 1
     assert json.loads(migrate_resp.data)["migrated_variables"] == 1
     assert json.loads(migrate_resp.data)["migrated_recent_values"] == 1
+    assert json.loads(migrate_resp.data)["migrated_workflow_executions"] == 1
     assert migrated_run["session_id"] == destination_token
     assert migrated_snapshot["session_id"] == destination_token
     assert migrated_prefs["preferences"]["pref_theme_name"] == "darklab_obsidian.yaml"
@@ -1872,6 +2224,10 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert int(source_recent_count) == 0
     assert int(migrated_stars) == 1
     assert int(migrated_variables) == 1
+    assert source_workflow_execution is None
+    assert migrated_workflow_execution is not None
+    assert migrated_workflow_execution["session_id"] == destination_token
+    assert migrated_workflow_execution["steps"][0]["run_id"] == workflow_run_id
     assert revoke_resp.status_code == 200
     assert revoked_verify_resp.status_code == 200
     assert json.loads(revoked_verify_resp.data)["exists"] is False
@@ -2617,6 +2973,23 @@ def test_postgres_db_init_applies_retention_pruning(monkeypatch, tmp_path, postg
     assert not snapshot_body_path.exists()
 
 
+@pytest.mark.postgres
+def test_postgres_fresh_schema_preflight_leaves_ledger_creation_to_locked_runner(
+    postgres_schema,
+):
+    from core.migrations import MIGRATIONS
+
+    conn = postgres_schema.conn
+
+    branch = core_database._postgres_schema_init_branch(conn, MIGRATIONS)
+    ledger = conn.execute(
+        "SELECT to_regclass('schema_migrations') AS table_name"
+    ).fetchone()
+
+    assert branch == "postgres_fresh_unified_baseline"
+    assert ledger["table_name"] is None
+
+
 def _build_migration_sqlite_fixture(root: Path) -> Path:
     db_path = root / "history.db"
     pointer = _write_body_pointer(root, "snapshot body for darklab.sh", "body-store/snapshots/snap-1.txt.gz")
@@ -2699,7 +3072,16 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (session_token, name)
             );
+            CREATE TABLE schema_migrations (
+                version TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );
             """
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations VALUES (?, ?, ?)",
+            ("0039", "unified_schema_baseline", "2026-05-16T00:00:00Z"),
         )
         conn.execute(
             """
@@ -2815,6 +3197,7 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     assert report.copied_rows["entity_intel_snapshots"] == 1
     assert report.verified_files == 2
     assert "runs_fts" in report.skipped_tables
+    assert "schema_migrations" in report.skipped_tables
 
     conn = postgres_schema.conn
     conn.execute(f"SET search_path TO {_quote_ident(postgres_schema.schema)}")

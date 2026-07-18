@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Browser schedules modal and handoff actions.
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
 import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
@@ -547,11 +550,14 @@ function _renderSchedulesList() {
   }
   _schedulesState.schedules.forEach((schedule) => {
     const row = document.createElement('div');
-    row.className = 'schedules-list-row panel-row panel-row-clickable';
+    row.className = 'schedules-list-row panel-row panel-row-clickable selection-row';
     row.dataset.scheduleId = schedule.id || '';
     row.setAttribute('role', 'button');
     row.tabIndex = 0;
-    if (String(schedule.id || '') === String(_schedulesState.selectedId || '')) row.classList.add('active');
+    if (String(schedule.id || '') === String(_schedulesState.selectedId || '')) {
+      row.classList.add('is-selected');
+      row.setAttribute('aria-current', 'true');
+    }
     const title = document.createElement('span');
     title.className = 'schedules-list-title';
     title.textContent = _scheduleTitle(schedule);

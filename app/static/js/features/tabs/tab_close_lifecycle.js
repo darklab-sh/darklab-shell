@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import {
   emitUiEvent as importedEmitUiEvent,
   getActiveTabId as importedGetActiveTabId,
@@ -232,6 +235,7 @@ function _resetPreservedSingleTabState(tab) {
   tab.command = '';
   tab.runId = null;
   tab.historyRunId = null;
+  tab.historyRunKind = '';
   tab.lastEventId = '';
   tab.attachMode = '';
   tab.reconnectedRun = false;

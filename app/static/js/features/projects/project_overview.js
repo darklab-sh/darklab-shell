@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Project Overview tab controller.
 // Loaded lazily; shell chrome supplies request, filter, and render callbacks.
 

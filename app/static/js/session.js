@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Shared utility module ──
 import { DarklabSessionCore as importedSessionCore } from './core/session_core.js';
 import { loadSessionPreferences as importedLoadSessionPreferences } from './features/preferences/preferences.js';

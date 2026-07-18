@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { describe, expect, it, vi } from 'vitest'
 import {
   applyRedactionRules,
@@ -536,6 +539,17 @@ describe('core ESM exports', () => {
 
       expect(fallbackCompare).toHaveBeenCalledWith('run-1', 'run-2', {
         url: '/history/compare?left=run-1&project_id=project-1&right=run-2',
+      })
+
+      fallbackCompare.mockClear()
+      const controls = document.createElement('div')
+      controls.dataset.projectCompareRunOptions = JSON.stringify([
+        { value: 'run-current', started: '2026-07-13T12:00:00Z' },
+        { value: 'run-baseline', started: '2026-07-12T12:00:00Z' },
+      ])
+      controller.compareRuns('project-1', 'run-current', 'run', 'run-baseline', controls)
+      expect(fallbackCompare).toHaveBeenCalledWith('run-baseline', 'run-current', {
+        url: '/history/compare?left=run-baseline&project_id=project-1&right=run-current',
       })
 
       delete bridgeGlobal.fetchAndRenderHistoryComparison
@@ -1115,6 +1129,7 @@ describe('core ESM exports', () => {
     })).toBe('8443/tcp https-alt')
 
     const atlasRow = renderAtlasEntityRow({ entity })
+    expect(atlasRow.classList.contains('selection-row')).toBe(true)
     expect(atlasRow.textContent).toContain('2 hits · 1 run')
     expect(atlasRow.textContent).toContain('proto tcp')
     expect(atlasRow.textContent).toContain('service https')
@@ -1126,6 +1141,7 @@ describe('core ESM exports', () => {
     })
     const projectRow = renderProjectEntityRow({
       entity,
+      selected: true,
       title: entity.canonical_value,
       meta: 'Ports · 2 hits',
       detail: projectController.portSummary(entity, { includeHost: true }),
@@ -1135,6 +1151,8 @@ describe('core ESM exports', () => {
     expect(projectRow.textContent).toContain('version nginx')
     expect(projectRow.textContent).toContain('banner nginx TLS')
     expect(projectRow.textContent).toContain('host ent-host-example')
+    expect(projectRow.classList.contains('selection-row')).toBe(true)
+    expect(projectRow.classList.contains('is-selected')).toBe(true)
   })
 
   it('applies host entity filters only to Project port entity requests', async () => {

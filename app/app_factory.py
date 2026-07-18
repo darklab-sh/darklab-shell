@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Generic Flask construction helper used by app.create_app."""
 
 from collections.abc import Callable, Iterable, Mapping

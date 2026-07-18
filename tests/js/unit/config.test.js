@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { fromDomScript, fromDomScripts } from './helpers/extract.js'
@@ -806,7 +809,7 @@ describe('frontend config bootstrap', () => {
     const openPromise = window.openHistoryCompareLauncher({ id: 'run-1' })
 
     await expect(openPromise).resolves.toEqual({ runId: 'run-1' })
-    expect(window.openHistoryCompareLauncher).toHaveBeenCalledWith({ id: 'run-1' })
+    expect(window.openHistoryCompareLauncher).toHaveBeenCalledWith({ id: 'run-1' }, {})
     expect(imported).toEqual(historyCompareScripts.map(([, url]) => url))
     expect(appended).toEqual([])
     expect(window.logClientError).not.toHaveBeenCalled()

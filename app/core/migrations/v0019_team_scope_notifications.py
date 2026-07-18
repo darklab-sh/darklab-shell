@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Team ownership for notification channels and delivery audit rows."""
 
 from .runner import Migration

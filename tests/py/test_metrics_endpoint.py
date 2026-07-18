@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Prometheus `/metrics` route and instrumentation tests."""
 
 from datetime import datetime, timedelta, timezone
@@ -262,6 +265,13 @@ class TestMetricsEndpoint:
         )
         app_metrics.record_completed_pty("mtr darklab.sh", 130, 0.5)
         app_metrics.record_workspace_evictions(2, "manual")
+        from services.metrics import workflows as workflow_metrics
+
+        workflow_metrics.record_workflow_execution_outcome("completed", 2.5)
+        workflow_metrics.record_workflow_step_outcome("succeeded", 1.25)
+        workflow_metrics.record_workflow_capture_failure("required_missing")
+        workflow_metrics.record_workflow_cancellation()
+        workflow_metrics.record_workflow_recovery_action("recovered")
 
         body = _allowed_metrics(get_client(use_forwarded_for=False)).get_data(as_text=True)
 
@@ -289,6 +299,11 @@ class TestMetricsEndpoint:
         assert 'darklab_evidence_package_skipped_items_total{kind="item"}' in body
         assert 'darklab_pty_finished_total{exit_code_class="signal",tool="mtr"}' in body
         assert 'darklab_workspace_evictions_total{reason="manual"}' in body
+        assert 'darklab_workflow_executions_finished_total{outcome="completed"}' in body
+        assert 'darklab_workflow_step_duration_seconds_bucket{le="2.0",outcome="succeeded"}' in body
+        assert 'darklab_workflow_capture_failures_total{reason="required_missing"}' in body
+        assert re.search(r"darklab_workflow_cancellations_total [1-9]", body)
+        assert 'darklab_workflow_recovery_actions_total{action="recovered"}' in body
 
 
 class TestMetricsDefinitionDrift:

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Neutral compare-action boundary shared by launcher and project run rows.
 
 const HISTORY_COMPARE_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis;

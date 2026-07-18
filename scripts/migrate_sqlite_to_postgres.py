@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Copy a darklab_shell SQLite database into a fresh Postgres database.
 
 This is an explicit offline cutover helper. Stop the app, snapshot the SQLite
@@ -37,12 +40,14 @@ import sys
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "app"))
+APP_ROOT = ROOT if (ROOT / "core").is_dir() else ROOT / "app"
+sys.path.insert(0, str(APP_ROOT))
 
 from core.migrations import MIGRATIONS  # noqa: E402
 from core.database_backend import postgres_jsonb_param  # noqa: E402
 
 FTS_TABLE_PREFIXES = ("runs_fts",)
+MIGRATION_LEDGER_TABLES = frozenset({"schema_migrations"})
 BODY_POINTER_KEY = "__darklab_body_store__"
 BODY_POINTER_VERSION = 1
 JSON_COLUMNS = frozenset({
@@ -142,7 +147,11 @@ def discover_migration_tables(conn: sqlite3.Connection) -> tuple[list[TableInfo]
     tables: list[TableInfo] = []
     skipped: list[str] = []
     for name, create_sql in _sqlite_table_names(conn):
-        if name.startswith(FTS_TABLE_PREFIXES) or "CREATE VIRTUAL TABLE" in create_sql.upper():
+        if (
+            name in MIGRATION_LEDGER_TABLES
+            or name.startswith(FTS_TABLE_PREFIXES)
+            or "CREATE VIRTUAL TABLE" in create_sql.upper()
+        ):
             skipped.append(name)
             continue
         column_rows = conn.execute(f"PRAGMA table_info({_quote_ident(name)})").fetchall()
@@ -221,7 +230,7 @@ def referenced_file_paths(conn: sqlite3.Connection, artifact_root: Path) -> list
     for table, column in BODY_POINTER_COLUMNS:
         if not _sqlite_has_table(conn, table) or not _sqlite_has_column(conn, table, column):
             continue
-        for row in conn.execute(f"SELECT {_quote_ident(column)} AS value FROM {_quote_ident(table)}"):  # nosec B608
+        for row in conn.execute(f"SELECT {_quote_ident(column)} AS value FROM {_quote_ident(table)}"):  # nosec
             pointer = _decode_body_pointer(row["value"])
             if pointer is None:
                 continue
@@ -317,7 +326,7 @@ def _applied_app_migrations(pg_conn: Any, schema: str) -> set[str]:
     tables = set(_postgres_tables(pg_conn, schema))
     if "schema_migrations" not in tables:
         return set()
-    rows = pg_conn.execute(  # nosec B608
+    rows = pg_conn.execute(  # nosec
         f"SELECT version FROM {_quote_ident(schema)}.schema_migrations"
     ).fetchall()
     return {str(row["version"]) for row in rows}
@@ -405,7 +414,7 @@ def _copy_table(
     placeholders = ", ".join(["%s"] * len(columns))
     conflict = " ON CONFLICT DO NOTHING" if resume or plan.name in DEDUPLICATE_COPY_KEYS else ""
     insert_sql = (
-        f"INSERT INTO {_quote_ident(plan.name)} "  # nosec B608
+        f"INSERT INTO {_quote_ident(plan.name)} "  # nosec
         f"({', '.join(_quote_ident(column) for column in columns)}) "
         f"VALUES ({placeholders}){conflict}"
     )
@@ -431,15 +440,15 @@ def _copy_select_sql(plan: CopyTablePlan, columns: list[str]) -> str:
     keys = DEDUPLICATE_COPY_KEYS.get(plan.name)
     if keys and all(key in columns for key in keys):
         key_sql = ", ".join(_quote_ident(key) for key in keys)
-        return (  # nosec B608
+        return (  # nosec
             f"SELECT {column_sql} FROM {table_sql} "
             f"WHERE rowid IN (SELECT MIN(rowid) FROM {table_sql} GROUP BY {key_sql})"
         )
-    return f"SELECT {column_sql} FROM {table_sql}"  # nosec B608
+    return f"SELECT {column_sql} FROM {table_sql}"  # nosec
 
 
 def _sqlite_row_count(conn: sqlite3.Connection, table: str) -> int:
-    row = conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()  # nosec B608
+    row = conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()  # nosec
     return int(row["count"] if row else 0)
 
 
@@ -451,7 +460,7 @@ def _sqlite_effective_row_count(conn: sqlite3.Connection, plan: CopyTablePlan) -
     if not all(key in source_columns for key in keys):
         return _sqlite_row_count(conn, plan.name)
     key_sql = ", ".join(_quote_ident(key) for key in keys)
-    row = conn.execute(  # nosec B608
+    row = conn.execute(  # nosec
         f"SELECT COUNT(*) AS count FROM ("
         f"SELECT 1 FROM {_quote_ident(plan.name)} GROUP BY {key_sql}"
         f")"
@@ -466,7 +475,7 @@ def _deduplicated_row_count(conn: sqlite3.Connection, plan: CopyTablePlan) -> in
 
 
 def _postgres_row_count(pg_conn: Any, table: str) -> int:
-    row = pg_conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()  # nosec B608
+    row = pg_conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()  # nosec
     return int(row["count"] if row else 0)
 
 
@@ -531,7 +540,7 @@ def _set_migration_triggers(pg_conn: Any, plans: list[CopyTablePlan], *, enabled
         if table_name not in planned_tables:
             continue
         for trigger_name in trigger_names:
-            pg_conn.execute(  # nosec B608
+            pg_conn.execute(  # nosec
                 f"ALTER TABLE {_quote_ident(table_name)} {action} TRIGGER {_quote_ident(trigger_name)}"
             )
 
@@ -662,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
     if report.copied_files:
         print(f"referenced files copied: {report.copied_files}")
     if report.skipped_tables:
-        print("skipped SQLite-only tables: " + ", ".join(report.skipped_tables))
+        print("skipped non-data tables: " + ", ".join(report.skipped_tables))
     if report.deduplicated_rows:
         details = ", ".join(
             f"{table}={count}"

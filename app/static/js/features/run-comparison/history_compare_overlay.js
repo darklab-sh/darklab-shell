@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // ── Run comparison overlay shell ─────────────────────────────────────────
 // Loaded before history.js. The History drawer still owns launcher/result rendering,
 // while this module owns the compare modal's open/close/focus lifecycle.
@@ -7,8 +10,10 @@ import {
   syncModalOverlayState as importedSyncModalOverlayState,
 } from '../../ui/ui_helpers.js';
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import { bindFocusTrap as importedBindFocusTrap } from '../../ui/ui_focus_trap.js';
 
 const HISTORY_COMPARE_OVERLAY_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
+let _historyCompareReturnFocus = null;
 
 function _historyCompareOverlayBindDismissible(overlay) {
   const bind = (typeof importedBindDismissible !== 'undefined' && importedBindDismissible)
@@ -22,6 +27,14 @@ function _historyCompareOverlayBindDismissible(overlay) {
     onClose: closeHistoryCompareOverlay,
     closeButtons: overlay.querySelectorAll('.history-compare-close, .sheet-grab'),
   });
+}
+
+function _historyCompareOverlayBindFocusTrap(modal) {
+  const bind = (typeof importedBindFocusTrap !== 'undefined' && importedBindFocusTrap)
+    || (typeof HISTORY_COMPARE_OVERLAY_GLOBAL.bindFocusTrap === 'function'
+      ? HISTORY_COMPARE_OVERLAY_GLOBAL.bindFocusTrap
+      : null);
+  if (typeof bind === 'function') bind(modal);
 }
 
 function _historyCompareOverlayCloseAppSelects() {
@@ -71,6 +84,7 @@ function _ensureHistoryCompareOverlay() {
     </section>
   `;
   document.body.appendChild(overlay);
+  _historyCompareOverlayBindFocusTrap(overlay.querySelector('#history-compare-modal'));
   overlay.addEventListener('click', e => {
     if (e.target === overlay) closeHistoryCompareOverlay();
   });
@@ -87,9 +101,28 @@ function _ensureHistoryCompareOverlay() {
   return overlay;
 }
 
-function closeHistoryCompareOverlay() {
+function _historyCompareOverlayRestoreFocus(target) {
+  if (
+    !target
+    || !target.isConnected
+    || typeof target.focus !== 'function'
+    || target.disabled
+    || target.closest?.('[hidden], [aria-hidden="true"], .u-hidden')
+  ) return false;
+  try {
+    target.focus({ preventScroll: true });
+  } catch (_) {
+    target.focus();
+  }
+  return document.activeElement === target;
+}
+
+function closeHistoryCompareOverlay(options = {}) {
   const overlay = document.getElementById('history-compare-overlay');
   if (!overlay) return;
+  const restoreFocus = !options || options.restoreFocus !== false;
+  const returnFocus = _historyCompareReturnFocus;
+  _historyCompareReturnFocus = null;
   // Close (and unportal) any open dropdowns before hiding the overlay,
   // otherwise a portaled menu would remain visible in document.body.
   HISTORY_COMPARE_OVERLAY_GLOBAL._closeHistoryCompareActionMenus?.();
@@ -98,7 +131,9 @@ function closeHistoryCompareOverlay() {
   overlay.classList.add('u-hidden');
   overlay.setAttribute('aria-hidden', 'true');
   _historyCompareOverlaySyncModalState();
-  _historyCompareOverlayRefocusComposer();
+  if (restoreFocus && !_historyCompareOverlayRestoreFocus(returnFocus)) {
+    _historyCompareOverlayRefocusComposer();
+  }
 }
 
 function _focusHistoryCompareOverlay() {
@@ -121,8 +156,16 @@ function _queueHistoryCompareInitialFocus() {
   schedule(_focusHistoryCompareOverlay);
 }
 
-function _openHistoryCompareOverlay() {
+function _openHistoryCompareOverlay(options = {}) {
   const overlay = _ensureHistoryCompareOverlay();
+  const wasOpen = overlay.classList.contains('open');
+  const requestedReturnFocus = options && options.returnFocus;
+  const active = typeof document !== 'undefined' ? document.activeElement : null;
+  if (requestedReturnFocus && !overlay.contains(requestedReturnFocus)) {
+    _historyCompareReturnFocus = requestedReturnFocus;
+  } else if (!wasOpen && active && active !== document.body && !overlay.contains(active)) {
+    _historyCompareReturnFocus = active;
+  }
   overlay.classList.remove('u-hidden');
   overlay.classList.add('open');
   overlay.setAttribute('aria-hidden', 'false');

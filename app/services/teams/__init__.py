@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Dormant team-mode foundation services."""
 
 from .capabilities import Capability, capabilities_for_role, require_capability, role_can
