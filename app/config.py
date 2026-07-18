@@ -23,7 +23,7 @@ from core.startup_logging import configure_config_log_fallback, install_config_l
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 CONFIG_LOAD_SUMMARY: dict[str, Any] = {}
 
-APP_VERSION = "2.6.0-rc.24"
+APP_VERSION = "2.6.0"
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 

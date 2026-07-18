@@ -42,6 +42,7 @@ _CHANGELOG_ARCHIVES = (
 )
 
 _PUBLISHED_CHANGELOG_HASHES = {
+    "2.6.0": "2301b6a3a70e07f14e5536c1b84aa25f5f5ba49fa67ddb8effd14814d6cc6351",
     "2.5.0": "57551c73e61a89420ac3bbc93427f260b177327f03b788c2f1658a362c29a7a8",
     "2.4": "6276e66a1f7dad33ec7e1f1334ced162ccaee30e4fc9d499c34e71d199e6e347",
     "2.3.1": "648441ffa4384a9117e89c42a7cb3b4d4c0c261bbc72f8046c0db46d5aa68231",
@@ -592,7 +593,7 @@ class TestChangelogArchives:
 
     def test_archive_coverage_matches_major_release_ranges(self):
         expected = {
-            "2.x.md": ("2.3.1", "2.3", "2.2", "2.1", "2.0"),
+            "2.x.md": ("2.4", "2.3.1", "2.3", "2.2", "2.1", "2.0"),
             "1.x.md": ("1.7", "1.6", "1.5", "1.4", "1.3", "1.2", "1.1", "1.0"),
         }
         actual = {
