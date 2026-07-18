@@ -773,7 +773,7 @@ cp .env.example .env
 
 ```env
 # APP_PORT=8888
-# HOST_BIND_ADDRESS=127.0.0.1
+# HOST_BIND_ADDRESS=0.0.0.0
 # DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
@@ -827,7 +827,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
-| `HOST_BIND_ADDRESS` | Repository-free production Compose | Host address used for the published app port. The public stack defaults to `127.0.0.1`; widening it exposes the app beyond the local host |
+| `HOST_BIND_ADDRESS` | Repository-free production Compose | Host address used for the published app port. The public stack defaults to `0.0.0.0` so remote hosts can connect. Use `127.0.0.1` when only a local reverse proxy should reach the app |
 | `DARKLAB_IMAGE` | Repository-free production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
 | `APP_LOCAL_CONF_DIR` | Flask app | Optional operator root for every supported local overlay. Production sets `/config`; when unset, loaders keep using sibling files beside their shipped assets |
 | `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
@@ -994,7 +994,7 @@ The production Compose file pins the release image to `linux/amd64`, and the ins
 
 ## Docker Compose Files
 
-The repository-free production [deploy/compose.yaml](deploy/compose.yaml) pulls the Linux AMD64 image `docker.io/darklabsh/darklab-shell:2.6.0` and doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the deployment directory, publishes on `127.0.0.1` by default, and omits fixed container names so separate Compose project directories don't collide.
+The repository-free production [deploy/compose.yaml](deploy/compose.yaml) pulls the Linux AMD64 image `docker.io/darklabsh/darklab-shell:2.6.0` and doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the deployment directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The app doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Official builds link the rail footer, mobile menu footer, FAQ, and terminal help to the running release's exact GitLab source tag and README through `PROJECT_SOURCE` in `app/config.py`. A modified build exposed over a network must point that value at the complete corresponding source for the modified version and keep the source offer prominent for its remote users. The full [GNU AGPLv3 license](LICENSE) controls.
 

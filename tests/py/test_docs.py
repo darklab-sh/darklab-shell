@@ -668,10 +668,18 @@ class TestReadmeStartPaths:
 
         assert text.index("## Quick Start\n") < text.index("## Features\n")
         assert "curl -fsSL" in quick_start and "| sh -s --" in quick_start
+        assert 'DARKLAB_INSTALL_DIR="$HOME/darklab-shell"' in quick_start
+        assert '--dir "$DARKLAB_INSTALL_DIR"' in quick_start
+        assert 'cd "$DARKLAB_INSTALL_DIR"' in quick_start
         assert "#review-and-verify-the-installer" in quick_start
         assert "Option 1" not in text and "Option 2" not in text and "Option 3" not in text
         assert "cosign verify-blob SHA256SUMS" in production
         assert "sha256sum -c setup.sh.sha256" in production
+        assert 'DARKLAB_INSTALL_DIR="$HOME/darklab-shell"' in production
+        assert '--dir "$DARKLAB_INSTALL_DIR"' in production
+        assert 'cd "$DARKLAB_INSTALL_DIR"' in production
+        assert '--dir "$HOME/darklab-shell"' not in text
+        assert 'cd "$HOME/darklab-shell"' not in text
         assert "git clone https://gitlab.com/darklab.sh/darklab_shell.git" in development
         assert "bash examples/run_local.sh" in development
         assert "git clone" not in quick_start and "examples/run_local.sh" not in quick_start

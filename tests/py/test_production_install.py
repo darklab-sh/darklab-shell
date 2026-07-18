@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0-rc.19"
+RELEASE_VERSION = "2.6.0-rc.20"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 NEXT_RC_VERSION = f"{FINAL_VERSION}-rc.{int(RELEASE_VERSION.rsplit('.', 1)[1]) + 1}"
@@ -646,7 +646,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "./data:/data" in shell["volumes"]
     assert "./workspaces:/workspaces" in shell["volumes"]
     assert shell["ports"] == [
-        "${HOST_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8888}:${APP_PORT:-8888}"
+        "${HOST_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8888}:${APP_PORT:-8888}"
     ]
     assert shell["environment"]["APP_LOCAL_CONF_DIR"] == "/config"
     assert shell["environment"]["RAW_PACKET_SCANNING_ENABLED"] == (
@@ -656,6 +656,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
         "${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}"
     )
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "HOST_BIND_ADDRESS=0.0.0.0" in env_example
     assert "# WORKSPACE_ROOT=/workspaces" in env_example
     assert services["postgres"]["profiles"] == ["postgres"]
     assert services["llama"]["profiles"] == ["llama"]
@@ -2095,6 +2096,8 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert "./verify-release-image.sh" in result.stdout
     assert "docker compose logs -f shell" in result.stdout
     assert "./darklab-deploy status" in result.stdout
+    assert "http://<server-address>:8888" in result.stdout
+    assert "HOST_BIND_ADDRESS=127.0.0.1" in result.stdout
     image_smoke = (ROOT / "scripts" / "verify_repository_free_image.sh").read_text(
         encoding="utf-8"
     )
@@ -2571,7 +2574,9 @@ def test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction(
     assert not [path for path in restore_target.iterdir() if ".restore-" in path.name]
 
 
-def test_restore_wrapper_leaves_app_stopped_after_helper_failure(tmp_path: Path):
+def test_restore_wrapper_accepts_relative_archive_and_leaves_app_stopped_after_helper_failure(
+    tmp_path: Path,
+):
     payload = _build_payload(tmp_path)
     install_dir = tmp_path / "managed deployment"
     installed = _run_setup(payload, install_dir, tmp_path / "setup-run")
@@ -2594,7 +2599,11 @@ def test_restore_wrapper_leaves_app_stopped_after_helper_failure(tmp_path: Path)
     })
 
     restored = subprocess.run(
-        [str(install_dir / "darklab-deploy"), "restore", str(backup)],
+        [
+            str(install_dir / "darklab-deploy"),
+            "restore",
+            backup.relative_to(install_dir).as_posix(),
+        ],
         cwd=install_dir,
         env=env,
         check=False,

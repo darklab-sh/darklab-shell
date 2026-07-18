@@ -37,15 +37,18 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 On a Linux AMD64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, install the current release with:
 
 ```bash
-curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.19/setup.sh | sh -s -- --dir "$HOME/darklab-shell"
-cd "$HOME/darklab-shell"
+# Change this if you want to install darklab_shell somewhere else.
+DARKLAB_INSTALL_DIR="$HOME/darklab-shell"
+
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
+cd "$DARKLAB_INSTALL_DIR"
 docker compose pull
 ./verify-release-image.sh
 docker compose up -d
 docker compose ps
 ```
 
-Open [http://127.0.0.1:8888](http://127.0.0.1:8888). The loopback-only default keeps the app off the wider network until you deliberately change `HOST_BIND_ADDRESS` or put it behind a trusted reverse proxy.
+Open `http://<server-address>:8888`, using the host's IP address or DNS name. The production stack listens on every host interface by default so remote hosts can connect. darklab_shell doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Want to inspect the installer, confirm its checksum, or verify the release's GitLab identity before running it? Follow [Review and Verify the Installer](#review-and-verify-the-installer) instead of streaming it. You don't need Git, a source checkout, Python, Node, or a local image build for either release-install path.
 
@@ -181,8 +184,8 @@ If you prefer to inspect the exact release installer before it runs, download it
 ```bash
 mkdir darklab-shell-download
 cd darklab-shell-download
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.19/setup.sh
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.19/setup.sh.sha256
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/setup.sh.sha256
 sha256sum -c setup.sh.sha256
 less setup.sh
 ```
@@ -190,11 +193,11 @@ less setup.sh
 The checksum catches download corruption. To confirm that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity:
 
 ```bash
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.19/SHA256SUMS
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.19/SHA256SUMS.sigstore.json
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0-rc.20/SHA256SUMS.sigstore.json
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0-rc.19" \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0-rc.20" \
   --certificate-oidc-issuer "https://gitlab.com"
 grep '  setup.sh$' SHA256SUMS | sha256sum -c -
 ```
@@ -202,8 +205,11 @@ grep '  setup.sh$' SHA256SUMS | sha256sum -c -
 After reviewing and verifying the installer, create and start the deployment:
 
 ```bash
-sh setup.sh --dir "$HOME/darklab-shell"
-cd "$HOME/darklab-shell"
+# Change this if you want to install darklab_shell somewhere else.
+DARKLAB_INSTALL_DIR="$HOME/darklab-shell"
+
+sh setup.sh --dir "$DARKLAB_INSTALL_DIR"
+cd "$DARKLAB_INSTALL_DIR"
 docker compose pull
 ./verify-release-image.sh
 docker compose up -d

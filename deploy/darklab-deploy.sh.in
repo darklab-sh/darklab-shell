@@ -181,7 +181,7 @@ verify_backup_archive() {
 
 require_common_tools() {
     missing=""
-    for command_name in awk basename chmod cp docker find grep gzip id mkdir mktemp mv od rm sed tail tar tr; do
+    for command_name in awk basename chmod cp dirname docker find grep gzip id mkdir mktemp mv od rm sed tail tar tr; do
         if ! command -v "$command_name" >/dev/null 2>&1; then
             missing="${missing} ${command_name}"
         fi
@@ -490,6 +490,11 @@ backup_command() {
 restore_command() {
     [ "$#" -eq 1 ] || fail "restore requires one backup archive path"
     restore_archive=$1
+    restore_archive_dir=$(dirname "$restore_archive")
+    restore_archive_name=$(basename "$restore_archive")
+    restore_archive_dir=$(CDPATH= cd "$restore_archive_dir" 2>/dev/null && pwd -P) \
+        || fail "backup archive directory does not exist: $restore_archive_dir"
+    restore_archive="${restore_archive_dir%/}/$restore_archive_name"
     managed_status >/dev/null
     restore_verify_stage=$(mktemp -d "${TMPDIR:-/tmp}/darklab-restore-verify.XXXXXX")
     verify_backup_archive "$restore_archive" "$restore_verify_stage"

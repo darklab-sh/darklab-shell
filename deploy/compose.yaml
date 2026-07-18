@@ -74,14 +74,14 @@ services:
       start_period: 30s
 
   shell:
-    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.6.0-rc.19}
+    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.6.0-rc.20}
     platform: linux/amd64
     labels:
       sh.darklab.config.database_backend: ${DATABASE_BACKEND:-sqlite}
       sh.darklab.metrics.path: /metrics
     init: true
     ports:
-      - "${HOST_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8888}:${APP_PORT:-8888}"
+      - "${HOST_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8888}:${APP_PORT:-8888}"
     volumes:
       - ./conf:/config:ro
       - ./data:/data

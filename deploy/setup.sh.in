@@ -153,5 +153,7 @@ Then run:
   docker compose logs -f shell
 
 Use ./darklab-deploy status to check the installed release and managed files.
-The app listens on http://127.0.0.1:8888 by default.
+The app listens on port 8888 on every host interface by default.
+Open http://<server-address>:8888 and restrict access to trusted networks.
+Set HOST_BIND_ADDRESS=127.0.0.1 in .env when only a local reverse proxy should connect.
 EOF
