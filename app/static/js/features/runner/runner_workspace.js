@@ -205,6 +205,62 @@ function _workspaceDownloadTarget(cmd) {
   return '';
 }
 
+function _workspaceDiffCommand(cmd) {
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  const isFileCommand = root === 'file';
+  if (isFileCommand && (parts[1] || '').toLowerCase() !== 'diff') return null;
+  if (!isFileCommand && root !== 'diff') return null;
+  const usage = isFileCommand
+    ? 'Usage: file diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]'
+    : 'Usage: diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]';
+  const modes = {
+    '-q': 'brief',
+    '--brief': 'brief',
+    '-u': 'unified',
+    '--unified': 'unified',
+    '-y': 'side_by_side',
+    '--side-by-side': 'side_by_side',
+  };
+  let mode = 'normal';
+  let modeSelected = false;
+  let parseOptions = true;
+  let invalid = false;
+  let last = false;
+  const operands = [];
+  parts.slice(isFileCommand ? 2 : 1).forEach((part) => {
+    if (parseOptions && part === '--') {
+      parseOptions = false;
+      return;
+    }
+    if (parseOptions && String(part || '').startsWith('-')) {
+      if (part === '--last') {
+        if (last) invalid = true;
+        last = true;
+        return;
+      }
+      const selected = modes[part];
+      if (!selected || (modeSelected && selected !== mode)) {
+        invalid = true;
+        return;
+      }
+      mode = selected;
+      modeSelected = true;
+      return;
+    }
+    operands.push(part);
+  });
+  if ((last && operands.length) || (!last && operands.length !== 2)) invalid = true;
+  return {
+    mode,
+    last,
+    left: invalid ? '' : operands[0],
+    right: invalid ? '' : operands[1],
+    usage,
+    invalid,
+  };
+}
+
 function _workspaceCommandTokens(cmd) {
   const tokens = [];
   const re = /"[^"]*"|'[^']*'|\S+/g;
@@ -408,11 +464,12 @@ function _isWorkspaceMoveCommand(cmd) {
 }
 
 function _isWorkspaceTerminalCommand(cmd) {
-  if (!_runnerWorkspaceEnabled()) return false;
   const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
+  if (root === 'diff') return true;
+  if (!_runnerWorkspaceEnabled()) return false;
   if (['cd', 'pwd', 'ls', 'll', 'cat', 'mkdir', 'grep', 'head', 'tail', 'wc', 'sort', 'uniq'].includes(root)) return true;
-  if (root === 'file' && ['list', 'ls', 'show', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
+  if (root === 'file' && ['list', 'ls', 'show', 'diff', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
   return false;
 }
 
@@ -434,6 +491,7 @@ export {
   _workspaceCwd,
   _workspaceDeleteCommand,
   _workspaceDeleteTarget,
+  _workspaceDiffCommand,
   _workspaceDisplayPath,
   _workspaceDownloadTarget,
   _workspaceEditorCommand,

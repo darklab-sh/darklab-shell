@@ -114,6 +114,7 @@ import {
   _workspaceCommandTokens as importedWorkspaceCommandTokens,
   _workspaceCwd as importedWorkspaceCwd,
   _workspaceDeleteCommand as importedWorkspaceDeleteCommand,
+  _workspaceDiffCommand as importedWorkspaceDiffCommand,
   _workspaceDisplayPath as importedWorkspaceDisplayPath,
   _workspaceDownloadTarget as importedWorkspaceDownloadTarget,
   _workspaceEditorCommand as importedWorkspaceEditorCommand,
@@ -309,6 +310,7 @@ var _runnerSetWorkspaceCwdAdapter = (...args) => _runnerFn('_setWorkspaceCwd', i
 var _runnerWorkspaceCommandTokensAdapter = (...args) => _runnerFn('_workspaceCommandTokens', importedWorkspaceCommandTokens)?.(...args);
 var _runnerWorkspaceCwdAdapter = (...args) => _runnerFn('_workspaceCwd', importedWorkspaceCwd)?.(...args);
 var _runnerWorkspaceDeleteCommandAdapter = (...args) => _runnerFn('_workspaceDeleteCommand', importedWorkspaceDeleteCommand)?.(...args);
+var _runnerWorkspaceDiffCommandAdapter = (...args) => _runnerFn('_workspaceDiffCommand', importedWorkspaceDiffCommand)?.(...args);
 var _runnerWorkspaceDisplayPathAdapter = (...args) => _runnerFn('_workspaceDisplayPath', importedWorkspaceDisplayPath)?.(...args);
 var _runnerWorkspaceDownloadTargetAdapter = (...args) => _runnerFn('_workspaceDownloadTarget', importedWorkspaceDownloadTarget)?.(...args);
 var _runnerWorkspaceEditorCommandAdapter = (...args) => _runnerFn('_workspaceEditorCommand', importedWorkspaceEditorCommand)?.(...args);
@@ -3238,6 +3240,36 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId) {
       await _runnerEnsureWorkspaceCacheAdapter();
       const target = _runnerResolveExistingWorkspaceCommandPathAdapter(rawTarget, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'file' });
       outputLines = await _workspaceReadLines(target);
+    } else if (root === 'diff' || (root === 'file' && action === 'diff')) {
+      const parsed = _runnerWorkspaceDiffCommandAdapter(cmd);
+      if (!parsed || parsed.invalid) throw new Error(parsed?.usage || 'Usage: diff <source1> <source2>');
+      const cwd = _runnerWorkspaceCwdAdapter(tabId);
+      const explicitSources = parsed.last ? [] : [parsed.left, parsed.right];
+      const requiresFiles = explicitSources.some(source => !String(source || '').startsWith('run:'));
+      if (requiresFiles) await _runnerEnsureWorkspaceCacheAdapter();
+      const sourceReference = (source) => {
+        const value = String(source || '');
+        if (value.startsWith('run:')) return value;
+        const rawPath = value.startsWith('file:') ? value.slice(5) : value;
+        const path = _runnerResolveExistingWorkspaceCommandPathAdapter(rawPath, { cwd, kind: 'file' });
+        return `file:${path}`;
+      };
+      const resp = await apiFetch('/workspace/diff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          left: parsed.last ? '' : sourceReference(parsed.left),
+          right: parsed.last ? '' : sourceReference(parsed.right),
+          last: parsed.last,
+          tab_id: tabId,
+          mode: parsed.mode,
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.error || `diff failed (${resp.status})`);
+      const notices = Array.isArray(data.notices) ? data.notices : [];
+      const lines = Array.isArray(data.lines) ? data.lines : [];
+      outputLines = notices.concat(lines).map(_workspacePlainLine);
     } else if (root === 'mkdir' || (root === 'file' && ['add-dir', 'mkdir'].includes(action))) {
       if (!_workspaceTerminalCanWrite('create folders in Files')) {
         throw new Error(_workspaceTerminalDeniedMessage('create folders in Files'));

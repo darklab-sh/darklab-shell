@@ -17721,6 +17721,203 @@ class TestWorkspaceRoutes:
             )
             assert other.status_code == 404
 
+    def test_workspace_diff_supports_shell_output_modes(self):
+        client = get_client()
+        session = "workspace-diff-" + uuid.uuid4().hex[:8]
+        headers = {"X-Session-ID": session}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            for path, text in (
+                ("reports/old.txt", "alpha\nbeta\n"),
+                ("reports/new.txt", "alpha\ndelta\n"),
+            ):
+                created = client.post(
+                    "/workspace/files",
+                    headers=headers,
+                    json={"path": path, "text": text},
+                )
+                assert created.status_code == 200
+
+            unified = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={
+                    "left": "file:reports/old.txt",
+                    "right": "file:reports/new.txt",
+                    "mode": "unified",
+                },
+            )
+            brief = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={
+                    "left": "reports/old.txt",
+                    "right": "reports/new.txt",
+                    "mode": "brief",
+                },
+            )
+            invalid = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={
+                    "left": "reports/old.txt",
+                    "right": "reports/new.txt",
+                    "mode": "colorized",
+                },
+            )
+
+        assert unified.status_code == 200
+        assert unified.headers["Cache-Control"] == "no-store"
+        assert unified.get_json() == {
+            "different": True,
+            "left": {
+                "kind": "file",
+                "label": "reports/old.txt",
+                "partial": False,
+                "reference": "file:reports/old.txt",
+            },
+            "right": {
+                "kind": "file",
+                "label": "reports/new.txt",
+                "partial": False,
+                "reference": "file:reports/new.txt",
+            },
+            "mode": "unified",
+            "notices": [],
+            "lines": [
+                "--- reports/old.txt",
+                "+++ reports/new.txt",
+                "@@ -1,2 +1,2 @@",
+                " alpha",
+                "-beta",
+                "+delta",
+            ],
+        }
+        assert brief.get_json()["lines"] == [
+            "Files reports/old.txt and reports/new.txt differ",
+        ]
+        assert invalid.status_code == 400
+        assert invalid.get_json()["error"] == "unsupported diff mode: colorized"
+
+    def test_workspace_diff_rejects_file_sources_above_line_and_byte_limits(self):
+        client = get_client()
+        session = "workspace-diff-limits-" + uuid.uuid4().hex[:8]
+        headers = {"X-Session-ID": session}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            for path, text in (
+                ("peer.txt", "peer\n"),
+                ("too-many-bytes.txt", "x" * 500_001),
+                ("too-many-lines.txt", "x\n" * 5_001),
+            ):
+                created = client.post(
+                    "/workspace/files",
+                    headers=headers,
+                    json={"path": path, "text": text},
+                )
+                assert created.status_code == 200
+
+            byte_limited = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={"left": "file:too-many-bytes.txt", "right": "file:peer.txt"},
+            )
+            line_limited = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={"left": "file:too-many-lines.txt", "right": "file:peer.txt"},
+            )
+
+        assert byte_limited.status_code == 413
+        assert byte_limited.get_json()["error"] == (
+            "file:too-many-bytes.txt exceeds the file diff limit of 500,000 bytes"
+        )
+        assert line_limited.status_code == 413
+        assert line_limited.get_json()["error"] == (
+            "file:too-many-lines.txt exceeds the file diff limit of 5,000 lines"
+        )
+
+    def test_workspace_diff_compares_files_runs_and_the_last_two_tab_runs(self):
+        client = get_client()
+        session = "workspace-run-diff-" + uuid.uuid4().hex[:8]
+        other_session = session + "-other"
+        headers = {"X-Session-ID": session}
+        tab_id = "tab-run-diff"
+        run_ids = [f"{session}-old", f"{session}-new", f"{session}-other"]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/files",
+                headers=headers,
+                json={"path": "expected.txt", "text": "alpha\nbeta\n"},
+            )
+            assert created.status_code == 200
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                    (
+                        run_ids[0], session, tab_id, "printf alpha beta",
+                        "2026-07-19T01:00:00+00:00", "2026-07-19T01:00:01+00:00",
+                        json.dumps(["alpha", "beta"]),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                    (
+                        run_ids[1], session, tab_id, "printf alpha delta",
+                        "2026-07-19T01:01:00+00:00", "2026-07-19T01:01:01+00:00",
+                        json.dumps(["alpha", "delta"]),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                    (
+                        run_ids[2], other_session, tab_id, "printf private",
+                        "2026-07-19T01:02:00+00:00", "2026-07-19T01:02:01+00:00",
+                        json.dumps(["private"]),
+                    ),
+                )
+                conn.commit()
+
+            mixed = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={
+                    "left": "file:expected.txt",
+                    "right": f"run:{run_ids[1]}",
+                    "mode": "unified",
+                },
+            )
+            latest = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={"last": True, "tab_id": tab_id, "mode": "brief"},
+            )
+            inaccessible = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={"left": f"run:{run_ids[0]}", "right": f"run:{run_ids[2]}"},
+            )
+
+        assert mixed.status_code == 200
+        mixed_payload = mixed.get_json()
+        assert mixed_payload["left"]["reference"] == "file:expected.txt"
+        assert mixed_payload["right"]["reference"] == f"run:{run_ids[1]}"
+        assert "-beta" in mixed_payload["lines"]
+        assert "+delta" in mixed_payload["lines"]
+        assert latest.status_code == 200
+        latest_payload = latest.get_json()
+        assert latest_payload["left"]["reference"] == f"run:{run_ids[0]}"
+        assert latest_payload["right"]["reference"] == f"run:{run_ids[1]}"
+        assert latest_payload["lines"] == [
+            f"Files {latest_payload['left']['label']} and {latest_payload['right']['label']} differ",
+        ]
+        assert inaccessible.status_code == 404
+        assert inaccessible.get_json()["error"] == f"completed run was not found: run:{run_ids[2]}"
+
     def test_workspace_file_routes_include_and_maintain_generic_metadata(self):
         client = get_client()
         session = "workspace-metadata-" + uuid.uuid4().hex[:8]

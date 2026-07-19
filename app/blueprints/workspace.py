@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
@@ -24,6 +24,8 @@ from services.download_tickets import (
     owner_context_ticket_payload,
     read_download_ticket,
 )
+from services.diff.sources import DiffSourceError, diff_source_notice, resolve_diff_sources
+from services.diff.text import DiffMode, SUPPORTED_DIFF_MODES, format_text_diff
 from services.teams.capabilities import Capability, require_capability, role_can
 from services.teams.contracts import TeamPermissionDenied
 from services.teams.request_scope import RequestScope, RequestScopeError, current_request_scope, scope_error_payload
@@ -370,6 +372,71 @@ def workspace_files_read():
         payload = {"path": normalized_path, "text": text, "size": info.get("size")}
         payload.update(workspace_file_metadata_by_path(scope, [normalized_path]).get(normalized_path, {}))
         return jsonify(payload)
+    except Exception as exc:
+        return _workspace_error_response(exc)
+
+
+@workspace_bp.route("/workspace/diff", methods=["POST"])
+def workspace_diff():
+    _session_id, scope, error = _workspace_scope_or_error(allow_archived=True)
+    if error:
+        return error
+    assert scope is not None
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    left_reference = str(data.get("left") or data.get("left_path") or "").strip()
+    right_reference = str(data.get("right") or data.get("right_path") or "").strip()
+    use_last = data.get("last") is True
+    tab_id = str(data.get("tab_id") or "").strip()[:128]
+    mode = str(data.get("mode") or "normal").strip()
+    if not use_last and (not left_reference or not right_reference):
+        return jsonify({"error": "left and right diff sources are required"}), 400
+    if use_last and (left_reference or right_reference):
+        return jsonify({"error": "last can't be combined with explicit diff sources"}), 400
+    if mode not in SUPPORTED_DIFF_MODES:
+        return jsonify({"error": f"unsupported diff mode: {mode}"}), 400
+    try:
+        left, right = resolve_diff_sources(
+            scope.context,
+            left_reference=left_reference,
+            right_reference=right_reference,
+            use_last=use_last,
+            tab_id=tab_id,
+        )
+        result = format_text_diff(
+            left.text,
+            right.text,
+            left_name=left.label,
+            right_name=right.label,
+            mode=cast(DiffMode, mode),
+        )
+        response = jsonify({
+            "different": result.different,
+            "left": {
+                "kind": left.kind,
+                "reference": left.reference,
+                "label": left.label,
+                "partial": left.partial,
+            },
+            "right": {
+                "kind": right.kind,
+                "reference": right.reference,
+                "label": right.label,
+                "partial": right.partial,
+            },
+            "mode": mode,
+            "notices": [
+                notice
+                for notice in (diff_source_notice(left), diff_source_notice(right))
+                if notice
+            ],
+            "lines": list(result.lines),
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except DiffSourceError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
     except Exception as exc:
         return _workspace_error_response(exc)
 

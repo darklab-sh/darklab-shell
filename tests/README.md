@@ -16,7 +16,7 @@ The suites are layered on purpose:
 2. Vitest checks client-side helper logic and browser-module failure paths in jsdom
 3. Playwright checks the full UI, network behavior, and cross-module interactions in a real browser
 
-Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks, Vitest owns browser command parsing and Files modal interactions, and Playwright covers the user-facing workflow in a live app.
+Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks plus owner-scoped file/run source resolution, file comparison limits, and shell-style formatting; Vitest owns browser command parsing and Files modal interactions; and Playwright covers the user-facing workflow in a live app.
 
 Project workspace behavior follows the same split: pytest owns project routes, schema, migration, overview and monitoring payloads, packages, history/share integration, and persistence edge cases; Vitest owns Projects modal, Overview and Monitoring tab rendering, history drawer, Files metadata, and package-wizard browser behavior; Playwright covers full user flows when focus, navigation, or live browser state is the important risk. Interactive PTY behavior is split between pytest service/route coverage, Vitest browser-controller coverage, and focused Playwright checks for the real terminal modal path.
 

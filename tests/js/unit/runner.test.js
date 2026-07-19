@@ -3669,6 +3669,167 @@ describe('workspace file delete confirmation', () => {
     expect(status.className).toBe('status-pill fail')
   })
 
+  it('compares workspace files from the current folder with file diff and diff', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/workspace/diff') {
+        const payload = JSON.parse(options.body)
+        const lines = payload.mode === 'unified'
+          ? ['--- reports/old.txt', '+++ reports/new.txt', '-old', '+new']
+          : ['Files reports/old.txt and reports/new.txt differ']
+        return Promise.resolve(new Response(JSON.stringify({ different: true, lines }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      apiFetch,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/old.txt', description: 'session file · 4 B' },
+        { value: 'reports/new.txt', description: 'session file · 4 B' },
+      ],
+    })
+
+    await submitCommand('file diff -u old.txt new.txt')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('-old', '', 'tab-1'))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/diff', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        left: 'file:reports/old.txt',
+        right: 'file:reports/new.txt',
+        last: false,
+        tab_id: 'tab-1',
+        mode: 'unified',
+      }),
+    }))
+
+    await submitCommand('diff -q old.txt new.txt')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      'Files reports/old.txt and reports/new.txt differ',
+      '',
+      'tab-1',
+    ))
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('shows usage for incomplete or conflicting workspace diff commands', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(new Response('{}', { status: 200 })))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('file diff old.txt')
+    await submitCommand('diff -q -u old.txt new.txt')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[error] Usage: file diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]',
+      'exit-fail',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      '[error] Usage: diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]',
+      'exit-fail',
+      'tab-1',
+    )
+    expect(apiFetch).not.toHaveBeenCalledWith('/workspace/diff', expect.anything())
+    expect(status.className).toBe('status-pill fail')
+  })
+
+  it('compares completed runs and resolves --last without requiring Files', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url !== '/workspace/diff') return Promise.resolve(new Response('{}', { status: 404 }))
+      const payload = JSON.parse(options.body)
+      const lines = payload.last
+        ? ['Files run:older and run:newer differ']
+        : ['--- run:older', '+++ run:newer', '-old', '+new']
+      return Promise.resolve(new Response(JSON.stringify({ different: true, notices: [], lines }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      appConfig: { workspace_enabled: false },
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('diff -u run:older run:newer')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('+new', '', 'tab-1'))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/diff', expect.objectContaining({
+      body: JSON.stringify({
+        left: 'run:older',
+        right: 'run:newer',
+        last: false,
+        tab_id: 'tab-1',
+        mode: 'unified',
+      }),
+    }))
+
+    await submitCommand('diff --last')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      'Files run:older and run:newer differ',
+      '',
+      'tab-1',
+    ))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/diff', expect.objectContaining({
+      body: JSON.stringify({
+        left: '',
+        right: '',
+        last: true,
+        tab_id: 'tab-1',
+        mode: 'normal',
+      }),
+    }))
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('compares an explicit file source with completed run output', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      different: true,
+      notices: [],
+      lines: ['-expected', '+actual'],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      apiFetch,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/expected.txt', description: 'session file · 9 B' },
+      ],
+    })
+
+    await submitCommand('diff -u file:expected.txt run:actual')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('+actual', '', 'tab-1'))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/diff', expect.objectContaining({
+      body: JSON.stringify({
+        left: 'file:reports/expected.txt',
+        right: 'run:actual',
+        last: false,
+        tab_id: 'tab-1',
+        mode: 'unified',
+      }),
+    }))
+  })
+
   it('runs standalone pipe helpers against workspace files', async () => {
     const appendLine = vi.fn()
     const readWorkspaceFile = vi.fn(path => Promise.resolve({ path, text: 'beta\nalpha\nbeta\n' }))

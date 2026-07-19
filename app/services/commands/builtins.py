@@ -88,6 +88,7 @@ from services.commands.builtins_system import (
 from services.commands.builtins_team import run_builtin_team as _run_builtin_team
 from services.commands.builtins_workspace import (
     parse_workspace_list_command as _parse_workspace_list_command,
+    run_builtin_diff as _run_builtin_diff,
     run_builtin_workspace as _run_builtin_workspace,
     run_builtin_workspace_alias as _run_builtin_workspace_alias,
 )
@@ -299,6 +300,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "commands":  lambda cmd, sid: _run_builtin_commands(cmd),
     "config":    lambda cmd, sid: _run_builtin_client_side_command("config"),
     "date":      lambda cmd, sid: _run_builtin_date(),
+    "diff":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "env":       lambda cmd, sid: _run_builtin_env(sid),
     "exit":      lambda cmd, sid: _run_builtin_client_side_command("exit"),
     "faq":       lambda cmd, sid: _run_builtin_faq(),
@@ -385,6 +387,16 @@ def execute_builtin_command(
     handler = _BUILTIN_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
         return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
+    if root == "diff":
+        diff_owner = owner_context
+        if diff_owner is None:
+            diff_owner = owner_context_for_scope(session_id, team_id=team_id)
+        return _run_builtin_diff(
+            _split_command(command),
+            diff_owner,
+            resolve_effective_cfg(),
+            tab_id=tab_id,
+        ), 0
     if root in _WORKSPACE_BUILTIN_ROOTS:
         workspace_owner = owner_context
         if workspace_owner is None:
@@ -395,6 +407,7 @@ def execute_builtin_command(
                 session_id,
                 owner_context=workspace_owner,
                 team_role=team_role,
+                tab_id=tab_id,
             )
         else:
             result = _run_builtin_workspace_alias(
@@ -402,6 +415,7 @@ def execute_builtin_command(
                 session_id,
                 owner_context=workspace_owner,
                 team_role=team_role,
+                tab_id=tab_id,
             )
         return result, 0
     if root == "project":

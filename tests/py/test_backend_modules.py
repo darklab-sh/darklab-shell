@@ -68,6 +68,7 @@ import config_paths
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
 import services.commands.registry_loader as registry_loader_module
 import services.commands.builtins as builtin_commands
+from services.diff.text import format_text_diff
 import services.session.variables as session_variables
 import services.secrets.storage as secrets_storage
 import services.secrets.vault as secrets_vault
@@ -136,6 +137,89 @@ SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "development" / "seed_history.py"
 MIGRATE_SQLITE_TO_POSTGRES_PATH = (
     REPO_ROOT / "scripts" / "operations" / "migrate_sqlite_to_postgres.py"
 )
+
+
+class TestTextDiffFormatting:
+    def test_formats_classic_brief_and_unified_output(self):
+        left = "alpha\nbeta\ngamma\n"
+        right = "alpha\ndelta\ngamma\nextra\n"
+
+        classic = format_text_diff(
+            left,
+            right,
+            left_name="left.txt",
+            right_name="right.txt",
+        )
+        brief = format_text_diff(
+            left,
+            right,
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="brief",
+        )
+        unified = format_text_diff(
+            left,
+            right,
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="unified",
+        )
+
+        assert classic.different is True
+        assert classic.lines == (
+            "2c2",
+            "< beta",
+            "---",
+            "> delta",
+            "3a4",
+            "> extra",
+        )
+        assert brief.lines == ("Files left.txt and right.txt differ",)
+        assert unified.lines == (
+            "--- left.txt",
+            "+++ right.txt",
+            "@@ -1,3 +1,4 @@",
+            " alpha",
+            "-beta",
+            "+delta",
+            " gamma",
+            "+extra",
+        )
+
+    def test_formats_side_by_side_and_reports_identical_files(self):
+        side_by_side = format_text_diff(
+            "alpha\nbeta\n",
+            "alpha\ndelta\n",
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="side_by_side",
+            side_by_side_width=43,
+        )
+        identical = format_text_diff(
+            "same\n",
+            "same\n",
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="brief",
+        )
+
+        assert side_by_side.lines == (
+            "alpha                  alpha",
+            "beta                 | delta",
+        )
+        assert identical.different is False
+        assert identical.lines == ()
+
+    def test_marks_a_missing_final_newline(self):
+        result = format_text_diff(
+            "same\n",
+            "same",
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="unified",
+        )
+
+        assert result.lines[-2:] == ("+same", "\\ No newline at end of file")
 
 
 def _load_seed_history_module():
@@ -16806,11 +16890,13 @@ class TestDerivedCommandRegistry:
         enabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
         assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled)
-        assert {"file", "cat", "ls", "rm"}.issubset(enabled)
+        assert "diff" in disabled
+        assert {"file", "cat", "diff", "ls", "rm"}.issubset(enabled)
         assert [item["value"] for item in enabled["file"]["arg_hints"]["__positional__"]] == [
             "list <folder>",
             "ls <folder>",
             "show <file>",
+            "diff <source1> <source2>",
             "add <file>",
             "add-dir <folder>",
             "edit <file>",

@@ -7,6 +7,8 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Enable TruffleHog github and gitlab sources](#enable-trufflehog-github-and-gitlab-sources)
+  - [Output redirection and file copy/touch built-ins](#output-redirection-and-file-copytouch-built-ins)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Validate split pytest timing on project runners](#validate-split-pytest-timing-on-project-runners)
@@ -31,7 +33,55 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+### Enable TruffleHog github and gitlab sources
+
+Allow `trufflehog github` and `trufflehog gitlab` alongside the existing `trufflehog git` HTTPS scans, with authenticated scanning through the secrets manager and org/group and self-hosted endpoint support. The output-redaction boundary already covers these sources — `--json` injection is not subcommand-scoped and `TruffleHogOutputFilter` masks `Raw`/`RawV2` on any trufflehog JSON row — so this work is about porting the git subcommand's *input* hardening to two new sources, not about transcript masking.
+
+- [ ] Add `trufflehog github` and `trufflehog gitlab` to the `policy.allow` list in `app/conf/commands.yaml` and remove the two matching `policy.deny` entries.
+- [ ] Re-add the git-scoped protections as source-scoped deny entries for both new sources, since the existing `trufflehog git --…` denials match by token and do not cover `github`/`gitlab`:
+  - `--config` and `--profile` for `github` and `gitlab`.
+  - `--no-cleanup` and any clone-path / local-git-config overrides the two sources accept.
+- [ ] Route the personal access token through the encrypted secrets manager instead of a command-line `--token`:
+  - Inject the resolved token as an environment variable (or a runtime-injected flag) the way other credentialed tools receive secrets, and deny plaintext `--token` on the command line so a PAT never lands in the stored command string, which is not redacted.
+  - Confirm the secret name/consumer wiring surfaces through `providers` / `secret show-consumers`.
+- [ ] Allow `--org` and `--group` (GitLab `--group-id`) for whole-org and whole-group enumeration:
+  - Accept the unbounded repo fan-out against run timeouts and resource limits, and document the cost in the command knowledge notes.
+- [ ] Allow `--endpoint` so self-hosted GitHub Enterprise and GitLab instances can be scanned, dropping the HTTPS-public-only assumption that the git path enforces.
+- [ ] Extend `workspace_flags` and any include/exclude path handling to the new subcommands where those flags apply.
+- [ ] Update documentation to match the widened surface:
+  - Revise the "TruffleHog Output Redaction" section in `DECISIONS.md`, which currently lists "HTTPS-only Git scans" as part of the safety boundary.
+  - Refresh the `knowledge` notes, gotchas, `safe_defaults`, and autocomplete examples for the trufflehog entry in `app/conf/commands.yaml`.
+  - Update the trufflehog coverage in `README.md`, `docs/tools.md`, and `docs/external-command-integrations.md`.
+- [ ] Add registry validation and policy tests covering the new allow/deny shapes, secret-backed token injection, and the `--org`/`--group`/`--endpoint` forms.
+
+### Output redirection and file copy/touch built-ins
+
+Three related terminal ergonomics enhancements that all write to the session workspace. Redirection and `tee` must write the same post-redaction stream that history stores, never the raw output, and all three go through the existing workspace file store so path safety, size limits, feature gating, and team/owner scope stay consistent.
+
+**Output redirection to a workspace file via `>` and `| tee <filename>`:**
+
+- [ ] Teach the terminal that `command > <filename>` writes the run's output to a workspace file and suppresses it from the terminal, while `command | tee <filename>` writes the file and still streams output to the terminal.
+- [ ] Extend the synthetic pipeline parser in `app/services/commands/postfilters.py`, which currently rejects `>` and the other redirection tokens in `disallowed_control`, to recognize a redirection sink and a `tee` sink stage with a filename argument.
+- [ ] Write the post-redaction stream, so masked secrets (for example TruffleHog `Raw`/`RawV2`) are what lands in the file, matching what history persists.
+- [ ] Reuse the workspace file store used by `file add`/`edit` so the write honors path safety, size limits, the workspace/Files feature gate, and `_can_manage_workspace_files` permission and team scope.
+- [ ] Decide overwrite semantics for `>` (overwrite) and note `>>` append as a possible follow-up.
+- [ ] Add autocomplete and help/discovery coverage so `>` and `tee` appear alongside the app-native pipe helpers.
+
+**`file copy` with a `cp` alias:**
+
+- [ ] Add a `copy`/`cp` subcommand to `app/services/commands/builtins_workspace.py` that copies one workspace file to a new path, alongside the existing `move`/`mv` handling.
+- [ ] Wire the `cp` alias through `builtins.py`: dispatch entry, `_resolve_workspace_alias_command` (two-path form like `mv`), `_WORKSPACE_ALIAS_ROOTS`, and `_WORKSPACE_BUILTIN_ROOTS`.
+
+**`file touch` with a `touch` alias:**
+
+- [ ] Add a `touch` subcommand to `builtins_workspace.py` that creates an empty workspace file, reusing the `file add` write path.
+- [ ] Wire the `touch` alias through `builtins.py` with the same dispatch, resolver, and roots plumbing.
+
+**Shared for `cp` and `touch`:**
+
+- [ ] Gate both writes behind `_can_manage_workspace_files` and the workspace feature, consistent with `file add`/`edit`.
+- [ ] Register both in the documented built-in catalog (`builtins_catalog.py`) and `builtin_autocomplete.yaml`, and confirm they surface in `commands`, `help`, and `file help`.
+- [ ] Add tests for copy, touch, and the redirection/`tee` sinks, including redaction-preserving writes, path-safety rejection, and permission/feature gating.
 
 ## Known Issues
 

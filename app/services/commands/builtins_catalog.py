@@ -150,6 +150,11 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "commands", "description": "List built-in and allowed external commands.", "root": "commands"},
     {"name": "config", "description": "Show or update user options from the terminal.", "root": "config"},
     {"name": "date", "description": "Show the current server time.", "root": "date"},
+    {
+        "name": "diff [-q|-u|-y] [--last | <source1> <source2>]",
+        "description": "Compare session files, completed run output, or the last two runs in this tab.",
+        "root": "diff",
+    },
     {"name": "df -h", "description": "Show a compact filesystem summary.", "root": "df"},
     {"name": "env", "description": "Show core environment values for this shell.", "root": "env"},
     {"name": "exit", "description": "Close the current tab.", "root": "exit"},
@@ -206,7 +211,11 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "var", "description": "Set, list, or unset session command variables.", "root": "var"},
     {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
     {"name": "watch", "description": "Create, inspect, pause, resume, delete, and fire watchers.", "root": "watch"},
-    {"name": "file", "description": "List, view, create, edit, download, move, or remove session files.", "root": "file"},
+    {
+        "name": "file",
+        "description": "List, view, compare, create, edit, download, move, or remove session files.",
+        "root": "file",
+    },
     {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
     {"name": "who", "description": "Show the current shell user and session.", "root": "who"},
     {"name": "whoami", "description": "Describe this shell and link to the project README.", "root": "whoami"},
@@ -219,4 +228,4 @@ _DOCUMENTED_BUILTIN_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_BUIL
 _BUILTIN_COMMANDS = _DOCUMENTED_BUILTIN_COMMAND_ROOTS | {"reboot", "sudo"}
 _WORKSPACE_ALIAS_ROOTS = {"cat", "cd", "grep", "head", "ll", "ls", "mkdir", "mv", "rm", "sort", "tail", "uniq", "wc"}
 _WORKSPACE_BUILTIN_ROOTS = _WORKSPACE_ALIAS_ROOTS | {"file"}
-_SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "ll", "ls", "rm"}
+_SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "diff", "ll", "ls", "rm"}

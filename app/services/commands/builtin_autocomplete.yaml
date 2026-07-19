@@ -59,6 +59,26 @@ commands:
     description: "built-in: show the current server time"
     autocomplete:
       arguments: []
+  - root: diff
+    description: "built-in: compare session files or completed run output"
+    autocomplete:
+      flags:
+        - value: --last
+          description: "Compare the last two completed runs in this tab"
+        - value: -q
+          description: "Only report whether the sources differ"
+        - value: --brief
+          description: "Only report whether the sources differ"
+        - value: -u
+          description: "Show a unified comparison with - and + lines"
+        - value: --unified
+          description: "Show a unified comparison with - and + lines"
+        - value: -y
+          description: "Show both sources in side-by-side columns"
+        - value: --side-by-side
+          description: "Show both sources in side-by-side columns"
+      argument_limit: 2
+      arguments: []
   - root: df
     description: "built-in: show a compact filesystem summary"
     autocomplete:
@@ -79,7 +99,7 @@ commands:
       arguments: []
   - root: file
     description: >-
-      built-in: list, view, create, edit, download, move, or remove
+      built-in: list, view, compare, create, edit, download, move, or remove
       session files
     feature_required: workspace
     autocomplete:
@@ -108,6 +128,14 @@ commands:
             value: "<file>"
             hint_only: true
             description: "Session file"
+        - value: diff
+          description: "Compare files or completed run output"
+          takes_value: true
+          insert: "diff "
+          value_hint:
+            value: "<source1> <source2>"
+            hint_only: true
+            description: "Files, run:<run-id> sources, or one of each"
         - value: add
           description: "Open the Files editor for a new session file"
           takes_value: true

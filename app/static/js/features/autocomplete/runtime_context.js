@@ -519,6 +519,29 @@ function getWorkspaceAutocompleteFlagFileHints(token = '') {
     : _runtimeWorkspaceFilePathHints();
 }
 
+function _runtimeWorkspaceDiffFlagHints() {
+  return [
+    _runtimeHint('--last', 'Compare the last two completed runs in this tab'),
+    _runtimeHint('-q', 'Only report whether the sources differ'),
+    _runtimeHint('--brief', 'Only report whether the sources differ'),
+    _runtimeHint('-u', 'Show a unified comparison with - and + lines'),
+    _runtimeHint('--unified', 'Show a unified comparison with - and + lines'),
+    _runtimeHint('-y', 'Show both sources in side-by-side columns'),
+    _runtimeHint('--side-by-side', 'Show both sources in side-by-side columns'),
+  ];
+}
+
+function _runtimeDiffSourceHints({ includeFiles = false } = {}) {
+  const hints = [
+    _runtimePlaceholderHint('run:<run-id>', 'Completed run output'),
+  ];
+  if (includeFiles) {
+    hints.push(_runtimePlaceholderHint('file:<path>', 'Session file'));
+    hints.push(..._runtimeWorkspaceFilePathHints());
+  }
+  return hints;
+}
+
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
   const filePathHints = _runtimeWorkspaceFilePathHints();
@@ -527,12 +550,13 @@ function _runtimeWorkspaceContext() {
   const moveSourceHints = _runtimeWorkspaceMoveSourceHints();
   const moveDestinationHints = _runtimeWorkspaceMoveDestinationHints();
   return _runtimeContextSpec({
-    expectsValue: ['show', 'add', 'add-dir', 'edit', 'download', 'move', 'rm', 'delete', 'ls'],
+    expectsValue: ['show', 'diff', 'add', 'add-dir', 'edit', 'download', 'move', 'rm', 'delete', 'ls'],
     argHints: {
       list: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       ls: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       help: [],
       show: filePathHints,
+      diff: _runtimeWorkspaceDiffFlagHints().concat(_runtimeDiffSourceHints({ includeFiles: true })),
       add: [_runtimePlaceholderHint('<file>', 'New session file name')],
       'add-dir': directoryHints.concat([_runtimePlaceholderHint('<folder>', 'New session folder')]),
       edit: filePathHints,
@@ -542,6 +566,8 @@ function _runtimeWorkspaceContext() {
       delete: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       __positional__: [
         _runtimeHint('show <file>', 'Print a session file in the terminal', 'show '),
+        _runtimeHint('diff <source1> <source2>', 'Compare files or completed run output', 'diff '),
+        _runtimeHint('diff --last', 'Compare the last two completed runs in this tab', 'diff --last'),
         _runtimeHint('add <file>', 'Open the Files editor for a new session file', 'add '),
         _runtimeHint('add-dir <folder>', 'Create a session folder', 'add-dir '),
         _runtimeHint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
@@ -836,6 +862,14 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
     context.cat = _runtimeMergeContextSpec(baseRegistry.cat, _runtimeContextSpec({
       argHints: { __positional__: _runtimeWorkspaceFilePathHints() },
       workspacePathArgKinds: { __positional__: ['file'] },
+    }));
+  }
+  if (baseRegistry.diff) {
+    const includeFiles = isWorkspaceFeatureEnabled();
+    context.diff = _runtimeMergeContextSpec(baseRegistry.diff, _runtimeContextSpec({
+      argHints: {
+        __positional__: _runtimeWorkspaceDiffFlagHints().concat(_runtimeDiffSourceHints({ includeFiles })),
+      },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.cd) {

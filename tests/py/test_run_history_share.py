@@ -2300,6 +2300,97 @@ class TestRunStreaming:
         assert "Create targets.txt from the Files panel.\\n" in help_body
         assert "curl -o response.html https://ip.darklab.sh\\n" in help_body
 
+    def test_builtin_workspace_diff_and_alias_share_shell_formats(self, tmp_path):
+        client = get_client()
+        session = "sess-workspace-diff"
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path / "workspaces"),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg):
+            for path, text in (
+                ("old.txt", "alpha\nbeta\n"),
+                ("new.txt", "alpha\ndelta\n"),
+            ):
+                created = client.post(
+                    "/workspace/files",
+                    json={"path": path, "text": text},
+                    headers={"X-Session-ID": session},
+                )
+                assert created.status_code == 200
+            unified = _post_run(
+                client,
+                json={"command": "file diff -u old.txt new.txt"},
+                headers={"X-Session-ID": session},
+            )
+            brief = _post_run(
+                client,
+                json={"command": "diff --brief old.txt new.txt"},
+                headers={"X-Session-ID": session},
+            )
+
+        assert unified.status_code == 200
+        unified_body = unified.get_data(as_text=True)
+        assert "--- old.txt\\n" in unified_body
+        assert "+++ new.txt\\n" in unified_body
+        assert "-beta\\n" in unified_body
+        assert "+delta\\n" in unified_body
+        assert brief.status_code == 200
+        assert "Files old.txt and new.txt differ\\n" in brief.get_data(as_text=True)
+
+    def test_builtin_diff_compares_completed_runs_and_last_two_tab_runs(self):
+        client = get_client()
+        session = "sess-run-output-diff"
+        tab_id = "tab-run-output-diff"
+        run_ids = ("run-output-diff-old", "run-output-diff-new")
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                "VALUES (?, ?, ?, 'printf old', ?, ?, 0, ?)",
+                (
+                    run_ids[0], session, tab_id, "2026-07-19T01:00:00+00:00",
+                    "2026-07-19T01:00:01+00:00", json.dumps(["alpha", "old"]),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                "VALUES (?, ?, ?, 'printf new', ?, ?, 0, ?)",
+                (
+                    run_ids[1], session, tab_id, "2026-07-19T01:01:00+00:00",
+                    "2026-07-19T01:01:01+00:00", json.dumps(["alpha", "new"]),
+                ),
+            )
+            conn.commit()
+
+        latest = _post_run(
+            client,
+            json={"command": "diff -u --last", "tab_id": tab_id},
+            headers={"X-Session-ID": session},
+        )
+        explicit = _post_run(
+            client,
+            json={"command": f"diff --brief run:{run_ids[0]} run:{run_ids[1]}"},
+            headers={"X-Session-ID": session},
+        )
+
+        assert latest.status_code == 200
+        latest_body = latest.get_data(as_text=True)
+        assert f"--- run:{run_ids[0]}" in latest_body
+        assert f"+++ run:{run_ids[1]}" in latest_body
+        latest_text = [str(event.get("text") or "") for event in _sse_events(latest_body)]
+        assert "-old" in latest_text
+        assert "+new" in latest_text
+        assert explicit.status_code == 200
+        assert f"Files run:{run_ids[0]}" in explicit.get_data(as_text=True)
+
     def test_builtin_workspace_show_reports_binary_files(self, tmp_path):
         client = get_client()
         session = "sess-workspace-binary"

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import re
-from typing import Sequence, cast
+from typing import Any, Mapping, Sequence, cast
 
 from config import resolve_effective_cfg
 from services.commands.builtins_format import (
@@ -17,6 +17,8 @@ from services.commands.builtins_format import (
     text_lines,
 )
 from services.commands.registry import split_command_argv
+from services.diff.sources import DiffSourceError, diff_source_notice, resolve_diff_sources
+from services.diff.text import DiffMode, format_text_diff
 from services.teams.capabilities import Capability, role_can
 from services.teams.scope import OwnerContext, owner_context_for_scope
 from services.workspace.files import (
@@ -213,6 +215,99 @@ def parse_workspace_list_command(parts: list[str]) -> tuple[bool, bool, str, str
     return _parse_workspace_list_command(parts)
 
 
+_WORKSPACE_DIFF_USAGE = (
+    "Usage: file diff [-q|--brief|-u|--unified|-y|--side-by-side] "
+    "[--last | <source1> <source2>]"
+)
+
+
+def parse_workspace_diff_command(
+    parts: list[str],
+) -> tuple[DiffMode, str, str, bool, str | None]:
+    root = parts[0].lower() if parts else ""
+    if root == "file":
+        if len(parts) < 2 or parts[1].lower() != "diff":
+            return "normal", "", "", False, _WORKSPACE_DIFF_USAGE
+        args = parts[2:]
+    elif root == "diff":
+        args = parts[1:]
+    else:
+        return "normal", "", "", False, _WORKSPACE_DIFF_USAGE
+
+    mode: DiffMode = "normal"
+    mode_selected = False
+    operands: list[str] = []
+    use_last = False
+    parse_options = True
+    options: dict[str, DiffMode] = {
+        "-q": "brief",
+        "--brief": "brief",
+        "-u": "unified",
+        "--unified": "unified",
+        "-y": "side_by_side",
+        "--side-by-side": "side_by_side",
+    }
+    for arg in args:
+        if parse_options and arg == "--":
+            parse_options = False
+            continue
+        if parse_options and arg.startswith("-"):
+            if arg == "--last":
+                if use_last:
+                    return "normal", "", "", False, _WORKSPACE_DIFF_USAGE
+                use_last = True
+                continue
+            selected = options.get(arg)
+            if selected is None or (mode_selected and selected != mode):
+                return "normal", "", "", False, _WORKSPACE_DIFF_USAGE
+            mode = selected
+            mode_selected = True
+            continue
+        operands.append(arg)
+    if use_last:
+        if operands:
+            return "normal", "", "", False, _WORKSPACE_DIFF_USAGE
+        return mode, "", "", True, None
+    if len(operands) != 2:
+        return "normal", "", "", False, _WORKSPACE_DIFF_USAGE
+    return mode, operands[0], operands[1], False, None
+
+
+def run_builtin_diff(
+    parts: list[str],
+    owner: OwnerContext,
+    cfg: Mapping[str, Any],
+    *,
+    tab_id: str = "",
+) -> list[dict[str, object]]:
+    mode, left_reference, right_reference, use_last, usage_error = parse_workspace_diff_command(parts)
+    if usage_error:
+        root = parts[0].lower() if parts else "file"
+        return [output_line(usage_error if root == "file" else usage_error.replace("file diff", "diff", 1))]
+    try:
+        left, right = resolve_diff_sources(
+            owner,
+            left_reference=left_reference,
+            right_reference=right_reference,
+            use_last=use_last,
+            tab_id=tab_id,
+            cfg=cfg,
+        )
+    except DiffSourceError as exc:
+        return [output_line(f"diff: {exc}")]
+    except Exception as exc:
+        return _workspace_command_error(exc)
+    result = format_text_diff(
+        left.text,
+        right.text,
+        left_name=left.label,
+        right_name=right.label,
+        mode=mode,
+    )
+    notices = [notice for notice in (diff_source_notice(left), diff_source_notice(right)) if notice]
+    return text_lines([*notices, *result.lines])
+
+
 def _workspace_owner_context(session_id: str, owner_context: OwnerContext | None = None) -> OwnerContext:
     if owner_context is not None:
         return owner_context
@@ -247,6 +342,7 @@ def run_builtin_workspace(
     *,
     owner_context: OwnerContext | None = None,
     team_role: str = "",
+    tab_id: str = "",
 ) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "help"
@@ -259,6 +355,7 @@ def run_builtin_workspace(
             output_line("  file list [-lR] [folder]", "builtin-help-row"),
             output_line("  file ls [-lR] [folder]", "builtin-help-row"),
             output_line("  file show <file>", "builtin-help-row"),
+            output_line("  file diff [-q|-u|-y] [--last | <source1> <source2>]", "builtin-help-row"),
             output_line("  file add [file]", "builtin-help-row"),
             output_line("  file edit <file>", "builtin-help-row"),
             output_line("  file download <file>", "builtin-help-row"),
@@ -269,6 +366,7 @@ def run_builtin_workspace(
             output_line("  ls [-lR]    -> file list [-lR]", "builtin-help-row"),
             output_line("  ll [-R]     -> file list -l [-R]", "builtin-help-row"),
             output_line("  cat <file>  -> file show <file>", "builtin-help-row"),
+            output_line("  diff <source1> <source2>  -> file diff <source1> <source2>", "builtin-help-row"),
             output_line("  mv <source> <destination>  -> file move <source> <destination>", "builtin-help-row"),
             output_line("  rm <file-or-folder>   -> file rm <file-or-folder>", "builtin-help-row"),
             output_line("", "builtin-spacer"),
@@ -276,6 +374,7 @@ def run_builtin_workspace(
             output_line("  Create targets.txt from the Files panel.", "builtin-note"),
             output_line("  Run: nmap -iL targets.txt", "builtin-help-row"),
             output_line("  Run: curl -o response.html https://ip.darklab.sh", "builtin-help-row"),
+            output_line("  Diff sources: <file>, file:<file>, or run:<run-id>; --last uses this tab.", "builtin-note"),
         ]
 
     if subcommand in {"list", "ls"}:
@@ -352,6 +451,9 @@ def run_builtin_workspace(
         file_lines = text.splitlines() or [""]
         return [output_line(f"file: {parts[2]}", "builtin-section")] + text_lines(file_lines)
 
+    if subcommand == "diff":
+        return run_builtin_diff(parts, owner, cfg, tab_id=tab_id)
+
     if subcommand in {"add", "edit", "download"}:
         expected = (
             "file add [file]"
@@ -411,7 +513,7 @@ def run_builtin_workspace(
     return [
         output_line(f"file: unknown subcommand '{subcommand}'"),
         output_line(
-            "Usage: file [list | show <file> | add <file> | edit <file> | "
+            "Usage: file [list | show <file> | diff <source1> <source2> | add <file> | edit <file> | "
             "download <file> | move <source> <destination> | rm <file-or-folder> | help]"
         ),
     ]
@@ -423,6 +525,7 @@ def run_builtin_workspace_alias(
     *,
     owner_context: OwnerContext | None = None,
     team_role: str = "",
+    tab_id: str = "",
 ) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     root = parts[0].lower() if parts else ""
@@ -444,6 +547,9 @@ def run_builtin_workspace_alias(
         if len(parts) != 2:
             return [output_line("Usage: cat <file>")]
         return run_builtin_workspace(f"file show {parts[1]}", session_id, owner_context=owner_context, team_role=team_role)
+    if root == "diff":
+        owner = _workspace_owner_context(session_id, owner_context)
+        return run_builtin_diff(parts, owner, resolve_effective_cfg(), tab_id=tab_id)
     if root == "rm":
         if len(parts) != 2:
             return [output_line("Usage: rm <file-or-folder>")]
@@ -462,6 +568,6 @@ def run_builtin_workspace_alias(
     if root in {"cd", "grep", "head", "mkdir", "sort", "tail", "uniq", "wc"}:
         return [output_line(f"{root}: handled in the browser workspace terminal")]
     return [output_line(
-        "Usage: file [list | show <file> | add <file> | edit <file> | "
+        "Usage: file [list | show <file> | diff <source1> <source2> | add <file> | edit <file> | "
         "download <file> | move <source> <destination> | rm <file-or-folder> | help]"
     )]
