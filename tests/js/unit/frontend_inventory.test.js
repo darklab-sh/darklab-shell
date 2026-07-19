@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import {
   buildFrontendInventoryReport,
   formatFrontendInventoryCheckResult,
-} from '../../../scripts/inventory_frontend_modules.mjs'
+} from '../../../scripts/frontend/inventory_frontend_modules.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -142,7 +142,7 @@ describe('frontend browser global boundary inventory', () => {
 
   it('passes check mode while reporting global purpose totals', () => {
     const report = runInventoryJson()
-    expect(report.generated_by).toBe('scripts/inventory_frontend_modules.mjs')
+    expect(report.generated_by).toBe('scripts/frontend/inventory_frontend_modules.mjs')
     expect(report.summary.unresolved_app_bare_read_count).toBe(0)
     expect(report.summary.window_publish_purposes.intentional_bootstrap).toBeGreaterThan(0)
     expect(report.summary.window_publish_purposes.lazy_placeholder).toBeGreaterThan(0)

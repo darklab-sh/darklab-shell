@@ -33,7 +33,20 @@ import {
 import { build as esbuild } from 'esbuild';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..');
+
+function findRepoRoot(startDir) {
+  let current = resolve(startDir);
+  while (true) {
+    if (existsSync(resolve(current, 'package.json')) && existsSync(resolve(current, 'app'))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) throw new Error('could not locate the darklab_shell repository root');
+    current = parent;
+  }
+}
+
+const ROOT = findRepoRoot(__dirname);
 const ESBUILD_WORKING_DIR = ROOT;
 const args = process.argv.slice(2);
 let outDir = resolve(ROOT, 'app/static/build');
@@ -793,7 +806,7 @@ assertJsCoverage(builtBundleRecords.flatMap((bundle) => bundle.sources));
 
 const manifest = {
   version: 1,
-  generated_by: 'scripts/build_assets.mjs',
+  generated_by: 'scripts/frontend/build_assets.mjs',
   bundles: buildEntries,
   static_assets: staticAssetEntries,
 };

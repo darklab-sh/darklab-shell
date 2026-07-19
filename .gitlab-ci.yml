@@ -97,7 +97,7 @@ test-py-pytest-fast:
   extends: .pytest-lane
   script:
     - mkdir -p test-results
-    - python scripts/check_pytest_partitions.py
+    - python scripts/test-support/check_pytest_partitions.py
     - >-
       bash -o pipefail -c
       'bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=.
@@ -105,7 +105,7 @@ test-py-pytest-fast:
       --junitxml=test-results/pytest-fast.xml --durations=50 -v
       | tee test-results/pytest-fast-durations.txt'
   after_script:
-    - python scripts/summarize_pytest_junit.py test-results/pytest-fast.xml test-results/pytest-fast-files.txt --lane fast
+    - python scripts/test-support/summarize_pytest_junit.py test-results/pytest-fast.xml test-results/pytest-fast-files.txt --lane fast
   artifacts:
     when: always
     paths:
@@ -127,7 +127,7 @@ test-py-pytest-release:
       --junitxml=test-results/pytest-release.xml --durations=50 -v
       | tee test-results/pytest-release-durations.txt'
   after_script:
-    - python scripts/summarize_pytest_junit.py test-results/pytest-release.xml test-results/pytest-release-files.txt --lane release_integration
+    - python scripts/test-support/summarize_pytest_junit.py test-results/pytest-release.xml test-results/pytest-release-files.txt --lane release_integration
   artifacts:
     when: always
     paths:
@@ -183,7 +183,7 @@ test-py-postgres:
     - mkdir -p test-results
     - bash -o pipefail -c 'bash scripts/run_postgres_tests.sh | tee test-results/pytest-postgres-durations.txt'
   after_script:
-    - python scripts/summarize_pytest_junit.py test-results/pytest-postgres.xml test-results/pytest-postgres-files.txt --lane postgres
+    - python scripts/test-support/summarize_pytest_junit.py test-results/pytest-postgres.xml test-results/pytest-postgres-files.txt --lane postgres
   artifacts:
     when: always
     paths:
@@ -207,9 +207,13 @@ lint-py:
     - apt-get update -q && apt-get install -y -q git
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
   script:
-    - ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/check_pytest_partitions.py scripts/check_source_licenses.py scripts/summarize_pytest_junit.py
+    - >
+      ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/*.py
+      scripts/development/*.py scripts/generate/*.py scripts/operations/
+      scripts/release/*.py scripts/release/check_versions.sh
+      scripts/test-support/*.py
     - bandit -r app/ -ll -q
-    - python scripts/check_source_licenses.py
+    - python scripts/release/check_source_licenses.py
     - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
 lint-js:
@@ -283,7 +287,7 @@ container-license-audit:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script: []
   script:
-    - python scripts/check_container_licenses.py
+    - python scripts/release/check_container_licenses.py
 
 release-version-audit:
   stage: audit
@@ -296,7 +300,7 @@ release-version-audit:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script: []
   script:
-    - python scripts/check_versions.sh --check-release-version
+    - python scripts/release/check_versions.sh --check-release-version
 
 dependency-version-check:
   stage: audit
@@ -310,7 +314,7 @@ dependency-version-check:
     - when: manual
       allow_failure: true
   script:
-    - ./scripts/check_versions.sh | tee version-check.txt
+    - ./scripts/release/check_versions.sh | tee version-check.txt
   artifacts:
     when: always
     paths:
@@ -335,7 +339,7 @@ container-smoke-test:
     - mkdir -p test-results
     - bash -o pipefail -c './scripts/container_smoke_test.sh | tee test-results/container-smoke-durations.txt'
   after_script:
-    - python3 scripts/summarize_pytest_junit.py test-results/container_smoke_test.xml test-results/container-smoke-files.txt --lane container_smoke
+    - python3 scripts/test-support/summarize_pytest_junit.py test-results/container_smoke_test.xml test-results/container-smoke-files.txt --lane container_smoke
   artifacts:
     when: always
     paths:
@@ -531,7 +535,7 @@ release-image-gitlab:
   before_script:
     - apk add --no-cache jq python3
   script:
-    - scripts/publish_release_artifacts.sh gitlab-image
+    - scripts/release/publish_release_artifacts.sh gitlab-image
   artifacts:
     when: always
     reports:
@@ -570,8 +574,8 @@ release-image-smoke:
         > release-image-metrics.txt
       printf 'GITLAB_UNPACKED_BYTES=%s\nGITLAB_PULL_SECONDS=%s\n' \
         "$unpacked_bytes" "$pull_seconds" > release-image-measurements.env
-    - CONTAINER_MOUNT_MODE=volume sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
-    - sh scripts/verify_bundled_tools.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" amd64
+    - CONTAINER_MOUNT_MODE=volume sh scripts/release/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
+    - sh scripts/release/verify_bundled_tools.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" amd64
   artifacts:
     when: always
     reports:
@@ -641,13 +645,13 @@ release-image-recheck:
     - docker pull "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST"
     - >-
       CONTAINER_MOUNT_MODE=volume
-      sh scripts/verify_repository_free_image.sh
+      sh scripts/release/verify_repository_free_image.sh
       "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST"
       "$RECHECK_VERSION"
       "$RECHECK_REVISION"
       "$RECHECK_PYTHON_BASE_DIGEST"
       "$RECHECK_ARCHITECTURE"
-    - sh scripts/verify_bundled_tools.sh "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST" "$RECHECK_ARCHITECTURE"
+    - sh scripts/release/verify_bundled_tools.sh "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST" "$RECHECK_ARCHITECTURE"
     - docker pull "$SYFT_IMAGE"
     - docker pull "$GRYPE_IMAGE"
     - mkdir -p recheck-evidence
@@ -730,9 +734,9 @@ release-image-arm64-smoke:
         --build-arg "BUILD_DATE=${CI_PIPELINE_CREATED_AT}" \
         --tag "$candidate_image" .
       docker image inspect "$candidate_image" > arm64-image-inspect.json
-      sh scripts/verify_repository_free_image.sh \
+      sh scripts/release/verify_repository_free_image.sh \
         "$candidate_image" "$release_version" "$CI_COMMIT_SHA" "$python_base_digest" arm64
-      sh scripts/verify_bundled_tools.sh "$candidate_image" arm64
+      sh scripts/release/verify_bundled_tools.sh "$candidate_image" arm64
   artifacts:
     when: always
     paths:
@@ -771,7 +775,7 @@ release-image-selinux-smoke:
     - grep -qi selinux selinux-docker-security.json
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - docker pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
-    - CONTAINER_VOLUME_LABEL=Z sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST" amd64
+    - CONTAINER_VOLUME_LABEL=Z sh scripts/release/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST" amd64
   artifacts:
     when: always
     paths:
@@ -805,7 +809,11 @@ release-image-rootless-podman-smoke:
     - grep -qx true podman-rootless.txt
     - echo "$CI_REGISTRY_PASSWORD" | podman login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - podman pull "$GITLAB_IMAGE@$GITLAB_DIGEST"
-    - CONTAINER_RUNTIME=podman CONTAINER_VOLUME_LABEL=Z sh scripts/verify_repository_free_image.sh "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST" amd64
+    - >
+      CONTAINER_RUNTIME=podman CONTAINER_VOLUME_LABEL=Z
+      sh scripts/release/verify_repository_free_image.sh
+      "$GITLAB_IMAGE@$GITLAB_DIGEST" "$RELEASE_VERSION" "$CI_COMMIT_SHA"
+      "$PYTHON_BASE_DIGEST" amd64
   after_script:
     - podman logout "$CI_REGISTRY" >/dev/null 2>&1 || true
   artifacts:
@@ -835,7 +843,7 @@ release-image-dockerhub:
   before_script:
     - apk add --no-cache jq
   script:
-    - scripts/publish_release_artifacts.sh dockerhub-image
+    - scripts/release/publish_release_artifacts.sh dockerhub-image
   artifacts:
     when: always
     reports:
@@ -870,7 +878,7 @@ release-supply-chain:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
     - >-
-      python3 scripts/build_release_evidence.py
+      python3 scripts/release/build_release_evidence.py
       --version "$RELEASE_VERSION"
       --gitlab-image "$GITLAB_IMAGE"
       --dockerhub-image "$DOCKERHUB_RELEASE_IMAGE"
@@ -928,7 +936,7 @@ release-payload-upload:
     - apk add --no-cache cosign curl python3
   script:
     - >-
-      python scripts/build_release_payload.py
+      python scripts/release/build_release_payload.py
       --version "$RELEASE_VERSION"
       --output-dir release-payload
       --gitlab-digest "$GITLAB_DIGEST"
@@ -936,8 +944,8 @@ release-payload-upload:
       --compressed-bytes "$GITLAB_COMPRESSED_BYTES"
       --unpacked-bytes "$GITLAB_UNPACKED_BYTES"
       --evidence-dir release-evidence
-    - scripts/publish_release_artifacts.sh sign-payload release-payload
-    - scripts/publish_release_artifacts.sh payload release-payload
+    - scripts/release/publish_release_artifacts.sh sign-payload release-payload
+    - scripts/release/publish_release_artifacts.sh payload release-payload
   artifacts:
     paths:
       - release-payload/
@@ -958,7 +966,7 @@ release-postgres-smoke:
   before_script:
     - apk add --no-cache curl jq
   script:
-    - sh scripts/verify_repository_free_postgres.sh "$CI_PROJECT_DIR/release-payload"
+    - sh scripts/release/verify_repository_free_postgres.sh "$CI_PROJECT_DIR/release-payload"
   artifacts:
     when: always
     paths:
@@ -1067,7 +1075,7 @@ release-public-smoke:
         '^https://gitlab\.com/darklab\.sh/darklab_shell//\.gitlab-ci\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
         "$dockerhub_overview"
     - docker pull "$DOCKERHUB_RELEASE_IMAGE"
-    - CONTAINER_MOUNT_MODE=volume sh scripts/verify_repository_free_image.sh "$DOCKERHUB_RELEASE_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
+    - CONTAINER_MOUNT_MODE=volume sh scripts/release/verify_repository_free_image.sh "$DOCKERHUB_RELEASE_IMAGE" "$RELEASE_VERSION" "$CI_COMMIT_SHA" "$PYTHON_BASE_DIGEST"
     - |
       release_check_failed() {
         actual=$(printf '%s' "$4" | tr '\r\n\t' '   ')

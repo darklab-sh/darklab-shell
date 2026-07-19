@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_by": "scripts/build_assets.mjs",
+  "generated_by": "scripts/frontend/build_assets.mjs",
   "bundles": {
     "app": {
       "type": "css",
@@ -644,8 +644,8 @@
       "hash": "6112b79f76176a233405024c38c59943c91e540b9b3f97a3d2678dde91368ff1"
     },
     "/vendor/ansi_up.js": {
-      "path": "/static/build/vendor-ansi-up.61ad065722eb.js",
-      "hash": "61ad065722eb1e36fe3a8c70fe497e9c0165754c1eb3fd119ed7d6cdf429aa1c"
+      "path": "/static/build/vendor-ansi-up.f013c66e11a7.js",
+      "hash": "f013c66e11a7f16a6955b98b233476420f382517946254dd5e2ca85d258c19c8"
     },
     "/vendor/fonts/JetBrainsMono-300.woff2": {
       "path": "/static/build/font-jetbrainsmono-300.a8af6d17917c.woff2",

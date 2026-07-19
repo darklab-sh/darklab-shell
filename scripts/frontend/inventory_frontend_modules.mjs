@@ -16,7 +16,20 @@ import { fileURLToPath } from 'url';
 import { Linter } from 'eslint';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..');
+
+function findRepoRoot(startDir) {
+  let current = resolve(startDir);
+  while (true) {
+    if (existsSync(resolve(current, 'package.json')) && existsSync(resolve(current, 'app'))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) throw new Error('could not locate the darklab_shell repository root');
+    current = parent;
+  }
+}
+
+const ROOT = findRepoRoot(__dirname);
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const ALLOWLIST_PURPOSES = new Set([
   'intentional_bootstrap',
@@ -204,7 +217,7 @@ const PUBLISHER_HELPER_REGISTRY = Object.freeze({
 const PUBLISHER_HELPER_NAMES = new Set(Object.keys(PUBLISHER_HELPER_REGISTRY));
 
 function usageText() {
-  return `Usage: node scripts/inventory_frontend_modules.mjs [--json] [--check]
+  return `Usage: npm run assets:inventory -- [--json] [--check]
 
 Prints a per-file inventory of frontend browser-global boundaries:
   - top-level function/var/let/const/class names
@@ -1768,7 +1781,7 @@ function buildFrontendInventoryReport({ root = ROOT, allowlistPath = defaultAllo
   const unusedAllowlist = unusedAllowlistEntries(allowlist, modules);
 
   const report = {
-    generated_by: 'scripts/inventory_frontend_modules.mjs',
+    generated_by: 'scripts/frontend/inventory_frontend_modules.mjs',
     allowlist: {
       path: relative(root, allowlistPath),
       entry_count: allowlist.globals.length,

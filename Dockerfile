@@ -83,7 +83,7 @@ ENV PATH=/usr/local/go/bin:${PATH}
 ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 ENV GO_X_CRYPTO_VERSION=${GO_X_CRYPTO_VERSION}
-COPY scripts/install_go_tool.sh /usr/local/bin/install-go-tool
+COPY scripts/container/install_go_tool.sh /usr/local/bin/install-go-tool
 RUN chmod 0755 /usr/local/bin/install-go-tool && \
     mkdir -p /out/usr/local/bin /out/usr/sbin \
         /out/usr/share/doc/darklab-shell/licenses/go-modules && \
@@ -433,7 +433,7 @@ RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 # Development Compose mounts ./app over this copy; release images run directly
 # from the checked-in application tree.
 COPY app/ /app/
-COPY scripts/backup_system.py scripts/migrate_sqlite_to_postgres.py scripts/restore_system.py /app/tools/
+COPY scripts/operations/backup_system.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
 
 # Keep the reviewed redistribution inventory and notices with the image.
 COPY LICENSE /usr/share/doc/darklab-shell/LICENSE

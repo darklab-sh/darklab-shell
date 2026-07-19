@@ -15,6 +15,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Project scripts separate stable commands from implementation helpers** — Release, container, frontend, generator, operator, development, and test-support code now lives in purpose-named directories while documented commands and common test runners keep their existing paths. CI, npm, Docker, hooks, and import-based tests call the grouped implementations directly; compatibility and architecture checks preserve command forwarding, executable modes, working-directory independence, image-copied helpers, and generated-asset ownership metadata.
+
 - **Backend test feedback arrives sooner without reducing release coverage** — The unchanged complete pytest command now has complementary fast and release-integration selections that GitLab runs as required concurrent jobs. An exact node-ID partition guard prevents skipped or duplicated coverage, each lane retains JUnit plus slow-test and file-level timing reports, stable route tests reuse reset applications with fresh clients, and asset working-directory checks avoid duplicate production compression while a focused sidecar test and the full committed-asset check preserve Brotli/gzip coverage.
 
 - **Scheduled image builds warm every self-managed runner** — The existing `bael`, `bune`, and `botis` fanout now also builds on `babi`, `bile`, `barbas`, `beleth`, `baka`, `bana`, the SELinux-enforcing `baku` runner, and the rootless-Podman `baal` runner.

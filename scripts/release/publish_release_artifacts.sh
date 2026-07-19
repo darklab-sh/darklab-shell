@@ -5,7 +5,17 @@
 set -eu
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
-repo_root=$(CDPATH= cd "$script_dir/.." && pwd)
+repo_root=$script_dir
+while [ "$repo_root" != / ]; do
+    if [ -f "$repo_root/package.json" ] && [ -d "$repo_root/app" ]; then
+        break
+    fi
+    repo_root=$(dirname "$repo_root")
+done
+if [ ! -f "$repo_root/package.json" ] || [ ! -d "$repo_root/app" ]; then
+    echo "publish_release_artifacts.sh: could not locate the repository root" >&2
+    exit 1
+fi
 
 usage() {
     echo "usage: publish_release_artifacts.sh gitlab-image|dockerhub-image|sign-payload|payload [PAYLOAD_DIR]" >&2

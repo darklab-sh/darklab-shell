@@ -37,9 +37,9 @@ run_check() {
     fi
 }
 
-run_check "ruff"      "$PYTHON" -m ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/check_source_licenses.py
+run_check "ruff"      "$PYTHON" -m ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/*.py scripts/development/*.py scripts/generate/*.py scripts/operations/ scripts/release/*.py scripts/release/check_versions.sh scripts/test-support/*.py
 run_check "bandit"    "$PYTHON" -m bandit -r app/ -ll -q
-run_check "licenses"  "$PYTHON" scripts/check_source_licenses.py
+run_check "licenses"  "$PYTHON" scripts/release/check_source_licenses.py
 run_check "pytest"    "$PYTHON" -m pytest tests/py/ -q --tb=short
 run_check "pip-audit" "$PYTHON" -m pip_audit -r app/requirements.txt -r requirements-dev.txt
 

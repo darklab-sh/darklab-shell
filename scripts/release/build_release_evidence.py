@@ -14,7 +14,14 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[1]
+def _repository_root(script_path: Path) -> Path:
+    for candidate in (script_path.resolve().parent, *script_path.resolve().parents):
+        if (candidate / "package.json").is_file() and (candidate / "app").is_dir():
+            return candidate
+    raise RuntimeError("could not locate the darklab_shell repository root")
+
+
+ROOT = _repository_root(Path(__file__))
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$")
 DIGEST_RE = re.compile(r"^sha256:([0-9a-f]{64})$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40,64}$")
@@ -35,7 +42,7 @@ BUILD_INPUT_FILES = (
     "app/requirements.txt",
     "deploy/container-licenses.json",
     "entrypoint.sh",
-    "scripts/install_go_tool.sh",
+    "scripts/container/install_go_tool.sh",
 )
 NETWORK_BUILD_TOOLS = (
     "apt-get",

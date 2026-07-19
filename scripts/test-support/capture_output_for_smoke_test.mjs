@@ -4,13 +4,26 @@
 
 import { chromium } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(__dirname, '..', '..')
+
+function findRepoRoot(startDir) {
+  let current = path.resolve(startDir)
+  while (true) {
+    if (existsSync(path.resolve(current, 'package.json')) && existsSync(path.resolve(current, 'app'))) {
+      return current
+    }
+    const parent = path.dirname(current)
+    if (parent === current) throw new Error('could not locate the darklab_shell repository root')
+    current = parent
+  }
+}
+
+const ROOT = findRepoRoot(__dirname)
 const DEFAULT_OUT_DIR = path.join('/tmp', 'darklab_shell-container-smoke-test-corpus')
 
 function parseArgs(argv) {
@@ -85,7 +98,7 @@ function parseArgs(argv) {
       continue
     }
     if (arg === '--help' || arg === '-h') {
-      console.log(`Usage: node scripts/capture_output_for_smoke_test.mjs [options]
+      console.log(`Usage: npm run capture:container-smoke-test -- [options]
 
 By default, commands are read from the shared container smoke corpus: commands.yaml examples plus workflow steps.
 Use --commands-file to run a specific subset instead.

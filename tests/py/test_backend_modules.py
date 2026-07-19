@@ -132,8 +132,10 @@ from services.workspace.files import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "seed_history.py"
-MIGRATE_SQLITE_TO_POSTGRES_PATH = REPO_ROOT / "scripts" / "migrate_sqlite_to_postgres.py"
+SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "development" / "seed_history.py"
+MIGRATE_SQLITE_TO_POSTGRES_PATH = (
+    REPO_ROOT / "scripts" / "operations" / "migrate_sqlite_to_postgres.py"
+)
 
 
 def _load_seed_history_module():
@@ -15746,7 +15748,13 @@ class TestEntrypointWorkspaceRepair:
         assert "close_postgres_pool()" in gunicorn_conf
 
     def test_playwright_server_uses_wsgi_application_entrypoint(self):
-        server_helper = (REPO_ROOT / "scripts" / "playwright" / "run_e2e_server.sh").read_text()
+        server_helper = (
+            REPO_ROOT
+            / "scripts"
+            / "test-support"
+            / "playwright"
+            / "run_e2e_server.sh"
+        ).read_text()
 
         assert "FLASK_APP=wsgi.py" in server_helper
         assert "wsgi:application" in server_helper
@@ -18237,7 +18245,7 @@ class TestThemeRegistry:
         assert theme["toolbar_button_text"] == app_config._THEME_DEFAULTS["dark"]["toolbar_button_text"]
 
     def test_theme_example_files_match_generated_defaults(self):
-        script_path = REPO_ROOT / "scripts" / "generate_theme_examples.py"
+        script_path = REPO_ROOT / "scripts" / "generate" / "generate_theme_examples.py"
         spec = importlib.util.spec_from_file_location("generate_theme_examples", script_path)
         assert spec and spec.loader
         module = importlib.util.module_from_spec(spec)

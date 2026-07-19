@@ -11,7 +11,14 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 
-ROOT = Path(__file__).resolve().parents[1]
+def _repository_root(script_path: Path) -> Path:
+    for candidate in (script_path.resolve().parent, *script_path.resolve().parents):
+        if (candidate / "package.json").is_file() and (candidate / "app").is_dir():
+            return candidate
+    raise RuntimeError("could not locate the darklab_shell repository root")
+
+
+ROOT = _repository_root(Path(__file__))
 
 
 def _source_file(testcase: ET.Element) -> str:

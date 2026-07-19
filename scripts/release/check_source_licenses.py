@@ -15,7 +15,14 @@ import subprocess
 import sys
 
 
-ROOT = Path(__file__).resolve().parents[1]
+def _repository_root(script_path: Path) -> Path:
+    for candidate in (script_path.resolve().parent, *script_path.resolve().parents):
+        if (candidate / "package.json").is_file() and (candidate / "app").is_dir():
+            return candidate
+    raise RuntimeError("could not locate the darklab_shell repository root")
+
+
+ROOT = _repository_root(Path(__file__))
 DEFAULT_COPYRIGHT_TAG = "SPDX-FileCopyrightText: 2026 mmayhew"
 LICENSE_TAG = "SPDX-License-Identifier: AGPL-3.0-only"
 PROJECT_LICENSE_SHA256 = "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
@@ -83,7 +90,11 @@ def _repository_files() -> list[str]:
         check=True,
         capture_output=True,
     )
-    return sorted(path for path in result.stdout.decode("utf-8").split("\0") if path)
+    return sorted(
+        path
+        for path in result.stdout.decode("utf-8").split("\0")
+        if path and (ROOT / path).is_file()
+    )
 
 
 def _is_excluded(path: str) -> bool:

@@ -9,7 +9,15 @@ SLOT="${2:?slot required}"
 CAPTURE_SESSION_TOKEN="tok_cafebabecafebabecafebabecafebabe"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
+while [[ "$REPO_ROOT" != / ]]; do
+    [[ -f "$REPO_ROOT/package.json" && -d "$REPO_ROOT/app" ]] && break
+    REPO_ROOT=$(dirname "$REPO_ROOT")
+done
+if [[ ! -f "$REPO_ROOT/package.json" || ! -d "$REPO_ROOT/app" ]]; then
+    echo "run_e2e_server.sh: could not locate the repository root" >&2
+    exit 1
+fi
 APP_DIR="$REPO_ROOT/app"
 PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 
@@ -51,7 +59,7 @@ if [[ "$SLOT" == capture-* ]]; then
   APP_DATA_DIR="$DATA_DIR" APP_CONF_DIR="$SHIPPED_CONF_DIR" APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR" \
     "$PYTHON_BIN" -c "from core.database import db_init; db_init()" >/dev/null
   APP_DATA_DIR="$DATA_DIR" APP_CONF_DIR="$SHIPPED_CONF_DIR" APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR" \
-    "$PYTHON_BIN" "$REPO_ROOT/scripts/seed_history.py" \
+    "$PYTHON_BIN" "$REPO_ROOT/scripts/development/seed_history.py" \
     --fixture visual-flows \
     --token "$CAPTURE_SESSION_TOKEN" \
     >/dev/null

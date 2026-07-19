@@ -16,7 +16,14 @@ import sys
 from time import perf_counter
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+def _repository_root(script_path: Path) -> Path:
+    for candidate in (script_path.resolve().parent, *script_path.resolve().parents):
+        if (candidate / "package.json").is_file() and (candidate / "app").is_dir():
+            return candidate
+    raise RuntimeError("could not locate the darklab_shell repository root")
+
+
+REPO_ROOT = _repository_root(Path(__file__))
 sys.path.insert(0, str(REPO_ROOT / "app"))
 
 from core.output_signals import OutputSignalClassifier  # noqa: E402

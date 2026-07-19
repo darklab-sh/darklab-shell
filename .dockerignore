@@ -23,10 +23,12 @@ docs/
 examples/
 assets/
 scripts/*
-!scripts/backup_system.py
-!scripts/install_go_tool.sh
-!scripts/migrate_sqlite_to_postgres.py
-!scripts/restore_system.py
+!scripts/container/
+!scripts/container/install_go_tool.sh
+!scripts/operations/
+!scripts/operations/backup_system.py
+!scripts/operations/migrate_sqlite_to_postgres.py
+!scripts/operations/restore_system.py
 config/
 data/
 

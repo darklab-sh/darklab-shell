@@ -300,7 +300,7 @@ These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `bui
 
 ## Vendor JS Workflow
 
-The browser libraries used at runtime — `ansi_up`, `jspdf`, `@xterm/xterm`, and `@xterm/addon-fit` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `scripts/build_vendor.mjs`. The generated files are committed so the app works without a build step in local development and docker-compose.
+The browser libraries used at runtime — `ansi_up`, `jspdf`, `@xterm/xterm`, and `@xterm/addon-fit` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `npm run vendor:sync`. The generated files are committed so the app works without a build step in local development and docker-compose.
 
 **Regenerate vendor files after a version bump:**
 
@@ -318,7 +318,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 `vendor:check` runs automatically as part of `npm run lint` and the pre-commit hook (when `node_modules` is present).
 
-**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
+**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. The vendor build wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
 
 **Frontend bundles:** CSS and JavaScript bundle output works the same way. `assets.config.json` defines bundle membership and order, `npm run assets:sync` regenerates committed files in `app/static/build/`, and `npm run assets:check` verifies that the checked-in bundles and their precompressed siblings still match the current sources. The app serves content-hashed bundles by default, minifies generated ESM output with linked external source maps, negotiates Brotli or gzip for generated text assets when the browser supports it, and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete. Set `asset_bundle_mode: source` in `app/conf/config.local.yaml` for local edit-and-refresh work without rebuilding after every source change. Source mode keeps JS module URLs unversioned so lazy imports and relative ESM imports don't refetch the same file under two browser module identities.
 
@@ -395,7 +395,7 @@ Release verification failures name the stage, invariant, expected value, and a b
 
 The vulnerability policy blocks Critical findings only when the report names an available fix. High findings and unfixed Critical findings remain visible in `vulnerability-report.json` without making every upstream package delay the release indefinitely. Any future suppression needs a reviewed, expiring rule with the affected package, vulnerability, reason, and follow-up owner; don't hide findings in an untracked CI command.
 
-The protected jobs call `scripts/publish_release_artifacts.sh` for canonical image publication, Docker Hub promotion, and immutable payload upload. Keep retry, conflict, malformed-response, and command-failure behavior in that script so the local fake-registry regression harness exercises the same branches CI runs.
+The protected jobs call `scripts/release/publish_release_artifacts.sh` for canonical image publication, Docker Hub promotion, and immutable payload upload. Keep retry, conflict, malformed-response, and command-failure behavior in that script so the local fake-registry regression harness exercises the same branches CI runs.
 
 Any Dockerfile tool-version or top-level apt, pip, or Git install change must update `deploy/container-licenses.json`. Run `python scripts/check_container_licenses.py` before publishing; it verifies that every install maps to a reviewed component with a source, license, and notice location and that the bundled WPScan terms still match upstream exactly. The image smoke job performs the second half of the gate against the built filesystem, including notice-path resolution and the generated RubyGem dependency manifest. Ordinary push and merge-request pipelines also run the offline release-version consistency check; the protected tag job repeats it against the tag itself.
 
@@ -445,7 +445,7 @@ SPDX-FileCopyrightText: 2026 Your Name
 SPDX-License-Identifier: AGPL-3.0-only
 ```
 
-Keep a script's shebang first and an HTML document's doctype first. Don't add the project notice to generated bundles, vendored libraries, fonts, or copied third-party material. `npm run lint:licenses` checks the project-owned boundary in `scripts/check_source_licenses.py`; review ownership before using its `--add-missing` maintenance option.
+Keep a script's shebang first and an HTML document's doctype first. Don't add the project notice to generated bundles, vendored libraries, fonts, or copied third-party material. `npm run lint:licenses` checks the project-owned boundary in `scripts/release/check_source_licenses.py`; review ownership before using its `--add-missing` maintenance option.
 
 ---
 

@@ -26,9 +26,9 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PAYLOAD_BUILDER = ROOT / "scripts" / "build_release_payload.py"
-EVIDENCE_BUILDER = ROOT / "scripts" / "build_release_evidence.py"
-RELEASE_PUBLISHER = ROOT / "scripts" / "publish_release_artifacts.sh"
+PAYLOAD_BUILDER = ROOT / "scripts" / "release" / "build_release_payload.py"
+EVIDENCE_BUILDER = ROOT / "scripts" / "release" / "build_release_evidence.py"
+RELEASE_PUBLISHER = ROOT / "scripts" / "release" / "publish_release_artifacts.sh"
 RELEASE_VERSION = "2.6.0"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
@@ -377,7 +377,8 @@ def _run_setup(
 
 
 def _load_script_module(name: str) -> ModuleType:
-    source = ROOT / "scripts" / f"{name}.py"
+    area = "operations" if name == "restore_system" else "release"
+    source = ROOT / "scripts" / area / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"test_{name}", source)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -714,10 +715,12 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
     entrypoint = (ROOT / "entrypoint.sh").read_text(encoding="utf-8")
-    image_smoke = (ROOT / "scripts" / "verify_repository_free_image.sh").read_text(
+    image_smoke = (
+        ROOT / "scripts" / "release" / "verify_repository_free_image.sh"
+    ).read_text(
         encoding="utf-8"
     )
-    bundled_tool_smoke = (ROOT / "scripts" / "verify_bundled_tools.sh").read_text(
+    bundled_tool_smoke = (ROOT / "scripts" / "release" / "verify_bundled_tools.sh").read_text(
         encoding="utf-8"
     )
 
@@ -750,13 +753,14 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'pg_dump_version "PostgreSQL 18"' in image_smoke
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
     assert (
-        "COPY scripts/backup_system.py scripts/migrate_sqlite_to_postgres.py "
-        "scripts/restore_system.py /app/tools/"
+        "COPY scripts/operations/backup_system.py "
+        "scripts/operations/migrate_sqlite_to_postgres.py "
+        "scripts/operations/restore_system.py /app/tools/"
     ) in dockerfile
-    assert "!scripts/backup_system.py" in dockerignore
-    assert "!scripts/install_go_tool.sh" in dockerignore
-    assert "!scripts/migrate_sqlite_to_postgres.py" in dockerignore
-    assert "!scripts/restore_system.py" in dockerignore
+    assert "!scripts/operations/backup_system.py" in dockerignore
+    assert "!scripts/container/install_go_tool.sh" in dockerignore
+    assert "!scripts/operations/migrate_sqlite_to_postgres.py" in dockerignore
+    assert "!scripts/operations/restore_system.py" in dockerignore
     assert "wpscan-ruby-gems.json" in dockerfile
     assert (
         'File.write("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json", '
@@ -769,7 +773,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
     assert 'install-go-tool "github.com/projectdiscovery/chaos-client' in dockerfile
     assert "go get \"golang.org/x/crypto@${GO_X_CRYPTO_VERSION}\"" in (
-        ROOT / "scripts" / "install_go_tool.sh"
+        ROOT / "scripts" / "container" / "install_go_tool.sh"
     ).read_text(encoding="utf-8")
     assert "go -C /tmp/gosu build -trimpath -o /out/usr/sbin/gosu" in dockerfile
     assert " apt-get install -y --no-install-recommends" in dockerfile
@@ -880,7 +884,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     runtime_result = subprocess.run(
         [
             "sh",
-            str(ROOT / "scripts" / "verify_repository_free_image.sh"),
+            str(ROOT / "scripts" / "release" / "verify_repository_free_image.sh"),
             f"registry.example.test/darklab:{RELEASE_VERSION}",
             RELEASE_VERSION,
             "revision-a",
@@ -912,7 +916,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     docker_result = subprocess.run(
         [
             "sh",
-            str(ROOT / "scripts" / "verify_repository_free_image.sh"),
+            str(ROOT / "scripts" / "release" / "verify_repository_free_image.sh"),
             f"registry.example.test/darklab:{RELEASE_VERSION}",
             RELEASE_VERSION,
             "revision-a",
@@ -933,7 +937,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     bundled_result = subprocess.run(
         [
             "sh",
-            str(ROOT / "scripts" / "verify_bundled_tools.sh"),
+            str(ROOT / "scripts" / "release" / "verify_bundled_tools.sh"),
             f"registry.example.test/darklab:{RELEASE_VERSION}",
             "arm64",
         ],
@@ -945,7 +949,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     )
     assert bundled_result.returncode == 0, bundled_result.stderr
     invalid_runtime = subprocess.run(
-        ["sh", str(ROOT / "scripts" / "verify_repository_free_image.sh"), "image"],
+        [
+            "sh",
+            str(ROOT / "scripts" / "release" / "verify_repository_free_image.sh"),
+            "image",
+        ],
         cwd=ROOT,
         env={**env, "CONTAINER_RUNTIME": "unsupported"},
         check=False,
@@ -961,7 +969,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
 
 def test_container_license_inventory_matches_dockerfile_and_release():
     result = subprocess.run(
-        [sys.executable, "scripts/check_container_licenses.py"],
+        [sys.executable, "scripts/release/check_container_licenses.py"],
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -1018,7 +1026,7 @@ def test_container_license_inventory_matches_dockerfile_and_release():
         assert f"/usr/share/doc/darklab-shell/licenses/{notice_name}" in (
             ROOT / "Dockerfile"
         ).read_text(encoding="utf-8")
-    publisher = (ROOT / "scripts" / "publish_release_artifacts.sh").read_text(
+    publisher = (ROOT / "scripts" / "release" / "publish_release_artifacts.sh").read_text(
         encoding="utf-8"
     )
     assert 'check_container_licenses.py"' in publisher
@@ -1037,8 +1045,8 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
     monkeypatch: pytest.MonkeyPatch,
 ):
     package_scripts = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["scripts"]
-    assert package_scripts["lint:licenses"] == "python scripts/check_source_licenses.py"
-    assert "python scripts/check_source_licenses.py" in package_scripts["lint:py"]
+    assert package_scripts["lint:licenses"] == "python scripts/release/check_source_licenses.py"
+    assert "python scripts/release/check_source_licenses.py" in package_scripts["lint:py"]
     assert "npm run lint:licenses" not in package_scripts["lint"]
 
     source_checker = _load_script_module("check_source_licenses")
@@ -1470,7 +1478,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     lint_py_setup = "\n".join(parsed_ci["lint-py"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bgit\b", lint_py_setup)
     assert "pip install -q -r app/requirements.txt -r requirements-dev.txt" in lint_py_setup
-    assert "python scripts/check_source_licenses.py" in parsed_ci["lint-py"]["script"]
+    assert "python scripts/release/check_source_licenses.py" in parsed_ci["lint-py"]["script"]
     assert "npm run lint:licenses" not in parsed_ci["lint-js"]["script"]
     assert parsed_ci["release-image-gitlab"]["artifacts"]["when"] == "always"
     assert parsed_ci["release-image-dockerhub"]["artifacts"]["when"] == "always"
@@ -1670,7 +1678,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     }
     assert release_create_needs["release-postgres-smoke"]["artifacts"] is False
     postgres_verifier = (
-        ROOT / "scripts" / "verify_repository_free_postgres.sh"
+        ROOT / "scripts" / "release" / "verify_repository_free_postgres.sh"
     ).read_text(encoding="utf-8")
     assert "COMPOSE_PROFILES=postgres" in postgres_verifier
     assert 'WEB_CONCURRENCY == "4"' in postgres_verifier
@@ -1692,7 +1700,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "cosign verify-blob" in publisher
     public_smoke_script = "\n".join(parsed_ci["release-public-smoke"]["script"])
     assert (
-        'CONTAINER_MOUNT_MODE=volume sh scripts/verify_repository_free_image.sh '
+        'CONTAINER_MOUNT_MODE=volume sh scripts/release/verify_repository_free_image.sh '
         '"$DOCKERHUB_RELEASE_IMAGE"'
     ) in public_smoke_script
     assert "release-build-inputs.json" in public_smoke_script
@@ -1858,7 +1866,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     assert build_inputs["reproducibility"]["container_image_byte_reproducible"] is False
     assert build_inputs["source"]["commit_sha"] == evidence_args["commit_sha"]
     assert ".gitlab-ci.yml" in build_inputs["source"]["files"]
-    assert "scripts/install_go_tool.sh" in build_inputs["source"]["files"]
+    assert "scripts/container/install_go_tool.sh" in build_inputs["source"]["files"]
     assert build_inputs["release_tool_images"] == {"gitlab_cli": GITLAB_CLI_IMAGE}
     assert evidence_index["release_tools"] == {"gitlab_cli_image": GITLAB_CLI_IMAGE}
     assert any(
@@ -2237,21 +2245,21 @@ def test_release_payload_rejects_invalid_provenance_before_writing(tmp_path: Pat
 
 def test_release_version_gate_covers_runtime_and_distribution_files():
     matching = subprocess.run(
-        [sys.executable, "scripts/check_versions.sh", "--release-version", RELEASE_VERSION],
+        [sys.executable, "scripts/release/check_versions.sh", "--release-version", RELEASE_VERSION],
         cwd=ROOT,
         check=False,
         capture_output=True,
         text=True,
     )
     mismatched = subprocess.run(
-        [sys.executable, "scripts/check_versions.sh", "--release-version", NEXT_VERSION],
+        [sys.executable, "scripts/release/check_versions.sh", "--release-version", NEXT_VERSION],
         cwd=ROOT,
         check=False,
         capture_output=True,
         text=True,
     )
     automatic = subprocess.run(
-        [sys.executable, "scripts/check_versions.sh", "--check-release-version"],
+        [sys.executable, "scripts/release/check_versions.sh", "--check-release-version"],
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -2268,7 +2276,7 @@ def test_release_version_gate_covers_runtime_and_distribution_files():
     rc_drift = subprocess.run(
         [
             sys.executable,
-            "scripts/check_versions.sh",
+            "scripts/release/check_versions.sh",
             "--release-version",
             NEXT_RC_VERSION,
         ],
@@ -2353,7 +2361,9 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert f"/blob/{_release_tag(RELEASE_VERSION)}/app/conf/config.yaml" in config_starter
     assert "YAML settings use `key: value`, not `key = value`" in config_starter
     assert "# workspace_max_file_mb: 10" in config_starter
-    image_smoke = (ROOT / "scripts" / "verify_repository_free_image.sh").read_text(
+    image_smoke = (
+        ROOT / "scripts" / "release" / "verify_repository_free_image.sh"
+    ).read_text(
         encoding="utf-8"
     )
     assert "faq.local.yaml" in image_smoke

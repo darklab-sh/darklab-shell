@@ -2,10 +2,23 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { readdirSync, readFileSync } from 'fs';
-import { resolve } from 'path';
+import { existsSync, readdirSync, readFileSync } from 'fs';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 
-const ROOT = resolve(process.cwd());
+function findRepoRoot(startDir) {
+  let current = resolve(startDir);
+  while (true) {
+    if (existsSync(resolve(current, 'package.json')) && existsSync(resolve(current, 'app'))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) throw new Error('could not locate the darklab_shell repository root');
+    current = parent;
+  }
+}
+
+const ROOT = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 
 function isIgnored(path) {
   return path.includes('/.git/') || path.includes('/node_modules/');

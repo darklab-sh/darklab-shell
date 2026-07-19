@@ -10,7 +10,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Validate split pytest timing on project runners](#validate-split-pytest-timing-on-project-runners)
-  - [Organize script entrypoints and implementation helpers](#organize-script-entrypoints-and-implementation-helpers)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -48,22 +47,6 @@ The complete backend suite now has exact fast and release-integration partitions
 
 - [ ] Record at least three comparable CI pipelines and confirm the first required pytest result arrives at least 50% sooner than the previous 433-second full job.
 - [ ] Confirm five consecutive pipelines pass without order dependence or leaked state, then record the observed fast, release-integration, and complete-suite medians here before closing this validation item.
-
-### Organize script entrypoints and implementation helpers
-
-The `scripts/` directory has 34 tracked files covering operator workflows, test runners, release publication, container construction, generated artifacts, frontend assets, and demo capture. Most still live at the top level, which makes supported commands hard to distinguish from internal helpers.
-
-Keep `scripts/` as the home for executable project tooling, but organize internal files by purpose rather than programming language or whether CI happens to call them. Treat top-level scripts as stable, supported entrypoints and keep commonly documented commands such as `run_playwright.sh`, `run_postgres_tests.sh`, and `run_pytest.sh` at their current paths.
-
-- [ ] Classify each current script as a stable entrypoint or an internal helper. Preserve documented operator and developer commands with their current path or a thin forwarding wrapper; don't create a permanent file-by-file documentation inventory.
-- [ ] Introduce purpose-based directories for `operations/`, `release/`, `container/`, `frontend/`, `generate/`, `development/`, and `test-support/`. Keep `hooks/`, and place Playwright server lifecycle helpers under the test-support boundary while retaining `scripts/run_playwright.sh` as the public runner.
-- [ ] Move scripts one purpose group at a time without renaming them in the same change. Start with release and container internals, then frontend and generators, followed by development, media-capture, and test-support helpers.
-- [ ] Keep backup, restore, and SQLite-to-Postgres migration commands easy for operators to find. If their implementation moves under `operations/`, preserve any documented source-checkout commands with forwarding entrypoints until the documentation and supported command contract deliberately change.
-- [ ] Update `.gitlab-ci.yml`, `package.json`, `Dockerfile`, `.dockerignore`, the pre-commit hook, release-evidence collection, project documentation, and tests after each group moves. Check scripts that derive the repository root from `Path.parents[...]`, `dirname`, or relative `../` paths from their new depth.
-- [ ] Keep script names action-oriented within each directory: `build_*` creates artifacts, `generate_*` refreshes checked-in output, `check_*` performs static validation, `verify_*` exercises built artifacts, and `run_*` remains a user-facing wrapper.
-- [ ] Add focused path and invocation coverage for Docker-only helpers, release jobs, stable wrappers, and generated-artifact commands before removing old paths. Run the full lint, test, container smoke, and release checks after the final cluster moves.
-
-**Done when:** the top level of `scripts/` contains only stable commands and clearly named purpose directories, existing documented command lines still work, internal helpers are easy to locate by responsibility, and local, CI, container-build, and release workflows pass without compatibility shims that no longer serve a supported path.
 
 ---
 

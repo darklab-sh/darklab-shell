@@ -8,7 +8,7 @@ const DEFAULT_OBS_WS_URL = 'ws://127.0.0.1:4455'
 const REQUEST_TIMEOUT_MS = 10_000
 
 function usage() {
-  console.log(`Usage: node scripts/obs_recording.mjs <command>
+  console.log(`Usage: node scripts/development/obs_recording.mjs <command>
 
 Commands:
   status       Print the current OBS recording status.

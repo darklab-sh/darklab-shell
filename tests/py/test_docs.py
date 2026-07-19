@@ -479,7 +479,7 @@ class TestProjectStructureCoverage:
 
         root_out = tmp_path / "from-root"
         scripts_out = tmp_path / "from-scripts"
-        script = _REPO_ROOT / "scripts" / "build_assets.mjs"
+        script = _REPO_ROOT / "scripts" / "frontend" / "build_assets.mjs"
         subprocess.run(
             ["node", str(script), "--out-dir", str(root_out), "--no-precompress"],
             cwd=str(_REPO_ROOT),
@@ -489,7 +489,7 @@ class TestProjectStructureCoverage:
         )
         subprocess.run(
             ["node", str(script), "--out-dir", str(scripts_out), "--no-precompress"],
-            cwd=str(_REPO_ROOT / "scripts"),
+            cwd=str(_REPO_ROOT / "scripts" / "frontend"),
             capture_output=True,
             text=True,
             check=True,
@@ -555,7 +555,9 @@ if (files.length === 0) throw new Error('no precompressed assets were checked');
         assert result.returncode == 0, result.stderr or result.stdout
 
     def test_asset_build_logs_esm_bundle_failure_context(self):
-        script = (_REPO_ROOT / "scripts" / "build_assets.mjs").read_text(encoding="utf-8")
+        script = (
+            _REPO_ROOT / "scripts" / "frontend" / "build_assets.mjs"
+        ).read_text(encoding="utf-8")
         assert "[assets] ESM bundle failed" in script
         for field in ("bundle:", "entry,", "out_dir:", "check_only:", "message:"):
             assert field in script

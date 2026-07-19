@@ -348,5 +348,5 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 | `app/` | Flask application, templates, static assets, and runtime configuration |
 | `deploy/` | Production Compose, setup, and release artifacts |
 | `docs/` | Focused user, operator, and contributor guides |
-| `scripts/` | Development, release, maintenance, and test helpers |
+| `scripts/` | Stable contributor commands with internal helpers grouped by purpose |
 | `tests/` | Backend, browser-unit, end-to-end, and visual-review coverage |
