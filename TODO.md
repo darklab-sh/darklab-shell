@@ -10,7 +10,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Enable TruffleHog github and gitlab sources](#enable-trufflehog-github-and-gitlab-sources)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
-  - [Validate split pytest timing on project runners](#validate-split-pytest-timing-on-project-runners)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -61,12 +60,7 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-### Validate split pytest timing on project runners
-
-The complete backend suite now has exact fast and release-integration partitions, separate CI timing artifacts, cheaper asset determinism coverage, and opt-in reusable applications for stable route modules. Keep the timing reports informational while the new jobs establish their normal range.
-
-- [ ] Record at least three comparable CI pipelines and confirm the first required pytest result arrives at least 50% sooner than the previous 433-second full job.
-- [ ] Confirm five consecutive pipelines pass without order dependence or leaked state, then record the observed fast, release-integration, and complete-suite medians here before closing this validation item.
+No open Technical Debt is currently tracked.
 
 ---
 
