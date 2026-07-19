@@ -709,6 +709,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "INTERACTIVE_PTY_ENABLED=${INTERACTIVE_PTY_ENABLED:-false}" in development_environment
 
 
+@pytest.mark.release_integration
 def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
@@ -1030,6 +1031,7 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     )
 
 
+@pytest.mark.release_integration
 def test_license_checkers_fail_closed_and_preserve_excluded_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1191,6 +1193,7 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
             container_checker.main()
 
 
+@pytest.mark.release_integration
 def test_cli_distributions_include_complete_agpl_license(tmp_path: Path):
     project_dir = tmp_path / "darklab_cli"
     shutil.copytree(ROOT / "tools" / "darklab_cli", project_dir)
@@ -1235,6 +1238,7 @@ def test_cli_distributions_include_complete_agpl_license(tmp_path: Path):
         assert wheel_metadata["License-Expression"] == "AGPL-3.0-only"
 
 
+@pytest.mark.release_integration
 def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Path):
     payload = _build_payload(tmp_path, "release-payload-a")
     retry_payload = _build_payload(tmp_path, "release-payload-b")
@@ -1408,9 +1412,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["RELEASE_SELINUX_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_CACHE_SCOPE"] == "v2-6"
-    assert parsed_ci["variables"]["RELEASE_CACHE_PROBE"] == "0"
+    assert "RELEASE_CACHE_PROBE" not in ci_config
     docker_build_rules = parsed_ci["docker-build"]["rules"]
-    assert "RELEASE_CACHE_PROBE" in docker_build_rules[0]["if"]
+    assert docker_build_rules[0]["if"] == (
+        '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
+    )
     tag_skip_rule = {"if": "$CI_COMMIT_TAG", "when": "never"}
     tag_skip_index = docker_build_rules.index(tag_skip_rule)
     changes_index = next(
@@ -1422,9 +1428,45 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "branch-image-evidence/darklab-shell.cdx.json" in branch_build_script
     assert "--only-fixed --fail-on critical" in branch_build_script
     assert parsed_ci["docker-build"]["artifacts"]["when"] == "always"
-    pytest_setup = "\n".join(parsed_ci["test-py-pytest"]["before_script"])
+    pytest_setup = "\n".join(parsed_ci[".pytest-lane"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bcurl\b", pytest_setup)
     assert re.search(r"\bapt-get install\b[^\n]*\bjq\b", pytest_setup)
+    package_scripts = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["scripts"]
+    assert package_scripts["test:pytest"] == (
+        "bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py"
+    )
+    assert "-m 'not release_integration'" in package_scripts["test:pytest:fast"]
+    assert "-m release_integration" in package_scripts["test:pytest:release"]
+    for job_name, lane, report_name in (
+        ("test-py-pytest-fast", "not release_integration", "pytest-fast.xml"),
+        ("test-py-pytest-release", "release_integration", "pytest-release.xml"),
+    ):
+        job = parsed_ci[job_name]
+        assert job["extends"] == ".pytest-lane"
+        assert lane in "\n".join(job["script"])
+        assert job["artifacts"]["when"] == "always"
+        assert job["artifacts"]["reports"]["junit"].endswith(report_name)
+        assert any(path.endswith(report_name) for path in job["artifacts"]["paths"])
+        assert any(path.endswith("-durations.txt") for path in job["artifacts"]["paths"])
+        assert any(path.endswith("-files.txt") for path in job["artifacts"]["paths"])
+    assert "check_pytest_partitions.py" in "\n".join(
+        parsed_ci["test-py-pytest-fast"]["script"]
+    )
+    postgres_pytest_job = parsed_ci["test-py-postgres"]
+    assert postgres_pytest_job["variables"]["PYTEST_JUNIT_XML"].endswith(
+        "pytest-postgres.xml"
+    )
+    assert postgres_pytest_job["variables"]["PYTEST_DURATIONS"] == "50"
+    assert postgres_pytest_job["artifacts"]["reports"]["junit"].endswith(
+        "pytest-postgres.xml"
+    )
+    container_smoke_job = parsed_ci["container-smoke-test"]
+    assert container_smoke_job["artifacts"]["reports"]["junit"].endswith(
+        "container_smoke_test.xml"
+    )
+    assert "container-smoke-durations.txt" in "\n".join(
+        container_smoke_job["artifacts"]["paths"]
+    )
     lint_py_setup = "\n".join(parsed_ci["lint-py"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bgit\b", lint_py_setup)
     assert "pip install -q -r app/requirements.txt -r requirements-dev.txt" in lint_py_setup
@@ -1480,32 +1522,6 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "buildcache-amd64-${cache_scope}" in publisher
     assert 'expected_cache_scope="v${release_major}-${release_minor}"' in publisher
     assert "--progress=plain" in publisher
-    cache_probe_template = parsed_ci[".release-cache-probe-amd64"]
-    assert cache_probe_template["rules"][0]["if"] == (
-        '$CI_PIPELINE_SOURCE == "schedule" && $RELEASE_CACHE_PROBE == "1"'
-    )
-    cache_probe_script = "\n".join(cache_probe_template["script"])
-    assert "docker buildx create --driver docker-container" in cache_probe_script
-    assert "--cache-from" in cache_probe_script
-    assert "--cache-to" in cache_probe_script
-    assert "--output type=cacheonly" in cache_probe_script
-    assert "Validated %d expensive builder RUN steps as CACHED" in (
-        cache_probe_script
-    )
-    cache_probe_export = parsed_ci["release-cache-probe-amd64-export"]
-    assert cache_probe_export["stage"] == "build"
-    assert cache_probe_export["tags"] == ["bael"]
-    assert cache_probe_export["variables"]["CACHE_PROBE_MODE"] == "export"
-    cache_probe_reuse = parsed_ci["release-cache-probe-amd64-reuse"]
-    assert cache_probe_reuse["stage"] == "publish"
-    assert cache_probe_reuse["tags"] == ["botis"]
-    assert cache_probe_reuse["variables"]["CACHE_PROBE_MODE"] == "reuse"
-    assert cache_probe_reuse["needs"] == [
-        {
-            "job": "release-cache-probe-amd64-export",
-            "artifacts": False,
-        }
-    ]
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
     amd64_smoke_script = "\n".join(parsed_ci["release-image-smoke"]["script"])
     digest_pinned_gitlab_image = '"$GITLAB_IMAGE@$GITLAB_DIGEST"'
@@ -1758,6 +1774,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert 'grep -R -E \'@[A-Z0-9_]+@\'' not in setup_template
 
 
+@pytest.mark.release_integration
 def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Path):
     evidence_builder = _load_script_module("build_release_evidence")
     payload_builder = _load_script_module("build_release_payload")
@@ -1928,6 +1945,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     assert not rejected_payload.exists()
 
 
+@pytest.mark.release_integration
 def test_release_image_publication_handles_publish_retry_and_conflict_branches(tmp_path: Path):
     digest = "sha256:" + "a" * 64
 
@@ -2119,6 +2137,7 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     assert "dockerhub-secret" not in combined_output
 
 
+@pytest.mark.release_integration
 def test_release_payload_publication_handles_upload_retry_and_conflict_branches(tmp_path: Path):
     first_dir = tmp_path / "first"
     first = _run_payload_publisher(first_dir, "first-publish")
@@ -2173,6 +2192,7 @@ def test_release_payload_publication_handles_upload_retry_and_conflict_branches(
     assert "job-token-secret" not in combined_output
 
 
+@pytest.mark.release_integration
 def test_release_payload_rejects_invalid_provenance_before_writing(tmp_path: Path):
     builder = _load_script_module("build_release_payload")
     digest = "sha256:" + "a" * 64
@@ -2262,6 +2282,7 @@ def test_release_version_gate_covers_runtime_and_distribution_files():
     assert "Invalid release version" not in rc_drift.stderr
 
 
+@pytest.mark.release_integration
 def test_installer_creates_private_operator_files_without_starting(tmp_path: Path):
     payload = _build_payload(tmp_path)
     target = tmp_path / "deployment with spaces"
@@ -2440,6 +2461,7 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert not old_compose_target.exists()
 
 
+@pytest.mark.release_integration
 def test_installer_accepts_its_verified_bootstrap_files_in_current_directory(tmp_path: Path):
     payload = _build_payload(tmp_path)
     target = tmp_path / "current-directory-install"
@@ -2469,6 +2491,7 @@ def test_installer_accepts_its_verified_bootstrap_files_in_current_directory(tmp
     assert (target / ".env").is_file()
 
 
+@pytest.mark.release_integration
 def test_installer_rejects_checksum_mismatch_before_creating_target(tmp_path: Path):
     payload = _build_payload(tmp_path)
     with (payload / DEPLOYMENT_ARCHIVE).open("ab") as archive:
@@ -2482,6 +2505,7 @@ def test_installer_rejects_checksum_mismatch_before_creating_target(tmp_path: Pa
     assert not target.exists()
 
 
+@pytest.mark.release_integration
 def test_installer_rejects_non_https_payload_sources(tmp_path: Path):
     payload = _build_payload(tmp_path)
     target = tmp_path / "must-not-exist"
@@ -2529,6 +2553,7 @@ def test_installer_rejects_non_https_payload_sources(tmp_path: Path):
     assert not failed_download_target.exists()
 
 
+@pytest.mark.release_integration
 def test_installer_supported_shell_fallbacks_and_failures_leave_no_partial_target(tmp_path: Path):
     payload = _build_payload(tmp_path)
     syntax = subprocess.run(
@@ -2659,6 +2684,7 @@ def test_installer_supported_shell_fallbacks_and_failures_leave_no_partial_targe
 
 
 @pytest.mark.parametrize("unsafe_kind", ["nonempty", "symlink"])
+@pytest.mark.release_integration
 def test_installer_rejects_unsafe_targets(tmp_path: Path, unsafe_kind: str):
     payload = _build_payload(tmp_path)
     target = tmp_path / "unsafe-target"
@@ -2676,6 +2702,7 @@ def test_installer_rejects_unsafe_targets(tmp_path: Path, unsafe_kind: str):
     assert "target directory must" in result.stderr
 
 
+@pytest.mark.release_integration
 def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     tmp_path: Path,
     monkeypatch,
@@ -2808,6 +2835,7 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     assert "source-password" not in adopted_env
 
 
+@pytest.mark.release_integration
 def test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction(
     tmp_path: Path,
     monkeypatch,
@@ -2862,6 +2890,7 @@ def test_failed_postgres_restore_keeps_operator_files_and_uses_one_transaction(
     assert not [path for path in restore_target.iterdir() if ".restore-" in path.name]
 
 
+@pytest.mark.release_integration
 def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_failure(
     tmp_path: Path,
 ):
@@ -3105,6 +3134,7 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
     assert not list(adoption_install.glob(".env.restore-postgres.*"))
 
 
+@pytest.mark.release_integration
 def test_online_upgrade_verifies_signed_manifest_before_downloading_archive(tmp_path: Path):
     current_payload = _build_payload_for_version(tmp_path, RELEASE_VERSION)
     next_version = NEXT_VERSION
@@ -3188,6 +3218,7 @@ def test_online_upgrade_verifies_signed_manifest_before_downloading_archive(tmp_
     assert "--certificate-oidc-issuer https://gitlab.com" in docker_log
 
 
+@pytest.mark.release_integration
 def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(tmp_path: Path):
     current_payload = _build_payload_for_version(tmp_path, RELEASE_VERSION)
     next_version = NEXT_VERSION

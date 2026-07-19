@@ -1125,18 +1125,16 @@ def _post_pty_run(
     stop_text: list[str] | None = None,
     stop_patterns: list[str] | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
-    payload = json.dumps({"command": command, "rows": 24, "cols": 100}).encode("utf-8")
-    start_req = urllib.request.Request(
+    start_status, started = _json_request(
         f"{base_url}/pty/runs",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "X-Session-ID": session_id,
-        },
+        session_id=session_id,
         method="POST",
+        payload={"command": command, "rows": 24, "cols": 100},
+        timeout=timeout,
     )
-    with urllib.request.urlopen(start_req, timeout=timeout) as resp:
-        started = json.loads(resp.read().decode("utf-8"))
+    assert start_status == 202, (
+        f"PTY start failed for {command!r}: HTTP {start_status}: {started}"
+    )
     run_id = str(started.get("run_id", ""))
     stream_url = str(started.get("stream", ""))
     if stream_url.startswith("/"):
@@ -1298,12 +1296,15 @@ def container_smoke_test():
         if "/data" not in tmpfs_mounts:
             tmpfs_mounts.append("/data")
         shell["tmpfs"] = tmpfs_mounts
-        shell["environment"] = [
-            "RAW_PACKET_SCANNING_ENABLED=true"
-            if str(item).startswith("RAW_PACKET_SCANNING_ENABLED=")
-            else item
-            for item in shell.get("environment", [])
-        ]
+        smoke_environment = []
+        for item in shell.get("environment", []):
+            value = str(item)
+            if value.startswith("RAW_PACKET_SCANNING_ENABLED="):
+                value = "RAW_PACKET_SCANNING_ENABLED=true"
+            elif value.startswith("INTERACTIVE_PTY_ENABLED="):
+                value = "INTERACTIVE_PTY_ENABLED=true"
+            smoke_environment.append(value)
+        shell["environment"] = smoke_environment
         shell["environment"].append("APP_LOCAL_CONF_DIR=/config")
         compose_cfg["services"]["raw-target"] = {
             "image": runtime_image_tag,
@@ -1578,8 +1579,7 @@ def test_container_smoke_test_workflow_capture_feeds_linked_run(container_smoke_
     )
 
     assert execution["status"] == "completed", execution
-    variables = cast(dict[str, Any], execution["variables"])
-    assert str(variables["status_line"]).startswith("HTTP/")
+    assert "variables" not in execution
     steps = cast(list[dict[str, Any]], execution["steps"])
     assert [step["status"] for step in steps] == ["succeeded", "succeeded"]
     assert steps[0]["capture_names"] == ["status_line"]

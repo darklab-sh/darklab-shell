@@ -226,6 +226,18 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
+Use `npm run test:pytest:fast` for a quicker backend loop while you're editing.
+It leaves the slower installer, publication, signing, and backup/restore checks
+for `npm run test:pytest:release`. These two commands are the same required
+lanes CI runs in parallel, and a collection guard makes sure they remain an
+exact split of the suite. Run the unchanged `npm run test:pytest` command before
+merging or releasing; the fast lane isn't a substitute for that complete serial
+check. For one area, pass the file directly to the approved helper:
+
+```bash
+bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py/test_routes.py -v
+```
+
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
 integration tests against isolated test schemas. The helper uses
@@ -264,7 +276,7 @@ The checks and their scope:
 |---|---|---|---|
 | Python style | `ruff check` | `app/`, `tests/py/`, source-license checker | `npm run lint:py` |
 | Python security | `bandit` | `app/` | `python -m bandit -r app/ -ll -q` |
-| Python tests | `pytest` | `tests/py/` | `npm run test:pytest` |
+| Python tests | `pytest` | `tests/py/` | `npm run test:pytest` (complete) or `npm run test:pytest:fast` (iteration) |
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
 | JS style | `eslint` | `app/static/js/`, `tests/js/`, `.tooling/`, `scripts/` | `npm run lint:js` |
@@ -378,8 +390,6 @@ Before creating a candidate tag, change every release-version source to the same
 The Docker Hub repository overview is maintained from `deploy/dockerhub-overview.txt`. Paste that reviewed text into the public repository overview before the protected tag runs; the anonymous post-release check reads Docker Hub's public repository API and fails when the expected GitLab OIDC issuer or semantic-version certificate-identity regexp is missing.
 
 Three compatibility gates are available on protected tags. The native GitLab-hosted runner tagged `saas-linux-small-arm64` uses an uncached, version-matched Docker-in-Docker build with a conservative `1360` MTU and `RELEASE_ARM64_COMPATIBILITY_ENABLED=1`. The SELinux-enforcing Fedora shell runner `baku`, selected by the `selinux`, `self-managed`, and `baku` tags, uses `RELEASE_SELINUX_COMPATIBILITY_ENABLED=1`. The non-root Debian shell runner `baal`, selected by the `podman`, `self-managed`, and `baal` tags, uses `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED=1`. Protected project variables enable all three for the v2.6.0 release chain and override the checked-in `0` defaults. These jobs passed the protected release candidates and block Docker Hub promotion on a failed architecture, packaged-tool execution, relabeled `/config`, `/data`, or `/workspaces` bind, durable restart, unprivileged SYN capability, or repository-free startup check. Scheduled fanout pipelines serialize the AMD64 registry-cache writer, warm each standard and SELinux runner's local Docker daemon, and warm `baal` through its rootless Podman image store.
-
-To confirm that the AMD64 release cache works across runners, create a schedule for the protected active release branch with `RELEASE_CACHE_PROBE=1`. The focused pipeline exports the release-line cache through a fresh BuildKit container on `bael`, then imports that exact probe cache through another fresh builder on `botis`. Ordinary test, lint, audit, and branch-image jobs stay out of this schedule. Both jobs retain their plain BuildKit logs, resolved Python base manifest, cache references, runner name, and build time; the reuse job fails unless the expensive Go, native, Ruby, and large-asset steps are reported as cached. The probe cache tag includes the pipeline ID so concurrent checks can't overwrite one another and can be removed later by the registry cleanup policy.
 
 Release verification failures name the stage, invariant, expected value, and a bounded actual value without printing registry credentials or token-bearing URLs. The canonical build and Docker Hub promotion retain only their allowlisted manifests, measurements, copy output, and bounded status summaries when a later check fails; Docker client configuration and credentials are never release artifacts.
 

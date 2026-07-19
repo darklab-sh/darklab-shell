@@ -83,6 +83,39 @@ def make_test_app(*, init_db: bool = True):
     return flask_app
 
 
+_REUSABLE_TEST_APPS = {}
+_REUSABLE_TEST_APP_CONFIGS = {}
+
+
+def reusable_test_app(scope: str, *, init_db: bool = True):
+    """Return an opt-in shared app for stable route tests.
+
+    Callers still create a function-scoped client and must not mutate extension
+    registration, request hooks, logging, imports, or construction-time config.
+    Those contracts continue to use ``make_test_app()`` directly.
+    """
+    key = (scope, init_db)
+    if key not in _REUSABLE_TEST_APPS:
+        flask_app = make_test_app(init_db=init_db)
+        _REUSABLE_TEST_APPS[key] = flask_app
+        _REUSABLE_TEST_APP_CONFIGS[key] = dict(flask_app.config)
+    return _REUSABLE_TEST_APPS[key]
+
+
+def reset_reusable_test_apps() -> None:
+    """Restore mutable Flask config while retaining immutable app wiring."""
+    for key, flask_app in _REUSABLE_TEST_APPS.items():
+        flask_app.config.clear()
+        flask_app.config.update(_REUSABLE_TEST_APP_CONFIGS[key])
+
+
+@pytest.fixture(autouse=True)
+def _reset_reusable_test_app_config():
+    reset_reusable_test_apps()
+    yield
+    reset_reusable_test_apps()
+
+
 def _configured_postgres_dsn(config) -> str:
     option_value = str(config.getoption("--postgres-dsn") or "").strip()
     env_value = str(os.environ.get(POSTGRES_DSN_ENV) or "").strip()
@@ -108,8 +141,16 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
+        "release_integration: slower release-boundary coverage for release workflows",
+    )
+    config.addinivalue_line(
+        "markers",
         "postgres: opt-in tests that require DARKLAB_TEST_POSTGRES_DSN or --postgres-dsn",
     )
+    xmlpath = getattr(config.option, "xmlpath", None)
+    if xmlpath and not Path(xmlpath).is_absolute():
+        config.option.xmlpath = str(ROOT_DIR / xmlpath)
+
     # The container smoke test writes its own XML report because it is usually
     # run in isolation from the rest of the suite and benefits from a stable path.
     if getattr(config.option, "xmlpath", None):

@@ -15,11 +15,18 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Backend test feedback arrives sooner without reducing release coverage** — The unchanged complete pytest command now has complementary fast and release-integration selections that GitLab runs as required concurrent jobs. An exact node-ID partition guard prevents skipped or duplicated coverage, each lane retains JUnit plus slow-test and file-level timing reports, stable route tests reuse reset applications with fresh clients, and asset working-directory checks avoid duplicate production compression while a focused sidecar test and the full committed-asset check preserve Brotli/gzip coverage.
+
 - **Scheduled image builds warm every self-managed runner** — The existing `bael`, `bune`, and `botis` fanout now also builds on `babi`, `bile`, `barbas`, `beleth`, `baka`, `bana`, the SELinux-enforcing `baku` runner, and the rootless-Podman `baal` runner.
 
-- **Release image cache behavior is measurable and independently testable** — Canonical AMD64 publication retains its build or tag-reuse time, cache reference, Python base digest, image size, and pipeline identity. A focused scheduled probe exports and reuses that release-line registry cache through fresh BuildKit builders on separate runners, while release publication rejects a cache scope that doesn't match the release line. The cross-runner acceptance run completed both the export and reuse jobs in under one minute with the expensive builder stages served from cache.
+- **Release image cache behavior is measurable without permanent probe jobs** — Canonical AMD64 publication retains its build or tag-reuse time, cache reference, Python base digest, image size, and pipeline identity, while release publication rejects a cache scope that doesn't match the release line. The cross-runner acceptance run completed both cache export and reuse in under one minute with the expensive builder stages served from cache, so scheduled CI now keeps only the production cache warmers.
 
 ### Fixed
+
+- **Container smoke tests follow the public workflow contract and enable the optional PTY feature they exercise.**
+  - **Root cause:** the workflow capture smoke case still expected private execution variables after those values were removed from public responses, while Compose's disabled-by-default PTY environment switch overrode the smoke-only YAML setting.
+  - **Fix:** the workflow case now verifies that variable values stay private while successful capture names and linked steps prove the value flowed downstream. The smoke stack explicitly enables Interactive PTY, and PTY startup failures include the returned HTTP status and JSON error.
+  - **Tests:** focused workflow privacy and container PTY smoke coverage exercise the corrected contracts.
 
 - **Release publication tests are isolated from their CI runner** — The fake publisher environment clears inherited GitLab pipeline and job IDs before exercising the missing-ID fallback, while a separate retry path verifies that explicitly supplied IDs still reach the build metrics artifact.
 

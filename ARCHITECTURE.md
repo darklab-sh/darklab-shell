@@ -1970,6 +1970,8 @@ The browser test harness mirrors production constraints rather than abstracting 
 - the standalone demo/capture Playwright configs share one visual-contract file so desktop/mobile viewport, density, touch, token, and seeded-history assumptions stay aligned across recording and screenshot flows
 - each parallel browser project gets its own Flask server port plus isolated internal `APP_DATA_DIR` state so SQLite history, run-output artifacts, and limiter/process state do not collide across workers
 - backend tests keep the app’s real relative-path assumptions by changing into `app/` before imports
+- stable route-test modules opt into a reusable Flask application while keeping function-scoped clients and resetting mutable app config between cases; factory, construction-time config, logging, import, and extension-isolation contracts keep fresh applications
+- GitLab runs the serial `not release_integration` and `release_integration` pytest selections as concurrent required jobs. A node-ID collection guard proves the selections are disjoint and together equal the complete serial suite, while separate JUnit and timing artifacts keep slow files visible.
 - the browser suite also carries focused regressions for the split welcome specs, pipe-stage autocomplete, and the responsive FAQ limits renderer because those are easiest to verify in the real UI
 
 Keep suite purposes, live inventory commands, focused run commands, and maintenance notes in [tests/README.md](tests/README.md). Keep the rationale behind this layered split in [DECISIONS.md](DECISIONS.md).

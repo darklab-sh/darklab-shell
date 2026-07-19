@@ -18,6 +18,7 @@ from unittest import mock
 
 import app as shell_app_module
 from conftest import make_test_app as _test_app
+from conftest import reusable_test_app
 import config
 import core.process as process
 from core.database import DB_PATH
@@ -33,7 +34,7 @@ if str(CLI_SRC) not in sys.path:
 
 
 def get_client():
-    return _test_app().test_client()
+    return reusable_test_app(__name__).test_client()
 
 
 class _LiveCliServer:

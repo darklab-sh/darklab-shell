@@ -76,6 +76,7 @@ npx playwright install
 Notes:
 
 - `npm run test:pytest` uses `.venv/bin/pytest` automatically when the repo virtualenv exists
+- `npm run test:pytest:fast` skips only the scenarios marked `release_integration`; `npm run test:pytest:release` runs those release-boundary scenarios on their own
 - keep the Python virtualenv active for lint and backend debugging work
 - `Vitest` and `Playwright` use the repo-local npm dependencies; do not rely on global installs
 - most day-to-day test work does not require Docker
@@ -86,7 +87,7 @@ Notes:
 
 ## Running the Suites
 
-Run the full sets:
+Run the full sets before merging or releasing:
 
 ```bash
 npm run test:pytest
@@ -94,6 +95,20 @@ npm run test:unit
 npm run test:e2e:source
 npm run test:e2e
 ```
+
+For a quicker backend loop while you're editing, run:
+
+```bash
+npm run test:pytest:fast
+```
+
+The fast command covers normal backend and route behavior. The complementary
+`npm run test:pytest:release` command covers slower repository-free installers,
+publication, signing, and backup/restore paths. CI runs both required serial
+lanes at the same time, retains separate JUnit, slow-test, and file-timing
+reports, and verifies that their node IDs are disjoint and add up to the
+unchanged complete suite. Use `npm run test:pytest`, not just the fast command,
+for the final local backend check.
 
 Run focused slices while iterating:
 
@@ -146,8 +161,9 @@ A practical local loop is usually:
 
 1. run the narrowest relevant `pytest` or `Vitest` file while iterating
 2. run the matching focused `Playwright` spec if the behavior is browser-visible
-3. run the full suite slice for the touched layer before pushing
-4. run the container smoke test only when the change can affect the built image or installed tools
+3. use `npm run test:pytest:fast` for broad backend feedback while iterating
+4. run the complete suite slice for the touched layer before pushing
+5. run the container smoke test only when the change can affect the built image or installed tools
 
 ---
 
@@ -157,7 +173,7 @@ These summaries explain what belongs in each layer. Use the live-listing command
 
 ### Pytest
 
-`tests/py/` covers backend contracts, route behavior, persistence, loaders, configuration/theme resolution, command validation, diagnostics gating, and structured logging.
+`tests/py/` covers backend contracts, route behavior, persistence, loaders, configuration/theme resolution, command validation, diagnostics gating, and structured logging. Stable route modules reuse an application with a fresh client and reset Flask config for each test; application-factory, construction-time configuration, logging, import, and extension-isolation tests still create independent applications.
 
 ### Vitest
 

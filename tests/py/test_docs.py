@@ -470,6 +470,7 @@ class TestProjectStructureCoverage:
 
         assert not offenders, "Tests must build Flask apps through create_app():\n" + "\n".join(offenders)
 
+    @pytest.mark.release_integration
     def test_asset_build_output_does_not_depend_on_cwd(self, tmp_path):
         if shutil.which("node") is None:
             pytest.skip("node is not available")
@@ -480,14 +481,14 @@ class TestProjectStructureCoverage:
         scripts_out = tmp_path / "from-scripts"
         script = _REPO_ROOT / "scripts" / "build_assets.mjs"
         subprocess.run(
-            ["node", str(script), "--out-dir", str(root_out)],
+            ["node", str(script), "--out-dir", str(root_out), "--no-precompress"],
             cwd=str(_REPO_ROOT),
             capture_output=True,
             text=True,
             check=True,
         )
         subprocess.run(
-            ["node", str(script), "--out-dir", str(scripts_out)],
+            ["node", str(script), "--out-dir", str(scripts_out), "--no-precompress"],
             cwd=str(_REPO_ROOT / "scripts"),
             capture_output=True,
             text=True,
@@ -495,6 +496,7 @@ class TestProjectStructureCoverage:
         )
         root_files = sorted(path.relative_to(root_out) for path in root_out.rglob("*") if path.is_file())
         scripts_files = sorted(path.relative_to(scripts_out) for path in scripts_out.rglob("*") if path.is_file())
+        assert not any(str(path).endswith((".br", ".gz")) for path in root_files + scripts_files)
         changed = [
             str(path)
             for path in root_files
@@ -509,6 +511,48 @@ class TestProjectStructureCoverage:
             + "\n"
             + "\n".join(f"  scripts-only: {path}" for path in sorted(set(scripts_files) - set(root_files)))
         )
+
+    def test_committed_asset_sidecars_roundtrip_to_source_bytes(self):
+        if shutil.which("node") is None:
+            pytest.skip("node is not available")
+
+        verification = r"""
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+const root = process.argv[1];
+const extensions = new Set(['.css', '.js', '.json', '.map', '.svg']);
+const files = fs.readdirSync(root).filter((name) => {
+  const fullPath = path.join(root, name);
+  return fs.statSync(fullPath).isFile()
+    && extensions.has(path.extname(name))
+    && fs.statSync(fullPath).size >= 100
+    && name !== 'manifest.json';
+});
+for (const name of files) {
+  const source = fs.readFileSync(path.join(root, name));
+  const brPath = path.join(root, `${name}.br`);
+  const gzPath = path.join(root, `${name}.gz`);
+  if (!fs.existsSync(brPath) || !fs.existsSync(gzPath)) {
+    throw new Error(`missing compressed sidecar for ${name}`);
+  }
+  if (!zlib.brotliDecompressSync(fs.readFileSync(brPath)).equals(source)) {
+    throw new Error(`Brotli sidecar does not match ${name}`);
+  }
+  if (!zlib.gunzipSync(fs.readFileSync(gzPath)).equals(source)) {
+    throw new Error(`gzip sidecar does not match ${name}`);
+  }
+}
+if (files.length === 0) throw new Error('no precompressed assets were checked');
+"""
+        result = subprocess.run(
+            ["node", "-e", verification, str(_REPO_ROOT / "app" / "static" / "build")],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
 
     def test_asset_build_logs_esm_bundle_failure_context(self):
         script = (_REPO_ROOT / "scripts" / "build_assets.mjs").read_text(encoding="utf-8")

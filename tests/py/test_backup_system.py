@@ -19,6 +19,9 @@ import tarfile
 
 import pytest
 
+
+pytestmark = pytest.mark.release_integration
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = ROOT / "scripts" / "backup_system.py"
 SPEC = importlib.util.spec_from_file_location("backup_system", SCRIPT_PATH)

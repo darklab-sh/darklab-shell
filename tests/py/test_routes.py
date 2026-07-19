@@ -37,6 +37,7 @@ import unittest.mock as mock
 import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
+from conftest import reusable_test_app
 import blueprints.assets as shell_assets
 import blueprints.history as history_routes
 import blueprints.projects as project_routes
@@ -120,7 +121,7 @@ def _assert_no_audit_private_export_strings(text: str) -> None:
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def get_client(*, use_forwarded_for=True):
-    client = _test_app().test_client()
+    client = reusable_test_app(__name__).test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client

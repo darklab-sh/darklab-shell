@@ -9,7 +9,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Open TODOs](#open-todos)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
-  - [Reduce pytest feedback time without weakening release coverage](#reduce-pytest-feedback-time-without-weakening-release-coverage)
+  - [Validate split pytest timing on project runners](#validate-split-pytest-timing-on-project-runners)
   - [Organize script entrypoints and implementation helpers](#organize-script-entrypoints-and-implementation-helpers)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
@@ -42,21 +42,12 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-### Reduce pytest feedback time without weakening release coverage
+### Validate split pytest timing on project runners
 
-The backend suite now takes about 150 seconds even though collecting its roughly 2,400 cases takes only about a second. A July 2026 profiling pass found three costs worth addressing:
+The complete backend suite now has exact fast and release-integration partitions, separate CI timing artifacts, cheaper asset determinism coverage, and opt-in reusable applications for stable route modules. Keep the timing reports informational while the new jobs establish their normal range.
 
-- Ordinary route tests build a fresh Flask app for nearly every test client. `create_app()` takes about 59 ms under the test configuration, and the suite has roughly 770 direct or helper-mediated app construction sites.
-- `TestProjectStructureCoverage.test_asset_build_output_does_not_depend_on_cwd` runs the complete ESM asset build twice and takes about 25 seconds. Each build also creates the production Brotli and gzip sidecars.
-- `test_production_install.py` takes about 23 seconds because it exercises archive, signing, publication, installer, upgrade, and restore flows through subprocesses.
-
-- [ ] Reuse a module- or session-scoped Flask app for ordinary route tests, with deliberate cleanup of mutable config, extension, database, and request state between cases. Keep focused factory tests that build independent apps and verify application-factory isolation.
-- [ ] Make the asset working-directory determinism check exercise the generated asset graph without paying for production precompression twice. A no-precompression build mode plus focused Brotli/gzip coverage is the preferred starting point; the full committed-asset check must remain in CI.
-- [ ] Give the production installer and release-publication scenarios an explicit integration/slow marker and a dedicated full-suite lane. Keep a fast developer pytest command for routine feedback while CI and release validation continue to run the complete coverage.
-- [ ] Publish a pytest duration report in CI so new slow tests and file-level runtime changes are visible before they accumulate.
-- [ ] Reconsider parallel pytest execution only after mutable application config, SQLite state, logging globals, and extension state are isolated well enough to avoid order-dependent failures.
-
-**Done when:** the documented fast pytest path is materially quicker, the complete suite still covers fresh application factories, production asset output, and release installation, and CI makes future runtime regressions easy to spot.
+- [ ] Record at least three comparable CI pipelines and confirm the first required pytest result arrives at least 50% sooner than the previous 433-second full job.
+- [ ] Confirm five consecutive pipelines pass without order dependence or leaked state, then record the observed fast, release-integration, and complete-suite medians here before closing this validation item.
 
 ### Organize script entrypoints and implementation helpers
 

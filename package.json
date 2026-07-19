@@ -6,6 +6,9 @@
   "scripts": {
     "test": "npm run test:pytest && npm run test:unit && npm run test:e2e:source && npm run test:e2e",
     "test:pytest": "bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py",
+    "test:pytest:fast": "bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. -m 'not release_integration' tests/py",
+    "test:pytest:release": "bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. -m release_integration tests/py",
+    "test:pytest:partitions": "python scripts/check_pytest_partitions.py",
     "test:postgres": "bash scripts/run_postgres_tests.sh",
     "test:unit": "vitest run --config .tooling/vitest.config.js",
     "test:unit:watch": "vitest --config .tooling/vitest.config.js",
@@ -15,7 +18,7 @@
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
     "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",
     "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check && npm run assets:check && npm run assets:inventory:check",
-    "lint:py": "ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/backup_system.py scripts/build_release_evidence.py scripts/build_release_payload.py scripts/check_source_licenses.py scripts/restore_system.py && bandit -r app/ -ll -q && python scripts/check_source_licenses.py",
+    "lint:py": "ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/backup_system.py scripts/build_release_evidence.py scripts/build_release_payload.py scripts/check_pytest_partitions.py scripts/check_source_licenses.py scripts/restore_system.py scripts/summarize_pytest_junit.py && bandit -r app/ -ll -q && python scripts/check_source_licenses.py",
     "lint:js": "npx eslint --no-warn-ignored --config .tooling/eslint.config.js tests/js/ .tooling/ scripts/ app/static/js/",
     "lint:css": "stylelint \"app/static/css/**/*.css\" --config .tooling/stylelint.config.mjs",
     "lint:shell": "shellcheck $(find . -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' | xargs grep -lE '^#!/.*(bash|sh)') deploy/setup.sh.in deploy/darklab-deploy.sh.in",
@@ -32,7 +35,7 @@
     "assets:inventory": "node scripts/inventory_frontend_modules.mjs",
     "assets:inventory:check": "node scripts/inventory_frontend_modules.mjs --check",
     "assets:sync": "node scripts/build_assets.mjs",
-    "assets:check": "tmp=$(mktemp -d) && node scripts/build_assets.mjs --out-dir \"$tmp\" --check && tmp_cwd=$(mktemp -d) && (cd scripts && node build_assets.mjs --out-dir \"$tmp_cwd\") && diff -qr \"$tmp\" \"$tmp_cwd\""
+    "assets:check": "tmp=$(mktemp -d) && node scripts/build_assets.mjs --out-dir \"$tmp\" --check && root_cwd=$(mktemp -d) && scripts_cwd=$(mktemp -d) && node scripts/build_assets.mjs --out-dir \"$root_cwd\" --no-precompress && (cd scripts && node build_assets.mjs --out-dir \"$scripts_cwd\" --no-precompress) && diff -qr \"$root_cwd\" \"$scripts_cwd\""
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",

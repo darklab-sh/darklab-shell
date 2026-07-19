@@ -149,6 +149,12 @@ EOF
 if [ "${#pytest_args[@]}" -eq 0 ]; then
   pytest_args=("${default_args[@]}")
 fi
+if [ -n "${PYTEST_JUNIT_XML:-}" ]; then
+  pytest_args+=("--junitxml=${PYTEST_JUNIT_XML}")
+fi
+if [ -n "${PYTEST_DURATIONS:-}" ]; then
+  pytest_args+=("--durations=${PYTEST_DURATIONS}")
+fi
 
 if [ "$mode" = "wait" ]; then
   if [ -z "${DARKLAB_TEST_POSTGRES_DSN:-}" ]; then

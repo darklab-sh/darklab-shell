@@ -38,6 +38,7 @@ const ESBUILD_WORKING_DIR = ROOT;
 const args = process.argv.slice(2);
 let outDir = resolve(ROOT, 'app/static/build');
 let checkOnly = false;
+let precompress = true;
 const buildStartedAt = Date.now();
 
 for (let i = 0; i < args.length; i += 1) {
@@ -47,6 +48,8 @@ for (let i = 0; i < args.length; i += 1) {
     i += 1;
   } else if (arg === '--check') {
     checkOnly = true;
+  } else if (arg === '--no-precompress') {
+    precompress = false;
   } else {
     throw new Error(`Unknown argument: ${arg}`);
   }
@@ -204,7 +207,7 @@ function writeBuildAsset(filename, content) {
   const outputPath = resolve(outDir, filename);
   const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
   writeFileSync(outputPath, content);
-  if (!shouldPrecompress(filename)) return;
+  if (!precompress || !shouldPrecompress(filename)) return;
   for (const [suffix, compressed] of Object.entries(precompressedVariants(buffer))) {
     if (!shouldWritePrecompressedVariant(buffer)) continue;
     writeFileSync(`${outputPath}.${suffix}`, compressed);
@@ -845,5 +848,6 @@ console.info('[assets] build completed', {
   lazy_esm_count: appLazySources.length,
   output_dir: relative(ROOT, outDir),
   check_only: checkOnly,
+  precompress,
   duration_ms: Date.now() - buildStartedAt,
 });

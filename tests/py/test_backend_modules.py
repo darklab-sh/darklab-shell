@@ -62,6 +62,7 @@ import runtime_bootstrap
 import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
+from conftest import reset_reusable_test_apps, reusable_test_app
 import config as app_config
 import config_paths
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
@@ -15372,6 +15373,29 @@ class TestSessionWorkspace:
 
 
 class TestEntrypointWorkspaceRepair:
+    def test_reusable_route_app_resets_config_and_keeps_clients_isolated(self):
+        first = reusable_test_app("reset-contract")
+        same = reusable_test_app("reset-contract")
+        other = reusable_test_app("separate-contract")
+        fresh = _test_app()
+        before_hooks = sum(len(handlers) for handlers in first.before_request_funcs.values())
+        original_name = first.config["APPLICATION_ROOT"]
+
+        first.config["APPLICATION_ROOT"] = "/mutated"
+        reset_reusable_test_apps()
+
+        assert same is first
+        assert other is not first
+        assert fresh is not first
+        assert first.config["APPLICATION_ROOT"] == original_name
+        assert sum(len(handlers) for handlers in first.before_request_funcs.values()) == before_hooks
+
+        first_client = first.test_client()
+        second_client = first.test_client()
+        first_client.set_cookie("reset-contract", "private")
+        assert first_client.get_cookie("reset-contract") is not None
+        assert second_client.get_cookie("reset-contract") is None
+
     def test_app_import_and_factory_are_side_effect_free_until_bootstrap(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

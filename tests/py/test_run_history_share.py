@@ -27,7 +27,7 @@ import pytest
 import app as shell_app_module
 import config as app_config
 from conftest import build_test_config
-from conftest import make_test_app as _test_app
+from conftest import reusable_test_app
 import blueprints.run as run_routes
 import core.database as shell_db
 import services.secrets.storage as secrets_storage
@@ -43,7 +43,7 @@ from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 # the real SQLite/artifact flow rather than heavy mocking.
 
 def get_client(*, use_forwarded_for=True):
-    client = _test_app().test_client()
+    client = reusable_test_app(__name__).test_client()
     if use_forwarded_for:
         token = uuid.uuid4().hex
         client.environ_base["HTTP_X_FORWARDED_FOR"] = (
