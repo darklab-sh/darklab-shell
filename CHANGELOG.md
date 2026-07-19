@@ -17,9 +17,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Scheduled image builds warm every self-managed runner** — The existing `bael`, `bune`, and `botis` fanout now also builds on `babi`, `bile`, `barbas`, `beleth`, `baka`, `bana`, the SELinux-enforcing `baku` runner, and the rootless-Podman `baal` runner.
 
-- **Release image cache behavior is measurable and independently testable** — Canonical AMD64 publication retains its build or tag-reuse time, cache reference, Python base digest, image size, and pipeline identity. A focused scheduled probe exports and reuses that release-line registry cache through fresh BuildKit builders on separate runners, while release publication rejects a cache scope that doesn't match the release line.
+- **Release image cache behavior is measurable and independently testable** — Canonical AMD64 publication retains its build or tag-reuse time, cache reference, Python base digest, image size, and pipeline identity. A focused scheduled probe exports and reuses that release-line registry cache through fresh BuildKit builders on separate runners, while release publication rejects a cache scope that doesn't match the release line. The cross-runner acceptance run completed both the export and reuse jobs in under one minute with the expensive builder stages served from cache.
 
 ### Fixed
+
+- **Release publication tests are isolated from their CI runner** — The fake publisher environment clears inherited GitLab pipeline and job IDs before exercising the missing-ID fallback, while a separate retry path verifies that explicitly supplied IDs still reach the build metrics artifact.
 
 - **Workspace terminal commands load existing files on first use** — `ls`, `ll`, and `file list` now load the lazy Files state before reading it, so an initial listing no longer appears empty until the Files modal has been opened.
 

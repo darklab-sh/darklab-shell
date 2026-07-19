@@ -477,6 +477,8 @@ def _run_release_publisher(
     bin_dir, log_path = _fake_release_tools(tmp_path)
     digest = "sha256:" + "a" * 64
     env = os.environ.copy()
+    for variable_name in ("CI_PIPELINE_ID", "CI_JOB_ID"):
+        env.pop(variable_name, None)
     env.update({
         "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
         "CI_COMMIT_TAG": _release_tag(RELEASE_VERSION),
@@ -1977,6 +1979,8 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
         gitlab_retry_dir,
         "gitlab-image",
         FAKE_EXISTING_DIGEST=digest,
+        CI_PIPELINE_ID="pipeline-123",
+        CI_JOB_ID="job-456",
     )
     assert gitlab_retry.returncode == 0, gitlab_retry.stderr
     assert "Reusing canonical GitLab image" in gitlab_retry.stdout
@@ -1993,6 +1997,8 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     assert retry_metrics["image_action"] == "reuse"
     assert retry_metrics["reused_existing_tag"] == "true"
     assert retry_metrics["build_seconds"] == "0"
+    assert retry_metrics["pipeline_id"] == "pipeline-123"
+    assert retry_metrics["job_id"] == "job-456"
 
     gitlab_conflict = _run_release_publisher(
         tmp_path / "gitlab-conflict",

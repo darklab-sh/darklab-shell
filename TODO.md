@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Shorten release image builds and failure feedback](#shorten-release-image-builds-and-failure-feedback)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Reduce pytest feedback time without weakening release coverage](#reduce-pytest-feedback-time-without-weakening-release-coverage)
@@ -33,12 +32,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-### Shorten release image builds and failure feedback
-
-The multi-stage image, early vulnerability gate, release-line AMD64 registry cache, uncached native ARM64 policy, and complete compatibility and supply-chain checks shipped in v2.6.0. Release feedback dropped from roughly 80–90 minutes to 40–45 minutes, and the runtime image no longer carries its build toolchains or caches. BuildKit cache mounts and a separately published scanner base aren't planned because the added complexity isn't justified by the measured result.
-
-- [ ] Run a scheduled pipeline on the protected active release branch with `RELEASE_CACHE_PROBE=1`. Confirm `release-cache-probe-amd64-export` passes on `bael`, then `release-cache-probe-amd64-reuse` passes on `botis` with every tracked expensive builder step reported as `CACHED`.
-- [ ] Record both probe durations and retain the plain BuildKit logs long enough to confirm the cache import, export, Python base digest, and remaining uncached work. Remove this section after the cross-runner result is confirmed.
+No open TODOs are currently tracked.
 
 ## Known Issues
 
