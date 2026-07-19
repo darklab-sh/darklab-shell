@@ -25,6 +25,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Bundled Go tool upgrades keep the requested release while enforcing the security floor.**
+  - **Root cause:** the shared installer selected each pinned tool before forcing the reviewed `golang.org/x/crypto` version. Go could satisfy the later request by downgrading a tool whose newer release required a newer crypto module, which made `httpx` v1.10.0 resolve and build as v1.9.0.
+  - **Fix:** the installer establishes the crypto version as a minimum first, selects the pinned tool second, and rejects any mismatch in either the selected module graph or the finished binary's embedded module metadata. A tool can still raise `x/crypto` above the baseline when required. DNSX v1.3.0's `-version` banner remains an upstream 1.2.3 string, so the embedded module version is the reliable build identity.
+  - **Tests:** focused installer coverage verifies dependency ordering and fails on both graph-level and embedded-binary downgrades, while the runtime-image contract keeps the checks in every Go builder stage.
+
 - **Container smoke tests follow the public workflow contract and enable the optional PTY feature they exercise.**
   - **Root cause:** the workflow capture smoke case still expected private execution variables after those values were removed from public responses, while Compose's disabled-by-default PTY environment switch overrode the smoke-only YAML setting.
   - **Fix:** the workflow case now verifies that variable values stay private while successful capture names and linked steps prove the value flowed downstream. The smoke stack explicitly enables Interactive PTY, and PTY startup failures include the returned HTTP status and JSON error.

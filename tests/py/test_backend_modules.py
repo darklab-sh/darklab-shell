@@ -22980,8 +22980,8 @@ class TestAutocompleteContextLoading:
 
         for arg_name, version, smoke_command in (
             ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
-            ("CDNCHECK_VERSION", "v1.2.43", "cdncheck -h"),
-            ("TRUFFLEHOG_VERSION", "v3.95.8", "trufflehog --help"),
+            ("CDNCHECK_VERSION", "v1.2.45", "cdncheck -h"),
+            ("TRUFFLEHOG_VERSION", "v3.95.9", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
         ):

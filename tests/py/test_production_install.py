@@ -715,6 +715,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
     entrypoint = (ROOT / "entrypoint.sh").read_text(encoding="utf-8")
+    go_installer = (ROOT / "scripts" / "container" / "install_go_tool.sh").read_text(
+        encoding="utf-8"
+    )
     image_smoke = (
         ROOT / "scripts" / "release" / "verify_repository_free_image.sh"
     ).read_text(
@@ -772,9 +775,16 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG GOSU_VERSION=1.19" in dockerfile
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
     assert 'install-go-tool "github.com/projectdiscovery/chaos-client' in dockerfile
-    assert "go get \"golang.org/x/crypto@${GO_X_CRYPTO_VERSION}\"" in (
-        ROOT / "scripts" / "container" / "install_go_tool.sh"
-    ).read_text(encoding="utf-8")
+    crypto_floor = 'go get "golang.org/x/crypto@${GO_X_CRYPTO_VERSION}"'
+    tool_selection = 'go get "$tool_spec"'
+    assert crypto_floor in go_installer
+    assert tool_selection in go_installer
+    assert go_installer.index(crypto_floor) < go_installer.index(tool_selection)
+    assert 'selected_version=$(go list -m -f \'{{.Version}}\' "$module_path")' in go_installer
+    assert 'expected_version=$(go list -m -f \'{{.Version}}\'' in go_installer
+    assert 'go version -m "$target"' in go_installer
+    assert "Go tool module version mismatch" in go_installer
+    assert "Go tool embedded module version mismatch" in go_installer
     assert "go -C /tmp/gosu build -trimpath -o /out/usr/sbin/gosu" in dockerfile
     assert " apt-get install -y --no-install-recommends" in dockerfile
     assert " sudo gosu " not in dockerfile
@@ -965,6 +975,140 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     assert "deploy/setup.sh.in" in package["scripts"]["lint:shell"]
     assert "deploy/darklab-deploy.sh.in" in package["scripts"]["lint:shell"]
+
+
+def _run_fake_go_tool_installer(
+    tmp_path: Path,
+    *,
+    selected_version: str,
+    embedded_version: str,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    fake_bin = tmp_path / "fake-go-bin"
+    fake_bin.mkdir()
+    log_path = tmp_path / "fake-go.log"
+    target = tmp_path / "out" / "httpx"
+    go_path = fake_bin / "go"
+    go_path.write_text(
+        """#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_GO_LOG"
+
+case "$1" in
+    mod|get)
+        exit 0
+        ;;
+    install)
+        mkdir -p "$(dirname "$FAKE_GO_TARGET")"
+        printf '#!/bin/sh\\nexit 0\\n' > "$FAKE_GO_TARGET"
+        chmod 0755 "$FAKE_GO_TARGET"
+        ;;
+    list)
+        if [ "$2" = "-f" ]; then
+            case "$3" in
+                *Module.Path*) printf '%s\\n' "$FAKE_GO_MODULE" ;;
+                *Target*) printf '%s\\n' "$FAKE_GO_TARGET" ;;
+                *) exit 90 ;;
+            esac
+        elif [ "$2" = "-m" ]; then
+            candidate=$5
+            if [ "$candidate" = "golang.org/x/crypto" ]; then
+                printf '%s\\n' "$FAKE_GO_X_CRYPTO_VERSION"
+            elif [ "$candidate" = "${FAKE_GO_MODULE}@${FAKE_GO_REQUESTED_VERSION}" ]; then
+                printf '%s\\n' "$FAKE_GO_EXPECTED_VERSION"
+            elif [ "$candidate" = "$FAKE_GO_MODULE" ]; then
+                printf '%s\\n' "$FAKE_GO_SELECTED_VERSION"
+            else
+                exit 91
+            fi
+        else
+            exit 92
+        fi
+        ;;
+    version)
+        test "$2" = "-m"
+        printf '%s: go1.26.5\\n' "$FAKE_GO_TARGET"
+        printf '\\tpath\\t%s\\n' "$FAKE_GO_PACKAGE"
+        printf '\\tmod\\t%s\\t%s\\th1:test\\n' "$FAKE_GO_MODULE" "$FAKE_GO_EMBEDDED_VERSION"
+        ;;
+    *)
+        exit 93
+        ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    go_path.chmod(0o755)
+    package = "github.com/projectdiscovery/httpx/cmd/httpx"
+    module = "github.com/projectdiscovery/httpx"
+    requested_version = "v1.10.0"
+    expected_version = "v1.10.0"
+    env = {
+        **os.environ,
+        "FAKE_GO_EMBEDDED_VERSION": embedded_version,
+        "FAKE_GO_EXPECTED_VERSION": expected_version,
+        "FAKE_GO_LOG": str(log_path),
+        "FAKE_GO_MODULE": module,
+        "FAKE_GO_PACKAGE": package,
+        "FAKE_GO_REQUESTED_VERSION": requested_version,
+        "FAKE_GO_SELECTED_VERSION": selected_version,
+        "FAKE_GO_TARGET": str(target),
+        "FAKE_GO_X_CRYPTO_VERSION": "v0.53.0",
+        "GO_X_CRYPTO_VERSION": "v0.52.0",
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+    }
+    result = subprocess.run(
+        [
+            "sh",
+            str(ROOT / "scripts" / "container" / "install_go_tool.sh"),
+            f"{package}@{requested_version}",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    return result, calls
+
+
+def test_go_tool_installer_keeps_the_requested_release_above_the_crypto_floor(
+    tmp_path: Path,
+):
+    result, calls = _run_fake_go_tool_installer(
+        tmp_path,
+        selected_version="v1.10.0",
+        embedded_version="v1.10.0",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.index("get golang.org/x/crypto@v0.52.0") < calls.index(
+        "get github.com/projectdiscovery/httpx/cmd/httpx@v1.10.0"
+    )
+    assert "version=v1.10.0 x_crypto=v0.53.0" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("selected_version", "embedded_version", "expected_error"),
+    [
+        ("v1.9.0", "v1.9.0", "Go tool module version mismatch"),
+        ("v1.10.0", "v1.9.0", "Go tool embedded module version mismatch"),
+    ],
+)
+def test_go_tool_installer_rejects_a_resolved_or_embedded_downgrade(
+    tmp_path: Path,
+    selected_version: str,
+    embedded_version: str,
+    expected_error: str,
+):
+    result, _calls = _run_fake_go_tool_installer(
+        tmp_path,
+        selected_version=selected_version,
+        embedded_version=embedded_version,
+    )
+
+    assert result.returncode == 1
+    assert expected_error in result.stderr
 
 
 def test_container_license_inventory_matches_dockerfile_and_release():
