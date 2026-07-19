@@ -15,7 +15,10 @@ function trackSourceJsRequests(page) {
   page.on('request', (request) => {
     try {
       const url = new URL(request.url())
-      if (!url.pathname.startsWith('/static/js/') || !url.pathname.endsWith('.js')) return
+      if (
+        !url.pathname.endsWith('.js')
+        || (!url.pathname.startsWith('/static/js/') && !url.pathname.startsWith('/static/build/'))
+      ) return
       requests.push({ path: url.pathname, versioned: url.searchParams.has('v') })
     } catch (_) {}
   })
@@ -34,6 +37,13 @@ function duplicateSourceModuleIdentities(requests) {
     .sort()
 }
 
+function hasWorkspaceModuleRequest(requests) {
+  return requests.some(({ path }) => (
+    path.endsWith('/workspace.js')
+    || /\/static-workspace\.[a-f0-9]+\.js$/.test(path)
+  ))
+}
+
 test.describe('source-mode lazy ESM surfaces', () => {
   test.setTimeout(90_000)
 
@@ -41,6 +51,25 @@ test.describe('source-mode lazy ESM surfaces', () => {
     testInfo.sourceJsRequests = trackSourceJsRequests(page)
     await page.goto('/')
     await ensurePromptReady(page)
+  })
+
+  test('loads existing Files for the first terminal listing', async ({ page }, testInfo) => {
+    expect(hasWorkspaceModuleRequest(testInfo.sourceJsRequests)).toBe(false)
+    await page.route('**/workspace/files', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        directories: [{ name: 'reports', path: 'reports' }],
+        files: [{ name: 'targets.txt', path: 'targets.txt', size: 12, mtime: 'now' }],
+        usage: { bytes_used: 12, file_count: 1 },
+        limits: { quota_bytes: 4096, max_files: 100 },
+      }),
+    }))
+
+    await runCommand(page, 'ls')
+
+    await expect(page.locator('.tab-panel.active .output')).toContainText('reports/ targets.txt')
+    expect(hasWorkspaceModuleRequest(testInfo.sourceJsRequests)).toBe(true)
+    await expect(page.locator('#workspace-overlay')).not.toHaveClass(/\bopen\b/)
   })
 
   test('opens high-risk lazy app surfaces through user controls', async ({ page }, testInfo) => {

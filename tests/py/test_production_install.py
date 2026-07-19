@@ -1449,6 +1449,27 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "--cache-to" in amd64_warmer_script
     assert "mode=max" in amd64_warmer_script
     assert "--output type=cacheonly" in amd64_warmer_script
+    scheduled_build_tags = {
+        "docker-build-bael": ["bael"],
+        "docker-build-bune": ["bune"],
+        "docker-build-botis": ["botis"],
+        "docker-build-babi": ["babi"],
+        "docker-build-bile": ["bile"],
+        "docker-build-barbas": ["barbas"],
+        "docker-build-beleth": ["beleth"],
+        "docker-build-baka": ["baka"],
+        "docker-build-bana": ["bana"],
+        "docker-build-baku": ["selinux", "self-managed", "baku"],
+        "docker-build-baal": ["podman", "self-managed", "baal"],
+    }
+    for job_name, tags in scheduled_build_tags.items():
+        assert parsed_ci[job_name]["extends"] == ".scheduled-docker-build"
+        assert parsed_ci[job_name]["tags"] == tags
+    podman_warmer_script = "\n".join(parsed_ci["docker-build-baal"]["script"])
+    assert "podman build" in podman_warmer_script
+    assert "docker.io/library/${python_base_image}" in podman_warmer_script
+    assert '--build-arg "TARGETARCH=amd64"' in podman_warmer_script
+    assert "--format docker" in podman_warmer_script
     assert "buildcache-amd64-${cache_scope}" in publisher
     assert "--progress=plain" in publisher
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]

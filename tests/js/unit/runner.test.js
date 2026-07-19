@@ -758,6 +758,7 @@ function loadRunnerFns({
   handleSecretCommand: handleSecretCommandOverride = undefined,
   closeTab: closeTabOverride = vi.fn(),
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
+  loadWorkspaceFilesPayload: loadWorkspaceFilesPayloadOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
   downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
   moveWorkspacePath: moveWorkspacePathOverride = undefined,
@@ -944,6 +945,9 @@ function loadRunnerFns({
         : {}),
       ...(handleSecretCommandOverride ? { handleSecretCommand: handleSecretCommandOverride } : {}),
       ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
+      ...(loadWorkspaceFilesPayloadOverride
+        ? { loadWorkspaceFilesPayload: loadWorkspaceFilesPayloadOverride }
+        : {}),
       ...(openWorkspaceEditorFromCommandOverride
         ? { openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride }
         : {}),
@@ -3330,6 +3334,41 @@ describe('workspace file delete confirmation', () => {
     expect(appendLine).not.toHaveBeenCalledWith('nested/', '', 'tab-1')
     expect(appendLine).not.toHaveBeenCalledWith('a.txt', '', 'tab-1')
     expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('deep.txt'), '', 'tab-1')
+  })
+
+  it('loads the lazy Files surface before the first workspace listing', async () => {
+    delete window.DarklabWorkspaceState
+    const appendLine = vi.fn()
+    let directories = []
+    let files = []
+    const loadWorkspaceFilesPayload = vi.fn(async () => {
+      directories = [{ name: 'reports', path: 'reports' }]
+      files = [{ name: 'targets.txt', path: 'targets.txt', size: 12, mtime: 'now' }]
+    })
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      loadWorkspaceFilesPayload,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => directories.map(directory => ({
+        value: directory.path,
+        description: 'personal folder',
+      })),
+      getWorkspaceAutocompleteFileHints: () => files.map(file => ({
+        value: file.path,
+        description: 'personal file · 12 B',
+      })),
+      getWorkspaceDirectoryEntries: () => ({ folders: directories, files }),
+    })
+
+    await submitCommand('ls')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('reports/ targets.txt', '', 'tab-1'))
+    expect(loadWorkspaceFilesPayload).toHaveBeenCalledTimes(1)
+    expect(refreshWorkspaceFileCache).not.toHaveBeenCalled()
   })
 
   it('lists workspace folders recursively only when -R is present with flags in any order', async () => {

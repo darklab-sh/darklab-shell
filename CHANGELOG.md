@@ -13,7 +13,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [2.6.1] - Unreleased
 
-No changes yet.
+### Changed
+
+- **Scheduled image builds warm every self-managed runner** — The existing `bael`, `bune`, and `botis` fanout now also builds on `babi`, `bile`, `barbas`, `beleth`, `baka`, `bana`, the SELinux-enforcing `baku` runner, and the rootless-Podman `baal` runner.
+
+### Fixed
+
+- **Workspace terminal commands load existing files on first use** — `ls`, `ll`, and `file list` now load the lazy Files state before reading it, so an initial listing no longer appears empty until the Files modal has been opened.
 
 ---
 

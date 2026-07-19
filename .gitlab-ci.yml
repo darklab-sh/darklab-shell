@@ -386,6 +386,60 @@ docker-build-botis:
   tags:
     - botis
 
+docker-build-babi:
+  extends: .scheduled-docker-build
+  tags:
+    - babi
+
+docker-build-bile:
+  extends: .scheduled-docker-build
+  tags:
+    - bile
+
+docker-build-barbas:
+  extends: .scheduled-docker-build
+  tags:
+    - barbas
+
+docker-build-beleth:
+  extends: .scheduled-docker-build
+  tags:
+    - beleth
+
+docker-build-baka:
+  extends: .scheduled-docker-build
+  tags:
+    - baka
+
+docker-build-bana:
+  extends: .scheduled-docker-build
+  tags:
+    - bana
+
+docker-build-baku:
+  extends: .scheduled-docker-build
+  tags:
+    - selinux
+    - self-managed
+    - baku
+
+docker-build-baal:
+  extends: .scheduled-docker-build
+  tags:
+    - podman
+    - self-managed
+    - baal
+  script:
+    - |
+      python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
+      case "$python_base_image" in
+        */*) ;;
+        *) python_base_image="docker.io/library/${python_base_image}" ;;
+      esac
+      podman build --build-arg "PYTHON_BASE_IMAGE=${python_base_image}" \
+        --build-arg "TARGETARCH=amd64" \
+        --format docker --tag "darklab_shell:${CI_COMMIT_SHA}" .
+
 .protected-release-tag:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true"'

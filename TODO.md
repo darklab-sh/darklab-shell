@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Repository-free production installation](#repository-free-production-installation)
   - [Shorten release image builds and failure feedback](#shorten-release-image-builds-and-failure-feedback)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
@@ -33,12 +32,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ---
 
 ## Open TODOs
-
-### Repository-free production installation
-
-**Outcome:** Operators can install and run a released darklab_shell stack from a small, versioned deployment directory without cloning the source repository or building the image locally. Developers keep the current source-mounted workflow. CI publishes the canonical self-contained image to the GitLab Container Registry first, then promotes that exact image to Docker Hub for the public, user-facing pull path used by production deployments.
-
-- [ ] Publish the protected `v2.6.0` tag and confirm the final-only `release-create` job plus the complete image, compatibility, supply-chain, installer, bundled-Postgres, and anonymous public smoke chain pass. Verify the final GitLab Release links, matching registry digest, setup files, checksums, signatures, notices, SBOM, provenance, and a healthy clean install, then remove this completed plan.
 
 ### Shorten release image builds and failure feedback
 

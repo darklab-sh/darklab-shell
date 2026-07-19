@@ -18,6 +18,7 @@ import {
   getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,
   refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache,
 } from '../workspace/workspace_autocomplete_cache.js';
+import { loadWorkspaceFilesPayload as importedLoadWorkspaceFilesPayload } from '../../workspace_bridge.js';
 import {
   hasComposerPromptHandler as importedHasComposerPromptHandler,
   syncShellPrompt as importedSyncShellPrompt,
@@ -356,6 +357,15 @@ function _resolveExistingWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCw
 }
 
 async function _ensureWorkspaceCache() {
+  const state = RUNNER_WORKSPACE_GLOBAL.DarklabWorkspaceState;
+  const loadFilesPayload = (
+    typeof importedLoadWorkspaceFilesPayload !== 'undefined'
+    && importedLoadWorkspaceFilesPayload
+  ) || RUNNER_WORKSPACE_GLOBAL.loadWorkspaceFilesPayload;
+  if ((!state || state.loaded !== true) && typeof loadFilesPayload === 'function') {
+    await loadFilesPayload();
+    return;
+  }
   const refresh = _workspaceCacheApi().refresh;
   if (typeof refresh === 'function') {
     await refresh();
