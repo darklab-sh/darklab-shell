@@ -2813,6 +2813,10 @@ describe('autocomplete helpers', () => {
             pipe_label: 'wc -l',
             pipe_description: 'Count lines',
           },
+          tee: {
+            pipe_command: true,
+            pipe_description: 'Write output to a session file and keep showing it',
+          },
         },
         acFiltered: [],
         acIndex: -1,
@@ -2824,8 +2828,9 @@ describe('autocomplete helpers', () => {
     )
 
     const items = getAutocompleteMatches('help | ', 7)
-    expect(items.map((item) => item.value)).toEqual(['grep', 'head', 'tail', 'wc -l'])
-    expect(items[3].description).toBe('Count lines')
+    expect(items.map((item) => item.value)).toEqual(['grep', 'head', 'tail', 'wc -l', 'tee'])
+    expect(items.find(item => item.value === 'wc -l').description).toBe('Count lines')
+    expect(items.find(item => item.value === 'tee').description).toContain('session file')
   })
 
   it('uses live workspace file hints for workspace read flags instead of static examples', () => {
@@ -3082,6 +3087,24 @@ describe('autocomplete helpers', () => {
             },
             workspace_path_arg_kinds: { __positional__: ['any', 'directory'] },
           },
+          cp: {
+            argument_limit: 2,
+            arg_hints: {
+              __positional__: [
+                { value: 'root.txt', description: 'session file · 1 B' },
+              ],
+            },
+            workspace_path_arg_kinds: { __positional__: ['file', 'directory'] },
+          },
+          touch: {
+            argument_limit: 1,
+            arg_hints: {
+              __positional__: [
+                { value: 'root.txt', description: 'session file · 1 B' },
+              ],
+            },
+            workspace_path_arg_kinds: { __positional__: ['file'] },
+          },
           file: {
             expects_value: ['show', 'move'],
             arg_hints: {
@@ -3119,6 +3142,9 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('mv ', 3).map(item => item.value)).not.toContain('deep/from-root.txt')
     expect(getAutocompleteMatches('mv darklab/', 11).map(item => item.value)).toEqual(['darklab/targets.txt', 'darklab/nested/'])
     expect(getAutocompleteMatches('mv root.txt ../', 14).map(item => item.value)).toEqual(['../archive/'])
+    expect(getAutocompleteMatches('cp darklab/', 11).map(item => item.value)).toEqual(['darklab/targets.txt'])
+    expect(getAutocompleteMatches('cp root.txt ../', 14).map(item => item.value)).toEqual(['../archive/'])
+    expect(getAutocompleteMatches('touch darklab/', 14).map(item => item.value)).toEqual(['darklab/targets.txt'])
     expect(getAutocompleteMatches('file show darklab/', 18).map(item => item.value)).toEqual(['darklab/targets.txt'])
     expect(getAutocompleteMatches('file move root.txt ../', 22).map(item => item.value)).toEqual(['../archive/'])
   })

@@ -143,6 +143,46 @@ function _workspaceMoveCommand(cmd) {
   };
 }
 
+function _workspaceCopyCommand(cmd) {
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  if (root === 'cp') {
+    return {
+      source: parts.length === 3 ? parts[1] : '',
+      destination: parts.length === 3 ? parts[2] : '',
+      usage: 'Usage: cp <source> <destination>',
+      invalid: parts.length !== 3,
+    };
+  }
+  const action = (parts[1] || '').toLowerCase();
+  if (root !== 'file' || action !== 'copy') return null;
+  return {
+    source: parts.length === 4 ? parts[2] : '',
+    destination: parts.length === 4 ? parts[3] : '',
+    usage: 'Usage: file copy <source> <destination>',
+    invalid: parts.length !== 4,
+  };
+}
+
+function _workspaceTouchCommand(cmd) {
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  if (root === 'touch') {
+    return {
+      target: parts.length === 2 ? parts[1] : '',
+      usage: 'Usage: touch <file>',
+      invalid: parts.length !== 2,
+    };
+  }
+  const action = (parts[1] || '').toLowerCase();
+  if (root !== 'file' || action !== 'touch') return null;
+  return {
+    target: parts.length === 3 ? parts[2] : '',
+    usage: 'Usage: file touch <file>',
+    invalid: parts.length !== 3,
+  };
+}
+
 function _workspaceListCommand(parts) {
   const root = (parts[0] || '').toLowerCase();
   const parseListArgs = (args, usage) => {
@@ -463,13 +503,18 @@ function _isWorkspaceMoveCommand(cmd) {
   return !!_workspaceMoveCommand(cmd);
 }
 
+function _isWorkspaceCopyCommand(cmd) {
+  if (!_runnerWorkspaceEnabled()) return false;
+  return !!_workspaceCopyCommand(cmd);
+}
+
 function _isWorkspaceTerminalCommand(cmd) {
   const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
   if (root === 'diff') return true;
   if (!_runnerWorkspaceEnabled()) return false;
-  if (['cd', 'pwd', 'ls', 'll', 'cat', 'mkdir', 'grep', 'head', 'tail', 'wc', 'sort', 'uniq'].includes(root)) return true;
-  if (root === 'file' && ['list', 'ls', 'show', 'diff', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
+  if (['cd', 'pwd', 'ls', 'll', 'cat', 'mkdir', 'touch', 'grep', 'head', 'tail', 'wc', 'sort', 'uniq'].includes(root)) return true;
+  if (root === 'file' && ['list', 'ls', 'show', 'diff', 'touch', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
   return false;
 }
 
@@ -479,6 +524,7 @@ if (typeof window !== 'undefined') {
 export {
   _ensureWorkspaceCache,
   _isWorkspaceDeleteCommand,
+  _isWorkspaceCopyCommand,
   _isWorkspaceDownloadCommand,
   _isWorkspaceEditorCommand,
   _isWorkspaceMoveCommand,
@@ -488,6 +534,7 @@ export {
   _resolveWorkspaceCommandPath,
   _setWorkspaceCwd,
   _workspaceCommandTokens,
+  _workspaceCopyCommand,
   _workspaceCwd,
   _workspaceDeleteCommand,
   _workspaceDeleteTarget,
@@ -502,6 +549,7 @@ export {
   _workspaceListCommand,
   _workspaceListTarget,
   _workspaceMoveCommand,
+  _workspaceTouchCommand,
   _workspacePathExists,
   _workspacePathHasGlob,
 };

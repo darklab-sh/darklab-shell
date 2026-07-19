@@ -2275,9 +2275,50 @@ class TestRunStreaming:
                 json={"command": "cat urls.txt"},
                 headers={"X-Session-ID": session},
             )
+            cp_resp = _post_run(
+                client,
+                json={"command": "cp urls.txt urls-copy.txt"},
+                headers={"X-Session-ID": session},
+            )
+            touch_resp = _post_run(
+                client,
+                json={"command": "touch empty.txt"},
+                headers={"X-Session-ID": session},
+            )
+            redirect_resp = _post_run(
+                client,
+                json={"command": "cat urls.txt > redirected.txt"},
+                headers={"X-Session-ID": session},
+            )
+            append_resp = _post_run(
+                client,
+                json={"command": "cat urls.txt >> redirected.txt"},
+                headers={"X-Session-ID": session},
+            )
+            tee_resp = _post_run(
+                client,
+                json={"command": "cat urls.txt | tee tee.txt"},
+                headers={"X-Session-ID": session},
+            )
             help_resp = _post_run(
                 client,
                 json={"command": "file help"},
+                headers={"X-Session-ID": session},
+            )
+            copied = client.get(
+                "/workspace/files/read?path=urls-copy.txt",
+                headers={"X-Session-ID": session},
+            )
+            touched = client.get(
+                "/workspace/files/read?path=empty.txt",
+                headers={"X-Session-ID": session},
+            )
+            redirected = client.get(
+                "/workspace/files/read?path=redirected.txt",
+                headers={"X-Session-ID": session},
+            )
+            tee_file = client.get(
+                "/workspace/files/read?path=tee.txt",
                 headers={"X-Session-ID": session},
             )
 
@@ -2291,11 +2332,32 @@ class TestRunStreaming:
         assert "file: urls.txt\\n" in cat_body
         assert "https://ip.darklab.sh\\n" in cat_body
 
+        assert cp_resp.status_code == 200
+        assert "file: copied urls.txt to urls-copy.txt\\n" in cp_resp.get_data(as_text=True)
+        assert copied.get_json()["text"] == "https://ip.darklab.sh\n"
+        assert touch_resp.status_code == 200
+        assert touched.get_json()["text"] == ""
+        assert redirect_resp.status_code == 200
+        assert "https://ip.darklab.sh\\n" not in redirect_resp.get_data(as_text=True)
+        assert append_resp.status_code == 200
+        assert "https://ip.darklab.sh\\n" not in append_resp.get_data(as_text=True)
+        assert redirected.get_json()["text"] == (
+            "file: urls.txt\nhttps://ip.darklab.sh\n"
+            "file: urls.txt\nhttps://ip.darklab.sh\n"
+        )
+        assert tee_resp.status_code == 200
+        assert "https://ip.darklab.sh\\n" in tee_resp.get_data(as_text=True)
+        assert tee_file.get_json()["text"] == "file: urls.txt\nhttps://ip.darklab.sh\n"
+
         assert help_resp.status_code == 200
         help_body = help_resp.get_data(as_text=True)
         assert "Session file commands:\\n" in help_body
         assert "file ls [-lR] [folder]\\n" in help_body
         assert "file download <file>\\n" in help_body
+        assert "file copy <source> <destination>\\n" in help_body
+        assert "file touch <file>\\n" in help_body
+        assert "command >> file" in help_body
+        assert "command | tee file" in help_body
         assert "Aliases:\\n" in help_body
         assert "Create targets.txt from the Files panel.\\n" in help_body
         assert "curl -o response.html https://ip.darklab.sh\\n" in help_body

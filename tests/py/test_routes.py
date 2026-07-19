@@ -4646,6 +4646,16 @@ class TestTeamRoutes:
                     headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
                     json={"source": "shared/readme.txt", "destination": "shared/moved.txt"},
                 )
+                viewer_copy = client.post(
+                    "/workspace/files/copy",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    json={"source": "shared/readme.txt", "destination": "shared/copy.txt"},
+                )
+                viewer_touch = client.post(
+                    "/workspace/files/touch",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    json={"path": "shared/empty.txt"},
+                )
                 viewer_delete = client.delete(
                     "/workspace/files?path=shared/readme.txt",
                     headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
@@ -4686,6 +4696,8 @@ class TestTeamRoutes:
             assert viewer_write.status_code == 403
             assert viewer_mkdir.status_code == 403
             assert viewer_move.status_code == 403
+            assert viewer_copy.status_code == 403
+            assert viewer_touch.status_code == 403
             assert viewer_delete.status_code == 403
             assert archived.status_code == 200
             assert archived_list.status_code == 200
@@ -17562,11 +17574,27 @@ class TestWorkspaceRoutes:
             assert created_data["file"] == {"path": file_path, "size": 11}
             assert created_data["workspace"]["usage"]["bytes_used"] == 11
 
+            appended = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": file_path, "text": "again\n", "append": True},
+            )
+            assert appended.status_code == 200
+            assert json.loads(appended.data)["file"] == {"path": file_path, "size": 17}
+            invalid_append = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": file_path, "text": "ignored", "append": "yes"},
+            )
+            assert invalid_append.status_code == 400
+            assert json.loads(invalid_append.data)["error"] == "append must be a boolean"
+
             listed_response = client.get("/workspace/files", headers={"X-Session-ID": session})
             assert listed_response.headers["Cache-Control"] == "no-store"
             listed = json.loads(listed_response.data)
             assert listed["files"][0]["path"] == file_path
             assert listed["limits"]["max_files"] == 10
+            assert listed["usage"]["bytes_used"] == 17
 
             read = client.get(
                 f"/workspace/files/read?path={file_path}",
@@ -17574,8 +17602,8 @@ class TestWorkspaceRoutes:
             )
             assert json.loads(read.data) == {
                 "path": file_path,
-                "text": "darklab.sh\n",
-                "size": 11,
+                "text": "darklab.sh\nagain\n",
+                "size": 17,
             }
 
             binary_path = resolve_workspace_path(session, "asset.db", config.CFG, ensure_parent=True)
@@ -17603,8 +17631,8 @@ class TestWorkspaceRoutes:
             deleted_files = json.loads(deleted.data)["workspace"]["files"]
             assert file_path not in {item["path"] for item in deleted_files}
             audit_rows = _audit_event_rows(target_id=file_path)
-            assert [row["event_type"] for row in audit_rows] == ["file.write", "file.delete"]
-            assert [row["target_type"] for row in audit_rows] == ["file", "file"]
+            assert [row["event_type"] for row in audit_rows] == ["file.write", "file.write", "file.delete"]
+            assert [row["target_type"] for row in audit_rows] == ["file", "file", "file"]
             assert audit_rows[0]["details"] == {
                 "source": "workspace",
                 "action": "write",
@@ -17614,6 +17642,14 @@ class TestWorkspaceRoutes:
                 "status": "file",
             }
             assert audit_rows[1]["details"] == {
+                "source": "workspace",
+                "action": "append",
+                "file_path": file_path,
+                "byte_size": 17,
+                "file_count": 1,
+                "status": "file",
+            }
+            assert audit_rows[2]["details"] == {
                 "source": "workspace",
                 "file_path": file_path,
                 "file_count": 1,
@@ -18154,6 +18190,67 @@ class TestWorkspaceRoutes:
             )
             assert moved_to_root.status_code == 200
             assert moved_to_root.get_json()["moved"]["destination"] == "one.txt"
+
+    def test_copy_and_touch_file_routes(self):
+        client = get_client()
+        session = "workspace-copy-touch-" + uuid.uuid4().hex[:8]
+        headers = {"X-Session-ID": session}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            assert client.post(
+                "/workspace/files",
+                headers=headers,
+                json={"path": "source.txt", "text": "source\n"},
+            ).status_code == 200
+            assert client.post(
+                "/workspace/directories",
+                headers=headers,
+                json={"path": "archive"},
+            ).status_code == 200
+
+            copied = client.post(
+                "/workspace/files/copy",
+                headers=headers,
+                json={"source": "source.txt", "destination": "archive"},
+            )
+            created = client.post(
+                "/workspace/files/touch",
+                headers=headers,
+                json={"path": "empty.txt"},
+            )
+            touched = client.post(
+                "/workspace/files/touch",
+                headers=headers,
+                json={"path": "source.txt"},
+            )
+            unsafe_copy = client.post(
+                "/workspace/files/copy",
+                headers=headers,
+                json={"source": "source.txt", "destination": "../escape.txt"},
+            )
+
+            assert copied.status_code == 200
+            assert copied.get_json()["copied"] == {
+                "source": "source.txt",
+                "destination": "archive/source.txt",
+                "size": len("source\n"),
+            }
+            assert client.get(
+                "/workspace/files/read?path=archive/source.txt",
+                headers=headers,
+            ).get_json()["text"] == "source\n"
+            assert created.status_code == 200
+            assert created.get_json()["file"] == {
+                "path": "empty.txt",
+                "size": 0,
+                "created": True,
+            }
+            assert touched.status_code == 200
+            assert touched.get_json()["file"] == {
+                "path": "source.txt",
+                "size": len("source\n"),
+                "created": False,
+            }
+            assert unsafe_copy.status_code == 400
 
     def test_move_rejects_invalid_paths_and_recursive_folder_moves(self):
         client = get_client()

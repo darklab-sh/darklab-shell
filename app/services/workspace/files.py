@@ -3,9 +3,9 @@
 
 """App-mediated workspace helpers.
 
-This module intentionally does not expose shell navigation or redirection.
-Every file operation resolves a user-facing relative path inside one hashed
-workspace directory and enforces quota limits before writes.
+This module intentionally does not interpret shell syntax. Every file operation
+resolves a user-facing relative path inside one hashed workspace directory and
+enforces quota limits before writes.
 """
 
 from __future__ import annotations

@@ -917,6 +917,24 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
       workspacePathArgKinds: { __positional__: ['any', 'directory'] },
     }));
   }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.cp) {
+    const copySourceHints = _runtimeWorkspaceFileHints();
+    context.cp = _runtimeMergeContextSpec(baseRegistry.cp, _runtimeContextSpec({
+      argHints: { __positional__: copySourceHints },
+      sequenceArgHints: _runtimeWorkspaceMoveSequenceHints(
+        'cp',
+        copySourceHints,
+        _runtimeWorkspaceMoveDestinationHints(),
+      ),
+      workspacePathArgKinds: { __positional__: ['file', 'directory'] },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.touch) {
+    context.touch = _runtimeMergeContextSpec(baseRegistry.touch, _runtimeContextSpec({
+      argHints: { __positional__: _runtimeWorkspaceFilePathHints() },
+      workspacePathArgKinds: { __positional__: ['file'] },
+    }));
+  }
   ['grep', 'head', 'tail', 'sort', 'uniq'].forEach((root) => {
     if (isWorkspaceFeatureEnabled() && baseRegistry[root]) {
       context[root] = _runtimeMergeContextSpec(baseRegistry[root], _runtimeContextSpec({

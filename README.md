@@ -78,7 +78,7 @@ After changing one of these settings, run `docker compose up -d --force-recreate
 | [Projects and Atlas](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, and entities. |
 | [Workflows and automation](FEATURES.md#guided-workflows) | Guided playbooks, schedules, watchers, and outbound notifications. |
 | [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context from supported providers. |
-| [Files, variables, and secrets](FEATURES.md#session-files) | Managed inputs, outputs, reusable values, and encrypted tool credentials. |
+| [Files, variables, and secrets](FEATURES.md#session-files) | Managed inputs and outputs, terminal capture/copy helpers, reusable values, and encrypted tool credentials. |
 | [Teams](FEATURES.md#team-mode) | Shared runs, projects, files, automation, and secrets with role controls. |
 | [Interactive tools](FEATURES.md#interactive-pty-mode) | Guarded PTY sessions for approved tools that need a real terminal. |
 | [AI assists](FEATURES.md#ai-assists) | Optional summaries and next-command drafts with privacy controls. |

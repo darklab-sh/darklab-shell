@@ -101,17 +101,17 @@ def _builtin_faq(app_name="darklab_shell", project_source=None, cfg=None):
             "category": "Core features",
             "feature": "workspace",
             "answer": (
-                "Files are app-managed, session-scoped text files for commands that need small inputs "
-                "or outputs. Use the Files panel or run file help to create, view, edit, "
-                "download, move, or delete files."
+                "Files are app-managed, session-scoped text files for commands that need small inputs or outputs. "
+                "Use the Files panel or run file help to create, view, edit, "
+                "download, copy, move, touch, or delete files."
             ),
             "answer_html": (
                 "Files are app-managed, session-scoped text files for commands that need small "
                 "inputs or outputs. Use the <strong>Files</strong> panel or run "
                 "<span class=\"allowed-chip faq-chip\" data-faq-command=\"file help\">file help</span> "
-                "to create, view, edit, download, move, or delete files.<br><br>"
-                "Commands can only read or write files through command flags explicitly enabled "
-                "in the command registry. Shell navigation and redirection are still blocked. "
+                "to create, view, edit, download, copy, move, touch, or delete files.<br><br>"
+                "Commands can use explicitly enabled file flags, <code>command &gt; file</code>, "
+                "<code>command &gt;&gt; file</code>, or a final <code>| tee file</code> sink. Other redirection remains blocked. "
                 "Files stay scoped to the current browser session or named session token."
             ),
         },
@@ -252,25 +252,25 @@ def _builtin_faq(app_name="darklab_shell", project_source=None, cfg=None):
             "question": "What built-in shell features are supported?",
             "category": "Getting started",
             "answer": (
-                "The shell supports built-in commands plus a narrow set of commands with built-in "
-                "pipe support like grep, head, tail, wc -l, jq, sort, and uniq. For a full list of built-in "
-                "commands, run commands --built-in in the web shell."
+                "The shell supports built-in commands plus a narrow set of built-in pipe helpers: grep, head, "
+                "tail, wc -l, jq, sort, uniq, and tee. For the full list, run commands --built-in in the web shell."
             ),
             "answer_html": (
                 "This shell includes two kinds of built-in behavior:<br><br>"
                 "<strong>Built-in commands</strong> such as <code>status</code>, "
                 "<code>history</code>, <code>retention</code>, <code>shortcuts</code>, "
                 "<code>limits</code>, and <code>faq</code>. For a full list, run "
-                "<code>commands --built-in</code>."
-                " These are provided directly by the shell.<br><br>"
+                "<code>commands --built-in</code>. These are provided directly by the shell.<br><br>"
                 "<strong>Commands with built-in pipe support</strong> let you trim output with "
                 "supported pipe helpers, for example <code>command | grep pattern</code>, "
                 "<code>command | head -n 20</code>, <code>command | head -20</code>, "
                 "<code>command | tail -n 20</code>, <code>command | tail -20</code>, "
                 "<code>command | wc -l</code>, <code>command | jq -r .host</code>, <code>command | sort -rn</code>, or "
                 "<code>command | uniq -c</code>. These helpers can also be chained together, "
-                "for example <code>command | grep pattern | wc -l</code>.<br><br>"
-                "General shell piping, arbitrary chaining, and redirection are still blocked."
+                "for example <code>command | grep pattern | wc -l</code>. When Files are enabled, "
+                "<code>command &gt; file</code> saves output quietly, <code>command &gt;&gt; file</code> appends it, and "
+                "<code>command | tee file</code> also keeps it visible.<br><br>"
+                "General shell piping, arbitrary chaining, and raw redirection remain blocked."
             ),
         },
         {

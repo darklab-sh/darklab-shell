@@ -5742,3 +5742,14 @@ pipe_helpers:
       flags:
         - value: -c
           description: Prefix each line with its occurrence count
+  - root: tee
+    feature_required: workspace
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Write output to a session file and keep showing it
+      arguments:
+        - placeholder: <file>
+          hint_only: true
+          value_type: workspace_path
+          description: Session file to overwrite

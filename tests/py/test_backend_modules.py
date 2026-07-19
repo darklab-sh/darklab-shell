@@ -72,6 +72,7 @@ from services.diff.text import format_text_diff
 import services.session.variables as session_variables
 import services.secrets.storage as secrets_storage
 import services.secrets.vault as secrets_vault
+import services.workspace.file_mutations as workspace_file_mutations
 import services.workspace.files as workspace_module
 import services.commands.wordlists as wordlists
 from services.commands.registry import (
@@ -8751,13 +8752,14 @@ class TestSchedulerFoundation:
         monkeypatch.setattr(registry, "interactive_pty_spec_for_command", lambda _command: None)
         monkeypatch.setattr(builtins_module, "resolves_exact_special_builtin_command", lambda _command: False)
         monkeypatch.setattr(builtins_module, "resolve_builtin_command", lambda command: command == "history")
+        postfilter = SimpleNamespace(output_sink_error="")
         monkeypatch.setattr(
             run_blueprint,
             "_prepare_command_input",
             lambda *_args, **_kwargs: SimpleNamespace(
                 execution_command="history",
                 variable_notice="expanded vars",
-                postfilter=object(),
+                postfilter=postfilter,
             ),
         )
         monkeypatch.setattr(
@@ -8765,7 +8767,11 @@ class TestSchedulerFoundation:
             "execute_builtin_command",
             lambda *args, **kwargs: ([{"type": "output", "text": "raw"}], 0),
         )
-        monkeypatch.setattr(run_blueprint, "_filter_builtin_command_events", lambda *_args: filtered_events)
+        def _filter_events(*_args):
+            postfilter.output_sink_error = "could not write the file"
+            return filtered_events
+
+        monkeypatch.setattr(run_blueprint, "_filter_builtin_command_events", _filter_events)
         monkeypatch.setattr(run_blueprint, "_history_safe_command_for_storage", lambda command: command)
 
         def _synthetic(*args, **kwargs):
@@ -8778,6 +8784,7 @@ class TestSchedulerFoundation:
 
         assert run_id == "run_builtin_rewritten"
         assert synthetic_calls[0][0][3] == filtered_events
+        assert synthetic_calls[0][0][4] == 1
         assert synthetic_calls[0][1] == {"cmd_type": "builtin", "owner_tab_id": "schedule:sch_test"}
 
     def test_scheduler_launch_path_returns_missing_runtime_synthetic_run(self, monkeypatch):
@@ -14948,6 +14955,69 @@ class TestSessionWorkspace:
             delete_workspace_file("session-1", "targets.txt", cfg)
             assert list_workspace_files("session-1", cfg) == []
 
+    def test_copy_and_touch_workspace_files_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "source.txt", "copied\n", cfg)
+            create_workspace_directory("session-1", "archive", cfg)
+
+            copied = workspace_file_mutations.copy_workspace_file(
+                "session-1",
+                "source.txt",
+                "archive",
+                cfg,
+            )
+            created = workspace_file_mutations.touch_workspace_file(
+                "session-1",
+                "empty.txt",
+                cfg,
+            )
+            touched = workspace_file_mutations.touch_workspace_file(
+                "session-1",
+                "source.txt",
+                cfg,
+            )
+            assert copied.source == "source.txt"
+            assert copied.destination == "archive/source.txt"
+            assert copied.size == len("copied\n")
+            assert read_workspace_text_file("session-1", "source.txt", cfg) == "copied\n"
+            assert read_workspace_text_file("session-1", "archive/source.txt", cfg) == "copied\n"
+            assert created == {"path": "empty.txt", "size": 0, "created": True}
+            assert touched == {"path": "source.txt", "size": len("copied\n"), "created": False}
+            appended = workspace_file_mutations.append_workspace_text_file(
+                "session-1",
+                "source.txt",
+                "again\n",
+                cfg,
+            )
+            appended_new = workspace_file_mutations.append_workspace_text_file(
+                "session-1",
+                "appended-new.txt",
+                "new\n",
+                cfg,
+            )
+            assert appended == {"path": "source.txt", "size": len("copied\nagain\n")}
+            assert appended_new == {"path": "appended-new.txt", "size": len("new\n")}
+            assert read_workspace_text_file("session-1", "source.txt", cfg) == "copied\nagain\n"
+            assert read_workspace_text_file("session-1", "appended-new.txt", cfg) == "new\n"
+
+            with pytest.raises(InvalidWorkspacePath, match="destination already exists"):
+                workspace_file_mutations.copy_workspace_file(
+                    "session-1",
+                    "source.txt",
+                    "archive/source.txt",
+                    cfg,
+                )
+            with pytest.raises(InvalidWorkspacePath):
+                workspace_file_mutations.copy_workspace_file(
+                    "session-1",
+                    "../source.txt",
+                    "escape.txt",
+                    cfg,
+                )
+            with pytest.raises(InvalidWorkspacePath):
+                workspace_file_mutations.touch_workspace_file("session-1", "../escape.txt", cfg)
+
     def test_prepare_workspace_file_for_command_uses_limited_write_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
@@ -15264,6 +15334,16 @@ class TestSessionWorkspace:
                 assert False, "expected max file size rejection"
             except WorkspaceQuotaExceeded:
                 pass
+            empty_path = resolve_workspace_path("session-1", "append.txt", cfg, ensure_parent=True)
+            empty_path.write_bytes(b"")
+            with pytest.raises(WorkspaceQuotaExceeded):
+                workspace_file_mutations.append_workspace_text_file(
+                    "session-1",
+                    "append.txt",
+                    "x",
+                    cfg,
+                )
+            assert empty_path.read_bytes() == b""
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_max_files=1)
@@ -16889,9 +16969,9 @@ class TestDerivedCommandRegistry:
         disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})
         enabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
-        assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled)
+        assert {"file", "cat", "cp", "ls", "rm", "touch"}.isdisjoint(disabled)
         assert "diff" in disabled
-        assert {"file", "cat", "diff", "ls", "rm"}.issubset(enabled)
+        assert {"file", "cat", "cp", "diff", "ls", "rm", "touch"}.issubset(enabled)
         assert [item["value"] for item in enabled["file"]["arg_hints"]["__positional__"]] == [
             "list <folder>",
             "ls <folder>",
@@ -16902,9 +16982,13 @@ class TestDerivedCommandRegistry:
             "edit <file>",
             "download <file>",
             "move <source> <destination>",
+            "copy <source> <destination>",
+            "touch <file>",
             "delete <file>",
             "help",
         ]
+        assert enabled["cp"]["arg_hints"]["__positional__"][0]["value_type"] == "workspace_path"
+        assert enabled["touch"]["arg_hints"]["__positional__"][0]["value_type"] == "workspace_path"
         assert "rm" in enabled["file"]["expects_value"]
         assert "rm" in enabled["file"]["arg_hints"]
 
@@ -17955,6 +18039,7 @@ class TestCommandKnowledgeNormalization:
         assert "grep" in roots
         assert "head" in roots
         assert "tail" in roots
+        assert "tee" in roots
         jq = next(pipe for pipe in pipes if pipe["root"] == "jq")
         assert jq["description"] == "Select fields from JSON or JSONL"
         flags = cast(list, jq["flags"])
@@ -18642,7 +18727,9 @@ class TestThemeRegistry:
         assert "command | sort -rn" in built_in_html
         assert "command | uniq -c" in built_in_html
         assert "command | grep pattern | wc -l" in built_in_html
-        assert "General shell piping, arbitrary chaining, and redirection are still blocked." in built_in_html
+        assert "command &gt; file" in built_in_html
+        assert "command | tee file" in built_in_html
+        assert "General shell piping, arbitrary chaining, and raw redirection remain blocked." in built_in_html
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────

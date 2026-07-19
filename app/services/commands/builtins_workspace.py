@@ -21,6 +21,7 @@ from services.diff.sources import DiffSourceError, diff_source_notice, resolve_d
 from services.diff.text import DiffMode, format_text_diff
 from services.teams.capabilities import Capability, role_can
 from services.teams.scope import OwnerContext, owner_context_for_scope
+from services.workspace.file_mutations import copy_owner_workspace_file, touch_owner_workspace_file
 from services.workspace.files import (
     InvalidWorkspacePath,
     WorkspaceBinaryFile,
@@ -359,7 +360,9 @@ def run_builtin_workspace(
             output_line("  file add [file]", "builtin-help-row"),
             output_line("  file edit <file>", "builtin-help-row"),
             output_line("  file download <file>", "builtin-help-row"),
+            output_line("  file copy <source> <destination>", "builtin-help-row"),
             output_line("  file move <source> <destination>", "builtin-help-row"),
+            output_line("  file touch <file>", "builtin-help-row"),
             output_line("  file rm <file-or-folder>", "builtin-help-row"),
             output_line("", "builtin-spacer"),
             output_line("Aliases:", "builtin-section"),
@@ -367,8 +370,15 @@ def run_builtin_workspace(
             output_line("  ll [-R]     -> file list -l [-R]", "builtin-help-row"),
             output_line("  cat <file>  -> file show <file>", "builtin-help-row"),
             output_line("  diff <source1> <source2>  -> file diff <source1> <source2>", "builtin-help-row"),
+            output_line("  cp <source> <destination>  -> file copy <source> <destination>", "builtin-help-row"),
             output_line("  mv <source> <destination>  -> file move <source> <destination>", "builtin-help-row"),
+            output_line("  touch <file>  -> file touch <file>", "builtin-help-row"),
             output_line("  rm <file-or-folder>   -> file rm <file-or-folder>", "builtin-help-row"),
+            output_line("", "builtin-spacer"),
+            output_line("Output capture:", "builtin-section"),
+            output_line("  command > file       overwrite a Files entry without terminal output", "builtin-help-row"),
+            output_line("  command >> file      append to a Files entry without terminal output", "builtin-help-row"),
+            output_line("  command | tee file   overwrite a Files entry and keep terminal output", "builtin-help-row"),
             output_line("", "builtin-spacer"),
             output_line("Example flow:", "builtin-section"),
             output_line("  Create targets.txt from the Files panel.", "builtin-note"),
@@ -510,11 +520,38 @@ def run_builtin_workspace(
             return _workspace_command_error(exc)
         return [output_line(f"file: moved {moved.source} to {moved.destination}", "builtin-success")]
 
+    if subcommand in {"copy", "cp"}:
+        if len(parts) != 4:
+            return [output_line("Usage: file copy <source> <destination>")]
+        if not _can_manage_workspace_files(owner, team_role):
+            return _workspace_write_denied()
+        try:
+            copied = copy_owner_workspace_file(owner, parts[2], parts[3], cfg)
+        except Exception as exc:
+            return _workspace_command_error(exc)
+        return [output_line(
+            f"file: copied {copied.source} to {copied.destination}",
+            "builtin-success",
+        )]
+
+    if subcommand == "touch":
+        if len(parts) != 3:
+            return [output_line("Usage: file touch <file>")]
+        if not _can_manage_workspace_files(owner, team_role):
+            return _workspace_write_denied()
+        try:
+            touched = touch_owner_workspace_file(owner, parts[2], cfg)
+        except Exception as exc:
+            return _workspace_command_error(exc)
+        action = "created" if touched["created"] else "updated"
+        return [output_line(f"file: {action} {touched['path']}", "builtin-success")]
+
     return [
         output_line(f"file: unknown subcommand '{subcommand}'"),
         output_line(
             "Usage: file [list | show <file> | diff <source1> <source2> | add <file> | edit <file> | "
-            "download <file> | move <source> <destination> | rm <file-or-folder> | help]"
+            "download <file> | copy <source> <destination> | move <source> <destination> | "
+            "touch <file> | rm <file-or-folder> | help]"
         ),
     ]
 
@@ -563,11 +600,30 @@ def run_builtin_workspace_alias(
             owner_context=owner_context,
             team_role=team_role,
         )
+    if root == "cp":
+        if len(parts) != 3:
+            return [output_line("Usage: cp <source> <destination>")]
+        return run_builtin_workspace(
+            f"file copy {parts[1]} {parts[2]}",
+            session_id,
+            owner_context=owner_context,
+            team_role=team_role,
+        )
+    if root == "touch":
+        if len(parts) != 2:
+            return [output_line("Usage: touch <file>")]
+        return run_builtin_workspace(
+            f"file touch {parts[1]}",
+            session_id,
+            owner_context=owner_context,
+            team_role=team_role,
+        )
     if root == "mkdir" and not _can_manage_workspace_files(_workspace_owner_context(session_id, owner_context), team_role):
         return _workspace_write_denied()
     if root in {"cd", "grep", "head", "mkdir", "sort", "tail", "uniq", "wc"}:
         return [output_line(f"{root}: handled in the browser workspace terminal")]
     return [output_line(
         "Usage: file [list | show <file> | diff <source1> <source2> | add <file> | edit <file> | "
-        "download <file> | move <source> <destination> | rm <file-or-folder> | help]"
+        "download <file> | copy <source> <destination> | move <source> <destination> | "
+        "touch <file> | rm <file-or-folder> | help]"
     )]

@@ -477,9 +477,109 @@ describe('client-side synthetic post-filters', () => {
       'theme_light_blue',
     ])
   })
+
+  it('parses workspace output redirection and tee sinks', () => {
+    expect(_parseSyntheticPostFilterCommand('theme list > reports/themes.txt')).toEqual({
+      kind: 'redirect',
+      baseCommand: 'theme list',
+      stages: [],
+      sink: { kind: 'redirect', path: 'reports/themes.txt' },
+    })
+    expect(_parseSyntheticPostFilterCommand('theme list | grep dark | tee reports/themes.txt')).toEqual({
+      kind: 'grep',
+      baseCommand: 'theme list',
+      stages: [
+        { kind: 'grep', pattern: 'dark', ignoreCase: false, invertMatch: false, extended: false },
+      ],
+      sink: { kind: 'tee', path: 'reports/themes.txt' },
+    })
+    expect(_parseSyntheticPostFilterCommand('theme list >> reports/themes.txt')).toEqual({
+      kind: 'append',
+      baseCommand: 'theme list',
+      stages: [],
+      sink: { kind: 'append', path: 'reports/themes.txt' },
+    })
+  })
+
+  it('rejects malformed sinks, unsafe destinations, and non-final tee stages', () => {
+    expect(_parseSyntheticPostFilterCommand('theme list >>')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('theme list > one.txt >> two.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('theme list > ../themes.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('theme list > /tmp/themes.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('theme list | tee themes.txt | wc -l')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('nmap 10.0.0.5 2> err.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('nmap 10.0.0.5 2>>err.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('nmap 10.0.0.5 2 > err.txt')).toEqual({
+      kind: 'redirect',
+      baseCommand: 'nmap 10.0.0.5 2',
+      stages: [],
+      sink: { kind: 'redirect', path: 'err.txt' },
+    })
+  })
 })
 
 describe('client-side UI command pipe helpers', () => {
+  it('writes or appends redirected client-side output without printing it in the terminal', async () => {
+    const appendLine = vi.fn()
+    const writeWorkspaceTextFile = vi.fn(() => Promise.resolve({ file: { path: 'reports/themes.txt' } }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      writeWorkspaceTextFile,
+      normalizeWorkspaceCommandPath: (path, cwd = '') => [cwd, path].filter(Boolean).join('/'),
+      runnerInitCode: `
+        async function handleThemeCommand(cmd, tabId) {
+          appendCommandEcho(cmd, tabId);
+          appendLine('theme_dark_amber', 'builtin-help-row', tabId);
+          appendLine('theme_light_blue', 'builtin-help-row', tabId);
+        }
+      `,
+    })
+
+    await submitCommand('theme list > themes.txt')
+    await vi.waitFor(() => expect(writeWorkspaceTextFile).toHaveBeenCalledWith(
+      'reports/themes.txt',
+      'theme_dark_amber\ntheme_light_blue\n',
+    ))
+    await submitCommand('theme list >> themes.txt')
+    await vi.waitFor(() => expect(writeWorkspaceTextFile).toHaveBeenNthCalledWith(
+      2,
+      'reports/themes.txt',
+      'theme_dark_amber\ntheme_light_blue\n',
+      { append: true },
+    ))
+
+    expect(appendLine).not.toHaveBeenCalledWith('theme_dark_amber', 'builtin-help-row', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('theme_light_blue', 'builtin-help-row', 'tab-1')
+  })
+
+  it('copies and touches workspace files through their terminal aliases', async () => {
+    const appendLine = vi.fn()
+    const copyWorkspacePath = vi.fn(() => Promise.resolve({
+      copied: { source: 'source.txt', destination: 'copy.txt' },
+    }))
+    const touchWorkspaceFile = vi.fn(() => Promise.resolve({ file: { path: 'new.txt' } }))
+    const common = {
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      copyWorkspacePath,
+      touchWorkspaceFile,
+      loadWorkspaceFilesPayload: () => Promise.resolve({ files: [] }),
+      getWorkspaceAutocompleteFileHints: () => [{ value: 'source.txt' }],
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: '' }],
+      normalizeWorkspaceCommandPath: (path, cwd = '') => [cwd, path].filter(Boolean).join('/'),
+    }
+    const copyRunner = loadRunnerFns(common)
+
+    await copyRunner.submitCommand('cp source.txt copy.txt')
+    await vi.waitFor(() => expect(copyWorkspacePath).toHaveBeenCalledWith('source.txt', 'copy.txt'))
+
+    const touchRunner = loadRunnerFns(common)
+    await touchRunner.submitCommand('touch new.txt')
+    await vi.waitFor(() => expect(touchWorkspaceFile).toHaveBeenCalledWith('new.txt'))
+    expect(appendLine).toHaveBeenCalledWith('file: touched new.txt', '', 'tab-1')
+  })
+
   it('filters terminal-native theme output through the same pipe helpers as older built-ins', async () => {
     const appendLine = vi.fn()
     const { submitCommand } = loadRunnerFns({
@@ -762,6 +862,9 @@ function loadRunnerFns({
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
   downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
   moveWorkspacePath: moveWorkspacePathOverride = undefined,
+  copyWorkspacePath: copyWorkspacePathOverride = undefined,
+  touchWorkspaceFile: touchWorkspaceFileOverride = undefined,
+  writeWorkspaceTextFile: writeWorkspaceTextFileOverride = undefined,
   readWorkspaceFile: readWorkspaceFileOverride = undefined,
   createWorkspaceDirectory: createWorkspaceDirectoryOverride = undefined,
   getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride = undefined,
@@ -955,6 +1058,9 @@ function loadRunnerFns({
         ? { downloadWorkspaceFile: downloadWorkspaceFileOverride }
         : {}),
       ...(moveWorkspacePathOverride ? { moveWorkspacePath: moveWorkspacePathOverride } : {}),
+      ...(copyWorkspacePathOverride ? { copyWorkspacePath: copyWorkspacePathOverride } : {}),
+      ...(touchWorkspaceFileOverride ? { touchWorkspaceFile: touchWorkspaceFileOverride } : {}),
+      ...(writeWorkspaceTextFileOverride ? { writeWorkspaceTextFile: writeWorkspaceTextFileOverride } : {}),
       ...(readWorkspaceFileOverride ? { readWorkspaceFile: readWorkspaceFileOverride } : {}),
       ...(createWorkspaceDirectoryOverride ? { createWorkspaceDirectory: createWorkspaceDirectoryOverride } : {}),
       ...(getWorkspaceDirectoryEntriesOverride ? { getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride } : {}),
@@ -1952,6 +2058,24 @@ describe('runner helpers', () => {
       'denied',
     )
     expect(status.className).toBe('status-pill fail')
+
+    const fdApiFetch = vi.fn(() => Promise.resolve())
+    const fdAppendLine = vi.fn()
+    const fdHarness = loadRunnerFns({
+      cmdValue: 'nmap 10.0.0.5 2> err.txt',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: fdApiFetch,
+      appendLine: fdAppendLine,
+    })
+    fdHarness.runCommand()
+
+    expect(fdApiFetch).not.toHaveBeenCalled()
+    expect(fdAppendLine).toHaveBeenNthCalledWith(
+      2,
+      '[denied] Only stdout redirection with >, >>, or final | tee is supported.',
+      'denied',
+    )
+    expect(fdHarness.status.className).toBe('status-pill fail')
   })
 
   it('runCommand allows the narrow synthetic grep form through to the API', () => {

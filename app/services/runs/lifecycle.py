@@ -67,7 +67,7 @@ from services.runs.private_data import (
 )
 from services.secrets.audit import emit_secret_event
 from services.session.variables import SessionVariableError, expand_session_variables
-from services.teams.scope import OwnerContext, owner_context_for_scope
+from services.teams.scope import OwnerContext, owner_context_for_scope, personal_owner_context
 
 log = logging.getLogger("shell")
 
@@ -189,9 +189,14 @@ def filter_builtin_command_events(events, variable_notice: str, postfilter) -> l
         for filtered_line in postfilter.process_output_line(str(event.get("text", ""))):
             filtered_event = dict(event)
             filtered_event["text"] = filtered_line.rstrip("\n")
+            if not postfilter.should_publish_output_line(filtered_line):
+                filtered_event["suppress_live"] = True
             filtered_events.append(filtered_event)
     for filtered_line in postfilter.finalize_output_lines():
-        filtered_events.append({"type": "output", "text": filtered_line.rstrip("\n")})
+        filtered_event = {"type": "output", "text": filtered_line.rstrip("\n")}
+        if not postfilter.should_publish_output_line(filtered_line):
+            filtered_event["suppress_live"] = True
+        filtered_events.append(filtered_event)
     return filtered_events
 
 
@@ -267,6 +272,10 @@ def prepare_command_input(
     display_command: str = "",
     private_values: tuple[str, ...] = (),
     log_pipe: bool = False,
+    owner_context: OwnerContext | None = None,
+    team_role: str = "",
+    workspace_cwd: str = "",
+    cfg: Mapping[str, Any] | None = None,
     command_root_fn: Callable[[str], str | None] = command_root,
     expand_session_variables_fn: Callable[..., Any] = expand_session_variables,
     parse_synthetic_postfilter_fn: Callable[[str], tuple[dict[str, Any] | None, str | None]] = parse_synthetic_postfilter,
@@ -304,6 +313,13 @@ def prepare_command_input(
         })
     try:
         postfilter = postfilter_processor_cls(postfilter_spec)
+        if postfilter_spec and postfilter_spec.get("sink"):
+            postfilter.configure_output_sink(
+                owner_context=owner_context or personal_owner_context(session_id),
+                team_role=team_role,
+                workspace_cwd=workspace_cwd,
+                cfg=resolve_effective_cfg(cfg),
+            )
     except ValueError as exc:
         raise RunPreparationError(redact_private_values(exc, private_values)) from exc
     return PreparedCommandInput(

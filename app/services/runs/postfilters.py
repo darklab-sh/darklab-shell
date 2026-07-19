@@ -15,7 +15,11 @@ from typing import Any, Mapping
 import config as app_config
 from services.commands.registry import command_root
 from services.teams.scope import OwnerContext, personal_owner_context
-from services.workspace.files import WorkspaceDisabled, owner_workspace_dir
+from services.workspace.files import (
+    WorkspaceDisabled,
+    owner_workspace_dir,
+)
+from services.runs.output_sinks import SyntheticPostFilterProcessor as SyntheticPostFilterProcessor
 
 log = logging.getLogger("shell")
 
@@ -206,37 +210,6 @@ class SyntheticPostFilterStageProcessor:
             return output_lines
 
         return []
-
-
-class SyntheticPostFilterProcessor:
-    """Apply one or more narrow app-native post-filter stages in order."""
-
-    def __init__(self, spec):
-        self.spec = spec or {}
-        stages = self.spec.get("stages") if isinstance(self.spec, dict) else None
-        if stages:
-            self.stages = [SyntheticPostFilterStageProcessor(stage) for stage in stages]
-        else:
-            self.stages = [SyntheticPostFilterStageProcessor(self.spec)]
-
-    def process_output_line(self, line: str) -> list[str]:
-        lines = [line]
-        for stage in self.stages:
-            next_lines = []
-            for current in lines:
-                next_lines.extend(stage.process_output_line(current))
-            lines = next_lines
-        return lines
-
-    def finalize_output_lines(self) -> list[str]:
-        lines: list[str] = []
-        for stage in self.stages:
-            next_lines = []
-            for current in lines:
-                next_lines.extend(stage.process_output_line(current))
-            next_lines.extend(stage.finalize_output_lines())
-            lines = next_lines
-        return lines
 
 
 def parse_jq_input_values(lines: list[str]) -> list[Any] | str:

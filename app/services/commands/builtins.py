@@ -177,9 +177,9 @@ def _resolve_workspace_alias_command(parts: list[str]) -> str | None:
         if usage_error:
             return None
         return root if not target or _safe_workspace_alias_path(target) else None
-    if root in {"cat", "rm"}:
+    if root in {"cat", "rm", "touch"}:
         return root if len(parts) == 2 and _safe_workspace_alias_path(parts[1]) else None
-    if root == "mv":
+    if root in {"cp", "mv"}:
         return root if len(parts) == 3 and all(_safe_workspace_alias_path(part) for part in parts[1:]) else None
     return None
 
@@ -295,6 +295,7 @@ def _run_builtin_which(command: str) -> list[dict[str, object]]:
 _BUILTIN_COMMAND_DISPATCH = {
     "banner":    lambda cmd, sid: _run_builtin_banner(load_ascii_art),
     "cat":       lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "cp":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "cd":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "clear":     lambda cmd, sid: _run_builtin_clear(),
     "commands":  lambda cmd, sid: _run_builtin_commands(cmd),
@@ -343,6 +344,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "stats":     lambda cmd, sid: _run_builtin_stats(sid),
     "status":    lambda cmd, sid: _run_builtin_status(sid),
     "tail":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "touch":     lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "team":      lambda cmd, sid: _run_builtin_team(cmd, sid),
     "sudo":      lambda cmd, sid: _run_builtin_sudo(cmd),
     "su_shell":  lambda cmd, sid: _run_builtin_su(cmd),

@@ -97,6 +97,7 @@ def start_brokered_run(
         session_id,
         client_ip,
         safe_private_values,
+        owner_context=owner_context, team_role=team_role, workspace_cwd=workspace_cwd,
     )
     if handlers.resolve_builtin_command(prepared_input.execution_command):
         if link_project_id:
@@ -112,15 +113,14 @@ def start_brokered_run(
         synthetic_kwargs = {"owner_tab_id": owner_tab_id}
         if team_id:
             synthetic_kwargs["team_id"] = team_id
+        filtered_events = handlers.filter_builtin_command_events(
+            events, prepared_input.variable_notice, prepared_input.postfilter)
+        exit_code = 1 if prepared_input.postfilter.output_sink_error and exit_code == 0 else exit_code
         run_id = handlers.brokered_synthetic_run(
             handlers.history_safe_command_for_storage(safe_command),
             session_id,
             client_ip,
-            handlers.filter_builtin_command_events(
-                events,
-                prepared_input.variable_notice,
-                prepared_input.postfilter,
-            ),
+            filtered_events,
             exit_code,
             **synthetic_kwargs,
             **({"run_created_hook": run_created_hook} if run_created_hook else {}),

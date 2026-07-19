@@ -29,6 +29,11 @@ from services.diff.text import DiffMode, SUPPORTED_DIFF_MODES, format_text_diff
 from services.teams.capabilities import Capability, require_capability, role_can
 from services.teams.contracts import TeamPermissionDenied
 from services.teams.request_scope import RequestScope, RequestScopeError, current_request_scope, scope_error_payload
+from services.workspace.file_mutations import (
+    append_owner_workspace_text_file,
+    copy_owner_workspace_file,
+    touch_owner_workspace_file,
+)
 from services.workspace.files import (
     InvalidWorkspacePath,
     WorkspaceDisabled,
@@ -295,9 +300,14 @@ def workspace_files_write():
     text = data.get("text", "")
     if not isinstance(text, str):
         return jsonify({"error": "text must be a string"}), 400
+    append = data.get("append", False)
+    if not isinstance(append, bool):
+        return jsonify({"error": "append must be a boolean"}), 400
     try:
-        file_info = write_owner_workspace_text_file(scope.context, path, text)
-        log.info("WORKSPACE_FILE_WRITE", extra={
+        writer = append_owner_workspace_text_file if append else write_owner_workspace_text_file
+        file_info = writer(scope.context, path, text)
+        action = "append" if append else "write"
+        log.info("WORKSPACE_FILE_APPEND" if append else "WORKSPACE_FILE_WRITE", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
             "team_id": scope.team_id,
@@ -310,7 +320,7 @@ def workspace_files_write():
             scope=scope,
             target_id=str(file_info["path"]),
             details={
-                "action": "write",
+                "action": action,
                 "file_path": str(file_info["path"]),
                 "byte_size": int(file_info["size"] or 0),
                 "file_count": 1,
@@ -572,6 +582,95 @@ def workspace_files_move():
             },
             "workspace": _workspace_payload(scope),
         })
+    except Exception as exc:
+        return _workspace_error_response(exc)
+
+
+@workspace_bp.route("/workspace/files/copy", methods=["POST"])
+def workspace_files_copy():
+    session_id, scope, error = _workspace_write_scope_or_error()
+    if error:
+        return error
+    assert scope is not None
+    assert session_id is not None
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    source = str(data.get("source") or "")
+    destination = str(data.get("destination") or "")
+    try:
+        copied = copy_owner_workspace_file(scope.context, source, destination)
+        _record_workspace_file_event(
+            AuditEventType.FILE_WRITE,
+            session_id=session_id,
+            scope=scope,
+            target_id=copied.destination,
+            details={
+                "action": "copy",
+                "source_path": copied.source,
+                "destination_path": copied.destination,
+                "file_path": copied.destination,
+                "byte_size": copied.size,
+                "file_count": 1,
+                "status": "file",
+            },
+        )
+        log.info("WORKSPACE_FILE_COPY", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": scope.team_id,
+            "source": copied.source,
+            "destination": copied.destination,
+            "size": copied.size,
+        })
+        return jsonify({
+            "ok": True,
+            "copied": {
+                "source": copied.source,
+                "destination": copied.destination,
+                "size": copied.size,
+            },
+            "workspace": _workspace_payload(scope),
+        })
+    except Exception as exc:
+        return _workspace_error_response(exc)
+
+
+@workspace_bp.route("/workspace/files/touch", methods=["POST"])
+def workspace_files_touch():
+    session_id, scope, error = _workspace_write_scope_or_error()
+    if error:
+        return error
+    assert scope is not None
+    assert session_id is not None
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    path = str(data.get("path") or "")
+    try:
+        file_info = touch_owner_workspace_file(scope.context, path)
+        action = "create" if file_info["created"] else "touch"
+        _record_workspace_file_event(
+            AuditEventType.FILE_WRITE,
+            session_id=session_id,
+            scope=scope,
+            target_id=str(file_info["path"]),
+            details={
+                "action": action,
+                "file_path": str(file_info["path"]),
+                "byte_size": int(file_info["size"] or 0),
+                "file_count": 1,
+                "status": "file",
+            },
+        )
+        log.info("WORKSPACE_FILE_TOUCH", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "team_id": scope.team_id,
+            "path": file_info["path"],
+            "file_created": file_info["created"],
+        })
+        return jsonify({"ok": True, "file": file_info, "workspace": _workspace_payload(scope)})
     except Exception as exc:
         return _workspace_error_response(exc)
 

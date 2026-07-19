@@ -161,8 +161,9 @@
 
 # ── Per-session Workspace Storage ────────────────────────────────────────────
 #
-# Optional app-mediated file storage for file-enabled commands and UI.
-# helpers. This does not enable shell navigation or redirection by itself.
+# Optional app-mediated file storage for file-enabled commands and UI helpers.
+# This enables only the app-managed `>` and final `tee` Files sinks, not raw
+# shell navigation or arbitrary redirection.
 # Server default if unset: false
 # workspace_enabled: false
 #

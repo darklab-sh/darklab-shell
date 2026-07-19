@@ -1664,8 +1664,27 @@ test.describe('workspace modal', () => {
 
     await runCommand(page, 'mv moved/targets.txt targets.txt')
     await expect(page.locator('.tab-panel.active .output')).toContainText('file: moved moved/targets.txt to targets.txt')
+    await runCommand(page, 'cp targets.txt targets-copy.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('file: copied targets.txt to targets-copy.txt')
+    await runCommand(page, 'touch empty.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('file: touched empty.txt')
+    await runCommand(page, 'cat targets.txt > captured.txt')
+    await runCommand(page, 'cat targets.txt >> captured.txt')
+    await runCommand(page, 'cat targets.txt | tee tee.txt')
     await runCommand(page, 'cat targets.txt')
     await expect(page.locator('.tab-panel.active .output')).toContainText('darklab.sh')
+    await runCommand(page, 'ls')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('captured.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('empty.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('targets-copy.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('tee.txt')
+
+    await page.locator('.rail-nav [data-action="workspace"]').click()
+    await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
+    const capturedRow = page.locator('.workspace-file-row').filter({ hasText: 'captured.txt' })
+    await capturedRow.locator('[data-workspace-action="view"]').click()
+    await expect(page.locator('#workspace-viewer-text .workspace-line-text').filter({ hasText: /^darklab\.sh$/ })).toHaveCount(2)
+    await expect(page.locator('#workspace-viewer-text .workspace-line-text').filter({ hasText: /^ip\.darklab\.sh$/ })).toHaveCount(2)
   })
 
   test('navigates nested file output folders and exposes viewer actions', async ({ page }) => {

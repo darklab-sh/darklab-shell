@@ -19,7 +19,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Cross-User Process Killing](#cross-user-process-killing)
   - [Two-User Security Model](#two-user-security-model)
   - [Path Blocking (/data and /tmp)](#path-blocking-data-and-tmp)
-  - [Workspace Moves and Globs Stay App-Mediated](#workspace-moves-and-globs-stay-app-mediated)
+  - [Workspace Shell Conveniences Stay App-Mediated](#workspace-shell-conveniences-stay-app-mediated)
   - [Loopback Address Blocking](#loopback-address-blocking)
   - [Session Token Security](#session-token-security)
   - [Team Ownership: Session Tokens Stay Actors](#team-ownership-session-tokens-stay-actors)
@@ -245,17 +245,21 @@ The regex is `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w
 
 Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (for example `nuclei -ud /tmp/nuclei-templates` and ProjectDiscovery `XDG_CONFIG_HOME` wrappers) are injected by `rewrite_command()` after command validation, so app-owned runtime tokens can point at trusted internal paths without exposing arbitrary `/tmp` input to users.
 
-### Workspace Moves and Globs Stay App-Mediated
+### Workspace Shell Conveniences Stay App-Mediated
 
 **Workspace file convenience should feel shell-like without becoming shell filesystem access.**
 
-The Files feature now supports moving/renaming files and folders plus simple `*` patterns in common terminal flows. Those features deliberately live in the app layer instead of relying on `/bin/sh`, `mv`, or shell glob expansion.
+The Files feature supports copy, touch, move/rename, simple `*` patterns, and constrained output capture in common terminal flows. Those features deliberately live in the app layer instead of relying on `/bin/sh`, host filesystem commands, shell glob expansion, or raw redirection.
 
 The decision is:
 
 - `file move` / `mv`, drag-and-drop, and the Files-row move action all use the shared workspace helpers
+- `file copy` / `cp` copies one regular file without following links or replacing an existing destination
+- `file touch` / `touch` creates an empty file or refreshes its modified time without truncating existing content
 - `*` patterns match within one path segment only and are expanded against the active session workspace listing
 - moving multiple matches requires the destination to already be a folder
+- final `command > file` and `command | tee file` sinks overwrite through the workspace store after output filtering and secret redaction, while final `command >> file` appends through the same boundary; all other redirection remains blocked
+- attached file-descriptor forms such as `2>` and `2>>` fail closed before tokenization, existing directory destinations fail before execution, and sink write failures force a nonzero run result without exposing internal workspace paths in the terminal
 - deletes still require the transcript-owned confirmation flow, and folders still require `-r` / `-rf`
 - backend built-ins mirror the browser behavior so stale clients and server-rendered command paths do not get a different filesystem model
 

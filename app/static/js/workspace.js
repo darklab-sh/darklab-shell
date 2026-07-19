@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // ── Session workspace UI ──
-// App-mediated file helper only. This does not expose shell navigation,
-// redirection, or arbitrary host paths.
+// App-mediated file helper only. Output sinks call this boundary; it does not
+// expose shell navigation, raw redirection, or arbitrary host paths.
 
 import {
   workspaceBreadcrumbs,
@@ -1419,6 +1419,18 @@ async function saveWorkspaceFile(path, text, metadata = null) {
   return data;
 }
 
+async function writeWorkspaceTextFile(path, text, { append = false } = {}) {
+  if (!workspaceCanWrite('write Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('write Files'));
+  const resp = await _workspaceApiFetch()('/workspace/files', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(append ? { path, text, append: true } : { path, text }),
+  });
+  const data = await _workspaceJson(resp);
+  renderWorkspaceFiles(data.workspace || {});
+  return data;
+}
+
 async function createWorkspaceDirectory(path) {
   if (!workspaceCanWrite('create folders in Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('create folders in Files'));
   const normalized = _normalizeWorkspaceDir(path);
@@ -1613,6 +1625,30 @@ async function moveWorkspacePath(source, destination) {
   hideWorkspaceViewer();
   const moved = data.moved || {};
   _showWorkspaceToast(`Moved ${moved.source || source} to ${moved.destination || destination || 'Files'}`, 'success');
+  return data;
+}
+
+async function copyWorkspacePath(source, destination) {
+  if (!workspaceCanWrite('copy Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('copy Files'));
+  const resp = await _workspaceApiFetch()('/workspace/files/copy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, destination }),
+  });
+  const data = await _workspaceJson(resp);
+  renderWorkspaceFiles(data.workspace || {});
+  return data;
+}
+
+async function touchWorkspaceFile(path) {
+  if (!workspaceCanWrite('touch Files', { toast: true })) throw new Error(_workspaceReadOnlyReason('touch Files'));
+  const resp = await _workspaceApiFetch()('/workspace/files/touch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  const data = await _workspaceJson(resp);
+  renderWorkspaceFiles(data.workspace || {});
   return data;
 }
 
@@ -1884,6 +1920,7 @@ if (typeof importedSetRuntimeHandlers === 'function') {
 if (typeof importedSetWorkspaceHandlers === 'function') {
   importedSetWorkspaceHandlers({
     closeWorkspace,
+    copyWorkspacePath,
     createWorkspaceDirectory,
     downloadWorkspaceFile,
     _formatWorkspaceBytes,
@@ -1896,12 +1933,15 @@ if (typeof importedSetWorkspaceHandlers === 'function') {
     readWorkspaceFile,
     refreshWorkspaceFiles,
     showWorkspaceViewer,
+    touchWorkspaceFile,
+    writeWorkspaceTextFile,
     workspaceCanWrite,
   });
 }
 
 export {
   closeWorkspace,
+  copyWorkspacePath,
   createWorkspaceDirectory,
   hideWorkspaceEditor,
   hideWorkspaceViewer,
@@ -1914,5 +1954,7 @@ export {
   refreshWorkspaceFiles,
   loadWorkspaceFilesPayload,
   showWorkspaceViewer,
+  touchWorkspaceFile,
+  writeWorkspaceTextFile,
   workspaceCanWrite,
 };

@@ -99,7 +99,7 @@ commands:
       arguments: []
   - root: file
     description: >-
-      built-in: list, view, compare, create, edit, download, move, or remove
+      built-in: list, view, compare, create, edit, download, copy, move, or remove
       session files
     feature_required: workspace
     autocomplete:
@@ -178,6 +178,24 @@ commands:
             # Workspace path covers both files and folders; it is not a scan target.
             value_type: workspace_path
             description: "Session file or folder path"
+        - value: copy
+          description: "Copy a session file"
+          takes_value: true
+          insert: "copy "
+          value_hint:
+            value: "<source> <destination>"
+            hint_only: true
+            value_type: workspace_path
+            description: "Source file and destination path"
+        - value: touch
+          description: "Create an empty session file or update its timestamp"
+          takes_value: true
+          insert: "touch "
+          value_hint:
+            value: "<file>"
+            hint_only: true
+            value_type: workspace_path
+            description: "Session file path"
         - value: rm
           description: "Remove a session file from this session"
           takes_value: true
@@ -358,6 +376,16 @@ commands:
     autocomplete:
       argument_limit: 1
       arguments: []
+  - root: cp
+    description: "built-in: copy a session file"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 2
+      arguments:
+        - value: "<source> <destination>"
+          hint_only: true
+          value_type: workspace_path
+          description: "Source file and destination path"
   - root: mv
     description: "built-in: move or rename a session file or folder"
     feature_required: workspace
@@ -557,6 +585,16 @@ commands:
           description: "Remove folders recursively"
       argument_limit: 1
       arguments: []
+  - root: touch
+    description: "built-in: create an empty session file or update its timestamp"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 1
+      arguments:
+        - value: "<file>"
+          hint_only: true
+          value_type: workspace_path
+          description: "Session file path"
   - root: route
     description: "built-in: show the shell routing table summary"
     autocomplete:

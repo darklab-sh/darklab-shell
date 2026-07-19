@@ -267,10 +267,10 @@ class TestIsCommandAllowedEdges:
         assert not ok
         assert "Shell operators" in reason
 
-    def test_redirection_is_blocked(self):
+    def test_absolute_output_redirection_destination_is_blocked(self):
         ok, reason = self._check("curl https://darklab.sh > /tmp/out")
         assert not ok
-        assert "Shell operators" in reason
+        assert "must be relative" in reason
 
     def test_deny_rule_takes_priority_over_allow(self):
         ok, _ = self._check("curl -o /dev/stdout https://darklab.sh", allow=["curl"], deny=["curl -o"])

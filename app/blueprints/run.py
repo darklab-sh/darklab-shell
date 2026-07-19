@@ -648,7 +648,7 @@ def _publish_broker_captured_line(
     cls: str = "",
     kind: LineKind | str | None = None,
     event: LineEvent | None = None,
-    run_started_dt,
+    run_started_dt, publish: bool = True,
 ):
     run_lifecycle.publish_broker_captured_line(
         run_id,
@@ -660,6 +660,7 @@ def _publish_broker_captured_line(
         kind=kind,
         event=event,
         run_started_dt=run_started_dt,
+        publish=publish,
         capture_event_with_signals_fn=_capture_event_with_signals,
         broker_output_payload_fn=_broker_output_payload,
         publish_run_event_fn=publish_run_event,

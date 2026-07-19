@@ -11,7 +11,11 @@ Run with: pytest tests/ (from the repo root)
 
 import unittest.mock as mock
 
-from blueprints.run import _SyntheticPostFilterProcessor
+import pytest
+
+from blueprints.run import _SyntheticPostFilterProcessor, _TruffleHogOutputFilter
+from services.teams.scope import personal_owner_context, team_owner_context
+from services.workspace.files import InvalidWorkspacePath, WorkspaceDisabled
 import services.commands.registry as commands
 import services.commands.raw_packets as raw_packets
 from services.commands.raw_packets import raw_packet_runtime_status
@@ -102,6 +106,8 @@ class TestShellOperators:
         assert not ok
 
     def test_redirect_append(self):
+        ok, _ = _check("ping darklab.sh >> reports/ping.txt")
+        assert ok
         ok, _ = _check("ping google.com >> /tmp/x")
         assert not ok
 
@@ -297,6 +303,231 @@ class TestSyntheticGrepParsing:
 
 
 class TestSyntheticPostFilterParsing:
+    def test_parses_redirect_and_tee_sinks(self):
+        redirect, redirect_error = parse_synthetic_postfilter(
+            "ping darklab.sh | grep ttl > reports/ping.txt"
+        )
+        tee, tee_error = parse_synthetic_postfilter(
+            "ping darklab.sh | grep ttl | tee reports/ping.txt"
+        )
+        append, append_error = parse_synthetic_postfilter(
+            "ping darklab.sh | grep ttl >> reports/ping.txt"
+        )
+
+        assert redirect_error is None
+        assert redirect is not None
+        assert redirect["base_command"] == "ping darklab.sh"
+        assert redirect["sink"] == {"kind": "redirect", "path": "reports/ping.txt"}
+        assert redirect["stages"][0]["kind"] == "grep"
+        assert tee_error is None
+        assert tee is not None
+        assert tee["sink"] == {"kind": "tee", "path": "reports/ping.txt"}
+        assert tee["stages"][0]["kind"] == "grep"
+        assert append_error is None
+        assert append is not None
+        assert append["sink"] == {"kind": "append", "path": "reports/ping.txt"}
+        assert append["stages"][0]["kind"] == "grep"
+
+    def test_parses_redirect_without_a_filter_and_rejects_unsafe_sinks(self):
+        spec, error = parse_synthetic_postfilter("ping darklab.sh > ping.txt")
+        absolute, absolute_error = parse_synthetic_postfilter("ping darklab.sh > /tmp/ping.txt")
+        traversal, traversal_error = parse_synthetic_postfilter("ping darklab.sh | tee ../ping.txt")
+        directory, directory_error = parse_synthetic_postfilter("ping darklab.sh > reports/")
+        stderr, stderr_error = parse_synthetic_postfilter("nmap 10.0.0.5 2> err.txt")
+        stderr_append, stderr_append_error = parse_synthetic_postfilter("nmap 10.0.0.5 2>>err.txt")
+
+        assert error is None
+        assert spec is not None
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["stages"] == []
+        assert spec["sink"] == {"kind": "redirect", "path": "ping.txt"}
+        appended, append_error = parse_synthetic_postfilter("ping darklab.sh >> ping.txt")
+        assert append_error is None
+        assert appended is not None
+        assert appended["sink"] == {"kind": "append", "path": "ping.txt"}
+        assert absolute is None
+        assert "must be relative" in str(absolute_error)
+        assert traversal is None
+        assert "cannot contain traversal" in str(traversal_error)
+        assert directory is None
+        assert "must be a file" in str(directory_error)
+        assert stderr is None
+        assert stderr_append is None
+        assert "Only stdout redirection" in str(stderr_error)
+        assert "Only stdout redirection" in str(stderr_append_error)
+        separated, separated_error = parse_synthetic_postfilter("nmap 10.0.0.5 2 > err.txt")
+        assert separated_error is None
+        assert separated is not None
+        assert separated["base_command"] == "nmap 10.0.0.5 2"
+
+    def test_rejects_nonfinal_or_ambiguous_tee_sinks(self):
+        nonfinal, nonfinal_error = parse_synthetic_postfilter(
+            "ping darklab.sh | tee ping.txt | grep ttl"
+        )
+        combined, combined_error = parse_synthetic_postfilter(
+            "ping darklab.sh | tee first.txt > second.txt"
+        )
+
+        assert nonfinal is None
+        assert "final stage" in str(nonfinal_error)
+        assert combined is None
+        assert "final stage" in str(combined_error)
+
+    def test_output_sink_writes_the_redacted_postfilter_stream(self):
+        processor = _SyntheticPostFilterProcessor({
+            "base_command": "trufflehog git https://example.test/repo.git",
+            "kind": "redirect",
+            "stages": [],
+            "sink": {"kind": "redirect", "path": "reports/secrets.jsonl"},
+        })
+        redactor = _TruffleHogOutputFilter("trufflehog git https://example.test/repo.git")
+        raw_line = '{"DetectorName":"Demo","Raw":"secret-value","RawV2":"secret-v2"}\n'
+
+        with mock.patch(
+            "services.runs.output_sinks.workspace_settings",
+            return_value=mock.Mock(max_file_bytes=1024),
+        ), mock.patch(
+            "services.runs.output_sink_files.resolve_owner_workspace_path",
+            side_effect=InvalidWorkspacePath("parent directory does not exist"),
+        ), mock.patch("services.runs.output_sink_files.write_owner_workspace_text_file") as write_file:
+            processor.configure_output_sink(
+                owner_context=personal_owner_context("sink-session"),
+                cfg={"workspace_enabled": True},
+            )
+            filtered = redactor.process_output_line(raw_line)
+            assert processor.process_output_line(filtered) == [filtered]
+            assert processor.finalize_output_lines() == []
+
+        written_text = write_file.call_args.args[2]
+        assert '"Raw":"[redacted]"' in written_text
+        assert '"RawV2":"[redacted]"' in written_text
+        assert "secret-value" not in written_text
+        assert "secret-v2" not in written_text
+        assert processor.suppresses_terminal_output is True
+
+        append_processor = _SyntheticPostFilterProcessor({
+            "base_command": "ping darklab.sh",
+            "kind": "append",
+            "stages": [],
+            "sink": {"kind": "append", "path": "reports/ping.txt"},
+        })
+        with mock.patch(
+            "services.runs.output_sinks.workspace_settings",
+            return_value=mock.Mock(max_file_bytes=1024),
+        ), mock.patch(
+            "services.runs.output_sink_files.resolve_owner_workspace_path",
+            side_effect=InvalidWorkspacePath("parent directory does not exist"),
+        ), mock.patch(
+            "services.runs.output_sink_files.append_owner_workspace_text_file",
+        ) as append_file:
+            append_processor.configure_output_sink(
+                owner_context=personal_owner_context("sink-session"),
+                cfg={"workspace_enabled": True},
+            )
+            assert append_processor.process_output_line("appended\n") == ["appended\n"]
+            assert append_processor.finalize_output_lines() == []
+        assert append_file.call_args.args[2] == "appended\n"
+        assert append_processor.suppresses_terminal_output is True
+
+    def test_tee_sink_keeps_output_visible_and_reports_write_failures(self, tmp_path):
+        processor = _SyntheticPostFilterProcessor({
+            "base_command": "ping darklab.sh",
+            "kind": "tee",
+            "stages": [],
+            "sink": {"kind": "tee", "path": "ping.txt"},
+        })
+        with mock.patch(
+            "services.runs.output_sinks.workspace_settings",
+            return_value=mock.Mock(max_file_bytes=1024),
+        ), mock.patch(
+            "services.runs.output_sink_files.resolve_owner_workspace_path",
+            return_value=tmp_path / "ping.txt",
+        ), mock.patch(
+            "services.runs.output_sink_files.write_owner_workspace_text_file",
+            side_effect=OSError("/data/workspaces/sess_private/ping.txt: disk unavailable"),
+        ), mock.patch("services.runs.output_sink_files.log.warning") as warning:
+            processor.configure_output_sink(
+                owner_context=personal_owner_context("sink-session"),
+                cfg={"workspace_enabled": True},
+            )
+            assert processor.process_output_line("visible\n") == ["visible\n"]
+            assert processor.finalize_output_lines() == [
+                "[error] output redirection failed: could not write the file\n",
+            ]
+
+        assert processor.suppresses_terminal_output is False
+        assert processor.output_sink_error == "could not write the file"
+        warning.assert_called_once()
+        assert warning.call_args.args[0] == "WORKSPACE_OUTPUT_SINK_WRITE_FAILED"
+        assert "/data/workspaces" not in processor.finalize_output_lines()[0]
+
+        redirect = _SyntheticPostFilterProcessor({
+            "base_command": "ping darklab.sh",
+            "kind": "redirect",
+            "stages": [],
+            "sink": {"kind": "redirect", "path": "ping.txt"},
+        })
+        redirect.output_sink_error = "disk unavailable"
+        assert redirect.should_publish_output_line("still redirected\n") is False
+        assert redirect.should_publish_output_line(
+            "[error] output redirection failed: disk unavailable\n"
+        ) is True
+
+    def test_output_sink_resolves_from_workspace_cwd_and_enforces_feature_role_and_destination(self, tmp_path):
+        spec = {
+            "base_command": "ping darklab.sh",
+            "kind": "redirect",
+            "stages": [],
+            "sink": {"kind": "redirect", "path": "ping.txt"},
+        }
+        processor = _SyntheticPostFilterProcessor(spec)
+        with mock.patch(
+            "services.runs.output_sinks.workspace_settings",
+            return_value=mock.Mock(max_file_bytes=1024),
+        ), mock.patch(
+            "services.runs.output_sink_files.resolve_owner_workspace_path",
+            side_effect=InvalidWorkspacePath("parent directory does not exist"),
+        ):
+            processor.configure_output_sink(
+                owner_context=personal_owner_context("sink-session"),
+                workspace_cwd="reports/daily",
+                cfg={"workspace_enabled": True},
+            )
+        assert processor.output_sink_path == "reports/daily/ping.txt"
+
+        directory = _SyntheticPostFilterProcessor(spec)
+        existing_directory = tmp_path / "reports"
+        existing_directory.mkdir()
+        with mock.patch(
+            "services.runs.output_sinks.workspace_settings",
+            return_value=mock.Mock(max_file_bytes=1024),
+        ), mock.patch(
+            "services.runs.output_sink_files.resolve_owner_workspace_path",
+            return_value=existing_directory,
+        ), pytest.raises(ValueError, match="must be a file"):
+            directory.configure_output_sink(
+                owner_context=personal_owner_context("sink-session"),
+                cfg={"workspace_enabled": True},
+            )
+
+        disabled = _SyntheticPostFilterProcessor(spec)
+        with mock.patch(
+            "services.runs.output_sinks.workspace_settings",
+            side_effect=WorkspaceDisabled("disabled"),
+        ), pytest.raises(ValueError, match="disabled"):
+            disabled.configure_output_sink(
+                owner_context=personal_owner_context("sink-session"),
+                cfg={"workspace_enabled": False},
+            )
+
+        viewer = _SyntheticPostFilterProcessor(spec)
+        with pytest.raises(ValueError, match="can't change"):
+            viewer.configure_output_sink(
+                owner_context=team_owner_context("team-1"),
+                team_role="viewer",
+                cfg={"workspace_enabled": True},
+            )
+
     def test_parses_default_head(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | head")
         assert err is None

@@ -60,16 +60,12 @@ def prepare_command_input(
     session_id: str,
     client_ip: str,
     private_values: tuple[str, ...],
+    **run_context: object,
 ) -> Any:
-    kwargs: dict[str, object] = {"display_command": display_command}
+    kwargs: dict[str, object] = {"display_command": display_command, **run_context}
     if private_values:
         kwargs["private_values"] = private_values
-    return handlers.prepare_command_input(
-        original_command,
-        session_id,
-        client_ip,
-        **kwargs,
-    )
+    return handlers.prepare_command_input(original_command, session_id, client_ip, **kwargs)
 
 
 def prepare_real_command(

@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Enable TruffleHog github and gitlab sources](#enable-trufflehog-github-and-gitlab-sources)
-  - [Output redirection and file copy/touch built-ins](#output-redirection-and-file-copytouch-built-ins)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Validate split pytest timing on project runners](#validate-split-pytest-timing-on-project-runners)
@@ -53,35 +52,6 @@ Allow `trufflehog github` and `trufflehog gitlab` alongside the existing `truffl
   - Refresh the `knowledge` notes, gotchas, `safe_defaults`, and autocomplete examples for the trufflehog entry in `app/conf/commands.yaml`.
   - Update the trufflehog coverage in `README.md`, `docs/tools.md`, and `docs/external-command-integrations.md`.
 - [ ] Add registry validation and policy tests covering the new allow/deny shapes, secret-backed token injection, and the `--org`/`--group`/`--endpoint` forms.
-
-### Output redirection and file copy/touch built-ins
-
-Three related terminal ergonomics enhancements that all write to the session workspace. Redirection and `tee` must write the same post-redaction stream that history stores, never the raw output, and all three go through the existing workspace file store so path safety, size limits, feature gating, and team/owner scope stay consistent.
-
-**Output redirection to a workspace file via `>` and `| tee <filename>`:**
-
-- [ ] Teach the terminal that `command > <filename>` writes the run's output to a workspace file and suppresses it from the terminal, while `command | tee <filename>` writes the file and still streams output to the terminal.
-- [ ] Extend the synthetic pipeline parser in `app/services/commands/postfilters.py`, which currently rejects `>` and the other redirection tokens in `disallowed_control`, to recognize a redirection sink and a `tee` sink stage with a filename argument.
-- [ ] Write the post-redaction stream, so masked secrets (for example TruffleHog `Raw`/`RawV2`) are what lands in the file, matching what history persists.
-- [ ] Reuse the workspace file store used by `file add`/`edit` so the write honors path safety, size limits, the workspace/Files feature gate, and `_can_manage_workspace_files` permission and team scope.
-- [ ] Decide overwrite semantics for `>` (overwrite) and note `>>` append as a possible follow-up.
-- [ ] Add autocomplete and help/discovery coverage so `>` and `tee` appear alongside the app-native pipe helpers.
-
-**`file copy` with a `cp` alias:**
-
-- [ ] Add a `copy`/`cp` subcommand to `app/services/commands/builtins_workspace.py` that copies one workspace file to a new path, alongside the existing `move`/`mv` handling.
-- [ ] Wire the `cp` alias through `builtins.py`: dispatch entry, `_resolve_workspace_alias_command` (two-path form like `mv`), `_WORKSPACE_ALIAS_ROOTS`, and `_WORKSPACE_BUILTIN_ROOTS`.
-
-**`file touch` with a `touch` alias:**
-
-- [ ] Add a `touch` subcommand to `builtins_workspace.py` that creates an empty workspace file, reusing the `file add` write path.
-- [ ] Wire the `touch` alias through `builtins.py` with the same dispatch, resolver, and roots plumbing.
-
-**Shared for `cp` and `touch`:**
-
-- [ ] Gate both writes behind `_can_manage_workspace_files` and the workspace feature, consistent with `file add`/`edit`.
-- [ ] Register both in the documented built-in catalog (`builtins_catalog.py`) and `builtin_autocomplete.yaml`, and confirm they surface in `commands`, `help`, and `file help`.
-- [ ] Add tests for copy, touch, and the redirection/`tee` sinks, including redaction-preserving writes, path-safety rejection, and permission/feature gating.
 
 ## Known Issues
 
