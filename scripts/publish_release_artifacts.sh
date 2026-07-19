@@ -46,24 +46,66 @@ publish_gitlab_image() {
     release_version=${CI_COMMIT_TAG#v}
     gitlab_image="${CI_REGISTRY_IMAGE}:${release_version}"
     cache_scope=${RELEASE_CACHE_SCOPE:-v2-6}
+    release_major=${release_version%%.*}
+    release_remainder=${release_version#*.}
+    release_minor=${release_remainder%%.*}
+    expected_cache_scope="v${release_major}-${release_minor}"
     cache_image="${CI_REGISTRY_IMAGE}:buildcache-amd64-${cache_scope}"
     python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' "$repo_root/Dockerfile")
     require_nonempty gitlab_image_preflight python_base_image "$python_base_image"
     printf 'RELEASE_IMAGE_JOB_STATUS=failed\n' > release-image.env
     release_status_file=release-image-status.txt
+    build_metrics_file=release-image-build-metrics.txt
+    image_action=preflight
+    image_action_seconds=0
+    build_seconds=0
+    reused_existing_tag=false
     printf 'stage=gitlab_image_publication status=running\n' > "$release_status_file"
     write_gitlab_status() {
         status=$?
         printf 'stage=gitlab_image_publication status=%s\n' "$status" > "$release_status_file"
+        if [ "$status" -eq 0 ]; then
+            metrics_status=complete
+        else
+            metrics_status=failed
+        fi
+        printf '%s\n' \
+            "status=${metrics_status}" \
+            "image_action=${image_action}" \
+            "image_action_seconds=${image_action_seconds}" \
+            "build_seconds=${build_seconds}" \
+            "reused_existing_tag=${reused_existing_tag}" \
+            "cache_scope=${cache_scope}" \
+            "cache_ref=${cache_image}" \
+            "platform=linux/amd64" \
+            "python_base_image=${python_base_image}" \
+            "python_base_digest=${python_base_digest:-unresolved}" \
+            "compressed_bytes=${compressed_bytes:-0}" \
+            "source_commit=${CI_COMMIT_SHA}" \
+            "pipeline_id=${CI_PIPELINE_ID:-unknown}" \
+            "job_id=${CI_JOB_ID:-unknown}" \
+            > "$build_metrics_file"
     }
     trap write_gitlab_status EXIT
+    require_equal gitlab_image_preflight cache_scope \
+        "$expected_cache_scope" "$cache_scope"
 
     python3 "$script_dir/check_versions.sh" --release-version "$release_version"
     python3 "$script_dir/check_container_licenses.py"
     echo "$CI_REGISTRY_PASSWORD" \
         | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     if docker manifest inspect -v "$gitlab_image" > gitlab-existing.json 2>/dev/null; then
-        docker pull "$gitlab_image"
+        image_action=reuse
+        reused_existing_tag=true
+        image_action_started=$(date +%s)
+        if docker pull "$gitlab_image"; then
+            :
+        else
+            image_action_status=$?
+            image_action_seconds=$(($(date +%s) - image_action_started))
+            return "$image_action_status"
+        fi
+        image_action_seconds=$(($(date +%s) - image_action_started))
         existing_version=$(docker image inspect \
             --format '{{index .Config.Labels "sh.darklab.app.version"}}' "$gitlab_image")
         existing_revision=$(docker image inspect \
@@ -94,18 +136,29 @@ publish_gitlab_image() {
             ][0].digest // empty
         ' python-base-index.json)
         require_digest gitlab_image_build python_base_digest "$python_base_digest"
-        docker buildx build --pull --platform linux/amd64 --provenance=false \
-            --progress=plain \
-            --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
-            --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
-            --build-arg "APP_VERSION=${release_version}" \
-            --build-arg "VCS_REF=${CI_COMMIT_SHA}" \
-            --build-arg "BUILD_DATE=${build_date}" \
-            --cache-from "type=registry,ref=${cache_image}" \
-            --cache-to "type=registry,ref=${cache_image},mode=max" \
-            --metadata-file release-build-metadata.json \
-            --tag "$gitlab_image" \
-            --push "$repo_root"
+        image_action=build
+        image_action_started=$(date +%s)
+        if docker buildx build --pull --platform linux/amd64 --provenance=false \
+                --progress=plain \
+                --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+                --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+                --build-arg "APP_VERSION=${release_version}" \
+                --build-arg "VCS_REF=${CI_COMMIT_SHA}" \
+                --build-arg "BUILD_DATE=${build_date}" \
+                --cache-from "type=registry,ref=${cache_image}" \
+                --cache-to "type=registry,ref=${cache_image},mode=max" \
+                --metadata-file release-build-metadata.json \
+                --tag "$gitlab_image" \
+                --push "$repo_root"; then
+            :
+        else
+            image_action_status=$?
+            image_action_seconds=$(($(date +%s) - image_action_started))
+            build_seconds=$image_action_seconds
+            return "$image_action_status"
+        fi
+        image_action_seconds=$(($(date +%s) - image_action_started))
+        build_seconds=$image_action_seconds
         gitlab_digest=$(jq -r '."containerimage.digest" // empty' release-build-metadata.json)
         require_digest gitlab_image_build digest "$gitlab_digest"
     fi

@@ -35,29 +35,10 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ### Shorten release image builds and failure feedback
 
-**Outcome:** Release candidates keep the full image, compatibility, supply-chain, and publication gates, but repeated runs reuse portable architecture-specific caches and report image-content failures as soon as the canonical GitLab image is available. The final runtime image remains self-contained without the toolchains, caches, development packages, apt indexes, or source trees used to build it.
+The multi-stage image, early vulnerability gate, release-line AMD64 registry cache, uncached native ARM64 policy, and complete compatibility and supply-chain checks shipped in v2.6.0. Release feedback dropped from roughly 80–90 minutes to 40–45 minutes, and the runtime image no longer carries its build toolchains or caches. BuildKit cache mounts and a separately published scanner base aren't planned because the added complexity isn't justified by the measured result.
 
-Keep one runtime image. Separate published runtime containers would complicate command execution, networking, Compose, licensing, upgrades, and support.
-
-#### Measure and make cache behavior visible
-
-- [ ] Record the AMD64 and ARM64 clean-build time, repeated-build time, cache import/export time, image pull time, and time to the first actionable image failure. Use `--progress=plain` or equivalent retained logs so cache-manifest imports and `CACHED` steps are visible.
-- [ ] Confirm the AMD64 release builder consistently imports and exports its registry-backed `mode=max` cache. Use architecture- and release-line-scoped cache references so unrelated or concurrent writers don't overwrite the same cache location.
-- [ ] Keep the native ARM64 release smoke uncached on the current 30 GB hosted runner. Restore a portable ARM64 cache only after a larger runner or a smaller image provides enough headroom for cache import, export, and runtime verification in one job.
-- [ ] Record when a refreshed Python base-image platform digest invalidates the complete image. Keep security-driven base refreshes intentional and visible rather than hiding them to preserve an old cache.
-- [ ] Measure registry layer caching and `RUN --mount=type=cache` separately. Cross-runner acceptance depends on exported layer-cache hits from stable stages and pinned inputs; cache mounts are builder-local acceleration and must not be counted as portable reuse on a fresh DinD daemon or another runner.
-
-#### Validate and tune the multi-stage build
-
-- [ ] Add BuildKit cache mounts for Go modules and compilation output, apt metadata/packages, pip downloads, and RubyGems only where they provide measured benefit on a persistent builder. Preserve reproducibility, don't let mutable cache contents replace pinned versions or checksum validation, and don't expect cache-mount contents to satisfy cross-runner registry-cache acceptance.
-- [ ] Compare the multi-stage clean build, repeated build, compressed image size, unpacked size, SBOM package count/size, and Critical/High and total fixed-vulnerability counts with the single-stage baseline. Confirm the runtime scan no longer attributes findings to build-only toolchains or caches.
-- [ ] Keep the multi-stage Dockerfile hadolint-clean and run the full container smoke, bundled-tool, license, AMD64, native ARM64, SELinux, rootless Podman, SBOM/vulnerability, and release checks before adopting it.
-- [ ] Consider a separately published, digest-pinned scanner-toolchain base image only if architecture-specific registry caches and multi-stage builds still leave release iteration unacceptably slow. If adopted, give it its own versioning, retention, provenance, SBOM, vulnerability, license, and multi-architecture contracts.
-
-#### End-state acceptance criteria
-
-- [ ] Two consecutive RC-equivalent AMD64 builds with unchanged pinned toolchain inputs visibly reuse the exported layer cache across fresh builders instead of recompiling the scanner suite; builder-local cache mounts aren't evidence for this criterion. Apply the same criterion to ARM64 only after that job has enough storage for a portable cache.
-- [ ] The measured repeated-pipeline feedback time is materially lower than the current 80–90-minute loop, and the retained logs make remaining cache misses and pull/build costs attributable.
+- [ ] Run a scheduled pipeline on the protected active release branch with `RELEASE_CACHE_PROBE=1`. Confirm `release-cache-probe-amd64-export` passes on `bael`, then `release-cache-probe-amd64-reuse` passes on `botis` with every tracked expensive builder step reported as `CACHED`.
+- [ ] Record both probe durations and retain the plain BuildKit logs long enough to confirm the cache import, export, Python base digest, and remaining uncached work. Remove this section after the cross-runner result is confirmed.
 
 ## Known Issues
 

@@ -20,6 +20,7 @@ variables:
   RELEASE_SELINUX_COMPATIBILITY_ENABLED: "0"
   RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED: "0"
   RELEASE_CACHE_SCOPE: "v2-6"
+  RELEASE_CACHE_PROBE: "0"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -58,7 +59,7 @@ test-js-e2e:
   variables:
     PLAYWRIGHT_PROJECT_COUNT: "3"
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_COMMIT_TAG
       when: never
@@ -83,7 +84,7 @@ test-js-e2e:
 test-py-pytest:
   stage: test
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -99,7 +100,7 @@ test-js-unit:
   stage: test
   image: $CI_NODE_IMAGE
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -125,7 +126,7 @@ test-py-postgres:
     POSTGRES_PASSWORD: darklab_dev_password
     DARKLAB_TEST_POSTGRES_DSN: "postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell"
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -140,7 +141,7 @@ test-py-postgres:
 lint-py:
   stage: lint
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -159,7 +160,7 @@ lint-js:
   stage: lint
   image: $CI_NODE_IMAGE
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -186,7 +187,7 @@ lint-js:
 audit-py:
   stage: audit
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -200,7 +201,7 @@ audit-js:
   stage: audit
   image: $CI_NODE_IMAGE
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -218,7 +219,7 @@ audit-js:
 container-license-audit:
   stage: audit
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -231,7 +232,7 @@ container-license-audit:
 release-version-audit:
   stage: audit
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -287,7 +288,7 @@ docker-build:
     DOCKER_BUILDKIT: "1"
   before_script: []
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($SCHEDULED_DOCKER_BUILD_FANOUT == "1" || $RELEASE_CACHE_PROBE == "1")'
       when: never
     # Tags skip this branch-only image; protected release tags build the canonical image below.
     - if: $CI_COMMIT_TAG
@@ -440,6 +441,135 @@ docker-build-baal:
         --build-arg "TARGETARCH=amd64" \
         --format docker --tag "darklab_shell:${CI_COMMIT_SHA}" .
 
+.release-cache-probe-amd64:
+  image: $CI_DOCKER_IMAGE
+  interruptible: true
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: "1"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RELEASE_CACHE_PROBE == "1"'
+    - when: never
+  before_script:
+    - apk add --no-cache jq
+  script:
+    - |
+      set -eu
+      set -o pipefail
+      echo "$CI_REGISTRY_PASSWORD" \
+        | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+      builder_name="darklab-cache-probe-${CI_JOB_ID}"
+      cleanup_builder() {
+        docker buildx rm --force "$builder_name" >/dev/null 2>&1 || true
+      }
+      trap cleanup_builder EXIT INT TERM
+      docker buildx create --driver docker-container \
+        --name "$builder_name" --use
+      docker buildx inspect --bootstrap
+      python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
+      docker buildx imagetools inspect --raw "$python_base_image" \
+        > "release-cache-probe-${CACHE_PROBE_MODE}-python-base-index.json"
+      python_base_digest=$(jq -r '
+        [.manifests[]
+          | select(.platform.os == "linux" and .platform.architecture == "amd64")
+          | select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest")
+        ][0].digest // empty
+      ' "release-cache-probe-${CACHE_PROBE_MODE}-python-base-index.json")
+      printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+      release_cache="${CI_REGISTRY_IMAGE}:buildcache-amd64-${RELEASE_CACHE_SCOPE}"
+      probe_cache="${release_cache}-probe-${CI_PIPELINE_ID}"
+      build_log="release-cache-probe-${CACHE_PROBE_MODE}.log"
+      build_started=$(date +%s)
+      if [ "$CACHE_PROBE_MODE" = "export" ]; then
+        docker buildx imagetools inspect "$release_cache" >/dev/null
+        docker buildx build --pull --platform linux/amd64 --provenance=false \
+          --progress=plain \
+          --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+          --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+          --cache-from "type=registry,ref=${release_cache}" \
+          --cache-to "type=registry,ref=${probe_cache},mode=max" \
+          --output type=cacheonly . 2>&1 | tee "$build_log"
+        cache_from=$release_cache
+        cache_to=$probe_cache
+      elif [ "$CACHE_PROBE_MODE" = "reuse" ]; then
+        docker buildx imagetools inspect "$probe_cache" >/dev/null
+        docker buildx build --pull --platform linux/amd64 --provenance=false \
+          --progress=plain \
+          --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+          --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+          --cache-from "type=registry,ref=${probe_cache}" \
+          --output type=cacheonly . 2>&1 | tee "$build_log"
+        cache_from=$probe_cache
+        cache_to=none
+        grep -F "$probe_cache" "$build_log" >/dev/null
+        awk '
+          /^#[0-9]+ \[(go-projectdiscovery|go-other-tools|native-tools|wordlist-assets|script-assets|rustscan-asset|ruby-tools) [^]]+\] RUN / {
+            tracked[$1] = $0
+          }
+          $2 == "CACHED" && ($1 in tracked) {
+            cached[$1] = 1
+          }
+          END {
+            total = 0
+            misses = 0
+            for (step in tracked) {
+              total++
+              if (!(step in cached)) {
+                print "Expected cached builder step: " tracked[step] > "/dev/stderr"
+                misses++
+              }
+            }
+            printf "Validated %d expensive builder RUN steps as CACHED.\n", total
+            if (total == 0 || misses > 0) {
+              exit 1
+            }
+          }
+        ' "$build_log"
+      else
+        echo "Unsupported cache probe mode: $CACHE_PROBE_MODE" >&2
+        exit 2
+      fi
+      build_seconds=$(($(date +%s) - build_started))
+      printf '%s\n' \
+        "mode=${CACHE_PROBE_MODE}" \
+        "runner=${CI_RUNNER_DESCRIPTION:-unknown}" \
+        "platform=linux/amd64" \
+        "source_commit=${CI_COMMIT_SHA}" \
+        "python_base_digest=${python_base_digest}" \
+        "cache_from=${cache_from}" \
+        "cache_to=${cache_to}" \
+        "build_seconds=${build_seconds}" \
+        "pipeline_id=${CI_PIPELINE_ID}" \
+        "job_id=${CI_JOB_ID}" \
+        > "release-cache-probe-${CACHE_PROBE_MODE}-metrics.txt"
+  artifacts:
+    when: always
+    paths:
+      - release-cache-probe-*.json
+      - release-cache-probe-*.log
+      - release-cache-probe-*-metrics.txt
+    expire_in: 1 week
+
+release-cache-probe-amd64-export:
+  extends: .release-cache-probe-amd64
+  stage: build
+  tags:
+    - bael
+  variables:
+    CACHE_PROBE_MODE: export
+
+release-cache-probe-amd64-reuse:
+  extends: .release-cache-probe-amd64
+  stage: publish
+  tags:
+    - botis
+  variables:
+    CACHE_PROBE_MODE: reuse
+  needs:
+    - job: release-cache-probe-amd64-export
+      artifacts: false
+
 .protected-release-tag:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true"'
@@ -470,6 +600,7 @@ release-image-gitlab:
     paths:
       - gitlab-manifest.json
       - release-build-metadata.json
+      - release-image-build-metrics.txt
       - release-image-status.txt
       - python-base-resolution.json
     expire_in: 1 week

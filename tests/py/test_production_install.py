@@ -1406,7 +1406,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["RELEASE_SELINUX_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_CACHE_SCOPE"] == "v2-6"
+    assert parsed_ci["variables"]["RELEASE_CACHE_PROBE"] == "0"
     docker_build_rules = parsed_ci["docker-build"]["rules"]
+    assert "RELEASE_CACHE_PROBE" in docker_build_rules[0]["if"]
     tag_skip_rule = {"if": "$CI_COMMIT_TAG", "when": "never"}
     tag_skip_index = docker_build_rules.index(tag_skip_rule)
     changes_index = next(
@@ -1429,6 +1431,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["release-image-gitlab"]["artifacts"]["when"] == "always"
     assert parsed_ci["release-image-dockerhub"]["artifacts"]["when"] == "always"
     assert "release-image-status.txt" in parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
+    assert "release-image-build-metrics.txt" in (
+        parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
+    )
     assert "python-base-resolution.json" in (
         parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
     )
@@ -1471,7 +1476,34 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert '--build-arg "TARGETARCH=amd64"' in podman_warmer_script
     assert "--format docker" in podman_warmer_script
     assert "buildcache-amd64-${cache_scope}" in publisher
+    assert 'expected_cache_scope="v${release_major}-${release_minor}"' in publisher
     assert "--progress=plain" in publisher
+    cache_probe_template = parsed_ci[".release-cache-probe-amd64"]
+    assert cache_probe_template["rules"][0]["if"] == (
+        '$CI_PIPELINE_SOURCE == "schedule" && $RELEASE_CACHE_PROBE == "1"'
+    )
+    cache_probe_script = "\n".join(cache_probe_template["script"])
+    assert "docker buildx create --driver docker-container" in cache_probe_script
+    assert "--cache-from" in cache_probe_script
+    assert "--cache-to" in cache_probe_script
+    assert "--output type=cacheonly" in cache_probe_script
+    assert "Validated %d expensive builder RUN steps as CACHED" in (
+        cache_probe_script
+    )
+    cache_probe_export = parsed_ci["release-cache-probe-amd64-export"]
+    assert cache_probe_export["stage"] == "build"
+    assert cache_probe_export["tags"] == ["bael"]
+    assert cache_probe_export["variables"]["CACHE_PROBE_MODE"] == "export"
+    cache_probe_reuse = parsed_ci["release-cache-probe-amd64-reuse"]
+    assert cache_probe_reuse["stage"] == "publish"
+    assert cache_probe_reuse["tags"] == ["botis"]
+    assert cache_probe_reuse["variables"]["CACHE_PROBE_MODE"] == "reuse"
+    assert cache_probe_reuse["needs"] == [
+        {
+            "job": "release-cache-probe-amd64-export",
+            "artifacts": False,
+        }
+    ]
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
     amd64_smoke_script = "\n".join(parsed_ci["release-image-smoke"]["script"])
     digest_pinned_gitlab_image = '"$GITLAB_IMAGE@$GITLAB_DIGEST"'
@@ -1915,6 +1947,30 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
         "image": "python:3.14.6-slim",
         "platform": "linux/amd64",
     }
+    first_metrics = dict(
+        row.split("=", 1)
+        for row in (
+            gitlab_first_dir / "release-image-build-metrics.txt"
+        ).read_text(encoding="utf-8").splitlines()
+    )
+    assert first_metrics == {
+        "status": "complete",
+        "image_action": "build",
+        "image_action_seconds": first_metrics["image_action_seconds"],
+        "build_seconds": first_metrics["build_seconds"],
+        "reused_existing_tag": "false",
+        "cache_scope": "v2-6",
+        "cache_ref": "registry.example.test/darklab/shell:buildcache-amd64-v2-6",
+        "platform": "linux/amd64",
+        "python_base_image": "python:3.14.6-slim",
+        "python_base_digest": "sha256:" + "b" * 64,
+        "compressed_bytes": "3072",
+        "source_commit": "revision-a",
+        "pipeline_id": "unknown",
+        "job_id": "unknown",
+    }
+    assert first_metrics["image_action_seconds"].isdigit()
+    assert first_metrics["build_seconds"] == first_metrics["image_action_seconds"]
 
     gitlab_retry_dir = tmp_path / "gitlab-retry"
     gitlab_retry = _run_release_publisher(
@@ -1927,6 +1983,16 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     assert "buildx build" not in (
         gitlab_retry_dir / "release-tools.log"
     ).read_text(encoding="utf-8")
+    retry_metrics = dict(
+        row.split("=", 1)
+        for row in (
+            gitlab_retry_dir / "release-image-build-metrics.txt"
+        ).read_text(encoding="utf-8").splitlines()
+    )
+    assert retry_metrics["status"] == "complete"
+    assert retry_metrics["image_action"] == "reuse"
+    assert retry_metrics["reused_existing_tag"] == "true"
+    assert retry_metrics["build_seconds"] == "0"
 
     gitlab_conflict = _run_release_publisher(
         tmp_path / "gitlab-conflict",
@@ -1939,6 +2005,23 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
         f"check=version expected={RELEASE_VERSION} actual=9.9.9"
         in gitlab_conflict.stderr
     )
+
+    scope_mismatch_dir = tmp_path / "gitlab-cache-scope-mismatch"
+    scope_mismatch = _run_release_publisher(
+        scope_mismatch_dir,
+        "gitlab-image",
+        RELEASE_CACHE_SCOPE="v2-5",
+    )
+    assert scope_mismatch.returncode != 0
+    assert "check=cache_scope expected=v2-6 actual=v2-5" in scope_mismatch.stderr
+    mismatch_metrics = dict(
+        row.split("=", 1)
+        for row in (
+            scope_mismatch_dir / "release-image-build-metrics.txt"
+        ).read_text(encoding="utf-8").splitlines()
+    )
+    assert mismatch_metrics["status"] == "failed"
+    assert mismatch_metrics["image_action"] == "preflight"
 
     rc_version = NEXT_RC_VERSION
     gitlab_rc_dir = tmp_path / "gitlab-rc"
