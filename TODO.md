@@ -9,6 +9,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Open TODOs](#open-todos)
   - [Enable TruffleHog github and gitlab sources](#enable-trufflehog-github-and-gitlab-sources)
   - [Validate multi-platform release publication](#validate-multi-platform-release-publication)
+  - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -57,14 +58,7 @@ Allow `trufflehog github` and `trufflehog gitlab` alongside the existing `truffl
 
 The dual-platform publication path is implemented. Complete these live checks before shipping the first release that claims native Linux ARM64 support:
 
-- [ ] Qualify the native ARM64 publication runner with three uncached build, push, pull, verification, and cleanup cycles.
-  - Record total wall-clock, build/push time, peak daemon and BuildKit storage, free space after export, cleanup time and recovered space, job timeout, driver, daemon configuration, and external registry/download reachability.
-  - Require the slowest cycle to finish within 75 percent of the job timeout and leave at least 30 percent disk headroom after export.
-  - Confirm the actual DinD path at `tcp://docker:2375`, including the `1360` MTU workaround, and keep ARM64 registry caching disabled unless a larger dedicated runner separately proves it safe.
-  - Replace the provisional hosted-runner details in `CONTRIBUTING.md` with the observed qualification results.
-- [ ] Run the protected `RELEASE_MULTIARCH_REHEARSAL=1` pipeline and confirm native anonymous AMD64 and ARM64 pulls select the expected child digests, pass the repository-free smoke checks, and create no Docker Hub tag, signature, payload, or GitLab Release.
 - [ ] Qualify staging cleanup in a disposable registry repository.
-  - Update the cleanup implementation to collect every expired matching tag before it starts deleting. Add an offset-pagination regression with more than two pages so deleting one page can't shift and skip later candidates.
   - Publish two tagged child manifests plus an index, remove the child tags, allow registry cleanup/garbage collection to run, and confirm the index remains pullable by tag and digest on both native architectures.
   - Keep successful release child anchors for the lifetime of their release and leave `RELEASE_STAGING_CLEANUP_ENABLED=0` until the temporary-tag cleanup job has passed this exercise.
 - [ ] Add executable publisher shell coverage with stubbed Docker, registry state, and runner identity.
@@ -72,6 +66,59 @@ The dual-platform publication path is implemented. Complete these live checks be
   - Keep the Python contract tests for descriptor and release-mode validation, but don't treat source-text assertions as coverage of publisher behavior.
 - [ ] Complete three consecutive protected release-candidate pipelines in dual mode without manual repair. Each pipeline must build both children natively, pass both smoke and vulnerability lanes, publish one two-platform GitLab index, copy the identical index to Docker Hub, sign the index and both children, and produce matching evidence and payload contracts.
 - [ ] On native AMD64 and ARM64 hosts, validate a clean repository-free install, upgrade, status check, backup, restore, bundled-tool verification, and Postgres-backed startup from the same canonical tag. Confirm an unsupported host architecture fails before startup with a clear error.
+
+### Autoscale ARM64 release runners on EC2 Spot
+
+Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker pool managed by GitLab Runner's Docker Autoscaler and AWS fleeting plugin. Keep the runner manager on existing self-hosted infrastructure, scale the AWS Auto Scaling Group from zero only after the manager accepts a matching job, and destroy each worker after one job. Preserve a documented On-Demand or hosted-runner fallback so Spot capacity does not become a hard release blocker.
+
+- [ ] Define the runner and worker contract before provisioning infrastructure:
+  - Use the `docker-autoscaler` executor so the existing Docker job images, service containers, privileged Docker-in-Docker flow, and release scripts keep their current execution model.
+  - Give this runner configuration its own AWS Auto Scaling Group; do not share the group with another runner manager or `[[runners]]` entry.
+  - Start with one job per instance, one use per instance, one maximum instance, no idle capacity, and no local state that must survive termination.
+  - Use an ARM64 worker with at least 8 vCPU, 32 GiB RAM, and a 250 GiB `gp3` Docker volume. Treat `m7g.2xlarge` as the baseline while allowing a configurable pool of compatible Graviton instance types.
+- [ ] Add Terraform for the AWS worker pool:
+  - Define inputs for AWS region, VPC, worker subnets, runner-manager network ranges, ARM64 AMI, instance-type overrides, maximum capacity, root-volume size and performance, and common resource tags.
+  - Create a launch template that requires IMDSv2, uses an ARM64 AMI, enables delete-on-termination storage, and provisions the Docker filesystem on a 250 GiB `gp3` volume with configurable IOPS and throughput.
+  - Create a worker security group that allows SSH only from the runner manager's fixed address or private network and allows the outbound DNS, HTTPS, and registry traffic needed by release builds.
+  - Create a mixed-instances Auto Scaling Group with minimum and desired capacity `0`, maximum capacity `1` by default, multiple subnets and compatible Graviton instance types, `price-capacity-optimized` Spot allocation, no independent scaling policy, instance scale-in protection, and `AZRebalance` suspended.
+  - Keep Spot at 100% for normal operation, but make the purchase policy configurable so an operator can temporarily select On-Demand capacity without changing the runner or CI configuration.
+  - Create the least-privilege IAM policy needed by the fleeting manager: describe the ASG and instances, change desired capacity and instance protection, terminate workers through the ASG, inspect Spot requests, and publish temporary SSH keys through EC2 Instance Connect when dynamic credentials are enabled.
+  - Output the ASG name, region, worker security-group ID, IAM policy ARN, and other values required by runner-manager configuration without outputting secret credentials.
+  - Add Terraform formatting, validation, static security checks, and reviewed plan output. Confirm a second plan is empty after apply and that destroying the stack removes workers, launch-template resources, and disposable volumes cleanly.
+- [ ] Prepare a fast, reproducible ARM64 worker image:
+  - Bake or otherwise version an ARM64 image with Docker Engine, SSH, EC2 Instance Connect support, CA certificates, and the small set of host utilities required by GitLab's Docker Autoscaler.
+  - Enable Docker at boot, grant the connector user access to Docker, and verify `docker info` succeeds over the same SSH path the runner manager uses.
+  - Keep boot-time configuration short and deterministic; do not install the full toolchain through user data on every scale-out.
+  - Record the image identifier as a Terraform input so worker-image updates produce an intentional launch-template revision.
+- [ ] Add generic Ansible management for the existing runner manager:
+  - Install or update a GitLab Runner version compatible with GitLab.com and the Docker Autoscaler executor.
+  - Configure the AWS fleeting plugin with a pinned compatible version and run `gitlab-runner fleeting install` when the selected plugin version is not already installed.
+  - Manage a root-readable AWS config containing the selected profile and region. Store AWS credentials through the automation system's secret mechanism rather than in source control, and keep the credential file readable only by the GitLab Runner service account.
+  - Manage the runner's `config.toml` entry with `executor = "docker-autoscaler"`, the protected ARM64 runner tags, privileged Docker support, `capacity_per_instance = 1`, `max_use_count = 1`, `max_instances = 1`, and an all-day policy with `idle_count = 0`.
+  - Configure the fleeting plugin with the Terraform-provided ASG name and AWS profile, and configure the SSH connector for either the worker's private address or its public address according to the chosen network design.
+  - Persist the runner configuration and, if enabled, taskscaler state across manager restarts with restrictive ownership and permissions.
+  - Validate the rendered runner configuration, installed plugin, AWS identity, ASG discovery, and service health before restarting the GitLab Runner service. Keep the Ansible run idempotent.
+  - Add runner-manager logging and monitoring for scale requests, worker acquisition time, preparation failures, Spot interruption failures, orphaned instances, and ASG desired capacity that remains above zero without an active job.
+- [ ] Prove the network and security boundaries:
+  - Confirm the runner manager can reach GitLab.com and the required AWS APIs over HTTPS and can connect to workers over SSH, while workers accept no other inbound application traffic.
+  - If workers use public addresses, restrict SSH to a fixed runner-manager source address. If workers use private addresses, document and validate the VPN or routed connection into the VPC.
+  - Confirm workers can resolve DNS and reach GitLab registries, Docker Hub, GitHub, language package indexes, and every other source used by the release image build without requiring broad inbound access.
+  - Verify the runtime IAM identity cannot modify unrelated Auto Scaling Groups or EC2 instances.
+- [ ] Migrate the ARM64 CI lane behind a temporary runner tag:
+  - Register the autoscaled runner as protected, locked to the intended project or group scope, and unable to accept untagged jobs.
+  - Point a temporary ARM64 build job at the new tag before changing the canonical release jobs.
+  - Preserve the current DinD service, MTU handling, native architecture checks, artifact contracts, timeouts, and disk measurements.
+  - Add a bounded retry for runner-system failures so a Spot interruption or failed worker acquisition can retry an idempotent build without hiding repeatable product failures.
+  - Keep the current ARM64 runner path available until the EC2 lane passes qualification and the fallback procedure has been exercised.
+- [ ] Qualify performance, cleanup, failure handling, and cost:
+  - Demonstrate scale from desired capacity `0` to `1` after job acceptance and back to `0` after completion, with no worker or EBS volume left behind.
+  - Run an uncached release image build and record provisioning time, build and export duration, peak disk use, final free-space percentage, CPU and memory pressure, and total Spot runtime.
+  - Run consecutive cached builds through the registry cache and confirm the larger worker avoids the cache-import and export-time disk exhaustion seen on the hosted ARM64 lane.
+  - Require at least 20% free Docker storage after image export and enough wall-clock margin to stay comfortably within the CI job timeout.
+  - Trigger a controlled Spot interruption, confirm the interrupted job fails as a runner-system failure, and confirm its retry starts on a fresh instance without conflicting with staging tags or publication state.
+  - Exercise the On-Demand fallback and return the ASG to Spot afterward.
+  - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
+- [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
 
 ## Known Issues
 

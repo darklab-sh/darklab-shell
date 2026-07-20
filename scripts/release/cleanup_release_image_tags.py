@@ -87,7 +87,7 @@ def cleanup_tags(
 ) -> list[str]:
     project = urllib.parse.quote(project_id, safe="")
     cutoff = now - dt.timedelta(days=keep_days)
-    deleted: list[str] = []
+    expired: list[str] = []
     path = f"/projects/{project}/registry/repositories/{repository_id}/tags"
     for page in api.pages(path):
         for tag in page:
@@ -100,10 +100,15 @@ def cleanup_tags(
                 raise RuntimeError(f"GitLab API returned an unexpected tag response: {name}")
             if _parse_timestamp(detail.get("created_at")) >= cutoff:
                 continue
-            print(f"{'Would delete' if dry_run else 'Deleting'} expired registry tag {name}")
-            if not dry_run:
-                api.request(f"{path}/{encoded_name}", method="DELETE")
-            deleted.append(name)
+            expired.append(name)
+
+    deleted: list[str] = []
+    for name in expired:
+        encoded_name = urllib.parse.quote(name, safe="")
+        print(f"{'Would delete' if dry_run else 'Deleting'} expired registry tag {name}")
+        if not dry_run:
+            api.request(f"{path}/{encoded_name}", method="DELETE")
+        deleted.append(name)
     return deleted
 
 

@@ -15,6 +15,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import urllib.parse
 import zipfile
 from email.parser import Parser
 from pathlib import Path
@@ -2513,25 +2514,29 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     assert cleanup.TEMPORARY_TAG_RE.fullmatch("2.6.1-amd64") is None
 
     class FakeCleanupApi:
-        deleted: list[str] = []
+        def __init__(self):
+            self.tags = [
+                f"2.6.1-rc.1-staging-{index}-abcdef123456-amd64"
+                for index in range(205)
+            ]
+            self.tags.insert(100, "2.6.1-amd64")
+            self.deleted: list[str] = []
+            self.page_count = 0
 
         def pages(self, _path: str):
-            yield [
-                {
-                    "name": "2.6.1-rc.1-staging-123-abcdef123456-amd64",
-                    "created_at": "2026-06-01T00:00:00Z",
-                },
-                {
-                    "name": "2.6.1-amd64",
-                    "created_at": "2026-06-01T00:00:00Z",
-                },
-            ]
+            offset = 0
+            while offset < len(self.tags):
+                self.page_count += 1
+                yield [{"name": name} for name in self.tags[offset:offset + 100]]
+                offset += 100
 
         def request(self, path: str, *, method: str = "GET"):
             if method == "GET":
                 return {"created_at": "2026-06-01T00:00:00Z"}, ""
             assert method == "DELETE"
-            self.deleted.append(path)
+            name = urllib.parse.unquote(path.rsplit("/", 1)[-1])
+            self.deleted.append(name)
+            self.tags.remove(name)
             return None, ""
 
     fake_cleanup_api = FakeCleanupApi()
@@ -2543,11 +2548,14 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
         now=cleanup.dt.datetime(2026, 7, 19, tzinfo=cleanup.dt.UTC),
         dry_run=False,
     )
-    assert deleted == ["2.6.1-rc.1-staging-123-abcdef123456-amd64"]
-    assert fake_cleanup_api.deleted == [
-        "/projects/123/registry/repositories/456/tags/"
-        "2.6.1-rc.1-staging-123-abcdef123456-amd64"
+    expected_deleted = [
+        f"2.6.1-rc.1-staging-{index}-abcdef123456-amd64"
+        for index in range(205)
     ]
+    assert fake_cleanup_api.page_count == 3
+    assert deleted == expected_deleted
+    assert fake_cleanup_api.deleted == expected_deleted
+    assert fake_cleanup_api.tags == ["2.6.1-amd64"]
 
 
 @pytest.mark.release_integration
