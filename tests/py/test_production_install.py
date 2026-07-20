@@ -1149,6 +1149,66 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
     )
     assert source_checker.main() == 1
 
+    container_checker_path = ROOT / "scripts" / "release" / "check_container_licenses.py"
+    installed_fixture = tmp_path / "installed-license-check"
+    installed_fixture.mkdir()
+    installed_notice = installed_fixture / "fixture-LICENSE.txt"
+    installed_notice.write_text("fixture license\n", encoding="utf-8")
+    installed_inventory = installed_fixture / "container-licenses.json"
+    installed_inventory.write_text(
+        json.dumps({
+            "components": [{
+                "name": "fixture component",
+                "notice_location": str(installed_notice),
+            }],
+        }),
+        encoding="utf-8",
+    )
+    installed_gems_payload = {
+        "schema_version": 1,
+        "gems": [{
+            "name": "fixture-gem",
+            "version": "1.0.0",
+            "licenses": ["MIT"],
+            "homepage": "",
+            "default_gem": False,
+        }],
+    }
+    installed_gems = installed_fixture / "wpscan-ruby-gems.json"
+    installed_gems.write_text(json.dumps(installed_gems_payload), encoding="utf-8")
+    installed_bin = installed_fixture / "bin"
+    installed_bin.mkdir()
+    fake_ruby = installed_bin / "ruby"
+    fake_ruby.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$FAKE_RUBY_GEMS\"\n",
+        encoding="utf-8",
+    )
+    fake_ruby.chmod(0o755)
+    embedded_checker = container_checker_path.read_text(encoding="utf-8").replace(
+        'Path("/usr/share/doc/darklab-shell/container-licenses.json")',
+        f"Path({str(installed_inventory)!r})",
+    ).replace(
+        'Path("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json")',
+        f"Path({str(installed_gems)!r})",
+    )
+    installed_check = subprocess.run(
+        [sys.executable, "-", "--installed-image"],
+        cwd=installed_fixture,
+        env={
+            **os.environ,
+            "FAKE_RUBY_GEMS": json.dumps(installed_gems_payload),
+            "PATH": f"{installed_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+        input=embedded_checker,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert installed_check.returncode == 0, installed_check.stderr
+    assert "Installed image exposes usable notices for 1 component groups" in (
+        installed_check.stdout
+    )
+
     container_checker = _load_script_module("check_container_licenses")
 
     def container_fixture(name: str) -> Path:

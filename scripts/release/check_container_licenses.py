@@ -16,22 +16,6 @@ import sys
 from pathlib import Path
 
 
-def _repository_root(script_path: Path) -> Path:
-    for candidate in (script_path.resolve().parent, *script_path.resolve().parents):
-        if (candidate / "package.json").is_file() and (candidate / "app").is_dir():
-            return candidate
-    raise RuntimeError("could not locate the darklab_shell repository root")
-
-
-ROOT = _repository_root(Path(__file__))
-DOCKERFILE = ROOT / "Dockerfile"
-INVENTORY = ROOT / "deploy" / "container-licenses.json"
-NOTICE = ROOT / "deploy" / "THIRD_PARTY_NOTICES.txt"
-LICENSE_DIR = ROOT / "deploy" / "third-party-licenses"
-NMAP_LICENSE = LICENSE_DIR / "Nmap-7.95-NPSL-0.95.txt"
-NMAP_LICENSE_SHA256 = "9d9a9a763c0e6145172cfe7d8483e23b38ce60b6c79a82e4894242917bdae6d3"
-WPSCAN_LICENSE = LICENSE_DIR / "WPScan-4.0.1.txt"
-WPSCAN_LICENSE_SHA256 = "72eaecf9c3497bb34fb5722eba38a4b3b0ae39235c17378547101b8329b51008"
 IMAGE_INVENTORY = Path("/usr/share/doc/darklab-shell/container-licenses.json")
 RUBY_GEM_MANIFEST = Path("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json")
 NOTICE_NAME_RE = re.compile(r"(?:license|copying|notice|copyright)", re.IGNORECASE)
@@ -118,6 +102,28 @@ def validate_installed_image() -> int:
         f"and records {len(gems)} RubyGems."
     )
     return 0
+
+
+if __name__ == "__main__" and sys.argv[1:] == ["--installed-image"]:
+    raise SystemExit(validate_installed_image())
+
+
+def _repository_root(script_path: Path) -> Path:
+    for candidate in (script_path.resolve().parent, *script_path.resolve().parents):
+        if (candidate / "package.json").is_file() and (candidate / "app").is_dir():
+            return candidate
+    raise RuntimeError("could not locate the darklab_shell repository root")
+
+
+ROOT = _repository_root(Path(__file__))
+DOCKERFILE = ROOT / "Dockerfile"
+INVENTORY = ROOT / "deploy" / "container-licenses.json"
+NOTICE = ROOT / "deploy" / "THIRD_PARTY_NOTICES.txt"
+LICENSE_DIR = ROOT / "deploy" / "third-party-licenses"
+NMAP_LICENSE = LICENSE_DIR / "Nmap-7.95-NPSL-0.95.txt"
+NMAP_LICENSE_SHA256 = "9d9a9a763c0e6145172cfe7d8483e23b38ce60b6c79a82e4894242917bdae6d3"
+WPSCAN_LICENSE = LICENSE_DIR / "WPScan-4.0.1.txt"
+WPSCAN_LICENSE_SHA256 = "72eaecf9c3497bb34fb5722eba38a4b3b0ae39235c17378547101b8329b51008"
 
 
 def _version_args(dockerfile: str) -> set[str]:
@@ -275,8 +281,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--installed-image"]:
-        raise SystemExit(validate_installed_image())
     if sys.argv[1:]:
         raise SystemExit(f"unknown arguments: {' '.join(sys.argv[1:])}")
     raise SystemExit(main())

@@ -33,6 +33,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Native release smoke checks can validate licenses from the installed image** — The streamed checker now enters installed-image mode before looking for source-only repository files, so AMD64 and ARM64 CI jobs don't mistake the container's `/app` directory for a checkout.
+
 - **Multi-platform release checks report real runner capacity and stay usable on minimal Docker installations.**
   - **Root cause:** the ARM64 DinD lane measured the job container's filesystem instead of the daemon's storage, v2 deployment manifests retained meaningless zero-valued scalar image metrics, and operator verification depended on the optional Buildx plugin while dropping the older Apple Silicon AMD64 fallback.
   - **Fix:** ARM64 metrics now read `/var/lib/docker` through the DinD daemon, v2 keeps measurements only in its per-platform map, and the installed verifier uses the canonical index RepoDigest plus local architecture and base labels with no Buildx requirement. Apple Silicon prefers ARM64 but can verify an explicitly degraded AMD64-only release through Docker's emulation path; Linux ARM64 remains native-only.
