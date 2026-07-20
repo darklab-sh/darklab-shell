@@ -370,10 +370,14 @@ if [ "${VERIFY_POSTGRES_STARTUP:-0}" = 1 ]; then
         container logs "$shell" >&2 || true
         verification_failed postgres_runtime app_health ready timeout
     }
-    runtime_config=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/config) \
-        || verification_failed postgres_runtime config_endpoint reachable failed
-    printf '%s' "$runtime_config" | grep -q '"database_backend":"postgres"' \
-        || verification_failed postgres_runtime database_backend postgres "$runtime_config"
+    postgres_migration_count=$(container exec "$postgres" \
+        psql -U darklab -d darklab_shell -tAc 'SELECT COUNT(*) FROM schema_migrations') \
+        || verification_failed postgres_runtime schema_migrations queryable failed
+    case "$postgres_migration_count" in
+        ""|0|*[!0-9]*)
+            verification_failed postgres_runtime schema_migrations positive "$postgres_migration_count"
+            ;;
+    esac
 fi
 
 printf 'repository-free image verification passed image=%s architecture=%s runtime=%s\n' \

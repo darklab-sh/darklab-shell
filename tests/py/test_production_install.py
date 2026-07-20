@@ -335,6 +335,7 @@ if [ "$1" = "exec" ]; then
         */health*) exit 0 ;;
         */config*) printf '{"app_name":"release-smoke"}\n' ;;
         */faq*) printf '[{"question":"Release overlay smoke"}]\n' ;;
+        *psql*schema_migrations*) printf '1\n' ;;
         *nmap*-sS*) printf 'Nmap done: 1 IP address (1 host up) scanned\n' ;;
     esac
     exit 0
@@ -829,6 +830,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         "CONTAINER_RUNTIME": "docker",
         "CONTAINER_MOUNT_MODE": "volume",
         "CONTAINER_VOLUME_LABEL": "",
+        "VERIFY_POSTGRES_STARTUP": "1",
     }
     docker_result = subprocess.run(
         [
@@ -851,6 +853,8 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "volume create darklab-release-conf-1234" in runtime_calls
     assert "darklab-release-conf-1234:/config:ro" in runtime_calls
     assert "volume rm darklab-release-conf-1234 darklab-release-data-1234" in runtime_calls
+    assert "DATABASE_BACKEND=postgres" in runtime_calls
+    assert "SELECT COUNT(*) FROM schema_migrations" in runtime_calls
     bundled_result = subprocess.run(
         [
             "sh",

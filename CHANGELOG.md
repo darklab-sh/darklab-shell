@@ -33,6 +33,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **ARM64 release smoke checks verify the live Postgres schema instead of a browser-only config response** — The optional Postgres startup gate now confirms that app migrations reached the fresh Postgres service. It no longer expects the public `/config` payload to expose the private database backend setting.
+
 - **Native release smoke checks can validate licenses from the installed image** — The streamed checker now enters installed-image mode before looking for source-only repository files, so AMD64 and ARM64 CI jobs don't mistake the container's `/app` directory for a checkout.
 
 - **Multi-platform release checks report real runner capacity and stay usable on minimal Docker installations.**
