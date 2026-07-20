@@ -43,6 +43,12 @@ EVIDENCE_FILES = (
     "release-evidence.json",
     "vulnerability-report.json",
 )
+INDEX_EVIDENCE_BASE_FILES = (
+    "provenance.intoto.jsonl",
+    "release-build-inputs.json",
+    "release-evidence.json",
+    "release-index.json",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -255,6 +261,122 @@ def _validate_evidence_dir(
             raise ValueError(f"Release evidence {section_name} checksum does not match")
 
 
+def _validate_index_evidence_dir(
+    evidence_dir: Path,
+    *,
+    version: str,
+    gitlab_image: str,
+    dockerhub_image: str,
+    release_index: dict[str, object],
+) -> tuple[str, ...]:
+    platforms = release_index.get("platforms")
+    if not isinstance(platforms, dict) or not platforms:
+        raise ValueError("Release index is missing its platform map")
+    release_mode = release_index.get("release_mode")
+    degraded_reason = release_index.get("degraded_reason", "")
+    if release_mode == "dual":
+        if degraded_reason not in (None, ""):
+            raise ValueError("Dual release mode must not include a degraded-mode reason")
+        expected_architectures = {"amd64", "arm64"}
+    elif release_mode == "amd64-only":
+        if not isinstance(degraded_reason, str) or not degraded_reason.strip():
+            raise ValueError("AMD64-only release mode requires a degraded-mode reason")
+        expected_architectures = {"amd64"}
+    else:
+        raise ValueError("Release index contains an unsupported release mode")
+    if set(platforms) != expected_architectures:
+        raise ValueError("Release index platform map does not match its release mode")
+    python_base = release_index.get("python_base")
+    if not isinstance(python_base, dict) or not DIGEST_RE.fullmatch(
+        str(python_base.get("index_digest", ""))
+    ):
+        raise ValueError("Release index Python base contract is invalid")
+    base_platforms = python_base.get("platforms")
+    if not isinstance(base_platforms, dict) or set(base_platforms) != {"amd64", "arm64"}:
+        raise ValueError("Release index Python base platform map is invalid")
+    for architecture, platform in platforms.items():
+        base_platform = base_platforms.get(architecture)
+        if not isinstance(platform, dict) or not isinstance(base_platform, dict) or (
+            platform.get("python_base_digest") != base_platform.get("digest")
+        ):
+            raise ValueError(
+                f"Release index Python base digest does not match for {architecture}"
+            )
+    architectures = tuple(sorted(platforms))
+    files = (*INDEX_EVIDENCE_BASE_FILES, *(
+        name
+        for architecture in architectures
+        for name in (
+            f"darklab-shell-{architecture}.cdx.json",
+            f"vulnerability-report-{architecture}.json",
+        )
+    ))
+    missing = [name for name in files if not (evidence_dir / name).is_file()]
+    if missing:
+        raise ValueError(f"Release evidence directory is missing: {', '.join(missing)}")
+    evidence = json.loads((evidence_dir / "release-evidence.json").read_text(encoding="utf-8"))
+    if not isinstance(evidence, dict) or evidence.get("format") != "darklab_shell.release_evidence.v2":
+        raise ValueError("Release evidence index has an unsupported format")
+    if evidence.get("version") != version:
+        raise ValueError("Release evidence version does not match the payload")
+    try:
+        normalized_release_index = json.loads(
+            (evidence_dir / "release-index.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Release evidence index contract is not readable JSON") from exc
+    if normalized_release_index != release_index:
+        raise ValueError("Release evidence index contract does not match the payload")
+    if evidence.get("python_base") != release_index.get("python_base"):
+        raise ValueError("Release evidence Python base contract does not match the payload")
+    image = evidence.get("image")
+    if not isinstance(image, dict):
+        raise ValueError("Release evidence image contract is missing")
+    expected_digest = release_index.get("index_digest")
+    if (
+        image.get("gitlab") != gitlab_image
+        or image.get("dockerhub") != dockerhub_image
+        or image.get("index_digest") != expected_digest
+        or image.get("release_mode") != release_index.get("release_mode")
+        or image.get("degraded_reason", "") != release_index.get("degraded_reason", "")
+        or image.get("platforms") != platforms
+    ):
+        raise ValueError("Release evidence image provenance does not match the payload")
+    for section_name, expected_path in (
+        ("release_index", "release-index.json"),
+        ("build_inputs", "release-build-inputs.json"),
+        ("provenance", "provenance.intoto.jsonl"),
+    ):
+        section = evidence.get(section_name)
+        if not isinstance(section, dict) or section.get("path") != expected_path:
+            raise ValueError(f"Release evidence {section_name} path is invalid")
+        if section.get("sha256") != _sha256(evidence_dir / expected_path):
+            raise ValueError(f"Release evidence {section_name} checksum does not match")
+    for section_name, prefix in (("sboms", "darklab-shell"), ("vulnerability_scans", "vulnerability-report")):
+        section = evidence.get(section_name)
+        if not isinstance(section, dict) or set(section) != set(architectures):
+            raise ValueError(f"Release evidence {section_name} platform map is invalid")
+        for architecture in architectures:
+            entry = section[architecture]
+            expected_path = (
+                f"{prefix}-{architecture}.cdx.json"
+                if section_name == "sboms"
+                else f"{prefix}-{architecture}.json"
+            )
+            if not isinstance(entry, dict) or entry.get("path") != expected_path:
+                raise ValueError(f"Release evidence {section_name} path is invalid")
+            platform = platforms.get(architecture)
+            if not isinstance(platform, dict) or entry.get("child_digest") != platform.get(
+                "digest"
+            ):
+                raise ValueError(
+                    f"Release evidence {section_name} child digest is invalid"
+                )
+            if entry.get("sha256") != _sha256(evidence_dir / expected_path):
+                raise ValueError(f"Release evidence {section_name} checksum does not match")
+    return files
+
+
 def _write_deterministic_archive(source_root: Path, archive_path: Path) -> None:
     """Write a byte-stable gzip tar with normalized ownership and timestamps."""
     with archive_path.open("wb") as raw_archive:
@@ -286,6 +408,7 @@ def build_payload(
     compressed_bytes: int,
     unpacked_bytes: int,
     evidence_dir: Path | None = None,
+    release_index_path: Path | None = None,
 ) -> None:
     if not VERSION_RE.fullmatch(version):
         raise ValueError(
@@ -323,7 +446,31 @@ def build_payload(
         "COMPRESSED_BYTES": str(compressed_bytes),
         "UNPACKED_BYTES": str(unpacked_bytes),
     }
-    if evidence_dir is not None:
+    release_index: dict[str, object] | None = None
+    evidence_files = EVIDENCE_FILES
+    if release_index_path is not None:
+        try:
+            release_index_value = json.loads(release_index_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Release index is not readable JSON") from exc
+        if not isinstance(release_index_value, dict) or (
+            release_index_value.get("format") != "darklab_shell.release_index.v1"
+        ):
+            raise ValueError("Release index has an unsupported format")
+        if release_index_value.get("index_digest") != gitlab_digest:
+            raise ValueError("Release index digest does not match the payload")
+        if release_index_value.get("version") != version:
+            raise ValueError("Release index version does not match the payload")
+        release_index = release_index_value
+        if evidence_dir is not None:
+            evidence_files = _validate_index_evidence_dir(
+                evidence_dir,
+                version=version,
+                gitlab_image=image_values["GITLAB_IMAGE"],
+                dockerhub_image=expected_image,
+                release_index=release_index,
+            )
+    elif evidence_dir is not None:
         _validate_evidence_dir(
             evidence_dir,
             version=version,
@@ -365,19 +512,40 @@ def build_payload(
             "verify-release-image.sh",
         ]
         manifest = {
-            "format": "darklab_shell.deployment.v1",
+            "format": (
+                "darklab_shell.deployment.v2"
+                if release_index is not None
+                else "darklab_shell.deployment.v1"
+            ),
             "version": version,
             "gitlab_image": image_values["GITLAB_IMAGE"],
             "gitlab_digest": gitlab_digest,
             "dockerhub_image": expected_image,
             "dockerhub_digest": dockerhub_digest,
-            "image_metrics": {
-                "compressed_bytes": compressed_bytes,
-                "unpacked_bytes": unpacked_bytes,
-            },
             "managed_files": managed_files,
             "operator_paths": [".env", "backups", "conf", "data", "workspaces"],
         }
+        if release_index is None:
+            manifest["image_metrics"] = {
+                "compressed_bytes": compressed_bytes,
+                "unpacked_bytes": unpacked_bytes,
+            }
+        else:
+            manifest["release_mode"] = release_index.get("release_mode")
+            manifest["degraded_reason"] = release_index.get("degraded_reason", "")
+            manifest["python_base"] = release_index.get("python_base")
+            python_base = release_index.get("python_base")
+            if isinstance(python_base, dict):
+                manifest["python_base_index_digest"] = python_base.get("index_digest")
+            manifest["platforms"] = release_index.get("platforms")
+            platform_map = release_index.get("platforms")
+            if isinstance(platform_map, dict):
+                for architecture, platform in platform_map.items():
+                    if isinstance(architecture, str) and isinstance(platform, dict):
+                        manifest[f"platform_{architecture}_digest"] = platform.get("digest")
+                        manifest[f"platform_{architecture}_python_base_digest"] = platform.get(
+                            "python_base_digest"
+                        )
         _write_text(
             bundle_root / "release-manifest.json",
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -412,9 +580,9 @@ def build_payload(
     _write_text(output_dir / f"{archive_name}.sha256", checksums[1] + "\n")
 
     if evidence_dir is not None:
-        for name in EVIDENCE_FILES:
+        for name in evidence_files:
             shutil.copyfile(evidence_dir / name, output_dir / name)
-        all_checksum_names = ["setup.sh", archive_name, *EVIDENCE_FILES]
+        all_checksum_names = ["setup.sh", archive_name, *evidence_files]
         _write_text(
             output_dir / "SHA256SUMS",
             "\n".join(f"{_sha256(output_dir / name)}  {name}" for name in all_checksum_names)
@@ -431,6 +599,7 @@ def main() -> int:
     parser.add_argument("--compressed-bytes", type=int, default=0)
     parser.add_argument("--unpacked-bytes", type=int, default=0)
     parser.add_argument("--evidence-dir", type=Path)
+    parser.add_argument("--release-index", type=Path)
     args = parser.parse_args()
     build_payload(
         version=args.version,
@@ -440,6 +609,7 @@ def main() -> int:
         compressed_bytes=args.compressed_bytes,
         unpacked_bytes=args.unpacked_bytes,
         evidence_dir=args.evidence_dir,
+        release_index_path=args.release_index,
     )
     return 0
 

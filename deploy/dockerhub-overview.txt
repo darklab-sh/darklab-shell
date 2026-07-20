@@ -4,7 +4,7 @@ darklab_shell is a self-hosted browser shell for network diagnostics and securit
 
 Source, documentation, and release history: https://gitlab.com/darklab.sh/darklab_shell
 
-Production installation starts from the versioned, checksummed setup files attached to each final GitLab release. The public Compose path uses immutable semantic-version tags from `docker.io/darklabsh/darklab-shell`; `latest` is not part of the supported release flow. Release-candidate tags use `X.Y.Z-rc.N`, are intended for validation, and may be removed after testing.
+Production installation starts from the versioned, checksummed setup files attached to each final GitLab release. The public Compose path uses immutable semantic-version OCI image indexes from `docker.io/darklabsh/darklab-shell`; Docker automatically selects the native Linux AMD64 or ARM64 child. `latest` is not part of the supported release flow. Release-candidate tags use `X.Y.Z-rc.N`, are intended for validation, and may be removed after testing. SELinux Docker and rootless Podman are verified separately against the AMD64 child.
 
 ## Install
 
@@ -28,7 +28,7 @@ Candidate tags are for release validation and may be removed after testing.
 
 ## Verify The Publisher
 
-Protected GitLab tag pipelines keylessly sign this Docker Hub image, the canonical GitLab registry image, and the release checksum manifest with Sigstore/Cosign.
+Protected GitLab tag pipelines keylessly sign this Docker Hub image index, the matching canonical GitLab registry index, every child manifest included in the release, and the release checksum manifest with Sigstore/Cosign.
 
 Expected OIDC issuer:
 
@@ -51,7 +51,7 @@ cosign verify \
   'docker.io/darklabsh/darklab-shell@sha256:RELEASE_DIGEST'
 ```
 
-Replace `RELEASE_DIGEST` with the digest recorded in that release's `release-manifest.json`. The GitLab and Docker Hub references must report the same digest.
+Replace `RELEASE_DIGEST` with the canonical index digest recorded in that release's `release-manifest.json`. The GitLab and Docker Hub index references must report the same digest. The manifest's platform map separately records the child digest Docker selects on this host; use that value for local platform checks, not as a replacement for the signed index target above.
 
 ## License
 

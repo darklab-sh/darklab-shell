@@ -46,6 +46,8 @@ suffix=$(printf '%s' "${CI_JOB_ID:-$$}" | tr -cd '0-9A-Za-z' | tail -c 20)
 network="darklab-release-smoke-${suffix}"
 redis="darklab-release-redis-${suffix}"
 shell="darklab-release-shell-${suffix}"
+postgres="darklab-release-postgres-${suffix}"
+postgres_volume="darklab-release-postgres-data-${suffix}"
 overlay_volume="darklab-release-conf-${suffix}"
 data_volume="darklab-release-data-${suffix}"
 workspace_volume="darklab-release-workspaces-${suffix}"
@@ -105,11 +107,12 @@ require_nonempty() {
 cleanup() {
     container exec "$shell" sh -c \
         'chmod -R a+rwX /data /workspaces' >/dev/null 2>&1 || true
-    container rm -f "$shell" "$redis" >/dev/null 2>&1 || true
+    container rm -f "$shell" "$redis" "$postgres" >/dev/null 2>&1 || true
     if [ "$mount_mode" = "volume" ]; then
         container volume rm "$overlay_volume" "$data_volume" \
             "$workspace_volume" >/dev/null 2>&1 || true
     fi
+    container volume rm "$postgres_volume" >/dev/null 2>&1 || true
     container network rm "$network" >/dev/null 2>&1 || true
     rm -rf "$deployment_dir"
 }
@@ -324,6 +327,54 @@ container exec --user appuser:appuser "$shell" test -f /data/release-bind-marker
     || verification_failed runtime_restart data_bind_marker present missing
 container exec --user appuser:appuser "$shell" test -f /workspaces/release-bind-marker \
     || verification_failed runtime_restart workspace_bind_marker present missing
+
+if [ "${VERIFY_POSTGRES_STARTUP:-0}" = 1 ]; then
+    container rm -f "$shell" >/dev/null
+    container volume create "$postgres_volume" >/dev/null
+    container run -d \
+        --name "$postgres" \
+        --network "$network" \
+        -v "$postgres_volume:/var/lib/postgresql" \
+        -e POSTGRES_DB=darklab_shell \
+        -e POSTGRES_USER=darklab \
+        -e POSTGRES_PASSWORD=release-smoke-password \
+        docker.io/library/postgres:18-alpine >/dev/null
+    attempt=0
+    until container exec "$postgres" pg_isready -U darklab -d darklab_shell >/dev/null 2>&1; do
+        if [ "$attempt" -ge 60 ]; then
+            container logs "$postgres" >&2 || true
+            verification_failed postgres_runtime health ready timeout
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+    container run -d \
+        --name "$shell" \
+        --network "$network" \
+        --read-only \
+        --tmpfs /tmp \
+        --cap-add NET_RAW \
+        --cap-add NET_ADMIN \
+        -v "$overlay_mount" \
+        -v "$data_mount" \
+        -v "$workspace_mount" \
+        -e REDIS_URL="redis://${redis}:6379/0" \
+        -e DATABASE_BACKEND=postgres \
+        -e DATABASE_URL="postgresql://darklab:release-smoke-password@${postgres}:5432/darklab_shell" \
+        -e APP_LOCAL_CONF_DIR=/config \
+        -e WORKSPACE_ROOT=/workspaces \
+        -e WEB_CONCURRENCY=1 \
+        -e WEB_THREADS=2 \
+        "$image" >/dev/null
+    wait_for_health || {
+        container logs "$shell" >&2 || true
+        verification_failed postgres_runtime app_health ready timeout
+    }
+    runtime_config=$(container exec "$shell" curl -fsS http://127.0.0.1:8888/config) \
+        || verification_failed postgres_runtime config_endpoint reachable failed
+    printf '%s' "$runtime_config" | grep -q '"database_backend":"postgres"' \
+        || verification_failed postgres_runtime database_backend postgres "$runtime_config"
+fi
 
 printf 'repository-free image verification passed image=%s architecture=%s runtime=%s\n' \
     "$image" "$expected_architecture" "$container_runtime"

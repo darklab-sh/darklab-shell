@@ -75,7 +75,6 @@ services:
 
   shell:
     image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.6.0}
-    platform: linux/amd64
     labels:
       sh.darklab.config.database_backend: ${DATABASE_BACKEND:-sqlite}
       sh.darklab.metrics.path: /metrics

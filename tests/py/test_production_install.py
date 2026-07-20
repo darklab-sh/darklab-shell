@@ -226,6 +226,10 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
     docker_path.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' \"$*\" >> \"$FAKE_DOCKER_LOG\"\n"
+        "fake_zero_digest=sha256:"
+        "0000000000000000000000000000000000000000000000000000000000000000\n"
+        "fake_child_digest=sha256:"
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n"
         "if [ \"$*\" = \"compose version --short\" ]; then\n"
         "    [ \"${FAKE_COMPOSE_VERSION_EXIT:-0}\" = \"0\" ] || exit \"$FAKE_COMPOSE_VERSION_EXIT\"\n"
         "    printf '%s\\n' \"${FAKE_COMPOSE_VERSION:-2.20.0}\"\n"
@@ -267,14 +271,37 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
         "    exit \"${FAKE_RESTORE_EXIT:-0}\"\n"
         "elif printf '%s' \"$*\" | grep -q ' verify-blob '; then\n"
         "    exit \"${FAKE_COSIGN_VERIFY_EXIT:-0}\"\n"
+        "elif printf '%s' \"$*\" | grep -q '^buildx imagetools inspect '; then\n"
+        "    printf '%s\\n' \"${FAKE_INDEX_CHILD_DIGEST:-$fake_child_digest}\"\n"
         "elif printf '%s' \"$*\" | grep -q '^image inspect '; then\n"
-        "    printf 'darklabsh/darklab-shell@%s\\n' \"${FAKE_IMAGE_DIGEST:-sha256:"
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}\"\n"
+        "    case \"$*\" in\n"
+        "        *'{{.Architecture}}'*) printf '%s\\n' \"${FAKE_IMAGE_ARCHITECTURE:-amd64}\" ;;\n"
+        "        *'sh.darklab.image.architecture'*) printf '%s\\n' \"${FAKE_IMAGE_ARCHITECTURE:-amd64}\" ;;\n"
+        "        *'sh.darklab.python.base.digest'*) "
+        "printf '%s\\n' \"${FAKE_IMAGE_BASE_DIGEST:-$fake_zero_digest}\" ;;\n"
+        "        *'sh.darklab.python.base.index.digest'*) "
+        "printf '%s\\n' \"${FAKE_IMAGE_BASE_INDEX_DIGEST:-$fake_zero_digest}\" ;;\n"
+        "        *) printf 'darklabsh/darklab-shell@%s\\n' \"${FAKE_IMAGE_DIGEST:-sha256:"
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}\" ;;\n"
+        "    esac\n"
         "fi\n"
         "exit 0\n",
         encoding="utf-8",
     )
     docker_path.chmod(0o755)
+    uname_path = bin_dir / "uname"
+    uname_path.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "    -m) [ -n \"${FAKE_UNAME_MACHINE:-}\" ] && "
+        "printf '%s\\n' \"$FAKE_UNAME_MACHINE\" || /usr/bin/uname -m ;;\n"
+        "    -s) [ -n \"${FAKE_UNAME_SYSTEM:-}\" ] && "
+        "printf '%s\\n' \"$FAKE_UNAME_SYSTEM\" || /usr/bin/uname -s ;;\n"
+        "    *) exec /usr/bin/uname \"$@\" ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    uname_path.chmod(0o755)
     return bin_dir, log_path
 
 
@@ -290,6 +317,7 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
         *sh.darklab.image.architecture*) printf 'arm64\n' ;;
         *org.opencontainers.image.licenses*) printf 'AGPL-3.0-only\n' ;;
         *sh.darklab.python.base.digest*) printf 'sha256:%064d\n' 0 ;;
+        *sh.darklab.python.base.index.digest*) printf 'sha256:%064d\n' 0 ;;
         *sh.darklab.app.version*) printf '__RELEASE_VERSION__\n' ;;
         *sh.darklab.git.revision*|*org.opencontainers.image.revision*) printf 'revision-a\n' ;;
     esac
@@ -384,131 +412,6 @@ def _load_script_module(name: str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def _fake_release_tools(tmp_path: Path) -> tuple[Path, Path]:
-    bin_dir = tmp_path / "release-bin"
-    bin_dir.mkdir()
-    log_path = tmp_path / "release-tools.log"
-    python_path = bin_dir / "python3"
-    python_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    python_path.chmod(0o755)
-    docker_path = bin_dir / "docker"
-    docker_path.write_text(
-        """#!/bin/sh
-printf '%s\n' "$*" >> "$FAKE_RELEASE_LOG"
-if [ "$1" = "login" ]; then
-    cat >/dev/null
-    exit 0
-fi
-if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
-    digest=${FAKE_EXISTING_DIGEST:-}
-    if [ -f "$FAKE_RELEASE_STATE" ]; then
-        digest=${FAKE_PROMOTED_DIGEST:-}
-    fi
-    [ -n "$digest" ] || exit 1
-    printf '{"Descriptor":{"digest":"%s"}}\n' "$digest"
-    exit 0
-fi
-if [ "$1" = "pull" ]; then
-    exit 0
-fi
-if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
-    case "$4" in
-        *sh.darklab.app.version*) printf '%s\n' "${FAKE_IMAGE_VERSION:-__RELEASE_VERSION__}" ;;
-        *sh.darklab.git.revision*) printf '%s\n' "${FAKE_IMAGE_REVISION:-revision-a}" ;;
-        *sh.darklab.python.base.digest*)
-            printf '%s\n' \
-                "${FAKE_PYTHON_BASE_DIGEST:-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
-            ;;
-        *org.opencontainers.image.created*) printf '%s\n' "${FAKE_BUILD_DATE:-2026-07-14T12:00:00Z}" ;;
-        *Architecture*) printf '%s\n' "${FAKE_IMAGE_ARCHITECTURE:-amd64}" ;;
-        *Size*) printf '%s\n' "${FAKE_IMAGE_SIZE:-2048}" ;;
-        *) exit 2 ;;
-    esac
-    exit 0
-fi
-if [ "$1" = "image" ] && [ "$2" = "rm" ]; then
-    exit 0
-fi
-if [ "$1" = "buildx" ] && [ "$2" = "build" ]; then
-    [ "${FAKE_BUILD_EXIT:-0}" = "0" ] || exit "$FAKE_BUILD_EXIT"
-    metadata_file=
-    previous=
-    for argument in "$@"; do
-        if [ "$previous" = "--metadata-file" ]; then
-            metadata_file=$argument
-            break
-        fi
-        previous=$argument
-    done
-    printf '{"containerimage.digest":"%s"}\n' "${FAKE_BUILT_DIGEST:-}" > "$metadata_file"
-    exit 0
-fi
-if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
-    case "$*" in
-        *python:*)
-            printf '{"manifests":[{"digest":"%s","platform":{"architecture":"amd64","os":"linux"}}]}\n' \
-                "${FAKE_PYTHON_BASE_DIGEST:-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
-            ;;
-        *) printf '{"layers":[{"size":1024},{"size":2048}]}\n' ;;
-    esac
-    exit 0
-fi
-if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "create" ]; then
-    [ "${FAKE_PROMOTE_EXIT:-0}" = "0" ] || exit "$FAKE_PROMOTE_EXIT"
-    : > "$FAKE_RELEASE_STATE"
-    printf 'copied\n'
-    exit 0
-fi
-exit 2
-""".replace("__RELEASE_VERSION__", RELEASE_VERSION),
-        encoding="utf-8",
-    )
-    docker_path.chmod(0o755)
-    return bin_dir, log_path
-
-
-def _run_release_publisher(
-    tmp_path: Path,
-    mode: str,
-    **overrides: str,
-) -> subprocess.CompletedProcess[str]:
-    tmp_path.mkdir()
-    bin_dir, log_path = _fake_release_tools(tmp_path)
-    digest = "sha256:" + "a" * 64
-    env = os.environ.copy()
-    for variable_name in ("CI_PIPELINE_ID", "CI_JOB_ID"):
-        env.pop(variable_name, None)
-    env.update({
-        "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
-        "CI_COMMIT_TAG": _release_tag(RELEASE_VERSION),
-        "CI_COMMIT_SHA": "revision-a",
-        "CI_REGISTRY": "registry.example.test",
-        "CI_REGISTRY_IMAGE": "registry.example.test/darklab/shell",
-        "CI_REGISTRY_USER": "release-user",
-        "CI_REGISTRY_PASSWORD": "registry-secret",
-        "RELEASE_VERSION": RELEASE_VERSION,
-        "GITLAB_IMAGE": f"registry.example.test/darklab/shell:{RELEASE_VERSION}",
-        "GITLAB_DIGEST": digest,
-        "DOCKERHUB_IMAGE": "docker.io/darklabsh/darklab-shell",
-        "DOCKERHUB_USERNAME": "darklabsh",
-        "DOCKERHUB_TOKEN": "dockerhub-secret",
-        "FAKE_BUILT_DIGEST": digest,
-        "FAKE_PROMOTED_DIGEST": digest,
-        "FAKE_PYTHON_BASE_DIGEST": "sha256:" + "b" * 64,
-        "FAKE_RELEASE_LOG": str(log_path),
-        "FAKE_RELEASE_STATE": str(tmp_path / "published.state"),
-    })
-    env.update(overrides)
-    return subprocess.run(
-        [str(RELEASE_PUBLISHER), mode],
-        cwd=tmp_path,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
 
 
 def _run_payload_publisher(
@@ -665,7 +568,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     shell = services["shell"]
 
     assert shell["image"] == f"${{DARKLAB_IMAGE:-{_dockerhub_image(RELEASE_VERSION)}}}"
-    assert shell["platform"] == "linux/amd64"
+    assert "platform" not in shell
     assert "build" not in shell
     assert all("/app" not in volume for volume in shell["volumes"])
     assert "./conf:/config:ro" in shell["volumes"]
@@ -826,6 +729,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ruby-dev" not in runtime_stage
     assert "zlib1g-dev" not in runtime_stage
     assert 'sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}"' in dockerfile
+    assert (
+        'sh.darklab.python.base.index.digest="${PYTHON_BASE_INDEX_DIGEST}"'
+        in dockerfile
+    )
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
     assert "RUSTSCAN_LINUX_ARM64_SHA256=" in dockerfile
     assert 'case "${TARGETARCH}" in' in dockerfile
@@ -1527,7 +1434,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "pull_seconds=" in ci_config
     assert "pull_seconds=" not in publisher
     assert "--pull-seconds" not in ci_config + publisher
-    assert "publish_release_artifacts.sh gitlab-image" in ci_config
+    assert "publish_release_artifacts.sh resolve-base" in ci_config
+    assert "publish_release_artifacts.sh gitlab-platform-image" in ci_config
+    assert "publish_release_artifacts.sh gitlab-index" in ci_config
     assert "publish_release_artifacts.sh dockerhub-image" in ci_config
     assert "publish_release_artifacts.sh payload release-payload" in ci_config
     assert "docker buildx imagetools create" in publisher
@@ -1549,20 +1458,31 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["CI_GITLAB_CLI_IMAGE"] == GITLAB_CLI_IMAGE
     assert parsed_ci["release-create"]["image"] == "$CI_GITLAB_CLI_IMAGE"
     assert "gitlab-org/cli:latest" not in ci_config
-    for job_name in (
-        "release-image-gitlab",
-        "release-image-smoke",
-        "release-image-vulnerability-scan",
+    release_image_pipeline_jobs = (
+        "release-python-base-resolution",
+        "release-image-amd64",
+        "release-image-amd64-smoke",
+        "release-image-amd64-vulnerability-scan",
+        "release-image-gitlab-index",
+    )
+    for job_name in release_image_pipeline_jobs:
+        assert parsed_ci[job_name]["extends"] == ".release-image-pipeline"
+    protected_release_jobs = (
         "release-image-dockerhub",
         "release-supply-chain",
         "release-payload-upload",
         "release-postgres-smoke",
         "release-public-smoke",
-    ):
+    )
+    for job_name in protected_release_jobs:
         assert parsed_ci[job_name]["extends"] == ".protected-release-tag"
-    assert parsed_ci["variables"]["RELEASE_ARM64_COMPATIBILITY_ENABLED"] == "0"
+    assert parsed_ci["variables"]["RELEASE_PLATFORM_MODE"] == "dual"
+    assert parsed_ci["variables"]["RELEASE_DEGRADED_REASON"] == ""
+    assert "RELEASE_ARM64_COMPATIBILITY_ENABLED" not in parsed_ci["variables"]
     assert parsed_ci["variables"]["RELEASE_SELINUX_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED"] == "0"
+    assert parsed_ci["variables"]["RELEASE_STAGING_CLEANUP_ENABLED"] == "0"
+    assert parsed_ci["variables"]["RELEASE_STAGING_KEEP_DAYS"] == "14"
     assert parsed_ci["variables"]["RELEASE_CACHE_SCOPE"] == "v2-6"
     assert "RELEASE_CACHE_PROBE" not in ci_config
     docker_build_rules = parsed_ci["docker-build"]["rules"]
@@ -1624,20 +1544,19 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "pip install -q -r app/requirements.txt -r requirements-dev.txt" in lint_py_setup
     assert "python scripts/release/check_source_licenses.py" in parsed_ci["lint-py"]["script"]
     assert "npm run lint:licenses" not in parsed_ci["lint-js"]["script"]
-    assert parsed_ci["release-image-gitlab"]["artifacts"]["when"] == "always"
+    assert parsed_ci["release-python-base-resolution"]["artifacts"]["when"] == "always"
+    assert "python-base-descriptor.txt" in parsed_ci[
+        "release-python-base-resolution"
+    ]["artifacts"]["paths"]
+    assert "python-base-resolution.json" in parsed_ci[
+        "release-python-base-resolution"
+    ]["artifacts"]["paths"]
+    assert "s/^Digest:[[:space:]]*//p" in publisher
+    assert '"$python_base_image@$python_base_index_digest"' in publisher
+    assert parsed_ci["release-image-amd64"]["artifacts"]["when"] == "always"
     assert parsed_ci["release-image-dockerhub"]["artifacts"]["when"] == "always"
-    assert "release-image-status.txt" in parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
-    assert "release-image-build-metrics.txt" in (
-        parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
-    )
-    assert "python-base-resolution.json" in (
-        parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
-    )
-    assert "release-image-metrics.txt" not in (
-        parsed_ci["release-image-gitlab"]["artifacts"]["paths"]
-    )
     amd64_resource_group = "release-cache-amd64-${RELEASE_CACHE_SCOPE}"
-    assert parsed_ci["release-image-gitlab"]["resource_group"] == (
+    assert parsed_ci["release-image-amd64"]["resource_group"] == (
         amd64_resource_group
     )
     amd64_warmer = parsed_ci["docker-build-bael"]
@@ -1671,31 +1590,31 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "docker.io/library/${python_base_image}" in podman_warmer_script
     assert '--build-arg "TARGETARCH=amd64"' in podman_warmer_script
     assert "--format docker" in podman_warmer_script
-    assert "buildcache-amd64-${cache_scope}" in publisher
+    assert 'cache_image="${CI_REGISTRY_IMAGE}:buildcache-${architecture}-${cache_scope}"' in publisher
     assert 'expected_cache_scope="v${release_major}-${release_minor}"' in publisher
     assert "--progress=plain" in publisher
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
-    amd64_smoke_script = "\n".join(parsed_ci["release-image-smoke"]["script"])
-    digest_pinned_gitlab_image = '"$GITLAB_IMAGE@$GITLAB_DIGEST"'
+    amd64_smoke_script = "\n".join(parsed_ci["release-image-amd64-smoke"]["script"])
+    digest_pinned_gitlab_image = '"$AMD64_IMAGE@$AMD64_DIGEST"'
     assert f"docker pull {digest_pinned_gitlab_image}" in amd64_smoke_script
     assert f"verify_repository_free_image.sh {digest_pinned_gitlab_image}" in amd64_smoke_script
     assert "CONTAINER_MOUNT_MODE=volume" in amd64_smoke_script
     assert f"verify_bundled_tools.sh {digest_pinned_gitlab_image} amd64" in amd64_smoke_script
     assert "pull_seconds=" in amd64_smoke_script
     assert "docker image inspect --format '{{.Size}}'" in amd64_smoke_script
-    assert parsed_ci["release-image-smoke"]["artifacts"]["reports"]["dotenv"] == (
-        "release-image-measurements.env"
+    assert parsed_ci["release-image-amd64-smoke"]["artifacts"]["reports"]["dotenv"] == (
+        "release-image-amd64-measurements.env"
     )
-    assert "release-image-metrics.txt" in (
-        parsed_ci["release-image-smoke"]["artifacts"]["paths"]
+    assert "release-platform-amd64.json" in (
+        parsed_ci["release-image-amd64-smoke"]["artifacts"]["paths"]
     )
-    vulnerability_job = parsed_ci["release-image-vulnerability-scan"]
+    vulnerability_job = parsed_ci["release-image-amd64-vulnerability-scan"]
     assert vulnerability_job["stage"] == "verify"
     assert vulnerability_job["artifacts"]["when"] == "always"
     vulnerability_script = "\n".join(vulnerability_job["script"])
     assert "--only-fixed --fail-on critical" in vulnerability_script
     assert "-o cyclonedx-json" in vulnerability_script
-    assert "cat release-evidence-input/darklab-shell.cdx.json |" in (
+    assert "cat release-evidence-amd64/darklab-shell-amd64.cdx.json |" in (
         vulnerability_script
     )
     assert "--user 0:0" in vulnerability_script
@@ -1703,15 +1622,18 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert recheck_job["stage"] == "verify"
     assert recheck_job["variables"]["RECHECK_ARCHITECTURE"] == "amd64"
     recheck_script = "\n".join(recheck_job["script"])
-    assert 'docker pull "$RECHECK_IMAGE@$RECHECK_IMAGE_DIGEST"' in recheck_script
+    assert 'RECHECK_REFERENCE_KIND' in recheck_script
+    assert 'RECHECK_CHILD_DIGEST' in recheck_script
     assert "verify_repository_free_image.sh" in recheck_script
     assert "verify_bundled_tools.sh" in recheck_script
     assert "--only-fixed --fail-on critical" in recheck_script
-    arm64_job = parsed_ci["release-image-arm64-smoke"]
+    arm64_job = parsed_ci["release-image-arm64"]
     assert arm64_job["stage"] == "publish"
-    assert arm64_job["tags"] == ["saas-linux-small-arm64"]
+    assert arm64_job["extends"] == ".release-arm64-dind"
     assert "resource_group" not in arm64_job
-    assert arm64_job["services"] == [
+    arm64_template = parsed_ci[".release-arm64-dind"]
+    assert arm64_template["tags"] == ["saas-linux-small-arm64"]
+    assert arm64_template["services"] == [
         {
             "name": "${CI_DOCKER_IMAGE}-dind",
             "alias": "docker",
@@ -1721,27 +1643,49 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
             ],
         }
     ]
-    assert arm64_job["variables"]["DOCKER_HOST"] == "tcp://docker:2375"
-    assert arm64_job["variables"]["DOCKER_TLS_CERTDIR"] == ""
-    arm64_before_script = "\n".join(arm64_job["before_script"])
+    assert arm64_template["variables"]["DOCKER_HOST"] == "tcp://docker:2375"
+    arm64_before_script = "\n".join(arm64_template["before_script"])
     assert "until docker info" in arm64_before_script
     assert "did not become ready after 60 seconds" in arm64_before_script
     assert "docker buildx create" not in arm64_before_script
     assert arm64_job["rules"][-1] == {"when": "never"}
-    assert "RELEASE_ARM64_COMPATIBILITY_ENABLED == \"1\"" in arm64_job["rules"][0]["if"]
+    assert '$RELEASE_PLATFORM_MODE == "dual"' in arm64_job["rules"][0]["if"]
     assert "(-rc\\.[0-9]+)?" in arm64_job["rules"][0]["if"]
     arm64_script = "\n".join(arm64_job["script"])
-    assert '"$(uname -m)" = "aarch64"' in arm64_script
-    assert "--platform linux/arm64" in arm64_script
-    assert "docker build --pull" in arm64_script
-    assert "docker buildx build" not in arm64_script
-    assert "buildcache-arm64-${RELEASE_CACHE_SCOPE}" not in arm64_script
+    assert "publish_release_artifacts.sh gitlab-platform-image" in arm64_script
+    assert "release-image-arm64-runner-metrics.txt" in arm64_script
+    assert "-v /var/lib/docker:/host-docker:ro" in arm64_script
+    assert "docker_disk_%s_available_kb" in arm64_script
+    assert "df -Pk /host-docker" in arm64_script
+    assert "df -Pk /var/lib/docker" not in arm64_script
     assert "--cache-from" not in arm64_script
     assert "--cache-to" not in arm64_script
     assert "--load" not in arm64_script
-    assert "verify_repository_free_image.sh" in arm64_script
-    assert "verify_bundled_tools.sh" in arm64_script
+    arm64_smoke_script = "\n".join(parsed_ci["release-image-arm64-smoke"]["script"])
+    assert '"$ARM64_IMAGE@$ARM64_DIGEST"' in arm64_smoke_script
+    assert "VERIFY_POSTGRES_STARTUP=1" in arm64_smoke_script
+    assert "verify_bundled_tools.sh" in arm64_smoke_script
+    assert "release-image-arm64-vulnerability-scan" in parsed_ci
     assert "docker-build-arm64-cache" not in parsed_ci
+    rehearsal_rule = parsed_ci[".release-image-pipeline"]["rules"][1]["if"]
+    assert 'RELEASE_MULTIARCH_REHEARSAL == "1"' in rehearsal_rule
+    for rehearsal_job in (
+        "release-image-rehearsal-amd64-index-smoke",
+        "release-image-rehearsal-arm64-index-smoke",
+    ):
+        rehearsal_script = "\n".join(parsed_ci[rehearsal_job]["script"])
+        assert "GITLAB_INDEX_IMAGE@$GITLAB_INDEX_DIGEST" in rehearsal_script
+        assert 'RELEASE_MULTIARCH_REHEARSAL == "1"' in (
+            parsed_ci[rehearsal_job]["rules"][0]["if"]
+        )
+    assert parsed_ci["release-image-rehearsal-arm64-index-smoke"]["extends"] == (
+        ".release-arm64-dind"
+    )
+    cleanup_job = parsed_ci["release-image-staging-cleanup"]
+    cleanup_script = "\n".join(cleanup_job["script"])
+    assert "cleanup_release_image_tags.py" in cleanup_script
+    assert "RELEASE_REGISTRY_CLEANUP_TOKEN" in cleanup_script
+    assert 'RELEASE_STAGING_CLEANUP_ENABLED == "1"' in cleanup_job["rules"][0]["if"]
     selinux_job = parsed_ci["release-image-selinux-smoke"]
     assert selinux_job["tags"] == ["selinux", "self-managed", "baku"]
     assert "RELEASE_SELINUX_COMPATIBILITY_ENABLED == \"1\"" in (
@@ -1770,17 +1714,28 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     )
     assert ".darklab-release-deployment.*" in podman_pre_get_sources
     assert 'podman unshare rm -rf "$stale_dir"' in podman_pre_get_sources
-    promotion_needs = {
+    index_needs = {
         need["job"]: need
-        for need in parsed_ci["release-image-dockerhub"]["needs"]
+        for need in parsed_ci["release-image-gitlab-index"]["needs"]
     }
+    for required_job in (
+        "release-image-amd64-smoke",
+        "release-image-amd64-vulnerability-scan",
+    ):
+        assert required_job in index_needs
+        assert not index_needs[required_job].get("optional", False)
     for compatibility_job in (
         "release-image-arm64-smoke",
         "release-image-selinux-smoke",
         "release-image-rootless-podman-smoke",
     ):
-        assert promotion_needs[compatibility_job]["optional"] is True
-    assert "release-image-vulnerability-scan" in promotion_needs
+        assert index_needs[compatibility_job]["optional"] is True
+    index_script = "\n".join(parsed_ci["release-image-gitlab-index"]["script"])
+    assert "publish_release_artifacts.sh gitlab-index" in index_script
+    promotion_needs = {
+        need["job"] for need in parsed_ci["release-image-dockerhub"]["needs"]
+    }
+    assert "release-image-gitlab-index" in promotion_needs
     supply_chain_job = parsed_ci["release-supply-chain"]
     assert supply_chain_job["stage"] == "attest"
     assert supply_chain_job["artifacts"]["when"] == "always"
@@ -1794,22 +1749,26 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         parsed_ci["variables"]["GRYPE_IMAGE"],
     )
     supply_chain_needs = {need["job"] for need in supply_chain_job["needs"]}
-    assert "release-image-vulnerability-scan" in supply_chain_needs
+    assert "release-image-amd64-vulnerability-scan" in supply_chain_needs
+    assert "release-image-arm64-vulnerability-scan" in supply_chain_needs
     supply_chain_script = "\n".join(supply_chain_job["script"])
     assert "--only-fixed --fail-on critical" not in supply_chain_script
     assert "-o cyclonedx-json" not in supply_chain_script
-    assert '--base-image "$PYTHON_BASE_IMAGE"' in supply_chain_script
-    assert '--base-image-digest "$PYTHON_BASE_DIGEST"' in supply_chain_script
+    assert "--release-index release-index.json" in supply_chain_script
+    assert '--dockerhub-index-digest "$DOCKERHUB_INDEX_DIGEST"' in supply_chain_script
+    assert "--sbom-amd64" in supply_chain_script
+    assert "--sbom-arm64" in supply_chain_script
     assert '--build-date "$RELEASE_BUILD_DATE"' in supply_chain_script
-    assert supply_chain_script.count("cosign sign ") == 2
-    assert supply_chain_script.count("cosign verify") == 2
+    assert "GITLAB_ARM64_DIGEST" in supply_chain_script
+    assert "for target in $targets" in supply_chain_script
     payload_script = "\n".join(parsed_ci["release-payload-upload"]["script"])
     assert "--evidence-dir release-evidence" in payload_script
+    assert "--release-index release-index.json" in payload_script
     assert "publish_release_artifacts.sh sign-payload release-payload" in payload_script
     payload_needs = {
         need["job"]: need for need in parsed_ci["release-payload-upload"]["needs"]
     }
-    assert payload_needs["release-image-smoke"]["artifacts"] is True
+    assert payload_needs["release-image-gitlab-index"]["artifacts"] is True
     postgres_job = parsed_ci["release-postgres-smoke"]
     postgres_script = "\n".join(postgres_job["script"])
     assert postgres_job["stage"] == "release"
@@ -1845,8 +1804,14 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     public_smoke_script = "\n".join(parsed_ci["release-public-smoke"]["script"])
     assert (
         'CONTAINER_MOUNT_MODE=volume sh scripts/release/verify_repository_free_image.sh '
-        '"$DOCKERHUB_RELEASE_IMAGE"'
+        '"$DOCKERHUB_INDEX_IMAGE"'
     ) in public_smoke_script
+    assert "anonymous-gitlab-index.json" in public_smoke_script
+    assert "anonymous-dockerhub-index.json" in public_smoke_script
+    assert 'docker buildx imagetools inspect "$GITLAB_INDEX_IMAGE"' in public_smoke_script
+    assert 'docker buildx imagetools inspect "$DOCKERHUB_INDEX_IMAGE"' in public_smoke_script
+    assert 'docker manifest inspect -v "$GITLAB_INDEX_IMAGE"' not in public_smoke_script
+    assert "GITLAB_ARM64_DIGEST" in public_smoke_script
     assert "release-build-inputs.json" in public_smoke_script
     assert "dockerhub-repository.json" in public_smoke_script
     assert "signing_identity_regexp" in public_smoke_script
@@ -1892,7 +1857,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "protected, masked, and hidden variable" in contributing
     assert "needs only **Read & Write** access" in contributing
     for variable_name in (
-        "RELEASE_ARM64_COMPATIBILITY_ENABLED",
+        "RELEASE_PLATFORM_MODE",
+        "RELEASE_DEGRADED_REASON",
         "RELEASE_SELINUX_COMPATIBILITY_ENABLED",
         "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED",
     ):
@@ -1907,11 +1873,12 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         "SHA256SUMS Sigstore bundle",
         "Deployment archive",
         "Deployment archive checksum",
-        "CycloneDX SBOM",
+        "Linux AMD64 CycloneDX SBOM",
         "SLSA provenance",
         "Release evidence index",
+        "Container image platform index",
         "Release build input inventory",
-        "Vulnerability report",
+        "Linux AMD64 vulnerability report",
     }
     release_link_urls = {link["url"] for link in release_links}
     assert any(
@@ -2082,6 +2049,219 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     ):
         assert checksums[name] == _sha256(payload / name)
 
+    release_index = {
+        "format": "darklab_shell.release_index.v1",
+        "version": RELEASE_VERSION,
+        "release_mode": "dual",
+        "degraded_reason": "",
+        "image": evidence_args["gitlab_image"],
+        "index_digest": digest,
+        "source_commit": evidence_args["commit_sha"],
+        "build_date": evidence_args["build_date"],
+        "python_base": {
+            "format": "darklab_shell.python_base_resolution.v1",
+            "image": "python:3.14.6-slim",
+            "index_digest": "sha256:" + "c" * 64,
+            "resolved_at": "2026-07-14T11:59:00Z",
+            "platforms": {
+                "amd64": {"platform": "linux/amd64", "digest": "sha256:" + "d" * 64},
+                "arm64": {"platform": "linux/arm64", "digest": "sha256:" + "e" * 64},
+            },
+        },
+        "platforms": {
+            "amd64": {
+                "platform": "linux/amd64",
+                "digest": "sha256:" + "f" * 64,
+                "python_base_digest": "sha256:" + "d" * 64,
+                "compressed_bytes": 100,
+                "unpacked_bytes": 200,
+            },
+            "arm64": {
+                "platform": "linux/arm64",
+                "digest": "sha256:" + "1" * 64,
+                "python_base_digest": "sha256:" + "e" * 64,
+                "compressed_bytes": 110,
+                "unpacked_bytes": 210,
+            },
+        },
+    }
+    release_index_path = tmp_path / "release-index.json"
+    release_index_path.write_text(json.dumps(release_index), encoding="utf-8")
+    index_evidence = tmp_path / "index-evidence"
+    evidence_builder.build_index_evidence(
+        version=RELEASE_VERSION,
+        gitlab_image=evidence_args["gitlab_image"],
+        dockerhub_image=evidence_args["dockerhub_image"],
+        dockerhub_index_digest=digest,
+        release_index_path=release_index_path,
+        commit_sha=evidence_args["commit_sha"],
+        commit_tag=evidence_args["commit_tag"],
+        pipeline_url=evidence_args["pipeline_url"],
+        pipeline_created_at=evidence_args["pipeline_created_at"],
+        build_date=evidence_args["build_date"],
+        sbom_paths={"amd64": sbom, "arm64": sbom},
+        vulnerability_report_paths={
+            "amd64": vulnerability_report,
+            "arm64": vulnerability_report,
+        },
+        syft_version="1.42.3",
+        grype_version="0.112.0",
+        gitlab_cli_image=GITLAB_CLI_IMAGE,
+        output_dir=index_evidence,
+    )
+    index_evidence_contract = json.loads(
+        (index_evidence / "release-evidence.json").read_text(encoding="utf-8")
+    )
+    assert index_evidence_contract["format"] == "darklab_shell.release_evidence.v2"
+    assert set(index_evidence_contract["sboms"]) == {"amd64", "arm64"}
+    index_payload = tmp_path / "index-payload"
+    payload_builder.build_payload(
+        version=RELEASE_VERSION,
+        output_dir=index_payload,
+        gitlab_digest=digest,
+        dockerhub_digest=digest,
+        compressed_bytes=0,
+        unpacked_bytes=0,
+        evidence_dir=index_evidence,
+        release_index_path=release_index_path,
+    )
+    index_manifest = json.loads(
+        _deployment_archive_files(index_payload)["release-manifest.json"]
+    )
+    assert index_manifest["format"] == "darklab_shell.deployment.v2"
+    assert "image_metrics" not in index_manifest
+    assert set(index_manifest["platforms"]) == {"amd64", "arm64"}
+    assert index_manifest["platforms"]["amd64"]["compressed_bytes"] == 100
+    assert index_manifest["platforms"]["arm64"]["unpacked_bytes"] == 210
+    assert index_manifest["python_base_index_digest"] == "sha256:" + "c" * 64
+    assert index_manifest["platform_arm64_digest"] == "sha256:" + "1" * 64
+    assert (index_payload / "darklab-shell-arm64.cdx.json").is_file()
+    v2_runtime = tmp_path / "v2-verifier-runtime"
+    v2_target = tmp_path / "v2-installed"
+    v2_setup = _run_setup(index_payload, v2_target, v2_runtime)
+    assert v2_setup.returncode == 0, v2_setup.stderr
+    verifier_architecture = (
+        "arm64" if os.uname().machine in {"aarch64", "arm64"} else "amd64"
+    )
+    verifier_child_digest = (
+        "sha256:" + "1" * 64
+        if verifier_architecture == "arm64"
+        else "sha256:" + "f" * 64
+    )
+    verifier_base_digest = (
+        "sha256:" + "e" * 64
+        if verifier_architecture == "arm64"
+        else "sha256:" + "d" * 64
+    )
+    v2_verifier_env = os.environ.copy()
+    v2_verifier_env.update({
+        "FAKE_DOCKER_LOG": str(v2_runtime / "docker.log"),
+        "FAKE_IMAGE_DIGEST": digest,
+        "FAKE_INDEX_CHILD_DIGEST": verifier_child_digest,
+        "FAKE_IMAGE_ARCHITECTURE": verifier_architecture,
+        "FAKE_IMAGE_BASE_DIGEST": verifier_base_digest,
+        "FAKE_IMAGE_BASE_INDEX_DIGEST": "sha256:" + "c" * 64,
+        "PATH": f"{v2_runtime / 'fake-bin'}{os.pathsep}{v2_verifier_env['PATH']}",
+    })
+    v2_verified = subprocess.run(
+        [str(v2_target / "verify-release-image.sh")],
+        cwd=v2_target,
+        env=v2_verifier_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert v2_verified.returncode == 0, v2_verified.stderr
+    assert f"platform=linux/{verifier_architecture} child=sha256:" in v2_verified.stdout
+    assert "buildx imagetools inspect" not in (
+        v2_runtime / "docker.log"
+    ).read_text(encoding="utf-8")
+
+    degraded_index = json.loads(json.dumps(release_index))
+    degraded_index["release_mode"] = "amd64-only"
+    degraded_index["degraded_reason"] = "ARM64 runner unavailable for security release"
+    degraded_index["platforms"] = {"amd64": release_index["platforms"]["amd64"]}
+    degraded_index_path = tmp_path / "degraded-release-index.json"
+    degraded_index_path.write_text(json.dumps(degraded_index), encoding="utf-8")
+    degraded_evidence = tmp_path / "degraded-index-evidence"
+    evidence_builder.build_index_evidence(
+        version=RELEASE_VERSION,
+        gitlab_image=evidence_args["gitlab_image"],
+        dockerhub_image=evidence_args["dockerhub_image"],
+        dockerhub_index_digest=digest,
+        release_index_path=degraded_index_path,
+        commit_sha=evidence_args["commit_sha"],
+        commit_tag=evidence_args["commit_tag"],
+        pipeline_url=evidence_args["pipeline_url"],
+        pipeline_created_at=evidence_args["pipeline_created_at"],
+        build_date=evidence_args["build_date"],
+        sbom_paths={"amd64": sbom},
+        vulnerability_report_paths={"amd64": vulnerability_report},
+        syft_version="1.42.3",
+        grype_version="0.112.0",
+        gitlab_cli_image=GITLAB_CLI_IMAGE,
+        output_dir=degraded_evidence,
+    )
+    degraded_payload = tmp_path / "degraded-index-payload"
+    payload_builder.build_payload(
+        version=RELEASE_VERSION,
+        output_dir=degraded_payload,
+        gitlab_digest=digest,
+        dockerhub_digest=digest,
+        compressed_bytes=0,
+        unpacked_bytes=0,
+        evidence_dir=degraded_evidence,
+        release_index_path=degraded_index_path,
+    )
+    degraded_manifest = json.loads(
+        _deployment_archive_files(degraded_payload)["release-manifest.json"]
+    )
+    assert degraded_manifest["release_mode"] == "amd64-only"
+    assert degraded_manifest["degraded_reason"] == degraded_index["degraded_reason"]
+    assert set(degraded_manifest["platforms"]) == {"amd64"}
+    assert "platform_arm64_digest" not in degraded_manifest
+    assert not (degraded_payload / "darklab-shell-arm64.cdx.json").exists()
+
+    degraded_runtime = tmp_path / "degraded-v2-verifier-runtime"
+    degraded_target = tmp_path / "degraded-v2-installed"
+    degraded_setup = _run_setup(degraded_payload, degraded_target, degraded_runtime)
+    assert degraded_setup.returncode == 0, degraded_setup.stderr
+    degraded_verifier_env = os.environ.copy()
+    degraded_verifier_env.update({
+        "FAKE_DOCKER_LOG": str(degraded_runtime / "docker.log"),
+        "FAKE_IMAGE_DIGEST": digest,
+        "FAKE_IMAGE_ARCHITECTURE": "amd64",
+        "FAKE_IMAGE_BASE_DIGEST": "sha256:" + "d" * 64,
+        "FAKE_IMAGE_BASE_INDEX_DIGEST": "sha256:" + "c" * 64,
+        "FAKE_UNAME_MACHINE": "arm64",
+        "FAKE_UNAME_SYSTEM": "Darwin",
+        "PATH": (
+            f"{degraded_runtime / 'fake-bin'}"
+            f"{os.pathsep}{degraded_verifier_env['PATH']}"
+        ),
+    })
+    darwin_degraded_verified = subprocess.run(
+        [str(degraded_target / "verify-release-image.sh")],
+        cwd=degraded_target,
+        env=degraded_verifier_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert darwin_degraded_verified.returncode == 0, darwin_degraded_verified.stderr
+    assert "platform=linux/amd64" in darwin_degraded_verified.stdout
+
+    linux_arm64_rejected = subprocess.run(
+        [str(degraded_target / "verify-release-image.sh")],
+        cwd=degraded_target,
+        env={**degraded_verifier_env, "FAKE_UNAME_SYSTEM": "Linux"},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert linux_arm64_rejected.returncode != 0
+    assert "manifest doesn't include Linux arm64" in linux_arm64_rejected.stderr
+
     (first_evidence / "darklab-shell.cdx.json").write_text("{}\n", encoding="utf-8")
     rejected_payload = tmp_path / "rejected-evidence"
     with pytest.raises(ValueError, match="evidence sbom checksum does not match"):
@@ -2099,194 +2279,211 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
 
 @pytest.mark.release_integration
 def test_release_image_publication_handles_publish_retry_and_conflict_branches(tmp_path: Path):
-    digest = "sha256:" + "a" * 64
+    contract = _load_script_module("release_image_contract")
+    amd64_digest = "sha256:" + "a" * 64
+    arm64_digest = "sha256:" + "b" * 64
+    base_index_digest = "sha256:" + "c" * 64
+    base_amd64_digest = "sha256:" + "d" * 64
+    base_arm64_digest = "sha256:" + "e" * 64
+    base_index_path = tmp_path / "python-base-index.json"
+    base_index_path.write_text(json.dumps({"manifests": [
+        {"digest": base_amd64_digest, "platform": {"os": "linux", "architecture": "amd64"}},
+        {"digest": base_arm64_digest, "platform": {"os": "linux", "architecture": "arm64"}},
+        {"digest": "sha256:" + "9" * 64, "platform": {"os": "linux", "architecture": "s390x"}},
+        {
+            "digest": "sha256:" + "8" * 64,
+            "platform": {"os": "unknown", "architecture": "unknown"},
+            "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+        },
+    ]}), encoding="utf-8")
+    base_resolution = contract.resolve_base(
+        image="python:3.14.6-slim",
+        index_digest=base_index_digest,
+        raw_index_path=base_index_path,
+    )
+    base_resolution_path = tmp_path / "python-base-resolution.json"
+    base_resolution_path.write_text(json.dumps(base_resolution), encoding="utf-8")
 
-    gitlab_first_dir = tmp_path / "gitlab-first"
-    gitlab_first = _run_release_publisher(gitlab_first_dir, "gitlab-image")
-    assert gitlab_first.returncode == 0, gitlab_first.stderr
-    first_log = (gitlab_first_dir / "release-tools.log").read_text(encoding="utf-8")
-    assert "buildx build" in first_log
-    assert "PYTHON_BASE_IMAGE=python:3.14.6-slim@sha256:" in first_log
-    assert "PYTHON_BASE_DIGEST=sha256:" in first_log
-    assert f"GITLAB_DIGEST={digest}" in (
-        gitlab_first_dir / "release-image.env"
-    ).read_text(encoding="utf-8")
-    base_resolution = json.loads(
-        (gitlab_first_dir / "python-base-resolution.json").read_text(encoding="utf-8")
-    )
-    assert base_resolution == {
-        "digest": "sha256:" + "b" * 64,
-        "image": "python:3.14.6-slim",
-        "platform": "linux/amd64",
-    }
-    first_metrics = dict(
-        row.split("=", 1)
-        for row in (
-            gitlab_first_dir / "release-image-build-metrics.txt"
-        ).read_text(encoding="utf-8").splitlines()
-    )
-    assert first_metrics == {
-        "status": "complete",
-        "image_action": "build",
-        "image_action_seconds": first_metrics["image_action_seconds"],
-        "build_seconds": first_metrics["build_seconds"],
-        "reused_existing_tag": "false",
-        "cache_scope": "v2-6",
-        "cache_ref": "registry.example.test/darklab/shell:buildcache-amd64-v2-6",
-        "platform": "linux/amd64",
-        "python_base_image": "python:3.14.6-slim",
-        "python_base_digest": "sha256:" + "b" * 64,
-        "compressed_bytes": "3072",
-        "source_commit": "revision-a",
-        "pipeline_id": "unknown",
-        "job_id": "unknown",
-    }
-    assert first_metrics["image_action_seconds"].isdigit()
-    assert first_metrics["build_seconds"] == first_metrics["image_action_seconds"]
-
-    gitlab_retry_dir = tmp_path / "gitlab-retry"
-    gitlab_retry = _run_release_publisher(
-        gitlab_retry_dir,
-        "gitlab-image",
-        FAKE_EXISTING_DIGEST=digest,
-        CI_PIPELINE_ID="pipeline-123",
-        CI_JOB_ID="job-456",
-    )
-    assert gitlab_retry.returncode == 0, gitlab_retry.stderr
-    assert "Reusing canonical GitLab image" in gitlab_retry.stdout
-    assert "buildx build" not in (
-        gitlab_retry_dir / "release-tools.log"
-    ).read_text(encoding="utf-8")
-    retry_metrics = dict(
-        row.split("=", 1)
-        for row in (
-            gitlab_retry_dir / "release-image-build-metrics.txt"
-        ).read_text(encoding="utf-8").splitlines()
-    )
-    assert retry_metrics["status"] == "complete"
-    assert retry_metrics["image_action"] == "reuse"
-    assert retry_metrics["reused_existing_tag"] == "true"
-    assert retry_metrics["build_seconds"] == "0"
-    assert retry_metrics["pipeline_id"] == "pipeline-123"
-    assert retry_metrics["job_id"] == "job-456"
-
-    gitlab_conflict = _run_release_publisher(
-        tmp_path / "gitlab-conflict",
-        "gitlab-image",
-        FAKE_EXISTING_DIGEST=digest,
-        FAKE_IMAGE_VERSION="9.9.9",
-    )
-    assert gitlab_conflict.returncode != 0
-    assert (
-        f"check=version expected={RELEASE_VERSION} actual=9.9.9"
-        in gitlab_conflict.stderr
-    )
-
-    scope_mismatch_dir = tmp_path / "gitlab-cache-scope-mismatch"
-    scope_mismatch = _run_release_publisher(
-        scope_mismatch_dir,
-        "gitlab-image",
-        RELEASE_CACHE_SCOPE="v2-5",
-    )
-    assert scope_mismatch.returncode != 0
-    assert "check=cache_scope expected=v2-6 actual=v2-5" in scope_mismatch.stderr
-    mismatch_metrics = dict(
-        row.split("=", 1)
-        for row in (
-            scope_mismatch_dir / "release-image-build-metrics.txt"
-        ).read_text(encoding="utf-8").splitlines()
-    )
-    assert mismatch_metrics["status"] == "failed"
-    assert mismatch_metrics["image_action"] == "preflight"
-
-    rc_version = NEXT_RC_VERSION
-    gitlab_rc_dir = tmp_path / "gitlab-rc"
-    gitlab_rc = _run_release_publisher(
-        gitlab_rc_dir,
-        "gitlab-image",
-        CI_COMMIT_TAG=_release_tag(rc_version),
-        RELEASE_VERSION=rc_version,
-        GITLAB_IMAGE=f"registry.example.test/darklab/shell:{rc_version}",
-    )
-    assert gitlab_rc.returncode == 0, gitlab_rc.stderr
-    assert f"GITLAB_IMAGE=registry.example.test/darklab/shell:{rc_version}" in (
-        gitlab_rc_dir / "release-image.env"
-    ).read_text(encoding="utf-8")
-
-    for case_name, overrides in (
-        ("gitlab-invalid-base-digest", {"FAKE_PYTHON_BASE_DIGEST": "sha256:bad"}),
-        ("gitlab-build-failure", {"FAKE_BUILD_EXIT": "17"}),
-        ("gitlab-missing-digest", {"FAKE_BUILT_DIGEST": ""}),
-        ("gitlab-malformed-digest", {"FAKE_BUILT_DIGEST": "sha256:not-a-digest"}),
+    contract_paths = []
+    for architecture, child_digest, base_digest, runner in (
+        ("amd64", amd64_digest, base_amd64_digest, "x86_64"),
+        ("arm64", arm64_digest, base_arm64_digest, "aarch64"),
     ):
-        failed = _run_release_publisher(
-            tmp_path / case_name,
-            "gitlab-image",
-            **overrides,
+        path = tmp_path / f"release-platform-{architecture}.json"
+        path.write_text(json.dumps({
+            "format": "darklab_shell.release_platform.v1",
+            "version": RELEASE_VERSION,
+            "architecture": architecture,
+            "platform": f"linux/{architecture}",
+            "image": f"registry.example.test/darklab/shell:staging-{architecture}",
+            "digest": child_digest,
+            "python_base_index_digest": base_index_digest,
+            "python_base_digest": base_digest,
+            "source_commit": "revision-a",
+            "build_date": "2026-07-19T12:00:00Z",
+            "compressed_bytes": 1024,
+            "unpacked_bytes": 2048,
+            "pull_seconds": 1,
+            "build_seconds": 2,
+            "runner_architecture": runner,
+        }), encoding="utf-8")
+        contract_paths.append(path)
+    raw_index_path = tmp_path / "release-index-raw.json"
+    raw_index_path.write_text(json.dumps({
+        "annotations": {
+            "sh.darklab.release.mode": "dual",
+            "sh.darklab.release.degraded-reason": "",
+        },
+        "manifests": [
+            {"digest": amd64_digest, "platform": {"os": "linux", "architecture": "amd64"}},
+            {"digest": arm64_digest, "platform": {"os": "linux", "architecture": "arm64"}},
+        ],
+    }), encoding="utf-8")
+    index = contract.validate_index(
+        release_mode="dual",
+        degraded_reason="",
+        image=f"registry.example.test/darklab/shell:{RELEASE_VERSION}",
+        index_digest="sha256:" + "f" * 64,
+        raw_index_path=raw_index_path,
+        base_resolution_path=base_resolution_path,
+        contract_paths=contract_paths,
+    )
+    assert set(index["platforms"]) == {"amd64", "arm64"}
+    assert index["python_base"]["index_digest"] == base_index_digest
+    release_index_with_attestation = tmp_path / "release-index-with-attestation.json"
+    release_index_with_attestation.write_text(
+        json.dumps({
+            **json.loads(raw_index_path.read_text(encoding="utf-8")),
+            "manifests": [
+                *json.loads(raw_index_path.read_text(encoding="utf-8"))["manifests"],
+                {
+                    "digest": "sha256:" + "7" * 64,
+                    "platform": {"os": "unknown", "architecture": "unknown"},
+                    "annotations": {
+                        "vnd.docker.reference.type": "attestation-manifest"
+                    },
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="attestation descriptor"):
+        contract.validate_index(
+            release_mode="dual",
+            degraded_reason="",
+            image=f"registry.example.test/darklab/shell:{RELEASE_VERSION}",
+            index_digest="sha256:" + "f" * 64,
+            raw_index_path=release_index_with_attestation,
+            base_resolution_path=base_resolution_path,
+            contract_paths=contract_paths,
         )
-        assert failed.returncode != 0, case_name
-
-    dockerhub_first_dir = tmp_path / "dockerhub-first"
-    dockerhub_first = _run_release_publisher(dockerhub_first_dir, "dockerhub-image")
-    assert dockerhub_first.returncode == 0, dockerhub_first.stderr
-    dockerhub_first_log = (
-        dockerhub_first_dir / "release-tools.log"
-    ).read_text(encoding="utf-8")
-    assert "buildx imagetools create" in dockerhub_first_log
-    assert (
-        f"registry.example.test/darklab/shell:{RELEASE_VERSION}@{digest}"
-        in dockerhub_first_log
-    )
-    assert f"DOCKERHUB_DIGEST={digest}" in (
-        dockerhub_first_dir / "dockerhub-image.env"
-    ).read_text(encoding="utf-8")
-
-    dockerhub_retry = _run_release_publisher(
-        tmp_path / "dockerhub-retry",
-        "dockerhub-image",
-        FAKE_EXISTING_DIGEST=digest,
-    )
-    assert dockerhub_retry.returncode == 0, dockerhub_retry.stderr
-    assert "already contains canonical digest" in dockerhub_retry.stdout
-
-    dockerhub_conflict = _run_release_publisher(
-        tmp_path / "dockerhub-conflict",
-        "dockerhub-image",
-        FAKE_EXISTING_DIGEST="sha256:" + "b" * 64,
-    )
-    assert dockerhub_conflict.returncode != 0
-    assert "check=canonical_digest" in dockerhub_conflict.stderr
-
-    dockerhub_rc_dir = tmp_path / "dockerhub-rc"
-    dockerhub_rc = _run_release_publisher(
-        dockerhub_rc_dir,
-        "dockerhub-image",
-        RELEASE_VERSION=rc_version,
-        GITLAB_IMAGE=f"registry.example.test/darklab/shell:{rc_version}",
-    )
-    assert dockerhub_rc.returncode == 0, dockerhub_rc.stderr
-    assert f"DOCKERHUB_RELEASE_IMAGE=docker.io/darklabsh/darklab-shell:{rc_version}" in (
-        dockerhub_rc_dir / "dockerhub-image.env"
-    ).read_text(encoding="utf-8")
-
-    for case_name, overrides in (
-        ("dockerhub-copy-failure", {"FAKE_PROMOTE_EXIT": "19"}),
-        ("dockerhub-missing-digest", {"FAKE_PROMOTED_DIGEST": ""}),
-        ("dockerhub-malformed-digest", {"FAKE_PROMOTED_DIGEST": "sha256:bad"}),
-    ):
-        failed = _run_release_publisher(
-            tmp_path / case_name,
-            "dockerhub-image",
-            **overrides,
+    with pytest.raises(ValueError, match="Platform contracts do not match release mode"):
+        contract.validate_index(
+            release_mode="dual",
+            degraded_reason="",
+            image=f"registry.example.test/darklab/shell:{RELEASE_VERSION}",
+            index_digest="sha256:" + "f" * 64,
+            raw_index_path=raw_index_path,
+            base_resolution_path=base_resolution_path,
+            contract_paths=contract_paths[:1],
         )
-        assert failed.returncode != 0, case_name
-
-    combined_output = "".join(
-        result.stdout + result.stderr
-        for result in (gitlab_first, gitlab_retry, dockerhub_first, dockerhub_retry)
+    with pytest.raises(ValueError, match="requires a nonempty degraded-mode reason"):
+        contract.validate_index(
+            release_mode="amd64-only",
+            degraded_reason="",
+            image=f"registry.example.test/darklab/shell:{RELEASE_VERSION}",
+            index_digest="sha256:" + "f" * 64,
+            raw_index_path=raw_index_path,
+            base_resolution_path=base_resolution_path,
+            contract_paths=contract_paths[:1],
+        )
+    degraded_raw_index = tmp_path / "release-index-degraded-raw.json"
+    degraded_raw_index.write_text(
+        json.dumps({
+            "annotations": {
+                "sh.darklab.release.mode": "amd64-only",
+                "sh.darklab.release.degraded-reason": "ARM64 runner unavailable",
+            },
+            "manifests": [
+                {
+                    "digest": amd64_digest,
+                    "platform": {"os": "linux", "architecture": "amd64"},
+                },
+            ],
+        }),
+        encoding="utf-8",
     )
-    assert "registry-secret" not in combined_output
-    assert "dockerhub-secret" not in combined_output
+    degraded_contract = contract.validate_index(
+        release_mode="amd64-only",
+        degraded_reason="ARM64 runner unavailable",
+        image=f"registry.example.test/darklab/shell:{RELEASE_VERSION}",
+        index_digest="sha256:" + "6" * 64,
+        raw_index_path=degraded_raw_index,
+        base_resolution_path=base_resolution_path,
+        contract_paths=contract_paths[:1],
+    )
+    assert set(degraded_contract["platforms"]) == {"amd64"}
+    assert degraded_contract["degraded_reason"] == "ARM64 runner unavailable"
+    publisher = RELEASE_PUBLISHER.read_text(encoding="utf-8")
+    assert "create_or_validate_child_anchor" in publisher
+    assert "--annotation \"index:sh.darklab.release.mode=${release_mode}\"" in publisher
+    assert "release_image_contract.py\" validate-index" in publisher
+    assert "release_image_contract.py\" validate-platforms" in publisher
+    assert "-index-staging-${CI_PIPELINE_ID}-${base_resolution_key}" in publisher
+    assert publisher.index("validate-platforms") < publisher.index(
+        'if docker buildx imagetools inspect "$canonical_image"'
+    )
+    assert 'require_equal gitlab_index staging_digest' in publisher
+    assert "buildcache-arm64" not in publisher
+    assert "-staging-${CI_PIPELINE_ID}-${base_resolution_key}-${architecture}" in publisher
+    cleanup = _load_script_module("cleanup_release_image_tags")
+    assert cleanup.TEMPORARY_TAG_RE.fullmatch(
+        "2.6.1-rc.1-staging-123-abcdef123456-amd64"
+    )
+    assert cleanup.TEMPORARY_TAG_RE.fullmatch(
+        "multiarch-rehearsal-abcdef12-123-arm64"
+    )
+    assert cleanup.TEMPORARY_TAG_RE.fullmatch(
+        "2.6.1-index-staging-123-abcdef123456"
+    )
+    assert cleanup.TEMPORARY_TAG_RE.fullmatch("2.6.1-amd64") is None
+
+    class FakeCleanupApi:
+        deleted: list[str] = []
+
+        def pages(self, _path: str):
+            yield [
+                {
+                    "name": "2.6.1-rc.1-staging-123-abcdef123456-amd64",
+                    "created_at": "2026-06-01T00:00:00Z",
+                },
+                {
+                    "name": "2.6.1-amd64",
+                    "created_at": "2026-06-01T00:00:00Z",
+                },
+            ]
+
+        def request(self, path: str, *, method: str = "GET"):
+            if method == "GET":
+                return {"created_at": "2026-06-01T00:00:00Z"}, ""
+            assert method == "DELETE"
+            self.deleted.append(path)
+            return None, ""
+
+    fake_cleanup_api = FakeCleanupApi()
+    deleted = cleanup.cleanup_tags(
+        api=fake_cleanup_api,
+        project_id="123",
+        repository_id=456,
+        keep_days=14,
+        now=cleanup.dt.datetime(2026, 7, 19, tzinfo=cleanup.dt.UTC),
+        dry_run=False,
+    )
+    assert deleted == ["2.6.1-rc.1-staging-123-abcdef123456-amd64"]
+    assert fake_cleanup_api.deleted == [
+        "/projects/123/registry/repositories/456/tags/"
+        "2.6.1-rc.1-staging-123-abcdef123456-amd64"
+    ]
 
 
 @pytest.mark.release_integration

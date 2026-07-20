@@ -8,6 +8,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Enable TruffleHog github and gitlab sources](#enable-trufflehog-github-and-gitlab-sources)
+  - [Validate multi-platform release publication](#validate-multi-platform-release-publication)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -52,6 +53,26 @@ Allow `trufflehog github` and `trufflehog gitlab` alongside the existing `truffl
   - Update the trufflehog coverage in `README.md`, `docs/tools.md`, and `docs/external-command-integrations.md`.
 - [ ] Add registry validation and policy tests covering the new allow/deny shapes, secret-backed token injection, and the `--org`/`--group`/`--endpoint` forms.
 
+### Validate multi-platform release publication
+
+The dual-platform publication path is implemented. Complete these live checks before shipping the first release that claims native Linux ARM64 support:
+
+- [ ] Qualify the native ARM64 publication runner with three uncached build, push, pull, verification, and cleanup cycles.
+  - Record total wall-clock, build/push time, peak daemon and BuildKit storage, free space after export, cleanup time and recovered space, job timeout, driver, daemon configuration, and external registry/download reachability.
+  - Require the slowest cycle to finish within 75 percent of the job timeout and leave at least 30 percent disk headroom after export.
+  - Confirm the actual DinD path at `tcp://docker:2375`, including the `1360` MTU workaround, and keep ARM64 registry caching disabled unless a larger dedicated runner separately proves it safe.
+  - Replace the provisional hosted-runner details in `CONTRIBUTING.md` with the observed qualification results.
+- [ ] Run the protected `RELEASE_MULTIARCH_REHEARSAL=1` pipeline and confirm native anonymous AMD64 and ARM64 pulls select the expected child digests, pass the repository-free smoke checks, and create no Docker Hub tag, signature, payload, or GitLab Release.
+- [ ] Qualify staging cleanup in a disposable registry repository.
+  - Update the cleanup implementation to collect every expired matching tag before it starts deleting. Add an offset-pagination regression with more than two pages so deleting one page can't shift and skip later candidates.
+  - Publish two tagged child manifests plus an index, remove the child tags, allow registry cleanup/garbage collection to run, and confirm the index remains pullable by tag and digest on both native architectures.
+  - Keep successful release child anchors for the lifetime of their release and leave `RELEASE_STAGING_CLEANUP_ENABLED=0` until the temporary-tag cleanup job has passed this exercise.
+- [ ] Add executable publisher shell coverage with stubbed Docker, registry state, and runner identity.
+  - Exercise first publication, identical retry/reuse, conflicting staging tags, wrong runner architecture, missing platform artifacts, child-anchor create/reuse/conflict, and Docker Hub index copy/reuse/conflict.
+  - Keep the Python contract tests for descriptor and release-mode validation, but don't treat source-text assertions as coverage of publisher behavior.
+- [ ] Complete three consecutive protected release-candidate pipelines in dual mode without manual repair. Each pipeline must build both children natively, pass both smoke and vulnerability lanes, publish one two-platform GitLab index, copy the identical index to Docker Hub, sign the index and both children, and produce matching evidence and payload contracts.
+- [ ] On native AMD64 and ARM64 hosts, validate a clean repository-free install, upgrade, status check, backup, restore, bundled-tool verification, and Postgres-backed startup from the same canonical tag. Confirm an unsupported host architecture fails before startup with a clear error.
+
 ## Known Issues
 
 No open Known Issues are currently tracked.
@@ -68,12 +89,6 @@ No open Technical Debt is currently tracked.
 
 These are possible future improvements, split by whether they look worth carrying forward.
 
-- **Publish one release image for Linux AMD64 and Linux ARM64.**
-  - Start after the current AMD64-only release pipeline has been fully validated. Build each architecture on a native Linux runner, push immutable architecture-specific staging references, verify both, and create the canonical GitLab multi-architecture index only after every gate passes. Promote that complete index to Docker Hub instead of publishing one architecture and later changing the tag.
-  - Record the index digest, both platform digests, and both Python base-image digests in the release evidence. Generate SBOM and vulnerability results for each platform, and make signatures, attestations, retry handling, and tag-immutability checks understand the index and its platform images.
-  - Pull the canonical index on native AMD64 and ARM64 runners and run the repository-free startup, bundled-tool, capability, durable-restart, architecture-label, and registry-parity checks against the platform image Docker actually selects.
-  - Remove the production Compose and installer AMD64 pin, make installation and verification architecture-aware, and confirm required Redis and Postgres images resolve on both supported platforms.
-  - Update the support matrix and release documentation to advertise Linux AMD64 and Linux ARM64 only after the published ARM64 path passes consistently. Keep macOS testing as useful development coverage without presenting Docker Desktop as a native production target.
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
   - Worth scoping once outbound notifications and external automation mature. The headless API is the right place to receive webhooks that auto-create or update projects.
 - **Cross-session Atlas view.**

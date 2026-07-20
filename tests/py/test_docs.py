@@ -944,8 +944,11 @@ class TestSupportedRuntimeDocumentation:
         rows = _supported_runtime_rows()
 
         compose_match = re.search(r"^\s*platform:\s*([^\s#]+)", _PRODUCTION_COMPOSE.read_text(), re.M)
-        assert compose_match, "deploy/compose.yaml must declare the production platform"
-        assert compose_match.group(1) in rows["Production architecture"]
+        assert compose_match is None, (
+            "deploy/compose.yaml must let the verified release index select the native platform"
+        )
+        assert "AMD64" in rows["Production architecture"]
+        assert "ARM64" in rows["Production architecture"]
 
         compose_versions = set(re.findall(
             r"Docker Compose ([0-9]+(?:\.[0-9]+)+) or newer is required",
@@ -956,13 +959,19 @@ class TestSupportedRuntimeDocumentation:
         assert f"Docker Compose {compose_version} or newer" in rows["Container orchestration"]
 
         ci_text = _GITLAB_CI.read_text()
+        platform_mode = re.search(
+            r'^\s*RELEASE_PLATFORM_MODE:\s*"([^"]+)"\s*$', ci_text, re.M
+        )
+        assert platform_mode and platform_mode.group(1) == "dual"
+        assert "supported" in rows["Native ARM64"].lower()
         gate_rows = {
-            "Native ARM64": "RELEASE_ARM64_COMPATIBILITY_ENABLED",
             "SELinux-enforcing Docker": "RELEASE_SELINUX_COMPATIBILITY_ENABLED",
             "Rootless Podman": "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED",
         }
         for row_name, variable in gate_rows.items():
             match = re.search(rf"^\s*{variable}:\s*\"([01])\"\s*$", ci_text, re.M)
             assert match, f".gitlab-ci.yml must declare {variable}"
-            expected = "disabled by default" if match.group(1) == "0" else "enabled by default"
-            assert expected in rows[row_name].lower()
+            if match.group(1) == "0":
+                assert "compatibility lane" in rows[row_name].lower()
+            else:
+                assert "supported" in rows[row_name].lower()

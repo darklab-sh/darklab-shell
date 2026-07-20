@@ -53,6 +53,7 @@ ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
 ARG PYTHON_BASE_DIGEST=unresolved
+ARG PYTHON_BASE_INDEX_DIGEST=unresolved
 
 # The Go builder base is shared by independent tool families. Its module and
 # compilation caches stay in builder layers and never enter the runtime image.
@@ -332,6 +333,7 @@ RUN gem install wpscan -v "${WPSCAN_VERSION}" && \
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 ARG TARGETARCH
 ARG PYTHON_BASE_DIGEST
+ARG PYTHON_BASE_INDEX_DIGEST
 ARG APP_VERSION
 ARG VCS_REF
 ARG BUILD_DATE
@@ -463,4 +465,5 @@ LABEL org.opencontainers.image.title="darklab_shell" \
       sh.darklab.git.revision="${VCS_REF}" \
       sh.darklab.python.version="${PYTHON_VERSION}" \
       sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}" \
+      sh.darklab.python.base.index.digest="${PYTHON_BASE_INDEX_DIGEST}" \
       sh.darklab.image.architecture="${TARGETARCH}"
