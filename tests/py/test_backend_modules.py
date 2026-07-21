@@ -2574,7 +2574,11 @@ class TestLoadConfig:
                     output_preview_max_mb: 2MB
                     full_output_max_bytes: 7340032
                     rate_limit_per_minute: 30
+                    database_pool_min: 2
+                    database_pool_max: 4
+                    database_postgres_jit: yes
                     ai_enabled: yes
+                    ai_timeout_seconds: 90
                     ai_max_concurrent: "3"
                     audit_export_max_rows: 999999
                     """
@@ -2587,7 +2591,16 @@ class TestLoadConfig:
                     rate_limit_per_minute: 99
                     """
                 ))
-            with mock.patch.object(app_config.log, "warning"):
+            with (
+                mock.patch.dict(os.environ, {
+                    "DATABASE_POOL_MIN": "",
+                    "DATABASE_POOL_MAX": "",
+                    "DATABASE_POSTGRES_JIT": "",
+                    "AI_TIMEOUT_SECONDS": "",
+                    "AI_MAX_CONCURRENT": "",
+                }),
+                mock.patch.object(app_config.log, "warning"),
+            ):
                 cfg = app_config.load_config(tmp)
 
         assert cfg["app_name"] == "abcdefghijklmnopqrst"
@@ -2603,11 +2616,11 @@ class TestLoadConfig:
         assert cfg["data_dir"] == ""
         assert cfg["database_backend"] == "sqlite"
         assert cfg["database_url"] == ""
-        assert cfg["database_pool_min"] == 1
-        assert cfg["database_pool_max"] == 5
-        assert cfg["database_postgres_jit"] is False
+        assert cfg["database_pool_min"] == 2
+        assert cfg["database_pool_max"] == 4
+        assert cfg["database_postgres_jit"] is True
         assert cfg["ai_enabled"] is True
-        assert cfg["ai_timeout_seconds"] == 120
+        assert cfg["ai_timeout_seconds"] == 90
         assert cfg["ai_max_concurrent"] == 3
         assert cfg["ai_max_output_tokens"] == 120
         assert cfg["ai_next_commands_max_output_tokens"] == 180
@@ -15823,7 +15836,7 @@ class TestEntrypointWorkspaceRepair:
 
     def test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
-        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        compose = yaml.safe_load((REPO_ROOT / "compose.dev.yaml").read_text())
         shell_env = TestAIRuntimeWiring._compose_environment(compose["services"]["shell"])
 
         assert 'from config import CFG' in entrypoint
@@ -15846,7 +15859,7 @@ class TestEntrypointWorkspaceRepair:
 
     def test_docker_static_metadata_labels_match_runtime_config_contract(self):
         dockerfile = (REPO_ROOT / "Dockerfile").read_text()
-        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        compose = yaml.safe_load((REPO_ROOT / "compose.dev.yaml").read_text())
         shell_service = compose["services"]["shell"]
         shell_env = TestAIRuntimeWiring._compose_environment(shell_service)
         build_args = {str(key): str(value) for key, value in shell_service["build"]["args"].items()}
@@ -15868,7 +15881,7 @@ class TestEntrypointWorkspaceRepair:
         assert set(python_from_args) == {"PYTHON_BASE_IMAGE"}
         assert app_config.APP_VERSION == package_version
         assert f"ARG APP_VERSION={app_config.APP_VERSION}" in dockerfile
-        assert build_args["APP_VERSION"] == f"${{APP_VERSION:-{app_config.APP_VERSION}}}"
+        assert build_args["APP_VERSION"] == f"${{APP_VERSION:-{app_config.APP_VERSION}-dev}}"
         assert build_args["VCS_REF"] == "${GIT_SHA:-unknown}"
         assert build_args["BUILD_DATE"] == "${BUILD_DATE:-unknown}"
         assert "PYTHON_BASE_IMAGE" not in build_args
@@ -15887,10 +15900,11 @@ class TestEntrypointWorkspaceRepair:
             assert label in dockerfile
         assert labels["sh.darklab.config.database_backend"] == shell_env["DATABASE_BACKEND"]
         assert labels["sh.darklab.config.database_backend"] == "${DATABASE_BACKEND:-sqlite}"
+        assert labels["sh.darklab.environment"] == "development"
         assert labels["sh.darklab.metrics.path"] == "/metrics"
 
     def test_compose_redis_is_ephemeral_under_read_only_root(self):
-        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        compose = yaml.safe_load((REPO_ROOT / "compose.dev.yaml").read_text())
         redis_service = compose["services"]["redis"]
         redis_command = [str(item) for item in redis_service.get("command", [])]
 
@@ -15955,7 +15969,7 @@ class TestAIRuntimeWiring:
         assert '" &' in entrypoint
 
     def test_compose_ai_profile_wires_shell_to_llama_sidecar(self):
-        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        compose = yaml.safe_load((REPO_ROOT / "compose.dev.yaml").read_text())
         services = compose["services"]
         shell = services["shell"]
         llama = services["llama"]
@@ -15977,10 +15991,10 @@ class TestAIRuntimeWiring:
         assert shell_env["AI_ENABLED"] == "${AI_ENABLED:-false}"
         assert shell_env["AI_BASE_URL"] == "${AI_BASE_URL:-http://llama:8080}"
         assert shell_env["AI_MODEL"] == "${AI_MODEL:-Llama-3.1-8B-Instruct}"
-        assert shell_env["AI_TIMEOUT_SECONDS"] == "${AI_TIMEOUT_SECONDS:-120}"
-        assert shell_env["AI_MAX_OUTPUT_TOKENS"] == "${AI_MAX_OUTPUT_TOKENS:-120}"
-        assert shell_env["AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS"] == "${AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS:-180}"
-        assert shell_env["AI_MAX_CONCURRENT"] == "${AI_MAX_CONCURRENT:-1}"
+        assert shell_env["AI_TIMEOUT_SECONDS"] == "${AI_TIMEOUT_SECONDS:-}"
+        assert shell_env["AI_MAX_OUTPUT_TOKENS"] == "${AI_MAX_OUTPUT_TOKENS:-}"
+        assert shell_env["AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS"] == "${AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS:-}"
+        assert shell_env["AI_MAX_CONCURRENT"] == "${AI_MAX_CONCURRENT:-}"
         assert shell_env["AI_FEATURE_SUMMARY"] == "${AI_FEATURE_SUMMARY:-false}"
         assert shell_env["AI_FEATURE_NEXT_COMMANDS"] == "${AI_FEATURE_NEXT_COMMANDS:-false}"
         assert shell_env["AI_FEATURE_RUN_SUGGESTIONS"] == "${AI_FEATURE_RUN_SUGGESTIONS:-false}"

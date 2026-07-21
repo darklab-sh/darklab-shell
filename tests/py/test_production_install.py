@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Contracts for the repository-free production deployment payload."""
+"""Contracts for the production installation payload."""
 
 from __future__ import annotations
 
@@ -127,8 +127,8 @@ def _build_payload_for_version(
     source_root = tmp_path / f"source-{version}"
     (source_root / "deploy").mkdir(parents=True)
     source_files = (
-        ".env.example",
         "LICENSE",
+        "deploy/.env.example",
         "deploy/THIRD_PARTY_NOTICES.txt",
         "deploy/config-local.yaml.dist",
         "deploy/container-licenses.json",
@@ -141,7 +141,7 @@ def _build_payload_for_version(
         destination = source_root / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-    env_example_path = source_root / ".env.example"
+    env_example_path = source_root / "deploy" / ".env.example"
     env_example_path.write_text(
         env_example_path.read_text(encoding="utf-8").replace(
             f"darklab-shell:{RELEASE_VERSION}",
@@ -564,7 +564,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     compose_text = (ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
     compose = yaml.safe_load(compose_text)
     development_compose = yaml.safe_load(
-        (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        (ROOT / "compose.dev.yaml").read_text(encoding="utf-8")
     )
     services = compose["services"]
     shell = services["shell"]
@@ -591,13 +591,18 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["INTERACTIVE_PTY_ENABLED"] == (
         "${INTERACTIVE_PTY_ENABLED:-false}"
     )
+    assert shell["environment"]["DATABASE_POOL_MIN"] == "${DATABASE_POOL_MIN:-}"
+    assert shell["environment"]["DATABASE_POOL_MAX"] == "${DATABASE_POOL_MAX:-}"
+    assert shell["environment"]["DATABASE_POSTGRES_JIT"] == "${DATABASE_POSTGRES_JIT:-}"
+    assert shell["environment"]["AI_TIMEOUT_SECONDS"] == "${AI_TIMEOUT_SECONDS:-}"
+    assert shell["environment"]["AI_MAX_OUTPUT_TOKENS"] == "${AI_MAX_OUTPUT_TOKENS:-}"
     assert "ulimits" not in shell
     assert "sysctls" not in shell
     assert "compose.operator.yaml" in compose_text
     assert "# ulimits:" in compose_text
     assert "# sysctls:" in compose_text
     assert "SELinux-enforcing Docker and rootless Docker or Podman" in compose_text
-    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    env_example = (ROOT / "deploy" / ".env.example").read_text(encoding="utf-8")
     assert "HOST_BIND_ADDRESS=0.0.0.0" in env_example
     assert "# WORKSPACE_ENABLED=true" in env_example
     assert "# WORKSPACE_BACKEND=volume" in env_example
@@ -607,12 +612,27 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert services["postgres"]["profiles"] == ["postgres"]
     assert services["llama"]["profiles"] == ["llama"]
     assert all("container_name" not in service for service in services.values())
+    development_services = development_compose["services"]
     assert development_compose["services"]["shell"]["build"]["context"] == "."
     assert "./app:/app:ro" in development_compose["services"]["shell"]["volumes"]
+    assert development_compose["services"]["shell"]["ports"] == [
+        "${DEV_HOST_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8888}:${APP_PORT:-8888}"
+    ]
+    assert development_compose["services"]["shell"]["labels"][
+        "sh.darklab.environment"
+    ] == "development"
+    assert all("container_name" not in service for service in development_services.values())
     development_environment = development_compose["services"]["shell"]["environment"]
     assert "WORKSPACE_ENABLED=${WORKSPACE_ENABLED:-false}" in development_environment
     assert "WORKSPACE_BACKEND=${WORKSPACE_BACKEND:-tmpfs}" in development_environment
     assert "INTERACTIVE_PTY_ENABLED=${INTERACTIVE_PTY_ENABLED:-false}" in development_environment
+    assert "DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-}" in development_environment
+    assert "DATABASE_POSTGRES_JIT=${DATABASE_POSTGRES_JIT:-}" in development_environment
+    assert "AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-}" in development_environment
+    development_env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "DEV_HOST_BIND_ADDRESS=127.0.0.1" in development_env_example
+    assert "DARKLAB_IMAGE=" not in development_env_example
+    assert not (ROOT / "examples" / "docker-compose.prod.yml").exists()
 
 
 @pytest.mark.release_integration
@@ -2769,7 +2789,7 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert "HOST_BIND_ADDRESS=127.0.0.1" in result.stdout
     assert "Optional Files, Interactive PTY, and raw-packet scanning" in result.stdout
     config_starter = (target / "conf" / "config.local.yaml").read_text(encoding="utf-8")
-    assert "Common optional feature switches" in config_starter
+    assert "Deployment wiring and optional feature switches" in config_starter
     assert "INTERACTIVE_PTY_ENABLED" in config_starter
     assert f"/blob/{_release_tag(RELEASE_VERSION)}/app/conf/config.yaml" in config_starter
     assert "YAML settings use `key: value`, not `key = value`" in config_starter
@@ -2807,6 +2827,7 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert lifecycle_help.returncode == 0, lifecycle_help.stderr
     assert "install --bundle DIR --target DIR" in lifecycle_help.stdout
     assert "migrate-to-postgres" in lifecycle_help.stdout
+    assert "migration-help" not in lifecycle_help.stdout
     assert "used internally by setup.sh" in lifecycle_help.stdout
     (target / "conf" / "config.local.yaml").write_text("# operator edit\n", encoding="utf-8")
     operator_edit_status = subprocess.run(
@@ -2825,8 +2846,8 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
         capture_output=True,
         text=True,
     )
-    assert migration_help.returncode == 0
-    assert "Changing an image tag never reverses database migrations" in migration_help.stdout
+    assert migration_help.returncode != 0
+    assert "unknown command: migration-help" in migration_help.stderr
 
     verifier_env = os.environ.copy()
     verifier_env.update({

@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Restore a repository-free darklab_shell backup inside the release image."""
+"""Restore a darklab_shell production backup inside the release image."""
 
 from __future__ import annotations
 

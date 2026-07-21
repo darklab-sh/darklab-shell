@@ -399,7 +399,7 @@ setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan
 setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu
 ```
 
-TCP connect scanning remains the default: `rewrite_command()` injects `-sT` when no scan mode is present. Operators can enable `raw_packet_scanning_enabled` on Linux Docker hosts. Once the runtime confirms `CAP_NET_RAW`, the effective/permitted Nmap file capability, and a compatible executable policy, command preparation adds `NMAP_PRIVILEGED=1` and leaves the scan mode to Nmap. Raw-dependent options fail with connect-mode guidance when readiness is inactive; plain `-sT` stays unchanged, mixed connect/raw options fail clearly, and spoofing/link-layer bypass options are always blocked. With restricted CIDRs configured, the adaptation adds `--send-ip` only after the matching root-owned firewall marker confirms the scanner-user OUTPUT boundary.
+TCP connect scanning remains the default: `rewrite_command()` injects `-sT` when no scan mode is present. Operators can set `RAW_PACKET_SCANNING_ENABLED=true` on Linux Docker hosts. Once the runtime confirms `CAP_NET_RAW`, the effective/permitted Nmap file capability, and a compatible executable policy, command preparation adds `NMAP_PRIVILEGED=1` and leaves the scan mode to Nmap. Raw-dependent options fail with connect-mode guidance when readiness is inactive; plain `-sT` stays unchanged, mixed connect/raw options fail clearly, and spoofing/link-layer bypass options are always blocked. With `RESTRICTED_COMMAND_INPUT_CIDRS` configured, the adaptation adds `--send-ip` only after the matching root-owned firewall marker confirms the scanner-user OUTPUT boundary.
 
 Workspace integration is separate from the scan-mode rewrite:
 
@@ -418,7 +418,7 @@ The app injects:
 -scan-type c
 ```
 
-when neither `-scan-type` nor `-st` is present and raw readiness is inactive. Ready deployments inject `-scan-type s` instead. An explicit connect choice is preserved in either mode. When `restricted_command_input_cidrs` is set, Naabu always remains on the connect path. Separate host or Docker bridge firewall rules do not change that readiness decision.
+when neither `-scan-type` nor `-st` is present and raw readiness is inactive. Ready deployments inject `-scan-type s` instead. An explicit connect choice is preserved in either mode. When `RESTRICTED_COMMAND_INPUT_CIDRS` is set, Naabu always remains on the connect path. Separate host or Docker bridge firewall rules do not change that readiness decision.
 
 Workspace integration covers list input and output files:
 
@@ -431,7 +431,7 @@ Workspace integration covers list input and output files:
 
 `masscan` is raw-packet only and has no TCP connect fallback. Live and interactive scans are available only when the operator opt-in is enabled and Masscan's Linux capability, binary, and file-capability readiness checks pass. Its help path remains available when readiness is inactive; actual scans return a short readiness error with RustScan or `nmap -sT` as connect-mode alternatives.
 
-When `restricted_command_input_cidrs` is set, Masscan scans are always unavailable because its packet-socket traffic does not use the scanner-user OUTPUT boundary. Separate host or Docker bridge firewall rules do not reactivate it.
+When `RESTRICTED_COMMAND_INPUT_CIDRS` is set, Masscan scans are always unavailable because its packet-socket traffic does not use the scanner-user OUTPUT boundary. Separate host or Docker bridge firewall rules do not reactivate it.
 
 Workspace integration covers target lists and output files:
 

@@ -1239,7 +1239,7 @@ def container_smoke_test():
     reach_host = _docker_reach_host()
     _cleanup_stale_smoke_compose_projects()
 
-    STANDALONE_COMPOSE = ROOT / "docker-compose.yml"
+    STANDALONE_COMPOSE = ROOT / "compose.dev.yaml"
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -1335,7 +1335,7 @@ def container_smoke_test():
         ]
         compose_cfg["services"]["restricted-shell"] = restricted_shell
 
-        compose_file = tmp_path / "docker-compose.yml"
+        compose_file = tmp_path / "compose.dev.yaml"
         compose_file.write_text(yaml.dump(compose_cfg))
 
         compose = ["docker", "compose", "-p", project, "-f", str(compose_file)]

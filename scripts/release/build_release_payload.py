@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Build the checksummed repository-free deployment payload."""
+"""Build the checksummed production installation payload."""
 
 from __future__ import annotations
 
@@ -485,7 +485,7 @@ def build_payload(
         bundle_root.mkdir()
         managed_sources = {
             "compose.yaml": compose_source,
-            ".env.example": ROOT / ".env.example",
+            ".env.example": ROOT / "deploy" / ".env.example",
             "verify-release-image.sh": ROOT / "deploy" / "verify-release-image.sh",
             "THIRD_PARTY_NOTICES.txt": ROOT / "deploy" / "THIRD_PARTY_NOTICES.txt",
             "container-licenses.json": ROOT / "deploy" / "container-licenses.json",

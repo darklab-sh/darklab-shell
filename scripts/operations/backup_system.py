@@ -524,7 +524,7 @@ def _compose_base_command(args: argparse.Namespace, compose_files: Sequence[Path
 def _default_compose_files(args: argparse.Namespace) -> list[Path]:
     if args.compose_file:
         return [Path(path).expanduser().resolve() for path in args.compose_file]
-    default = ROOT / "docker-compose.yml"
+    default = ROOT / "compose.dev.yaml"
     return [default] if default.exists() else []
 
 
@@ -1299,7 +1299,7 @@ def include_config_files(ctx: BackupContext, stage: Path, compose_files: Sequenc
             source = Path(extra).expanduser().resolve()
             destination = release_dir / source.name
             if destination.exists():
-                raise BackupError(f"duplicate repository-free release file name: {source.name}")
+                raise BackupError(f"duplicate managed release file name: {source.name}")
             source_stat = _stat_readable_source(source, kind="extra", missing_ok=True)
             if source_stat is None:
                 if ctx.args.ignore_missing_extra_file:
@@ -1328,7 +1328,12 @@ def include_config_files(ctx: BackupContext, stage: Path, compose_files: Sequenc
     for path in sorted(conf_dir.rglob("*.local.*")):
         copy_once(path, missing_ok=True)
 
-    root_compose_files = sorted(ROOT.glob("docker-compose*.yml")) + sorted(ROOT.glob("docker-compose*.yaml"))
+    root_compose_files = (
+        sorted(ROOT.glob("compose*.yml"))
+        + sorted(ROOT.glob("compose*.yaml"))
+        + sorted(ROOT.glob("docker-compose*.yml"))
+        + sorted(ROOT.glob("docker-compose*.yaml"))
+    )
     for path in [*root_compose_files, *compose_files]:
         if path.exists():
             copy_once(path)
@@ -1603,7 +1608,7 @@ def _prepare_requested_inputs(ctx: BackupContext) -> None:
         not ctx.args.env_file or not getattr(ctx.args, "local_conf_dir", "")
     ):
         raise BackupError(
-            "repository-free backups require --env-file and --local-conf-dir"
+            "production backups require --env-file and --local-conf-dir"
         )
 
     env_paths = [Path(path).expanduser().resolve() for path in (ctx.args.env_file_multi or [])]
@@ -1770,7 +1775,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--local-conf-dir",
         default="",
-        help="Operator config overlay directory included by repository-free backups.",
+        help="Operator config overlay directory included by production backups.",
     )
     parser.add_argument(
         "--repository-free",

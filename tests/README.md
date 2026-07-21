@@ -103,7 +103,7 @@ npm run test:pytest:fast
 ```
 
 The fast command covers normal backend and route behavior. The complementary
-`npm run test:pytest:release` command covers slower repository-free installers,
+`npm run test:pytest:release` covers slower production installers,
 publication, signing, and backup/restore paths. CI runs both required serial
 lanes at the same time, retains separate JUnit, slow-test, and file-timing
 reports, and verifies that their node IDs are disjoint and add up to the
@@ -284,7 +284,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 ./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
 
-GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. Ordinary branch image builds also retain a CycloneDX SBOM and full Grype report and fail on fixed Critical findings before a release tag is created. Protected tags resolve one Python base index, build native AMD64 and ARM64 staging children, and run repository-free, bundled-tool, Syft, and Grype checks against each child before the canonical image index can exist. The ARM64 smoke also starts Redis and Postgres. Later evidence and signing jobs consume the retained platform contracts, SBOMs, and reports. A protected branch rehearsal publishes a temporary index and repeats anonymous native pulls without promoting or creating release artifacts. Maintainers can use `release-image-recheck` to rerun repository-free startup, bundled tools, and the scan against either an existing child digest or an index digest plus its selected platform without rebuilding it.
+GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. Ordinary branch image builds also retain a CycloneDX SBOM and full Grype report and fail on fixed Critical findings before a release tag is created. Protected tags resolve one Python base index, build native AMD64 and ARM64 staging children, and run production-installation, bundled-tool, Syft, and Grype checks against each child before the canonical image index can exist. The ARM64 smoke also starts Redis and Postgres. Later evidence and signing jobs consume the retained platform contracts, SBOMs, and reports. A protected branch rehearsal publishes a temporary index and repeats anonymous native pulls without promoting or creating release artifacts. Maintainers can use `release-image-recheck` to rerun production startup, bundled tools, and the scan against either an existing child digest or an index digest plus its selected platform without rebuilding it.
 
 ---
 
@@ -297,7 +297,7 @@ Seeded commands are pulled from the command-registry example catalog, so the gen
 The script must run **inside the container** so the same SQLite version that owns the DB does the writes; it refuses to write from the host by default.
 
 ```bash
-docker compose exec -T shell python - --new-token < scripts/seed_history.py
+docker compose -f compose.dev.yaml exec -T shell python - --new-token < scripts/seed_history.py
 ```
 
 Use `--help` for the full flag list and invocation forms.

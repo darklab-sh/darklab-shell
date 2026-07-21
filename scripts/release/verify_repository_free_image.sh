@@ -285,7 +285,7 @@ wait_for_health() {
 
 wait_for_health || {
     container logs "$shell" >&2 || true
-    echo "repository-free image did not become healthy" >&2
+    echo "production image did not become healthy" >&2
     exit 1
 }
 
@@ -380,5 +380,5 @@ if [ "${VERIFY_POSTGRES_STARTUP:-0}" = 1 ]; then
     esac
 fi
 
-printf 'repository-free image verification passed image=%s architecture=%s runtime=%s\n' \
+printf 'production image verification passed image=%s architecture=%s runtime=%s\n' \
     "$image" "$expected_architecture" "$container_runtime"

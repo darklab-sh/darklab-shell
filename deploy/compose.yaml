@@ -99,7 +99,7 @@ services:
     # them for the host's memory, workload, Docker daemon limits, and kernel.
     # These example values aren't validated across every environment, including
     # SELinux-enforcing Docker and rootless Docker or Podman, which may reject
-    # some sysctls. See "Repository-free local Compose overrides" in
+    # some sysctls. See "Production Compose overrides" in
     # CONFIGURATION.md before enabling them.
     # ulimits:
     #   nofile:
@@ -119,9 +119,12 @@ services:
       PROMETHEUS_MULTIPROC_DIR: ${PROMETHEUS_MULTIPROC_DIR:-/tmp/darklab_shell-prom}
       DATABASE_BACKEND: ${DATABASE_BACKEND:-sqlite}
       DATABASE_URL: ${DATABASE_URL:-}
-      DATABASE_POOL_MIN: ${DATABASE_POOL_MIN:-1}
-      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-5}
-      DATABASE_POSTGRES_JIT: ${DATABASE_POSTGRES_JIT:-false}
+      # Empty environment values are ignored by the app config loader. This
+      # keeps database and AI fine-tuning in conf/config.local.yaml effective
+      # unless an operator deliberately exports the matching variable.
+      DATABASE_POOL_MIN: ${DATABASE_POOL_MIN:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-}
+      DATABASE_POSTGRES_JIT: ${DATABASE_POSTGRES_JIT:-}
       AI_WORKER_ENABLED: ${AI_WORKER_ENABLED:-0}
       AI_ENABLED: ${AI_ENABLED:-false}
       AI_PROVIDER: ${AI_PROVIDER:-openai_compatible}
@@ -129,17 +132,17 @@ services:
       AI_MODEL: ${AI_MODEL:-Llama-3.1-8B-Instruct}
       AI_API_KEY_SECRET_NAME: ${AI_API_KEY_SECRET_NAME:-}
       AI_API_KEY: ${AI_API_KEY:-}
-      AI_CONNECT_TIMEOUT_SECONDS: ${AI_CONNECT_TIMEOUT_SECONDS:-5}
-      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-120}
-      AI_MAX_INPUT_CHARS: ${AI_MAX_INPUT_CHARS:-24000}
-      AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-120}
-      AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS: ${AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS:-180}
-      AI_MAX_CONCURRENT: ${AI_MAX_CONCURRENT:-1}
-      AI_MAX_QUEUE_DEPTH: ${AI_MAX_QUEUE_DEPTH:-20}
-      AI_RATE_LIMIT_PER_SESSION_HOUR: ${AI_RATE_LIMIT_PER_SESSION_HOUR:-5}
-      AI_RATE_LIMIT_GLOBAL_PER_MINUTE: ${AI_RATE_LIMIT_GLOBAL_PER_MINUTE:-2}
-      AI_ALLOW_FULL_OUTPUT: ${AI_ALLOW_FULL_OUTPUT:-false}
-      AI_REQUIRE_PRIVATE_BASE_URL: ${AI_REQUIRE_PRIVATE_BASE_URL:-true}
+      AI_CONNECT_TIMEOUT_SECONDS: ${AI_CONNECT_TIMEOUT_SECONDS:-}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-}
+      AI_MAX_INPUT_CHARS: ${AI_MAX_INPUT_CHARS:-}
+      AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-}
+      AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS: ${AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS:-}
+      AI_MAX_CONCURRENT: ${AI_MAX_CONCURRENT:-}
+      AI_MAX_QUEUE_DEPTH: ${AI_MAX_QUEUE_DEPTH:-}
+      AI_RATE_LIMIT_PER_SESSION_HOUR: ${AI_RATE_LIMIT_PER_SESSION_HOUR:-}
+      AI_RATE_LIMIT_GLOBAL_PER_MINUTE: ${AI_RATE_LIMIT_GLOBAL_PER_MINUTE:-}
+      AI_ALLOW_FULL_OUTPUT: ${AI_ALLOW_FULL_OUTPUT:-}
+      AI_REQUIRE_PRIVATE_BASE_URL: ${AI_REQUIRE_PRIVATE_BASE_URL:-}
       AI_BASE_URL_ALLOWED_CIDRS: ${AI_BASE_URL_ALLOWED_CIDRS:-}
       AI_PROMPT_VERSION_OVERRIDE: ${AI_PROMPT_VERSION_OVERRIDE:-}
       AI_FEATURE_SUMMARY: ${AI_FEATURE_SUMMARY:-false}

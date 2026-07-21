@@ -41,6 +41,27 @@ _CHANGELOG_ARCHIVES = (
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",
 )
 
+_ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
+    "ai_api_key",
+    "ai_api_key_secret_name",
+    "ai_base_url",
+    "ai_enabled",
+    "ai_feature_next_commands",
+    "ai_feature_run_suggestions",
+    "ai_feature_summary",
+    "ai_model",
+    "ai_provider",
+    "database_backend",
+    "database_url",
+    "interactive_pty_enabled",
+    "prometheus_multiproc_dir",
+    "raw_packet_scanning_enabled",
+    "restricted_command_input_cidrs",
+    "workspace_backend",
+    "workspace_enabled",
+    "workspace_root",
+})
+
 _PUBLISHED_CHANGELOG_HASHES = {
     "2.6.0": "2301b6a3a70e07f14e5536c1b84aa25f5f5ba49fa67ddb8effd14814d6cc6351",
     "2.5.0": "57551c73e61a89420ac3bbc93427f260b177327f03b788c2f1658a362c29a7a8",
@@ -102,6 +123,14 @@ def _config_default_keys() -> list[str]:
     raise AssertionError("Could not find load_config() defaults dict in app/config.py")
 
 
+def _operator_yaml_default_keys() -> list[str]:
+    """Return defaults that operators can set through YAML."""
+    return [
+        key for key in _config_default_keys()
+        if key not in _ENVIRONMENT_OWNED_CONFIG_KEYS
+    ]
+
+
 def _documented_default_config_keys() -> set[str]:
     """Return top-level config keys represented in app/conf/config.yaml."""
     keys = set()
@@ -113,11 +142,14 @@ def _documented_default_config_keys() -> set[str]:
 
 
 def _configuration_reference_table_keys() -> set[str]:
-    """Return setting names from the CONFIGURATION.md application settings table."""
+    """Return setting names from the CONFIGURATION.md application YAML table."""
     text = _CONFIGURATION.read_text()
-    match = re.search(r"^## Application Settings\n(?P<body>.*?)(?:^---\n\n## Files Under app/conf\n)",
-                      text, re.M | re.S)
-    assert match, "Could not find CONFIGURATION.md '## Application Settings' table"
+    match = re.search(
+        r"^## Application YAML Settings\n(?P<body>.*?)(?:^---\n\n## Files Under app/conf\n)",
+        text,
+        re.M | re.S,
+    )
+    assert match, "Could not find CONFIGURATION.md '## Application YAML Settings' table"
     return set(re.findall(r"^\|\s+`([^`]+)`\s+\|", match.group("body"), re.M))
 
 
@@ -608,11 +640,10 @@ class TestArchitectureRouteInventory:
 # ── Part 5: operator configuration docs ──────────────────────────────────────
 
 class TestOperatorConfigurationDocs:
-    """Operator-facing config defaults must stay represented in both the
-    checked-in config override file and the operator configuration reference."""
+    """Operator-facing YAML defaults must stay represented in both references."""
 
     def test_config_yaml_represents_app_defaults(self):
-        expected = _config_default_keys()
+        expected = _operator_yaml_default_keys()
         documented = _documented_default_config_keys()
         missing = [key for key in expected if key not in documented]
         assert not missing, (
@@ -621,11 +652,12 @@ class TestOperatorConfigurationDocs:
         )
 
     def test_configuration_reference_represents_app_defaults(self):
-        expected = _config_default_keys()
+        expected = _operator_yaml_default_keys()
         documented = _configuration_reference_table_keys()
         missing = [key for key in expected if key not in documented]
         assert not missing, (
-            "CONFIGURATION.md '## Application Settings' table is missing app/config.py default keys:\n"
+            "CONFIGURATION.md '## Application YAML Settings' table is missing "
+            "app/config.py default keys:\n"
             + "\n".join(f"  {key}" for key in missing)
         )
 
@@ -715,6 +747,17 @@ class TestReadmeStartPaths:
         quick_start = text.split("## Quick Start\n", 1)[1].split("\n## ", 1)[0]
         production = text.split("## Production Deployment\n", 1)[1].split("\n## ", 1)[0]
         development = text.split("## Running in a Development Environment\n", 1)[1].split("\n## ", 1)[0]
+        current_deployment_docs = "\n".join(
+            path.read_text()
+            for path in (
+                _README,
+                _REPO_ROOT / "CONFIGURATION.md",
+                _REPO_ROOT / "FEATURES.md",
+                _REPO_ROOT / "THEME.md",
+                _REPO_ROOT / "docs" / "logging.md",
+                _REPO_ROOT / "docs" / "postgres-migration.md",
+            )
+        )
 
         assert text.index("## Quick Start\n") < text.index("## Features\n")
         assert "curl -fsSL" in quick_start and "| sh -s --" in quick_start
@@ -732,7 +775,19 @@ class TestReadmeStartPaths:
         assert 'cd "$HOME/darklab-shell"' not in text
         assert "git clone https://gitlab.com/darklab.sh/darklab_shell.git" in development
         assert "bash examples/run_local.sh" in development
+        assert "docker compose -f compose.dev.yaml up --build" in development
         assert "git clone" not in quick_start and "examples/run_local.sh" not in quick_start
+        assert "repository-free" not in current_deployment_docs.lower()
+        assert "examples/docker-compose.prod.yml" not in current_deployment_docs
+        assert "docker-compose.yml" not in current_deployment_docs
+        assert "python scripts/backup_system.py" not in current_deployment_docs
+        config_reference = (_REPO_ROOT / "app" / "conf" / "config.yaml").read_text()
+        for key in _ENVIRONMENT_OWNED_CONFIG_KEYS:
+            assert not re.search(rf"(?m)^\s*#?\s*{re.escape(key)}\s*:", config_reference), key
+        assert "workspace_max_file_mb:" in config_reference
+        assert "interactive_pty_max_runtime_seconds:" in config_reference
+        assert "database_pool_min:" in config_reference
+        assert "ai_timeout_seconds:" in config_reference
 
 
 class TestReadmeInstalledTools:

@@ -56,13 +56,14 @@ ROOT_SOURCE_FILES = frozenset({
     ".markdownlint-cli2.jsonc",
     ".shellcheckrc",
     "Dockerfile",
-    "docker-compose.yml",
+    "compose.dev.yaml",
     "entrypoint.sh",
     "requirements-dev.txt",
     "tools/darklab_cli/pyproject.toml",
 })
 SPECIAL_SOURCE_FILES = frozenset({
     "app/requirements.txt",
+    "deploy/.env.example",
     "deploy/config-local.yaml.dist",
     "deploy/darklab-deploy.sh.in",
     "deploy/setup.sh.in",

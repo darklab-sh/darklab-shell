@@ -43,7 +43,7 @@ The dual-platform publication path is implemented. Complete these live checks be
   - Exercise first publication, identical retry/reuse, conflicting staging tags, wrong runner architecture, missing platform artifacts, child-anchor create/reuse/conflict, and Docker Hub index copy/reuse/conflict.
   - Keep the Python contract tests for descriptor and release-mode validation, but don't treat source-text assertions as coverage of publisher behavior.
 - [ ] Complete three consecutive protected release-candidate pipelines in dual mode without manual repair. Each pipeline must build both children natively, pass both smoke and vulnerability lanes, publish one two-platform GitLab index, copy the identical index to Docker Hub, sign the index and both children, and produce matching evidence and payload contracts.
-- [ ] On native AMD64 and ARM64 hosts, validate a clean repository-free install, upgrade, status check, backup, restore, bundled-tool verification, and Postgres-backed startup from the same canonical tag. Confirm an unsupported host architecture fails before startup with a clear error.
+- [ ] On native AMD64 and ARM64 hosts, validate a clean production install, upgrade, status check, backup, restore, bundled-tool verification, and Postgres-backed startup from the same canonical tag. Confirm an unsupported host architecture fails before startup with a clear error.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 

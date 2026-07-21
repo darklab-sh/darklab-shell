@@ -70,7 +70,7 @@ done
 echo "Checking container at ${BASE_URL} ..."
 if ! curl -sf "${BASE_URL}/health" > /dev/null 2>&1; then
   echo "Error: cannot reach ${BASE_URL} — is the container running?"
-  echo "  docker compose up"
+  echo "  docker compose -f compose.dev.yaml up"
   exit 1
 fi
 echo "Container is up."
@@ -98,7 +98,7 @@ require_workspace_enabled() {
   else
     echo "Add this to app/conf/config.local.yaml and restart the container:"
     echo "  workspace_enabled: true"
-    echo "  docker compose down && docker compose up -d"
+    echo "  docker compose -f compose.dev.yaml down && docker compose -f compose.dev.yaml up -d"
   fi
   exit 1
 }
@@ -114,7 +114,7 @@ seed_demo_history() {
   esac
 
   echo "Seeding demo history fixture (${DEMO_HISTORY_FIXTURE}) ..."
-  docker compose exec -T shell python - \
+  docker compose -f compose.dev.yaml exec -T shell python - \
     --fixture "$DEMO_HISTORY_FIXTURE" \
     --token "$DEMO_SESSION_TOKEN" \
     < "$ROOT_DIR/scripts/development/seed_history.py" >/dev/null

@@ -19,7 +19,7 @@ export COMPOSE_PROJECT_NAME="darklab-release-postgres-${suffix}"
 export COMPOSE_PROFILES=postgres
 
 fail() {
-    printf 'repository-free Postgres verification failed: %s\n' "$*" >&2
+    printf 'production Postgres verification failed: %s\n' "$*" >&2
     exit 1
 }
 
@@ -181,5 +181,5 @@ jq -e '.preferences.pref_theme_name == "theme_light_blue"' \
     "$install_dir/postgres-restored.json" >/dev/null \
     || fail "restored Postgres state did not match the verified backup"
 
-printf 'repository-free Postgres verification passed payload=%s project=%s\n' \
+printf 'production Postgres verification passed payload=%s project=%s\n' \
     "$payload_dir" "$COMPOSE_PROJECT_NAME"

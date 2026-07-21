@@ -39,9 +39,9 @@ PACKAGE_LOCK = ROOT / "package-lock.json"
 DOCKERFILE = ROOT / "Dockerfile"
 GITLAB_CI = ROOT / ".gitlab-ci.yml"
 APP_CONFIG = ROOT / "app" / "config.py"
-DEV_COMPOSE = ROOT / "docker-compose.yml"
+DEV_COMPOSE = ROOT / "compose.dev.yaml"
 PROD_COMPOSE = ROOT / "deploy" / "compose.yaml"
-ENV_EXAMPLE = ROOT / ".env.example"
+PROD_ENV_EXAMPLE = ROOT / "deploy" / ".env.example"
 OPENAPI_SNAPSHOT = ROOT / "docs" / "api-v1-openapi.json"
 CONTAINER_LICENSE_INVENTORY = ROOT / "deploy" / "container-licenses.json"
 PRODUCTION_INSTALL_TEST = ROOT / "tests" / "py" / "test_production_install.py"
@@ -310,17 +310,18 @@ def _release_version_values() -> dict[str, str]:
         "package-lock.json": str(package_lock.get("version", "missing")),
         "package-lock.json root": str(lock_root.get("version", "missing")),
         "Dockerfile": _match(DOCKERFILE, r"^ARG APP_VERSION=([^\s]+)"),
-        "docker-compose.yml": _match(
+        "compose.dev.yaml": _match(
             DEV_COMPOSE,
-            r"APP_VERSION:\s*\$\{APP_VERSION:-([^}]+)\}",
+            r"APP_VERSION:\s*\$\{APP_VERSION:-"
+            r"([0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)-dev\}",
         ),
         "deploy/compose.yaml": _match(
             PROD_COMPOSE,
             r"docker\.io/darklabsh/darklab-shell:"
             r"([0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)",
         ),
-        ".env.example": _match(
-            ENV_EXAMPLE,
+        "deploy/.env.example": _match(
+            PROD_ENV_EXAMPLE,
             r"^DARKLAB_IMAGE=docker\.io/darklabsh/darklab-shell:([^\s]+)",
         ),
         "deploy/container-licenses.json": str(

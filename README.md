@@ -118,7 +118,7 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-Released images keep shipped defaults under `/app/conf`; repository-free installs keep private operator overrides under `./conf`, and source-mounted development uses `*.local.*` files beside the shipped catalogs. SQLite is the default database, with Postgres available for larger deployments.
+Released images keep shipped defaults under `/app/conf`; production installations keep private operator overrides under `./conf`, and source-mounted development uses `*.local.*` files beside the shipped catalogs. SQLite is the default database, with Postgres available for larger deployments.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for settings, precedence, supported runtimes, deployment choices, Files storage, raw scanning, database selection, and production tuning. Back up the current data before a database migration, then follow [Postgres Migration](docs/postgres-migration.md) for SQLite-to-Postgres moves or Postgres major-version upgrades. Theme authors can use [THEME.md](THEME.md).
 
@@ -239,7 +239,7 @@ The installed `release-manifest.json` records both registry index references, th
 
 `/data` is durable and contains the default SQLite database, saved output artifacts, and the app-owned vault key. Files workspaces use temporary storage by default and are wiped when the shell container restarts; configure the volume backend before relying on Files for durable evidence. Redis stores coordination and cache state, so a restart can interrupt active work but does not replace the durable database.
 
-Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, `migration-help`, and `remove` for release-managed lifecycle work. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
+Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, and `remove` for production lifecycle work. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
 
 ---
 
@@ -254,10 +254,10 @@ Clone the repository and start the development Compose stack:
 ```bash
 git clone https://gitlab.com/darklab.sh/darklab_shell.git
 cd darklab_shell
-docker compose up --build
+docker compose -f compose.dev.yaml up --build
 ```
 
-This uses the same Dockerfile and entrypoint as the released image, then mounts `./app:/app:ro` over the bundled copy for a quick edit-and-restart loop.
+This uses the same Dockerfile and entrypoint as the released image, then mounts `./app:/app:ro` over the bundled copy for a quick edit-and-restart loop. The development stack binds to `127.0.0.1` by default, uses development labels, and deliberately omits production restart policy and fixed container names.
 
 ### Local Python Environment
 
@@ -312,7 +312,7 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 - [Default.md](.gitlab/merge_request_templates/Default.md) - Default GitLab merge request template used by contributors
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and application internals
 - [CHANGELOG.md](CHANGELOG.md) - Release-by-release change log organised by version
-- [CONFIGURATION.md](CONFIGURATION.md) - Operator reference for repository-free `.env` and `conf/` settings, source-development overrides, Compose customization, storage, and host tuning
+- [CONFIGURATION.md](CONFIGURATION.md) - Operator reference for production `.env` and `conf/` settings, development overrides, Compose customization, storage, and host tuning
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Local setup, test workflow, linting, branch workflow, and merge request guidance
 - [CONTRIBUTORS.md](CONTRIBUTORS.md) - Contributor and acknowledgement notes
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes

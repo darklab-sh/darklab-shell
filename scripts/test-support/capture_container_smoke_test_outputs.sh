@@ -30,7 +30,7 @@
 # Typical upgrade workflow:
 #   1. Disable rate limiting in app/conf/config.local.yaml (see above).
 #   2. Build and start the updated container:
-#        docker compose up --build
+#        docker compose -f compose.dev.yaml up --build
 #   3. Capture fresh baselines from the running container:
 #        scripts/capture_container_smoke_test_outputs.sh
 #   4. Review the diff in tests/py/fixtures/container_smoke_test-expectations.json

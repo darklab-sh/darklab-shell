@@ -14,7 +14,7 @@ usage() {
     cat <<EOF
 Usage: darklab-deploy COMMAND [OPTIONS]
 
-Manage a repository-free darklab_shell deployment.
+Manage a darklab_shell production installation.
 
 Commands:
   install --bundle DIR --target DIR
@@ -25,7 +25,6 @@ Commands:
                                  Restore a backup; adoption allows Postgres on a fresh install
   migrate-to-postgres            Move this managed install from SQLite to bundled Postgres
   upgrade VERSION [OPTIONS]      Install an exact newer release after verifying a backup
-  migration-help                 Show how to move from a repository-backed deployment
   remove --yes                   Remove release-managed files and leave operator data
   version                        Print the installed deployment-tool version
 
@@ -510,7 +509,7 @@ create_repository_free_backup() {
     if [ "$backup_failed" = true ]; then
         cat "$backup_log" >&2
         rm -rf "$backup_log" "$backup_verify_stage"
-        fail "repository-free backup failed"
+        fail "production backup failed"
     fi
     backup_container_path=$(cat "$backup_log")
     case "$backup_container_path" in
@@ -988,25 +987,6 @@ upgrade_release() {
     printf '  docker compose pull\n  ./verify-release-image.sh\n  docker compose up -d\n'
 }
 
-migration_help() {
-    cat <<'EOF'
-To move a repository-backed deployment into the managed layout:
-
-1. Create and verify a complete backup of the current database, .env, local config,
-   data directory, durable workspaces, and /data/.secrets_master_key.
-2. Install the same darklab_shell release into a new, empty directory with setup.sh.
-3. Stop both stacks. Copy only operator-owned .env, conf/, data/, workspaces/, and
-   backups/ into the new directory; do not copy repository Compose or app source files.
-4. Compare .env with the installed .env.example, keep the installed DARKLAB_IMAGE,
-   run docker compose config, then pull and verify the release image.
-5. Start the managed stack and verify health, history, Files, Secrets, and any enabled
-   Postgres or workspace storage before removing the old checkout.
-
-Changing an image tag never reverses database migrations. Keep the old deployment and
-its verified backup until the migrated stack has been checked.
-EOF
-}
-
 remove_managed() {
     [ "${1:-}" = "--yes" ] || fail "remove requires --yes"
     managed_status >/dev/null
@@ -1052,10 +1032,6 @@ case "$command_name" in
     upgrade)
         require_common_tools
         upgrade_release "$@"
-        ;;
-    migration-help)
-        [ "$#" -eq 0 ] || fail "migration-help does not accept options"
-        migration_help
         ;;
     remove)
         require_common_tools

@@ -1,6 +1,6 @@
 # Configuration
 
-This is the operator-facing configuration reference for darklab_shell. Repository-free production installs use `.env`, local files under `conf/`, and optional Compose overrides beside the installed `compose.yaml`. Source checkouts keep their development overrides under `app/conf/`.
+This is the operator-facing configuration reference for darklab_shell. Production installations use `.env`, local files under `conf/`, and optional Compose overrides beside the installed `compose.yaml`. Source checkouts keep their development overrides under `app/conf/`.
 
 For feature behavior, start with [FEATURES.md](FEATURES.md). For internal configuration flow between Flask and the browser, see [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces).
 
@@ -8,14 +8,16 @@ For feature behavior, start with [FEATURES.md](FEATURES.md). For internal config
 
 ## Configuration Model
 
-Shipped application settings live in `app/conf/config.yaml` inside the release image and source checkout. Repository-free operators normally leave that file immutable and put YAML overrides in the installed `conf/config.local.yaml`. Source development uses `app/conf/config.local.yaml` instead. The shipped config acts as the deployment layer on top of built-in defaults from `app/config.py`.
+Shipped application settings live in `app/conf/config.yaml` inside the release image and source checkout. Production operators normally leave that file immutable and put YAML fine-tuning in the installed `conf/config.local.yaml`. Source development uses `app/conf/config.local.yaml` instead. Deployment wiring and feature switches live in `.env`; this keeps Compose services, container startup, lifecycle commands, and the app on the same settings.
 
 Resolution order for the main app config is:
 
 1. Built-in defaults from `app/config.py`
 2. `app/conf/config.yaml`
 3. Optional local `config.local.yaml`, either beside the shipped file or under `APP_LOCAL_CONF_DIR`
-4. Environment variables for the settings that support them
+4. Environment variables for deployment-owned settings and supported overrides
+
+Environment variables win when both sources define the same effective setting. The shipped Compose files intentionally provide deployment defaults for Files, database selection, interactive PTY, restricted target CIDRs, raw-packet scanning, Prometheus multiprocess storage, and core AI provider/features. Configure those through `.env`, not YAML. Database pool/JIT values and AI timeout, queue, rate-limit, output, and provider-network tuning remain valid YAML settings; Compose passes an empty value for their optional environment overrides so `config.local.yaml` isn't shadowed by an unused default.
 
 The loader validates the final config at startup. Malformed YAML, a non-mapping file root, or a structurally invalid value stops startup with specific phase, key, and source context. Unknown keys are ignored and logged as `CONFIG_UNKNOWN_KEY_IGNORED` so typos do not quietly become live settings. Error messages redact secret-looking values, including `ai_api_key`, AI secret names, SMTP password secret ids, credential-bearing DSNs such as `database_url`, and webhook-style fields. Non-secret schema values are shown in a shortened form so ordinary typos are easier to fix.
 
@@ -27,23 +29,31 @@ The runtime keeps one validated effective config after startup. Operators normal
 
 ### Schema Contract
 
-The application settings table below is the operator reference. The schema contract is:
+The application settings table below is the YAML fine-tuning reference. Deployment-owned settings appear in [Environment Variables and `.env`](#environment-variables-and-env) instead. Their lowercase effective keys still exist inside the app for runtime checks, logging, registry feature requirements, and tests, but they aren't operator-facing YAML options.
+
+The schema contract is:
 
 | Field group | Validation posture |
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
 | Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, and `project_digests` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
-| Forgiving booleans | `workspace_enabled`, `interactive_pty_enabled`, `raw_packet_scanning_enabled`, `database_postgres_jit`, `audit_log_enabled`, and the `ai_*` feature/control booleans accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
+| Forgiving booleans | Boolean environment settings plus YAML settings such as `database_postgres_jit`, `audit_log_enabled`, `ai_allow_full_output`, and `ai_require_private_base_url` accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
 | Normalized lists | CIDR lists and `output_entity_extra_domain_suffixes` drop invalid entries with key/source warning logs. Redaction rules are normalized through the same snapshot-share rule validator used at runtime |
 | Derived effective keys | `output_preview_max_bytes` is derived from `output_preview_max_mb`, and `full_output_max_bytes` is derived from `full_output_max_mb` unless the legacy byte key is supplied and the MB key is still at its built-in default |
 | Secret-looking values | Load errors and config object representations redact API keys, secret names/ids, passwords, webhook-like keys, and credential-bearing URLs such as `database_url` |
 
-Most settings in `config.yaml` are read at startup. After changing `config.yaml`, `config.local.yaml`, or an environment variable used by the app config, restart the app container:
+Settings are read at startup. After changing `config.local.yaml` or `.env`, recreate the app container so environment changes and YAML changes are both applied. In a production installation:
 
 ```bash
-docker compose restart
+docker compose up -d --force-recreate shell
+```
+
+In a source checkout:
+
+```bash
+docker compose -f compose.dev.yaml up -d --force-recreate shell
 ```
 
 No image rebuild is needed for normal config changes.
@@ -52,13 +62,13 @@ No image rebuild is needed for normal config changes.
 
 ## Local Override Files
 
-Most operator-owned files under `app/conf/` and `app/conf/themes/` support `*.local.*` overlays. Source deployments keep those files beside the shipped files. Repository-free production keeps the same relative names under host `./conf`, mounted at `/config`, while immutable defaults remain under `/app/conf`.
+Most operator-owned files under `app/conf/` and `app/conf/themes/` support `*.local.*` overlays. Source development keeps those files beside the shipped files. Production installations keep the same relative names under host `./conf`, mounted at `/config`, while immutable defaults remain under `/app/conf`.
 
 The installer keeps the host overlay tree at `0700` with files at `0600`. Container startup rejects symlinks and special files, then stages the tree into a private `appuser`-owned runtime directory before dropping privileges. Restart the shell container after editing a production host overlay so it stages a fresh snapshot. `CONFIG_LOADED` reports the shipped and local roots, while DEBUG diagnostics can list safe relative names for present supported overlays; neither log includes file contents. Missing and comment-only optional overlays are normal and don't produce warnings.
 
-| Shipped base | Repository-free local overlay | Source-development overlay | Behavior |
+| Shipped base | Production local overlay | Development overlay | Behavior |
 |--------------|-------------------------------|----------------------------|----------|
-| `app/conf/config.yaml` | `conf/config.local.yaml` | `app/conf/config.local.yaml` | Overrides any subset of app settings |
+| `app/conf/config.yaml` | `conf/config.local.yaml` | `app/conf/config.local.yaml` | Overrides application YAML fine-tuning settings |
 | `app/conf/commands.yaml` | `conf/commands.local.yaml` | `app/conf/commands.local.yaml` | Adds new command roots and merges same-root entries into the base registry |
 | `app/conf/faq.yaml` | `conf/faq.local.yaml` | `app/conf/faq.local.yaml` | Appends local FAQ entries |
 | `app/conf/welcome.yaml` | `conf/welcome.local.yaml` | `app/conf/welcome.local.yaml` | Appends local welcome samples |
@@ -79,7 +89,7 @@ Package presets and report templates are complete replacement catalogs rather th
 
 ## Config File Reload Behavior
 
-The table describes loader behavior when the app process can read an edited file directly, including source-mounted development. Repository-free production reads a private startup snapshot, so any host-side `conf/` change needs `docker compose restart shell` first.
+The table describes loader behavior when the app process can read an edited file directly, including source-mounted development. Production reads a private startup snapshot, so any host-side `conf/` change needs `docker compose restart shell` first.
 
 | File | When changes take effect |
 |------|--------------------------|
@@ -125,11 +135,11 @@ Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
 
 ---
 
-## Application Settings
+## Application YAML Settings
 
-The values below are the built-in server defaults from `app/config.py`.
+The values below are the built-in server defaults that operators can fine-tune with `config.local.yaml`. Deployment-owned settings are intentionally omitted and live in `.env` instead.
 
-Project workspace settings cap session-scoped case folders, links, targets, labels, notes, and package exports. Interactive PTY settings enable a separate guarded terminal path for approved interactive tools; leave `interactive_pty_enabled` off unless the deployment is prepared for the runtime and Redis requirements described below.
+Project workspace settings cap session-scoped case folders, links, targets, labels, notes, and package exports. Interactive PTY settings tune the separate guarded terminal path after `INTERACTIVE_PTY_ENABLED=true` enables it.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -145,16 +155,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
 | `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag`, `/diag/audit`, and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-session AI assist write quota for operator testing, but the global AI write limit still applies |
 | `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
-| `prometheus_multiproc_dir` | `/tmp/darklab_shell-prom` | Writable shared directory used by `prometheus_client` to aggregate counters and histograms across Gunicorn workers. `PROMETHEUS_MULTIPROC_DIR` overrides this value when set |
 | `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_http_duration` | `[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]` | Prometheus HTTP request duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_ai_provider_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60]` | Prometheus AI provider duration histogram buckets, in seconds |
-| `ai_enabled` | `false` | Enables the optional AI assist foundation. When disabled, cached reads stay harmless and no provider calls are made |
-| `ai_provider` | `openai_compatible` | Provider contract for AI assists. The current foundation uses OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints |
-| `ai_base_url` | _(empty)_ | Base URL for the AI provider, such as a llama.cpp, Ollama, vLLM, LiteLLM, or hosted OpenAI-compatible endpoint |
-| `ai_model` | _(empty)_ | Model name sent to the provider and checked by `/diag` against `/v1/models` |
-| `ai_api_key_secret_name` | _(empty)_ | Optional personal/team vault secret name to use when an AI request has a session context |
-| `ai_api_key` | _(empty)_ | Optional process/config fallback API key. Local unauthenticated providers usually leave this empty |
 | `ai_connect_timeout_seconds` | `5` | Provider TCP connect timeout |
 | `ai_timeout_seconds` | `120` | Provider read timeout. Local CPU models can need longer than normal HTTP calls, and AI assists run in the worker path rather than tying up a route worker |
 | `ai_max_input_chars` | `24000` | Maximum assembled prompt context size, measured in characters rather than tokens |
@@ -168,16 +171,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `ai_require_private_base_url` | `true` | Requires provider hosts to resolve to loopback/private/link-local addresses or an allowed CIDR |
 | `ai_base_url_allowed_cidrs` | `[]` | Extra CIDRs allowed for AI providers when `ai_require_private_base_url` is enabled |
 | `ai_prompt_version_override` | _(empty)_ | Optional prompt version override for staging comparisons |
-| `ai_feature_summary` | `false` | Feature flag for Run Details AI summaries |
-| `ai_feature_next_commands` | `false` | Feature flag for Run Details AI next-command drafts. Accepted suggestions can be copied after validation |
-| `ai_feature_run_suggestions` | `false` | Feature flag for Run buttons on accepted AI suggestions. The button submits through the normal composer path, so command policy still applies |
-| `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved. In Compose deployments, `RESTRICTED_COMMAND_INPUT_CIDRS` overrides this value and also feeds the scanner-user egress block |
-| `raw_packet_scanning_enabled` | `false` | Opts approved scanners into capability-backed raw-packet modes when Linux runtime readiness passes. Ordinary Nmap and Naabu commands keep their connect-mode defaults when disabled or unavailable. This setting does not enable Docker privileged mode |
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for the default SQLite history database, compressed full-output artifacts, body-store files, and the app-owned secret key file. Postgres deployments still use it for filesystem-backed artifacts and app-owned files. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
-| `database_backend` | `sqlite` | Server-side only. Selects the database backend. SQLite remains the default local/single-user path. When set to `postgres`, normal `db_connect()` calls use the Postgres pool |
-| `database_url` | _(empty)_ | Server-side only. Postgres DSN used when `database_backend: postgres`. Ignored by SQLite. Can also be set with the `DATABASE_URL` environment variable |
 | `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
 | `database_postgres_jit` | `false` | Server-side only. Controls whether app-owned Postgres pool connections allow PostgreSQL JIT compilation. The default keeps interactive pages from paying JIT startup cost on complex queries. Can also be set with `DATABASE_POSTGRES_JIT` |
@@ -293,9 +289,6 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped database preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
 | `full_output_max_bytes` | derived from `full_output_max_mb` | Server-side only. Effective byte value used by artifact storage after startup. Operators should set `full_output_max_mb`; legacy byte-based config is still accepted only when the MB setting is left at its built-in default |
-| `workspace_enabled` | `false` | Server-side only. Enables app-managed personal and team Files, including the constrained `command > file`, `command >> file`, and final `command \| tee file` sinks. It does not enable raw shell navigation, file-descriptor redirects such as `2>`, or arbitrary redirection |
-| `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. Team Files on `tmpfs` are single-container scratch space and disappear on restart; use `volume` for durable shared team Files |
-| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed personal `sess_*` and team `team_*` workspace directories. In Compose deployments, `WORKSPACE_ROOT` overrides this value so the entrypoint and app use the same path |
 | `workspace_quota_mb` | `50 MB` | Server-side only. Per-owner workspace quota for each personal or team workspace |
 | `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
 | `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
@@ -372,7 +365,6 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `run_broker_subscriber_block_seconds` | `15` | How long broker stream subscribers wait for new events before receiving a heartbeat |
 | `run_broker_heartbeat_seconds` | `20` | How often broker workers emit heartbeat events while a process is idle |
 | `run_broker_owner_stale_seconds` | `75` | How long an owner browser can go without touching a run before ownership is considered stale |
-| `interactive_pty_enabled` | `false` | Enables the guarded interactive PTY path for allowlisted tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`. Multi-worker deployments require Redis so PTY output, input, and resize events can be brokered across workers; without Redis this mode is limited to `WEB_CONCURRENCY=1` |
 | `interactive_pty_max_runtime_seconds` | `900` | Maximum lifetime for an interactive PTY command before the server terminates it |
 | `interactive_pty_max_concurrent_per_session` | `4` | Maximum number of active interactive PTY commands one browser session can run at the same time |
 | `interactive_pty_buffer_limit` | `512` | Maximum in-memory PTY events kept per local active run before older live events are dropped from the local fallback buffer |
@@ -765,7 +757,7 @@ To update suggestions, edit `conf/commands.yaml` and/or `conf/commands.local.yam
 
 ## Environment Variables and .env
 
-The repo includes [`.env.example`](.env.example). Copy it to `.env` before starting Compose if you want local overrides:
+The production installer creates `.env` and installs a matching `.env.example` you can review when a later release adds settings. The source repository keeps a separate development [`.env.example`](.env.example); copy it before starting `compose.dev.yaml` when you want development overrides:
 
 ```bash
 cp .env.example .env
@@ -773,8 +765,7 @@ cp .env.example .env
 
 ```env
 # APP_PORT=8888
-# HOST_BIND_ADDRESS=0.0.0.0
-# DARKLAB_IMAGE=docker.io/darklabsh/darklab-shell:2.6.0
+# DEV_HOST_BIND_ADDRESS=127.0.0.1
 # WORKSPACE_ENABLED=false
 # WORKSPACE_BACKEND=tmpfs
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
@@ -830,43 +821,45 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
-| `HOST_BIND_ADDRESS` | Repository-free production Compose | Host address used for the published app port. The public stack defaults to `0.0.0.0` so remote hosts can connect. Use `127.0.0.1` when only a local reverse proxy should reach the app |
-| `DARKLAB_IMAGE` | Repository-free production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
+| `HOST_BIND_ADDRESS` | Production Compose | Host address used for the published app port. The public stack defaults to `0.0.0.0` so remote hosts can connect. Use `127.0.0.1` when only a local reverse proxy should reach the app |
+| `DARKLAB_IMAGE` | Production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
 | `APP_LOCAL_CONF_DIR` | Flask app | Optional operator root for every supported local overlay. Production sets `/config`; when unset, loaders keep using sibling files beside their shipped assets |
-| `WORKSPACE_ENABLED` | Docker Compose, Flask app | Enables or disables personal and team Files. When set, it overrides `workspace_enabled` in app config |
-| `WORKSPACE_BACKEND` | Docker Compose, Flask app | Selects `tmpfs` for short-lived Files or `volume` for persistent mounted storage. When set, it overrides `workspace_backend` in app config |
-| `WORKSPACE_ROOT` | Docker entrypoint, Docker Compose, Flask app | Path prepared by the container before dropping privileges. When set, it overrides `workspace_root` in app config |
-| `INTERACTIVE_PTY_ENABLED` | Docker Compose, Flask app | Enables guarded terminal sessions for approved interactive tools. When set, it overrides `interactive_pty_enabled` in app config; detailed PTY limits remain in YAML |
-| `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. When set, it overrides `restricted_command_input_cidrs` in app config and adds scanner-user OUTPUT deny rules in the container |
+| `WORKSPACE_ENABLED` | Docker Compose, Flask app | Enables or disables personal and team Files |
+| `WORKSPACE_BACKEND` | Docker Compose, Flask app | Selects `tmpfs` for short-lived Files or `volume` for persistent mounted storage |
+| `WORKSPACE_ROOT` | Docker entrypoint, Docker Compose, Flask app | Path prepared by the container before dropping privileges and used by the app for personal and team Files |
+| `INTERACTIVE_PTY_ENABLED` | Docker Compose, Flask app | Enables guarded terminal sessions for approved interactive tools; detailed PTY limits remain in YAML |
+| `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. The same value drives app validation and scanner-user OUTPUT deny rules |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `SCHEDULER_ENABLED` | Docker entrypoint | Starts the scheduled-run worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
-| `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Optional override for `prometheus_multiproc_dir`. The app creates this scratch directory and exports it for `prometheus_client` multiprocess metrics |
+| `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Scratch directory created and exported for `prometheus_client` multiprocess metrics |
 | `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `llama`, `postgres`, or a comma-separated combination such as `llama,postgres` when you want profile-gated services included without passing `--profile` |
 | `AI_WORKER_ENABLED` | Docker entrypoint | Starts the AI worker beside Gunicorn when set to `1`. Leave it `0` when AI is disabled or when another process is responsible for draining the AI queue |
 | `AI_ENABLED` / `AI_PROVIDER` / `AI_BASE_URL` / `AI_MODEL` | Docker Compose, Flask app | Core AI provider settings. `AI_ENABLED` permits AI routes and diagnostics; `AI_PROVIDER` is currently `openai_compatible`; `AI_BASE_URL` points at the provider; `AI_MODEL` is sent to chat completions and checked by `/diag` |
 | `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted personal or team vault for the queued request scope; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
-| `AI_CONNECT_TIMEOUT_SECONDS` / `AI_TIMEOUT_SECONDS` | Docker Compose, Flask app | Provider connect and read timeouts. Local CPU models often need a longer read timeout than normal app routes |
-| `AI_MAX_INPUT_CHARS` / `AI_MAX_OUTPUT_TOKENS` / `AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS` | Docker Compose, Flask app | Prompt input and provider output caps. Input is measured in characters. Summary and next-command assists use separate output caps because next-command JSON needs more room |
-| `AI_MAX_CONCURRENT` / `AI_MAX_QUEUE_DEPTH` | Docker Compose, Flask app | AI worker concurrency and queue/backlog limits. The bundled local profile defaults to one concurrent provider call |
-| `AI_RATE_LIMIT_PER_SESSION_HOUR` / `AI_RATE_LIMIT_GLOBAL_PER_MINUTE` | Docker Compose, Flask app | Redis-backed AI assist write limits. Clients allowed by `diagnostics_allowed_cidrs` bypass the per-session quota for operator testing, but the global limit still applies |
-| `AI_ALLOW_FULL_OUTPUT` | Docker Compose, Flask app | Lets AI context assembly read complete persisted output as source material for bounded prompt sections. It does not send an unbounded full transcript |
-| `AI_REQUIRE_PRIVATE_BASE_URL` / `AI_BASE_URL_ALLOWED_CIDRS` | Docker Compose, Flask app | Provider network guard. The default requires the provider host to resolve to loopback, private, link-local, or explicitly allowed CIDR ranges |
-| `AI_PROMPT_VERSION_OVERRIDE` | Docker Compose, Flask app | Optional prompt version override for staging prompt comparisons |
+| `AI_CONNECT_TIMEOUT_SECONDS` / `AI_TIMEOUT_SECONDS` | Flask app | Optional environment overrides for the YAML provider connect and read timeouts |
+| `AI_MAX_INPUT_CHARS` / `AI_MAX_OUTPUT_TOKENS` / `AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS` | Flask app | Optional environment overrides for the YAML prompt input and provider output caps |
+| `AI_MAX_CONCURRENT` / `AI_MAX_QUEUE_DEPTH` | Flask app | Optional environment overrides for YAML worker concurrency and queue limits |
+| `AI_RATE_LIMIT_PER_SESSION_HOUR` / `AI_RATE_LIMIT_GLOBAL_PER_MINUTE` | Flask app | Optional environment overrides for YAML Redis-backed AI assist write limits |
+| `AI_ALLOW_FULL_OUTPUT` | Flask app | Optional environment override for the YAML full-output context setting |
+| `AI_REQUIRE_PRIVATE_BASE_URL` / `AI_BASE_URL_ALLOWED_CIDRS` | Flask app | Optional environment overrides for the YAML provider network guard |
+| `AI_PROMPT_VERSION_OVERRIDE` | Flask app | Optional environment override for the YAML staging prompt version |
 | `AI_FEATURE_SUMMARY` / `AI_FEATURE_NEXT_COMMANDS` / `AI_FEATURE_RUN_SUGGESTIONS` | Docker Compose, Flask app | AI UI feature flags for summaries, next-command drafts, and opt-in Run buttons for accepted suggestions |
 | `LLAMA_HF_MODEL` | Docker Compose | Hugging Face GGUF repo and quantization passed to the optional llama.cpp sidecar |
 | `LLAMA_THREADS` / `LLAMA_CTX_SIZE` / `LLAMA_N_PREDICT` / `LLAMA_PARALLEL` | Docker Compose | Runtime sizing for the optional llama.cpp sidecar. These map to llama-server thread count, context size, max generated tokens, and parallel slot count. The bundled default keeps `LLAMA_PARALLEL=1` so serialized AI worker requests reuse one slot more predictably |
-| `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Use `sqlite` for the default local/single-user path or `postgres` for a Postgres-backed deployment |
-| `DATABASE_URL` | Flask app | Optional override for `database_url`, normally a Postgres DSN when `DATABASE_BACKEND=postgres` |
-| `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional Postgres connection-pool bounds |
-| `DATABASE_POSTGRES_JIT` | Flask app | Optional override for `database_postgres_jit`. Leave unset or `false` for lower-latency interactive app queries |
+| `DATABASE_BACKEND` | Docker Compose, Flask app, lifecycle commands | Selects `sqlite` or `postgres` for the whole deployment |
+| `DATABASE_URL` | Docker Compose, Flask app, lifecycle commands | Postgres DSN used when `DATABASE_BACKEND=postgres` |
+| `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional environment overrides for YAML Postgres connection-pool bounds |
+| `DATABASE_POSTGRES_JIT` | Flask app | Optional environment override for the YAML Postgres JIT setting |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
 | `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
 | `DOCKER_GELF_ADDRESS` | Local Compose override | GELF log destination when an operator-created Compose override enables Docker's GELF logging driver |
 
-If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The checkout-only example override at `examples/docker-compose.prod.yml` defaults `WEB_CONCURRENCY` to `8`, but the repository-free stack keeps the entrypoint default unless `.env` changes it. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
+If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production stack keeps those defaults unless `.env` changes them. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
+
+The optional database and AI tuning variables are escape hatches for process-managed deployments. Leave them unset in the shipped Compose stacks to use `config.local.yaml`; their Compose entries intentionally pass empty values, which the app ignores.
 
 ---
 
@@ -886,7 +879,7 @@ The app checks the Linux capability bounding set, `no-new-privileges`, and each 
 
 When ready, Nmap receives `NMAP_PRIVILEGED=1` from the app's trusted runtime adaptation. This tells Nmap to use the capability already attached to its binary; it does not grant Docker privileged mode. The app does not set `privileged: true`, run commands as root, use host networking, or require Macvlan/IPvlan. User-supplied Nmap `--privileged`, source/decoy/MAC spoofing, and link-layer `--send-eth` remain blocked.
 
-The scanner-user firewall blocks the app port only for destinations local to the container, so a remote authorized host can still be scanned on the same port. At startup, the entrypoint reads the app's effective normalized `restricted_command_input_cidrs` from `config.yaml`, `config.local.yaml`, and environment overrides. Every corresponding OUTPUT rule must install or the container stops. A root-owned marker records the installed list, and raw Nmap remains inactive unless it matches; active Nmap adds `--send-ip`. Naabu and Masscan can use packet sockets that do not share that path, so their raw modes stay unavailable whenever restricted CIDRs are configured. There is no setting that treats separate host or Docker bridge firewall rules as readiness proof.
+The scanner-user firewall blocks the app port only for destinations local to the container, so a remote authorized host can still be scanned on the same port. At startup, the entrypoint normalizes `RESTRICTED_COMMAND_INPUT_CIDRS` through the app config loader. Every corresponding OUTPUT rule must install or the container stops. A root-owned marker records the installed list, and raw Nmap remains inactive unless it matches; active Nmap adds `--send-ip`. Naabu and Masscan can use packet sockets that do not share that path, so their raw modes stay unavailable whenever restricted CIDRs are configured. There is no setting that treats separate host or Docker bridge firewall rules as readiness proof.
 
 To verify the setup against a system you are authorized to scan, run an explicit SYN scan in the browser and check for a SYN/ACK reason:
 
@@ -902,7 +895,7 @@ An explicit `nmap -sT ...` remains a connect scan even when raw mode is active.
 
 SQLite is the default database backend and remains the recommended local/single-user path. Postgres is the production-scaling path for heavier deployments.
 
-The app reads the shipped `app/conf/config.yaml`, then the active local `config.local.yaml`, then environment variables. Repository-free production gets that local file from installed `conf/config.local.yaml`; source development uses `app/conf/config.local.yaml`. Environment variables win. In Docker Compose deployments, prefer `.env` for backend selection because Compose uses the same file to decide which services to start.
+The app reads the shipped `app/conf/config.yaml`, then the active local `config.local.yaml`, then environment variables. Production gets that local file from installed `conf/config.local.yaml`; source development uses `app/conf/config.local.yaml`. Environment variables win. In Docker Compose environments, prefer `.env` for backend selection because Compose uses the same file to decide which services to start.
 
 For a Compose-managed Postgres deployment, set these values in `.env`:
 
@@ -913,7 +906,7 @@ POSTGRES_PASSWORD=<redacted>
 DATABASE_URL=postgresql://darklab:<redacted>@postgres:5432/darklab_shell
 ```
 
-`COMPOSE_PROFILES=postgres` enables the profile-gated Postgres 18 service without passing `--profile postgres` on every command. `DATABASE_BACKEND`, `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, and `DATABASE_POSTGRES_JIT` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
+`COMPOSE_PROFILES=postgres` enables the profile-gated Postgres 18 service without passing `--profile postgres` on every command. `DATABASE_BACKEND` and `DATABASE_URL` select and connect the app backend. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time. Tune pool bounds and JIT in `conf/config.local.yaml`; the matching environment variables remain available for process-managed deployments but are blank by default in Compose.
 
 For the bundled llama.cpp server, include the `llama` profile:
 
@@ -923,9 +916,6 @@ AI_ENABLED=true
 AI_WORKER_ENABLED=1
 AI_BASE_URL=http://llama:8080
 AI_MODEL=Llama-3.1-8B-Instruct
-AI_TIMEOUT_SECONDS=120
-AI_MAX_OUTPUT_TOKENS=120
-AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS=180
 AI_FEATURE_SUMMARY=true
 AI_FEATURE_NEXT_COMMANDS=true
 AI_FEATURE_RUN_SUGGESTIONS=false
@@ -940,25 +930,25 @@ The llama.cpp sidecar serves the same OpenAI-compatible chat endpoint the app al
 
 The base Compose file defaults `AI_BASE_URL` to `http://llama:8080` and `AI_MODEL` to `Llama-3.1-8B-Instruct`, so those two lines can stay commented in `.env` when you use the bundled llama.cpp sidecar.
 
-If you run the app outside Compose, or you prefer file-based app config, the equivalent app-side settings are:
+Tune AI timeouts, prompt/output caps, queue limits, rate limits, and provider network policy in `conf/config.local.yaml`:
 
 ```yaml
-database_backend: postgres
-database_url: postgresql://darklab:<redacted>@postgres:5432/darklab_shell
+ai_timeout_seconds: 120
+ai_max_output_tokens: 120
+ai_next_commands_max_output_tokens: 180
 ```
 
-Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins, so `.env` will override `config.local.yaml`. If you use a Compose override file such as `docker-compose.local.yml` for bind-mounted workspaces, make sure it preserves the base service environment or repeats the database environment values; otherwise the container can start with the profile-gated Postgres service present while the app still sees the SQLite defaults.
+If you use `compose.operator.yaml` for bind-mounted workspaces, make sure it preserves the base service environment or repeats the database environment values; otherwise the container can start with the profile-gated Postgres service present while the app still sees the SQLite defaults.
 
 Postgres connection notes:
 
 - Keep `DATABASE_URL` aligned with any `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` overrides.
 - URL-encode special characters in the password before putting it in `DATABASE_URL`.
-- App Postgres connections disable JIT by default because the UI favors predictable low-latency page requests over long analytical queries. Set `DATABASE_POSTGRES_JIT=true` only after measuring that your workload benefits from it.
+- App Postgres connections disable JIT by default because the UI favors predictable low-latency page requests over long analytical queries. Set `database_postgres_jit: true` in `conf/config.local.yaml` only after measuring that your workload benefits from it.
 - If `POSTGRES_PASSWORD` changes after the `postgres-data` volume already exists, Postgres does not automatically change the existing role password. Managed SQLite migration and fresh-host backend adoption inspect the cluster over its local container socket before network authentication: they synchronize the configured password only when the destination has no user tables, and refuse to touch a non-empty retained volume. Other Postgres deployments need a deliberate role-password change or volume replacement.
-- The bundled Postgres service uses the Postgres 18 Docker image layout and mounts `postgres-data` at `/var/lib/postgresql`. If you have an older darklab_shell `postgres-data` volume created under Postgres 17's `/var/lib/postgresql/data` layout, export it before upgrading and restore into a fresh Postgres 18 volume. See [docs/postgres-migration.md](docs/postgres-migration.md#bundled-postgres-major-upgrades).
 - Keep the same `SECRETS_MASTER_KEY` or copied app-owned key file when migrating encrypted secrets.
 
-For an existing repository-free SQLite install, run `./darklab-deploy migrate-to-postgres` from the installation directory as the user who owns the deployment. Don't use `sudo`: the command uses Docker to read the app-owned SQLite file from the managed `/data` mount, while keeping `.env` and other operator files owned by the deployment user. It creates a verified backup, requires an empty bundled Postgres destination, synchronizes an empty retained cluster with the current installer-generated password, copies and validates the stopped SQLite database, updates the managed environment, and recreates the app on bundled Postgres. A named `postgres-data` volume survives `docker compose down` and deletion of the installation directory; if that retained volume contains user tables, migration refuses to overwrite it and tells you it isn't an empty target. Source checkouts and custom Postgres targets use the manual helper flow in [docs/postgres-migration.md](docs/postgres-migration.md).
+For an existing production SQLite install, run `./darklab-deploy migrate-to-postgres` from the installation directory as the user who owns the deployment. Don't use `sudo`: the command uses Docker to read the app-owned SQLite file from the managed `/data` mount, while keeping `.env` and other operator files owned by the deployment user. It creates a verified backup, requires an empty bundled Postgres destination, synchronizes an empty retained cluster with the current installer-generated password, copies and validates the stopped SQLite database, updates the managed environment, and recreates the app on bundled Postgres. A named `postgres-data` volume survives `docker compose down` and deletion of the installation directory; if that retained volume contains user tables, migration refuses to overwrite it and tells you it isn't an empty target. Development checkouts and custom Postgres targets can use the direct helper described in [docs/postgres-migration.md](docs/postgres-migration.md).
 
 Back up the SQLite data directory before migration and keep that snapshot until the Postgres deployment has been validated under real use. Rollback is switching the app config back to SQLite and restoring the untouched data directory snapshot if anything looks wrong after cutover.
 
@@ -1000,7 +990,7 @@ The production Compose file leaves platform selection to the release image index
 
 ## Docker Compose Files
 
-The repository-free production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:2.6.0` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the deployment directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The app doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
+The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:2.6.0` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The app doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Official builds link the rail footer, mobile menu footer, FAQ, and terminal help to the running release's exact GitLab source tag and README through `PROJECT_SOURCE` in `app/config.py`. A modified build exposed over a network must point that value at the complete corresponding source for the modified version and keep the source offer prominent for its remote users. The full [GNU AGPLv3 license](LICENSE) controls.
 
@@ -1022,7 +1012,7 @@ Release assets add publisher identity on top of those digest checks. `SHA256SUMS
 
 Before an upgrade, stop writes and verify a backup of the selected database, `.env`, `conf/`, host `data/`, persistent workspaces, and `release-manifest.json`. The production stack mounts that deployment-directory `./data` path at `/data` inside the container. Run the new installer in a separate empty directory, compare its managed files, preserve operator-owned state, then update `DARKLAB_IMAGE` to the exact new tag and recreate the shell. Startup may apply a forward-only schema migration, and changing the tag back doesn't reverse it.
 
-### Repository-free local Compose overrides
+### Production Compose overrides
 
 The installed `compose.yaml` is release-owned. Its `shell` service includes a commented copy of the optional scanner-tuning settings for discoverability, but don't uncomment them in the managed file. Keep deployment-specific service settings in a separate file beside it so an upgrade can replace the managed stack without overwriting your choices. For example, create `compose.operator.yaml` to add scanner limits and Docker GELF transport:
 
@@ -1063,37 +1053,27 @@ docker compose -f compose.yaml -f compose.operator.yaml up -d
 
 `darklab-deploy` manages the release-owned base stack. After an upgrade or restore recreates services, rerun the layered `up -d` command so service-level options from `compose.operator.yaml` are applied again. Keep a private copy of this operator-owned file with your deployment backups; managed backups don't automatically include additional top-level Compose files. Application log format remains separate: set `log_format: gelf` in installed `conf/config.local.yaml` only when the application itself should emit GELF-shaped JSON.
 
-### Source-checkout development and custom examples
+### Source-checkout development
 
-The repository-backed [docker-compose.yml](docker-compose.yml) is the local development stack. It builds the same Dockerfile, then mounts `./app:/app:ro` over the bundled application. It isn't the normal production-install path.
+The repository-backed [compose.dev.yaml](compose.dev.yaml) is the supported development stack. It builds the same Dockerfile, mounts `./app:/app:ro` over the bundled application, binds the app to loopback by default, and omits production restart behavior. It isn't a production deployment path.
 
 The base file starts the shell service, an ephemeral Redis sidecar, the shell's writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for backend development and testing:
 
 ```bash
-docker compose --profile postgres up -d postgres
+docker compose -f compose.dev.yaml --profile postgres up -d postgres
 ```
 
-The app keeps using SQLite by default. The optional Postgres service supports source-based backend work and the opt-in Postgres test lane. Startup runs the app-owned schema migrations for the selected backend, and when `database_backend` is `postgres`, normal app database calls route through the Postgres pool.
+The app keeps using SQLite by default. The optional Postgres service supports source-based backend work and the opt-in Postgres test lane. Startup runs the app-owned schema migrations for the selected backend, and when `DATABASE_BACKEND=postgres`, normal app database calls route through the Postgres pool.
 
 The bundled Redis service runs with a read-only root filesystem and persistence disabled (`--save ""`, `--appendonly no`). It stores coordination, broker, rate-limit, and cache-like state; durable app data belongs in SQLite/Postgres, `/data`, and any configured workspace volume.
 
-The checkout-only [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) file is a custom-deployment reference for contributors and operators who intentionally run from source. It isn't included in the repository-free installation payload. Layer it on the development stack with:
+Start the full development stack explicitly so Compose doesn't mistake it for an installed production stack:
 
 ```bash
-docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --build
+docker compose -f compose.dev.yaml up --build
 ```
 
-The source-checkout example adds:
-
-1. Docker GELF log transport for `shell`, `redis`, and the optional `postgres` service
-2. Reverse-proxy environment values such as `VIRTUAL_HOST` and `LETSENCRYPT_HOST`
-3. External Docker network usage instead of a direct host `ports:` binding
-4. Deployment-specific container names
-5. Optional Gunicorn sizing via `.env`
-6. A persistent `./workspaces:/workspaces` bind mount for session Files
-7. Scanner-friendly `ulimits` and network namespace sysctls
-
-Application log format and Docker log transport are separate controls. Source-checkout users can set `log_format: gelf` in `app/conf/config.local.yaml` and use the example override with `DOCKER_GELF_ADDRESS`. Repository-free operators should use installed `conf/config.local.yaml` and a local Compose override such as `compose.operator.yaml` above.
+Application log format and Docker log transport are separate controls. Development can set `log_format: gelf` in `app/conf/config.local.yaml`. Production operators should use installed `conf/config.local.yaml` and a local Compose override such as `compose.operator.yaml` above.
 
 ### Docker Labels
 
@@ -1123,10 +1103,10 @@ The base Compose service adds container labels for runtime configuration that is
 | `sh.darklab.config.database_backend` | `${DATABASE_BACKEND:-sqlite}` |
 | `sh.darklab.metrics.path` | `/metrics` |
 
-For release builds, pass the same metadata values you want Docker inventory to show:
+For a local development image, pass the metadata values you want Docker inventory to show:
 
 ```bash
-docker compose build \
+docker compose -f compose.dev.yaml build \
   --build-arg APP_VERSION=2.6.0 \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -1135,7 +1115,7 @@ docker compose build \
 To check the labels on a running container:
 
 ```bash
-docker inspect darklab_shell \
+docker inspect "$(docker compose -f compose.dev.yaml ps -q shell)" \
   --format '{{ index .Config.Labels "sh.darklab.config.database_backend" }}'
 ```
 
@@ -1149,9 +1129,7 @@ Files/workspace storage has three coordinated settings:
 - `WORKSPACE_BACKEND` selects short-lived `tmpfs` storage or persistent `volume` storage.
 - `WORKSPACE_ROOT` is the path the Docker entrypoint prepares before dropping privileges and the app uses at runtime.
 
-Repository-free Compose deployments can set all three in `.env`. The equivalent `workspace_enabled`, `workspace_backend`, and `workspace_root` keys remain available in installed `conf/config.local.yaml` for file-based overrides. Source development uses `app/conf/config.local.yaml`.
-
-Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
+Set all three in `.env` for production and Compose-based source development. Direct source runs export the same variables in the process environment. They aren't `config.local.yaml` options because the entrypoint, mount layout, backup/restore tooling, and app must all use the same deployment contract.
 
 Team Files use the same root as personal Files. Personal directories are named `sess_*`; team directories are named `team_*`. For durable shared team Files, use the `volume` backend with a persistent shared mount. The `tmpfs` backend is useful for scratch personal sessions, but team Files stored there are lost on container restart and are only shared inside one running container.
 
@@ -1165,7 +1143,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 
 ### Persistent bind mount
 
-The repository-free production Compose file already maps `./workspaces:/workspaces`. Select that persistent location in `.env`:
+The production Compose file already maps `./workspaces:/workspaces`. Select that persistent location in `.env`:
 
 ```env
 WORKSPACE_ENABLED=true
@@ -1203,7 +1181,7 @@ volumes:
 
 ## Operator Backups
 
-Repository-free installs include the backup and restore path in `darklab-deploy`. It runs the image's backup helper in a one-off Compose container, so the host only needs Docker and Compose. The release image includes the PostgreSQL 18 client used with the bundled PostgreSQL 18 service:
+Production installations include the backup and restore path in `darklab-deploy`. It runs the image's backup helper in a one-off Compose container, so the host only needs Docker and Compose. The release image includes the PostgreSQL 18 client used with the bundled PostgreSQL 18 service:
 
 ```bash
 ./darklab-deploy backup --keep-days 14
@@ -1222,56 +1200,7 @@ This option is only for a Postgres backup restored into a fresh install that's s
 
 `./darklab-deploy upgrade X.Y.Z` uses the same path automatically. It refuses to continue when release-owned files have changed, the target isn't newer, the release archive can't be verified, or the pre-upgrade backup fails. Every archive must produce a complete readable listing, and each member path is checked before anything is extracted. Online upgrades verify the release's signed `SHA256SUMS` with a digest-pinned Cosign container and the exact GitLab tag identity before downloading the archive. A supplied `--backup /path/to/archive` must pass the same checksum verification. `--archive /path/to/archive` is an operator-trusted offline path: the command checks the adjacent `.sha256` file, but you must verify the publisher's `SHA256SUMS.sigstore.json` separately. The command updates only managed files and the `DARKLAB_IMAGE` line; other `.env` settings and every operator directory stay in place. When a release adds keys to `.env.example`, the command prints only their names and asks you to review the installed example before restarting. It doesn't append defaults, replace existing values, or print values from either file. Afterward, run the printed pull, image-verification, and restart commands. Changing an image tag never reverses a database migration.
 
-Repository-backed deployments can call [`scripts/backup_system.py`](scripts/backup_system.py) directly when they want a scheduled backup that matches a custom source checkout. The script loads the effective app config, optionally loads `.env`, detects SQLite or Postgres, stages files with owner-only permissions, writes `manifest.json` and `checksums.sha256`, and creates a `darklab-backup-<timestamp>.tar.gz` archive by default.
-
-Basic cron-friendly example:
-
-```bash
-python scripts/backup_system.py \
-  --env-file .env \
-  --output-dir /backups/darklab_shell \
-  --keep-days 14
-```
-
-Run the script as a host user that can read every physical source it needs to copy. On Linux Docker hosts, production bind mounts commonly require root because `/data` and `/workspaces` are owned by the container's numeric app users and are not world-readable. Docker group access is still useful for Compose Postgres dumps, Docker volume exports, and container-only sources, but it does not grant read access to locked-down host bind-mount directories.
-
-For SQLite, the script writes a consistent `database/history.db` snapshot with SQLite's online backup API, then copies the rest of `data_dir` while leaving the live `history.db`, `history.db-wal`, and `history.db-shm` files out of the copied `data/` directory. When the script runs from the Docker host, it keeps the app's logical `data_dir` separate from the physical backup source, so the bundled `/data` mount resolves to the host `./data` directory declared in Compose. For Postgres, it writes `database/postgres.dump` with `pg_dump --format=custom --no-owner --no-acl`. Direct script runs against Compose use `pg_dump` inside the Postgres container with `docker compose exec -T`, so the host does not need `pg_dump` installed. Repository-free backups use the matching PostgreSQL 18 client in their one-off release-image container. Local host `pg_dump` is used only for other host-reachable database URLs or when `--postgres-dump-mode local` is set.
-
-The backup includes:
-
-- the database dump or SQLite snapshot
-- `data_dir` contents, including run-output artifacts, body-store files, package/report jobs, and the app-owned `.secrets_master_key` file when it exists
-- `app/conf/**/*.yaml`, `app/conf/**/*.local.*`, root `docker-compose*.yml` / `docker-compose*.yaml`, and `.env` when present or supplied with `--env-file`
-- files named with repeatable `--extra-file`, such as a local Compose override or systemd unit
-- enabled workspaces when a physical source can be resolved
-
-`data_dir` and workspace backups distinguish the app's logical path from the host or Docker source that needs to be copied:
-
-- The bundled Compose `/data` bind mount is copied from the host path mapped to `/data`.
-- `--data-source bind:/path` can override the data source when a deployment stores app data outside the Compose files.
-- Docker volume or container-only `data_dir` sources can be copied for Postgres deployments; SQLite backups need a host-readable bind path so the online snapshot can read the live database safely.
-
-- Bind mounts are copied from the host path Docker maps to `WORKSPACE_ROOT`.
-- Docker named volumes are exported through Docker. When the app container is available, auto-detection uses `docker cp` from the mounted path; explicit `--workspace-source volume:<name>` uses a short-lived helper container.
-- Tmpfs or container-only workspaces are skipped with a warning unless `--include-ephemeral-workspaces` is set.
-
-The script does not always need the app containers to be running. SQLite backups of the bundled Compose stack can run from the host while containers are stopped because `/data` resolves to the host bind mount. Local config files, `.env`, and explicit host paths also do not need running containers. Compose Postgres dumps, `container:name:/path` sources, and `--include-ephemeral-workspaces` do need the relevant container to be running; when it is not available, the script reports that service or container as unavailable instead of treating the logical container path as a host directory. In `--postgres-dump-mode auto`, a `DATABASE_URL` host that matches a Compose service name, such as `postgres`, is treated as a container-network address and dumped through `docker compose exec`. A remote or host-reachable URL keeps using local `pg_dump` even if the supplied stack also has a running Postgres service. The repository-free `darklab-deploy backup` wrapper handles a stopped bundled Postgres service for you: it starts and waits for that service, runs the dump, then stops it again only when it wasn't already running.
-
-When a source-backed deployment uses Compose overrides, pass the same Compose files in the same order you use for `docker compose`. The first file supplies the Compose project directory for relative bind mounts, so the checkout-only example override's `./workspaces:/workspaces` path resolves to repo-root `./workspaces` when you pass `docker-compose.yml` first. The script reads `WORKSPACE_ROOT` from the supplied Compose stack when `--compose-file` is explicit; `--workspace-root` can override the logical app path, and `--workspace-source` can override the physical copy source.
-
-Use these flags when auto-detection needs help:
-
-```bash
-python scripts/backup_system.py \
-  --env-file .env \
-  --compose-file docker-compose.yml \
-  --compose-file examples/docker-compose.prod.yml \
-  --extra-file docker-compose.local.yml \
-  --data-source bind:/srv/darklab/data \
-  --output-dir /backups/darklab_shell
-```
-
-`--data-source` and `--workspace-source` accept `bind:/path`, `volume:name`, or `container:name:/path`. `--workspace-root /path` records the logical app path when it cannot be read from config or Compose. An explicit workspace source is included regardless of `workspace_enabled`; `--include-workspaces never` is the deliberate opt-out. `--dry-run` validates explicitly requested env and extra files, then prints the resolved backend, Postgres dump mode, data directory mapping, Compose files, workspace source, warnings, and skipped items without creating the output directory or lock file. Missing `--extra-file` paths are accepted only when `--ignore-missing-extra-file` is also set. Automation can use `--result-path-only` to receive exactly the completed absolute backup path on stdout; warnings still go to stderr.
+The underlying `scripts/operations/backup_system.py` helper remains available to contributors building development fixtures or custom test environments. It isn't a supported production lifecycle interface; production automation should invoke `darklab-deploy backup` from the installation directory.
 
 Completed backups use microsecond UTC names and add a sequence when a timestamp is already present. Archives are published without replacing an existing file, and checksum generation reads large payloads in bounded chunks instead of holding a full file in memory.
 
@@ -1283,7 +1212,7 @@ Backups contain sensitive material: `.env`, encrypted secret rows, the app-owned
 
 ## Production Host Tuning
 
-Wide scans can open many outbound sockets quickly. Repository-free operators can add the container's file descriptor limit and network namespace sysctls with the [local Compose override](#repository-free-local-compose-overrides) above. The checkout-only example override demonstrates the same settings for source-based stacks. A few host-level settings may still matter.
+Wide scans can open many outbound sockets quickly. Production operators can add the container's file descriptor limit and network namespace sysctls with the [Compose override](#production-compose-overrides) above. A few host-level settings may still matter.
 
 ### Docker daemon file descriptor ceiling
 
@@ -1340,22 +1269,22 @@ sudo sysctl --system
 
 ## Common Recipes
 
-These recipes lead with repository-free production paths. YAML snippets belong in installed `conf/config.local.yaml` unless a different file is named. For source development, use the same YAML under `app/conf/config.local.yaml`.
+These recipes lead with production installation paths. YAML snippets belong in installed `conf/config.local.yaml` unless a different file is named. For source development, use the same YAML under `app/conf/config.local.yaml`.
 
 ### Enable Files
 
 ```env
-# .env in the repository-free installation directory
+# .env in the production installation directory
 WORKSPACE_ENABLED=true
 WORKSPACE_BACKEND=tmpfs
 WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 ```
 
-For a non-Compose source run, set the equivalent `workspace_enabled`, `workspace_backend`, and `workspace_root` keys in `app/conf/config.local.yaml`.
+For a non-Compose source run, export the same three variables before starting the app.
 
 ### Enable Interactive PTY
 
-For repository-free production, enable the feature in `.env`:
+For production, enable the feature in `.env`:
 
 ```env
 INTERACTIVE_PTY_ENABLED=true
@@ -1371,7 +1300,7 @@ interactive_pty_input_rate_limit_per_second: 10
 interactive_pty_input_rate_limit_per_minute: 500
 ```
 
-Non-Compose source runs can set `interactive_pty_enabled: true` in `app/conf/config.local.yaml`. Multi-worker deployments should keep Redis enabled so PTY output, input, resize, and reattach state work across workers.
+Non-Compose source runs export `INTERACTIVE_PTY_ENABLED=true`. Multi-worker deployments should keep Redis enabled so PTY output, input, resize, and reattach state work across workers.
 
 ### Enable Diagnostics
 
@@ -1384,12 +1313,17 @@ trusted_proxy_cidrs:
   - ::1/128
 ```
 
-The same allowlist gates Prometheus metrics:
+The same allowlist gates Prometheus metrics. Keep the process-level scratch directory in `.env`:
+
+```env
+PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
+```
+
+Tune metric collection and histogram buckets in YAML:
 
 ```yaml
 # conf/config.local.yaml
 metrics_enabled: true
-prometheus_multiproc_dir: /tmp/darklab_shell-prom
 metrics_histogram_buckets_run_duration: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]
 metrics_histogram_buckets_http_duration: [0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]
 metrics_histogram_buckets_ai_provider_duration: [0.1, 0.5, 1, 2, 5, 10, 30, 60]
@@ -1433,7 +1367,7 @@ These caps apply to Atlas imports before and during apply, so lowering them can 
 default_theme: darklab_obsidian.yaml
 ```
 
-Shipped themes remain under `/app/conf/themes` in the release image. Repository-free theme overlays belong under installed `conf/themes/`. See [THEME.md](THEME.md) for theme authoring.
+Shipped themes remain under `/app/conf/themes` in the release image. Production theme overlays belong under installed `conf/themes/`. See [THEME.md](THEME.md) for theme authoring.
 
 ### Enable GELF Application Logs
 
@@ -1443,7 +1377,7 @@ log_format: gelf
 log_level: INFO
 ```
 
-Use an installation-directory [local Compose override](#repository-free-local-compose-overrides) and `DOCKER_GELF_ADDRESS` if Docker should also ship container logs through the GELF driver.
+Use an installation-directory [Compose override](#production-compose-overrides) and `DOCKER_GELF_ADDRESS` if Docker should also ship container logs through the GELF driver.
 
 ### Customize Package Presets
 
@@ -1454,7 +1388,7 @@ The release image ships its evidence package presets under `/app/conf/package_pr
 package_presets_file: package_presets.local.yaml
 ```
 
-Normal relative paths resolve from the shipped config root. Relative filenames containing `.local.` resolve from the operator root, so this repository-free example reads `conf/package_presets.local.yaml`; source development uses `app/conf/package_presets.local.yaml`. The app reloads the catalog when the readable YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
+Normal relative paths resolve from the shipped config root. Relative filenames containing `.local.` resolve from the operator root, so this production example reads `conf/package_presets.local.yaml`; source development uses `app/conf/package_presets.local.yaml`. The app reloads the catalog when the readable YAML file changes. If an override is missing or invalid, the shipped presets stay available and the server logs `PACKAGE_PRESETS_OVERRIDE_INVALID`.
 
 A preset controls the wizard defaults only. Users can still adjust the package before creating it, and package size limits, redaction rules, artifact safety checks, and project link validation still apply.
 
@@ -1514,7 +1448,7 @@ Normal relative paths resolve from the shipped config root. Relative filenames c
 - Add deployment-specific evidence package presets in `package_presets.local.yaml` and point `package_presets_file` at that file.
 - Add deployment-specific report templates in `report_templates.local.yaml` and point `report_templates_file` at that file.
 
-Use these names under installed `conf/` for repository-free deployments or `app/conf/` for source development.
+Use these names under installed `conf/` for production installations or `app/conf/` for source development.
 
 ---
 

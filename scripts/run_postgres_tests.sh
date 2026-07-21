@@ -4,6 +4,8 @@
 
 set -euo pipefail
 
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -198,7 +200,7 @@ fi
 if [ -n "${DOCKER_COMPOSE:-}" ]; then
   read -r -a compose_cmd <<< "$DOCKER_COMPOSE"
 else
-  compose_cmd=(docker compose)
+  compose_cmd=(docker compose -f "$ROOT_DIR/compose.dev.yaml")
 fi
 postgres_user=${POSTGRES_USER:-darklab}
 postgres_password=${POSTGRES_PASSWORD:-darklab_dev_password}

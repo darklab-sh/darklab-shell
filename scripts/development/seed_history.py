@@ -26,19 +26,21 @@ stdin and forwards the trailing argv to it.
 
 Inside the container, generate a new token and populate 70 runs:
 
-    docker compose exec -T shell python - --new-token < scripts/seed_history.py
+    docker compose -f compose.dev.yaml exec -T shell python - --new-token < scripts/seed_history.py
 
 Populate runs for an existing token:
 
-    docker compose exec -T shell python - --token tok_abcdef0123456789abcdef0123456789 < scripts/seed_history.py
+    docker compose -f compose.dev.yaml exec -T shell python - \
+      --token tok_abcdef0123456789abcdef0123456789 < scripts/seed_history.py
 
 Populate runs for an anonymous UUID session:
 
-    docker compose exec -T shell python - --uuid 11111111-2222-3333-4444-555555555555 < scripts/seed_history.py
+    docker compose -f compose.dev.yaml exec -T shell python - \
+      --uuid 11111111-2222-3333-4444-555555555555 < scripts/seed_history.py
 
 Pick a custom count and star some of the seeded commands:
 
-    docker compose exec -T shell python - --new-token --count 40 --star 5 < scripts/seed_history.py
+    docker compose -f compose.dev.yaml exec -T shell python - --new-token --count 40 --star 5 < scripts/seed_history.py
 """
 
 from __future__ import annotations
@@ -472,7 +474,7 @@ def _guard_host_write_to_project_data(allow: bool) -> None:
         "stdin and forward your args to it (-T disables TTY so the redirect works,\n"
         "python - reads the program from stdin):\n"
         "\n"
-        f"    docker compose exec -T shell python - {forwarded} < scripts/seed_history.py\n"
+        f"    docker compose -f compose.dev.yaml exec -T shell python - {forwarded} < scripts/seed_history.py\n"
         "\n"
         "Or, if the container is stopped and you accept the cross-version SQLite\n"
         "corruption risk, re-run with --allow-host-write."

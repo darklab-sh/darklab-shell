@@ -3,10 +3,10 @@
 
 # darklab_shell — Configuration
 # ----------------------------------
-# Changes to this file take effect after a container restart (docker compose restart).
-# No rebuild is needed.
+# Changes to this file take effect after the app container restarts. No image
+# rebuild is needed.
 # Optional: add *.local.* files for untracked server-specific overrides.
-# Source deployments keep them beside these files. Repository-free installs
+# Source-mounted development keeps them beside these files. Production installs
 # keep the same relative names under mounted ./conf (the /config container path).
 # Examples: config.local.yaml, commands.local.yaml, ascii.local.txt,
 # app_hints.local.txt, faq.local.yaml, welcome.local.yaml,
@@ -14,6 +14,9 @@
 # If present, each local overlay is applied after its checked-in base file.
 # Text/config lists append local entries; ASCII art files use the local file if
 # present; YAML config dictionaries merge key-by-key.
+# Deployment wiring and feature switches aren't listed here. Configure their
+# uppercase environment variables in .env so Compose, container startup,
+# lifecycle tools, and the app all receive the same values. See CONFIGURATION.md.
 
 # ── Branding ──────────────────────────────────────────────────────────────────
 
@@ -75,17 +78,11 @@
 # Server default if unset: auto (/data if writable, otherwise /tmp)
 # data_dir: /data
 #
-# Database backend. SQLite is the default for local and single-user installs.
-# Set this to postgres to use database_url, the Postgres connection pool, and
-# app-owned Postgres migrations at startup.
-# Server default if unset: sqlite
-# database_backend: sqlite
-#
-# Postgres DSN and pool bounds. These are ignored while database_backend is
-# sqlite. DATABASE_URL, DATABASE_POOL_MIN, and DATABASE_POOL_MAX environment
-# variables can also set these values for Compose-based deployments.
-# Server defaults if unset: "", 1, 5
-# database_url: postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
+# Database backend selection and its DSN are deployment settings. Set
+# DATABASE_BACKEND and DATABASE_URL in .env (or the process environment for a
+# direct source run) so Compose services, lifecycle tools, and the app agree.
+# Pool bounds remain application fine-tuning and can be overridden here.
+# Server defaults if unset: 1, 5
 # database_pool_min: 1
 # database_pool_max: 5
 #
@@ -162,29 +159,11 @@
 
 # ── Per-session Workspace Storage ────────────────────────────────────────────
 #
-# Optional app-mediated file storage for file-enabled commands and UI helpers.
-# This enables only the app-managed `>` and final `tee` Files sinks, not raw
-# shell navigation or arbitrary redirection.
-# Server default if unset: false
-# workspace_enabled: false
-#
-# Storage backend label. `tmpfs` is intended for short-lived in-memory storage;
-# `volume` is intended for a Docker-mounted bind mount or named volume.
-# The backend value documents operator intent; `workspace_root` controls the
-# actual filesystem location and does not create a Docker mount by itself.
-# Server default if unset: tmpfs
-# workspace_backend: tmpfs
-#
-# Root directory that will contain hashed per-session workspace directories.
-# Never point this at the app source tree, SQLite data directory, or host root.
-# Session directories are created sticky + setgid, and files are group-readable
-# for the app/scanner shared group without being world-readable.
-# The Docker entrypoint normalizes WORKSPACE_ROOT ownership and permissions
-# before dropping to appuser. In Compose deployments, set WORKSPACE_ROOT in
-# docker-compose.yml, a Compose override, or .env; the app treats that env var as
-# the runtime workspace_root override so the path only needs to live in one place.
-# Server default if unset: /tmp/darklab_shell-workspaces
-# workspace_root: /tmp/darklab_shell-workspaces
+# Files enablement, backend selection, and the root path are deployment
+# settings. Set WORKSPACE_ENABLED, WORKSPACE_BACKEND, and WORKSPACE_ROOT in
+# .env (or the process environment for a direct source run) so the container
+# entrypoint, lifecycle tools, mount, and app use one contract. Fine-tune Files
+# limits below without repeating those deployment settings in YAML.
 #
 # Per-session byte quota expressed in megabytes.
 # Server default if unset: 50
@@ -459,11 +438,9 @@
 # Server default if unset: true
 # metrics_enabled: true
 #
-# Shared directory used by prometheus_client to aggregate counters/histograms
-# across Gunicorn workers. In the Docker Compose setup this lives on /tmp tmpfs
-# and is cleared on container startup by entrypoint.sh.
-# Server default if unset: /tmp/darklab_shell-prom
-# prometheus_multiproc_dir: /tmp/darklab_shell-prom
+# PROMETHEUS_MULTIPROC_DIR is a process-level deployment setting because the
+# Prometheus client needs it before the app finishes loading YAML. The Compose
+# stack supplies its /tmp default; don't repeat it in this file.
 #
 # Optional histogram bucket overrides, in seconds. The defaults cover short
 # web requests and long-running scanner commands.
@@ -500,17 +477,11 @@
 
 # ── AI Assists ───────────────────────────────────────────────────────────────
 #
-# Optional AI provider settings for run-output summaries and safe next-command
-# drafts. The foundation is disabled by default. Provider calls use an
-# OpenAI-compatible /v1/chat/completions endpoint, and the diagnostics page can
-# probe /v1/models plus run a tiny JSON-only test prompt when enabled.
+# AI enablement, provider connection details, credentials, and UI feature
+# switches are deployment settings under their matching AI_* environment
+# variables. The timeout, queue, rate-limit, output, and network-policy values
+# below are application fine-tuning and can be overridden in YAML.
 # Server defaults if unset:
-# ai_enabled: false
-# ai_provider: openai_compatible
-# ai_base_url: ""
-# ai_model: ""
-# ai_api_key_secret_name: ""  # Existing session vault secret name, when the caller has a session.
-# ai_api_key: ""              # Environment/config fallback for operators that prefer process env.
 # ai_connect_timeout_seconds: 5
 # ai_timeout_seconds: 120
 # ai_max_input_chars: 24000
@@ -526,39 +497,19 @@
 # ai_require_private_base_url: true
 # ai_base_url_allowed_cidrs: []
 # ai_prompt_version_override: ""
-# ai_feature_summary: false
-# ai_feature_next_commands: false
-# ai_feature_run_suggestions: false
 
 # ── Restricted Command Inputs ────────────────────────────────────────────────
 
-# IPs or CIDR ranges that should be rejected when supplied as command targets.
-# This applies only to command slots explicitly marked with host/domain/IP/CIDR
-# value metadata in commands.yaml, including inspectable workspace input files
-# passed through declared read flags. Domain names are not DNS-resolved here;
-# this policy blocks literal IP/CIDR values and literal IPs embedded in URLs or
-# host:port values.
-#
-# Typical values:
-#   169.254.169.254/32 — cloud metadata service
-#   127.0.0.0/8        — IPv4 loopback range
-#   ::1/128            — IPv6 loopback address
-#
-# Server default if unset: [] (disabled)
-# In Compose deployments, RESTRICTED_COMMAND_INPUT_CIDRS overrides this value
-# and also feeds the scanner-user container egress block, so set it in .env
-# when you want the app policy and network policy to use the same CIDRs.
-# restricted_command_input_cidrs:
-#   - 169.254.169.254/32
+# Set RESTRICTED_COMMAND_INPUT_CIDRS in .env so command validation and the
+# scanner-user container egress block receive the same deployment boundary.
+# Domain names aren't DNS-resolved by the app-side validation; the container
+# rule also covers tool-managed DNS and resolver paths.
 
 # ── Raw-packet scanning ─────────────────────────────────────────────────────
 
-# Opt in to capability-backed raw-packet modes for approved scanners. The app
-# keeps TCP-connect defaults unless both this setting and runtime capability
-# checks pass. This does not enable Docker privileged mode.
-# Server default if unset: false
-# In Compose deployments, RAW_PACKET_SCANNING_ENABLED overrides this value.
-# raw_packet_scanning_enabled: false
+# Set RAW_PACKET_SCANNING_ENABLED=true in .env to opt into capability-backed
+# raw-packet modes. Runtime readiness checks still apply, and this never enables
+# Docker privileged mode.
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
@@ -876,14 +827,9 @@
 # Server default if unset: 75
 # run_broker_owner_stale_seconds: 75
 
-# Enable interactive PTY mode for allowlisted interactive tools such as
-# nc --interactive, telnet --interactive, mtr --interactive, ffuf --interactive,
-# and masscan --interactive. Multi-worker deployments require Redis so PTY
-# output, input, and resize events can be brokered across workers. Without
-# Redis, this mode is limited to single-worker local/dev deployments.
-# Server default if unset: false
-# In Compose deployments, INTERACTIVE_PTY_ENABLED overrides this value.
-# interactive_pty_enabled: false
+# Set INTERACTIVE_PTY_ENABLED=true in .env to enable PTY mode for allowlisted
+# interactive tools. Multi-worker deployments use Redis for cross-worker input,
+# output, resize, and reattach state. Fine-tune PTY limits below.
 
 # Maximum lifetime for an interactive PTY command before the server terminates
 # it, in seconds.

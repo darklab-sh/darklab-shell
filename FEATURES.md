@@ -45,7 +45,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Theme Selector](#theme-selector)
 - [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
-- [Repository-Free Self-Hosting](#repository-free-self-hosting)
+- [Production Installation](#production-installation)
 - [Operator Backups](#operator-backups)
 - [Session Tokens](#session-tokens)
 - [Team-Mode](#team-mode)
@@ -922,7 +922,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `wget` downloads default to the active Files folder when Files are enabled. Operators can still choose a subfolder with `-P downloads` or `--directory-prefix=downloads`.
 - Raw shell navigation and redirection remain blocked. The supported `command > file`, `command >> file`, and final `| tee file` forms write only through the Files boundary; other file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
 
-**Configuration:** Compose deployments use `WORKSPACE_ENABLED`, `WORKSPACE_BACKEND`, and `WORKSPACE_ROOT` in `.env`. Non-Compose deployments use the matching `workspace_*` settings in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
+**Configuration:** set `WORKSPACE_ENABLED`, `WORKSPACE_BACKEND`, and `WORKSPACE_ROOT` in `.env`. Direct source runs export the same variables; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
 
 ---
 
@@ -1030,7 +1030,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - The registry is re-read on every request for command policy, so edits take effect without a restart. Deleting or emptying the registry disables restrictions entirely.
 - Tool names and subcommand prefixes are matched **case-insensitively**; flag names are matched **with exact case** (so `!curl -K` blocks `-K` without blocking `-k`).
 - `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.
-- Operators can set `restricted_command_input_cidrs` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags. Built-in workspace path slots such as `mv` and `file move` stay out of this target check.
+- Operators can set `RESTRICTED_COMMAND_INPUT_CIDRS` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags. Built-in workspace path slots such as `mv` and `file move` stay out of this target check.
 - Command-specific runtime adaptations are also declared in the registry. `inject_flags` handles safe default flags such as `nmap -sT`, `nuclei -ud /tmp/nuclei-templates`, `naabu -scan-type c`, and `mtr --report-wide`; managed workspace directories and environment wrappers handle Amass' active personal/team database path.
 - The same registry feeds terminal discovery commands that share the modal's catalog data and hide entries whose `feature_required` is disabled:
   - `commands` lists built-in and allowed external roots, followed by an app-native pipe-helpers section (`grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, `uniq`) labeled as app-managed filters rather than arbitrary shell pipelines.
@@ -1040,7 +1040,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** prefix matching is deliberately coarse — operators must be explicit with deny entries to block flag combinations on otherwise-allowed tools. Deny matching only applies once the tool prefix matches (e.g., `!nmap -sU` only affects `nmap` commands). Restricted command inputs only inspect literal values in metadata-known target slots; domain names are not DNS-resolved.
 
-**Configuration:** command policy uses `conf/commands.yaml`; restricted target inputs use `restricted_command_input_cidrs` in `conf/config.yaml`. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/external-command-integrations.md](docs/external-command-integrations.md).
+**Configuration:** command policy uses `conf/commands.yaml`; restricted target inputs use `RESTRICTED_COMMAND_INPUT_CIDRS` in `.env`. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/external-command-integrations.md](docs/external-command-integrations.md).
 
 ```yaml
 commands:
@@ -1322,9 +1322,9 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ---
 
-## Repository-Free Self-Hosting
+## Production Installation
 
-**Purpose:** install a released darklab_shell stack without cloning or building the source repository.
+**Purpose:** install and operate a released darklab_shell stack without cloning or building the source repository.
 
 **Behavior:**
 
@@ -1336,7 +1336,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - Shipped commands, workflows, themes, and other catalogs stay in the image. Matching operator files under `conf/` add to or override those defaults without hiding newer image content.
 - Private host permissions stay intact: container startup validates and stages the complete `conf/` overlay tree into an app-owned runtime copy before the web and worker processes start.
 - The installer verifies its exact release files and prepares the directory, but it doesn't pull or start containers until the operator runs the printed commands.
-- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, migrates a managed SQLite install to bundled Postgres with backup and row-count validation, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, explains clone-to-managed migration, and removes managed files without deleting operator state. Fresh replacement installs can explicitly adopt a managed Postgres backup while retaining their new database credentials, and the destination must be empty before the transactional restore starts. Migration and adoption inspect bundled Postgres through its local container socket, safely synchronize an empty retained cluster's password, and refuse to overwrite a named volume containing user tables. The managed migration reads locked-down app data through Docker and keeps host-side files owned by the deployment user. Offline archives remain an explicit operator-verified path.
+- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, migrates SQLite to bundled Postgres with backup and row-count validation, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, and removes managed files without deleting operator state. Fresh replacement installs can explicitly adopt a managed Postgres backup while retaining their new database credentials, and the destination must be empty before the transactional restore starts. Migration and adoption inspect bundled Postgres through its local container socket, safely synchronize an empty retained cluster's password, and refuse to overwrite a named volume containing user tables. The migration reads locked-down app data through Docker and keeps host-side files owned by the installation user. Offline archives remain an explicit operator-verified path.
 
 **Limits:** The current production platform and compatibility status live in the canonical [Supported Runtimes](CONFIGURATION.md#supported-runtimes) table. The app has no user authentication boundary, so the default all-interface listener must be limited to trusted networks with a host or upstream firewall. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
 
@@ -1350,20 +1350,18 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 **Behavior:**
 
-- `scripts/backup_system.py` loads the effective app config and optional `.env` file before it decides what to back up.
-- SQLite deployments get a consistent `history.db` snapshot through SQLite's backup API. Postgres deployments get a custom-format `pg_dump` archive, with the bundled database started temporarily when a managed backup finds it stopped.
-- The backup includes `data_dir`, local config files, `.env` when present, optional `--extra-file` paths, and enabled workspaces. An explicit workspace source is always included even when Files is currently disabled.
-- Data and workspace backup use the physical storage source, not just the app's logical path: bind mounts copy the host path, Docker named volumes are exported through Docker, and tmpfs/container-only workspaces require an explicit opt-in.
-- Locked-down host bind mounts must be readable by the user running the script. On Linux production hosts, that often means running the backup as root or choosing a Docker volume/container source instead of a host path.
+- `./darklab-deploy backup` runs the backup engine in a one-off release-image container with the installation's exact mounts and settings.
+- SQLite installations get a consistent `history.db` snapshot through SQLite's backup API. Postgres installations get a custom-format `pg_dump` archive, with the bundled database started temporarily when a backup finds it stopped.
+- The backup includes the selected database, durable app data, local configuration, `.env`, managed release metadata, and the complete managed workspace directory even when Files is currently disabled.
+- Data and workspaces are read through the container mounts, so operators don't need to loosen app-owned host permissions or run the lifecycle command with `sudo`.
 - Each backup writes a redacted manifest, checksums, restore notes, and either a `.tar.gz` archive or an unpacked directory when `--compress none` is used.
 - Large files are checksummed without loading the whole file into memory, and collision-safe output names keep closely timed backups from replacing each other.
-- Dry runs validate requested env and extra-file paths before writing an output directory or lock file.
 - Retention runs record their cutoff and candidate scan in the manifest, then report examined, removed, and failed counts after the new backup is safely published. Unexpected script failures include a traceback for unattended-job diagnosis.
-- Repository-free installs expose the same engine through `./darklab-deploy backup`; the release image supplies Python and a PostgreSQL 18 client that matches the bundled database, while the installed command supplies exact mounts, operator files, managed release metadata, and the complete managed `./workspaces` directory. Workspace files remain protected when Files is currently disabled or `.env` uses formatting that Compose accepts. `./darklab-deploy restore` verifies checksums, takes a safety backup, stages local config and durable workspaces, preserves the installed image and target Postgres credentials, and uses one Postgres transaction before it commits host files. Successful restores return those files to the invoking operator, recreate the app when restored environment settings changed, and wait for it to become healthy; failures leave it stopped with the safety-backup recovery command.
+- `./darklab-deploy restore` verifies checksums, takes a safety backup, stages local config and durable workspaces, preserves the installed image and target Postgres credentials, and uses one Postgres transaction before it commits host files. Successful restores return those files to the installation user, recreate the app when restored environment settings changed, and wait for it to become healthy; failures leave it stopped with the safety-backup recovery command.
 
-**Limits:** backup archives contain sensitive material, including local deployment files and the app-owned secrets key file when it exists. Run the script during quiet periods or stop the app when you need the strongest database-plus-filesystem consistency.
+**Limits:** backup archives contain sensitive material, including local settings and the app-owned secrets key file. Run backups during quiet periods when you need the strongest database-plus-filesystem consistency.
 
-**Configuration:** see [CONFIGURATION.md → Operator Backups](CONFIGURATION.md#operator-backups) for cron examples and Docker/Compose flags.
+**Configuration:** see [CONFIGURATION.md → Operator Backups](CONFIGURATION.md#operator-backups) for lifecycle commands, retention, restore, and backend adoption.
 
 ---
 
@@ -1450,7 +1448,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 Restricted-CIDR deployments add another boundary. Raw Nmap activates only when the protected firewall marker matches the effective CIDR list, then uses the IP path covered by the scanner-user OUTPUT rules. Packet-socket Naabu and Masscan stay inactive because their traffic doesn't cross that path; separate host or Docker bridge rules don't count as readiness proof. The app-port guard applies only to container-local destinations, so an authorized remote host using the same port remains scannable.
 
-**Configuration:** set `raw_packet_scanning_enabled: true` in `config.local.yaml` or `RAW_PACKET_SCANNING_ENABLED=true` in Compose. See [CONFIGURATION.md → Raw-packet scanning](CONFIGURATION.md#raw-packet-scanning) for readiness requirements, restricted-network behavior, diagnostics, and examples.
+**Configuration:** set `RAW_PACKET_SCANNING_ENABLED=true` in `.env`. Direct source runs export the same variable. See [CONFIGURATION.md → Raw-packet scanning](CONFIGURATION.md#raw-packet-scanning) for readiness requirements, restricted-network behavior, diagnostics, and examples.
 
 ---
 
@@ -1473,8 +1471,8 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 - `commands.yaml` — dispatch gate (see [Command Allowlist](#command-allowlist)).
 - `trusted_proxy_cidrs` in `config.yaml` — CIDRs whose `X-Forwarded-For` is honored.
 - `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`, `/diag/audit`, and `/metrics`.
-- `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
-- `raw_packet_scanning_enabled` in `config.yaml` or `RAW_PACKET_SCANNING_ENABLED` in Compose — capability-backed raw scanning opt-in.
+- `compose.dev.yaml` for development and the installed `compose.yaml` for production — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
+- `RAW_PACKET_SCANNING_ENABLED` in `.env` — capability-backed raw scanning opt-in.
 
 ---
 
@@ -1587,7 +1585,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 
 **Limits:** `/diag`, `/diag/audit`, and `/metrics` are gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables `/diag` and `/diag/audit` completely and prevents `/metrics` from being scraped. Set `metrics_enabled: false` to keep `/diag` and `/diag/audit` available while hiding `/metrics`.
 
-**Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, `prometheus_multiproc_dir`, and metrics histogram bucket settings in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
+**Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, and metric histogram buckets live in `config.local.yaml`; `PROMETHEUS_MULTIPROC_DIR` lives in `.env`. See [CONFIGURATION.md](CONFIGURATION.md).
 
 ---
 

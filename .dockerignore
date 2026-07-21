@@ -42,6 +42,9 @@ pyrightconfig.json
 *.md
 
 # Compose and environment files
+compose*.yaml
+compose*.yml
+docker-compose*.yaml
 docker-compose*.yml
 .env*
 
