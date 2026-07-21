@@ -435,11 +435,11 @@ Go tools such as `nuclei`, `subfinder`, `httpx`, `dnsx`, `naabu`, `katana`, `tls
 
 ### TruffleHog Output Redaction
 
-**TruffleHog managed scans use JSON output so raw secret fields can be masked before persistence.**
+**TruffleHog managed scans use JSON output so every secret-bearing field can be masked before persistence.**
 
-The command registry appends `--json` to `trufflehog filesystem --directory ...` and `trufflehog git https://...` scans unless the flag is already present or the command is a help request. The run-output path then parses TruffleHog JSON rows and replaces `Raw` / `RawV2` with a redaction marker before the line is streamed, stored, shared, exported, or used to create findings.
+The command registry appends `--json` to managed `trufflehog filesystem`, `git`, `github`, and `gitlab` scans unless the flag is already present or the command is a help request. The run-output path treats detector JSON as a finding and replaces `Raw`, `RawV2`, `Redacted`, and all `SecretParts` values before the line is streamed, stored, written to Files, shared, exported, or used to create findings. Exact copies of those values elsewhere in the JSON row are replaced too.
 
-The app treats TruffleHog's `Redacted` field as untrusted display data. Finding text records detector, verification state, source location, and a generic redacted marker, but does not persist the vendor-provided secret hint verbatim when it matches raw secret material. TruffleHog's own verification behavior remains available for users who intentionally run the scanner; the app's safety boundary is controlled command shapes, managed inputs, HTTPS-only Git scans, JSON output, and server-side transcript masking.
+The app treats TruffleHog's `Redacted` field as secret material because detectors may put an unchanged credential or part of a private key there. Finding text records only detector, verification state, and safe source-location metadata, and a malformed detector row falls back to a generic finding label instead of storing the original text. Redacted share and package paths also recognize PEM and PGP private-key blocks across line boundaries as a defense for output from TruffleHog or any other command. TruffleHog's own verification behavior remains available for users who intentionally run the scanner; the app's safety boundary is controlled command shapes, managed Files inputs, credential-free HTTPS repository and provider endpoints, encrypted environment-only provider tokens, managed temporary clones, JSON output, and server-side transcript masking.
 
 ### SQLite WAL Mode
 

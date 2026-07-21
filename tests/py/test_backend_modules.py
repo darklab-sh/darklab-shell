@@ -3167,6 +3167,7 @@ class TestLoadConfig:
         })
         labels = [rule["label"] for rule in rules]
         assert "bearer token" in labels
+        assert "private key block" in labels
         assert "email address" in labels
         assert labels[-1] == "custom"
 
@@ -16070,6 +16071,8 @@ class TestDerivedCommandRegistry:
                     inject_env: VTCLI_APIKEY
                     fallback_envs:
                       - VTCLI_APIKEY
+                    subcommands:
+                      - stats
                   - env: ""
                   - env: bad-name
                 autocomplete:
@@ -16194,17 +16197,22 @@ class TestDerivedCommandRegistry:
                 "optional": True,
                 "inject_env": "VTCLI_APIKEY",
                 "fallback_envs": ["VTCLI_APIKEY"],
+                "subcommands": ["stats"],
             },
         ]
         with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             assert commands.required_secrets_for_command("ping -h") == []
             assert commands.required_secrets_for_command("ping example.org") == [
                 {"env": "SHODAN_API_KEY", "optional": False},
+            ]
+            assert commands.required_secrets_for_command("ping stats") == [
+                {"env": "SHODAN_API_KEY", "optional": False},
                 {
                     "env": "VT_API_KEY",
                     "optional": True,
                     "inject_env": "VTCLI_APIKEY",
                     "fallback_envs": ["VTCLI_APIKEY"],
+                    "subcommands": ["stats"],
                 },
             ]
         mtr = registry["commands"][1]
@@ -16271,6 +16279,7 @@ class TestDerivedCommandRegistry:
                             "env": "VT_API_KEY",
                             "inject_env": "VTCLI_APIKEY",
                             "fallback_envs": ["VTCLI_APIKEY"],
+                            "subcommands": ["scan"],
                         },
                     ],
                     "workspace_flags": [
@@ -16315,6 +16324,7 @@ class TestDerivedCommandRegistry:
                 "env": "VT_API_KEY",
                 "inject_env": "VTCLI_APIKEY",
                 "fallback_envs": ["VTCLI_APIKEY"],
+                "subcommands": ["scan"],
                 "optional": False,
             },
         ]
@@ -16323,9 +16333,10 @@ class TestDerivedCommandRegistry:
                 "env": "VT_API_KEY",
                 "inject_env": "VTCLI_APIKEY",
                 "fallback_envs": ["VTCLI_APIKEY"],
+                "subcommands": ["scan"],
                 "optional": False,
                 "source": "command_registry",
-                "consumer": "sentinel",
+                "consumer": "sentinel scan",
             },
         ]
         entry_flags = entry.get("flags")
@@ -16339,6 +16350,7 @@ class TestDerivedCommandRegistry:
         assert entry["runtime_notes"] == ["Adds `--safe` automatically when needed."]
         assert subcommand is not None
         assert subcommand["subcommand"] == "scan"
+        assert subcommand["requires_secrets"] == entry["requires_secrets"]
         subcommand_examples = subcommand.get("examples")
         subcommand_flags = subcommand.get("flags")
         assert isinstance(subcommand_examples, list)
@@ -16570,10 +16582,25 @@ class TestDerivedCommandRegistry:
             {"name": "VTCLI_APIKEY", "consumer_envs": ["VTCLI_APIKEY"]},
             {"name": "FOFA_API_KEY", "consumer_envs": ["FOFA_API_KEY"]},
             {"name": "FOFA_EMAIL", "consumer_envs": ["FOFA_EMAIL"]},
+            {"name": "GITHUB_TOKEN", "consumer_envs": ["GITHUB_TOKEN"]},
         ]
 
         with (
             mock.patch("services.commands.builtins_secrets.provider_status_catalog", return_value=providers),
+            mock.patch("services.commands.builtins_secrets.command_secret_consumers", return_value=[
+                {
+                    "consumer": "trufflehog github",
+                    "env": "GITHUB_TOKEN",
+                    "fallback_envs": [],
+                    "optional": False,
+                },
+                {
+                    "consumer": "trufflehog gitlab",
+                    "env": "GITLAB_TOKEN",
+                    "fallback_envs": [],
+                    "optional": False,
+                },
+            ]),
             mock.patch("services.commands.builtins_secrets.list_secret_metadata", return_value=stored_secrets),
         ):
             lines, exit_code = builtin_commands.execute_builtin_command("secret show-consumers", "secret-session")
@@ -16600,6 +16627,12 @@ class TestDerivedCommandRegistry:
         assert "not configured · intel ip · CENSYS_PAT" in text
         assert "ProjectDiscovery Chaos" in text
         assert "not configured · chaos CLI · PDCP_API_KEY" in text
+        assert "Command credentials:" in text
+        assert "1 usable · 1 not configured" in text
+        assert "trufflehog github" in text
+        assert "configured · GITHUB_TOKEN" in text
+        assert "trufflehog gitlab" in text
+        assert "not configured · GITLAB_TOKEN" in text
         assert [line.get("text") for line in alias_lines] == [line.get("text") for line in lines]
 
     def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
@@ -17072,7 +17105,15 @@ class TestDerivedCommandRegistry:
         trufflehog = by_root["trufflehog"]
         assert "trufflehog filesystem --directory" in trufflehog["policy"]["allow"]
         assert "trufflehog git" in trufflehog["policy"]["allow"]
+        assert "trufflehog github" in trufflehog["policy"]["allow"]
+        assert "trufflehog gitlab" in trufflehog["policy"]["allow"]
         assert "trufflehog git file://" in trufflehog["policy"]["deny"]
+        assert "trufflehog github --token" in trufflehog["policy"]["deny"]
+        assert "trufflehog gitlab --token" in trufflehog["policy"]["deny"]
+        assert trufflehog["requires_secrets"] == [
+            {"env": "GITHUB_TOKEN", "optional": False, "subcommands": ["github"]},
+            {"env": "GITLAB_TOKEN", "optional": False, "subcommands": ["gitlab"]},
+        ]
         assert trufflehog["runtime_adaptations"]["inject_flags"][0]["flags"] == ["--json"]
         assert is_command_allowed("trufflehog --help")[0]
         assert is_command_allowed("trufflehog git https://github.com/trufflesecurity/test_keys --json")[0]
@@ -17080,7 +17121,53 @@ class TestDerivedCommandRegistry:
         assert not is_command_allowed("trufflehog git file:///tmp/repo --json")[0]
         assert not is_command_allowed("trufflehog git ssh://git@example.com/repo.git --json")[0]
         assert not is_command_allowed("trufflehog git local-repo --json")[0]
+        assert not is_command_allowed("trufflehog git https://token@github.com/darklab/shell.git")[0]
+        assert is_command_allowed("trufflehog github --repo https://github.com/darklab/shell")[0]
+        assert is_command_allowed("trufflehog github --org darklab --endpoint https://github.example.test")[0]
+        assert is_command_allowed("trufflehog gitlab --group-id 123 --endpoint https://gitlab.example.test")[0]
         assert not is_command_allowed("trufflehog github --repo darklab/shell")[0]
+        assert not is_command_allowed("trufflehog github --endpoint http://github.example.test --org darklab")[0]
+        assert not is_command_allowed("trufflehog gitlab --token plaintext --group-id 123")[0]
+        assert not is_command_allowed("trufflehog github --auth-in-url --org darklab")[0]
+        assert commands.required_secrets_for_command("trufflehog filesystem --directory secrets") == []
+        assert commands.required_secrets_for_command("trufflehog git https://github.com/darklab/shell") == []
+        assert commands.required_secrets_for_command("trufflehog github --org darklab") == [
+            {"env": "GITHUB_TOKEN", "optional": False, "subcommands": ["github"]},
+        ]
+        assert commands.required_secrets_for_command("trufflehog gitlab --group-id 123") == [
+            {"env": "GITLAB_TOKEN", "optional": False, "subcommands": ["gitlab"]},
+        ]
+        assert {
+            (item["consumer"], item["env"])
+            for item in commands.command_secret_consumers()
+            if str(item["consumer"]).startswith("trufflehog ")
+        } == {
+            ("trufflehog github", "GITHUB_TOKEN"),
+            ("trufflehog gitlab", "GITLAB_TOKEN"),
+        }
+
+        from services.runs.private_data import resolve_secret_environment
+
+        def _trufflehog_secret(_scope, env_name, **_kwargs):
+            return {
+                "GITHUB_TOKEN": "github-secret",
+                "GITLAB_TOKEN": "gitlab-secret",
+            }.get(env_name)
+
+        github_env, github_names = resolve_secret_environment(
+            "trufflehog github --org darklab",
+            "trufflehog-secret-session",
+            get_secret_value_for_env_fn=_trufflehog_secret,
+        )
+        gitlab_env, gitlab_names = resolve_secret_environment(
+            "trufflehog gitlab --group-id 123",
+            "trufflehog-secret-session",
+            get_secret_value_for_env_fn=_trufflehog_secret,
+        )
+        assert github_env == {"GITHUB_TOKEN": "github-secret"}
+        assert github_names == ["GITHUB_TOKEN"]
+        assert gitlab_env == {"GITLAB_TOKEN": "gitlab-secret"}
+        assert gitlab_names == ["GITLAB_TOKEN"]
         puredns = by_root["puredns"]
         assert "puredns resolve" in puredns["policy"]["deny"]
         assert "puredns --bin" in puredns["policy"]["deny"]
@@ -17232,6 +17319,18 @@ class TestDerivedCommandRegistry:
                 (
                     "trufflehog git https://github.com/trufflesecurity/test_keys "
                     "--include-paths trufflehog-include.txt --exclude-paths trufflehog-exclude.txt --json"
+                ): (
+                    ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
+                ),
+                (
+                    "trufflehog github --org darklab --include-paths trufflehog-include.txt "
+                    "--exclude-paths trufflehog-exclude.txt --json"
+                ): (
+                    ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
+                ),
+                (
+                    "trufflehog gitlab --group-id 123 --include-paths trufflehog-include.txt "
+                    "--exclude-paths trufflehog-exclude.txt --json"
                 ): (
                     ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
                 ),
@@ -21802,6 +21901,26 @@ class TestOutputSignals:
             (entity["type"], entity["canonical_value"])
             for entity in trufflehog_entities
         } == {("domain", "github.com")}
+        for payload in (
+            {
+                "DetectorName": "PrivateKey",
+                "DetectorType": 27,
+                "Verified": False,
+                "Raw": "-----BEGIN RSA PRIVATE KEY-----\nprivate-key-data",
+                "Redacted": "-----BEGIN RSA PRIVATE KEY-----\nprivate-key-data",
+                "SecretParts": {"token": "-----BEGIN RSA PRIVATE KEY-----\nprivate-key-data"},
+                "SourceMetadata": {"Data": {"Filesystem": {"file": "id_rsa", "line": 1}}},
+            },
+            {
+                "DetectorType": 999,
+                "Verified": False,
+                "RawV2": "multipart-credential",
+                "SecretParts": {"username": "demo-user", "password": "demo-password"},
+            },
+        ):
+            assert OutputSignalClassifier("trufflehog filesystem --directory / --json").classify_line(
+                json.dumps(payload)
+            )["signals"] == ["findings"]
 
         puredns_metadata = OutputSignalClassifier(
             "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
@@ -23275,6 +23394,29 @@ class TestAutocompleteContextLoading:
                     {"value": "shodan host 8.8.8.8", "description": "Secret-required lookup"},
                 ],
             },
+            "trufflehog": {
+                "requires_secrets": [
+                    {
+                        "env": "GITHUB_TOKEN",
+                        "optional": False,
+                        "subcommands": ["github"],
+                    },
+                ],
+                "subcommands": {
+                    "git": {
+                        "examples": [{
+                            "value": "trufflehog git https://github.com/darklab/shell",
+                            "description": "Public Git scan",
+                        }],
+                    },
+                    "github": {
+                        "examples": [{
+                            "value": "trufflehog github --org darklab",
+                            "description": "Credentialed organization scan",
+                        }],
+                    },
+                },
+            },
         }
 
         with mock.patch(
@@ -23285,7 +23427,11 @@ class TestAutocompleteContextLoading:
                 result = load_container_smoke_test_commands()
 
         load_context.assert_called_once_with({"workspace_enabled": False})
-        assert result == ["curl -I https://ip.darklab.sh", "shodan --help"]
+        assert result == [
+            "curl -I https://ip.darklab.sh",
+            "shodan --help",
+            "trufflehog git https://github.com/darklab/shell",
+        ]
 
     def test_container_smoke_test_interactive_commands_include_only_pty_examples(self):
         registry_context = {
@@ -27301,6 +27447,8 @@ SQL syntax error near q</response>
             "Raw": raw_secret,
             "RawV2": raw_secret_v2,
             "Redacted": raw_secret,
+            "SecretParts": {"access_key": raw_secret, "secret_key": "raw-secret-value"},
+            "ExtraData": {"verification": f"rejected {raw_secret_v2}"},
         })
         output_filter = _TruffleHogOutputFilter("trufflehog git https://github.com/trufflesecurity/test_keys --json")
         filtered_line = output_filter.process_output_line(f"{line}\n")
@@ -27328,7 +27476,9 @@ SQL syntax error near q</response>
         assert len(recorded) == 1
         assert filtered_payload["Raw"] == "[redacted]"
         assert filtered_payload["RawV2"] == "[redacted]"
-        assert filtered_payload["Redacted"] == raw_secret
+        assert filtered_payload["Redacted"] == "[redacted]"
+        assert set(filtered_payload["SecretParts"].values()) == {"[redacted]"}
+        assert filtered_payload["ExtraData"]["verification"] == "rejected [redacted]"
         assert raw_secret not in filtered_payload["Raw"]
         assert "raw-secret-value" not in filtered_line
         assert finding["severity"] == "high"
@@ -27339,7 +27489,7 @@ SQL syntax error near q</response>
         assert "raw-secret-value" not in finding["raw_line"]
         assert dict(entity) == {"type": "domain", "canonical_value": "github.com"}
 
-    def test_record_run_findings_uses_generic_trufflehog_redaction_hint(self):
+    def test_record_run_findings_does_not_persist_vendor_redaction_hint(self):
         from blueprints.run import _TruffleHogOutputFilter
         from services.projects.findings import record_run_findings
 
@@ -27384,7 +27534,7 @@ SQL syntax error near q</response>
             conn.close()
 
         persisted = json.dumps(dict(finding))
-        assert "redacted=[redacted]" in finding["raw_line"]
+        assert "redacted=[redacted]" not in finding["raw_line"]
         assert raw_secret not in persisted
         assert raw_secret_v2 not in persisted
         assert provider_redacted not in persisted
@@ -27425,7 +27575,8 @@ SQL syntax error near q</response>
         with mock.patch.object(findings.log, "warning") as warning:
             text = findings._trufflehog_safe_finding_text(raw_line)
 
-        assert text == raw_line
+        assert text == "TruffleHog secret finding [redacted]"
+        assert "raw-secret-value" not in text
         warning.assert_called_once()
         assert warning.call_args.args == ("TRUFFLEHOG_FINDING_REDACTION_FALLBACK",)
         extra = warning.call_args.kwargs["extra"]

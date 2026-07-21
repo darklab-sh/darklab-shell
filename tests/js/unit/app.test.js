@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import yaml from 'js-yaml'
+import { load as loadYaml } from 'js-yaml'
 import { loadAppFns } from './helpers/app_harness.js'
 import { fromDomScripts } from './helpers/extract.js'
 import {
@@ -343,7 +343,7 @@ function shippedThemeRegistry() {
     .filter(name => name.endsWith('.yaml') && !name.endsWith('.local.yaml'))
     .sort()
     .map(filename => {
-      const raw = yaml.load(readFileSync(resolve(themeDir, filename), 'utf8')) || {}
+      const raw = loadYaml(readFileSync(resolve(themeDir, filename), 'utf8')) || {}
       const name = filename.replace(/\.yaml$/, '')
       const vars = {}
       Object.entries(raw).forEach(([key, value]) => {

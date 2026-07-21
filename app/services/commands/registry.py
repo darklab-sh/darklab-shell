@@ -30,6 +30,7 @@ from services.commands import (
     registry_runtime,
     registry_smoke,
     registry_targets,
+    registry_trufflehog,
     registry_validate,
     registry_workspace,
 )
@@ -1030,33 +1031,7 @@ def _reserved_interactive_deny_matches(command: str, deny_entries: list[str]) ->
 
 
 def _trufflehog_git_uri_restriction_reason(command: str) -> str:
-    tokens = split_command_argv(command)
-    if len(tokens) < 3 or tokens[0].lower() != "trufflehog" or tokens[1].lower() != "git":
-        return ""
-    value_flags = {
-        "--branch",
-        "--exclude-globs",
-        "--exclude-paths",
-        "--include-paths",
-        "--max-depth",
-        "--since-commit",
-    }
-    index = 2
-    while index < len(tokens):
-        token = tokens[index]
-        if token in value_flags:
-            index += 2
-            continue
-        if any(token.startswith(f"{flag}=") for flag in value_flags):
-            index += 1
-            continue
-        if token.startswith("-"):
-            index += 1
-            continue
-        if token.lower().startswith("https://"):
-            return ""
-        return "trufflehog git scans must use an HTTPS repository URL."
-    return ""
+    return registry_trufflehog.source_restriction_reason(command)
 
 
 def _puredns_resolver_restriction_reason(command: str) -> str:

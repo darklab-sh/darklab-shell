@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from services.commands.registry_secret_specs import scoped_required_secrets
 from services.commands.registry_validation import split_command_argv
 
 
@@ -108,10 +109,6 @@ def load_container_smoke_test_commands(
         if not isinstance(spec, dict):
             continue
         root = str(root or "").strip().lower()
-        required_secrets = [
-            item for item in spec.get("requires_secrets") or []
-            if isinstance(item, dict) and not bool(item.get("optional"))
-        ]
         for example in _example_sources(spec):
             if not isinstance(example, dict):
                 continue
@@ -120,9 +117,14 @@ def load_container_smoke_test_commands(
                 continue
             if not suggestion_enabled_for_features(example, {"workspace_enabled": False}):
                 continue
+            command = str(example.get("value") or "").strip()
+            required_secrets = [
+                item
+                for item in scoped_required_secrets(command, spec.get("requires_secrets"))
+                if not bool(item.get("optional"))
+            ]
             if required_secrets and not _is_unauthenticated_help_smoke(root, spec, example):
                 continue
-            command = str(example.get("value") or "").strip()
             if not command or command in seen:
                 continue
             seen.add(command)

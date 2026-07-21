@@ -13,6 +13,7 @@ import re
 from typing import Any, Mapping
 
 import config as app_config
+from core.trufflehog_redaction import redact_trufflehog_json_line
 from services.commands.registry import command_root
 from services.teams.scope import OwnerContext, personal_owner_context
 from services.workspace.files import (
@@ -319,26 +320,10 @@ class WorkspacePathOutputFilter:
 
 
 class TruffleHogOutputFilter:
-    _SECRET_FIELDS = {"Raw", "RawV2"}
-
     def __init__(self, command: str):
         self.enabled = command_root(command) == "trufflehog"
 
     def process_output_line(self, line: str) -> str:
         if not self.enabled:
             return line
-        suffix = "\n" if str(line).endswith("\n") else ""
-        try:
-            parsed = json.loads(str(line).rstrip("\n"))
-        except (TypeError, ValueError):
-            return line
-        if not isinstance(parsed, dict):
-            return line
-        redacted = False
-        for secret_field in self._SECRET_FIELDS:
-            if secret_field in parsed and parsed[secret_field] not in ("", None):
-                parsed[secret_field] = "[redacted]"
-                redacted = True
-        if not redacted:
-            return line
-        return json.dumps(parsed, ensure_ascii=False, separators=(",", ":")) + suffix
+        return redact_trufflehog_json_line(line, assume_trufflehog=True)

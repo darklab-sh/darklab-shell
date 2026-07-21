@@ -22261,6 +22261,25 @@ class TestShareRoute:
                     "label": "builtin redaction",
                     "content": [
                         {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
+                        {"text": "-----BEGIN RSA PRIVATE KEY-----", "cls": "notice"},
+                        {"text": "MIIEprivate-key-material", "cls": "notice"},
+                        {"text": "-----END RSA PRIVATE KEY-----", "cls": "notice"},
+                        {"text": "scan complete", "cls": "notice"},
+                        {
+                            "text": json.dumps({
+                                "DetectorName": "PrivateKey",
+                                "Raw": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                "Redacted": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                "SecretParts": {
+                                    "token": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                },
+                                "ExtraData": {
+                                    "duplicate": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                },
+                            }),
+                            "cls": "finding",
+                        },
+                        {"text": "after historical finding", "cls": "notice"},
                     ],
                 },
                 headers={"X-Session-ID": "test-session"},
@@ -22269,6 +22288,16 @@ class TestShareRoute:
             fetch = client.get(f"/share/{share_id}?json")
         data = json.loads(fetch.data)
         assert data["content"][0]["text"] == "contact [email-redacted] at [ip-redacted]"
+        redacted_text = [item["text"] for item in data["content"]]
+        assert redacted_text[1:3] == ["[private-key-redacted]", "scan complete"]
+        historical_finding = json.loads(redacted_text[3])
+        assert historical_finding["Raw"] == "[redacted]"
+        assert historical_finding["Redacted"] == "[redacted]"
+        assert historical_finding["SecretParts"] == {"token": "[redacted]"}
+        assert historical_finding["ExtraData"] == {"duplicate": "[redacted]"}
+        assert redacted_text[4] == "after historical finding"
+        assert "private-key-material" not in json.dumps(data)
+        assert "legacy-key-prefix" not in json.dumps(data)
 
     def test_post_skips_share_redaction_when_apply_redaction_false(self):
         client = get_client()

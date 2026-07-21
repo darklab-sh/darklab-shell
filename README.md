@@ -161,7 +161,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `fierce` | DNS reconnaissance and subdomain brute-forcing |
 | `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
 | `ffuf` | Fast directory, file, and vhost fuzzing |
-| `trufflehog` | Secret scanning for session folders and HTTPS Git repositories |
+| `trufflehog` | Secret scanning for Files, HTTPS Git repositories, GitHub, and GitLab |
 | `puredns` | DNS brute forcing with resolver and wildcard output |
 | `naabu` | Fast port discovery across hosts and target lists (ProjectDiscovery) |
 | `katana` | JavaScript-aware web crawler for attack surface mapping (ProjectDiscovery) |

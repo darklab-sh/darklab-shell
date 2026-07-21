@@ -103,6 +103,7 @@
 #   - IPv4 addresses
 #   - IPv6 addresses
 #   - hostnames / dotted domains
+#   - PEM / PGP private-key blocks, including blocks split across output lines
 # The app then appends any operator-defined rules from `share_redaction_rules`.
 # Normal run history, history permalinks, and local `save txt` / `save html` /
 # `save pdf` exports remain raw.

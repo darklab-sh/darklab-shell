@@ -15,6 +15,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **TruffleHog can scan authenticated GitHub and GitLab sources without exposing provider tokens.**
+  - **Why:** Files and public HTTPS Git scans couldn't enumerate private repositories, organizations, groups, or self-hosted provider instances.
+  - **What:** `trufflehog github` receives `GITHUB_TOKEN` and `trufflehog gitlab` receives `GITLAB_TOKEN` from the active encrypted secrets scope. Repository and endpoint URLs must use credential-free HTTPS; inline tokens, auth-in-URL, custom clone paths, retained clones, and local Git sources remain blocked. GitHub `--org`, GitLab `--group-id`, custom HTTPS endpoints, and workspace-backed include/exclude files are supported, and `providers` reports both command credentials.
+  - **Tests:** registry, policy, secret-scope, workspace rewrite, autocomplete, runtime JSON injection, consumer-display, and per-example smoke-source assertions cover both provider sources without adding new test cases.
+
 - **Terminal output can be saved directly to Files, and files can be copied or touched from the prompt** — `command > file` overwrites a workspace file while keeping output out of the live terminal, `command >> file` appends to it, and `command | tee file` overwrites it while still displaying the same post-filtered, redacted output. `file copy` / `cp` copies one file without overwriting an existing destination, while `file touch` / `touch` creates an empty file or refreshes its modified time; every write follows the active Files directory, owner/team permissions, path checks, and workspace limits.
 
 - **Files and completed runs can be compared directly from the terminal** — `diff` accepts workspace files, explicit `file:<path>` sources, completed `run:<run-id>` output, or one of each. `diff --last` compares the last two completed runs from the current tab, while `file diff` keeps the same file-oriented command under the Files namespace. The default output follows classic `diff` with `<` and `>` lines; `-q` / `--brief`, `-u` / `--unified`, and `-y` / `--side-by-side` provide familiar alternate layouts. Run sources follow the same owner scope, output filtering, and comparison limits as the History comparison view, and file sources stay inside the active personal or team workspace. Each file source is limited to 5,000 lines and 500,000 UTF-8 bytes so terminal comparisons stay responsive; oversized files are rejected instead of silently truncated.
@@ -32,6 +37,15 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Release image cache behavior is measurable without permanent probe jobs** — Canonical AMD64 publication retains its build or tag-reuse time, cache reference, Python base digest, image size, and pipeline identity, while release publication rejects a cache scope that doesn't match the release line. The cross-runner acceptance run completed both cache export and reuse in under one minute with the expensive builder stages served from cache, so scheduled CI now keeps only the production cache warmers.
 
 ### Fixed
+
+- **TruffleHog findings and redacted snapshots no longer expose vendor secret fields or private keys.**
+  - **Root cause:** TruffleHog doesn't guarantee that `Redacted` is safe to display, multipart credentials can remain in `SecretParts`, and snapshot redaction handled only independent regex matches rather than private-key blocks spanning several output lines.
+  - **Fix:** managed TruffleHog JSON now masks `Raw`, `RawV2`, `Redacted`, every `SecretParts` value, and duplicate copies elsewhere in the row before any transcript, Files output, history, share, export, or finding path receives it. Finding fallback text never reuses a malformed raw row, and redacted shares or packages replace complete PEM and PGP private-key blocks from any command.
+  - **Tests:** existing output-sink, structured-finding, Atlas materialization, fallback, and share-route cases now cover verified, unverified, multipart, duplicated-secret, and multiline private-key shapes without changing the documented test count.
+
+- **Development YAML tooling no longer installs a vulnerable `js-yaml` release** — The dependency override moves compatible v4 consumers to patched `js-yaml` 4.3.0 without forcing Markdownlint off its supported v5 dependency or downgrading Stylelint. Theme registry tests declare the patched v5 parser directly and use its named `load` export, so their YAML fixtures work with the current ESM module shape.
+
+- **Development tooling no longer installs the vulnerable `brace-expansion` 5.0.6 release** — The lockfile now selects patched version 5.0.7 for ESLint's Minimatch dependency, clearing the high-severity JavaScript dependency audit without a forced or breaking upgrade.
 
 - **Staging registry cleanup doesn't skip expired tags when pages shift during deletion** — The cleanup job now collects and validates the complete match set before issuing its first delete request. Its regression models 205 temporary tags across three mutable offset-paginated pages and confirms every expired attempt is removed while a release-child anchor remains untouched.
 

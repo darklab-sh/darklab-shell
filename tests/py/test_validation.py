@@ -9,6 +9,7 @@ blocking, allowlist prefix matching, deny prefix (!), and command rewrites.
 Run with: pytest tests/ (from the repo root)
 """
 
+import json
 import unittest.mock as mock
 
 import pytest
@@ -381,7 +382,11 @@ class TestSyntheticPostFilterParsing:
             "sink": {"kind": "redirect", "path": "reports/secrets.jsonl"},
         })
         redactor = _TruffleHogOutputFilter("trufflehog git https://example.test/repo.git")
-        raw_line = '{"DetectorName":"Demo","Raw":"secret-value","RawV2":"secret-v2"}\n'
+        raw_line = (
+            '{"DetectorName":"Demo","Raw":"secret-value","RawV2":"secret-v2",'
+            '"Redacted":"secret-value","SecretParts":{"token":"secret-value","pin":"1234"},'
+            '"ExtraData":{"verification":"secret-v2 was rejected","pin_copy":"PIN 1234 invalid"}}\n'
+        )
 
         with mock.patch(
             "services.runs.output_sinks.workspace_settings",
@@ -401,9 +406,22 @@ class TestSyntheticPostFilterParsing:
         written_text = write_file.call_args.args[2]
         assert '"Raw":"[redacted]"' in written_text
         assert '"RawV2":"[redacted]"' in written_text
+        assert '"Redacted":"[redacted]"' in written_text
+        assert '"SecretParts":{"token":"[redacted]","pin":"[redacted]"}' in written_text
+        assert '"verification":"[redacted] was rejected"' in written_text
+        assert '"pin_copy":"PIN [redacted] invalid"' in written_text
         assert "secret-value" not in written_text
         assert "secret-v2" not in written_text
+        assert '"pin":"1234"' not in written_text
         assert processor.suppresses_terminal_output is True
+        malformed = redactor.process_output_line('{"Raw":"malformed-secret-value"\n')
+        assert json.loads(malformed) == {
+            "DetectorName": "Unknown",
+            "Verified": False,
+            "Redacted": "[redacted]",
+            "ParseError": True,
+        }
+        assert "malformed-secret-value" not in malformed
 
         append_processor = _SyntheticPostFilterProcessor({
             "base_command": "ping darklab.sh",
@@ -1442,6 +1460,12 @@ class TestRewrites:
         cmd, notice = rewrite_command("trufflehog git https://github.com/trufflesecurity/test_keys")
         assert cmd == "trufflehog git https://github.com/trufflesecurity/test_keys --json"
         assert notice is None
+
+        cmd, _ = rewrite_command("trufflehog github --org trufflesecurity")
+        assert cmd == "trufflehog github --org trufflesecurity --json"
+
+        cmd, _ = rewrite_command("trufflehog gitlab --group-id 12345")
+        assert cmd == "trufflehog gitlab --group-id 12345 --json"
 
         cmd, _ = rewrite_command("trufflehog filesystem --directory secrets --json")
         assert cmd.count("--json") == 1

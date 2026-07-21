@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Enable TruffleHog github and gitlab sources](#enable-trufflehog-github-and-gitlab-sources)
   - [Validate multi-platform release publication](#validate-multi-platform-release-publication)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Known Issues](#known-issues)
@@ -32,27 +31,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ---
 
 ## Open TODOs
-
-### Enable TruffleHog github and gitlab sources
-
-Allow `trufflehog github` and `trufflehog gitlab` alongside the existing `trufflehog git` HTTPS scans, with authenticated scanning through the secrets manager and org/group and self-hosted endpoint support. The output-redaction boundary already covers these sources — `--json` injection is not subcommand-scoped and `TruffleHogOutputFilter` masks `Raw`/`RawV2` on any trufflehog JSON row — so this work is about porting the git subcommand's *input* hardening to two new sources, not about transcript masking.
-
-- [ ] Add `trufflehog github` and `trufflehog gitlab` to the `policy.allow` list in `app/conf/commands.yaml` and remove the two matching `policy.deny` entries.
-- [ ] Re-add the git-scoped protections as source-scoped deny entries for both new sources, since the existing `trufflehog git --…` denials match by token and do not cover `github`/`gitlab`:
-  - `--config` and `--profile` for `github` and `gitlab`.
-  - `--no-cleanup` and any clone-path / local-git-config overrides the two sources accept.
-- [ ] Route the personal access token through the encrypted secrets manager instead of a command-line `--token`:
-  - Inject the resolved token as an environment variable (or a runtime-injected flag) the way other credentialed tools receive secrets, and deny plaintext `--token` on the command line so a PAT never lands in the stored command string, which is not redacted.
-  - Confirm the secret name/consumer wiring surfaces through `providers` / `secret show-consumers`.
-- [ ] Allow `--org` and `--group` (GitLab `--group-id`) for whole-org and whole-group enumeration:
-  - Accept the unbounded repo fan-out against run timeouts and resource limits, and document the cost in the command knowledge notes.
-- [ ] Allow `--endpoint` so self-hosted GitHub Enterprise and GitLab instances can be scanned, dropping the HTTPS-public-only assumption that the git path enforces.
-- [ ] Extend `workspace_flags` and any include/exclude path handling to the new subcommands where those flags apply.
-- [ ] Update documentation to match the widened surface:
-  - Revise the "TruffleHog Output Redaction" section in `DECISIONS.md`, which currently lists "HTTPS-only Git scans" as part of the safety boundary.
-  - Refresh the `knowledge` notes, gotchas, `safe_defaults`, and autocomplete examples for the trufflehog entry in `app/conf/commands.yaml`.
-  - Update the trufflehog coverage in `README.md`, `docs/tools.md`, and `docs/external-command-integrations.md`.
-- [ ] Add registry validation and policy tests covering the new allow/deny shapes, secret-backed token injection, and the `--org`/`--group`/`--endpoint` forms.
 
 ### Validate multi-platform release publication
 

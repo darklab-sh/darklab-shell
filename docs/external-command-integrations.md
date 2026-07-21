@@ -52,6 +52,7 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The r
 | `wpscan` | Injects optional `WPSCAN_API_TOKEN` from the encrypted secrets vault and blocks inline `--api-token` use. | Regular WordPress scans still work without a key, while API-backed vulnerability data can be enabled without putting the token in command history or argv. |
 | `urlscan-cli` | Injects `URLSCAN_API_KEY` from the encrypted secrets vault and blocks key/config/completion setup, inline key flags, and stdin-driven scan/result forms. | Users can submit URLs, fetch scan results, and search urlscan.io without writing keys to a local keyring/config file or putting tokens into command history. |
 | `chaos` | Injects `PDCP_API_KEY` from the encrypted secrets vault and blocks inline key flags, updater flows, list-file input, and direct output-file writes. | Users can query ProjectDiscovery Chaos for domain subdomains while keeping the provider key in the app vault and avoiding unmanaged file reads/writes. |
+| `trufflehog github` / `trufflehog gitlab` | Injects `GITHUB_TOKEN` or `GITLAB_TOKEN` only for the matching source and blocks inline tokens, credential-bearing URLs, auth-in-URL, custom clone paths, and retained clones. | Users can scan private repositories, organizations, groups, and self-hosted provider endpoints without putting a PAT in command history or stored output. |
 
 ---
 
@@ -106,7 +107,7 @@ runtime_adaptations:
 
 `environment` wraps the final execution command with `env NAME=value ...` after workspace path rewriting. Entries can use the same `requires_raw_packets` readiness gate and `unless_any` exclusions as flag injection. Nmap uses a command-prefix injection for the fixed `NMAP_PRIVILEGED=1` value so it composes with conditional scan flags; workspace-backed tools use `{managed_workspace_parent}`, which resolves from the declared managed directory flag.
 
-Encrypted credentials use a separate `requires_secrets` declaration instead of the `environment` wrapper. At launch, `/runs` looks up the current session's matching encrypted secrets, decrypts them in memory, and passes them through `subprocess.Popen(env=...)`. Secret values are never inserted into the shell command string. Required missing secrets block launch with a clear error; optional missing secrets log a warning and let the command run without that env var.
+Encrypted credentials use a separate `requires_secrets` declaration instead of the `environment` wrapper. At launch, `/runs` looks up the current session's matching encrypted secrets, decrypts them in memory, and passes them through `subprocess.Popen(env=...)`. Secret values are never inserted into the shell command string. Required missing secrets block launch with a clear error; optional missing secrets log a warning and let the command run without that env var. A declaration can use `subcommands` to scope a credential to one or more command modes; TruffleHog uses this so `github` receives only `GITHUB_TOKEN`, `gitlab` receives only `GITLAB_TOKEN`, and filesystem or ordinary Git scans require neither.
 
 ```yaml
 requires_secrets:
@@ -231,16 +232,20 @@ Security note: ProjectDiscovery provider/config files can contain API keys or ot
 
 ## TruffleHog
 
-TruffleHog is exposed for two managed scan shapes:
+TruffleHog is exposed for four managed scan shapes:
 
 - `trufflehog filesystem --directory <folder> --json` scans a folder from Files.
 - `trufflehog git https://... --json` scans an HTTPS Git repository.
+- `trufflehog github --repo https://... --json` scans one or more GitHub repositories, while `--org` can enumerate an organization.
+- `trufflehog gitlab --repo https://... --json` scans one or more GitLab repositories, while `--group-id` can enumerate a group and its subgroups.
 
-`trufflehog git` repository arguments must start with `https://`. Local paths, `file://` repositories, and `ssh://` repositories are rejected before launch. The registry also blocks custom clone paths, no-cleanup mode, trust-local-git-config, profile/config files, and provider subcommands outside the exposed filesystem/git paths.
+GitHub scans require `GITHUB_TOKEN`; GitLab scans require `GITLAB_TOKEN`. Both values come from the active personal or team secrets vault and are passed through the vendor-supported environment variables. Inline `--token` values, credential-bearing URLs, and `--auth-in-url` are rejected so PATs cannot enter command history, argv, transcripts, or logs. `providers` and `secret show-consumers` report whether both command credentials are configured.
 
-`--include-paths` and `--exclude-paths` can read regex files from Files for both filesystem and Git scans. TruffleHog writes findings to stdout; stdout JSON rows are the supported report channel for structured capture.
+Repository and `--endpoint` values for GitHub and GitLab must be credential-free HTTPS URLs. A custom HTTPS `--endpoint` supports GitHub Enterprise and self-hosted GitLab. Local paths, `file://` repositories, and `ssh://` repositories are rejected before launch. The registry also blocks custom clone paths, no-cleanup mode, trust-local-git-config, profile/config files, and provider sources outside the four exposed scan paths.
 
-TruffleHog scan commands receive `--json` automatically unless the user already passed it or is asking for help. JSON rows are treated as findings, and the live transcript masks `Raw` / `RawV2` before output is streamed, stored, shared, exported, or materialized into findings. Persisted Atlas finding text is rebuilt from detector name, verification state, Git repository/file/line metadata, and a generic redacted marker instead of trusting vendor secret fields verbatim. If a TruffleHog command is ever run outside that managed JSON path, plain text output remains transcript-only and does not create structured findings.
+`--include-paths` and `--exclude-paths` can read regex files from Files for filesystem, Git, GitHub, and GitLab scans. TruffleHog writes findings to stdout; stdout JSON rows are the supported report channel for structured capture. Organization, group, and all-accessible-repository scans are allowed, but their fan-out remains bounded by the app's normal command timeout and resource limits.
+
+TruffleHog scan commands receive `--json` automatically unless the user already passed it or is asking for help. Every detector result is treated as a finding, including unverified and multipart results. Before output is streamed, stored, written to Files, shared, exported, or materialized into findings, the live transcript masks `Raw`, `RawV2`, `Redacted`, and every `SecretParts` value, then removes copies of those values from the rest of the JSON row. Persisted Atlas finding text is rebuilt from detector, verification, and source-location metadata instead of trusting vendor secret fields as safe display text. Redacted snapshots also replace PEM and PGP private-key blocks from any command, including blocks printed across several lines. If a TruffleHog command is ever run outside that managed JSON path, plain text output remains transcript-only and does not create structured findings.
 
 ---
 
@@ -443,7 +448,7 @@ The registry is the first stop for a new command, but it is not the only stop. B
 - Keep user-facing examples aligned with the app-owned rewrite behavior.
 - Add backend tests for validation, rewrite, and workspace path handling.
 - Add autocomplete tests if examples, flags, or positional hints change.
-- Add or update container smoke expectations when the change affects visible examples or workflow steps. The generic smoke corpus skips normal examples for commands with required encrypted secrets, but it can include registry-declared help examples marked with `smoke.profile: unauthenticated`. Cover credentialed behavior with registry, policy, secret-injection, or keyed smoke tests.
+- Add or update container smoke expectations when the change affects visible examples or workflow steps. The generic smoke corpus applies required-secret declarations to each example's subcommand, skips credentialed examples, and can include registry-declared help examples marked with `smoke.profile: unauthenticated`. Cover credentialed behavior with registry, policy, secret-injection, or keyed smoke tests.
 - Document tool-specific behavior here when the app does more than simple allowlist metadata.
 
 Also check the command-specific surfaces that sit outside the registry:
