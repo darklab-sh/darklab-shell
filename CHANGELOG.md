@@ -11,7 +11,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.6.1] - Unreleased
+## [2.7.0] - Unreleased
 
 ### Added
 
@@ -40,6 +40,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Scheduled image builds warm every self-managed runner** — The existing `bael`, `bune`, and `botis` fanout now also builds on `babi`, `bile`, `barbas`, `beleth`, `baka`, `bana`, the SELinux-enforcing `baku` runner, and the rootless-Podman `baal` runner.
 
 - **Release image cache behavior is measurable without permanent probe jobs** — Canonical AMD64 publication retains its build or tag-reuse time, cache reference, Python base digest, image size, and pipeline identity, while release publication rejects a cache scope that doesn't match the release line. The cross-runner acceptance run completed both cache export and reuse in under one minute with the expensive builder stages served from cache, so scheduled CI now keeps only the production cache warmers.
+
+- **Multi-platform publisher retry and conflict paths are tested as real shell behavior** — A stub Docker client, registry state, and runner-identity harness executes platform build and reuse, conflicting staging content, wrong-architecture and missing-artifact failures, child-anchor create/reuse/conflict, canonical-index conflict, and Docker Hub copy/reuse/conflict paths through the same publisher script CI runs. The existing Python contract tests continue to validate descriptors and release modes without standing in for publisher behavior.
 
 ### Fixed
 

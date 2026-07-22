@@ -36,12 +36,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 The dual-platform publication path is implemented. Complete these live checks before shipping the first release that claims native Linux ARM64 support:
 
-- [ ] Qualify staging cleanup in a disposable registry repository.
-  - Publish two tagged child manifests plus an index, remove the child tags, allow registry cleanup/garbage collection to run, and confirm the index remains pullable by tag and digest on both native architectures.
-  - Keep successful release child anchors for the lifetime of their release and leave `RELEASE_STAGING_CLEANUP_ENABLED=0` until the temporary-tag cleanup job has passed this exercise.
-- [ ] Add executable publisher shell coverage with stubbed Docker, registry state, and runner identity.
-  - Exercise first publication, identical retry/reuse, conflicting staging tags, wrong runner architecture, missing platform artifacts, child-anchor create/reuse/conflict, and Docker Hub index copy/reuse/conflict.
-  - Keep the Python contract tests for descriptor and release-mode validation, but don't treat source-text assertions as coverage of publisher behavior.
+- [ ] Qualify anchored staging cleanup in a disposable registry repository.
+  - Publish two staging children, create durable architecture anchors, and assemble the canonical index from those anchors, matching the production publication order.
+  - Delete only the temporary child and staging-index tags, then confirm the canonical index remains pullable by tag and digest on native AMD64 and ARM64 while both architecture anchors remain intact.
+  - Keep successful release child anchors for the lifetime of their release. The separate experiment that removes every child tag and waits for GitLab.com to garbage-collect unreferenced data is useful defense-in-depth evidence, but it does not block a release because production cleanup never deletes those anchors.
+  - Leave `RELEASE_STAGING_CLEANUP_ENABLED=0` until the anchored cleanup exercise passes; GitLab.com's later physical storage reclamation does not need to complete before enabling cleanup or publishing the dual-platform release.
 - [ ] Complete three consecutive protected release-candidate pipelines in dual mode without manual repair. Each pipeline must build both children natively, pass both smoke and vulnerability lanes, publish one two-platform GitLab index, copy the identical index to Docker Hub, sign the index and both children, and produce matching evidence and payload contracts.
 - [ ] On native AMD64 and ARM64 hosts, validate a clean production install, upgrade, status check, backup, restore, bundled-tool verification, and Postgres-backed startup from the same canonical tag. Confirm an unsupported host architecture fails before startup with a clear error.
 

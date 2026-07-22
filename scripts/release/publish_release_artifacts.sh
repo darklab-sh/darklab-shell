@@ -144,7 +144,7 @@ publish_gitlab_platform_image() {
     require_nonempty platform_image_preflight build_date "${RELEASE_BUILD_DATE:-}"
     base_resolution_key=$(printf '%s' "${PYTHON_BASE_INDEX_DIGEST#sha256:}" | cut -c1-12)
     staging_image="${CI_REGISTRY_IMAGE}:${publication_tag}-staging-${CI_PIPELINE_ID}-${base_resolution_key}-${architecture}"
-    cache_scope=${RELEASE_CACHE_SCOPE:-v2-6}
+    cache_scope=${RELEASE_CACHE_SCOPE:-v2-7}
     release_major=${release_version%%.*}
     release_remainder=${release_version#*.}
     release_minor=${release_remainder%%.*}

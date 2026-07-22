@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "release" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "release" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "release" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.6.0"
+RELEASE_VERSION = "2.7.0-rc.1"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 RC_TWO_VERSION = f"{FINAL_VERSION}-rc.2"
@@ -40,7 +40,7 @@ NEXT_RC_VERSION = (
     if _CURRENT_RC_NUMBER
     else RC_TWO_VERSION
 )
-NEXT_VERSION = "2.6.1"
+NEXT_VERSION = "2.7.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
 GITLAB_CLI_IMAGE = (
@@ -558,6 +558,406 @@ fi
         capture_output=True,
         text=True,
     )
+
+
+_PUBLISHER_DIGESTS = {
+    "amd64": "sha256:" + "a" * 64,
+    "arm64": "sha256:" + "b" * 64,
+    "base_index": "sha256:" + "c" * 64,
+    "base_amd64": "sha256:" + "d" * 64,
+    "base_arm64": "sha256:" + "e" * 64,
+    "index": "sha256:" + "f" * 64,
+    "conflict": "sha256:" + "1" * 64,
+}
+
+
+def _publisher_state_path(state_dir: Path, reference: str) -> Path:
+    return state_dir / re.sub(r"[^A-Za-z0-9_.-]", "_", reference)
+
+
+def _write_publisher_state(state_dir: Path, reference: str, digest: str) -> None:
+    _publisher_state_path(state_dir, reference).write_text(digest + "\n", encoding="utf-8")
+
+
+def _write_release_publisher_contracts(
+    tmp_path: Path,
+    *,
+    wrong_runner: bool = False,
+    missing_arm64: bool = False,
+    conflicting_index: bool = False,
+) -> dict[str, str]:
+    registry_image = "registry.example.test/darklab/shell"
+    dockerhub_image = "docker.io/darklabsh/darklab-shell"
+    build_date = "2026-07-21T12:00:00Z"
+    source_commit = "revision-a"
+    base_resolution = {
+        "format": "darklab_shell.python_base_resolution.v1",
+        "image": "python:3.14.6-slim",
+        "index_digest": _PUBLISHER_DIGESTS["base_index"],
+        "resolved_at": build_date,
+        "platforms": {
+            "amd64": {
+                "platform": "linux/amd64",
+                "digest": _PUBLISHER_DIGESTS["base_amd64"],
+            },
+            "arm64": {
+                "platform": "linux/arm64",
+                "digest": _PUBLISHER_DIGESTS["base_arm64"],
+            },
+        },
+    }
+    (tmp_path / "python-base-resolution.json").write_text(
+        json.dumps(base_resolution), encoding="utf-8"
+    )
+    for architecture, runner_architecture in (
+        ("amd64", "aarch64" if wrong_runner else "x86_64"),
+        ("arm64", "aarch64"),
+    ):
+        if architecture == "arm64" and missing_arm64:
+            continue
+        contract = {
+            "format": "darklab_shell.release_platform.v1",
+            "version": RELEASE_VERSION,
+            "architecture": architecture,
+            "platform": f"linux/{architecture}",
+            "image": f"{registry_image}:staging-{architecture}",
+            "digest": _PUBLISHER_DIGESTS[architecture],
+            "python_base_index_digest": _PUBLISHER_DIGESTS["base_index"],
+            "python_base_digest": _PUBLISHER_DIGESTS[f"base_{architecture}"],
+            "source_commit": source_commit,
+            "build_date": build_date,
+            "compressed_bytes": 1024,
+            "unpacked_bytes": 2048,
+            "pull_seconds": 1,
+            "build_seconds": 2,
+            "runner_architecture": runner_architecture,
+        }
+        (tmp_path / f"release-platform-{architecture}.json").write_text(
+            json.dumps(contract), encoding="utf-8"
+        )
+    raw_index = {
+        "annotations": {
+            "sh.darklab.release.mode": "dual",
+            "sh.darklab.release.degraded-reason": "",
+        },
+        "manifests": [
+            {
+                "digest": _PUBLISHER_DIGESTS["amd64"],
+                "platform": {"os": "linux", "architecture": "amd64"},
+            },
+            {
+                "digest": (
+                    _PUBLISHER_DIGESTS["conflict"]
+                    if conflicting_index
+                    else _PUBLISHER_DIGESTS["arm64"]
+                ),
+                "platform": {"os": "linux", "architecture": "arm64"},
+            },
+        ],
+    }
+    index_manifest = tmp_path / "fake-index-manifest.json"
+    index_manifest.write_text(json.dumps(raw_index), encoding="utf-8")
+    return {
+        "registry_image": registry_image,
+        "dockerhub_image": dockerhub_image,
+        "build_date": build_date,
+        "source_commit": source_commit,
+        "index_manifest": str(index_manifest),
+    }
+
+
+def _fake_release_publisher_tools(tmp_path: Path) -> tuple[Path, Path, Path]:
+    bin_dir = tmp_path / "publisher-bin"
+    bin_dir.mkdir()
+    state_dir = tmp_path / "registry-state"
+    state_dir.mkdir()
+    log_path = tmp_path / "publisher-tools.log"
+    docker_path = bin_dir / "docker"
+    docker_path.write_text(
+        r'''#!/bin/sh
+printf 'docker %s\n' "$*" >> "$FAKE_PUBLISHER_LOG"
+
+state_path() {
+    key=$(printf '%s' "$1" | sed 's/[^A-Za-z0-9_.-]/_/g')
+    printf '%s/%s\n' "$FAKE_REGISTRY_STATE" "$key"
+}
+
+last_argument=
+for argument in "$@"; do last_argument=$argument; done
+
+if [ "$1" = "login" ]; then
+    exit 0
+fi
+
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+    state=$(state_path "$last_argument")
+    [ -f "$state" ] || exit 1
+    digest=$(cat "$state")
+    printf '{"Descriptor":{"digest":"%s"}}\n' "$digest"
+    exit 0
+fi
+
+if [ "$1" = "pull" ]; then
+    exit 0
+fi
+
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+    case "$*" in
+        *sh.darklab.app.version*) printf '%s\n' "${FAKE_EXISTING_VERSION:-$RELEASE_VERSION}" ;;
+        *sh.darklab.git.revision*) printf '%s\n' "${FAKE_EXISTING_REVISION:-$CI_COMMIT_SHA}" ;;
+        *sh.darklab.python.base.index.digest*) printf '%s\n' "$PYTHON_BASE_INDEX_DIGEST" ;;
+        *sh.darklab.python.base.digest*) printf '%s\n' "$PYTHON_BASE_AMD64_DIGEST" ;;
+        *org.opencontainers.image.created*) printf '%s\n' "$RELEASE_BUILD_DATE" ;;
+        *Architecture*) printf '%s\n' "${FAKE_EXISTING_ARCHITECTURE:-amd64}" ;;
+        *) exit 91 ;;
+    esac
+    exit 0
+fi
+
+if [ "$1" = "buildx" ] && [ "$2" = "build" ]; then
+    metadata_file=
+    tag=
+    previous=
+    for argument in "$@"; do
+        if [ "$previous" = "--metadata-file" ]; then metadata_file=$argument; fi
+        if [ "$previous" = "--tag" ]; then tag=$argument; fi
+        previous=$argument
+    done
+    [ -n "$metadata_file" ] && [ -n "$tag" ] || exit 92
+    printf '{"containerimage.digest":"%s"}\n' "$FAKE_PLATFORM_DIGEST" > "$metadata_file"
+    state=$(state_path "$tag")
+    printf '%s\n' "$FAKE_PLATFORM_DIGEST" > "$state"
+    exit 0
+fi
+
+if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "create" ]; then
+    tag=
+    prefer_child=0
+    previous=
+    for argument in "$@"; do
+        if [ "$previous" = "--tag" ]; then tag=$argument; fi
+        if [ "$argument" = "--prefer-index=false" ]; then prefer_child=1; fi
+        previous=$argument
+    done
+    [ -n "$tag" ] || exit 93
+    if [ "$prefer_child" -eq 1 ]; then
+        digest=${last_argument##*@}
+    else
+        digest=$FAKE_INDEX_DIGEST
+    fi
+    state=$(state_path "$tag")
+    printf '%s\n' "$digest" > "$state"
+    exit 0
+fi
+
+if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
+    state=$(state_path "$last_argument")
+    [ -f "$state" ] || exit 1
+    digest=$(cat "$state")
+    case " $* " in
+        *' --raw '*)
+            if [ "$digest" = "$FAKE_AMD64_DIGEST" ] || [ "$digest" = "$FAKE_ARM64_DIGEST" ]; then
+                printf '{"layers":[{"size":3072}]}\n'
+            else
+                cat "$FAKE_INDEX_MANIFEST"
+            fi
+            ;;
+        *) printf 'Name: %s\nDigest: %s\n' "$last_argument" "$digest" ;;
+    esac
+    exit 0
+fi
+
+printf 'unexpected fake docker command: %s\n' "$*" >&2
+exit 94
+''',
+        encoding="utf-8",
+    )
+    docker_path.chmod(0o755)
+    uname_path = bin_dir / "uname"
+    uname_path.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"-m\" ]; then printf '%s\\n' \"$FAKE_UNAME_MACHINE\"; "
+        "else exec /usr/bin/uname \"$@\"; fi\n",
+        encoding="utf-8",
+    )
+    uname_path.chmod(0o755)
+    return bin_dir, state_dir, log_path
+
+
+def _release_publisher_env(
+    *,
+    fixture: dict[str, str],
+    bin_dir: Path,
+    state_dir: Path,
+    log_path: Path,
+) -> dict[str, str]:
+    env = os.environ.copy()
+    for inherited_name in (
+        "CI_COMMIT_TAG",
+        "CI_JOB_ID",
+        "CI_PIPELINE_ID",
+        "CI_PIPELINE_SOURCE",
+        "CI_COMMIT_REF_PROTECTED",
+    ):
+        env.pop(inherited_name, None)
+    env.update({
+        "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+        "CI_COMMIT_TAG": f"v{RELEASE_VERSION}",
+        "CI_COMMIT_SHA": fixture["source_commit"],
+        "CI_JOB_ID": "456",
+        "CI_PIPELINE_ID": "123",
+        "CI_PIPELINE_SOURCE": "push",
+        "CI_COMMIT_REF_PROTECTED": "true",
+        "CI_REGISTRY": "registry.example.test",
+        "CI_REGISTRY_IMAGE": fixture["registry_image"],
+        "CI_REGISTRY_USER": "gitlab-user",
+        "CI_REGISTRY_PASSWORD": "gitlab-password-secret",
+        "RELEASE_VERSION": RELEASE_VERSION,
+        "RELEASE_PLATFORM_MODE": "dual",
+        "RELEASE_DEGRADED_REASON": "",
+        "RELEASE_BUILD_DATE": fixture["build_date"],
+        "PYTHON_BASE_IMAGE": "python:3.14.6-slim",
+        "PYTHON_BASE_INDEX_DIGEST": _PUBLISHER_DIGESTS["base_index"],
+        "PYTHON_BASE_AMD64_DIGEST": _PUBLISHER_DIGESTS["base_amd64"],
+        "PYTHON_BASE_ARM64_DIGEST": _PUBLISHER_DIGESTS["base_arm64"],
+        "FAKE_AMD64_DIGEST": _PUBLISHER_DIGESTS["amd64"],
+        "FAKE_ARM64_DIGEST": _PUBLISHER_DIGESTS["arm64"],
+        "FAKE_INDEX_DIGEST": _PUBLISHER_DIGESTS["index"],
+        "FAKE_INDEX_MANIFEST": fixture["index_manifest"],
+        "FAKE_PUBLISHER_LOG": str(log_path),
+        "FAKE_REGISTRY_STATE": str(state_dir),
+        "FAKE_UNAME_MACHINE": "x86_64",
+    })
+    return env
+
+
+def _run_platform_publisher(
+    tmp_path: Path,
+    scenario: str,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    tmp_path.mkdir()
+    fixture = _write_release_publisher_contracts(tmp_path)
+    bin_dir, state_dir, log_path = _fake_release_publisher_tools(tmp_path)
+    base_key = _PUBLISHER_DIGESTS["base_index"].removeprefix("sha256:")[:12]
+    staging_image = (
+        f"{fixture['registry_image']}:{RELEASE_VERSION}-staging-123-{base_key}-amd64"
+    )
+    if scenario in {"reuse", "conflict"}:
+        _write_publisher_state(state_dir, staging_image, _PUBLISHER_DIGESTS["amd64"])
+    env = _release_publisher_env(
+        fixture=fixture,
+        bin_dir=bin_dir,
+        state_dir=state_dir,
+        log_path=log_path,
+    )
+    env.update({
+        "RELEASE_ARCHITECTURE": "amd64",
+        "RELEASE_CACHE_SCOPE": "v2-7",
+        "FAKE_PLATFORM_DIGEST": _PUBLISHER_DIGESTS["amd64"],
+    })
+    if scenario == "conflict":
+        env["FAKE_EXISTING_VERSION"] = "9.9.9"
+    result = subprocess.run(
+        [str(RELEASE_PUBLISHER), "gitlab-platform-image"],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result, log_path.read_text(encoding="utf-8")
+
+
+def _run_index_publisher(
+    tmp_path: Path,
+    scenario: str,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    tmp_path.mkdir()
+    fixture = _write_release_publisher_contracts(
+        tmp_path,
+        wrong_runner=scenario == "wrong-runner",
+        missing_arm64=scenario == "missing-arm64",
+        conflicting_index=scenario == "staging-conflict",
+    )
+    bin_dir, state_dir, log_path = _fake_release_publisher_tools(tmp_path)
+    base_key = _PUBLISHER_DIGESTS["base_index"].removeprefix("sha256:")[:12]
+    amd64_anchor = f"{fixture['registry_image']}:{RELEASE_VERSION}-amd64"
+    arm64_anchor = f"{fixture['registry_image']}:{RELEASE_VERSION}-arm64"
+    staging_index = (
+        f"{fixture['registry_image']}:{RELEASE_VERSION}-index-staging-123-{base_key}"
+    )
+    canonical_index = f"{fixture['registry_image']}:{RELEASE_VERSION}"
+    if scenario == "reuse":
+        for reference, digest in (
+            (amd64_anchor, _PUBLISHER_DIGESTS["amd64"]),
+            (arm64_anchor, _PUBLISHER_DIGESTS["arm64"]),
+            (staging_index, _PUBLISHER_DIGESTS["index"]),
+            (canonical_index, _PUBLISHER_DIGESTS["index"]),
+        ):
+            _write_publisher_state(state_dir, reference, digest)
+    elif scenario == "anchor-conflict":
+        _write_publisher_state(state_dir, amd64_anchor, _PUBLISHER_DIGESTS["conflict"])
+    elif scenario == "canonical-conflict":
+        _write_publisher_state(state_dir, canonical_index, _PUBLISHER_DIGESTS["conflict"])
+    elif scenario == "staging-conflict":
+        _write_publisher_state(state_dir, staging_index, _PUBLISHER_DIGESTS["index"])
+    env = _release_publisher_env(
+        fixture=fixture,
+        bin_dir=bin_dir,
+        state_dir=state_dir,
+        log_path=log_path,
+    )
+    env.update({
+        "AMD64_IMAGE": f"{fixture['registry_image']}:staging-amd64",
+        "AMD64_DIGEST": _PUBLISHER_DIGESTS["amd64"],
+        "ARM64_IMAGE": f"{fixture['registry_image']}:staging-arm64",
+        "ARM64_DIGEST": _PUBLISHER_DIGESTS["arm64"],
+    })
+    result = subprocess.run(
+        [str(RELEASE_PUBLISHER), "gitlab-index"],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result, log_path.read_text(encoding="utf-8")
+
+
+def _run_dockerhub_publisher(
+    tmp_path: Path,
+    scenario: str,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    tmp_path.mkdir()
+    fixture = _write_release_publisher_contracts(tmp_path)
+    bin_dir, state_dir, log_path = _fake_release_publisher_tools(tmp_path)
+    dockerhub_reference = f"{fixture['dockerhub_image']}:{RELEASE_VERSION}"
+    if scenario == "reuse":
+        _write_publisher_state(state_dir, dockerhub_reference, _PUBLISHER_DIGESTS["index"])
+    elif scenario == "conflict":
+        _write_publisher_state(state_dir, dockerhub_reference, _PUBLISHER_DIGESTS["conflict"])
+    env = _release_publisher_env(
+        fixture=fixture,
+        bin_dir=bin_dir,
+        state_dir=state_dir,
+        log_path=log_path,
+    )
+    env.update({
+        "DOCKERHUB_IMAGE": fixture["dockerhub_image"],
+        "DOCKERHUB_USERNAME": "dockerhub-user",
+        "DOCKERHUB_TOKEN": "dockerhub-token-secret",
+        "GITLAB_INDEX_IMAGE": f"{fixture['registry_image']}:{RELEASE_VERSION}",
+        "GITLAB_INDEX_DIGEST": _PUBLISHER_DIGESTS["index"],
+    })
+    result = subprocess.run(
+        [str(RELEASE_PUBLISHER), "dockerhub-image"],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result, log_path.read_text(encoding="utf-8")
 
 
 def test_production_compose_uses_pinned_public_image_and_no_source_mount():
@@ -1568,7 +1968,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_STAGING_CLEANUP_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_STAGING_KEEP_DAYS"] == "14"
-    assert parsed_ci["variables"]["RELEASE_CACHE_SCOPE"] == "v2-6"
+    assert parsed_ci["variables"]["RELEASE_CACHE_SCOPE"] == "v2-7"
     assert "RELEASE_CACHE_PROBE" not in ci_config
     docker_build_rules = parsed_ci["docker-build"]["rules"]
     assert docker_build_rules[0]["if"] == (
@@ -2509,18 +2909,143 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     )
     assert set(degraded_contract["platforms"]) == {"amd64"}
     assert degraded_contract["degraded_reason"] == "ARM64 runner unavailable"
-    publisher = RELEASE_PUBLISHER.read_text(encoding="utf-8")
-    assert "create_or_validate_child_anchor" in publisher
-    assert "--annotation \"index:sh.darklab.release.mode=${release_mode}\"" in publisher
-    assert "release_image_contract.py\" validate-index" in publisher
-    assert "release_image_contract.py\" validate-platforms" in publisher
-    assert "-index-staging-${CI_PIPELINE_ID}-${base_resolution_key}" in publisher
-    assert publisher.index("validate-platforms") < publisher.index(
-        'if docker buildx imagetools inspect "$canonical_image"'
+
+    platform_first, platform_first_log = _run_platform_publisher(
+        tmp_path / "platform-first", "first"
     )
-    assert 'require_equal gitlab_index staging_digest' in publisher
-    assert "buildcache-arm64" not in publisher
-    assert "-staging-${CI_PIPELINE_ID}-${base_resolution_key}-${architecture}" in publisher
+    assert platform_first.returncode == 0, platform_first.stderr
+    assert "docker buildx build" in platform_first_log
+    platform_metrics = dict(
+        row.split("=", 1)
+        for row in (tmp_path / "platform-first" / "release-image-amd64-build-metrics.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    assert platform_metrics["image_action"] == "build"
+    assert platform_metrics["reused_existing_tag"] == "false"
+
+    platform_reuse, platform_reuse_log = _run_platform_publisher(
+        tmp_path / "platform-reuse", "reuse"
+    )
+    assert platform_reuse.returncode == 0, platform_reuse.stderr
+    assert "docker buildx build" not in platform_reuse_log
+    platform_reuse_metrics = dict(
+        row.split("=", 1)
+        for row in (tmp_path / "platform-reuse" / "release-image-amd64-build-metrics.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    assert platform_reuse_metrics["image_action"] == "reuse"
+    assert platform_reuse_metrics["reused_existing_tag"] == "true"
+
+    platform_conflict, platform_conflict_log = _run_platform_publisher(
+        tmp_path / "platform-conflict", "conflict"
+    )
+    assert platform_conflict.returncode != 0
+    assert "stage=platform_existing_tag check=version" in platform_conflict.stderr
+    assert "docker buildx build" not in platform_conflict_log
+
+    index_first, index_first_log = _run_index_publisher(
+        tmp_path / "index-first", "first"
+    )
+    assert index_first.returncode == 0, index_first.stderr
+    assert index_first_log.count("imagetools create --prefer-index=false") == 2
+    assert "--annotation index:sh.darklab.release.mode=dual" in index_first_log
+    assert (tmp_path / "index-first" / "release-index.json").is_file()
+
+    index_reuse, index_reuse_log = _run_index_publisher(
+        tmp_path / "index-reuse", "reuse"
+    )
+    assert index_reuse.returncode == 0, index_reuse.stderr
+    assert "imagetools create" not in index_reuse_log
+    assert "Reusing canonical GitLab image index" in index_reuse.stdout
+    assert "Reusing immutable amd64 child anchor" in (
+        tmp_path / "index-reuse" / "gitlab-amd64-anchor-create.txt"
+    ).read_text(encoding="utf-8")
+
+    staging_conflict, staging_conflict_log = _run_index_publisher(
+        tmp_path / "index-staging-conflict", "staging-conflict"
+    )
+    assert staging_conflict.returncode != 0
+    assert "Canonical linux/arm64 digest does not match" in staging_conflict.stderr
+    assert f"imagetools create --tag registry.example.test/darklab/shell:{RELEASE_VERSION}" not in (
+        staging_conflict_log
+    )
+
+    wrong_runner, wrong_runner_log = _run_index_publisher(
+        tmp_path / "index-wrong-runner", "wrong-runner"
+    )
+    assert wrong_runner.returncode != 0
+    assert "runner architecture does not match" in wrong_runner.stderr
+    assert "imagetools create" not in wrong_runner_log
+
+    missing_arm64, missing_arm64_log = _run_index_publisher(
+        tmp_path / "index-missing-arm64", "missing-arm64"
+    )
+    assert missing_arm64.returncode != 0
+    assert "release-platform-arm64.json" in missing_arm64.stderr
+    assert "imagetools create" not in missing_arm64_log
+
+    anchor_conflict, anchor_conflict_log = _run_index_publisher(
+        tmp_path / "index-anchor-conflict", "anchor-conflict"
+    )
+    assert anchor_conflict.returncode != 0
+    assert "stage=gitlab_child_anchor check=digest" in anchor_conflict.stderr
+    assert "imagetools create" not in anchor_conflict_log
+
+    canonical_conflict, canonical_conflict_log = _run_index_publisher(
+        tmp_path / "index-canonical-conflict", "canonical-conflict"
+    )
+    assert canonical_conflict.returncode != 0
+    assert "stage=gitlab_index check=staging_digest" in canonical_conflict.stderr
+    assert "imagetools create --prefer-index=false" in canonical_conflict_log
+
+    dockerhub_first, dockerhub_first_log = _run_dockerhub_publisher(
+        tmp_path / "dockerhub-first", "first"
+    )
+    assert dockerhub_first.returncode == 0, dockerhub_first.stderr
+    assert f"imagetools create --tag docker.io/darklabsh/darklab-shell:{RELEASE_VERSION}" in (
+        dockerhub_first_log
+    )
+    assert (tmp_path / "dockerhub-first" / "dockerhub-index.json").is_file()
+
+    dockerhub_reuse, dockerhub_reuse_log = _run_dockerhub_publisher(
+        tmp_path / "dockerhub-reuse", "reuse"
+    )
+    assert dockerhub_reuse.returncode == 0, dockerhub_reuse.stderr
+    assert "Docker Hub tag already contains canonical digest" in dockerhub_reuse.stdout
+    assert "imagetools create" not in dockerhub_reuse_log
+
+    dockerhub_conflict, dockerhub_conflict_log = _run_dockerhub_publisher(
+        tmp_path / "dockerhub-conflict", "conflict"
+    )
+    assert dockerhub_conflict.returncode != 0
+    assert "stage=dockerhub_existing_tag check=canonical_digest" in (
+        dockerhub_conflict.stderr
+    )
+    assert "imagetools create" not in dockerhub_conflict_log
+
+    combined_publisher_output = "".join(
+        result.stdout + result.stderr
+        for result in (
+            platform_first,
+            platform_reuse,
+            platform_conflict,
+            index_first,
+            index_reuse,
+            staging_conflict,
+            wrong_runner,
+            missing_arm64,
+            anchor_conflict,
+            canonical_conflict,
+            dockerhub_first,
+            dockerhub_reuse,
+            dockerhub_conflict,
+        )
+    )
+    assert "gitlab-password-secret" not in combined_publisher_output
+    assert "dockerhub-token-secret" not in combined_publisher_output
+
     cleanup = _load_script_module("cleanup_release_image_tags")
     assert cleanup.TEMPORARY_TAG_RE.fullmatch(
         "2.6.1-rc.1-staging-123-abcdef123456-amd64"
