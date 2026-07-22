@@ -19209,19 +19209,61 @@ class TestRunBrokerMemoryStore:
         fake_redis.xrevrange.return_value = [
             (b"3-0", {b"payload": b'{"type":"output","text":"line 3"}'}),
             (b"2-0", {b"payload": b'{"type":"output","text":"line 2"}'}),
+            (b"1-0", {b"payload": b'{"type":"output","text":"line 1"}'}),
         ]
-        fake_redis.xlen.return_value = 3
 
         with mock.patch.object(process, "redis_client", fake_redis), \
-             mock.patch.object(run_broker, "_replay_fetch_count", return_value=2):
+             mock.patch.object(run_broker, "_replay_fetch_count", return_value=2), \
+             mock.patch.object(run_broker.log, "warning") as log_warning:
             events = run_broker._RedisRunBrokerStore().replay("run-1")
 
+        fake_redis.xrevrange.assert_called_once_with(
+            "runstream:run-1",
+            max="+",
+            min="-",
+            count=3,
+        )
+        fake_redis.xlen.assert_not_called()
         assert events[0].payload["type"] == "notice"
         assert events[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
         assert [(event.event_id, event.payload.get("text")) for event in events[1:]] == [
             ("2-0", "line 2"),
             ("3-0", "line 3"),
         ]
+        log_warning.assert_called_once_with("BROKER_REPLAY_TRIMMED", extra={
+            "run_id": "run-1",
+            "mode": "redis",
+            "max_events": 5000,
+            "max_bytes": 10485760,
+            "remaining_events": 2,
+        })
+
+    def test_redis_replay_does_not_mark_short_tail_when_stream_grows_after_fetch(self):
+        fake_redis = mock.Mock()
+        fake_redis.xrevrange.return_value = [
+            (b"2-0", {b"payload": b'{"type":"output","text":"line 2"}'}),
+            (b"1-0", {b"payload": b'{"type":"output","text":"line 1"}'}),
+        ]
+        fake_redis.xlen.return_value = 3
+
+        with mock.patch.object(process, "redis_client", fake_redis), \
+             mock.patch.object(run_broker, "_replay_fetch_count", return_value=2), \
+             mock.patch.object(run_broker.log, "warning") as log_warning:
+            events = run_broker._RedisRunBrokerStore().replay("run-1")
+
+        fake_redis.xrevrange.assert_called_once_with(
+            "runstream:run-1",
+            max="+",
+            min="-",
+            count=3,
+        )
+        fake_redis.xlen.assert_not_called()
+        assert [(event.event_id, event.payload.get("text")) for event in events] == [
+            ("1-0", "line 1"),
+            ("2-0", "line 2"),
+        ]
+        assert not any(event.payload.get("text") == run_broker.REPLAY_TRIM_NOTICE for event in events)
+        log_warning.assert_not_called()
 
     def test_redis_publish_trims_stream_with_replay_derived_maxlen(self):
         fake_redis = mock.Mock()
