@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_for_release": "2.7.0-rc.3",
+  "reviewed_for_release": "2.7.0",
   "reviewed_on": "2026-07-21",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
