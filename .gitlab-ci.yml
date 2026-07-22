@@ -1178,17 +1178,51 @@ release-supply-chain:
       --output-dir release-evidence
     - |
       signing_identity="${CI_PROJECT_URL}//.gitlab-ci.yml@refs/tags/${CI_COMMIT_TAG}"
+      verify_release_signature() {
+        cosign verify \
+          --certificate-identity "$signing_identity" \
+          --certificate-oidc-issuer "$CI_SERVER_URL" \
+          "$1"
+      }
+      verify_release_signature_with_retry() {
+        signature_target="$1"
+        signature_verify_attempt=1
+        signature_verify_delay=2
+        signature_verify_max_attempts=7
+        while :; do
+          if signature_verify_output=$(verify_release_signature "$signature_target" 2>&1); then
+            printf '%s\n' "$signature_verify_output"
+            return 0
+          fi
+          if [ "$signature_verify_attempt" -ge "$signature_verify_max_attempts" ]; then
+            printf '%s\n' "$signature_verify_output" >&2
+            printf 'Signature for %s was not visible after %s verification attempts.\n' \
+              "$signature_target" "$signature_verify_attempt" >&2
+            return 1
+          fi
+          printf 'Signature for %s is not visible yet; retrying in %s seconds (%s/%s).\n' \
+            "$signature_target" "$signature_verify_delay" \
+            "$signature_verify_attempt" "$signature_verify_max_attempts"
+          sleep "$signature_verify_delay"
+          signature_verify_attempt=$((signature_verify_attempt + 1))
+          if [ "$signature_verify_delay" -lt 32 ]; then
+            signature_verify_delay=$((signature_verify_delay * 2))
+          fi
+        done
+      }
       targets="${GITLAB_INDEX_IMAGE}@${GITLAB_INDEX_DIGEST} ${DOCKERHUB_INDEX_IMAGE}@${DOCKERHUB_INDEX_DIGEST}"
       for digest in "$GITLAB_AMD64_DIGEST" "$GITLAB_ARM64_DIGEST"; do
         [ -n "$digest" ] || continue
         targets="$targets ${GITLAB_INDEX_IMAGE}@${digest} ${DOCKERHUB_INDEX_IMAGE}@${digest}"
       done
       for target in $targets; do
+        if signature_verify_output=$(verify_release_signature "$target" 2>&1); then
+          printf 'Reusing existing verified signature for %s.\n' "$target"
+          printf '%s\n' "$signature_verify_output"
+          continue
+        fi
         cosign sign "$target"
-        cosign verify \
-          --certificate-identity "$signing_identity" \
-          --certificate-oidc-issuer "$CI_SERVER_URL" \
-          "$target"
+        verify_release_signature_with_retry "$target"
       done
   artifacts:
     when: always
