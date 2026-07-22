@@ -2246,6 +2246,21 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert '--build-date "$RELEASE_BUILD_DATE"' in supply_chain_script
     assert "GITLAB_ARM64_DIGEST" in supply_chain_script
     assert "for target in $targets" in supply_chain_script
+    assert "verify_release_signature()" in supply_chain_script
+    assert "verify_release_signature_with_retry()" in supply_chain_script
+    assert "signature_verify_max_attempts=7" in supply_chain_script
+    assert 'signature_verify_delay=$((signature_verify_delay * 2))' in supply_chain_script
+    assert 'signature_verify_output=$(verify_release_signature "$target" 2>&1)' in (
+        supply_chain_script
+    )
+    assert 'cosign sign "$target"' in supply_chain_script
+    assert 'verify_release_signature_with_retry "$target"' in supply_chain_script
+    assert supply_chain_script.index(
+        'signature_verify_output=$(verify_release_signature "$target" 2>&1)'
+    ) < supply_chain_script.index('cosign sign "$target"')
+    assert supply_chain_script.index('cosign sign "$target"') < supply_chain_script.index(
+        'verify_release_signature_with_retry "$target"'
+    )
     payload_script = "\n".join(parsed_ci["release-payload-upload"]["script"])
     assert "--evidence-dir release-evidence" in payload_script
     assert "--release-index release-index.json" in payload_script
