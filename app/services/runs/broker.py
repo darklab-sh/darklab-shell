@@ -482,20 +482,19 @@ class _RedisRunBrokerStore:
                 key,
                 max="+",
                 min="-",
-                count=fetch_count,
+                count=fetch_count + 1,
             ),
         )
+        replay_trimmed = len(rows or []) > fetch_count
+        if replay_trimmed:
+            rows = rows[:fetch_count]
         events: list[BrokerEvent] = []
         for event_id, fields in reversed(rows or []):
             payload = _decode_payload(fields, run_id=run_id, event_id=_coerce_text(event_id))
             if payload is not None:
                 events.append(BrokerEvent(_coerce_text(event_id), payload))
         bounded = _bounded_replay_events(events)
-        try:
-            stream_length = int(cast(Any, redis_client.xlen(key)))
-        except (TypeError, ValueError, AttributeError):
-            stream_length = len(rows or [])
-        if stream_length > len(rows or []):
+        if replay_trimmed:
             log.warning("BROKER_REPLAY_TRIMMED", extra={
                 "run_id": run_id,
                 "mode": broker_mode(),

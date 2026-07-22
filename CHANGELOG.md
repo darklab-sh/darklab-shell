@@ -19,6 +19,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Fresh Redis-backed live replays no longer show a false trimmed-output warning.**
+  - **Root cause:** Redis read the newest retained events and then queried the stream length separately, so an active command publishing between those requests could make a short replay look truncated.
+  - **Fix:** replay now requests one extra tail record in the same Redis read and treats only that extra oldest record as proof that the retained window omitted earlier events.
+  - **Tests:** focused broker coverage exercises genuine tail truncation, the former active-stream growth race, the retained-event warning count, and the absence of the second Redis length query.
+
 - **Release signing tolerates registry signature propagation without adding duplicate signatures on job retries.**
   - **Root cause:** the supply-chain job verified each image immediately after signing it, but Docker Hub could accept a signature before making it visible to the following verification request. Retrying the job then signed targets that had already completed successfully.
   - **Fix:** each release target first reuses an existing signature that matches the protected tag identity. Missing signatures are created once, then verification polls with bounded exponential backoff while registry referrers become visible.
