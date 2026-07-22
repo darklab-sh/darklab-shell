@@ -64,6 +64,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Development tooling no longer installs the vulnerable `brace-expansion` 5.0.6 release** — The lockfile now selects patched version 5.0.7 for ESLint's Minimatch dependency, clearing the high-severity JavaScript dependency audit without a forced or breaking upgrade.
 
+- **Browser and development dependencies no longer install vulnerable DOMPurify, fast-uri, or linkify-it releases** — The lockfile now selects DOMPurify 3.4.12, fast-uri 3.1.4, and linkify-it 5.0.2, clearing the custom-element sanitizer bypass, URI host-confusion, and quadratic `mailto:` parsing advisories without changing their parent packages.
+
 - **Staging registry cleanup doesn't skip expired tags when pages shift during deletion** — The cleanup job now collects and validates the complete match set before issuing its first delete request. Its regression models 205 temporary tags across three mutable offset-paginated pages and confirms every expired attempt is removed while a release-child anchor remains untouched.
 
 - **ARM64 release smoke checks verify the live Postgres schema instead of a browser-only config response** — The optional Postgres startup gate now confirms that app migrations reached the fresh Postgres service. It no longer expects the public `/config` payload to expose the private database backend setting.
