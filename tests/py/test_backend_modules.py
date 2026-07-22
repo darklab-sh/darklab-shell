@@ -7911,11 +7911,12 @@ class TestPostgresMigrations:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         try:
-            applied = run_migrations(
-                conn,
-                (*MIGRATIONS, future_delta),
-                backend=database_backend.DatabaseBackend.SQLITE,
-            )
+            with mock.patch("core.migrations.runner.log.info") as log_info:
+                applied = run_migrations(
+                    conn,
+                    (*MIGRATIONS, future_delta),
+                    backend=database_backend.DatabaseBackend.SQLITE,
+                )
             table_exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_baseline_delta'"
             ).fetchone()
@@ -7929,6 +7930,13 @@ class TestPostgresMigrations:
         assert applied == [*[migration.version for migration in MIGRATIONS], "0045"]
         assert table_exists is not None
         assert "0045" in versions
+        migration_events = [
+            call for call in log_info.call_args_list
+            if call.args and call.args[0] == "MIGRATION_APPLIED"
+        ]
+        assert migration_events
+        assert all("migration_version" in call.kwargs["extra"] for call in migration_events)
+        assert all("version" not in call.kwargs["extra"] for call in migration_events)
 
     def test_migration_failure_logs_statement_context(self):
         from core.migrations.runner import Migration, apply_migration
@@ -7963,7 +7971,7 @@ class TestPostgresMigrations:
         event, = log_error.call_args.args
         extra = log_error.call_args.kwargs["extra"]
         assert event == "MIGRATION_FAILED"
-        assert extra["version"] == "9999"
+        assert extra["migration_version"] == "9999"
         assert extra["statement_index"] == 2
         assert extra["statement_count"] == 2
         assert len(extra["statement_hash"]) == 16

@@ -137,7 +137,7 @@ def apply_unified_baseline_from_empty(
                 failed_statement = statement
                 log.debug("MIGRATION_STATEMENT_STARTED", extra={
                     "backend": backend.value,
-                    "version": migration.version,
+                    "migration_version": migration.version,
                     "migration_name": migration.name,
                     "statement_index": index,
                     "statement_count": statement_count,
@@ -162,7 +162,10 @@ def apply_unified_baseline_from_empty(
         raise
     if commit:
         _commit_if_available(conn)
-    log.info("MIGRATION_APPLIED", extra={"version": baseline.version, "migration_name": baseline.name})
+    log.info(
+        "MIGRATION_APPLIED",
+        extra={"migration_version": baseline.version, "migration_name": baseline.name},
+    )
     log.info("MIGRATION_BASELINE_COMPLETED", extra={
         "backend": backend.value,
         "baseline_version": baseline.version,
@@ -189,7 +192,7 @@ def apply_migration(
             failed_statement = statement
             log.debug("MIGRATION_STATEMENT_STARTED", extra={
                 "backend": backend.value,
-                "version": migration.version,
+                "migration_version": migration.version,
                 "migration_name": migration.name,
                 "statement_index": index,
                 "statement_count": statement_count,
@@ -215,7 +218,10 @@ def apply_migration(
         raise
     if commit:
         _commit_if_available(conn)
-    log.info("MIGRATION_APPLIED", extra={"version": migration.version, "migration_name": migration.name})
+    log.info(
+        "MIGRATION_APPLIED",
+        extra={"migration_version": migration.version, "migration_name": migration.name},
+    )
 
 
 def run_migrations(
@@ -254,7 +260,7 @@ def run_migrations(
         if migration.version in applied:
             log.debug("MIGRATION_SKIPPED_ALREADY_APPLIED", extra={
                 "backend": backend.value,
-                "version": migration.version,
+                "migration_version": migration.version,
             })
             continue
         if before_migration is not None:
@@ -263,7 +269,7 @@ def run_migrations(
             if migration.version in applied:
                 log.debug("MIGRATION_SKIPPED_ALREADY_APPLIED", extra={
                     "backend": backend.value,
-                    "version": migration.version,
+                    "migration_version": migration.version,
                     "after_before_migration": True,
                 })
                 continue
@@ -357,7 +363,7 @@ def _log_migration_failed(
     statement: str = "",
 ) -> None:
     extra: dict[str, Any] = {
-        "version": migration.version,
+        "migration_version": migration.version,
         "migration_name": migration.name,
         "backend": backend.value,
         "error": str(exc),

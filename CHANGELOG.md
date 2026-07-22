@@ -43,6 +43,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **GELF startup and migration logs no longer collide with OpenSearch metadata fields.**
+  - **Root cause:** `APP_INITIALIZED` and schema-migration records used a structured field named `version`. The GELF formatter correctly prefixed additional fields with `_`, but that produced `_version`, which OpenSearch reserves for document metadata; the fatal configuration fallback had the same latent problem with `_source`.
+  - **Fix:** app startup now reports `app_version`, migration events report `migration_version`, and both normal GELF formatting and fatal startup fallback namespace any OpenSearch-reserved additional name under `_event_*`. GELF protocol version `1.1` and the existing `_app_version` field remain unchanged.
+  - **Tests:** formatter coverage rejects `_version` and `_source`, verifies their safe `_event_*` names, and startup plus migration event contracts pin the explicit field names.
+
 - **Deployment settings no longer masquerade as usable YAML overrides.**
   - **Root cause:** both shipped Compose stacks always supplied defaults for Files, database, PTY, raw scanning, Prometheus, and AI environment variables, so matching values in `config.local.yaml` could be silently shadowed even though the YAML reference presented them as operator options.
   - **Fix:** deployment wiring and feature switches now have one documented `.env` surface, including `WORKSPACE_ENABLED`, `WORKSPACE_BACKEND`, and `WORKSPACE_ROOT`. The shipped YAML reference keeps only application fine-tuning, and Compose passes empty optional overrides for database pool/JIT and AI tuning so those YAML values can take effect.

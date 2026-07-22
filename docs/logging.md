@@ -99,7 +99,7 @@ The current event inventory is:
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
 | INFO | `CONFIG_LOADED` | app startup | conf_dir, local_conf_dir, local_overlay, supported_local_overlays, overlays, database_backend, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
-| INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
+| INFO | `APP_INITIALIZED` | app startup | app_version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
 | INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
 | INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
 | INFO | `DB_BACKEND_SELECTED` | `db_init` | backend |
@@ -109,7 +109,7 @@ The current event inventory is:
 | INFO | `REDIS_FAKE_ENABLED` | process tracking startup | fallback |
 | INFO | `REDIS_FALLBACK_IN_PROCESS` | process tracking startup | redis_configured, workers, fallback |
 | INFO | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP` | active-run startup cleanup | metadata_removed, session_members_removed, team_members_removed, pid, cleanup_owner, lock_type |
-| INFO | `MIGRATION_APPLIED` | Schema migration runner | version, migration_name |
+| INFO | `MIGRATION_APPLIED` | Schema migration runner | migration_version, migration_name |
 | INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
 | INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |
@@ -414,7 +414,7 @@ The current event inventory is:
 | ERROR | `SCHEDULER_WORKER_BOOTSTRAP_FAILED` | scheduler worker | phase, pid (+ traceback) |
 | ERROR | `AI_WORKER_BOOTSTRAP_FAILED` | AI worker startup | phase (+ traceback) |
 | ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
-| ERROR | `MIGRATION_FAILED` | Schema migration runner | version, migration_name, error (+ traceback) |
+| ERROR | `MIGRATION_FAILED` | Schema migration runner | migration_version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
 | ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, request_id, method, path, status (+ traceback) |
@@ -423,6 +423,7 @@ The current event inventory is:
 ## Logging Shape Notes
 
 - request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
+- GELF keeps its required top-level `version: "1.1"` field separate from the app release in `_app_version`. Structured context names that would become OpenSearch metadata fields are emitted under `_event_*` instead, such as `_event_version` and `_event_source`, so Graylog can index them without colliding with `_version` or `_source`
 - run lifecycle logs intentionally carry `ip`, `session`, and `run_id` so start/end/kill/failure events can be correlated without reconstructing request flow from surrounding lines
 - web bootstrap runs active-run metadata cleanup through a Redis-backed ownership guard; no-Redis deployments keep the previous per-worker cleanup fallback, while multi-worker startup without Redis fails closed with `REDIS_REQUIRED_FOR_MULTI_WORKER`
 - diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the command-execution path

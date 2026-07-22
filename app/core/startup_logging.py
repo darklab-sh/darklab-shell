@@ -14,6 +14,26 @@ from typing import Any
 
 _FATAL_FIELDS = ("phase", "source", "key", "error")
 _GELF_LEVEL_ERROR = 3
+_OPENSEARCH_METADATA_FIELDS = frozenset({
+    "_field_names",
+    "_id",
+    "_ignored",
+    "_index",
+    "_meta",
+    "_primary_term",
+    "_routing",
+    "_seq_no",
+    "_source",
+    "_version",
+})
+
+
+def gelf_additional_field_name(key: str) -> str:
+    """Return a GELF field name that cannot collide with OpenSearch metadata."""
+    field_name = f"_{key}"
+    if field_name in _OPENSEARCH_METADATA_FIELDS:
+        return f"_event_{key}"
+    return field_name
 
 
 def _safe_log_value(value: object, limit: int = 240) -> str:
@@ -106,7 +126,10 @@ class ConfigStartupLogger:
                     "_app": self.app_name,
                     "_app_version": self.app_version,
                     "_logger": record.name,
-                    **{f"_{key}": value for key, value in fields.items()},
+                    **{
+                        gelf_additional_field_name(key): value
+                        for key, value in fields.items()
+                    },
                 }
                 line = json.dumps(payload, separators=(",", ":"), default=str)
             else:
