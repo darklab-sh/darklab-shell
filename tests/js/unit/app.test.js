@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import yaml from 'js-yaml'
+import { load as loadYaml } from 'js-yaml'
 import { loadAppFns } from './helpers/app_harness.js'
 import { fromDomScripts } from './helpers/extract.js'
 import {
@@ -268,14 +268,15 @@ function builtInAutocompleteBase() {
       },
     },
     file: {
-      ...emptyBuiltIn('built-in: list, view, create, edit, download, move, or remove session files'),
+      ...emptyBuiltIn('built-in: list, view, compare, create, edit, download, move, or remove session files'),
       feature_required: 'workspace',
-      expects_value: ['show', 'add', 'add-dir', 'edit', 'download', 'move', 'rm', 'delete', 'ls'],
+      expects_value: ['show', 'diff', 'add', 'add-dir', 'edit', 'download', 'move', 'rm', 'delete', 'ls'],
       arg_hints: {
         list: [],
         ls: [],
         help: [],
         show: [],
+        diff: [],
         add: [hint('<file>', 'New session file name')],
         'add-dir': [hint('<folder>', 'New session folder')],
         edit: [],
@@ -287,6 +288,7 @@ function builtInAutocompleteBase() {
           hint('list <folder>', 'List current session files', 'list '),
           hint('ls <folder>', 'List current session files', 'ls '),
           hint('show <file>', 'Print a session file in the terminal', 'show '),
+          hint('diff <source1> <source2>', 'Compare files or completed run output', 'diff '),
           hint('add <file>', 'Open the Files editor for a new session file', 'add '),
           hint('add-dir <folder>', 'Create a session folder', 'add-dir '),
           hint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
@@ -299,6 +301,19 @@ function builtInAutocompleteBase() {
     },
     cat: { ...emptyBuiltIn('built-in: show a session file'), feature_required: 'workspace', argument_limit: 1 },
     cd: { ...emptyBuiltIn('built-in: change the current workspace folder'), feature_required: 'workspace', argument_limit: 1 },
+    diff: {
+      ...emptyBuiltIn('built-in: compare session files or completed run output'),
+      flags: [
+        hint('--last'),
+        hint('-q'),
+        hint('--brief'),
+        hint('-u'),
+        hint('--unified'),
+        hint('-y'),
+        hint('--side-by-side'),
+      ],
+      argument_limit: 2,
+    },
     grep: { ...emptyBuiltIn('built-in: filter a session file'), feature_required: 'workspace', argument_limit: 2 },
     head: { ...emptyBuiltIn('built-in: print the first lines of a session file'), feature_required: 'workspace', argument_limit: 1 },
     ll: { ...emptyBuiltIn('built-in: long-list session files'), feature_required: 'workspace', argument_limit: 1 },
@@ -328,7 +343,7 @@ function shippedThemeRegistry() {
     .filter(name => name.endsWith('.yaml') && !name.endsWith('.local.yaml'))
     .sort()
     .map(filename => {
-      const raw = yaml.load(readFileSync(resolve(themeDir, filename), 'utf8')) || {}
+      const raw = loadYaml(readFileSync(resolve(themeDir, filename), 'utf8')) || {}
       const name = filename.replace(/\.yaml$/, '')
       const vars = {}
       Object.entries(raw).forEach(([key, value]) => {
@@ -3423,6 +3438,7 @@ describe('app helpers', () => {
       'list <folder>',
       'ls <folder>',
       'show <file>',
+      'diff <source1> <source2>',
       'add <file>',
       'add-dir <folder>',
       'edit <file>',
@@ -3430,6 +3446,7 @@ describe('app helpers', () => {
       'move <source> <destination>',
       'delete <file>',
       'help',
+      'diff --last',
     ])
     expect(context.status).toBeTruthy()
     expect(context.whoami).toBeTruthy()
@@ -3458,6 +3475,10 @@ describe('app helpers', () => {
     const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
     expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.arg_hints.diff.map(item => item.value)).toEqual([
+      '--last', '-q', '--brief', '-u', '--unified', '-y', '--side-by-side',
+      'run:<run-id>', 'file:<path>', 'targets.txt', 'ffuf.json', 'reports/',
+    ])
     expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
     expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
     expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
@@ -3474,6 +3495,10 @@ describe('app helpers', () => {
       'session folder',
     ])
     expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.diff.arg_hints.__positional__.map(item => item.value)).toEqual([
+      '--last', '-q', '--brief', '-u', '--unified', '-y', '--side-by-side',
+      'run:<run-id>', 'file:<path>', 'targets.txt', 'ffuf.json', 'reports/',
+    ])
     expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['reports/', '/'])
     expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', 'reports/', '/'])
     expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', 'reports/', '/'])
@@ -3509,6 +3534,10 @@ describe('app helpers', () => {
     expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
     expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
     expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.file.arg_hints.diff.map(item => item.value)).toEqual([
+      '--last', '-q', '--brief', '-u', '--unified', '-y', '--side-by-side',
+      'run:<run-id>', 'file:<path>', 'summary.txt', 'nested/',
+    ])
     expect(context.file.arg_hints.list.map(item => item.value)).toEqual(['-l', '-R', 'nested/', '/'])
     expect(context.file.arg_hints.ls.map(item => item.value)).toEqual(['-l', '-R', 'nested/', '/'])
     expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
@@ -3553,9 +3582,11 @@ describe('app helpers', () => {
     const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
     expect(context.cat.workspace_path_arg_kinds.__positional__).toEqual(['file'])
+    expect(context.diff.workspace_path_arg_kinds).toEqual({})
     expect(context.ls.workspace_path_arg_kinds.__positional__).toEqual(['directory'])
     expect(context.mv.workspace_path_arg_kinds.__positional__).toEqual(['any', 'directory'])
     expect(context.file.workspace_path_arg_kinds.move).toEqual(['any', 'directory'])
+    expect(context.file.workspace_path_arg_kinds.diff).toBeUndefined()
     expect(getWorkspaceAutocompletePathHints('file', 'darklab/').map(item => item.value)).toEqual(['darklab/summary.txt', 'darklab/child/'])
     expect(getWorkspaceAutocompletePathHints('directory', '../').map(item => item.value)).toEqual(['../darklab/', '../reports/'])
     expect(getWorkspaceAutocompletePathHints('file', '../darklab/').map(item => item.value)).toEqual(['../darklab/targets.txt', '../darklab/nested/'])
@@ -3573,6 +3604,9 @@ describe('app helpers', () => {
     expect(context.file).toBeUndefined()
     expect(context.cat).toBeUndefined()
     expect(context.cd).toBeUndefined()
+    expect(context.diff.arg_hints.__positional__.map(item => item.value)).toEqual([
+      '--last', '-q', '--brief', '-u', '--unified', '-y', '--side-by-side', 'run:<run-id>',
+    ])
     expect(context.grep).toBeUndefined()
     expect(context.ll).toBeUndefined()
     expect(context.ls).toBeUndefined()
@@ -3598,7 +3632,7 @@ describe('app helpers', () => {
       [...commandsYaml.matchAll(/^- root: ([a-z0-9_-]+)/gm)].map(match => match[1]),
     )
     const runtimeRoots = [
-      'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'env', 'exit', 'faq', 'fortune', 'free',
+      'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'diff', 'env', 'exit', 'faq', 'fortune', 'free',
       'file', 'grep', 'groups', 'head', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'll', 'ls', 'man',
       'mkdir', 'ps', 'pwd', 'quit', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'sort', 'stats', 'status',
       'tail', 'theme', 'tour', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',

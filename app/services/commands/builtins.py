@@ -88,6 +88,7 @@ from services.commands.builtins_system import (
 from services.commands.builtins_team import run_builtin_team as _run_builtin_team
 from services.commands.builtins_workspace import (
     parse_workspace_list_command as _parse_workspace_list_command,
+    run_builtin_diff as _run_builtin_diff,
     run_builtin_workspace as _run_builtin_workspace,
     run_builtin_workspace_alias as _run_builtin_workspace_alias,
 )
@@ -176,9 +177,9 @@ def _resolve_workspace_alias_command(parts: list[str]) -> str | None:
         if usage_error:
             return None
         return root if not target or _safe_workspace_alias_path(target) else None
-    if root in {"cat", "rm"}:
+    if root in {"cat", "rm", "touch"}:
         return root if len(parts) == 2 and _safe_workspace_alias_path(parts[1]) else None
-    if root == "mv":
+    if root in {"cp", "mv"}:
         return root if len(parts) == 3 and all(_safe_workspace_alias_path(part) for part in parts[1:]) else None
     return None
 
@@ -294,11 +295,13 @@ def _run_builtin_which(command: str) -> list[dict[str, object]]:
 _BUILTIN_COMMAND_DISPATCH = {
     "banner":    lambda cmd, sid: _run_builtin_banner(load_ascii_art),
     "cat":       lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "cp":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "cd":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "clear":     lambda cmd, sid: _run_builtin_clear(),
     "commands":  lambda cmd, sid: _run_builtin_commands(cmd),
     "config":    lambda cmd, sid: _run_builtin_client_side_command("config"),
     "date":      lambda cmd, sid: _run_builtin_date(),
+    "diff":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "env":       lambda cmd, sid: _run_builtin_env(sid),
     "exit":      lambda cmd, sid: _run_builtin_client_side_command("exit"),
     "faq":       lambda cmd, sid: _run_builtin_faq(),
@@ -341,6 +344,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "stats":     lambda cmd, sid: _run_builtin_stats(sid),
     "status":    lambda cmd, sid: _run_builtin_status(sid),
     "tail":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "touch":     lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "team":      lambda cmd, sid: _run_builtin_team(cmd, sid),
     "sudo":      lambda cmd, sid: _run_builtin_sudo(cmd),
     "su_shell":  lambda cmd, sid: _run_builtin_su(cmd),
@@ -385,6 +389,16 @@ def execute_builtin_command(
     handler = _BUILTIN_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
         return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
+    if root == "diff":
+        diff_owner = owner_context
+        if diff_owner is None:
+            diff_owner = owner_context_for_scope(session_id, team_id=team_id)
+        return _run_builtin_diff(
+            _split_command(command),
+            diff_owner,
+            resolve_effective_cfg(),
+            tab_id=tab_id,
+        ), 0
     if root in _WORKSPACE_BUILTIN_ROOTS:
         workspace_owner = owner_context
         if workspace_owner is None:
@@ -395,6 +409,7 @@ def execute_builtin_command(
                 session_id,
                 owner_context=workspace_owner,
                 team_role=team_role,
+                tab_id=tab_id,
             )
         else:
             result = _run_builtin_workspace_alias(
@@ -402,6 +417,7 @@ def execute_builtin_command(
                 session_id,
                 owner_context=workspace_owner,
                 team_role=team_role,
+                tab_id=tab_id,
             )
         return result, 0
     if root == "project":

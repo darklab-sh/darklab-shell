@@ -35,13 +35,13 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 ## Quick Start
 
-On a Linux AMD64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, install the current release with:
+On a Linux AMD64 or ARM64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, install the current release with:
 
 ```bash
 # Change this if you want to install darklab_shell somewhere else.
 DARKLAB_INSTALL_DIR="$HOME/darklab-shell"
 
-curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.7.0/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
 cd "$DARKLAB_INSTALL_DIR"
 docker compose pull
 ./verify-release-image.sh
@@ -78,7 +78,7 @@ After changing one of these settings, run `docker compose up -d --force-recreate
 | [Projects and Atlas](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, and entities. |
 | [Workflows and automation](FEATURES.md#guided-workflows) | Guided playbooks, schedules, watchers, and outbound notifications. |
 | [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context from supported providers. |
-| [Files, variables, and secrets](FEATURES.md#session-files) | Managed inputs, outputs, reusable values, and encrypted tool credentials. |
+| [Files, variables, and secrets](FEATURES.md#session-files) | Managed inputs and outputs, terminal capture/copy helpers, reusable values, and encrypted tool credentials. |
 | [Teams](FEATURES.md#team-mode) | Shared runs, projects, files, automation, and secrets with role controls. |
 | [Interactive tools](FEATURES.md#interactive-pty-mode) | Guarded PTY sessions for approved tools that need a real terminal. |
 | [AI assists](FEATURES.md#ai-assists) | Optional summaries and next-command drafts with privacy controls. |
@@ -118,7 +118,7 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-Released images keep shipped defaults under `/app/conf`; repository-free installs keep private operator overrides under `./conf`, and source-mounted development uses `*.local.*` files beside the shipped catalogs. SQLite is the default database, with Postgres available for larger deployments.
+Released images keep shipped defaults under `/app/conf`; production installations keep private operator overrides under `./conf`, and source-mounted development uses `*.local.*` files beside the shipped catalogs. SQLite is the default database, with Postgres available for larger deployments.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for settings, precedence, supported runtimes, deployment choices, Files storage, raw scanning, database selection, and production tuning. Back up the current data before a database migration, then follow [Postgres Migration](docs/postgres-migration.md) for SQLite-to-Postgres moves or Postgres major-version upgrades. Theme authors can use [THEME.md](THEME.md).
 
@@ -161,7 +161,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `fierce` | DNS reconnaissance and subdomain brute-forcing |
 | `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
 | `ffuf` | Fast directory, file, and vhost fuzzing |
-| `trufflehog` | Secret scanning for session folders and HTTPS Git repositories |
+| `trufflehog` | Secret scanning for Files, HTTPS Git repositories, GitHub, and GitLab |
 | `puredns` | DNS brute forcing with resolver and wildcard output |
 | `naabu` | Fast port discovery across hosts and target lists (ProjectDiscovery) |
 | `katana` | JavaScript-aware web crawler for attack surface mapping (ProjectDiscovery) |
@@ -199,8 +199,8 @@ If you prefer to inspect the exact release installer before it runs, download it
 ```bash
 mkdir darklab-shell-download
 cd darklab-shell-download
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/setup.sh.sha256
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.7.0/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.7.0/setup.sh.sha256
 sha256sum -c setup.sh.sha256
 less setup.sh
 ```
@@ -208,11 +208,11 @@ less setup.sh
 The checksum catches download corruption. To confirm that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity:
 
 ```bash
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/SHA256SUMS
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.6.0/SHA256SUMS.sigstore.json
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.7.0/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.7.0/SHA256SUMS.sigstore.json
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.6.0" \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.7.0" \
   --certificate-oidc-issuer "https://gitlab.com"
 grep '  setup.sh$' SHA256SUMS | sha256sum -c -
 ```
@@ -231,15 +231,15 @@ docker compose up -d
 docker compose ps
 ```
 
-The canonical image is published in the [GitLab Container Registry](https://gitlab.com/darklab.sh/darklab_shell/container_registry), then the same manifest is copied to [`docker.io/darklabsh/darklab-shell`](https://hub.docker.com/r/darklabsh/darklab-shell) for the Compose pull path. The protected tag pipeline keylessly signs both immutable image references and `SHA256SUMS` with its GitLab OIDC identity. The Docker Hub overview publishes the stable issuer and certificate-identity pattern independently of the GitLab release assets, and the public release check requires that trust information to be present. The release also publishes a CycloneDX SBOM, SLSA provenance, the Grype vulnerability report, a build-input inventory, and a small evidence index tying them to the tag, commit, pipeline, shared image digest, and exact Python base manifest. The release gate fails on Critical findings that have an available fix; all reported matches remain in the downloadable report.
+The canonical image is published in the [GitLab Container Registry](https://gitlab.com/darklab.sh/darklab_shell/container_registry), then the same OCI image index is copied to [`docker.io/darklabsh/darklab-shell`](https://hub.docker.com/r/darklabsh/darklab-shell) for the Compose pull path. Docker automatically selects the native Linux AMD64 or ARM64 child image from that one release tag. The protected tag pipeline keylessly signs both index references, every published child digest, and `SHA256SUMS` with its GitLab OIDC identity. The Docker Hub overview publishes the stable issuer and certificate-identity pattern independently of the GitLab release assets, and the public release check requires that trust information to be present. The release also publishes per-platform CycloneDX SBOMs and Grype reports, SLSA provenance, a build-input inventory, and a small evidence index tying them to the tag, commit, pipeline, shared index digest, child digests, and one resolved Python base index. The release gate fails on Critical findings that have an available fix; all reported matches remain in the downloadable reports.
 
-The installed `release-manifest.json` records both image references, matching digests, and compressed and unpacked image sizes. After the pull, `verify-release-image.sh` requires those registry digests to agree, checks that `.env` still selects the reviewed image, and confirms the local image has the recorded digest before startup. CI keeps cold-pull timing as separate run metadata so retrying a release can't change an already published payload. `LICENSE` contains darklab_shell's GNU AGPLv3 terms; `THIRD_PARTY_NOTICES.txt` and `container-licenses.json` list the bundled tools' separate terms, including WPScan's commercial-use note and Nmap's NPSL 0.95 terms. The built-in FAQ identifies the Nmap Security Scanner and links to the Nmap project.
+The installed `release-manifest.json` records both registry index references, their matching digest, and each platform's child digest, base digest, and measured image sizes. After the pull, `verify-release-image.sh` checks the host architecture, requires the registry index digests to agree, confirms `.env` still selects the reviewed image, and verifies the architecture and base labels Docker selected for this host before startup. It uses the standard Docker CLI and doesn't require the Buildx plugin. CI keeps cold-pull timing as separate run metadata so retrying a release can't change an already published payload. `LICENSE` contains darklab_shell's GNU AGPLv3 terms; `THIRD_PARTY_NOTICES.txt` and `container-licenses.json` list the bundled tools' separate terms, including WPScan's commercial-use note and Nmap's NPSL 0.95 terms. The built-in FAQ identifies the Nmap Security Scanner and links to the Nmap project.
 
 ### Storage and Lifecycle
 
 `/data` is durable and contains the default SQLite database, saved output artifacts, and the app-owned vault key. Files workspaces use temporary storage by default and are wiped when the shell container restarts; configure the volume backend before relying on Files for durable evidence. Redis stores coordination and cache state, so a restart can interrupt active work but does not replace the durable database.
 
-Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, `migration-help`, and `remove` for release-managed lifecycle work. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
+Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, and `remove` for production lifecycle work. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
 
 ---
 
@@ -254,10 +254,10 @@ Clone the repository and start the development Compose stack:
 ```bash
 git clone https://gitlab.com/darklab.sh/darklab_shell.git
 cd darklab_shell
-docker compose up --build
+docker compose -f compose.dev.yaml up --build
 ```
 
-This uses the same Dockerfile and entrypoint as the released image, then mounts `./app:/app:ro` over the bundled copy for a quick edit-and-restart loop.
+This uses the same Dockerfile and entrypoint as the released image, then mounts `./app:/app:ro` over the bundled copy for a quick edit-and-restart loop. The development stack binds to `127.0.0.1` by default, uses development labels, and deliberately omits production restart policy and fixed container names.
 
 ### Local Python Environment
 
@@ -312,7 +312,7 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 - [Default.md](.gitlab/merge_request_templates/Default.md) - Default GitLab merge request template used by contributors
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and application internals
 - [CHANGELOG.md](CHANGELOG.md) - Release-by-release change log organised by version
-- [CONFIGURATION.md](CONFIGURATION.md) - Operator reference for repository-free `.env` and `conf/` settings, source-development overrides, Compose customization, storage, and host tuning
+- [CONFIGURATION.md](CONFIGURATION.md) - Operator reference for production `.env` and `conf/` settings, development overrides, Compose customization, storage, and host tuning
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Local setup, test workflow, linting, branch workflow, and merge request guidance
 - [CONTRIBUTORS.md](CONTRIBUTORS.md) - Contributor and acknowledgement notes
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes
@@ -348,5 +348,5 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 | `app/` | Flask application, templates, static assets, and runtime configuration |
 | `deploy/` | Production Compose, setup, and release artifacts |
 | `docs/` | Focused user, operator, and contributor guides |
-| `scripts/` | Development, release, maintenance, and test helpers |
+| `scripts/` | Stable contributor commands with internal helpers grouped by purpose |
 | `tests/` | Backend, browser-unit, end-to-end, and visual-review coverage |

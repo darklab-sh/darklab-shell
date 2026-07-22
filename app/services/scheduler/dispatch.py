@@ -511,6 +511,8 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             original_command,
             schedule.session_token,
             client_ip,
+            owner_context=owner_context,
+            team_role="operator" if schedule.team_id else "",
         )
     except run_blueprint._RunPreparationError as exc:  # noqa: SLF001
         raise ScheduleFireError(str(exc)) from exc
@@ -527,15 +529,18 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
         synthetic_kwargs = {"owner_tab_id": owner_tab_id}
         if schedule.team_id:
             synthetic_kwargs["team_id"] = schedule.team_id
+        filtered_events = run_blueprint._filter_builtin_command_events(  # noqa: SLF001
+            events,
+            prepared_input.variable_notice,
+            prepared_input.postfilter,
+        )
+        if prepared_input.postfilter.output_sink_error and exit_code == 0:
+            exit_code = 1
         return run_blueprint._brokered_synthetic_run(  # noqa: SLF001
             run_blueprint._history_safe_command_for_storage(original_command),  # noqa: SLF001
             schedule.session_token,
             client_ip,
-            run_blueprint._filter_builtin_command_events(  # noqa: SLF001
-                events,
-                prepared_input.variable_notice,
-                prepared_input.postfilter,
-            ),
+            filtered_events,
             exit_code,
             cmd_type="builtin",
             **synthetic_kwargs,

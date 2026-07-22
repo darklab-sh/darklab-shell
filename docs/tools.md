@@ -49,7 +49,7 @@ Files is not a general host filesystem. Absolute paths, traversal, hidden paths,
 
 ## Add Tool Credentials
 
-Save API keys in **Options → Secrets** or start the same protected prompt with `secret set NAME`. `secret list` shows saved names without revealing values, and `providers` shows which intel providers are ready in the active personal or team scope.
+Save API keys in **Options → Secrets** or start the same protected prompt with `secret set NAME`. `secret list` shows saved names without revealing values, and `providers` shows which intel providers and credentialed commands are ready in the active personal or team scope.
 
 Approved commands receive matching values through their process environment. The key is not added to the command, transcript, history, snapshot, or log. Inline credential flags are blocked where they could leak a secret.
 
@@ -121,7 +121,19 @@ Saved output records whether a finding used the managed cache, a workspace templ
 
 ### `trufflehog`
 
-Use `trufflehog filesystem --directory <folder> --json` for a Files folder or `trufflehog git https://... --json` for an HTTPS Git repository. Local Git paths, SSH URLs, custom clone directories, and no-cleanup or trust-local-config modes are blocked to keep scans inside the managed runtime boundary.
+Use `trufflehog filesystem --directory <folder> --json` for a Files folder or `trufflehog git https://... --json` for a public HTTPS Git repository. Private and provider-wide scans use credentials saved through **Options → Secrets** or `secret set NAME`:
+
+```text
+secret set GITHUB_TOKEN
+trufflehog github --repo https://github.com/example/private-repo
+trufflehog github --org example
+
+secret set GITLAB_TOKEN
+trufflehog gitlab --repo https://gitlab.com/example/private-repo.git
+trufflehog gitlab --group-id 12345
+```
+
+Use `--endpoint https://...` with `github` or `gitlab` for a self-hosted provider. Organization, group, and all-accessible-repository scans can cover a lot of repositories, so start with one `--repo` when checking a new token or endpoint. Inline `--token`, credential-bearing URLs, local Git paths, SSH URLs, custom clone directories, and no-cleanup or auth-in-URL modes are blocked so credentials stay out of history and clones stay inside the managed runtime boundary.
 
 ### `puredns`
 

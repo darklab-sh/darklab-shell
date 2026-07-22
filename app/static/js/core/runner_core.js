@@ -32,6 +32,14 @@ var DarklabRunnerCore = (function (global) {
     return (first === '"' || first === "'") && value[value.length - 1] === first;
   }
 
+  function _isValidOutputSinkPath(value) {
+    const path = String(value || '');
+    if (!path || path !== path.trim() || path.startsWith('/') || path.includes('\\')) return false;
+    if ([...path].some(char => char.charCodeAt(0) < 32)) return false;
+    const parts = path.split('/');
+    return parts.length > 0 && parts.every(part => part && part !== '.' && part !== '..' && part.length <= 255);
+  }
+
   function _parseStage(stageTokens) {
     if (!stageTokens.length) return null;
     const normalizedStageTokens = stageTokens.map(_unquoteToken);
@@ -187,8 +195,9 @@ var DarklabRunnerCore = (function (global) {
   }
 
   function parseSyntheticPostFilterCommand(cmd) {
-    if (!cmd || !cmd.includes('|')) return false;
+    if (!cmd || (!cmd.includes('|') && !cmd.includes('>'))) return false;
     if (cmd.includes('`') || cmd.includes('$(')) return null;
+    if (/(^|\s)\d+>>?/.test(cmd)) return null;
     const tokens = [];
     const re = /"[^"]*"|'[^']*'|&&|\|\|?|;;?|>>?|<|[^\s|&;<>]+/g;
     let match = re.exec(cmd);
@@ -197,26 +206,52 @@ var DarklabRunnerCore = (function (global) {
       match = re.exec(cmd);
     }
     if (!tokens.length) return null;
-    if (tokens.some(token => ['&&', '||', ';', ';;', '>', '>>', '<', '&'].includes(token))) return null;
+    if (tokens.some(token => ['&&', '||', ';', ';;', '<', '&'].includes(token))) return null;
+    let sink = null;
+    const redirectIndexes = tokens
+      .map((token, index) => (['>', '>>'].includes(token) ? index : -1))
+      .filter(index => index !== -1);
+    if (redirectIndexes.length) {
+      const redirectIndex = redirectIndexes[0];
+      if (redirectIndexes.length !== 1 || redirectIndex <= 0 || redirectIndex !== tokens.length - 2) return null;
+      const path = _unquoteToken(tokens[tokens.length - 1]).trim();
+      if (!_isValidOutputSinkPath(path)) return null;
+      sink = { kind: tokens[redirectIndex] === '>>' ? 'append' : 'redirect', path };
+      tokens.splice(redirectIndex);
+    }
     const pipeIndexes = tokens
       .map((token, index) => (token === '|' ? index : -1))
       .filter(index => index !== -1);
-    if (!pipeIndexes.length || pipeIndexes[0] <= 0) return null;
+    if ((!pipeIndexes.length && !sink) || (pipeIndexes.length && pipeIndexes[0] <= 0)) return null;
 
     const stages = [];
-    let stageStart = pipeIndexes[0] + 1;
-    for (const pipeIndex of pipeIndexes.slice(1).concat(tokens.length)) {
-      const stageTokens = tokens.slice(stageStart, pipeIndex);
-      const stage = _parseStage(stageTokens);
-      if (!stage) return null;
-      stages.push(stage);
-      stageStart = pipeIndex + 1;
+    if (pipeIndexes.length) {
+      let stageStart = pipeIndexes[0] + 1;
+      const stageEnds = pipeIndexes.slice(1).concat(tokens.length);
+      for (let index = 0; index < stageEnds.length; index += 1) {
+        const pipeIndex = stageEnds[index];
+        const stageTokens = tokens.slice(stageStart, pipeIndex);
+        const helper = String(_unquoteToken(stageTokens[0] || '')).toLowerCase();
+        if (helper === 'tee') {
+          if (sink || index !== stageEnds.length - 1 || stageTokens.length !== 2) return null;
+          const path = _unquoteToken(stageTokens[1]).trim();
+          if (!_isValidOutputSinkPath(path)) return null;
+          sink = { kind: 'tee', path };
+          stageStart = pipeIndex + 1;
+          continue;
+        }
+        const stage = _parseStage(stageTokens);
+        if (!stage) return null;
+        stages.push(stage);
+        stageStart = pipeIndex + 1;
+      }
     }
 
     return {
-      kind: stages[0] ? stages[0].kind : null,
-      baseCommand: tokens.slice(0, pipeIndexes[0]).map(_unquoteToken).join(' '),
+      kind: stages[0] ? stages[0].kind : (sink && sink.kind),
+      baseCommand: tokens.slice(0, pipeIndexes.length ? pipeIndexes[0] : tokens.length).map(_unquoteToken).join(' '),
       stages,
+      sink,
     };
   }
 

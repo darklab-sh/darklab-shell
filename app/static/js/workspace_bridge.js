@@ -9,6 +9,7 @@ const WORKSPACE_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalT
 
 const workspaceHandlers = {
   closeWorkspace: null,
+  copyWorkspacePath: null,
   createWorkspaceDirectory: null,
   downloadWorkspaceFile: null,
   _formatWorkspaceBytes: null,
@@ -21,6 +22,8 @@ const workspaceHandlers = {
   readWorkspaceFile: null,
   refreshWorkspaceFiles: null,
   showWorkspaceViewer: null,
+  touchWorkspaceFile: null,
+  writeWorkspaceTextFile: null,
   workspaceCanWrite: null,
 };
 let workspaceLoadPromise = null;
@@ -135,6 +138,10 @@ function closeWorkspace(...args) {
   return _callWorkspace('closeWorkspace', args);
 }
 
+async function copyWorkspacePath(...args) {
+  return _callLoadedWorkspace('copyWorkspacePath', args);
+}
+
 async function createWorkspaceDirectory(...args) {
   return _callLoadedWorkspace('createWorkspaceDirectory', args);
 }
@@ -168,6 +175,14 @@ async function moveWorkspacePath(...args) {
   return _callLoadedWorkspace('moveWorkspacePath', args);
 }
 
+async function touchWorkspaceFile(...args) {
+  return _callLoadedWorkspace('touchWorkspaceFile', args);
+}
+
+async function writeWorkspaceTextFile(...args) {
+  return _callLoadedWorkspace('writeWorkspaceTextFile', args);
+}
+
 async function openWorkspace(...args) {
   return _callLoadedWorkspace('openWorkspace', args);
 }
@@ -195,6 +210,7 @@ function workspaceCanWrite(...args) {
 
 const workspaceBridgeApi = {
   closeWorkspace,
+  copyWorkspacePath,
   createWorkspaceDirectory,
   downloadWorkspaceFile,
   _formatWorkspaceBytes,
@@ -209,11 +225,14 @@ const workspaceBridgeApi = {
   refreshWorkspaceFiles,
   setWorkspaceHandlers,
   showWorkspaceViewer,
+  touchWorkspaceFile,
+  writeWorkspaceTextFile,
   workspaceCanWrite,
 };
 
 export {
   closeWorkspace,
+  copyWorkspacePath,
   createWorkspaceDirectory,
   downloadWorkspaceFile,
   _formatWorkspaceBytes,
@@ -228,5 +247,7 @@ export {
   refreshWorkspaceFiles,
   setWorkspaceHandlers,
   showWorkspaceViewer,
+  touchWorkspaceFile,
+  writeWorkspaceTextFile,
   workspaceCanWrite,
 };

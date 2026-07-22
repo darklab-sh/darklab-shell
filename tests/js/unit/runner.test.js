@@ -477,9 +477,109 @@ describe('client-side synthetic post-filters', () => {
       'theme_light_blue',
     ])
   })
+
+  it('parses workspace output redirection and tee sinks', () => {
+    expect(_parseSyntheticPostFilterCommand('theme list > reports/themes.txt')).toEqual({
+      kind: 'redirect',
+      baseCommand: 'theme list',
+      stages: [],
+      sink: { kind: 'redirect', path: 'reports/themes.txt' },
+    })
+    expect(_parseSyntheticPostFilterCommand('theme list | grep dark | tee reports/themes.txt')).toEqual({
+      kind: 'grep',
+      baseCommand: 'theme list',
+      stages: [
+        { kind: 'grep', pattern: 'dark', ignoreCase: false, invertMatch: false, extended: false },
+      ],
+      sink: { kind: 'tee', path: 'reports/themes.txt' },
+    })
+    expect(_parseSyntheticPostFilterCommand('theme list >> reports/themes.txt')).toEqual({
+      kind: 'append',
+      baseCommand: 'theme list',
+      stages: [],
+      sink: { kind: 'append', path: 'reports/themes.txt' },
+    })
+  })
+
+  it('rejects malformed sinks, unsafe destinations, and non-final tee stages', () => {
+    expect(_parseSyntheticPostFilterCommand('theme list >>')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('theme list > one.txt >> two.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('theme list > ../themes.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('theme list > /tmp/themes.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('theme list | tee themes.txt | wc -l')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('nmap 10.0.0.5 2> err.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('nmap 10.0.0.5 2>>err.txt')).toBeNull()
+    expect(_parseSyntheticPostFilterCommand('nmap 10.0.0.5 2 > err.txt')).toEqual({
+      kind: 'redirect',
+      baseCommand: 'nmap 10.0.0.5 2',
+      stages: [],
+      sink: { kind: 'redirect', path: 'err.txt' },
+    })
+  })
 })
 
 describe('client-side UI command pipe helpers', () => {
+  it('writes or appends redirected client-side output without printing it in the terminal', async () => {
+    const appendLine = vi.fn()
+    const writeWorkspaceTextFile = vi.fn(() => Promise.resolve({ file: { path: 'reports/themes.txt' } }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      writeWorkspaceTextFile,
+      normalizeWorkspaceCommandPath: (path, cwd = '') => [cwd, path].filter(Boolean).join('/'),
+      runnerInitCode: `
+        async function handleThemeCommand(cmd, tabId) {
+          appendCommandEcho(cmd, tabId);
+          appendLine('theme_dark_amber', 'builtin-help-row', tabId);
+          appendLine('theme_light_blue', 'builtin-help-row', tabId);
+        }
+      `,
+    })
+
+    await submitCommand('theme list > themes.txt')
+    await vi.waitFor(() => expect(writeWorkspaceTextFile).toHaveBeenCalledWith(
+      'reports/themes.txt',
+      'theme_dark_amber\ntheme_light_blue\n',
+    ))
+    await submitCommand('theme list >> themes.txt')
+    await vi.waitFor(() => expect(writeWorkspaceTextFile).toHaveBeenNthCalledWith(
+      2,
+      'reports/themes.txt',
+      'theme_dark_amber\ntheme_light_blue\n',
+      { append: true },
+    ))
+
+    expect(appendLine).not.toHaveBeenCalledWith('theme_dark_amber', 'builtin-help-row', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('theme_light_blue', 'builtin-help-row', 'tab-1')
+  })
+
+  it('copies and touches workspace files through their terminal aliases', async () => {
+    const appendLine = vi.fn()
+    const copyWorkspacePath = vi.fn(() => Promise.resolve({
+      copied: { source: 'source.txt', destination: 'copy.txt' },
+    }))
+    const touchWorkspaceFile = vi.fn(() => Promise.resolve({ file: { path: 'new.txt' } }))
+    const common = {
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      copyWorkspacePath,
+      touchWorkspaceFile,
+      loadWorkspaceFilesPayload: () => Promise.resolve({ files: [] }),
+      getWorkspaceAutocompleteFileHints: () => [{ value: 'source.txt' }],
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: '' }],
+      normalizeWorkspaceCommandPath: (path, cwd = '') => [cwd, path].filter(Boolean).join('/'),
+    }
+    const copyRunner = loadRunnerFns(common)
+
+    await copyRunner.submitCommand('cp source.txt copy.txt')
+    await vi.waitFor(() => expect(copyWorkspacePath).toHaveBeenCalledWith('source.txt', 'copy.txt'))
+
+    const touchRunner = loadRunnerFns(common)
+    await touchRunner.submitCommand('touch new.txt')
+    await vi.waitFor(() => expect(touchWorkspaceFile).toHaveBeenCalledWith('new.txt'))
+    expect(appendLine).toHaveBeenCalledWith('file: touched new.txt', '', 'tab-1')
+  })
+
   it('filters terminal-native theme output through the same pipe helpers as older built-ins', async () => {
     const appendLine = vi.fn()
     const { submitCommand } = loadRunnerFns({
@@ -758,9 +858,13 @@ function loadRunnerFns({
   handleSecretCommand: handleSecretCommandOverride = undefined,
   closeTab: closeTabOverride = vi.fn(),
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
+  loadWorkspaceFilesPayload: loadWorkspaceFilesPayloadOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
   downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
   moveWorkspacePath: moveWorkspacePathOverride = undefined,
+  copyWorkspacePath: copyWorkspacePathOverride = undefined,
+  touchWorkspaceFile: touchWorkspaceFileOverride = undefined,
+  writeWorkspaceTextFile: writeWorkspaceTextFileOverride = undefined,
   readWorkspaceFile: readWorkspaceFileOverride = undefined,
   createWorkspaceDirectory: createWorkspaceDirectoryOverride = undefined,
   getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride = undefined,
@@ -944,6 +1048,9 @@ function loadRunnerFns({
         : {}),
       ...(handleSecretCommandOverride ? { handleSecretCommand: handleSecretCommandOverride } : {}),
       ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
+      ...(loadWorkspaceFilesPayloadOverride
+        ? { loadWorkspaceFilesPayload: loadWorkspaceFilesPayloadOverride }
+        : {}),
       ...(openWorkspaceEditorFromCommandOverride
         ? { openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride }
         : {}),
@@ -951,6 +1058,9 @@ function loadRunnerFns({
         ? { downloadWorkspaceFile: downloadWorkspaceFileOverride }
         : {}),
       ...(moveWorkspacePathOverride ? { moveWorkspacePath: moveWorkspacePathOverride } : {}),
+      ...(copyWorkspacePathOverride ? { copyWorkspacePath: copyWorkspacePathOverride } : {}),
+      ...(touchWorkspaceFileOverride ? { touchWorkspaceFile: touchWorkspaceFileOverride } : {}),
+      ...(writeWorkspaceTextFileOverride ? { writeWorkspaceTextFile: writeWorkspaceTextFileOverride } : {}),
       ...(readWorkspaceFileOverride ? { readWorkspaceFile: readWorkspaceFileOverride } : {}),
       ...(createWorkspaceDirectoryOverride ? { createWorkspaceDirectory: createWorkspaceDirectoryOverride } : {}),
       ...(getWorkspaceDirectoryEntriesOverride ? { getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride } : {}),
@@ -1948,6 +2058,24 @@ describe('runner helpers', () => {
       'denied',
     )
     expect(status.className).toBe('status-pill fail')
+
+    const fdApiFetch = vi.fn(() => Promise.resolve())
+    const fdAppendLine = vi.fn()
+    const fdHarness = loadRunnerFns({
+      cmdValue: 'nmap 10.0.0.5 2> err.txt',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: fdApiFetch,
+      appendLine: fdAppendLine,
+    })
+    fdHarness.runCommand()
+
+    expect(fdApiFetch).not.toHaveBeenCalled()
+    expect(fdAppendLine).toHaveBeenNthCalledWith(
+      2,
+      '[denied] Only stdout redirection with >, >>, or final | tee is supported.',
+      'denied',
+    )
+    expect(fdHarness.status.className).toBe('status-pill fail')
   })
 
   it('runCommand allows the narrow synthetic grep form through to the API', () => {
@@ -3332,6 +3460,41 @@ describe('workspace file delete confirmation', () => {
     expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('deep.txt'), '', 'tab-1')
   })
 
+  it('loads the lazy Files surface before the first workspace listing', async () => {
+    delete window.DarklabWorkspaceState
+    const appendLine = vi.fn()
+    let directories = []
+    let files = []
+    const loadWorkspaceFilesPayload = vi.fn(async () => {
+      directories = [{ name: 'reports', path: 'reports' }]
+      files = [{ name: 'targets.txt', path: 'targets.txt', size: 12, mtime: 'now' }]
+    })
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      loadWorkspaceFilesPayload,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => directories.map(directory => ({
+        value: directory.path,
+        description: 'personal folder',
+      })),
+      getWorkspaceAutocompleteFileHints: () => files.map(file => ({
+        value: file.path,
+        description: 'personal file · 12 B',
+      })),
+      getWorkspaceDirectoryEntries: () => ({ folders: directories, files }),
+    })
+
+    await submitCommand('ls')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('reports/ targets.txt', '', 'tab-1'))
+    expect(loadWorkspaceFilesPayload).toHaveBeenCalledTimes(1)
+    expect(refreshWorkspaceFileCache).not.toHaveBeenCalled()
+  })
+
   it('lists workspace folders recursively only when -R is present with flags in any order', async () => {
     const appendLine = vi.fn()
     const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
@@ -3628,6 +3791,167 @@ describe('workspace file delete confirmation', () => {
     expect(appendLine).toHaveBeenCalledWith('Usage: mv <source> <destination>', 'exit-fail', 'tab-1')
     expect(moveWorkspacePath).not.toHaveBeenCalled()
     expect(status.className).toBe('status-pill fail')
+  })
+
+  it('compares workspace files from the current folder with file diff and diff', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/workspace/diff') {
+        const payload = JSON.parse(options.body)
+        const lines = payload.mode === 'unified'
+          ? ['--- reports/old.txt', '+++ reports/new.txt', '-old', '+new']
+          : ['Files reports/old.txt and reports/new.txt differ']
+        return Promise.resolve(new Response(JSON.stringify({ different: true, lines }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      apiFetch,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/old.txt', description: 'session file · 4 B' },
+        { value: 'reports/new.txt', description: 'session file · 4 B' },
+      ],
+    })
+
+    await submitCommand('file diff -u old.txt new.txt')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('-old', '', 'tab-1'))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/diff', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        left: 'file:reports/old.txt',
+        right: 'file:reports/new.txt',
+        last: false,
+        tab_id: 'tab-1',
+        mode: 'unified',
+      }),
+    }))
+
+    await submitCommand('diff -q old.txt new.txt')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      'Files reports/old.txt and reports/new.txt differ',
+      '',
+      'tab-1',
+    ))
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('shows usage for incomplete or conflicting workspace diff commands', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(new Response('{}', { status: 200 })))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('file diff old.txt')
+    await submitCommand('diff -q -u old.txt new.txt')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[error] Usage: file diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]',
+      'exit-fail',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      '[error] Usage: diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]',
+      'exit-fail',
+      'tab-1',
+    )
+    expect(apiFetch).not.toHaveBeenCalledWith('/workspace/diff', expect.anything())
+    expect(status.className).toBe('status-pill fail')
+  })
+
+  it('compares completed runs and resolves --last without requiring Files', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url !== '/workspace/diff') return Promise.resolve(new Response('{}', { status: 404 }))
+      const payload = JSON.parse(options.body)
+      const lines = payload.last
+        ? ['Files run:older and run:newer differ']
+        : ['--- run:older', '+++ run:newer', '-old', '+new']
+      return Promise.resolve(new Response(JSON.stringify({ different: true, notices: [], lines }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      appConfig: { workspace_enabled: false },
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('diff -u run:older run:newer')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('+new', '', 'tab-1'))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/diff', expect.objectContaining({
+      body: JSON.stringify({
+        left: 'run:older',
+        right: 'run:newer',
+        last: false,
+        tab_id: 'tab-1',
+        mode: 'unified',
+      }),
+    }))
+
+    await submitCommand('diff --last')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      'Files run:older and run:newer differ',
+      '',
+      'tab-1',
+    ))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/diff', expect.objectContaining({
+      body: JSON.stringify({
+        left: '',
+        right: '',
+        last: true,
+        tab_id: 'tab-1',
+        mode: 'normal',
+      }),
+    }))
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('compares an explicit file source with completed run output', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      different: true,
+      notices: [],
+      lines: ['-expected', '+actual'],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      apiFetch,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/expected.txt', description: 'session file · 9 B' },
+      ],
+    })
+
+    await submitCommand('diff -u file:expected.txt run:actual')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('+actual', '', 'tab-1'))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/diff', expect.objectContaining({
+      body: JSON.stringify({
+        left: 'file:reports/expected.txt',
+        right: 'run:actual',
+        last: false,
+        tab_id: 'tab-1',
+        mode: 'unified',
+      }),
+    }))
   })
 
   it('runs standalone pipe helpers against workspace files', async () => {

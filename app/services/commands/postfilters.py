@@ -8,6 +8,12 @@ from __future__ import annotations
 import re
 import shlex
 
+from services.workspace.models import InvalidWorkspacePath
+from services.workspace.paths import validate_relative_path
+
+
+_FILE_DESCRIPTOR_REDIRECT_RE = re.compile(r'(^|\s)\d+>>?')
+
 
 def _split_shell_control_tokens(command: str) -> list[str]:
     """Split a shell-like command while keeping control operators as tokens."""
@@ -26,6 +32,19 @@ def _is_quoted_token(token: str) -> bool:
 
 def _unquote_token(token: str) -> str:
     return token[1:-1] if _is_quoted_token(token) else token
+
+
+def _output_sink_path(token: str) -> tuple[str | None, str | None]:
+    destination = _unquote_token(token).strip()
+    if not destination:
+        return None, "Output redirection requires a destination file."
+    if destination.endswith('/'):
+        return None, "Output redirection destination must be a file, not a directory."
+    try:
+        validate_relative_path(destination)
+    except InvalidWorkspacePath as exc:
+        return None, f"Output redirection destination is invalid: {exc}"
+    return destination, None
 
 
 def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
@@ -238,52 +257,87 @@ def _parse_synthetic_postfilter_stage(stage_tokens: list[str]) -> tuple[dict | N
 
 
 def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
-    """Parse a narrow app-native `command | helper ...` post-filter pipeline.
+    """Parse an app-native post-filter pipeline and optional Files sink.
 
     Returns (spec, error_message). spec is None when the command does not use
     the synthetic post-filter path. error_message is populated only when the
     input is clearly trying to use a supported helper but the stage is invalid.
     """
     stripped = command.strip()
-    if '|' not in stripped:
+    if '|' not in stripped and '>' not in stripped:
         return None, None
     if '`' in stripped or '$(' in stripped:
         return None, None
+    if _FILE_DESCRIPTOR_REDIRECT_RE.search(stripped):
+        return None, "Only stdout redirection with `>`, `>>`, or final `| tee` is supported."
 
     tokens = _split_shell_control_tokens(stripped)
     if not tokens:
         return None, None
 
-    disallowed_control = {'&&', '||', ';', ';;', '>', '>>', '<', '&'}
+    disallowed_control = {'&&', '||', ';', ';;', '<', '&'}
     if any(token in disallowed_control for token in tokens):
         return None, None
 
+    sink = None
+    redirect_indexes = [index for index, token in enumerate(tokens) if token in {'>', '>>'}]
+    if redirect_indexes:
+        if len(redirect_indexes) != 1:
+            return None, "Output redirection supports one destination file."
+        redirect_index = redirect_indexes[0]
+        if redirect_index == 0 or redirect_index != len(tokens) - 2:
+            return None, "Output redirection requires `command > file` or `command >> file`."
+        destination, destination_error = _output_sink_path(tokens[-1])
+        if destination_error:
+            return None, destination_error
+        assert destination is not None
+        sink = {
+            "kind": "append" if tokens[redirect_index] == ">>" else "redirect",
+            "path": destination,
+        }
+        tokens = tokens[:redirect_index]
+
     pipe_indexes = [index for index, token in enumerate(tokens) if token == '|']
-    if not pipe_indexes:
+    if not pipe_indexes and not sink:
         return None, None
 
-    base_tokens = tokens[:pipe_indexes[0]]
+    base_tokens = tokens[:pipe_indexes[0]] if pipe_indexes else tokens
     if not base_tokens:
         return None, "Synthetic post-filters require `command | helper ...`."
 
     stage_specs: list[dict] = []
-    stage_start = pipe_indexes[0] + 1
-    for pipe_index in pipe_indexes[1:] + [len(tokens)]:
-        stage_tokens = tokens[stage_start:pipe_index]
-        if not stage_tokens:
-            return None, "Synthetic post-filters require `command | helper ...`."
+    if pipe_indexes:
+        stage_start = pipe_indexes[0] + 1
+        for stage_number, pipe_index in enumerate(pipe_indexes[1:] + [len(tokens)]):
+            stage_tokens = tokens[stage_start:pipe_index]
+            if not stage_tokens:
+                return None, "Synthetic post-filters require `command | helper ...`."
 
-        spec, error = _parse_synthetic_postfilter_stage(stage_tokens)
-        if error:
-            return None, error
-        if not spec:
-            return None, None
+            helper = _unquote_token(stage_tokens[0]).lower()
+            is_final_stage = stage_number == len(pipe_indexes) - 1
+            if helper == "tee":
+                if sink or not is_final_stage or len(stage_tokens) != 2:
+                    return None, "Synthetic tee requires `command | tee file` as the final stage."
+                destination, destination_error = _output_sink_path(stage_tokens[1])
+                if destination_error:
+                    return None, destination_error
+                assert destination is not None
+                sink = {"kind": "tee", "path": destination}
+                stage_start = pipe_index + 1
+                continue
 
-        stage_specs.append(spec)
-        stage_start = pipe_index + 1
+            spec, error = _parse_synthetic_postfilter_stage(stage_tokens)
+            if error:
+                return None, error
+            if not spec:
+                return None, None
+
+            stage_specs.append(spec)
+            stage_start = pipe_index + 1
 
     return {
         "base_command": shlex.join(_unquote_token(token) for token in base_tokens),
         "stages": stage_specs,
-        "kind": stage_specs[0]["kind"],
+        "kind": stage_specs[0]["kind"] if stage_specs else str((sink or {}).get("kind") or ""),
+        "sink": sink,
     }, None

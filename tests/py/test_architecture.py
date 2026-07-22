@@ -10,6 +10,7 @@ import hashlib
 import importlib
 import os
 import re
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -137,8 +138,10 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/registry_faq.py", 505, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_loader.py", 744, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_runtime.py", 173, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/commands/registry_smoke.py", 194, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_secret_specs.py", 157, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_smoke.py", 199, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_targets.py", 345, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_trufflehog.py", 70, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_validate.py", 178, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_validation.py", 239, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_workspace.py", 466, "split-package-ratchet"),
@@ -193,6 +196,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/projects/overview_app.py", 452, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/overview_intel.py", 294, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/files.py", 1080, "split-target-phase4"),
+    ModuleSizeBudget("app/services/workspace/file_mutations.py", 254, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/maintenance.py", 401, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/metadata.py", 172, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/modes.py", 6, "split-package-ratchet"),
@@ -225,6 +229,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/metrics/__init__.py", 983, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/projects/auto_promote.py", 963, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/runs/broker_worker.py", 496, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/broker_capture.py", 46, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization.py", 1006, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
@@ -234,6 +239,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/builtins_runtime.py", 830, "ratchet-only"),
     ModuleSizeBudget("app/blueprints/teams.py", 796, "ratchet-only"),
     ModuleSizeBudget("app/services/runs/postfilters.py", 368, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/output_sinks.py", 143, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/output_sink_files.py", 81, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/process_control.py", 85, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_parser.py", 856, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_sources.py", 226, "split-package-ratchet"),
@@ -724,6 +731,104 @@ class TestBlueprintImportOrder:
             check=False,
         )
         assert result.returncode == 0, result.stderr
+
+
+class TestScriptEntrypointLayout:
+    def test_script_layout_and_compatibility_entrypoints_are_stable(self, tmp_path):
+        scripts_root = _REPO_ROOT / "scripts"
+        expected_directories = {
+            "container",
+            "development",
+            "frontend",
+            "generate",
+            "hooks",
+            "operations",
+            "release",
+            "test-support",
+        }
+        expected_top_level_files = {
+            "backup_system.py",
+            "build_release_payload.py",
+            "capture_container_smoke_test_outputs.sh",
+            "capture_ui_screenshots.sh",
+            "check_container_licenses.py",
+            "check_versions.sh",
+            "container_smoke_test.sh",
+            "generate_api_openapi.py",
+            "generate_theme_examples.py",
+            "migrate_sqlite_to_postgres.py",
+            "record_demo.sh",
+            "record_demo_mobile.sh",
+            "restore_system.py",
+            "run_playwright.sh",
+            "run_postgres_tests.sh",
+            "run_pytest.sh",
+            "seed_history.py",
+        }
+        actual_directories = {
+            path.name
+            for path in scripts_root.iterdir()
+            if path.is_dir() and path.name != "__pycache__"
+        }
+        actual_top_level_files = {
+            path.name for path in scripts_root.iterdir() if path.is_file()
+        }
+        assert actual_directories == expected_directories
+        assert actual_top_level_files == expected_top_level_files
+
+        wrappers = {
+            "backup_system.py": "operations/backup_system.py",
+            "build_release_payload.py": "release/build_release_payload.py",
+            "capture_container_smoke_test_outputs.sh": (
+                "test-support/capture_container_smoke_test_outputs.sh"
+            ),
+            "capture_ui_screenshots.sh": "development/capture_ui_screenshots.sh",
+            "check_container_licenses.py": "release/check_container_licenses.py",
+            "check_versions.sh": "release/check_versions.sh",
+            "generate_api_openapi.py": "generate/generate_api_openapi.py",
+            "generate_theme_examples.py": "generate/generate_theme_examples.py",
+            "migrate_sqlite_to_postgres.py": (
+                "operations/migrate_sqlite_to_postgres.py"
+            ),
+            "record_demo.sh": "development/record_demo.sh",
+            "record_demo_mobile.sh": "development/record_demo_mobile.sh",
+            "restore_system.py": "operations/restore_system.py",
+            "seed_history.py": "development/seed_history.py",
+        }
+        for wrapper_name, implementation_path in wrappers.items():
+            wrapper = scripts_root / wrapper_name
+            text = wrapper.read_text(encoding="utf-8")
+            assert implementation_path in text
+            assert stat.S_IMODE(wrapper.stat().st_mode) & stat.S_IXUSR
+            assert '"$@"' in text or "*sys.argv[1:]" in text
+            assert "exec " in text or "os.execv(" in text
+
+        help_wrappers = (
+            "backup_system.py",
+            "build_release_payload.py",
+            "capture_ui_screenshots.sh",
+            "check_versions.sh",
+            "migrate_sqlite_to_postgres.py",
+            "restore_system.py",
+            "seed_history.py",
+        )
+        for wrapper_name in help_wrappers:
+            wrapper = scripts_root / wrapper_name
+            command = (
+                [sys.executable, str(wrapper), "--help"]
+                if wrapper.suffix == ".py" or wrapper_name == "check_versions.sh"
+                else [str(wrapper), "--help"]
+            )
+            result = subprocess.run(
+                command,
+                cwd=tmp_path,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"{wrapper_name} failed outside the repository root:\n{result.stderr}"
+            )
 
 
 class TestDecomposedRouteContract:

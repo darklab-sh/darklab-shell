@@ -1,0 +1,618 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+"""Build the checksummed production installation payload."""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import json
+import re
+import shutil
+import tarfile
+import tempfile
+from pathlib import Path
+
+
+def _repository_root(script_path: Path) -> Path:
+    for candidate in (script_path.resolve().parent, *script_path.resolve().parents):
+        if (candidate / "package.json").is_file() and (candidate / "app").is_dir():
+            return candidate
+    raise RuntimeError("could not locate the darklab_shell repository root")
+
+
+ROOT = _repository_root(Path(__file__))
+DEFAULT_DOCKERHUB_IMAGE = "docker.io/darklabsh/darklab-shell"
+DEFAULT_GITLAB_IMAGE = "registry.gitlab.com/darklab.sh/darklab_shell"
+COSIGN_IMAGE = (
+    "ghcr.io/sigstore/cosign/cosign:v3.0.6@"
+    "sha256:de9c65609e6bde17e6b48de485ee788407c9502fa08b8f4459f595b21f56cd00"
+)
+PROJECT_URL = "https://gitlab.com/darklab.sh/darklab_shell"
+PACKAGE_NAME = "darklab-shell-deploy"
+PROJECT_PACKAGE_API = "https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic"
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$")
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+EVIDENCE_FILES = (
+    "darklab-shell.cdx.json",
+    "provenance.intoto.jsonl",
+    "release-build-inputs.json",
+    "release-evidence.json",
+    "vulnerability-report.json",
+)
+INDEX_EVIDENCE_BASE_FILES = (
+    "provenance.intoto.jsonl",
+    "release-build-inputs.json",
+    "release-evidence.json",
+    "release-index.json",
+)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _replace_tokens(template: str, values: dict[str, str]) -> str:
+    rendered = template
+    for key, value in values.items():
+        rendered = rendered.replace(f"@{key}@", value)
+    remaining = sorted(set(re.findall(r"@[A-Z0-9_]+@", rendered)))
+    if remaining:
+        raise ValueError(f"Unresolved release template tokens: {', '.join(remaining)}")
+    return rendered
+
+
+def _write_text(path: Path, text: str, *, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    path.chmod(mode)
+
+
+def _write_operator_starters(starters_dir: Path, version: str) -> None:
+    config_template = (ROOT / "deploy" / "config-local.yaml.dist").read_text(encoding="utf-8")
+    _write_text(
+        starters_dir / "conf" / "config.local.yaml",
+        _replace_tokens(config_template, {"RELEASE_VERSION": version}),
+        mode=0o600,
+    )
+    docs_root = f"https://gitlab.com/darklab.sh/darklab_shell/-/blob/v{version}"
+    source_root = f"{docs_root}/app/conf"
+    starters = {
+        "conf/commands.local.yaml": (
+            "# Add new external commands or extend settings for an existing command root.\n"
+            "# Built-in command registry and examples (reference only):\n"
+            f"# {source_root}/commands.yaml\n"
+            "# Operator guide:\n"
+            f"# {docs_root}/CONFIGURATION.md#command-registry-autocomplete\n"
+            "#\n"
+            "# Example - remove the leading # characters to use it:\n"
+            "# version: 1\n"
+            "# commands:\n"
+            "#   - root: ping\n"
+            "#     knowledge:\n"
+            "#       notes:\n"
+            "#         - \"Use only against approved targets.\"\n"
+        ),
+        "conf/faq.local.yaml": (
+            "# Append deployment-specific entries to the built-in FAQ.\n"
+            "# Built-in FAQ entries and examples (reference only):\n"
+            f"# {source_root}/faq.yaml\n"
+            "# Operator guide:\n"
+            f"# {docs_root}/CONFIGURATION.md#local-override-files\n"
+            "#\n"
+            "# Example - remove the leading # characters to use it:\n"
+            "# - question: \"Who operates this instance?\"\n"
+            "#   category: \"Other\"\n"
+            "#   answer: \"The internal security team operates this instance.\"\n"
+        ),
+        "conf/welcome.local.yaml": (
+            "# Append deployment-specific command examples to the welcome rotation.\n"
+            "# Built-in welcome entries and examples (reference only):\n"
+            f"# {source_root}/welcome.yaml\n"
+            "# Operator guide:\n"
+            f"# {docs_root}/CONFIGURATION.md#local-override-files\n"
+            "#\n"
+            "# Example - remove the leading # characters to use it:\n"
+            "# - cmd: \"ping -c 4 gateway.example.test\"\n"
+            "#   group: \"basics\"\n"
+            "#   out: \"check reachability to the approved gateway\"\n"
+        ),
+        "conf/workflows.local.yaml": (
+            "# Append deployment-specific guided workflows and version 2 playbooks.\n"
+            "# Built-in workflow catalog and examples (reference only):\n"
+            f"# {source_root}/workflows.yaml\n"
+            "# Authoring guide:\n"
+            f"# {docs_root}/docs/workflows.md#definition-files\n"
+            "#\n"
+            "# Example - remove the leading # characters to use it:\n"
+            "# - version: 2\n"
+            "#   id: dns_check\n"
+            "#   title: \"DNS check\"\n"
+            "#   description: \"Resolve an approved domain.\"\n"
+            "#   inputs:\n"
+            "#     - id: domain\n"
+            "#       label: Domain\n"
+            "#       type: domain\n"
+            "#       required: true\n"
+            "#   steps:\n"
+            "#     - id: resolve\n"
+            "#       cmd: \"dig +short A {{domain}}\"\n"
+            "#       next:\n"
+            "#         success: complete\n"
+            "#         failure: stop\n"
+        ),
+        "conf/app_hints.local.txt": (
+            "# Append desktop hints, with one hint per line.\n"
+            "# Built-in desktop hints and categories (reference only):\n"
+            f"# {source_root}/app_hints.txt\n"
+            "# Operator guide:\n"
+            f"# {docs_root}/CONFIGURATION.md#local-override-files\n"
+            "#\n"
+            "# Example - remove the leading # characters to use it:\n"
+            "# [workspace]\n"
+            "# Use Files to keep approved target lists with your session.\n"
+        ),
+        "conf/app_hints_mobile.local.txt": (
+            "# Append short, touch-focused mobile hints, with one hint per line.\n"
+            "# Built-in mobile hints and categories (reference only):\n"
+            f"# {source_root}/app_hints_mobile.txt\n"
+            "# Operator guide:\n"
+            f"# {docs_root}/CONFIGURATION.md#local-override-files\n"
+            "#\n"
+            "# Example - remove the leading # characters to use it:\n"
+            "# [workspace]\n"
+            "# Open Files from the mobile menu to review saved output.\n"
+        ),
+        "conf/themes/darklab_obsidian.local.yaml": (
+            "# Override only the darklab_obsidian theme keys you want to change.\n"
+            "# Use <theme-name>.local.yaml to target another shipped theme.\n"
+            "# Built-in Darklab Obsidian theme and values (reference only):\n"
+            f"# {source_root}/themes/darklab_obsidian.yaml\n"
+            "# Theme guide:\n"
+            f"# {docs_root}/THEME.md#authoring-a-theme\n"
+            "#\n"
+            "# Example - remove the leading # to use it:\n"
+            "# green: \"#00ff88\"\n"
+        ),
+        "conf/ascii.local.txt.example": (
+            "Rename this file to ascii.local.txt and replace all of its contents with desktop banner art.\n"
+            "An active ascii.local.txt replaces the shipped banner instead of extending it.\n"
+            "Built-in desktop banner for reference:\n"
+            f"{source_root}/ascii.txt\n"
+            "Overlay guide:\n"
+            f"{docs_root}/CONFIGURATION.md#local-override-files\n"
+        ),
+        "conf/ascii_mobile.local.txt.example": (
+            "Rename this file to ascii_mobile.local.txt and replace all of its contents with mobile banner art.\n"
+            "An active ascii_mobile.local.txt replaces the shipped banner instead of extending it.\n"
+            "Built-in mobile banner for reference:\n"
+            f"{source_root}/ascii_mobile.txt\n"
+            "Overlay guide:\n"
+            f"{docs_root}/CONFIGURATION.md#local-override-files\n"
+        ),
+        "conf/package_presets.local.yaml.example": (
+            "# This file replaces the complete package preset catalog; it does not merge.\n"
+            "# Copy the full built-in catalog from this exact release before editing it:\n"
+            f"# {source_root}/package_presets.yaml\n"
+            "# Operator guide:\n"
+            f"# {docs_root}/CONFIGURATION.md#customize-package-presets\n"
+            "# Then remove .example and select the replacement in config.local.yaml:\n"
+            "# package_presets_file: package_presets.local.yaml\n"
+        ),
+        "conf/report_templates.local.yaml.example": (
+            "# This file replaces the complete report template catalog; it does not merge.\n"
+            "# Copy the full built-in catalog from this exact release before editing it:\n"
+            f"# {source_root}/report_templates.yaml\n"
+            "# Operator guide:\n"
+            f"# {docs_root}/CONFIGURATION.md#customize-report-templates\n"
+            "# Then remove .example and select the replacement in config.local.yaml:\n"
+            "# report_templates_file: report_templates.local.yaml\n"
+        ),
+    }
+    for relative_path, content in starters.items():
+        _write_text(starters_dir / relative_path, content, mode=0o600)
+
+
+def _validate_evidence_dir(
+    evidence_dir: Path,
+    *,
+    version: str,
+    gitlab_image: str,
+    dockerhub_image: str,
+    digest: str,
+) -> None:
+    missing = [name for name in EVIDENCE_FILES if not (evidence_dir / name).is_file()]
+    if missing:
+        raise ValueError(f"Release evidence directory is missing: {', '.join(missing)}")
+    try:
+        evidence = json.loads((evidence_dir / "release-evidence.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Release evidence index is not readable JSON") from exc
+    if not isinstance(evidence, dict) or evidence.get("format") != "darklab_shell.release_evidence.v1":
+        raise ValueError("Release evidence index has an unsupported format")
+    if evidence.get("version") != version:
+        raise ValueError("Release evidence version does not match the payload")
+    image = evidence.get("image")
+    if not isinstance(image, dict) or image != {
+        "gitlab": gitlab_image,
+        "dockerhub": dockerhub_image,
+        "digest": digest,
+        "platform": "linux/amd64",
+    }:
+        raise ValueError("Release evidence image provenance does not match the payload")
+    evidence_sections = {
+        "build_inputs": "release-build-inputs.json",
+        "sbom": "darklab-shell.cdx.json",
+        "provenance": "provenance.intoto.jsonl",
+        "vulnerability_scan": "vulnerability-report.json",
+    }
+    for section_name, expected_path in evidence_sections.items():
+        section = evidence.get(section_name)
+        if not isinstance(section, dict) or section.get("path") != expected_path:
+            raise ValueError(f"Release evidence {section_name} path is invalid")
+        if section.get("sha256") != _sha256(evidence_dir / expected_path):
+            raise ValueError(f"Release evidence {section_name} checksum does not match")
+
+
+def _validate_index_evidence_dir(
+    evidence_dir: Path,
+    *,
+    version: str,
+    gitlab_image: str,
+    dockerhub_image: str,
+    release_index: dict[str, object],
+) -> tuple[str, ...]:
+    platforms = release_index.get("platforms")
+    if not isinstance(platforms, dict) or not platforms:
+        raise ValueError("Release index is missing its platform map")
+    release_mode = release_index.get("release_mode")
+    degraded_reason = release_index.get("degraded_reason", "")
+    if release_mode == "dual":
+        if degraded_reason not in (None, ""):
+            raise ValueError("Dual release mode must not include a degraded-mode reason")
+        expected_architectures = {"amd64", "arm64"}
+    elif release_mode == "amd64-only":
+        if not isinstance(degraded_reason, str) or not degraded_reason.strip():
+            raise ValueError("AMD64-only release mode requires a degraded-mode reason")
+        expected_architectures = {"amd64"}
+    else:
+        raise ValueError("Release index contains an unsupported release mode")
+    if set(platforms) != expected_architectures:
+        raise ValueError("Release index platform map does not match its release mode")
+    python_base = release_index.get("python_base")
+    if not isinstance(python_base, dict) or not DIGEST_RE.fullmatch(
+        str(python_base.get("index_digest", ""))
+    ):
+        raise ValueError("Release index Python base contract is invalid")
+    base_platforms = python_base.get("platforms")
+    if not isinstance(base_platforms, dict) or set(base_platforms) != {"amd64", "arm64"}:
+        raise ValueError("Release index Python base platform map is invalid")
+    for architecture, platform in platforms.items():
+        base_platform = base_platforms.get(architecture)
+        if not isinstance(platform, dict) or not isinstance(base_platform, dict) or (
+            platform.get("python_base_digest") != base_platform.get("digest")
+        ):
+            raise ValueError(
+                f"Release index Python base digest does not match for {architecture}"
+            )
+    architectures = tuple(sorted(platforms))
+    files = (*INDEX_EVIDENCE_BASE_FILES, *(
+        name
+        for architecture in architectures
+        for name in (
+            f"darklab-shell-{architecture}.cdx.json",
+            f"vulnerability-report-{architecture}.json",
+        )
+    ))
+    missing = [name for name in files if not (evidence_dir / name).is_file()]
+    if missing:
+        raise ValueError(f"Release evidence directory is missing: {', '.join(missing)}")
+    evidence = json.loads((evidence_dir / "release-evidence.json").read_text(encoding="utf-8"))
+    if not isinstance(evidence, dict) or evidence.get("format") != "darklab_shell.release_evidence.v2":
+        raise ValueError("Release evidence index has an unsupported format")
+    if evidence.get("version") != version:
+        raise ValueError("Release evidence version does not match the payload")
+    try:
+        normalized_release_index = json.loads(
+            (evidence_dir / "release-index.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Release evidence index contract is not readable JSON") from exc
+    if normalized_release_index != release_index:
+        raise ValueError("Release evidence index contract does not match the payload")
+    if evidence.get("python_base") != release_index.get("python_base"):
+        raise ValueError("Release evidence Python base contract does not match the payload")
+    image = evidence.get("image")
+    if not isinstance(image, dict):
+        raise ValueError("Release evidence image contract is missing")
+    expected_digest = release_index.get("index_digest")
+    if (
+        image.get("gitlab") != gitlab_image
+        or image.get("dockerhub") != dockerhub_image
+        or image.get("index_digest") != expected_digest
+        or image.get("release_mode") != release_index.get("release_mode")
+        or image.get("degraded_reason", "") != release_index.get("degraded_reason", "")
+        or image.get("platforms") != platforms
+    ):
+        raise ValueError("Release evidence image provenance does not match the payload")
+    for section_name, expected_path in (
+        ("release_index", "release-index.json"),
+        ("build_inputs", "release-build-inputs.json"),
+        ("provenance", "provenance.intoto.jsonl"),
+    ):
+        section = evidence.get(section_name)
+        if not isinstance(section, dict) or section.get("path") != expected_path:
+            raise ValueError(f"Release evidence {section_name} path is invalid")
+        if section.get("sha256") != _sha256(evidence_dir / expected_path):
+            raise ValueError(f"Release evidence {section_name} checksum does not match")
+    for section_name, prefix in (("sboms", "darklab-shell"), ("vulnerability_scans", "vulnerability-report")):
+        section = evidence.get(section_name)
+        if not isinstance(section, dict) or set(section) != set(architectures):
+            raise ValueError(f"Release evidence {section_name} platform map is invalid")
+        for architecture in architectures:
+            entry = section[architecture]
+            expected_path = (
+                f"{prefix}-{architecture}.cdx.json"
+                if section_name == "sboms"
+                else f"{prefix}-{architecture}.json"
+            )
+            if not isinstance(entry, dict) or entry.get("path") != expected_path:
+                raise ValueError(f"Release evidence {section_name} path is invalid")
+            platform = platforms.get(architecture)
+            if not isinstance(platform, dict) or entry.get("child_digest") != platform.get(
+                "digest"
+            ):
+                raise ValueError(
+                    f"Release evidence {section_name} child digest is invalid"
+                )
+            if entry.get("sha256") != _sha256(evidence_dir / expected_path):
+                raise ValueError(f"Release evidence {section_name} checksum does not match")
+    return files
+
+
+def _write_deterministic_archive(source_root: Path, archive_path: Path) -> None:
+    """Write a byte-stable gzip tar with normalized ownership and timestamps."""
+    with archive_path.open("wb") as raw_archive:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw_archive, mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+                for path in [source_root, *sorted(source_root.rglob("*"))]:
+                    relative = path.relative_to(source_root.parent).as_posix()
+                    info = archive.gettarinfo(str(path), arcname=relative)
+                    info.uid = 0
+                    info.gid = 0
+                    info.uname = ""
+                    info.gname = ""
+                    info.mtime = 0
+                    if path.is_dir():
+                        info.mode = 0o755
+                        archive.addfile(info)
+                    else:
+                        info.mode = path.stat().st_mode & 0o777
+                        with path.open("rb") as source:
+                            archive.addfile(info, source)
+
+
+def build_payload(
+    *,
+    version: str,
+    output_dir: Path,
+    gitlab_digest: str,
+    dockerhub_digest: str,
+    compressed_bytes: int,
+    unpacked_bytes: int,
+    evidence_dir: Path | None = None,
+    release_index_path: Path | None = None,
+) -> None:
+    if not VERSION_RE.fullmatch(version):
+        raise ValueError(
+            "Release version must be MAJOR.MINOR.PATCH or "
+            f"MAJOR.MINOR.PATCH-rc.NUMBER: {version!r}"
+        )
+    for name, digest in (("GitLab", gitlab_digest), ("Docker Hub", dockerhub_digest)):
+        if not DIGEST_RE.fullmatch(digest):
+            raise ValueError(f"{name} image digest must be sha256:<64 lowercase hex characters>")
+    if gitlab_digest != dockerhub_digest:
+        raise ValueError("GitLab and Docker Hub image digests must match")
+    for name, value in (("compressed_bytes", compressed_bytes), ("unpacked_bytes", unpacked_bytes)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} must be a non-negative integer")
+
+    compose_source = ROOT / "deploy" / "compose.yaml"
+    expected_image = f"{DEFAULT_DOCKERHUB_IMAGE}:{version}"
+    if expected_image not in compose_source.read_text(encoding="utf-8"):
+        raise ValueError(f"deploy/compose.yaml does not reference {expected_image}")
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError(f"Release payload directory must be empty: {output_dir}")
+
+    archive_name = f"{PACKAGE_NAME}-{version}.tar.gz"
+    bundle_name = f"{PACKAGE_NAME}-{version}"
+    image_values = {
+        "RELEASE_VERSION": version,
+        "PAYLOAD_BASE_URL": f"{PROJECT_PACKAGE_API}/{PACKAGE_NAME}/{version}",
+        "PACKAGE_ROOT_URL": f"{PROJECT_PACKAGE_API}/{PACKAGE_NAME}",
+        "GITLAB_IMAGE": f"{DEFAULT_GITLAB_IMAGE}:{version}",
+        "GITLAB_DIGEST": gitlab_digest,
+        "DOCKERHUB_IMAGE": expected_image,
+        "DOCKERHUB_DIGEST": dockerhub_digest,
+        "COSIGN_IMAGE": COSIGN_IMAGE,
+        "PROJECT_URL": PROJECT_URL,
+        "COMPRESSED_BYTES": str(compressed_bytes),
+        "UNPACKED_BYTES": str(unpacked_bytes),
+    }
+    release_index: dict[str, object] | None = None
+    evidence_files = EVIDENCE_FILES
+    if release_index_path is not None:
+        try:
+            release_index_value = json.loads(release_index_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Release index is not readable JSON") from exc
+        if not isinstance(release_index_value, dict) or (
+            release_index_value.get("format") != "darklab_shell.release_index.v1"
+        ):
+            raise ValueError("Release index has an unsupported format")
+        if release_index_value.get("index_digest") != gitlab_digest:
+            raise ValueError("Release index digest does not match the payload")
+        if release_index_value.get("version") != version:
+            raise ValueError("Release index version does not match the payload")
+        release_index = release_index_value
+        if evidence_dir is not None:
+            evidence_files = _validate_index_evidence_dir(
+                evidence_dir,
+                version=version,
+                gitlab_image=image_values["GITLAB_IMAGE"],
+                dockerhub_image=expected_image,
+                release_index=release_index,
+            )
+    elif evidence_dir is not None:
+        _validate_evidence_dir(
+            evidence_dir,
+            version=version,
+            gitlab_image=image_values["GITLAB_IMAGE"],
+            dockerhub_image=expected_image,
+            digest=gitlab_digest,
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="darklab-release-") as temporary_dir:
+        bundle_root = Path(temporary_dir) / bundle_name
+        bundle_root.mkdir()
+        managed_sources = {
+            "compose.yaml": compose_source,
+            ".env.example": ROOT / "deploy" / ".env.example",
+            "verify-release-image.sh": ROOT / "deploy" / "verify-release-image.sh",
+            "THIRD_PARTY_NOTICES.txt": ROOT / "deploy" / "THIRD_PARTY_NOTICES.txt",
+            "container-licenses.json": ROOT / "deploy" / "container-licenses.json",
+            "LICENSE": ROOT / "LICENSE",
+        }
+        for relative_path, source in managed_sources.items():
+            shutil.copyfile(source, bundle_root / relative_path)
+        (bundle_root / "verify-release-image.sh").chmod(0o755)
+
+        lifecycle = _replace_tokens(
+            (ROOT / "deploy" / "darklab-deploy.sh.in").read_text(encoding="utf-8"),
+            image_values,
+        )
+        _write_text(bundle_root / "darklab-deploy", lifecycle, mode=0o755)
+        _write_operator_starters(bundle_root / "starters", version)
+
+        managed_files = [
+            ".env.example",
+            "LICENSE",
+            "THIRD_PARTY_NOTICES.txt",
+            "compose.yaml",
+            "container-licenses.json",
+            "darklab-deploy",
+            "verify-release-image.sh",
+        ]
+        manifest = {
+            "format": (
+                "darklab_shell.deployment.v2"
+                if release_index is not None
+                else "darklab_shell.deployment.v1"
+            ),
+            "version": version,
+            "gitlab_image": image_values["GITLAB_IMAGE"],
+            "gitlab_digest": gitlab_digest,
+            "dockerhub_image": expected_image,
+            "dockerhub_digest": dockerhub_digest,
+            "managed_files": managed_files,
+            "operator_paths": [".env", "backups", "conf", "data", "workspaces"],
+        }
+        if release_index is None:
+            manifest["image_metrics"] = {
+                "compressed_bytes": compressed_bytes,
+                "unpacked_bytes": unpacked_bytes,
+            }
+        else:
+            manifest["release_mode"] = release_index.get("release_mode")
+            manifest["degraded_reason"] = release_index.get("degraded_reason", "")
+            manifest["python_base"] = release_index.get("python_base")
+            python_base = release_index.get("python_base")
+            if isinstance(python_base, dict):
+                manifest["python_base_index_digest"] = python_base.get("index_digest")
+            manifest["platforms"] = release_index.get("platforms")
+            platform_map = release_index.get("platforms")
+            if isinstance(platform_map, dict):
+                for architecture, platform in platform_map.items():
+                    if isinstance(architecture, str) and isinstance(platform, dict):
+                        manifest[f"platform_{architecture}_digest"] = platform.get("digest")
+                        manifest[f"platform_{architecture}_python_base_digest"] = platform.get(
+                            "python_base_digest"
+                        )
+        _write_text(
+            bundle_root / "release-manifest.json",
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        )
+        checksum_names = [*managed_files, "release-manifest.json"]
+        checksum_rows = [f"{_sha256(bundle_root / name)}  {name}" for name in checksum_names]
+        _write_text(bundle_root / "managed-files.sha256", "\n".join(checksum_rows) + "\n")
+
+        archive_path = output_dir / archive_name
+        _write_deterministic_archive(bundle_root, archive_path)
+
+    archive_sha256 = _sha256(output_dir / archive_name)
+    setup_values = {
+        "RELEASE_VERSION": version,
+        "PAYLOAD_BASE_URL": image_values["PAYLOAD_BASE_URL"],
+        "ARCHIVE_NAME": archive_name,
+        "ARCHIVE_SHA256": archive_sha256,
+    }
+    setup_path = output_dir / "setup.sh"
+    _write_text(
+        setup_path,
+        _replace_tokens((ROOT / "deploy" / "setup.sh.in").read_text(encoding="utf-8"), setup_values),
+        mode=0o755,
+    )
+
+    checksums = [
+        f"{_sha256(output_dir / name)}  {name}"
+        for name in ("setup.sh", archive_name)
+    ]
+    _write_text(output_dir / "SHA256SUMS", "\n".join(checksums) + "\n")
+    _write_text(output_dir / "setup.sh.sha256", checksums[0] + "\n")
+    _write_text(output_dir / f"{archive_name}.sha256", checksums[1] + "\n")
+
+    if evidence_dir is not None:
+        for name in evidence_files:
+            shutil.copyfile(evidence_dir / name, output_dir / name)
+        all_checksum_names = ["setup.sh", archive_name, *evidence_files]
+        _write_text(
+            output_dir / "SHA256SUMS",
+            "\n".join(f"{_sha256(output_dir / name)}  {name}" for name in all_checksum_names)
+            + "\n",
+        )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--gitlab-digest", required=True)
+    parser.add_argument("--dockerhub-digest", required=True)
+    parser.add_argument("--compressed-bytes", type=int, default=0)
+    parser.add_argument("--unpacked-bytes", type=int, default=0)
+    parser.add_argument("--evidence-dir", type=Path)
+    parser.add_argument("--release-index", type=Path)
+    args = parser.parse_args()
+    build_payload(
+        version=args.version,
+        output_dir=args.output_dir,
+        gitlab_digest=args.gitlab_digest,
+        dockerhub_digest=args.dockerhub_digest,
+        compressed_bytes=args.compressed_bytes,
+        unpacked_bytes=args.unpacked_bytes,
+        evidence_dir=args.evidence_dir,
+        release_index_path=args.release_index,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

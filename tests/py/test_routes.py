@@ -37,6 +37,7 @@ import unittest.mock as mock
 import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
+from conftest import reusable_test_app
 import blueprints.assets as shell_assets
 import blueprints.history as history_routes
 import blueprints.projects as project_routes
@@ -120,7 +121,7 @@ def _assert_no_audit_private_export_strings(text: str) -> None:
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def get_client(*, use_forwarded_for=True):
-    client = _test_app().test_client()
+    client = reusable_test_app(__name__).test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client
@@ -4645,6 +4646,16 @@ class TestTeamRoutes:
                     headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
                     json={"source": "shared/readme.txt", "destination": "shared/moved.txt"},
                 )
+                viewer_copy = client.post(
+                    "/workspace/files/copy",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    json={"source": "shared/readme.txt", "destination": "shared/copy.txt"},
+                )
+                viewer_touch = client.post(
+                    "/workspace/files/touch",
+                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    json={"path": "shared/empty.txt"},
+                )
                 viewer_delete = client.delete(
                     "/workspace/files?path=shared/readme.txt",
                     headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
@@ -4685,6 +4696,8 @@ class TestTeamRoutes:
             assert viewer_write.status_code == 403
             assert viewer_mkdir.status_code == 403
             assert viewer_move.status_code == 403
+            assert viewer_copy.status_code == 403
+            assert viewer_touch.status_code == 403
             assert viewer_delete.status_code == 403
             assert archived.status_code == 200
             assert archived_list.status_code == 200
@@ -17561,11 +17574,27 @@ class TestWorkspaceRoutes:
             assert created_data["file"] == {"path": file_path, "size": 11}
             assert created_data["workspace"]["usage"]["bytes_used"] == 11
 
+            appended = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": file_path, "text": "again\n", "append": True},
+            )
+            assert appended.status_code == 200
+            assert json.loads(appended.data)["file"] == {"path": file_path, "size": 17}
+            invalid_append = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": file_path, "text": "ignored", "append": "yes"},
+            )
+            assert invalid_append.status_code == 400
+            assert json.loads(invalid_append.data)["error"] == "append must be a boolean"
+
             listed_response = client.get("/workspace/files", headers={"X-Session-ID": session})
             assert listed_response.headers["Cache-Control"] == "no-store"
             listed = json.loads(listed_response.data)
             assert listed["files"][0]["path"] == file_path
             assert listed["limits"]["max_files"] == 10
+            assert listed["usage"]["bytes_used"] == 17
 
             read = client.get(
                 f"/workspace/files/read?path={file_path}",
@@ -17573,8 +17602,8 @@ class TestWorkspaceRoutes:
             )
             assert json.loads(read.data) == {
                 "path": file_path,
-                "text": "darklab.sh\n",
-                "size": 11,
+                "text": "darklab.sh\nagain\n",
+                "size": 17,
             }
 
             binary_path = resolve_workspace_path(session, "asset.db", config.CFG, ensure_parent=True)
@@ -17602,8 +17631,8 @@ class TestWorkspaceRoutes:
             deleted_files = json.loads(deleted.data)["workspace"]["files"]
             assert file_path not in {item["path"] for item in deleted_files}
             audit_rows = _audit_event_rows(target_id=file_path)
-            assert [row["event_type"] for row in audit_rows] == ["file.write", "file.delete"]
-            assert [row["target_type"] for row in audit_rows] == ["file", "file"]
+            assert [row["event_type"] for row in audit_rows] == ["file.write", "file.write", "file.delete"]
+            assert [row["target_type"] for row in audit_rows] == ["file", "file", "file"]
             assert audit_rows[0]["details"] == {
                 "source": "workspace",
                 "action": "write",
@@ -17613,6 +17642,14 @@ class TestWorkspaceRoutes:
                 "status": "file",
             }
             assert audit_rows[1]["details"] == {
+                "source": "workspace",
+                "action": "append",
+                "file_path": file_path,
+                "byte_size": 17,
+                "file_count": 1,
+                "status": "file",
+            }
+            assert audit_rows[2]["details"] == {
                 "source": "workspace",
                 "file_path": file_path,
                 "file_count": 1,
@@ -17719,6 +17756,203 @@ class TestWorkspaceRoutes:
                 headers={"X-Session-ID": "workspace-other"},
             )
             assert other.status_code == 404
+
+    def test_workspace_diff_supports_shell_output_modes(self):
+        client = get_client()
+        session = "workspace-diff-" + uuid.uuid4().hex[:8]
+        headers = {"X-Session-ID": session}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            for path, text in (
+                ("reports/old.txt", "alpha\nbeta\n"),
+                ("reports/new.txt", "alpha\ndelta\n"),
+            ):
+                created = client.post(
+                    "/workspace/files",
+                    headers=headers,
+                    json={"path": path, "text": text},
+                )
+                assert created.status_code == 200
+
+            unified = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={
+                    "left": "file:reports/old.txt",
+                    "right": "file:reports/new.txt",
+                    "mode": "unified",
+                },
+            )
+            brief = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={
+                    "left": "reports/old.txt",
+                    "right": "reports/new.txt",
+                    "mode": "brief",
+                },
+            )
+            invalid = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={
+                    "left": "reports/old.txt",
+                    "right": "reports/new.txt",
+                    "mode": "colorized",
+                },
+            )
+
+        assert unified.status_code == 200
+        assert unified.headers["Cache-Control"] == "no-store"
+        assert unified.get_json() == {
+            "different": True,
+            "left": {
+                "kind": "file",
+                "label": "reports/old.txt",
+                "partial": False,
+                "reference": "file:reports/old.txt",
+            },
+            "right": {
+                "kind": "file",
+                "label": "reports/new.txt",
+                "partial": False,
+                "reference": "file:reports/new.txt",
+            },
+            "mode": "unified",
+            "notices": [],
+            "lines": [
+                "--- reports/old.txt",
+                "+++ reports/new.txt",
+                "@@ -1,2 +1,2 @@",
+                " alpha",
+                "-beta",
+                "+delta",
+            ],
+        }
+        assert brief.get_json()["lines"] == [
+            "Files reports/old.txt and reports/new.txt differ",
+        ]
+        assert invalid.status_code == 400
+        assert invalid.get_json()["error"] == "unsupported diff mode: colorized"
+
+    def test_workspace_diff_rejects_file_sources_above_line_and_byte_limits(self):
+        client = get_client()
+        session = "workspace-diff-limits-" + uuid.uuid4().hex[:8]
+        headers = {"X-Session-ID": session}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            for path, text in (
+                ("peer.txt", "peer\n"),
+                ("too-many-bytes.txt", "x" * 500_001),
+                ("too-many-lines.txt", "x\n" * 5_001),
+            ):
+                created = client.post(
+                    "/workspace/files",
+                    headers=headers,
+                    json={"path": path, "text": text},
+                )
+                assert created.status_code == 200
+
+            byte_limited = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={"left": "file:too-many-bytes.txt", "right": "file:peer.txt"},
+            )
+            line_limited = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={"left": "file:too-many-lines.txt", "right": "file:peer.txt"},
+            )
+
+        assert byte_limited.status_code == 413
+        assert byte_limited.get_json()["error"] == (
+            "file:too-many-bytes.txt exceeds the file diff limit of 500,000 bytes"
+        )
+        assert line_limited.status_code == 413
+        assert line_limited.get_json()["error"] == (
+            "file:too-many-lines.txt exceeds the file diff limit of 5,000 lines"
+        )
+
+    def test_workspace_diff_compares_files_runs_and_the_last_two_tab_runs(self):
+        client = get_client()
+        session = "workspace-run-diff-" + uuid.uuid4().hex[:8]
+        other_session = session + "-other"
+        headers = {"X-Session-ID": session}
+        tab_id = "tab-run-diff"
+        run_ids = [f"{session}-old", f"{session}-new", f"{session}-other"]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/files",
+                headers=headers,
+                json={"path": "expected.txt", "text": "alpha\nbeta\n"},
+            )
+            assert created.status_code == 200
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                    (
+                        run_ids[0], session, tab_id, "printf alpha beta",
+                        "2026-07-19T01:00:00+00:00", "2026-07-19T01:00:01+00:00",
+                        json.dumps(["alpha", "beta"]),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                    (
+                        run_ids[1], session, tab_id, "printf alpha delta",
+                        "2026-07-19T01:01:00+00:00", "2026-07-19T01:01:01+00:00",
+                        json.dumps(["alpha", "delta"]),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                    (
+                        run_ids[2], other_session, tab_id, "printf private",
+                        "2026-07-19T01:02:00+00:00", "2026-07-19T01:02:01+00:00",
+                        json.dumps(["private"]),
+                    ),
+                )
+                conn.commit()
+
+            mixed = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={
+                    "left": "file:expected.txt",
+                    "right": f"run:{run_ids[1]}",
+                    "mode": "unified",
+                },
+            )
+            latest = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={"last": True, "tab_id": tab_id, "mode": "brief"},
+            )
+            inaccessible = client.post(
+                "/workspace/diff",
+                headers=headers,
+                json={"left": f"run:{run_ids[0]}", "right": f"run:{run_ids[2]}"},
+            )
+
+        assert mixed.status_code == 200
+        mixed_payload = mixed.get_json()
+        assert mixed_payload["left"]["reference"] == "file:expected.txt"
+        assert mixed_payload["right"]["reference"] == f"run:{run_ids[1]}"
+        assert "-beta" in mixed_payload["lines"]
+        assert "+delta" in mixed_payload["lines"]
+        assert latest.status_code == 200
+        latest_payload = latest.get_json()
+        assert latest_payload["left"]["reference"] == f"run:{run_ids[0]}"
+        assert latest_payload["right"]["reference"] == f"run:{run_ids[1]}"
+        assert latest_payload["lines"] == [
+            f"Files {latest_payload['left']['label']} and {latest_payload['right']['label']} differ",
+        ]
+        assert inaccessible.status_code == 404
+        assert inaccessible.get_json()["error"] == f"completed run was not found: run:{run_ids[2]}"
 
     def test_workspace_file_routes_include_and_maintain_generic_metadata(self):
         client = get_client()
@@ -17956,6 +18190,67 @@ class TestWorkspaceRoutes:
             )
             assert moved_to_root.status_code == 200
             assert moved_to_root.get_json()["moved"]["destination"] == "one.txt"
+
+    def test_copy_and_touch_file_routes(self):
+        client = get_client()
+        session = "workspace-copy-touch-" + uuid.uuid4().hex[:8]
+        headers = {"X-Session-ID": session}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            assert client.post(
+                "/workspace/files",
+                headers=headers,
+                json={"path": "source.txt", "text": "source\n"},
+            ).status_code == 200
+            assert client.post(
+                "/workspace/directories",
+                headers=headers,
+                json={"path": "archive"},
+            ).status_code == 200
+
+            copied = client.post(
+                "/workspace/files/copy",
+                headers=headers,
+                json={"source": "source.txt", "destination": "archive"},
+            )
+            created = client.post(
+                "/workspace/files/touch",
+                headers=headers,
+                json={"path": "empty.txt"},
+            )
+            touched = client.post(
+                "/workspace/files/touch",
+                headers=headers,
+                json={"path": "source.txt"},
+            )
+            unsafe_copy = client.post(
+                "/workspace/files/copy",
+                headers=headers,
+                json={"source": "source.txt", "destination": "../escape.txt"},
+            )
+
+            assert copied.status_code == 200
+            assert copied.get_json()["copied"] == {
+                "source": "source.txt",
+                "destination": "archive/source.txt",
+                "size": len("source\n"),
+            }
+            assert client.get(
+                "/workspace/files/read?path=archive/source.txt",
+                headers=headers,
+            ).get_json()["text"] == "source\n"
+            assert created.status_code == 200
+            assert created.get_json()["file"] == {
+                "path": "empty.txt",
+                "size": 0,
+                "created": True,
+            }
+            assert touched.status_code == 200
+            assert touched.get_json()["file"] == {
+                "path": "source.txt",
+                "size": len("source\n"),
+                "created": False,
+            }
+            assert unsafe_copy.status_code == 400
 
     def test_move_rejects_invalid_paths_and_recursive_folder_moves(self):
         client = get_client()
@@ -21966,6 +22261,25 @@ class TestShareRoute:
                     "label": "builtin redaction",
                     "content": [
                         {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
+                        {"text": "-----BEGIN RSA PRIVATE KEY-----", "cls": "notice"},
+                        {"text": "MIIEprivate-key-material", "cls": "notice"},
+                        {"text": "-----END RSA PRIVATE KEY-----", "cls": "notice"},
+                        {"text": "scan complete", "cls": "notice"},
+                        {
+                            "text": json.dumps({
+                                "DetectorName": "PrivateKey",
+                                "Raw": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                "Redacted": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                "SecretParts": {
+                                    "token": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                },
+                                "ExtraData": {
+                                    "duplicate": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                },
+                            }),
+                            "cls": "finding",
+                        },
+                        {"text": "after historical finding", "cls": "notice"},
                     ],
                 },
                 headers={"X-Session-ID": "test-session"},
@@ -21974,6 +22288,16 @@ class TestShareRoute:
             fetch = client.get(f"/share/{share_id}?json")
         data = json.loads(fetch.data)
         assert data["content"][0]["text"] == "contact [email-redacted] at [ip-redacted]"
+        redacted_text = [item["text"] for item in data["content"]]
+        assert redacted_text[1:3] == ["[private-key-redacted]", "scan complete"]
+        historical_finding = json.loads(redacted_text[3])
+        assert historical_finding["Raw"] == "[redacted]"
+        assert historical_finding["Redacted"] == "[redacted]"
+        assert historical_finding["SecretParts"] == {"token": "[redacted]"}
+        assert historical_finding["ExtraData"] == {"duplicate": "[redacted]"}
+        assert redacted_text[4] == "after historical finding"
+        assert "private-key-material" not in json.dumps(data)
+        assert "legacy-key-prefix" not in json.dumps(data)
 
     def test_post_skips_share_redaction_when_apply_redaction_false(self):
         client = get_client()

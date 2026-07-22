@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import {
   buildFrontendInventoryReport,
   formatFrontendInventoryCheckResult,
-} from '../../../scripts/inventory_frontend_modules.mjs'
+} from '../../../scripts/frontend/inventory_frontend_modules.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -71,25 +71,25 @@ describe('frontend browser global boundary inventory', () => {
       compatibility_read: 0,
     }),
     resolver_helper_calls_by_class: Object.freeze({
-      bridge_dispatch: 93,
+      bridge_dispatch: 96,
       global_only: 560,
-      import_first: 579,
+      import_first: 586,
     }),
     resolver_helper_calls_by_final_resolution: Object.freeze({
       allowlisted_global: 54,
-      bridge_dispatch_report_only: 89,
+      bridge_dispatch_report_only: 92,
       dynamic_or_non_literal: 27,
-      fallback_imported_binding: 370,
+      fallback_imported_binding: 374,
       fallback_local_binding: 11,
       global_publish: 77,
-      guarded_compatibility_fallback: 518,
+      guarded_compatibility_fallback: 521,
       same_file_import_source: 86,
       unresolved_report_only: 0,
     }),
     bridge_dispatch: Object.freeze({
-      declaration_count: 82,
-      registration_count: 87,
-      dispatch_count: 89,
+      declaration_count: 85,
+      registration_count: 90,
+      dispatch_count: 92,
       dispatched_missing_declaration_count: 0,
       dispatched_missing_registration_count: 0,
       declared_not_dispatched_count: 0,
@@ -99,7 +99,7 @@ describe('frontend browser global boundary inventory', () => {
         output: Object.freeze({ declared_count: 12, registered_count: 12, dispatched_count: 12 }),
         runner: Object.freeze({ declared_count: 25, registered_count: 25, dispatched_count: 25 }),
         tabs: Object.freeze({ declared_count: 18, registered_count: 18, dispatched_count: 18 }),
-        workspace: Object.freeze({ declared_count: 14, registered_count: 14, dispatched_count: 14 }),
+        workspace: Object.freeze({ declared_count: 17, registered_count: 17, dispatched_count: 17 }),
         workflows: Object.freeze({ declared_count: 7, registered_count: 7, dispatched_count: 7 }),
       }),
     }),
@@ -142,7 +142,7 @@ describe('frontend browser global boundary inventory', () => {
 
   it('passes check mode while reporting global purpose totals', () => {
     const report = runInventoryJson()
-    expect(report.generated_by).toBe('scripts/inventory_frontend_modules.mjs')
+    expect(report.generated_by).toBe('scripts/frontend/inventory_frontend_modules.mjs')
     expect(report.summary.unresolved_app_bare_read_count).toBe(0)
     expect(report.summary.window_publish_purposes.intentional_bootstrap).toBeGreaterThan(0)
     expect(report.summary.window_publish_purposes.lazy_placeholder).toBeGreaterThan(0)

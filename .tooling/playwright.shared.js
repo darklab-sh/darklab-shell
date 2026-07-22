@@ -18,7 +18,7 @@ const webServerTimeout = Math.max(
 
 export function buildIsolatedWebServer(port, slot) {
   return {
-    command: `/bin/bash ${resolve(rootDir, 'scripts/playwright/run_e2e_server.sh')} ${port} ${slot}`,
+    command: `/bin/bash ${resolve(rootDir, 'scripts/test-support/playwright/run_e2e_server.sh')} ${port} ${slot}`,
     cwd: rootDir,
     url: `http://127.0.0.1:${port}/health`,
     reuseExistingServer: false,

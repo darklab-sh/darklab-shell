@@ -18,8 +18,9 @@ from core.output_signals import (
     extract_target,
     strip_ansi_codes,
 )
-from services.intel.canonical import CanonicalizationError, canonical_url
 from services.diff.models import DIFF_KIND_NONE
+from services.diff.text import sequence_opcodes
+from services.intel.canonical import CanonicalizationError, canonical_url
 from services.runs.output_model import LineEvent
 from services.runs.output_model import is_noise_event, noise_kind_for_event
 from services.runs.output_store import load_run_output_events_for_run
@@ -1085,7 +1086,6 @@ def hunk_line_diff(
     use_line_index = _all_compare_entries_have_line_indexes(left_entries, right_entries)
     left_match_keys = [compare_line_sequence_key(entry, use_line_index=use_line_index) for entry in left_entries]
     right_match_keys = [compare_line_sequence_key(entry, use_line_index=use_line_index) for entry in right_entries]
-    matcher = SequenceMatcher(None, left_match_keys, right_match_keys, autojunk=False)
     hunks = []
     totals = {
         "left_total_lines": len(left_entries),
@@ -1100,7 +1100,10 @@ def hunk_line_diff(
     emitted_change_units = 0
     emitted_change_hunks = 0
 
-    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+    for tag, left_start, left_end, right_start, right_end in sequence_opcodes(
+        left_match_keys,
+        right_match_keys,
+    ):
         if tag == "equal":
             totals["equal_line_count"] += left_end - left_start
             hunks.append(compare_equal_hunk(

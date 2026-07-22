@@ -45,7 +45,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Theme Selector](#theme-selector)
 - [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
-- [Repository-Free Self-Hosting](#repository-free-self-hosting)
+- [Production Installation](#production-installation)
 - [Operator Backups](#operator-backups)
 - [Session Tokens](#session-tokens)
 - [Team-Mode](#team-mode)
@@ -295,7 +295,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 ## Built-In Pipe Support
 
-**Purpose:** narrow app-native pipe helpers (`grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, `uniq`) that keep common post-filter use cases available without enabling general shell piping or redirection.
+**Purpose:** narrow app-native pipe helpers (`grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, `uniq`) plus safe Files output capture, without enabling a general shell pipeline.
 
 **Behavior:**
 
@@ -304,9 +304,13 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - `jq` is an app-owned JSON/JSONL selector, not the host binary. It supports object fields such as `.host`, array iteration such as `.results[]`, key-existence filters such as `select(has("ip"))`, equality filters such as `select(.status == "ok")`, contains filters such as `select(.title contains "login")`, pretty JSON output by default, `-c` for compact JSON, and `-r` for scalar text output.
 - Autocomplete understands the narrow pipe stage and can guide `grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, and `uniq` after `command |`.
 - Workspace `ls` / `file list` keep their compact one-line display when run directly, but pipe helpers receive short listings as one logical entry per line so common forms like `ls | grep txt` behave like a normal terminal.
-- Arbitrary pipes, chaining, and redirection remain blocked at the command-validation layer.
+- `command > file` overwrites a file in the current Files folder and suppresses the command output from the live terminal. `command >> file` appends to the file and also suppresses live output. `command | tee file` overwrites the file and keeps the same output visible.
+- Output files receive the same post-filtered, path-masked, secret-redacted stream that run history stores. Personal/team scope, write permissions, safe relative paths, quotas, and maximum file size come from the normal Files boundary. Existing directory destinations and unsafe paths are rejected before the command starts.
+- A failed output write makes the run fail, including unattended scheduled built-ins. Unexpected filesystem failures return a generic message while the server log keeps the diagnostic detail.
+- Autocomplete includes `tee` and active Files paths after a supported pipe. `file help` shows all three output-capture forms.
+- Arbitrary pipes, command chaining, and all redirection outside the three app-managed Files forms remain blocked at the command-validation layer.
 
-**Limits:** only the seven helper stages above are recognised. Combinable flags are supported within a stage (e.g. `sort -rn`) and supported stages can be chained together (e.g. `command | grep pattern | wc -l`). The `jq` helper intentionally rejects arbitrary jq programs, shell escapes, joins, transforms, arithmetic, recursion, and file access. Malformed JSON produces a generic error without echoing the input line.
+**Limits:** only the seven filter stages and final Files sinks above are recognised. `>` and `tee` overwrite their destination; `>>` appends. File-descriptor redirects such as `2>` and `2>>` aren't supported and fail closed with a stdout-only message. Combinable flags are supported within a filter stage (e.g. `sort -rn`) and supported stages can be chained together (e.g. `command | grep pattern | wc -l`). The `jq` helper intentionally rejects arbitrary jq programs, shell escapes, joins, transforms, arithmetic, recursion, and file access. Malformed JSON produces a generic error without echoing the input line.
 
 **Configuration:** external command metadata lives in `conf/commands.yaml`; the built-in helper grammar and execution limits aren't operator-configurable.
 
@@ -337,6 +341,10 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 - `command | uniq -c`
 - `command | grep pattern | wc -l`
 - `command | sort -u | uniq -c`
+- `command > output.txt`
+- `command >> output.txt`
+- `command | tee output.txt`
+- `command | grep pattern | tee matches.txt`
 
 ---
 
@@ -699,12 +707,12 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Share Redaction
 
-**Purpose:** optional masking of common secrets and infrastructure details (bearer tokens, emails, IPs, hostnames) on snapshot permalinks, with a persistent raw-vs-redacted default controlled by the Options modal.
+**Purpose:** optional masking of common secrets and infrastructure details (bearer tokens, private-key blocks, emails, IPs, and hostnames) on snapshot permalinks, with a persistent raw-vs-redacted default controlled by the Options modal.
 
 **Behavior:**
 
 - When creating a share snapshot, the shell can prompt whether to share raw or redacted output.
-- A built-in redaction baseline masks common secrets and infrastructure details; operators can append custom regex rules on top.
+- A built-in redaction baseline masks common secrets and infrastructure details. It recognizes PEM and PGP private keys even when a command prints the block across several lines, and operators can append custom regex rules on top.
 - App-native `intel` response bodies are raw-only for sharing: snapshot payloads replace those lines with `Intel data omitted from share` even when the user chooses raw sharing.
 - Once a raw/redacted choice is saved as the persistent default in the [Options modal](#options-modal), subsequent share actions skip the prompt and reuse that choice — whether sharing is triggered from the prompt flow or directly from the Options modal.
 - Redaction applies only to the snapshot payload; the stored run history is never modified.
@@ -752,7 +760,8 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active runs, success rate, average duration, and the top non-built-in command roots by run count.
 - `project` manages case folders from the terminal: list/create/use/rename/current/clear/archive/unarchive/delete, link or unlink runs, link the last eligible run, and list/add/quick-add/remove project targets.
 - `schedule` manages saved recurring commands, while `watch` turns a completed baseline run into a recurring change-detection monitor.
-- `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, `file move <source> <destination>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`, plus the convenience aliases `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `mv <source> <destination>`, and confirmed `rm [-r|-f|-rf] <file-or-folder>`, expose keyboard-first access to the active personal or team Files workspace when workspace storage is enabled. `cd` is tab-local and treats the active workspace root as `/`; relative file commands resolve from that tab's current workspace folder. `file add` opens a blank file editor, `file add <file>` opens the same editor with the file name prefilled, `file add-dir` / `mkdir` creates a folder, `file download <file>` starts a browser download, and `file move` / `mv` move or rename a file or folder. `file list` / `ls` list the current folder non-recursively in short form by default; `file list -l` / `ls -l` show the long listing with type, size, and modified columns.
+- `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file diff <file1> <file2>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, `file copy <source> <destination>`, `file move <source> <destination>`, `file touch <file>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`, plus the convenience aliases `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `cp <source> <destination>`, `mv <source> <destination>`, `touch <file>`, and confirmed `rm [-r|-f|-rf] <file-or-folder>`, expose keyboard-first access to the active personal or team Files workspace when workspace storage is enabled. `cd` is tab-local and treats the active workspace root as `/`; relative file commands resolve from that tab's current workspace folder. `file add` opens a blank file editor, `file add <file>` opens the same editor with the file name prefilled, `file add-dir` / `mkdir` creates a folder, `file download <file>` starts a browser download, `file copy` / `cp` copies one file without replacing an existing destination, `file move` / `mv` move or rename a file or folder, and `file touch` / `touch` creates an empty file or updates its modified time without truncating it. `file list` / `ls` list the current folder non-recursively in short form by default; `file list -l` / `ls -l` show the long listing with type, size, and modified columns.
+- `diff <source1> <source2>` compares two workspace files, two completed runs written as `run:<run-id>`, or a file and run together, such as `diff file:expected.txt run:<run-id>`. Bare file names resolve from the current tab's Files folder. `diff --last` compares the last two completed runs from that tab without requiring Files to be enabled. Comparisons use the classic `<` / `>` layout by default, with `-q` / `--brief`, `-u` / `--unified`, and `-y` / `--side-by-side` available for familiar alternate output. Each file source can contain up to 5,000 lines and 500,000 UTF-8 bytes; larger files return an explicit error instead of a partial comparison.
 - `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` also work as standalone workspace-file commands, for example `grep -i admin targets.txt`, `head -n 20 output.txt`, `wc -l urls.txt`, and `sort -u names.txt`. They reuse the same constrained helper implementation as built-in pipe stages and never expose arbitrary shell piping or host filesystem access.
 - `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
@@ -883,7 +892,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, FOFA, and ZoomEye require user-provided provider keys. FOFA also requires the account email as `FOFA_EMAIL`, accepts `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN` for the API key, and needs an F-point balance for search calls. ZoomEye uses `ZOOMEYE_API_KEY` with the regional `api.zoomeye.ai` API and needs available resource credits. SecurityTrails currently requires a paid account. Shodan InternetDB, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
 
-**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, optional `CENSYS_ORGANIZATION_ID`, `GREYNOISE_API_KEY`, `VT_API_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, optional `IPINFO_TOKEN`, `URLHAUS_AUTH_KEY`, `THREATFOX_AUTH_KEY`, `VULNERS_API_KEY`, `URLSCAN_API_KEY`, `SECURITYTRAILS_API_KEY`, `FOFA_KEY` or a FOFA alias, `FOFA_EMAIL`, `ZOOMEYE_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts explicit names such as the VirusTotal CLI's native `VTCLI_APIKEY`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
+**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, optional `CENSYS_ORGANIZATION_ID`, `GREYNOISE_API_KEY`, `VT_API_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, optional `IPINFO_TOKEN`, `URLHAUS_AUTH_KEY`, `THREATFOX_AUTH_KEY`, `VULNERS_API_KEY`, `URLSCAN_API_KEY`, `SECURITYTRAILS_API_KEY`, `FOFA_KEY` or a FOFA alias, `FOFA_EMAIL`, `ZOOMEYE_API_KEY`, `PDCP_API_KEY`, `GITHUB_TOKEN`, or `GITLAB_TOKEN` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts explicit names such as the VirusTotal CLI's native `VTCLI_APIKEY`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
 
 ---
 
@@ -902,18 +911,18 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - The Files panel can create, view, edit, move, download, and delete text files owned by the active personal or team scope; JSON and JSONL/NDJSON files are pretty-printed in the read-only viewer, and open file previews can be refreshed manually or opt into auto-refresh while following appended output at the bottom. Files can also be dragged onto folder rows after confirmation.
 - Team Files live in a separate `team_*` workspace directory. The Files panel reloads when you switch personal/team scope and keeps the current folder separate per scope. Team viewers can list, read, preview, and download team files; owners, admins, and operators can also create, edit, move, and delete files. Archived teams stay readable in Files but cannot change files until reactivated.
 - The add/edit file modal includes labels and a private note for the workspace file. File rows surface existing labels/notes from the generic entity metadata store, and move/delete operations update or clear that metadata with the file so project views and package exports do not keep stale paths. Team-file labels and notes are shared with team members and stay separate from personal file metadata.
-- File writes, folder creation, and file/folder moves write best-effort audit rows with the path, destination path, file count, and byte size where applicable. Deletes keep their fail-closed audit row. Audit details do not store file contents.
-- The `file` built-in provides terminal access to the same file model through `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, `file move <source> <destination>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`; `file add` opens a blank file editor unless a filename is provided, `file add-dir` creates a folder, `file download <file>` starts the same browser download path as the Files panel, and `file move` moves or renames files and folders. `cd` is tracked per tab, treats the active personal/team workspace root as `/`, and causes relative commands such as `ls`, `cat`, `mv`, `rm`, and `file show` to resolve from the tab's current workspace folder. Team viewers can read through the terminal built-ins, but write commands are blocked before they open browser confirmations.
-- The `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `mv <source> <destination>`, `rm [-r|-f|-rf] <file-or-folder>`, `grep <pattern> <file>`, `head [-n N] <file>`, `tail [-n N] <file>`, `wc -l <file>`, `sort [-r|-n|-u] <file>`, and `uniq [-c] <file>` aliases map to app-native workspace operations only; they do not expose arbitrary host/container filesystem access.
+- File writes and appends, copy/touch operations, folder creation, and file/folder moves write best-effort audit rows with the path, destination path, file count, and byte size where applicable. Deletes keep their fail-closed audit row. Audit details do not store file contents.
+- The `file` built-in provides terminal access to the same file model through `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, `file copy <source> <destination>`, `file move <source> <destination>`, `file touch <file>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`; `file add` opens a blank file editor unless a filename is provided, `file add-dir` creates a folder, `file download <file>` starts the same browser download path as the Files panel, `file copy` copies one file without replacing an existing destination, `file move` moves or renames files and folders, and `file touch` creates an empty file or refreshes its modified time. `cd` is tracked per tab, treats the active personal/team workspace root as `/`, and causes relative commands such as `ls`, `cat`, `cp`, `mv`, `touch`, `rm`, and `file show` to resolve from the tab's current workspace folder. Team viewers can read through the terminal built-ins, but write commands are blocked before they open browser confirmations.
+- The `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `cp <source> <destination>`, `mv <source> <destination>`, `touch <file>`, `rm [-r|-f|-rf] <file-or-folder>`, `grep <pattern> <file>`, `head [-n N] <file>`, `tail [-n N] <file>`, `wc -l <file>`, `sort [-r|-n|-u] <file>`, and `uniq [-c] <file>` aliases map to app-native workspace operations only; they do not expose arbitrary host/container filesystem access.
 - `file list`, `ls`, `file move`, `mv`, and confirmed `file delete` support simple `*` patterns such as `file ls darklab-*`, `mv darklab-* darklab/`, and `file delete scan-*`. A `*` matches inside one path segment and does not cross `/`; moving multiple matches requires the destination to already be a folder.
 - `file delete <file>`, `file rm <file>`, and `rm <file>` first verify the target exists, then require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions. Folder deletion requires `-r` or `-rf` before the confirmation is shown, including when a glob matches one or more folders.
-- Loaded workspace file and folder names feed autocomplete for `file show`, `file edit`, `file download`, `file move`, `file delete`, `file rm`, `cat`, `ls`, `mv`, and `rm`.
+- Loaded workspace file and folder names feed autocomplete for `file show`, `file edit`, `file download`, `file copy`, `file move`, `file touch`, `file delete`, `file rm`, `cat`, `ls`, `cp`, `mv`, `touch`, `rm`, and `tee` destinations.
 - Workspace-only external-tool examples and flags in `commands.yaml` are hidden from autocomplete unless Files are enabled, so operators can add discoverable file workflows without exposing unusable suggestions on instances that keep Files disabled.
 - Selected command flags declared in `commands.yaml` can consume or write active personal/team Files. At execution time, user-facing names such as `targets.txt` are validated and rewritten to the active workspace path passed to the subprocess; output then maps absolute hashed paths back to user-facing Files paths.
 - `wget` downloads default to the active Files folder when Files are enabled. Operators can still choose a subfolder with `-P downloads` or `--directory-prefix=downloads`.
-- Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
+- Raw shell navigation and redirection remain blocked. The supported `command > file`, `command >> file`, and final `| tee file` forms write only through the Files boundary; other file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
 
-**Configuration:** Compose deployments use `WORKSPACE_ENABLED`, `WORKSPACE_BACKEND`, and `WORKSPACE_ROOT` in `.env`. Non-Compose deployments use the matching `workspace_*` settings in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
+**Configuration:** set `WORKSPACE_ENABLED`, `WORKSPACE_BACKEND`, and `WORKSPACE_ROOT` in `.env`. Direct source runs export the same variables; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
 
 ---
 
@@ -1021,7 +1030,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - The registry is re-read on every request for command policy, so edits take effect without a restart. Deleting or emptying the registry disables restrictions entirely.
 - Tool names and subcommand prefixes are matched **case-insensitively**; flag names are matched **with exact case** (so `!curl -K` blocks `-K` without blocking `-k`).
 - `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.
-- Operators can set `restricted_command_input_cidrs` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags. Built-in workspace path slots such as `mv` and `file move` stay out of this target check.
+- Operators can set `RESTRICTED_COMMAND_INPUT_CIDRS` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags. Built-in workspace path slots such as `mv` and `file move` stay out of this target check.
 - Command-specific runtime adaptations are also declared in the registry. `inject_flags` handles safe default flags such as `nmap -sT`, `nuclei -ud /tmp/nuclei-templates`, `naabu -scan-type c`, and `mtr --report-wide`; managed workspace directories and environment wrappers handle Amass' active personal/team database path.
 - The same registry feeds terminal discovery commands that share the modal's catalog data and hide entries whose `feature_required` is disabled:
   - `commands` lists built-in and allowed external roots, followed by an app-native pipe-helpers section (`grep`, `head`, `tail`, `wc -l`, `jq`, `sort`, `uniq`) labeled as app-managed filters rather than arbitrary shell pipelines.
@@ -1031,7 +1040,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** prefix matching is deliberately coarse — operators must be explicit with deny entries to block flag combinations on otherwise-allowed tools. Deny matching only applies once the tool prefix matches (e.g., `!nmap -sU` only affects `nmap` commands). Restricted command inputs only inspect literal values in metadata-known target slots; domain names are not DNS-resolved.
 
-**Configuration:** command policy uses `conf/commands.yaml`; restricted target inputs use `restricted_command_input_cidrs` in `conf/config.yaml`. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/external-command-integrations.md](docs/external-command-integrations.md).
+**Configuration:** command policy uses `conf/commands.yaml`; restricted target inputs use `RESTRICTED_COMMAND_INPUT_CIDRS` in `.env`. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/external-command-integrations.md](docs/external-command-integrations.md).
 
 ```yaml
 commands:
@@ -1313,21 +1322,21 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ---
 
-## Repository-Free Self-Hosting
+## Production Installation
 
-**Purpose:** install a released darklab_shell stack without cloning or building the source repository.
+**Purpose:** install and operate a released darklab_shell stack without cloning or building the source repository.
 
 **Behavior:**
 
 - The release installer creates a small deployment directory from one deterministic archive with production Compose, an environment file, local configuration starters, persistent data folders, managed-file checksums, the project license, third-party notices, a release manifest, a lifecycle command, and a verifier that confirms the pulled image matches both recorded registry digests before startup.
 - The app is licensed under GNU AGPLv3. Its rail footer, mobile menu footer, and FAQ link to the exact source tag and README for each official release. Modified network versions must point that link at their corresponding source and prominently offer it to every remote user at no charge through a standard or customary copying method; the full license controls. Project-owned source files keep short SPDX notices when they're copied separately, while generated and third-party files retain their own notices.
-- Production pulls an exact `docker.io/darklabsh/darklab-shell` release tag. The same image is available from the GitLab Container Registry, and the manifest records both matching digests plus measured image sizes for verification and support. The installed verifier also rejects an image selection that has drifted from that reviewed manifest.
-- Each protected release publishes a CycloneDX SBOM, full Grype vulnerability report, SLSA provenance, and an evidence index tied to the source commit, pipeline, and shared registry digest. Fixed Critical findings block publication. GitLab's keyless Sigstore identity signs both immutable image references and `SHA256SUMS`. The Docker Hub overview publishes the expected issuer and certificate identity separately, and the public smoke path checks that description before it verifies, installs, and starts the release.
+- Production pulls one exact `docker.io/darklabsh/darklab-shell` release tag on Linux AMD64 and ARM64. Docker chooses the native child image automatically, the same complete image index is available from the GitLab Container Registry, and the installed manifest records both matching index digests plus the reviewed child digest and measured sizes for each platform. The installed verifier rejects unsupported hosts and any image selection that has drifted from that platform map.
+- Each protected release publishes a CycloneDX SBOM and full Grype vulnerability report for every included platform, SLSA provenance, and an evidence index tied to the source commit, pipeline, shared registry index digest, child digests, and shared Python base resolution. Fixed Critical findings block publication. GitLab's keyless Sigstore identity signs both immutable index references, their child manifests, and `SHA256SUMS`. The Docker Hub overview publishes the expected issuer and certificate identity separately, and the public smoke path checks that description before it verifies, installs, and starts the release.
 - The app publishes port 8888 on every host interface by default so remote operators can connect without first configuring a reverse proxy. Operators can narrow `HOST_BIND_ADDRESS` to loopback, restrict the port with a firewall, and review local settings, [raw-packet scanning](#raw-packet-scanning), optional Postgres, optional local AI, and reverse-proxy exposure before starting it.
 - Shipped commands, workflows, themes, and other catalogs stay in the image. Matching operator files under `conf/` add to or override those defaults without hiding newer image content.
 - Private host permissions stay intact: container startup validates and stages the complete `conf/` overlay tree into an app-owned runtime copy before the web and worker processes start.
 - The installer verifies its exact release files and prepares the directory, but it doesn't pull or start containers until the operator runs the printed commands.
-- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, migrates a managed SQLite install to bundled Postgres with backup and row-count validation, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, explains clone-to-managed migration, and removes managed files without deleting operator state. Fresh replacement installs can explicitly adopt a managed Postgres backup while retaining their new database credentials, and the destination must be empty before the transactional restore starts. Migration and adoption inspect bundled Postgres through its local container socket, safely synchronize an empty retained cluster's password, and refuse to overwrite a named volume containing user tables. The managed migration reads locked-down app data through Docker and keeps host-side files owned by the deployment user. Offline archives remain an explicit operator-verified path.
+- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, migrates SQLite to bundled Postgres with backup and row-count validation, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, and removes managed files without deleting operator state. Fresh replacement installs can explicitly adopt a managed Postgres backup while retaining their new database credentials, and the destination must be empty before the transactional restore starts. Migration and adoption inspect bundled Postgres through its local container socket, safely synchronize an empty retained cluster's password, and refuse to overwrite a named volume containing user tables. The migration reads locked-down app data through Docker and keeps host-side files owned by the installation user. Offline archives remain an explicit operator-verified path.
 
 **Limits:** The current production platform and compatibility status live in the canonical [Supported Runtimes](CONFIGURATION.md#supported-runtimes) table. The app has no user authentication boundary, so the default all-interface listener must be limited to trusted networks with a host or upstream firewall. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
 
@@ -1341,20 +1350,18 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 **Behavior:**
 
-- `scripts/backup_system.py` loads the effective app config and optional `.env` file before it decides what to back up.
-- SQLite deployments get a consistent `history.db` snapshot through SQLite's backup API. Postgres deployments get a custom-format `pg_dump` archive, with the bundled database started temporarily when a managed backup finds it stopped.
-- The backup includes `data_dir`, local config files, `.env` when present, optional `--extra-file` paths, and enabled workspaces. An explicit workspace source is always included even when Files is currently disabled.
-- Data and workspace backup use the physical storage source, not just the app's logical path: bind mounts copy the host path, Docker named volumes are exported through Docker, and tmpfs/container-only workspaces require an explicit opt-in.
-- Locked-down host bind mounts must be readable by the user running the script. On Linux production hosts, that often means running the backup as root or choosing a Docker volume/container source instead of a host path.
+- `./darklab-deploy backup` runs the backup engine in a one-off release-image container with the installation's exact mounts and settings.
+- SQLite installations get a consistent `history.db` snapshot through SQLite's backup API. Postgres installations get a custom-format `pg_dump` archive, with the bundled database started temporarily when a backup finds it stopped.
+- The backup includes the selected database, durable app data, local configuration, `.env`, managed release metadata, and the complete managed workspace directory even when Files is currently disabled.
+- Data and workspaces are read through the container mounts, so operators don't need to loosen app-owned host permissions or run the lifecycle command with `sudo`.
 - Each backup writes a redacted manifest, checksums, restore notes, and either a `.tar.gz` archive or an unpacked directory when `--compress none` is used.
 - Large files are checksummed without loading the whole file into memory, and collision-safe output names keep closely timed backups from replacing each other.
-- Dry runs validate requested env and extra-file paths before writing an output directory or lock file.
 - Retention runs record their cutoff and candidate scan in the manifest, then report examined, removed, and failed counts after the new backup is safely published. Unexpected script failures include a traceback for unattended-job diagnosis.
-- Repository-free installs expose the same engine through `./darklab-deploy backup`; the release image supplies Python and a PostgreSQL 18 client that matches the bundled database, while the installed command supplies exact mounts, operator files, managed release metadata, and the complete managed `./workspaces` directory. Workspace files remain protected when Files is currently disabled or `.env` uses formatting that Compose accepts. `./darklab-deploy restore` verifies checksums, takes a safety backup, stages local config and durable workspaces, preserves the installed image and target Postgres credentials, and uses one Postgres transaction before it commits host files. Successful restores return those files to the invoking operator, recreate the app when restored environment settings changed, and wait for it to become healthy; failures leave it stopped with the safety-backup recovery command.
+- `./darklab-deploy restore` verifies checksums, takes a safety backup, stages local config and durable workspaces, preserves the installed image and target Postgres credentials, and uses one Postgres transaction before it commits host files. Successful restores return those files to the installation user, recreate the app when restored environment settings changed, and wait for it to become healthy; failures leave it stopped with the safety-backup recovery command.
 
-**Limits:** backup archives contain sensitive material, including local deployment files and the app-owned secrets key file when it exists. Run the script during quiet periods or stop the app when you need the strongest database-plus-filesystem consistency.
+**Limits:** backup archives contain sensitive material, including local settings and the app-owned secrets key file. Run backups during quiet periods when you need the strongest database-plus-filesystem consistency.
 
-**Configuration:** see [CONFIGURATION.md → Operator Backups](CONFIGURATION.md#operator-backups) for cron examples and Docker/Compose flags.
+**Configuration:** see [CONFIGURATION.md → Operator Backups](CONFIGURATION.md#operator-backups) for lifecycle commands, retention, restore, and backend adoption.
 
 ---
 
@@ -1441,7 +1448,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 Restricted-CIDR deployments add another boundary. Raw Nmap activates only when the protected firewall marker matches the effective CIDR list, then uses the IP path covered by the scanner-user OUTPUT rules. Packet-socket Naabu and Masscan stay inactive because their traffic doesn't cross that path; separate host or Docker bridge rules don't count as readiness proof. The app-port guard applies only to container-local destinations, so an authorized remote host using the same port remains scannable.
 
-**Configuration:** set `raw_packet_scanning_enabled: true` in `config.local.yaml` or `RAW_PACKET_SCANNING_ENABLED=true` in Compose. See [CONFIGURATION.md → Raw-packet scanning](CONFIGURATION.md#raw-packet-scanning) for readiness requirements, restricted-network behavior, diagnostics, and examples.
+**Configuration:** set `RAW_PACKET_SCANNING_ENABLED=true` in `.env`. Direct source runs export the same variable. See [CONFIGURATION.md → Raw-packet scanning](CONFIGURATION.md#raw-packet-scanning) for readiness requirements, restricted-network behavior, diagnostics, and examples.
 
 ---
 
@@ -1451,7 +1458,7 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 **Behavior:**
 
-- **Shell injection protection.** The app blocks metacharacters that enable command chaining and redirection — `&&`, `||`, `;`, backticks, `$()`, and redirection operators. `|` is allowed only within the constrained pipe model described in [Built-In Pipe Support](#built-in-pipe-support). Direct filesystem references to `/data` and `/tmp` are blocked as command arguments (using a negative lookbehind so URLs containing those strings as path segments are still permitted). Loopback targets (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`) are blocked at the validation layer.
+- **Shell injection protection.** The app blocks metacharacters that enable command chaining or arbitrary redirection — `&&`, `||`, `;`, backticks, `$()`, `<`, and unsupported control operators. `|` is allowed only within the constrained pipe model described in [Built-In Pipe Support](#built-in-pipe-support), while `>` and `>>` are accepted only as final app-managed Files sinks. Direct filesystem references to `/data` and `/tmp` are blocked as command arguments (using a negative lookbehind so URLs containing those strings as path segments are still permitted). Loopback targets (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`) are blocked at the validation layer.
 - **Process isolation.** Gunicorn runs as unprivileged `appuser`; user-submitted commands run as separate unprivileged `scanner` processes. The container filesystem is read-only (`read_only: true`); `/data` is accessible only to `appuser` (`chmod 700`), while optional session workspaces use a shared appuser/scanner group with non-world-readable files. Container startup installs an OS-level guard so `scanner` cannot connect back to the app port.
 - **Opt-in raw-packet scans.** Capability-backed scanner modes use the same unprivileged process boundary and fail closed when their readiness checks don't pass. See [Raw-Packet Scanning](#raw-packet-scanning) for tool behavior, fallbacks, restricted-network limits, and setup.
 - **Rate limiting + process tracking.** Redis-backed rate limiting prevents burst abuse across multiple Gunicorn workers, including noisy scans against random app paths that would otherwise crowd out normal browser and command requests. PID tracking in Redis keeps kill behavior correct when a kill request lands on a different worker than the one that started the process.
@@ -1464,8 +1471,8 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 - `commands.yaml` — dispatch gate (see [Command Allowlist](#command-allowlist)).
 - `trusted_proxy_cidrs` in `config.yaml` — CIDRs whose `X-Forwarded-For` is honored.
 - `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`, `/diag/audit`, and `/metrics`.
-- `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
-- `raw_packet_scanning_enabled` in `config.yaml` or `RAW_PACKET_SCANNING_ENABLED` in Compose — capability-backed raw scanning opt-in.
+- `compose.dev.yaml` for development and the installed `compose.yaml` for production — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
+- `RAW_PACKET_SCANNING_ENABLED` in `.env` — capability-backed raw scanning opt-in.
 
 ---
 
@@ -1578,7 +1585,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 
 **Limits:** `/diag`, `/diag/audit`, and `/metrics` are gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables `/diag` and `/diag/audit` completely and prevents `/metrics` from being scraped. Set `metrics_enabled: false` to keep `/diag` and `/diag/audit` available while hiding `/metrics`.
 
-**Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, `prometheus_multiproc_dir`, and metrics histogram bucket settings in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
+**Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, and metric histogram buckets live in `config.local.yaml`; `PROMETHEUS_MULTIPROC_DIR` lives in `.env`. See [CONFIGURATION.md](CONFIGURATION.md).
 
 ---
 

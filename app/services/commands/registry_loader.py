@@ -18,6 +18,7 @@ from services.commands.registry_adaptations import (
     environment_merge_key,
     inject_merge_key,
 )
+from services.commands import registry_secret_specs
 
 
 log = logging.getLogger("shell")
@@ -322,45 +323,7 @@ def normalize_runtime_adaptations(raw_value) -> dict[str, object]:
 
 
 def normalize_required_secrets(items) -> list[dict[str, object]]:
-    result: list[dict[str, object]] = []
-    by_key: dict[tuple[str, str], dict[str, object]] = {}
-    for item in items or []:
-        if not isinstance(item, dict):
-            continue
-        env = str(item.get("env") or "").strip().upper()
-        if not SECRET_ENV_RE.fullmatch(env):
-            continue
-        inject_env = str(item.get("inject_env") or item.get("as") or env).strip().upper()
-        if not SECRET_ENV_RE.fullmatch(inject_env):
-            continue
-        fallback_envs = []
-        for fallback in item.get("fallback_envs", []) or []:
-            fallback_env = str(fallback or "").strip().upper()
-            if (
-                SECRET_ENV_RE.fullmatch(fallback_env)
-                and fallback_env not in fallback_envs
-                and fallback_env != env
-            ):
-                fallback_envs.append(fallback_env)
-        optional = bool(item.get("optional", False))
-        key = (env, inject_env)
-        if key in by_key:
-            # If any declaration requires the secret, keep the merged entry required.
-            by_key[key]["optional"] = bool(by_key[key].get("optional")) and optional
-            existing_fallbacks = by_key[key].setdefault("fallback_envs", [])
-            if isinstance(existing_fallbacks, list):
-                for fallback_env in fallback_envs:
-                    if fallback_env not in existing_fallbacks:
-                        existing_fallbacks.append(fallback_env)
-            continue
-        normalized: dict[str, object] = {"env": env, "optional": optional}
-        if inject_env != env:
-            normalized["inject_env"] = inject_env
-        if fallback_envs:
-            normalized["fallback_envs"] = fallback_envs
-        by_key[key] = normalized
-        result.append(normalized)
-    return result
+    return registry_secret_specs.normalize_required_secrets(items, secret_env_re=SECRET_ENV_RE)
 
 
 def coerce_positive_int(value: object, default: int) -> int:
@@ -636,7 +599,11 @@ def merge_command_registry_entries(
                     help_spec[key] = values
         if overlay_entry.get("requires_secrets"):
             existing_secrets = {
-                (item.get("env"), item.get("inject_env") or item.get("env")): item
+                (
+                    item.get("env"),
+                    item.get("inject_env") or item.get("env"),
+                    tuple(item.get("subcommands", []) or []),
+                ): item
                 for item in merged.setdefault("requires_secrets", [])
                 if isinstance(item, dict) and item.get("env")
             }
@@ -645,7 +612,7 @@ def merge_command_registry_entries(
                 inject_env = (secret.get("inject_env") or env) if isinstance(secret, dict) else None
                 if not env:
                     continue
-                key = (env, inject_env)
+                key = (env, inject_env, tuple(secret.get("subcommands", []) or []))
                 if key in existing_secrets:
                     existing_secrets[key]["optional"] = bool(existing_secrets[key].get("optional")) and bool(
                         secret.get("optional")

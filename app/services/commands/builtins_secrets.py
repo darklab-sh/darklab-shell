@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.commands.builtins_format import format_native_record, output_line
-from services.commands.registry import split_command_argv
+from services.commands.registry import command_secret_consumers, split_command_argv
 from services.intel.registry import provider_status_catalog
 from services.secrets.audit import emit_secret_event
 from services.secrets.storage import InvalidSecretName, delete_secret, list_secret_metadata, normalize_secret_name
@@ -129,6 +129,33 @@ def _format_provider_status_row(provider: dict[str, Any], status_label: str) -> 
     return format_native_record(label, detail, 22)
 
 
+def _command_consumer_status(
+    consumer: dict[str, Any],
+    stored_secret_names: set[str],
+) -> tuple[bool, str]:
+    names = [
+        str(name or "").strip().upper()
+        for name in [consumer.get("env"), *(consumer.get("fallback_envs") or [])]
+        if str(name or "").strip()
+    ]
+    if any(name in stored_secret_names for name in names):
+        return True, "configured"
+    if consumer.get("optional"):
+        return True, "available"
+    return False, "not configured"
+
+
+def _format_command_consumer_row(consumer: dict[str, Any], status_label: str) -> str:
+    label = str(consumer.get("consumer") or "Command").strip()
+    names = [
+        str(name or "").strip().upper()
+        for name in [consumer.get("env"), *(consumer.get("fallback_envs") or [])]
+        if str(name or "").strip()
+    ]
+    detail = " · ".join([status_label, " or ".join(names)])
+    return format_native_record(label, detail, 22)
+
+
 def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
     try:
         stored_secret_names = _provider_secret_name_set(secret_scope_id)
@@ -136,8 +163,9 @@ def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
         return [output_line(f"secret: {exc}")]
 
     providers = provider_status_catalog()
-    if not providers:
-        return [output_line("No intel providers are registered.", "builtin-note")]
+    command_consumers = command_secret_consumers()
+    if not providers and not command_consumers:
+        return [output_line("No secret consumers are registered.", "builtin-note")]
 
     provider_rows = []
     for provider in providers:
@@ -174,6 +202,25 @@ def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
         lines.append(output_line(""))
         lines.append(output_line("Not configured:", "builtin-section"))
         for row in missing_rows:
+            lines.append(output_line(str(row["line"]), "builtin-kv"))
+
+    command_rows = []
+    for consumer in command_consumers:
+        configured, status_label = _command_consumer_status(consumer, stored_secret_names)
+        command_rows.append({
+            "configured": configured,
+            "label": str(consumer.get("consumer") or ""),
+            "line": _format_command_consumer_row(consumer, status_label),
+        })
+    if command_rows:
+        command_configured = sum(1 for row in command_rows if row["configured"])
+        lines.append(output_line(""))
+        lines.append(output_line("Command credentials:", "builtin-section"))
+        lines.append(output_line(
+            f"{command_configured} usable · {len(command_rows) - command_configured} not configured",
+            "builtin-note",
+        ))
+        for row in sorted(command_rows, key=lambda item: str(item["label"]).lower()):
             lines.append(output_line(str(row["line"]), "builtin-kv"))
 
     return lines

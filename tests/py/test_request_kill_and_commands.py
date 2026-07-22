@@ -267,10 +267,10 @@ class TestIsCommandAllowedEdges:
         assert not ok
         assert "Shell operators" in reason
 
-    def test_redirection_is_blocked(self):
+    def test_absolute_output_redirection_destination_is_blocked(self):
         ok, reason = self._check("curl https://darklab.sh > /tmp/out")
         assert not ok
-        assert "Shell operators" in reason
+        assert "must be relative" in reason
 
     def test_deny_rule_takes_priority_over_allow(self):
         ok, _ = self._check("curl -o /dev/stdout https://darklab.sh", allow=["curl"], deny=["curl -o"])
@@ -1097,6 +1097,11 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("workspace list") is None
             assert resolve_builtin_command("ls") == "ls"
             assert resolve_builtin_command("cat targets.txt") == "cat"
+            assert resolve_builtin_command("diff targets-old.txt targets-new.txt") == "diff"
+            assert resolve_builtin_command("diff -u targets-old.txt targets-new.txt") == "diff"
+            assert resolve_builtin_command("diff -q -u targets-old.txt targets-new.txt") == "diff"
+            assert resolve_builtin_command("diff --last") == "diff"
+            assert resolve_builtin_command("diff file:expected.txt run:run-1") == "diff"
             assert resolve_builtin_command("rm targets.txt") == "rm"
 
     def test_workspace_builtin_commands_are_hidden_when_disabled(self):
@@ -1104,6 +1109,9 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("file list") is None
             assert resolve_builtin_command("ls") is None
             assert resolve_builtin_command("cat targets.txt") is None
+            assert resolve_builtin_command("diff targets-old.txt targets-new.txt") == "diff"
+            assert resolve_builtin_command("diff run:run-1 run:run-2") == "diff"
+            assert resolve_builtin_command("diff --last") == "diff"
             assert resolve_builtin_command("rm targets.txt") is None
 
     def test_tour_builtin_command_is_hidden_when_disabled(self):

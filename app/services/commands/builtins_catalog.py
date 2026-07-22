@@ -145,11 +145,17 @@ _SPECIAL_BUILTIN_COMMANDS = {
 _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "banner", "description": "Print the configured banner art without replaying welcome.", "root": "banner"},
     {"name": "cat <file>", "description": "Show a session file.", "root": "cat"},
+    {"name": "cp <source> <destination>", "description": "Copy a session file.", "root": "cp"},
     {"name": "cd [folder]", "description": "Change the current workspace folder for this tab.", "root": "cd"},
     {"name": "clear", "description": "Clear the current terminal tab output.", "root": "clear"},
     {"name": "commands", "description": "List built-in and allowed external commands.", "root": "commands"},
     {"name": "config", "description": "Show or update user options from the terminal.", "root": "config"},
     {"name": "date", "description": "Show the current server time.", "root": "date"},
+    {
+        "name": "diff [-q|-u|-y] [--last | <source1> <source2>]",
+        "description": "Compare session files, completed run output, or the last two runs in this tab.",
+        "root": "diff",
+    },
     {"name": "df -h", "description": "Show a compact filesystem summary.", "root": "df"},
     {"name": "env", "description": "Show core environment values for this shell.", "root": "env"},
     {"name": "exit", "description": "Close the current tab.", "root": "exit"},
@@ -195,6 +201,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "status", "description": "Show the current session summary, limits, and backend health.", "root": "status"},
     {"name": "sort [-r|-n|-u] <file>", "description": "Sort a session file.", "root": "sort"},
     {"name": "tail [-n N] <file>", "description": "Show the last lines of a session file.", "root": "tail"},
+    {"name": "touch <file>", "description": "Create an empty session file or refresh its modified time.", "root": "touch"},
     {"name": "team", "description": "Create, join, inspect, and manage teams from the terminal.", "root": "team"},
     {"name": "theme", "description": "Show or apply the active shell theme from the terminal.", "root": "theme"},
     {"name": "tour", "description": "Print the onboarding tour inside the terminal.", "root": "tour"},
@@ -206,7 +213,11 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "var", "description": "Set, list, or unset session command variables.", "root": "var"},
     {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
     {"name": "watch", "description": "Create, inspect, pause, resume, delete, and fire watchers.", "root": "watch"},
-    {"name": "file", "description": "List, view, create, edit, download, move, or remove session files.", "root": "file"},
+    {
+        "name": "file",
+        "description": "List, view, compare, create, edit, download, copy, move, or remove session files.",
+        "root": "file",
+    },
     {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
     {"name": "who", "description": "Show the current shell user and session.", "root": "who"},
     {"name": "whoami", "description": "Describe this shell and link to the project README.", "root": "whoami"},
@@ -217,6 +228,8 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
 _BUILTIN_COMMAND_HELP = [(entry["name"], entry["description"]) for entry in _DOCUMENTED_BUILTIN_COMMANDS]
 _DOCUMENTED_BUILTIN_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_BUILTIN_COMMANDS if "root" in entry}
 _BUILTIN_COMMANDS = _DOCUMENTED_BUILTIN_COMMAND_ROOTS | {"reboot", "sudo"}
-_WORKSPACE_ALIAS_ROOTS = {"cat", "cd", "grep", "head", "ll", "ls", "mkdir", "mv", "rm", "sort", "tail", "uniq", "wc"}
+_WORKSPACE_ALIAS_ROOTS = {
+    "cat", "cd", "cp", "grep", "head", "ll", "ls", "mkdir", "mv", "rm", "sort", "tail", "touch", "uniq", "wc",
+}
 _WORKSPACE_BUILTIN_ROOTS = _WORKSPACE_ALIAS_ROOTS | {"file"}
-_SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "ll", "ls", "rm"}
+_SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "diff", "ll", "ls", "rm"}

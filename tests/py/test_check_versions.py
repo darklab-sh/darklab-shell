@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_check_versions_module():
-    path = ROOT / "scripts" / "check_versions.sh"
+    path = ROOT / "scripts" / "release" / "check_versions.sh"
     loader = importlib.machinery.SourceFileLoader("check_versions_script", str(path))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None

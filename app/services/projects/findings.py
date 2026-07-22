@@ -1070,7 +1070,7 @@ def _trufflehog_safe_finding_text(raw_line: str) -> str:
             "line_length": len(str(raw_line or "")),
             "looks_json": cleaned.lstrip().startswith("{"),
         })
-        return strip_ansi_codes(raw_line).strip()
+        return "TruffleHog secret finding [redacted]"
     detector = str(data.get("DetectorName") or data.get("DetectorType") or "secret").strip() or "secret"
     verified = data.get("Verified")
     verification = "verified" if verified is True else "unknown" if verified is None else "unverified"

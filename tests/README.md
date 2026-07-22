@@ -16,7 +16,7 @@ The suites are layered on purpose:
 2. Vitest checks client-side helper logic and browser-module failure paths in jsdom
 3. Playwright checks the full UI, network behavior, and cross-module interactions in a real browser
 
-Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks, Vitest owns browser command parsing and Files modal interactions, and Playwright covers the user-facing workflow in a live app.
+Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks plus owner-scoped copy/touch/overwrite/append sinks, destination preflight, safe write failures, scheduled-run exit status, file/run source resolution, file comparison limits, and shell-style formatting; Vitest owns browser command parsing, fail-closed file-descriptor redirects, output capture, and Files modal interactions; and Playwright covers the user-facing workflow in a live app.
 
 Project workspace behavior follows the same split: pytest owns project routes, schema, migration, overview and monitoring payloads, packages, history/share integration, and persistence edge cases; Vitest owns Projects modal, Overview and Monitoring tab rendering, history drawer, Files metadata, and package-wizard browser behavior; Playwright covers full user flows when focus, navigation, or live browser state is the important risk. Interactive PTY behavior is split between pytest service/route coverage, Vitest browser-controller coverage, and focused Playwright checks for the real terminal modal path.
 
@@ -76,6 +76,7 @@ npx playwright install
 Notes:
 
 - `npm run test:pytest` uses `.venv/bin/pytest` automatically when the repo virtualenv exists
+- `npm run test:pytest:fast` skips only the scenarios marked `release_integration`; `npm run test:pytest:release` runs those release-boundary scenarios on their own
 - keep the Python virtualenv active for lint and backend debugging work
 - `Vitest` and `Playwright` use the repo-local npm dependencies; do not rely on global installs
 - most day-to-day test work does not require Docker
@@ -86,7 +87,7 @@ Notes:
 
 ## Running the Suites
 
-Run the full sets:
+Run the full sets before merging or releasing:
 
 ```bash
 npm run test:pytest
@@ -94,6 +95,23 @@ npm run test:unit
 npm run test:e2e:source
 npm run test:e2e
 ```
+
+For a quicker backend loop while you're editing, run:
+
+```bash
+npm run test:pytest:fast
+```
+
+The fast command covers normal backend and route behavior. The complementary
+`npm run test:pytest:release` covers slower production installers,
+publication, signing, and backup/restore paths. Its publisher coverage runs the
+real release shell script against stubbed Docker, registry state, and runner
+identity so first publication, retry, and immutable-tag conflicts stay aligned
+with CI without contacting a registry. CI runs both required serial
+lanes at the same time, retains separate JUnit, slow-test, and file-timing
+reports, and verifies that their node IDs are disjoint and add up to the
+unchanged complete suite. Use `npm run test:pytest`, not just the fast command,
+for the final local backend check.
 
 Run focused slices while iterating:
 
@@ -146,8 +164,9 @@ A practical local loop is usually:
 
 1. run the narrowest relevant `pytest` or `Vitest` file while iterating
 2. run the matching focused `Playwright` spec if the behavior is browser-visible
-3. run the full suite slice for the touched layer before pushing
-4. run the container smoke test only when the change can affect the built image or installed tools
+3. use `npm run test:pytest:fast` for broad backend feedback while iterating
+4. run the complete suite slice for the touched layer before pushing
+5. run the container smoke test only when the change can affect the built image or installed tools
 
 ---
 
@@ -157,7 +176,7 @@ These summaries explain what belongs in each layer. Use the live-listing command
 
 ### Pytest
 
-`tests/py/` covers backend contracts, route behavior, persistence, loaders, configuration/theme resolution, command validation, diagnostics gating, and structured logging.
+`tests/py/` covers backend contracts, route behavior, persistence, loaders, configuration/theme resolution, command validation, diagnostics gating, and structured logging. Stable route modules reuse an application with a fresh client and reset Flask config for each test; application-factory, construction-time configuration, logging, import, and extension-isolation tests still create independent applications.
 
 ### Vitest
 
@@ -185,7 +204,7 @@ scripts/record_demo.sh --base-url http://localhost:9000
 scripts/record_demo.sh --no-arm                     # start immediately when OBS is already lined up
 ```
 
-Wrappers health-check the container, seed/register the demo session token through the configured app database, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use `scripts/obs_recording.mjs` to start/stop OBS over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token through the configured app database, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use the grouped OBS helper to start and stop recording over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
 OBS must be installed and running before you start either wrapper. Enable the WebSocket server in `Tools -> WebSocket Server Settings`; set `OBS_WS_PASSWORD` if your OBS WebSocket requires one.
 
@@ -268,7 +287,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 ./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
 
-GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. Ordinary branch image builds also retain a CycloneDX SBOM and full Grype report and fail on fixed Critical findings before a release tag is created. Protected tags scan the canonical GitLab image as soon as it is available, in parallel with the runtime compatibility jobs, and pass those retained files to the later evidence/signing job. Maintainers can use the manual `release-image-recheck` job to rerun repository-free startup, bundled tools, and the scan against an existing immutable digest without rebuilding it.
+GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. Ordinary branch image builds also retain a CycloneDX SBOM and full Grype report and fail on fixed Critical findings before a release tag is created. Protected tags resolve one Python base index, build native AMD64 and ARM64 staging children, and run production-installation, bundled-tool, Syft, and Grype checks against each child before the canonical image index can exist. The ARM64 smoke also starts Redis and Postgres. Later evidence and signing jobs consume the retained platform contracts, SBOMs, and reports. A protected branch rehearsal publishes a temporary index and repeats anonymous native pulls without promoting or creating release artifacts. Maintainers can use `release-image-recheck` to rerun production startup, bundled tools, and the scan against either an existing child digest or an index digest plus its selected platform without rebuilding it.
 
 ---
 
@@ -281,7 +300,7 @@ Seeded commands are pulled from the command-registry example catalog, so the gen
 The script must run **inside the container** so the same SQLite version that owns the DB does the writes; it refuses to write from the host by default.
 
 ```bash
-docker compose exec -T shell python - --new-token < scripts/seed_history.py
+docker compose -f compose.dev.yaml exec -T shell python - --new-token < scripts/seed_history.py
 ```
 
 Use `--help` for the full flag list and invocation forms.

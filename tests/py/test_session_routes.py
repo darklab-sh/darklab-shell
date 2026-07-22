@@ -9,14 +9,14 @@ import sqlite3
 import uuid
 
 import config as app_config
-from conftest import make_test_app as _test_app
+from conftest import reusable_test_app
 from core.database import DB_PATH
 from services.teams.storage import token_hash
 import services.workspace.files as workspace
 
 
 def get_client():
-    return _test_app().test_client()
+    return reusable_test_app(__name__).test_client()
 
 
 def _audit_event_rows(event_type):

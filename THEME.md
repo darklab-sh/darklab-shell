@@ -161,7 +161,7 @@ The current built-in selector ships 18 named themes:
 ### Authoring a theme
 
 - Copy `theme_dark.yaml.example` or `theme_light.yaml.example` into `app/conf/themes/<filename>.yaml` to expose it in the runtime selector. The loader reads the built-in reference files plus every YAML file in `app/conf/themes/`.
-- For a private overlay on an existing base theme, create `app/conf/themes/<filename>.local.yaml` in a source deployment or `conf/themes/<filename>.local.yaml` in a repository-free deployment. The loader merges it after the shipped base file.
+- For a private overlay on an existing base theme, create `app/conf/themes/<filename>.local.yaml` in development or `conf/themes/<filename>.local.yaml` in a production installation. The loader merges it after the shipped base file.
 - Unknown keys are ignored — only keys present in `_THEME_DEFAULTS` (`app/config.py`) are accepted.
 - Values may be any valid CSS color, length, gradient, or shadow string, depending on the key.
 - To derive one value from another, use CSS custom-property references such as `var(--green)` or `color-mix(in srgb, var(--surface) 88%, #000)`. The loader preserves those strings exactly; the browser resolves them after injection.
@@ -196,7 +196,7 @@ There is no filename-based or palette-based group inference — `group` must be 
 ## Practical Notes
 
 - Theme YAML files are explicit and self-contained so operators can tune the shell without touching code.
-- Repository-free production resolves `themes/<name>.local.yaml` under mounted `/config`. An overlay can change a shipped named theme but doesn't add a new selector entry by itself. Restart the shell container after changing the host file because production stages a private overlay snapshot at startup.
+- Production resolves `themes/<name>.local.yaml` under mounted `/config`. An overlay can change a shipped named theme but doesn't add a new selector entry by itself. Restart the shell container after changing the host file because production stages a private overlay snapshot at startup.
 - Most values are safe to tweak live as long as they remain valid CSS values.
 - The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three.
 - If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.

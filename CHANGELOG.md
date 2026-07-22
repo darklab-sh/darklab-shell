@@ -11,9 +11,93 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.6.1] - Unreleased
+## [2.7.1] - Unreleased
 
 No changes yet.
+
+---
+
+## [2.7.0] - 2026-07-22
+
+### Added
+
+- **TruffleHog can scan authenticated GitHub and GitLab sources without exposing provider tokens.**
+  - **Why:** Files and public HTTPS Git scans couldn't enumerate private repositories, organizations, groups, or self-hosted provider instances.
+  - **What:** `trufflehog github` receives `GITHUB_TOKEN` and `trufflehog gitlab` receives `GITLAB_TOKEN` from the active encrypted secrets scope. Repository and endpoint URLs must use credential-free HTTPS; inline tokens, auth-in-URL, custom clone paths, retained clones, and local Git sources remain blocked. GitHub `--org`, GitLab `--group-id`, custom HTTPS endpoints, and workspace-backed include/exclude files are supported, and `providers` reports both command credentials.
+  - **Tests:** registry, policy, secret-scope, workspace rewrite, autocomplete, runtime JSON injection, consumer-display, and per-example smoke-source assertions cover both provider sources without adding new test cases.
+
+- **Terminal output can be saved directly to Files, and files can be copied or touched from the prompt** — `command > file` overwrites a workspace file while keeping output out of the live terminal, `command >> file` appends to it, and `command | tee file` overwrites it while still displaying the same post-filtered, redacted output. `file copy` / `cp` copies one file without overwriting an existing destination, while `file touch` / `touch` creates an empty file or refreshes its modified time; every write follows the active Files directory, owner/team permissions, path checks, and workspace limits.
+
+- **Files and completed runs can be compared directly from the terminal** — `diff` accepts workspace files, explicit `file:<path>` sources, completed `run:<run-id>` output, or one of each. `diff --last` compares the last two completed runs from the current tab, while `file diff` keeps the same file-oriented command under the Files namespace. The default output follows classic `diff` with `<` and `>` lines; `-q` / `--brief`, `-u` / `--unified`, and `-y` / `--side-by-side` provide familiar alternate layouts. Run sources follow the same owner scope, output filtering, and comparison limits as the History comparison view, and file sources stay inside the active personal or team workspace. Each file source is limited to 5,000 lines and 500,000 UTF-8 bytes so terminal comparisons stay responsive; oversized files are rejected instead of silently truncated.
+
+### Changed
+
+- **Production installation and source development now have separate, explicit runtime contracts.**
+  - **Before:** the root Compose file and environment template mixed development defaults with release-facing settings, while an old checkout-only production override, migration help, direct backup examples, and “repository-free” wording kept a second production path visible.
+  - **After:** production starts from the versioned installer, installed `compose.yaml`, `deploy/.env.example`, and `darklab-deploy`; development uses the loopback-only `compose.dev.yaml`, the root development `.env.example`, or the local Python helper. The retired production override and checkout migration procedures are gone, development services no longer claim fixed container names or production restart behavior, and current docs use production-installation language throughout.
+  - **Tests:** production-payload contracts pin the correct environment template and production/development Compose boundaries, lifecycle coverage rejects the retired `migration-help` command, documentation checks reject stale deployment paths and terminology, and both Compose files pass rendered-config validation.
+
+- **Release tags publish one native image for Linux AMD64 and ARM64** — Protected tag pipelines resolve one Python base index, build and scan each architecture on a native runner, and assemble the verified child digests into one immutable GitLab OCI index before copying the same index to Docker Hub. The installer manifest, image verifier, SBOMs, vulnerability reports, provenance, signatures, public smoke checks, and release evidence all retain the canonical index digest plus the selected child and platform-base digests. Dual-platform publication fails closed when either child is missing; a manual protected AMD64-only emergency release requires a public reason and stays permanently single-platform. SELinux Docker and rootless Podman remain AMD64 compatibility claims, and ARM64 stays uncached on the storage-limited hosted runner. Three protected rehearsals exercised both native children without publishing release artifacts; the uncached ARM64 lane completed within 50.75 percent of its timeout and retained at least 23.62 percent free storage against its accepted 20 percent floor. A disposable GitLab registry exercise used the production cleanup code to remove both temporary children and the staging index while the canonical index and durable architecture anchors kept their exact digests and remained runnable for both platforms.
+
+- **Project scripts separate stable commands from implementation helpers** — Release, container, frontend, generator, operator, development, and test-support code now lives in purpose-named directories while documented commands and common test runners keep their existing paths. CI, npm, Docker, hooks, and import-based tests call the grouped implementations directly; compatibility and architecture checks preserve command forwarding, executable modes, working-directory independence, image-copied helpers, and generated-asset ownership metadata.
+
+- **Backend test feedback arrives sooner without reducing release coverage** — The unchanged complete pytest command now has complementary fast and release-integration selections that GitLab runs as required concurrent jobs. An exact node-ID partition guard prevents skipped or duplicated coverage, each lane retains JUnit plus slow-test and file-level timing reports, stable route tests reuse reset applications with fresh clients, and asset working-directory checks avoid duplicate production compression while a focused sidecar test and the full committed-asset check preserve Brotli/gzip coverage. Five consecutive project-runner pipelines passed both lanes; median runner durations were 91.6 seconds for release integration and 301.2 seconds for the fast lane, compared with 477.2 seconds for the previous complete-suite job. The first required result now arrives about 79% sooner than the earlier 433-second test baseline.
+
+- **Scheduled image builds warm every self-managed runner** — The existing `bael`, `bune`, and `botis` fanout now also builds on `babi`, `bile`, `barbas`, `beleth`, `baka`, `bana`, the SELinux-enforcing `baku` runner, and the rootless-Podman `baal` runner.
+
+- **Release image cache behavior is measurable without permanent probe jobs** — Canonical AMD64 publication retains its build or tag-reuse time, cache reference, Python base digest, image size, and pipeline identity, while release publication rejects a cache scope that doesn't match the release line. The cross-runner acceptance run completed both cache export and reuse in under one minute with the expensive builder stages served from cache, so scheduled CI now keeps only the production cache warmers.
+
+- **Multi-platform publisher retry and conflict paths are tested as real shell behavior** — A stub Docker client, registry state, and runner-identity harness executes platform build and reuse, conflicting staging content, wrong-architecture and missing-artifact failures, child-anchor create/reuse/conflict, canonical-index conflict, and Docker Hub copy/reuse/conflict paths through the same publisher script CI runs. The existing Python contract tests continue to validate descriptors and release modes without standing in for publisher behavior.
+
+### Fixed
+
+- **GELF startup and migration logs no longer collide with OpenSearch metadata fields.**
+  - **Root cause:** `APP_INITIALIZED` and schema-migration records used a structured field named `version`. The GELF formatter correctly prefixed additional fields with `_`, but that produced `_version`, which OpenSearch reserves for document metadata; the fatal configuration fallback had the same latent problem with `_source`.
+  - **Fix:** app startup now reports `app_version`, migration events report `migration_version`, and both normal GELF formatting and fatal startup fallback namespace any OpenSearch-reserved additional name under `_event_*`. GELF protocol version `1.1` and the existing `_app_version` field remain unchanged.
+  - **Tests:** formatter coverage rejects `_version` and `_source`, verifies their safe `_event_*` names, and startup plus migration event contracts pin the explicit field names.
+
+- **Deployment settings no longer masquerade as usable YAML overrides.**
+  - **Root cause:** both shipped Compose stacks always supplied defaults for Files, database, PTY, raw scanning, Prometheus, and AI environment variables, so matching values in `config.local.yaml` could be silently shadowed even though the YAML reference presented them as operator options.
+  - **Fix:** deployment wiring and feature switches now have one documented `.env` surface, including `WORKSPACE_ENABLED`, `WORKSPACE_BACKEND`, and `WORKSPACE_ROOT`. The shipped YAML reference keeps only application fine-tuning, and Compose passes empty optional overrides for database pool/JIT and AI tuning so those YAML values can take effect.
+  - **Tests:** production/development Compose contracts pin the environment-owned switches and empty fine-tuning overrides, while the documentation guard keeps deployment-owned keys out of the shipped YAML option list.
+
+- **TruffleHog findings and redacted snapshots no longer expose vendor secret fields or private keys.**
+  - **Root cause:** TruffleHog doesn't guarantee that `Redacted` is safe to display, multipart credentials can remain in `SecretParts`, and snapshot redaction handled only independent regex matches rather than private-key blocks spanning several output lines.
+  - **Fix:** managed TruffleHog JSON now masks `Raw`, `RawV2`, `Redacted`, every `SecretParts` value, and duplicate copies elsewhere in the row before any transcript, Files output, history, share, export, or finding path receives it. Finding fallback text never reuses a malformed raw row, and redacted shares or packages replace complete PEM and PGP private-key blocks from any command.
+  - **Tests:** existing output-sink, structured-finding, Atlas materialization, fallback, and share-route cases now cover verified, unverified, multipart, duplicated-secret, and multiline private-key shapes without changing the documented test count.
+
+- **Development YAML tooling no longer installs a vulnerable `js-yaml` release** — The dependency override moves compatible v4 consumers to patched `js-yaml` 4.3.0 without forcing Markdownlint off its supported v5 dependency or downgrading Stylelint. Theme registry tests declare the patched v5 parser directly and use its named `load` export, so their YAML fixtures work with the current ESM module shape.
+
+- **Development tooling no longer installs the vulnerable `brace-expansion` 5.0.6 release** — The lockfile now selects patched version 5.0.7 for ESLint's Minimatch dependency, clearing the high-severity JavaScript dependency audit without a forced or breaking upgrade.
+
+- **Browser and development dependencies no longer install vulnerable DOMPurify, fast-uri, or linkify-it releases** — The lockfile now selects DOMPurify 3.4.12, fast-uri 3.1.4, and linkify-it 5.0.2, clearing the custom-element sanitizer bypass, URI host-confusion, and quadratic `mailto:` parsing advisories without changing their parent packages.
+
+- **Staging registry cleanup doesn't skip expired tags when pages shift during deletion** — The cleanup job now collects and validates the complete match set before issuing its first delete request. Its regression models 205 temporary tags across three mutable offset-paginated pages and confirms every expired attempt is removed while a release-child anchor remains untouched.
+
+- **ARM64 release smoke checks verify the live Postgres schema instead of a browser-only config response** — The optional Postgres startup gate now confirms that app migrations reached the fresh Postgres service. It no longer expects the public `/config` payload to expose the private database backend setting.
+
+- **Native release smoke checks can validate licenses from the installed image** — The streamed checker now enters installed-image mode before looking for source-only repository files, so AMD64 and ARM64 CI jobs don't mistake the container's `/app` directory for a checkout.
+
+- **Multi-platform release checks report real runner capacity and stay usable on minimal Docker installations.**
+  - **Root cause:** the ARM64 DinD lane measured the job container's filesystem instead of the daemon's storage, v2 deployment manifests retained meaningless zero-valued scalar image metrics, and operator verification depended on the optional Buildx plugin while dropping the older Apple Silicon AMD64 fallback.
+  - **Fix:** ARM64 metrics now read `/var/lib/docker` through the DinD daemon, v2 keeps measurements only in its per-platform map, and the installed verifier uses the canonical index RepoDigest plus local architecture and base labels with no Buildx requirement. Apple Silicon prefers ARM64 but can verify an explicitly degraded AMD64-only release through Docker's emulation path; Linux ARM64 remains native-only.
+  - **Tests:** release-pipeline contracts pin the daemon-backed metric path, v1 retains its scalar compatibility field while v2 omits that ambiguous field, and verifier coverage exercises native selection, Darwin fallback, and Linux ARM64 rejection.
+
+- **Files output capture fails safely before and after a run** — File-descriptor forms such as `2>` and `2>>` are rejected instead of being mistaken for stdout capture, existing directory destinations are caught before a command starts, and scheduled built-ins now record a failed exit when their output can't be saved. Unexpected filesystem errors stay in server logs and return a generic terminal message instead of exposing the workspace's internal host path.
+
+- **Bundled Go tool upgrades keep the requested release while enforcing the security floor.**
+  - **Root cause:** the shared installer selected each pinned tool before forcing the reviewed `golang.org/x/crypto` version. Go could satisfy the later request by downgrading a tool whose newer release required a newer crypto module, which made `httpx` v1.10.0 resolve and build as v1.9.0.
+  - **Fix:** the installer establishes the crypto version as a minimum first, selects the pinned tool second, and rejects any mismatch in either the selected module graph or the finished binary's embedded module metadata. A tool can still raise `x/crypto` above the baseline when required. DNSX v1.3.0's `-version` banner remains an upstream 1.2.3 string, so the embedded module version is the reliable build identity.
+  - **Tests:** focused installer coverage verifies dependency ordering and fails on both graph-level and embedded-binary downgrades, while the runtime-image contract keeps the checks in every Go builder stage.
+
+- **Container smoke tests follow the public workflow contract and enable the optional PTY feature they exercise.**
+  - **Root cause:** the workflow capture smoke case still expected private execution variables after those values were removed from public responses, while Compose's disabled-by-default PTY environment switch overrode the smoke-only YAML setting.
+  - **Fix:** the workflow case now verifies that variable values stay private while successful capture names and linked steps prove the value flowed downstream. The smoke stack explicitly enables Interactive PTY, and PTY startup failures include the returned HTTP status and JSON error.
+  - **Tests:** focused workflow privacy and container PTY smoke coverage exercise the corrected contracts.
+
+- **Release publication tests are isolated from their CI runner** — The fake publisher environment clears inherited GitLab pipeline and job IDs before exercising the missing-ID fallback, while a separate retry path verifies that explicitly supplied IDs still reach the build metrics artifact.
+
+- **Workspace terminal commands load existing files on first use** — `ls`, `ll`, and `file list` now load the lazy Files state before reading it, so an initial listing no longer appears empty until the Files modal has been opened.
 
 ---
 
@@ -121,93 +205,5 @@ No changes yet.
 - **Published images keep durable notices for the external-intelligence CLIs** — VirusTotal, IPinfo, and urlscan license files are copied out of Go's temporary module cache into the image documentation directory, so repository-free verification checks the same notices that remain available at runtime.
 
 - **Protected release smoke tests verify the exact image they pull** — The normal AMD64 lane keeps the GitLab registry digest attached through repository-free and bundled-tool checks instead of relying on a tag alias that a digest-qualified pull doesn't create locally.
-
----
-
-## [2.5.0] - 2026-07-11
-
-### Added
-
-- **Operators can create comprehensive deployment backups** — `scripts/backup_system.py` now creates cron-friendly backups that resolve the effective app config, snapshot SQLite with the online backup API or dump Postgres with `pg_dump`, include `data_dir`, config overlays, `.env`, repeatable `--extra-file` paths, and enabled workspaces, then write restore notes, checksums, and a redacted manifest before archiving.
-  - **Data storage:** the script records both the logical app `data_dir` and the physical backup source, so a host-run backup of the bundled Compose stack copies the host `./data` bind mount instead of falling back to the host's local `/tmp` path.
-  - **Workspace storage:** the script records both the logical app `workspace_root` and the physical backup source, copying bind mounts from the host path and exporting Docker named volumes through Docker while requiring explicit opt-in for tmpfs/container-only workspaces even when the same tmpfs path exists on the host. When operators pass the same ordered Compose files they use for deployment, the script reads `WORKSPACE_ROOT` and resolves relative workspace bind mounts against the base Compose project directory; `--workspace-root` remains available when the logical app path needs to be supplied directly. If ephemeral workspace backup is requested while the app container is stopped, dry runs and backups report the unavailable container instead of claiming a host bind source.
-  - **Container-aware database selection:** host-readable SQLite bind-mount backups continue to work with containers stopped. Auto Postgres backups use `docker compose exec` only when the database URL names a service in the supplied Compose stack; remote and host-reachable URLs keep using local `pg_dump` even when the bundled Postgres container is also running.
-  - **Source permissions:** unreadable host bind sources now fail with backup-specific root/bind-mount guidance instead of a raw Python `PermissionError`, while failed runs still remove their lock file.
-  - **Lock cleanup:** failed backup runs release and remove their `.backup.lock` file before returning, so a handled failure does not leave a stale lock path behind.
-  - **Reliable output and preflight:** large files are checksummed in bounded chunks, microsecond backup names gain an exclusive sequence when needed, existing archives are never replaced, and `--dry-run` rejects the same missing env and extra-file inputs as a real backup before it creates an output directory or lock file.
-  - **Tests:** added pytest coverage for SQLite snapshot behavior, Compose bind-mounted `data_dir` resolution, production Compose workspace override detection, live database exclusion from copied `data_dir`, extra/env file inclusion, dry-run input validation, missing extra-file opt-outs, unreadable bind-mount source guidance with lock cleanup, tmpfs workspace skips, stopped-container ephemeral workspace handling, bind-mounted workspace copies, Docker-volume copy command shaping, local and Compose Postgres dump selection, remote Postgres URL isolation from a running Compose service, chunked checksums, collision-safe archive and directory output, default gzip restore contents and checksum validation, retention reporting, stopped-service messaging, and manifest redaction.
-
-- **HTTP and TCP ping tools are available in the shell** — The Docker image now includes Debian's packaged `httping` plus a pinned upstream `tcping` Go install, with command registry entries for examples, help, target/port autocomplete, and container smoke coverage for the recommended syntax.
-
-- **WPScan can use a vault-backed API token** — `wpscan` now receives optional `WPSCAN_API_TOKEN` values from the encrypted secrets vault, while regular scans still run without a token and inline `--api-token` usage is blocked so keys stay out of command text.
-
-### Changed
-
-- **Bundled security tools are current for this release** — Container images now ship Go 1.26.5, Nuclei 3.11.0, httpx 1.10.0, cdncheck 1.2.43, TruffleHog 3.95.8, WPScan 4.0.1, and urlscan-cli 2026.07.07.
-
-- **Initial shell startup and first-open surfaces are lighter** — The initial page now ships less inactive UI, while first-use surfaces still open with the same polished behavior.
-  - Feature-owned styles for Projects, Atlas, Command Registry, Run Comparison, Schedules, Status Monitor, Watchers, Workflows, and Files load with their first-use modules instead of blocking the first shell paint.
-  - Atlas and Projects mount their large modal shells from first-use HTML fragments, while Schedules, Watchers, and Findings Board create their modal shells when their feature modules load.
-  - Finding triage, styled HTML/PDF export, terminal tour commands, and Files use lighter bridges or runtime gates so their full controllers stay off the initial shell path until needed.
-  - Source asset mode keeps JS module URLs unversioned, generated bundle-mode ESM ships minified code with linked source maps, and hashed build assets serve committed Brotli/gzip siblings by content negotiation. Compression uses a stable source-size rule so committed asset checks stay consistent across supported CI environments.
-  - Browser-facing fonts use WOFF2 on the shell path, `ansi_up.js` defers, and jsPDF still gets the TrueType files it needs for PDF export.
-  - Projects starts controller imports, the first project list, and active-project context together; Atlas shows its overlay shell immediately, starts its summary/list requests early, and keeps detail/mobile/board controllers out of the first-open path.
-  - **Tests:** route, browser-unit, asset, source-mode Playwright, and mobile Playwright coverage verifies the lighter shell, lazy fragments/styles, bundle/source URL contracts, compression, source maps, first-open behavior, and Files/triage/export/tour bridge boundaries.
-
-- **Project and Atlas first-page reads are cheaper** — The hot list paths now match their indexes and avoid broad count work until callers need it.
-  - Personal Atlas and Project reads use the same explicit personal-team predicate as their partial indexes, with startup normalization for legacy personal rows that still have `NULL` team IDs.
-  - Project and Atlas first-open sort paths have dedicated SQLite/Postgres indexes, and run file artifact lookups use run-id-leading indexes where the existing primary key does not already cover the path.
-  - Project list count loading rolls up the visible page from scoped run/entity links and indexed artifact/finding lookups instead of running the previous broad `COUNT(DISTINCT)` union.
-  - Atlas entity and finding pages use `limit + 1` paging by default and defer exact totals/status buckets unless a caller asks for them; API v1 keeps exact totals for headless clients.
-  - Initial shell boot and first-open modal paths share in-flight workflow catalog, Files list, and active Project context loads, and anonymous personal sessions skip the boot-only Teams refresh until team UI needs it.
-  - **Tests:** SQLite/Postgres query-plan coverage, Project route coverage, Atlas route/browser coverage, and browser-unit tests verify index selection, exact-total opt-in, lower-bound pagination, Project count/finding summary parity, request coalescing, and current source/bundle asset contracts.
-
-- **Performance diagnostics are safer and more useful** — Startup and first-use paths now emit bounded context when they fail without logging raw search text or query-string secrets.
-  - Missing generated build assets, lazy module contract failures, Atlas/Projects preload/request failures, Project workspace action failures, and Files lazy-surface failures log structured event names with bounded IDs, route names, asset names, status, and timing context.
-  - Project, Project metrics, and Atlas list services emit DEBUG-level timing and branch details for the new pagination/count paths so operators can troubleshoot regressions without turning normal large-list views into warning noise.
-
-- **Docker deployments expose static inventory labels** — Built images and Compose containers now carry OCI and `sh.darklab.*` labels for app version, git revision, build date, Python version, configured database backend, and the metrics path.
-  - The database-backend label uses the same `${DATABASE_BACKEND:-sqlite}` Compose interpolation the app receives, while live health, database size, and pool state remain in `/metrics`.
-  - **Tests:** one pytest contract verifies the Dockerfile labels, Compose label interpolation, app/package version alignment, and Python base-image label source.
-
-### Fixed
-
-- **Operational and startup logs now preserve severity, config context, cleanup scope, and backup diagnostics** — Browser lifecycle events, configuration loading, destructive cleanup, and scheduled backups now leave an accurate troubleshooting trail without recording secrets, cleanup samples, or raw artifact data.
-  - Configuration events emitted before runtime logging is ready are buffered and replayed once through the selected text or GELF formatter at the effective level. Ignored, dropped, defaulted, clamped, and truncated values all contribute to the startup warning count.
-  - Fatal configuration failures emit one bounded structured fallback with phase, source, key, and error type. Raw parser details, configuration values, and tracebacks stay out of that path even when startup can't finish.
-  - Import-time buffering doesn't attach a logger handler or change the logger level, and Intel missing-secret DEBUG events use a non-reserved context field, so side-effect-free imports and DEBUG provider lookups remain safe.
-  - Browser `debug`, `info`, `warn`/`warning`, and `error` reports keep their intended server log levels; normal INFO events no longer increment the client-error metric, unknown levels fall back to WARNING, and bounded artifact IDs survive client-log sanitization.
-  - History deletion and Project unlink INFO/audit events record the requested cleanup flags plus removed, curated, and kept entity/finding counts after cleanup completes.
-  - Unexpected backup failures print their traceback, while `--keep-days` records its cutoff and candidate scan in the manifest, warns about inspection/removal failures, and prints examined, removed, and failure totals after a successful backup is published.
-  - **Maintainability:** cleanup field shaping and snapshot persistence live in focused History and Project service modules, keeping the route and mutation modules inside their architecture size budgets.
-  - **Tests:** fresh-process startup coverage verifies text/GELF output, DEBUG/ERROR thresholds, structured warning and fatal context, redaction, warning counts, and one-time replay. Route and backup coverage verifies the client level/metric matrix, artifact ID allowlisting, cleanup INFO/audit fields, retention summaries and inspection warnings, and unexpected-exception tracebacks.
-
-- **Accepted command autocomplete roots now keep examples visible** — Choosing a command root such as `ping` from a partial match like `pin` now refreshes autocomplete after insertion, so the same example commands appear as when the root is typed manually.
-
-- **First-open modal behavior stays polished after the startup trim** — The lazy shell changes now preserve the pre-trim visual and interaction details.
-  - Theme selector alignment, Run Details entity rows, Project Runs/Findings placeholders, main-terminal Atlas entity highlights, and Atlas entity tab auto-selection render correctly on first load.
-  - Atlas keeps its own fallback shell open while the first-use controller finishes loading, so the import dialog no longer closes itself while previewing a browser import on first open.
-  - Atlas and Projects first-open prefetches settle quietly when an open is canceled or module loading fails, and fragment failures show a retryable error toast plus bounded client context instead of leaving a silent rejected promise.
-  - The Project Report tab now preserves metadata typed while selector pages finish loading in the background, so preview/export keeps the current engagement name instead of occasionally rendering the default title.
-
-- **Atlas cleanup previews and confirmations explain cleanup choices consistently** — Run deletion, Project unlinking, Project cleanup, and Atlas sibling-cleanup flows now use the same cleanup buckets and clearer copy.
-  - Project cleanup, Project unlink, run deletion, and Atlas sibling-cleanup confirmations now explain disposable, kept-by-default, and not-eligible Atlas cleanup buckets with grouped reason labels; Project Runs tab removals still send the selected cleanup flags before summarizing removed entity counts.
-  - Cleanup confirmations now treat explicit zero-count reason buckets as authoritative, so stale legacy compatibility counts cannot bring back empty Atlas cleanup checkboxes.
-  - History run deletion now leaves optional Atlas cleanup unchecked by default, matching Atlas and Project cleanup confirmations.
-  - Cleanup previews and confirmations carry compact display-only samples for kept-by-default and not-eligible rows, including Project unlink previews, and keep those samples collapsed until opened.
-  - Kept-by-default run cleanup no longer deletes a parent Atlas entity when that would indirectly delete a child finding that is not eligible for the cleanup.
-  - Atlas entity/finding sibling cleanup previews no longer count the row being explicitly deleted as not eligible, so selected rows do not block cleanup of their same-run siblings.
-  - Team-scoped History cleanup previews and deletes now classify team-owned Project links and metadata by team ownership, so cross-member Project links keep the same Atlas rows in preview and apply.
-  - Team-scoped History cleanup now applies the same team ownership scope during deletion, so Atlas rows previewed for cleanup are removed even when the row was first created by a different teammate.
-  - Team-scoped Project run unlink previews now keep entity links when a reviewed child finding belongs to another teammate in the same team.
-  - Pending command-discovered Project targets are treated as disposable same-run entities unless another keep signal exists, so fresh command targets do not pull same-run findings into the kept-by-default cleanup bucket.
-  - **Tests:** a live History Playwright flow verifies all three preview buckets, unchecked cleanup defaults, sample disclosure, selected request flags, and the resulting Atlas entity and finding state.
-
-- **Optimized Project and API paths keep their old behavior** — The performance work preserves the important edge cases around paging and team scope.
-  - API v1 team Project finding lists include cross-member findings reachable through authorized team Project run/entity links, matching Project count and finding-summary rollups.
-  - Project list pagination keeps limit handling active even when Python runs with assertions disabled.
-
-- **Command-discovered `nc` Project targets keep hosts and ports separate** — `nc -zv` now treats the first positional value as the target host and later positional values as ports.
-  - `nc -zv` command-discovered Project targets now treat positional ports as ports instead of hostnames, so values like `80` no longer become Atlas domain entities.
 
 ---

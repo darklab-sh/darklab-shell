@@ -4,6 +4,8 @@
 
 set -euo pipefail
 
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -149,6 +151,12 @@ EOF
 if [ "${#pytest_args[@]}" -eq 0 ]; then
   pytest_args=("${default_args[@]}")
 fi
+if [ -n "${PYTEST_JUNIT_XML:-}" ]; then
+  pytest_args+=("--junitxml=${PYTEST_JUNIT_XML}")
+fi
+if [ -n "${PYTEST_DURATIONS:-}" ]; then
+  pytest_args+=("--durations=${PYTEST_DURATIONS}")
+fi
 
 if [ "$mode" = "wait" ]; then
   if [ -z "${DARKLAB_TEST_POSTGRES_DSN:-}" ]; then
@@ -192,7 +200,7 @@ fi
 if [ -n "${DOCKER_COMPOSE:-}" ]; then
   read -r -a compose_cmd <<< "$DOCKER_COMPOSE"
 else
-  compose_cmd=(docker compose)
+  compose_cmd=(docker compose -f "$ROOT_DIR/compose.dev.yaml")
 fi
 postgres_user=${POSTGRES_USER:-darklab}
 postgres_password=${POSTGRES_PASSWORD:-darklab_dev_password}

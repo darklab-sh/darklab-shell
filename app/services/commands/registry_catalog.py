@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Callable, cast
 
-from services.commands import registry_loader
+from services.commands import registry_loader, registry_secret_specs
 from services.commands.features import suggestion_enabled_for_features
 from services.commands.registry_validation import command_root
 
@@ -23,15 +23,9 @@ def required_secrets_for_command(
     is_help_invocation: Callable[[str, str | None, dict | None], bool],
 ) -> list[dict[str, object]]:
     """Return normalized secret declarations for a command root."""
-    root = command_root(command)
-    if not root:
-        return []
-    if is_help_invocation(command, root, registry):
-        return []
-    for entry in registry.get("commands", []) or []:
-        if str(entry.get("root") or "").strip().lower() == root:
-            return [dict(item) for item in entry.get("requires_secrets") or [] if isinstance(item, dict)]
-    return []
+    return registry_secret_specs.required_secrets_for_command(
+        command, registry, is_help_invocation=is_help_invocation,
+    )
 
 
 def interactive_pty_specs_from_registry(registry: dict) -> list[dict[str, object]]:
@@ -202,48 +196,12 @@ def _catalog_interactive_notes(interactive_spec: object) -> list[str]:
 
 
 def _catalog_required_secrets(items: object) -> list[dict[str, object]]:
-    secrets = []
-    if not isinstance(items, list):
-        return secrets
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        env = str(item.get("env") or "").strip().upper()
-        if not env:
-            continue
-        entry: dict[str, object] = {
-            "env": env,
-            "optional": bool(item.get("optional", False)),
-        }
-        inject_env = str(item.get("inject_env") or "").strip().upper()
-        if inject_env and inject_env != env:
-            entry["inject_env"] = inject_env
-        fallback_envs = [
-            str(fallback or "").strip().upper()
-            for fallback in item.get("fallback_envs", []) or []
-            if str(fallback or "").strip()
-        ]
-        if fallback_envs:
-            entry["fallback_envs"] = fallback_envs
-        secrets.append(entry)
-    return secrets
+    return registry_secret_specs.catalog_required_secrets(items)
 
 
 def command_secret_consumers(registry: dict) -> list[dict[str, object]]:
     """Return metadata-only secret consumers declared by command registry entries."""
-    consumers: list[dict[str, object]] = []
-    for entry in registry.get("commands", []) or []:
-        if not isinstance(entry, dict):
-            continue
-        root = str(entry.get("root") or "").strip().lower()
-        if not root:
-            continue
-        for secret in _catalog_required_secrets(entry.get("requires_secrets")):
-            consumer = dict(secret)
-            consumer["source"] = "command_registry"
-            consumer["consumer"] = root
-            consumers.append(consumer)
-    return consumers
+    return registry_secret_specs.command_secret_consumers(registry)
 
 
 def command_catalog_from_registry(registry: dict, cfg=None) -> list[dict[str, object]]:
@@ -357,6 +315,9 @@ def command_catalog_entry(root: str, subcommand: str | None, registry: dict, cfg
             scoped["flags"] = sub.get("flags") or []
             scoped["arguments"] = sub.get("arguments") or []
             scoped["subcommands"] = []
+            scoped["requires_secrets"] = registry_secret_specs.scoped_required_secrets(
+                f"{wanted_root} {wanted_subcommand}", entry.get("requires_secrets"),
+            )
             return scoped
         return None
     return None

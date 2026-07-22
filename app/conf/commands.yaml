@@ -3063,23 +3063,26 @@ commands:
           value_type: url
           description: Usually provided through -u
   - root: trufflehog
-    description: Scans workspace folders or HTTPS Git repositories for exposed secrets.
+    description: Scans Files, HTTPS Git repositories, GitHub, or GitLab for exposed secrets.
     category: Vulnerability Scanning
     knowledge:
       notes:
-        - Use filesystem --directory for a session folder, or git https://... for a remote repository scan.
+        - Use filesystem --directory for Files, git https://... for a public repository, or github/gitlab for a secret-backed provider scan.
+        - GitHub reads GITHUB_TOKEN and GitLab reads GITLAB_TOKEN from the encrypted secrets manager; inline --token values are blocked.
         - JSON output is added automatically for managed scans so the app can classify and redact secret fields before storing output.
       gotchas:
         - Local file:// and ssh:// Git scans, clone-path overrides, and no-cleanup modes are blocked to keep scans inside managed paths.
         - The --config path is blocked because detector config can carry sensitive policy and verifier settings.
+        - Organization, group, or all-accessible-repository scans can fan out widely and may reach the configured command timeout.
       safe_defaults:
-        - Run trufflehog filesystem --directory <folder> --json for workspace files, or trufflehog git https://... --json for a public remote repository.
+        - Start with one Files folder or one --repo URL before widening a scan to --org, --group-id, or every repository the token can access.
       common_flags:
         - "filesystem --directory — scan a session folder"
         - "git https://... — scan an HTTPS Git repository"
+        - "github --repo/--org — scan GitHub with GITHUB_TOKEN"
+        - "gitlab --repo/--group-id — scan GitLab with GITLAB_TOKEN"
         - "--json — emit JSON rows"
-        - "--include-paths/--exclude-paths — read path regexes from session files"
-      artifact_behavior: TruffleHog writes findings to stdout. With Files enabled, --directory reads a session folder and include/exclude path regex files read from the session workspace; local Git file paths and custom clone directories are blocked.
+      artifact_behavior: TruffleHog writes findings to stdout. Files supplies folder scans and include/exclude regex files; repository clones stay in managed temporary storage.
     help:
       flags:
         - --help
@@ -3093,6 +3096,8 @@ commands:
         - trufflehog help
         - trufflehog filesystem --directory
         - trufflehog git
+        - trufflehog github
+        - trufflehog gitlab
       deny:
         - trufflehog --config
         - trufflehog --profile
@@ -3109,13 +3114,34 @@ commands:
         - trufflehog git --trust-local-git-config
         - trufflehog git file://
         - trufflehog git ssh://
-        - trufflehog github
-        - trufflehog gitlab
+        - trufflehog github --config
+        - trufflehog github --profile
+        - trufflehog github --token
+        - trufflehog github --include-paths
+        - trufflehog github --exclude-paths
+        - trufflehog github --clone-path
+        - trufflehog github --no-cleanup
+        - trufflehog github --auth-in-url
+        - trufflehog gitlab --config
+        - trufflehog gitlab --profile
+        - trufflehog gitlab --token
+        - trufflehog gitlab --include-paths
+        - trufflehog gitlab --exclude-paths
+        - trufflehog gitlab --clone-path
+        - trufflehog gitlab --no-cleanup
+        - trufflehog gitlab --auth-in-url
         - trufflehog s3
         - trufflehog gcs
         - trufflehog syslog
         - trufflehog circleci
         - trufflehog docker
+    requires_secrets:
+      - env: GITHUB_TOKEN
+        subcommands:
+          - github
+      - env: GITLAB_TOKEN
+        subcommands:
+          - gitlab
     workspace_flags:
       - flag: --directory
         mode: read
@@ -3130,6 +3156,8 @@ commands:
         subcommands:
           - filesystem
           - git
+          - github
+          - gitlab
       - flag: --exclude-paths
         mode: read
         value: separate_or_attached
@@ -3137,6 +3165,8 @@ commands:
         subcommands:
           - filesystem
           - git
+          - github
+          - gitlab
     runtime_adaptations:
       inject_flags:
         - flags:
@@ -3160,6 +3190,10 @@ commands:
           description: Scan an HTTPS Git repository for exposed secrets
           smoke:
             profile: manual
+        - value: trufflehog github --repo https://github.com/example/private-repo --json
+          description: Scan one GitHub repository using GITHUB_TOKEN
+        - value: trufflehog gitlab --group-id 12345 --json
+          description: Scan a GitLab group using GITLAB_TOKEN
       flags:
         - value: --help
           description: Show help and usage
@@ -3223,6 +3257,76 @@ commands:
               hint_only: true
               value_type: url
               description: HTTPS Git repository URL
+        github:
+          description: Scan GitHub repositories with GITHUB_TOKEN
+          examples:
+            - value: trufflehog github --repo https://github.com/example/private-repo --json
+              description: Scan one GitHub repository
+            - value: trufflehog github --org example --json
+              description: Scan repositories in a GitHub organization
+          flags:
+            - value: --repo
+              description: HTTPS GitHub repository URL; repeat for more repositories
+              takes_value: true
+              value_type: url
+            - value: --org
+              description: GitHub organization; repeat for more organizations
+              takes_value: true
+            - value: --endpoint
+              description: HTTPS API endpoint for GitHub Enterprise
+              takes_value: true
+              value_type: url
+            - value: --include-repos
+              description: Repository name or glob to include in an organization scan
+              takes_value: true
+            - value: --exclude-repos
+              description: Repository name or glob to exclude from an organization scan
+              takes_value: true
+            - value: --include-paths
+              description: Read include regexes from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --exclude-paths
+              description: Read exclude regexes from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --json
+              description: Emit JSON rows
+        gitlab:
+          description: Scan GitLab repositories with GITLAB_TOKEN
+          examples:
+            - value: trufflehog gitlab --repo https://gitlab.com/example/private-repo.git --json
+              description: Scan one GitLab repository
+            - value: trufflehog gitlab --group-id 12345 --json
+              description: Scan a GitLab group and its subgroups
+          flags:
+            - value: --repo
+              description: HTTPS GitLab repository URL; repeat for more repositories
+              takes_value: true
+              value_type: url
+            - value: --group-id
+              description: GitLab numeric group ID; repeat for more groups
+              takes_value: true
+            - value: --endpoint
+              description: HTTPS endpoint for a self-hosted GitLab instance
+              takes_value: true
+              value_type: url
+            - value: --include-repos
+              description: Repository name or glob to include in a group scan
+              takes_value: true
+            - value: --exclude-repos
+              description: Repository name or glob to exclude from a group scan
+              takes_value: true
+            - value: --include-paths
+              description: Read include regexes from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --exclude-paths
+              description: Read exclude regexes from a session file
+              takes_value: true
+              feature_required: workspace
+            - value: --json
+              description: Emit JSON rows
   - root: puredns
     description: Brute-forces DNS names through massdns with resolver files and wildcard handling.
     category: Network Reconnaissance
@@ -5742,3 +5846,14 @@ pipe_helpers:
       flags:
         - value: -c
           description: Prefix each line with its occurrence count
+  - root: tee
+    feature_required: workspace
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Write output to a session file and keep showing it
+      arguments:
+        - placeholder: <file>
+          hint_only: true
+          value_type: workspace_path
+          description: Session file to overwrite

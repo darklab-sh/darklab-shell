@@ -7,12 +7,10 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Repository-free production installation](#repository-free-production-installation)
-  - [Shorten release image builds and failure feedback](#shorten-release-image-builds-and-failure-feedback)
+  - [Validate multi-platform release publication](#validate-multi-platform-release-publication)
+  - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
-  - [Reduce pytest feedback time without weakening release coverage](#reduce-pytest-feedback-time-without-weakening-release-coverage)
-  - [Organize script entrypoints and implementation helpers](#organize-script-entrypoints-and-implementation-helpers)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -34,37 +32,65 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-### Repository-free production installation
+### Validate multi-platform release publication
 
-**Outcome:** Operators can install and run a released darklab_shell stack from a small, versioned deployment directory without cloning the source repository or building the image locally. Developers keep the current source-mounted workflow. CI publishes the canonical self-contained image to the GitLab Container Registry first, then promotes that exact image to Docker Hub for the public, user-facing pull path used by production deployments.
+The dual-platform publication path is implemented. Complete these live checks before shipping the first release that claims native Linux ARM64 support:
 
-- [ ] Publish the protected `v2.6.0` tag and confirm the final-only `release-create` job plus the complete image, compatibility, supply-chain, installer, bundled-Postgres, and anonymous public smoke chain pass. Verify the final GitLab Release links, matching registry digest, setup files, checksums, signatures, notices, SBOM, provenance, and a healthy clean install, then remove this completed plan.
+- [ ] Complete three consecutive protected release-candidate pipelines in dual mode without manual repair. Each pipeline must build both children natively, pass both smoke and vulnerability lanes, publish one two-platform GitLab index, copy the identical index to Docker Hub, sign the index and both children, and produce matching evidence and payload contracts.
+- [ ] On native AMD64 and ARM64 hosts, validate a clean production install, upgrade, status check, backup, restore, bundled-tool verification, and Postgres-backed startup from the same canonical tag. Confirm an unsupported host architecture fails before startup with a clear error.
 
-### Shorten release image builds and failure feedback
+### Autoscale ARM64 release runners on EC2 Spot
 
-**Outcome:** Release candidates keep the full image, compatibility, supply-chain, and publication gates, but repeated runs reuse portable architecture-specific caches and report image-content failures as soon as the canonical GitLab image is available. The final runtime image remains self-contained without the toolchains, caches, development packages, apt indexes, or source trees used to build it.
+Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker pool managed by GitLab Runner's Docker Autoscaler and AWS fleeting plugin. Keep the runner manager on existing self-hosted infrastructure, scale the AWS Auto Scaling Group from zero only after the manager accepts a matching job, and destroy each worker after one job. Preserve a documented On-Demand or hosted-runner fallback so Spot capacity does not become a hard release blocker.
 
-Keep one runtime image. Separate published runtime containers would complicate command execution, networking, Compose, licensing, upgrades, and support.
-
-#### Measure and make cache behavior visible
-
-- [ ] Record the AMD64 and ARM64 clean-build time, repeated-build time, cache import/export time, image pull time, and time to the first actionable image failure. Use `--progress=plain` or equivalent retained logs so cache-manifest imports and `CACHED` steps are visible.
-- [ ] Confirm the AMD64 release builder consistently imports and exports its registry-backed `mode=max` cache. Use architecture- and release-line-scoped cache references so unrelated or concurrent writers don't overwrite the same cache location.
-- [ ] Keep the native ARM64 release smoke uncached on the current 30 GB hosted runner. Restore a portable ARM64 cache only after a larger runner or a smaller image provides enough headroom for cache import, export, and runtime verification in one job.
-- [ ] Record when a refreshed Python base-image platform digest invalidates the complete image. Keep security-driven base refreshes intentional and visible rather than hiding them to preserve an old cache.
-- [ ] Measure registry layer caching and `RUN --mount=type=cache` separately. Cross-runner acceptance depends on exported layer-cache hits from stable stages and pinned inputs; cache mounts are builder-local acceleration and must not be counted as portable reuse on a fresh DinD daemon or another runner.
-
-#### Validate and tune the multi-stage build
-
-- [ ] Add BuildKit cache mounts for Go modules and compilation output, apt metadata/packages, pip downloads, and RubyGems only where they provide measured benefit on a persistent builder. Preserve reproducibility, don't let mutable cache contents replace pinned versions or checksum validation, and don't expect cache-mount contents to satisfy cross-runner registry-cache acceptance.
-- [ ] Compare the multi-stage clean build, repeated build, compressed image size, unpacked size, SBOM package count/size, and Critical/High and total fixed-vulnerability counts with the single-stage baseline. Confirm the runtime scan no longer attributes findings to build-only toolchains or caches.
-- [ ] Keep the multi-stage Dockerfile hadolint-clean and run the full container smoke, bundled-tool, license, AMD64, native ARM64, SELinux, rootless Podman, SBOM/vulnerability, and release checks before adopting it.
-- [ ] Consider a separately published, digest-pinned scanner-toolchain base image only if architecture-specific registry caches and multi-stage builds still leave release iteration unacceptably slow. If adopted, give it its own versioning, retention, provenance, SBOM, vulnerability, license, and multi-architecture contracts.
-
-#### End-state acceptance criteria
-
-- [ ] Two consecutive RC-equivalent AMD64 builds with unchanged pinned toolchain inputs visibly reuse the exported layer cache across fresh builders instead of recompiling the scanner suite; builder-local cache mounts aren't evidence for this criterion. Apply the same criterion to ARM64 only after that job has enough storage for a portable cache.
-- [ ] The measured repeated-pipeline feedback time is materially lower than the current 80–90-minute loop, and the retained logs make remaining cache misses and pull/build costs attributable.
+- [ ] Define the runner and worker contract before provisioning infrastructure:
+  - Use the `docker-autoscaler` executor so the existing Docker job images, service containers, privileged Docker-in-Docker flow, and release scripts keep their current execution model.
+  - Give this runner configuration its own AWS Auto Scaling Group; do not share the group with another runner manager or `[[runners]]` entry.
+  - Start with one job per instance, one use per instance, one maximum instance, no idle capacity, and no local state that must survive termination.
+  - Use an ARM64 worker with at least 8 vCPU, 32 GiB RAM, and a 250 GiB `gp3` Docker volume. Treat `m7g.2xlarge` as the baseline while allowing a configurable pool of compatible Graviton instance types.
+- [ ] Add Terraform for the AWS worker pool:
+  - Define inputs for AWS region, VPC, worker subnets, runner-manager network ranges, ARM64 AMI, instance-type overrides, maximum capacity, root-volume size and performance, and common resource tags.
+  - Create a launch template that requires IMDSv2, uses an ARM64 AMI, enables delete-on-termination storage, and provisions the Docker filesystem on a 250 GiB `gp3` volume with configurable IOPS and throughput.
+  - Create a worker security group that allows SSH only from the runner manager's fixed address or private network and allows the outbound DNS, HTTPS, and registry traffic needed by release builds.
+  - Create a mixed-instances Auto Scaling Group with minimum and desired capacity `0`, maximum capacity `1` by default, multiple subnets and compatible Graviton instance types, `price-capacity-optimized` Spot allocation, no independent scaling policy, instance scale-in protection, and `AZRebalance` suspended.
+  - Keep Spot at 100% for normal operation, but make the purchase policy configurable so an operator can temporarily select On-Demand capacity without changing the runner or CI configuration.
+  - Create the least-privilege IAM policy needed by the fleeting manager: describe the ASG and instances, change desired capacity and instance protection, terminate workers through the ASG, inspect Spot requests, and publish temporary SSH keys through EC2 Instance Connect when dynamic credentials are enabled.
+  - Output the ASG name, region, worker security-group ID, IAM policy ARN, and other values required by runner-manager configuration without outputting secret credentials.
+  - Add Terraform formatting, validation, static security checks, and reviewed plan output. Confirm a second plan is empty after apply and that destroying the stack removes workers, launch-template resources, and disposable volumes cleanly.
+- [ ] Prepare a fast, reproducible ARM64 worker image:
+  - Bake or otherwise version an ARM64 image with Docker Engine, SSH, EC2 Instance Connect support, CA certificates, and the small set of host utilities required by GitLab's Docker Autoscaler.
+  - Enable Docker at boot, grant the connector user access to Docker, and verify `docker info` succeeds over the same SSH path the runner manager uses.
+  - Keep boot-time configuration short and deterministic; do not install the full toolchain through user data on every scale-out.
+  - Record the image identifier as a Terraform input so worker-image updates produce an intentional launch-template revision.
+- [ ] Add generic Ansible management for the existing runner manager:
+  - Install or update a GitLab Runner version compatible with GitLab.com and the Docker Autoscaler executor.
+  - Configure the AWS fleeting plugin with a pinned compatible version and run `gitlab-runner fleeting install` when the selected plugin version is not already installed.
+  - Manage a root-readable AWS config containing the selected profile and region. Store AWS credentials through the automation system's secret mechanism rather than in source control, and keep the credential file readable only by the GitLab Runner service account.
+  - Manage the runner's `config.toml` entry with `executor = "docker-autoscaler"`, the protected ARM64 runner tags, privileged Docker support, `capacity_per_instance = 1`, `max_use_count = 1`, `max_instances = 1`, and an all-day policy with `idle_count = 0`.
+  - Configure the fleeting plugin with the Terraform-provided ASG name and AWS profile, and configure the SSH connector for either the worker's private address or its public address according to the chosen network design.
+  - Persist the runner configuration and, if enabled, taskscaler state across manager restarts with restrictive ownership and permissions.
+  - Validate the rendered runner configuration, installed plugin, AWS identity, ASG discovery, and service health before restarting the GitLab Runner service. Keep the Ansible run idempotent.
+  - Add runner-manager logging and monitoring for scale requests, worker acquisition time, preparation failures, Spot interruption failures, orphaned instances, and ASG desired capacity that remains above zero without an active job.
+- [ ] Prove the network and security boundaries:
+  - Confirm the runner manager can reach GitLab.com and the required AWS APIs over HTTPS and can connect to workers over SSH, while workers accept no other inbound application traffic.
+  - If workers use public addresses, restrict SSH to a fixed runner-manager source address. If workers use private addresses, document and validate the VPN or routed connection into the VPC.
+  - Confirm workers can resolve DNS and reach GitLab registries, Docker Hub, GitHub, language package indexes, and every other source used by the release image build without requiring broad inbound access.
+  - Verify the runtime IAM identity cannot modify unrelated Auto Scaling Groups or EC2 instances.
+- [ ] Migrate the ARM64 CI lane behind a temporary runner tag:
+  - Register the autoscaled runner as protected, locked to the intended project or group scope, and unable to accept untagged jobs.
+  - Point a temporary ARM64 build job at the new tag before changing the canonical release jobs.
+  - Preserve the current DinD service, MTU handling, native architecture checks, artifact contracts, timeouts, and disk measurements.
+  - Add a bounded retry for runner-system failures so a Spot interruption or failed worker acquisition can retry an idempotent build without hiding repeatable product failures.
+  - Keep the current ARM64 runner path available until the EC2 lane passes qualification and the fallback procedure has been exercised.
+- [ ] Qualify performance, cleanup, failure handling, and cost:
+  - Demonstrate scale from desired capacity `0` to `1` after job acceptance and back to `0` after completion, with no worker or EBS volume left behind.
+  - Run an uncached release image build and record provisioning time, build and export duration, peak disk use, final free-space percentage, CPU and memory pressure, and total Spot runtime.
+  - Run consecutive cached builds through the registry cache and confirm the larger worker avoids the cache-import and export-time disk exhaustion seen on the hosted ARM64 lane.
+  - Require at least 20% free Docker storage after image export and enough wall-clock margin to stay comfortably within the CI job timeout.
+  - Trigger a controlled Spot interruption, confirm the interrupted job fails as a runner-system failure, and confirm its retry starts on a fresh instance without conflicting with staging tags or publication state.
+  - Exercise the On-Demand fallback and return the ASG to Spot afterward.
+  - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
+- [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
 
 ## Known Issues
 
@@ -74,37 +100,7 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-### Reduce pytest feedback time without weakening release coverage
-
-The backend suite now takes about 150 seconds even though collecting its roughly 2,400 cases takes only about a second. A July 2026 profiling pass found three costs worth addressing:
-
-- Ordinary route tests build a fresh Flask app for nearly every test client. `create_app()` takes about 59 ms under the test configuration, and the suite has roughly 770 direct or helper-mediated app construction sites.
-- `TestProjectStructureCoverage.test_asset_build_output_does_not_depend_on_cwd` runs the complete ESM asset build twice and takes about 25 seconds. Each build also creates the production Brotli and gzip sidecars.
-- `test_production_install.py` takes about 23 seconds because it exercises archive, signing, publication, installer, upgrade, and restore flows through subprocesses.
-
-- [ ] Reuse a module- or session-scoped Flask app for ordinary route tests, with deliberate cleanup of mutable config, extension, database, and request state between cases. Keep focused factory tests that build independent apps and verify application-factory isolation.
-- [ ] Make the asset working-directory determinism check exercise the generated asset graph without paying for production precompression twice. A no-precompression build mode plus focused Brotli/gzip coverage is the preferred starting point; the full committed-asset check must remain in CI.
-- [ ] Give the production installer and release-publication scenarios an explicit integration/slow marker and a dedicated full-suite lane. Keep a fast developer pytest command for routine feedback while CI and release validation continue to run the complete coverage.
-- [ ] Publish a pytest duration report in CI so new slow tests and file-level runtime changes are visible before they accumulate.
-- [ ] Reconsider parallel pytest execution only after mutable application config, SQLite state, logging globals, and extension state are isolated well enough to avoid order-dependent failures.
-
-**Done when:** the documented fast pytest path is materially quicker, the complete suite still covers fresh application factories, production asset output, and release installation, and CI makes future runtime regressions easy to spot.
-
-### Organize script entrypoints and implementation helpers
-
-The `scripts/` directory has 34 tracked files covering operator workflows, test runners, release publication, container construction, generated artifacts, frontend assets, and demo capture. Most still live at the top level, which makes supported commands hard to distinguish from internal helpers.
-
-Keep `scripts/` as the home for executable project tooling, but organize internal files by purpose rather than programming language or whether CI happens to call them. Treat top-level scripts as stable, supported entrypoints and keep commonly documented commands such as `run_playwright.sh`, `run_postgres_tests.sh`, and `run_pytest.sh` at their current paths.
-
-- [ ] Classify each current script as a stable entrypoint or an internal helper. Preserve documented operator and developer commands with their current path or a thin forwarding wrapper; don't create a permanent file-by-file documentation inventory.
-- [ ] Introduce purpose-based directories for `operations/`, `release/`, `container/`, `frontend/`, `generate/`, `development/`, and `test-support/`. Keep `hooks/`, and place Playwright server lifecycle helpers under the test-support boundary while retaining `scripts/run_playwright.sh` as the public runner.
-- [ ] Move scripts one purpose group at a time without renaming them in the same change. Start with release and container internals, then frontend and generators, followed by development, media-capture, and test-support helpers.
-- [ ] Keep backup, restore, and SQLite-to-Postgres migration commands easy for operators to find. If their implementation moves under `operations/`, preserve any documented source-checkout commands with forwarding entrypoints until the documentation and supported command contract deliberately change.
-- [ ] Update `.gitlab-ci.yml`, `package.json`, `Dockerfile`, `.dockerignore`, the pre-commit hook, release-evidence collection, project documentation, and tests after each group moves. Check scripts that derive the repository root from `Path.parents[...]`, `dirname`, or relative `../` paths from their new depth.
-- [ ] Keep script names action-oriented within each directory: `build_*` creates artifacts, `generate_*` refreshes checked-in output, `check_*` performs static validation, `verify_*` exercises built artifacts, and `run_*` remains a user-facing wrapper.
-- [ ] Add focused path and invocation coverage for Docker-only helpers, release jobs, stable wrappers, and generated-artifact commands before removing old paths. Run the full lint, test, container smoke, and release checks after the final cluster moves.
-
-**Done when:** the top level of `scripts/` contains only stable commands and clearly named purpose directories, existing documented command lines still work, internal helpers are easy to locate by responsibility, and local, CI, container-build, and release workflows pass without compatibility shims that no longer serve a supported path.
+No open Technical Debt is currently tracked.
 
 ---
 
@@ -112,12 +108,6 @@ Keep `scripts/` as the home for executable project tooling, but organize interna
 
 These are possible future improvements, split by whether they look worth carrying forward.
 
-- **Publish one release image for Linux AMD64 and Linux ARM64.**
-  - Start after the current AMD64-only release pipeline has been fully validated. Build each architecture on a native Linux runner, push immutable architecture-specific staging references, verify both, and create the canonical GitLab multi-architecture index only after every gate passes. Promote that complete index to Docker Hub instead of publishing one architecture and later changing the tag.
-  - Record the index digest, both platform digests, and both Python base-image digests in the release evidence. Generate SBOM and vulnerability results for each platform, and make signatures, attestations, retry handling, and tag-immutability checks understand the index and its platform images.
-  - Pull the canonical index on native AMD64 and ARM64 runners and run the repository-free startup, bundled-tool, capability, durable-restart, architecture-label, and registry-parity checks against the platform image Docker actually selects.
-  - Remove the production Compose and installer AMD64 pin, make installation and verification architecture-aware, and confirm required Redis and Postgres images resolve on both supported platforms.
-  - Update the support matrix and release documentation to advertise Linux AMD64 and Linux ARM64 only after the published ARM64 path passes consistently. Keep macOS testing as useful development coverage without presenting Docker Desktop as a native production target.
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
   - Worth scoping once outbound notifications and external automation mature. The headless API is the right place to receive webhooks that auto-create or update projects.
 - **Cross-session Atlas view.**

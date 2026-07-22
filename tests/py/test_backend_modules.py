@@ -62,14 +62,17 @@ import runtime_bootstrap
 import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
+from conftest import reset_reusable_test_apps, reusable_test_app
 import config as app_config
 import config_paths
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
 import services.commands.registry_loader as registry_loader_module
 import services.commands.builtins as builtin_commands
+from services.diff.text import format_text_diff
 import services.session.variables as session_variables
 import services.secrets.storage as secrets_storage
 import services.secrets.vault as secrets_vault
+import services.workspace.file_mutations as workspace_file_mutations
 import services.workspace.files as workspace_module
 import services.commands.wordlists as wordlists
 from services.commands.registry import (
@@ -131,8 +134,93 @@ from services.workspace.files import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "seed_history.py"
-MIGRATE_SQLITE_TO_POSTGRES_PATH = REPO_ROOT / "scripts" / "migrate_sqlite_to_postgres.py"
+SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "development" / "seed_history.py"
+MIGRATE_SQLITE_TO_POSTGRES_PATH = (
+    REPO_ROOT / "scripts" / "operations" / "migrate_sqlite_to_postgres.py"
+)
+
+
+class TestTextDiffFormatting:
+    def test_formats_classic_brief_and_unified_output(self):
+        left = "alpha\nbeta\ngamma\n"
+        right = "alpha\ndelta\ngamma\nextra\n"
+
+        classic = format_text_diff(
+            left,
+            right,
+            left_name="left.txt",
+            right_name="right.txt",
+        )
+        brief = format_text_diff(
+            left,
+            right,
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="brief",
+        )
+        unified = format_text_diff(
+            left,
+            right,
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="unified",
+        )
+
+        assert classic.different is True
+        assert classic.lines == (
+            "2c2",
+            "< beta",
+            "---",
+            "> delta",
+            "3a4",
+            "> extra",
+        )
+        assert brief.lines == ("Files left.txt and right.txt differ",)
+        assert unified.lines == (
+            "--- left.txt",
+            "+++ right.txt",
+            "@@ -1,3 +1,4 @@",
+            " alpha",
+            "-beta",
+            "+delta",
+            " gamma",
+            "+extra",
+        )
+
+    def test_formats_side_by_side_and_reports_identical_files(self):
+        side_by_side = format_text_diff(
+            "alpha\nbeta\n",
+            "alpha\ndelta\n",
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="side_by_side",
+            side_by_side_width=43,
+        )
+        identical = format_text_diff(
+            "same\n",
+            "same\n",
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="brief",
+        )
+
+        assert side_by_side.lines == (
+            "alpha                  alpha",
+            "beta                 | delta",
+        )
+        assert identical.different is False
+        assert identical.lines == ()
+
+    def test_marks_a_missing_final_newline(self):
+        result = format_text_diff(
+            "same\n",
+            "same",
+            left_name="left.txt",
+            right_name="right.txt",
+            mode="unified",
+        )
+
+        assert result.lines[-2:] == ("+same", "\\ No newline at end of file")
 
 
 def _load_seed_history_module():
@@ -2486,7 +2574,11 @@ class TestLoadConfig:
                     output_preview_max_mb: 2MB
                     full_output_max_bytes: 7340032
                     rate_limit_per_minute: 30
+                    database_pool_min: 2
+                    database_pool_max: 4
+                    database_postgres_jit: yes
                     ai_enabled: yes
+                    ai_timeout_seconds: 90
                     ai_max_concurrent: "3"
                     audit_export_max_rows: 999999
                     """
@@ -2499,7 +2591,16 @@ class TestLoadConfig:
                     rate_limit_per_minute: 99
                     """
                 ))
-            with mock.patch.object(app_config.log, "warning"):
+            with (
+                mock.patch.dict(os.environ, {
+                    "DATABASE_POOL_MIN": "",
+                    "DATABASE_POOL_MAX": "",
+                    "DATABASE_POSTGRES_JIT": "",
+                    "AI_TIMEOUT_SECONDS": "",
+                    "AI_MAX_CONCURRENT": "",
+                }),
+                mock.patch.object(app_config.log, "warning"),
+            ):
                 cfg = app_config.load_config(tmp)
 
         assert cfg["app_name"] == "abcdefghijklmnopqrst"
@@ -2515,11 +2616,11 @@ class TestLoadConfig:
         assert cfg["data_dir"] == ""
         assert cfg["database_backend"] == "sqlite"
         assert cfg["database_url"] == ""
-        assert cfg["database_pool_min"] == 1
-        assert cfg["database_pool_max"] == 5
-        assert cfg["database_postgres_jit"] is False
+        assert cfg["database_pool_min"] == 2
+        assert cfg["database_pool_max"] == 4
+        assert cfg["database_postgres_jit"] is True
         assert cfg["ai_enabled"] is True
-        assert cfg["ai_timeout_seconds"] == 120
+        assert cfg["ai_timeout_seconds"] == 90
         assert cfg["ai_max_concurrent"] == 3
         assert cfg["ai_max_output_tokens"] == 120
         assert cfg["ai_next_commands_max_output_tokens"] == 180
@@ -3079,6 +3180,7 @@ class TestLoadConfig:
         })
         labels = [rule["label"] for rule in rules]
         assert "bearer token" in labels
+        assert "private key block" in labels
         assert "email address" in labels
         assert labels[-1] == "custom"
 
@@ -7809,11 +7911,12 @@ class TestPostgresMigrations:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         try:
-            applied = run_migrations(
-                conn,
-                (*MIGRATIONS, future_delta),
-                backend=database_backend.DatabaseBackend.SQLITE,
-            )
+            with mock.patch("core.migrations.runner.log.info") as log_info:
+                applied = run_migrations(
+                    conn,
+                    (*MIGRATIONS, future_delta),
+                    backend=database_backend.DatabaseBackend.SQLITE,
+                )
             table_exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_baseline_delta'"
             ).fetchone()
@@ -7827,6 +7930,13 @@ class TestPostgresMigrations:
         assert applied == [*[migration.version for migration in MIGRATIONS], "0045"]
         assert table_exists is not None
         assert "0045" in versions
+        migration_events = [
+            call for call in log_info.call_args_list
+            if call.args and call.args[0] == "MIGRATION_APPLIED"
+        ]
+        assert migration_events
+        assert all("migration_version" in call.kwargs["extra"] for call in migration_events)
+        assert all("version" not in call.kwargs["extra"] for call in migration_events)
 
     def test_migration_failure_logs_statement_context(self):
         from core.migrations.runner import Migration, apply_migration
@@ -7861,7 +7971,7 @@ class TestPostgresMigrations:
         event, = log_error.call_args.args
         extra = log_error.call_args.kwargs["extra"]
         assert event == "MIGRATION_FAILED"
-        assert extra["version"] == "9999"
+        assert extra["migration_version"] == "9999"
         assert extra["statement_index"] == 2
         assert extra["statement_count"] == 2
         assert len(extra["statement_hash"]) == 16
@@ -8664,13 +8774,14 @@ class TestSchedulerFoundation:
         monkeypatch.setattr(registry, "interactive_pty_spec_for_command", lambda _command: None)
         monkeypatch.setattr(builtins_module, "resolves_exact_special_builtin_command", lambda _command: False)
         monkeypatch.setattr(builtins_module, "resolve_builtin_command", lambda command: command == "history")
+        postfilter = SimpleNamespace(output_sink_error="")
         monkeypatch.setattr(
             run_blueprint,
             "_prepare_command_input",
             lambda *_args, **_kwargs: SimpleNamespace(
                 execution_command="history",
                 variable_notice="expanded vars",
-                postfilter=object(),
+                postfilter=postfilter,
             ),
         )
         monkeypatch.setattr(
@@ -8678,7 +8789,11 @@ class TestSchedulerFoundation:
             "execute_builtin_command",
             lambda *args, **kwargs: ([{"type": "output", "text": "raw"}], 0),
         )
-        monkeypatch.setattr(run_blueprint, "_filter_builtin_command_events", lambda *_args: filtered_events)
+        def _filter_events(*_args):
+            postfilter.output_sink_error = "could not write the file"
+            return filtered_events
+
+        monkeypatch.setattr(run_blueprint, "_filter_builtin_command_events", _filter_events)
         monkeypatch.setattr(run_blueprint, "_history_safe_command_for_storage", lambda command: command)
 
         def _synthetic(*args, **kwargs):
@@ -8691,6 +8806,7 @@ class TestSchedulerFoundation:
 
         assert run_id == "run_builtin_rewritten"
         assert synthetic_calls[0][0][3] == filtered_events
+        assert synthetic_calls[0][0][4] == 1
         assert synthetic_calls[0][1] == {"cmd_type": "builtin", "owner_tab_id": "schedule:sch_test"}
 
     def test_scheduler_launch_path_returns_missing_runtime_synthetic_run(self, monkeypatch):
@@ -14861,6 +14977,69 @@ class TestSessionWorkspace:
             delete_workspace_file("session-1", "targets.txt", cfg)
             assert list_workspace_files("session-1", cfg) == []
 
+    def test_copy_and_touch_workspace_files_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "source.txt", "copied\n", cfg)
+            create_workspace_directory("session-1", "archive", cfg)
+
+            copied = workspace_file_mutations.copy_workspace_file(
+                "session-1",
+                "source.txt",
+                "archive",
+                cfg,
+            )
+            created = workspace_file_mutations.touch_workspace_file(
+                "session-1",
+                "empty.txt",
+                cfg,
+            )
+            touched = workspace_file_mutations.touch_workspace_file(
+                "session-1",
+                "source.txt",
+                cfg,
+            )
+            assert copied.source == "source.txt"
+            assert copied.destination == "archive/source.txt"
+            assert copied.size == len("copied\n")
+            assert read_workspace_text_file("session-1", "source.txt", cfg) == "copied\n"
+            assert read_workspace_text_file("session-1", "archive/source.txt", cfg) == "copied\n"
+            assert created == {"path": "empty.txt", "size": 0, "created": True}
+            assert touched == {"path": "source.txt", "size": len("copied\n"), "created": False}
+            appended = workspace_file_mutations.append_workspace_text_file(
+                "session-1",
+                "source.txt",
+                "again\n",
+                cfg,
+            )
+            appended_new = workspace_file_mutations.append_workspace_text_file(
+                "session-1",
+                "appended-new.txt",
+                "new\n",
+                cfg,
+            )
+            assert appended == {"path": "source.txt", "size": len("copied\nagain\n")}
+            assert appended_new == {"path": "appended-new.txt", "size": len("new\n")}
+            assert read_workspace_text_file("session-1", "source.txt", cfg) == "copied\nagain\n"
+            assert read_workspace_text_file("session-1", "appended-new.txt", cfg) == "new\n"
+
+            with pytest.raises(InvalidWorkspacePath, match="destination already exists"):
+                workspace_file_mutations.copy_workspace_file(
+                    "session-1",
+                    "source.txt",
+                    "archive/source.txt",
+                    cfg,
+                )
+            with pytest.raises(InvalidWorkspacePath):
+                workspace_file_mutations.copy_workspace_file(
+                    "session-1",
+                    "../source.txt",
+                    "escape.txt",
+                    cfg,
+                )
+            with pytest.raises(InvalidWorkspacePath):
+                workspace_file_mutations.touch_workspace_file("session-1", "../escape.txt", cfg)
+
     def test_prepare_workspace_file_for_command_uses_limited_write_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
@@ -15177,6 +15356,16 @@ class TestSessionWorkspace:
                 assert False, "expected max file size rejection"
             except WorkspaceQuotaExceeded:
                 pass
+            empty_path = resolve_workspace_path("session-1", "append.txt", cfg, ensure_parent=True)
+            empty_path.write_bytes(b"")
+            with pytest.raises(WorkspaceQuotaExceeded):
+                workspace_file_mutations.append_workspace_text_file(
+                    "session-1",
+                    "append.txt",
+                    "x",
+                    cfg,
+                )
+            assert empty_path.read_bytes() == b""
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_max_files=1)
@@ -15372,6 +15561,29 @@ class TestSessionWorkspace:
 
 
 class TestEntrypointWorkspaceRepair:
+    def test_reusable_route_app_resets_config_and_keeps_clients_isolated(self):
+        first = reusable_test_app("reset-contract")
+        same = reusable_test_app("reset-contract")
+        other = reusable_test_app("separate-contract")
+        fresh = _test_app()
+        before_hooks = sum(len(handlers) for handlers in first.before_request_funcs.values())
+        original_name = first.config["APPLICATION_ROOT"]
+
+        first.config["APPLICATION_ROOT"] = "/mutated"
+        reset_reusable_test_apps()
+
+        assert same is first
+        assert other is not first
+        assert fresh is not first
+        assert first.config["APPLICATION_ROOT"] == original_name
+        assert sum(len(handlers) for handlers in first.before_request_funcs.values()) == before_hooks
+
+        first_client = first.test_client()
+        second_client = first.test_client()
+        first_client.set_cookie("reset-contract", "private")
+        assert first_client.get_cookie("reset-contract") is not None
+        assert second_client.get_cookie("reset-contract") is None
+
     def test_app_import_and_factory_are_side_effect_free_until_bootstrap(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -15632,7 +15844,7 @@ class TestEntrypointWorkspaceRepair:
 
     def test_entrypoint_blocks_restricted_cidrs_for_scanner_user_only(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
-        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        compose = yaml.safe_load((REPO_ROOT / "compose.dev.yaml").read_text())
         shell_env = TestAIRuntimeWiring._compose_environment(compose["services"]["shell"])
 
         assert 'from config import CFG' in entrypoint
@@ -15655,7 +15867,7 @@ class TestEntrypointWorkspaceRepair:
 
     def test_docker_static_metadata_labels_match_runtime_config_contract(self):
         dockerfile = (REPO_ROOT / "Dockerfile").read_text()
-        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        compose = yaml.safe_load((REPO_ROOT / "compose.dev.yaml").read_text())
         shell_service = compose["services"]["shell"]
         shell_env = TestAIRuntimeWiring._compose_environment(shell_service)
         build_args = {str(key): str(value) for key, value in shell_service["build"]["args"].items()}
@@ -15677,7 +15889,7 @@ class TestEntrypointWorkspaceRepair:
         assert set(python_from_args) == {"PYTHON_BASE_IMAGE"}
         assert app_config.APP_VERSION == package_version
         assert f"ARG APP_VERSION={app_config.APP_VERSION}" in dockerfile
-        assert build_args["APP_VERSION"] == f"${{APP_VERSION:-{app_config.APP_VERSION}}}"
+        assert build_args["APP_VERSION"] == f"${{APP_VERSION:-{app_config.APP_VERSION}-dev}}"
         assert build_args["VCS_REF"] == "${GIT_SHA:-unknown}"
         assert build_args["BUILD_DATE"] == "${BUILD_DATE:-unknown}"
         assert "PYTHON_BASE_IMAGE" not in build_args
@@ -15696,10 +15908,11 @@ class TestEntrypointWorkspaceRepair:
             assert label in dockerfile
         assert labels["sh.darklab.config.database_backend"] == shell_env["DATABASE_BACKEND"]
         assert labels["sh.darklab.config.database_backend"] == "${DATABASE_BACKEND:-sqlite}"
+        assert labels["sh.darklab.environment"] == "development"
         assert labels["sh.darklab.metrics.path"] == "/metrics"
 
     def test_compose_redis_is_ephemeral_under_read_only_root(self):
-        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        compose = yaml.safe_load((REPO_ROOT / "compose.dev.yaml").read_text())
         redis_service = compose["services"]["redis"]
         redis_command = [str(item) for item in redis_service.get("command", [])]
 
@@ -15722,7 +15935,13 @@ class TestEntrypointWorkspaceRepair:
         assert "close_postgres_pool()" in gunicorn_conf
 
     def test_playwright_server_uses_wsgi_application_entrypoint(self):
-        server_helper = (REPO_ROOT / "scripts" / "playwright" / "run_e2e_server.sh").read_text()
+        server_helper = (
+            REPO_ROOT
+            / "scripts"
+            / "test-support"
+            / "playwright"
+            / "run_e2e_server.sh"
+        ).read_text()
 
         assert "FLASK_APP=wsgi.py" in server_helper
         assert "wsgi:application" in server_helper
@@ -15758,7 +15977,7 @@ class TestAIRuntimeWiring:
         assert '" &' in entrypoint
 
     def test_compose_ai_profile_wires_shell_to_llama_sidecar(self):
-        compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+        compose = yaml.safe_load((REPO_ROOT / "compose.dev.yaml").read_text())
         services = compose["services"]
         shell = services["shell"]
         llama = services["llama"]
@@ -15780,10 +15999,10 @@ class TestAIRuntimeWiring:
         assert shell_env["AI_ENABLED"] == "${AI_ENABLED:-false}"
         assert shell_env["AI_BASE_URL"] == "${AI_BASE_URL:-http://llama:8080}"
         assert shell_env["AI_MODEL"] == "${AI_MODEL:-Llama-3.1-8B-Instruct}"
-        assert shell_env["AI_TIMEOUT_SECONDS"] == "${AI_TIMEOUT_SECONDS:-120}"
-        assert shell_env["AI_MAX_OUTPUT_TOKENS"] == "${AI_MAX_OUTPUT_TOKENS:-120}"
-        assert shell_env["AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS"] == "${AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS:-180}"
-        assert shell_env["AI_MAX_CONCURRENT"] == "${AI_MAX_CONCURRENT:-1}"
+        assert shell_env["AI_TIMEOUT_SECONDS"] == "${AI_TIMEOUT_SECONDS:-}"
+        assert shell_env["AI_MAX_OUTPUT_TOKENS"] == "${AI_MAX_OUTPUT_TOKENS:-}"
+        assert shell_env["AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS"] == "${AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS:-}"
+        assert shell_env["AI_MAX_CONCURRENT"] == "${AI_MAX_CONCURRENT:-}"
         assert shell_env["AI_FEATURE_SUMMARY"] == "${AI_FEATURE_SUMMARY:-false}"
         assert shell_env["AI_FEATURE_NEXT_COMMANDS"] == "${AI_FEATURE_NEXT_COMMANDS:-false}"
         assert shell_env["AI_FEATURE_RUN_SUGGESTIONS"] == "${AI_FEATURE_RUN_SUGGESTIONS:-false}"
@@ -15874,6 +16093,8 @@ class TestDerivedCommandRegistry:
                     inject_env: VTCLI_APIKEY
                     fallback_envs:
                       - VTCLI_APIKEY
+                    subcommands:
+                      - stats
                   - env: ""
                   - env: bad-name
                 autocomplete:
@@ -15998,17 +16219,22 @@ class TestDerivedCommandRegistry:
                 "optional": True,
                 "inject_env": "VTCLI_APIKEY",
                 "fallback_envs": ["VTCLI_APIKEY"],
+                "subcommands": ["stats"],
             },
         ]
         with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             assert commands.required_secrets_for_command("ping -h") == []
             assert commands.required_secrets_for_command("ping example.org") == [
                 {"env": "SHODAN_API_KEY", "optional": False},
+            ]
+            assert commands.required_secrets_for_command("ping stats") == [
+                {"env": "SHODAN_API_KEY", "optional": False},
                 {
                     "env": "VT_API_KEY",
                     "optional": True,
                     "inject_env": "VTCLI_APIKEY",
                     "fallback_envs": ["VTCLI_APIKEY"],
+                    "subcommands": ["stats"],
                 },
             ]
         mtr = registry["commands"][1]
@@ -16075,6 +16301,7 @@ class TestDerivedCommandRegistry:
                             "env": "VT_API_KEY",
                             "inject_env": "VTCLI_APIKEY",
                             "fallback_envs": ["VTCLI_APIKEY"],
+                            "subcommands": ["scan"],
                         },
                     ],
                     "workspace_flags": [
@@ -16119,6 +16346,7 @@ class TestDerivedCommandRegistry:
                 "env": "VT_API_KEY",
                 "inject_env": "VTCLI_APIKEY",
                 "fallback_envs": ["VTCLI_APIKEY"],
+                "subcommands": ["scan"],
                 "optional": False,
             },
         ]
@@ -16127,9 +16355,10 @@ class TestDerivedCommandRegistry:
                 "env": "VT_API_KEY",
                 "inject_env": "VTCLI_APIKEY",
                 "fallback_envs": ["VTCLI_APIKEY"],
+                "subcommands": ["scan"],
                 "optional": False,
                 "source": "command_registry",
-                "consumer": "sentinel",
+                "consumer": "sentinel scan",
             },
         ]
         entry_flags = entry.get("flags")
@@ -16143,6 +16372,7 @@ class TestDerivedCommandRegistry:
         assert entry["runtime_notes"] == ["Adds `--safe` automatically when needed."]
         assert subcommand is not None
         assert subcommand["subcommand"] == "scan"
+        assert subcommand["requires_secrets"] == entry["requires_secrets"]
         subcommand_examples = subcommand.get("examples")
         subcommand_flags = subcommand.get("flags")
         assert isinstance(subcommand_examples, list)
@@ -16374,10 +16604,25 @@ class TestDerivedCommandRegistry:
             {"name": "VTCLI_APIKEY", "consumer_envs": ["VTCLI_APIKEY"]},
             {"name": "FOFA_API_KEY", "consumer_envs": ["FOFA_API_KEY"]},
             {"name": "FOFA_EMAIL", "consumer_envs": ["FOFA_EMAIL"]},
+            {"name": "GITHUB_TOKEN", "consumer_envs": ["GITHUB_TOKEN"]},
         ]
 
         with (
             mock.patch("services.commands.builtins_secrets.provider_status_catalog", return_value=providers),
+            mock.patch("services.commands.builtins_secrets.command_secret_consumers", return_value=[
+                {
+                    "consumer": "trufflehog github",
+                    "env": "GITHUB_TOKEN",
+                    "fallback_envs": [],
+                    "optional": False,
+                },
+                {
+                    "consumer": "trufflehog gitlab",
+                    "env": "GITLAB_TOKEN",
+                    "fallback_envs": [],
+                    "optional": False,
+                },
+            ]),
             mock.patch("services.commands.builtins_secrets.list_secret_metadata", return_value=stored_secrets),
         ):
             lines, exit_code = builtin_commands.execute_builtin_command("secret show-consumers", "secret-session")
@@ -16404,6 +16649,12 @@ class TestDerivedCommandRegistry:
         assert "not configured · intel ip · CENSYS_PAT" in text
         assert "ProjectDiscovery Chaos" in text
         assert "not configured · chaos CLI · PDCP_API_KEY" in text
+        assert "Command credentials:" in text
+        assert "1 usable · 1 not configured" in text
+        assert "trufflehog github" in text
+        assert "configured · GITHUB_TOKEN" in text
+        assert "trufflehog gitlab" in text
+        assert "not configured · GITLAB_TOKEN" in text
         assert [line.get("text") for line in alias_lines] == [line.get("text") for line in lines]
 
     def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
@@ -16773,20 +17024,26 @@ class TestDerivedCommandRegistry:
         disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})
         enabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
-        assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled)
-        assert {"file", "cat", "ls", "rm"}.issubset(enabled)
+        assert {"file", "cat", "cp", "ls", "rm", "touch"}.isdisjoint(disabled)
+        assert "diff" in disabled
+        assert {"file", "cat", "cp", "diff", "ls", "rm", "touch"}.issubset(enabled)
         assert [item["value"] for item in enabled["file"]["arg_hints"]["__positional__"]] == [
             "list <folder>",
             "ls <folder>",
             "show <file>",
+            "diff <source1> <source2>",
             "add <file>",
             "add-dir <folder>",
             "edit <file>",
             "download <file>",
             "move <source> <destination>",
+            "copy <source> <destination>",
+            "touch <file>",
             "delete <file>",
             "help",
         ]
+        assert enabled["cp"]["arg_hints"]["__positional__"][0]["value_type"] == "workspace_path"
+        assert enabled["touch"]["arg_hints"]["__positional__"][0]["value_type"] == "workspace_path"
         assert "rm" in enabled["file"]["expects_value"]
         assert "rm" in enabled["file"]["arg_hints"]
 
@@ -16870,7 +17127,15 @@ class TestDerivedCommandRegistry:
         trufflehog = by_root["trufflehog"]
         assert "trufflehog filesystem --directory" in trufflehog["policy"]["allow"]
         assert "trufflehog git" in trufflehog["policy"]["allow"]
+        assert "trufflehog github" in trufflehog["policy"]["allow"]
+        assert "trufflehog gitlab" in trufflehog["policy"]["allow"]
         assert "trufflehog git file://" in trufflehog["policy"]["deny"]
+        assert "trufflehog github --token" in trufflehog["policy"]["deny"]
+        assert "trufflehog gitlab --token" in trufflehog["policy"]["deny"]
+        assert trufflehog["requires_secrets"] == [
+            {"env": "GITHUB_TOKEN", "optional": False, "subcommands": ["github"]},
+            {"env": "GITLAB_TOKEN", "optional": False, "subcommands": ["gitlab"]},
+        ]
         assert trufflehog["runtime_adaptations"]["inject_flags"][0]["flags"] == ["--json"]
         assert is_command_allowed("trufflehog --help")[0]
         assert is_command_allowed("trufflehog git https://github.com/trufflesecurity/test_keys --json")[0]
@@ -16878,7 +17143,53 @@ class TestDerivedCommandRegistry:
         assert not is_command_allowed("trufflehog git file:///tmp/repo --json")[0]
         assert not is_command_allowed("trufflehog git ssh://git@example.com/repo.git --json")[0]
         assert not is_command_allowed("trufflehog git local-repo --json")[0]
+        assert not is_command_allowed("trufflehog git https://token@github.com/darklab/shell.git")[0]
+        assert is_command_allowed("trufflehog github --repo https://github.com/darklab/shell")[0]
+        assert is_command_allowed("trufflehog github --org darklab --endpoint https://github.example.test")[0]
+        assert is_command_allowed("trufflehog gitlab --group-id 123 --endpoint https://gitlab.example.test")[0]
         assert not is_command_allowed("trufflehog github --repo darklab/shell")[0]
+        assert not is_command_allowed("trufflehog github --endpoint http://github.example.test --org darklab")[0]
+        assert not is_command_allowed("trufflehog gitlab --token plaintext --group-id 123")[0]
+        assert not is_command_allowed("trufflehog github --auth-in-url --org darklab")[0]
+        assert commands.required_secrets_for_command("trufflehog filesystem --directory secrets") == []
+        assert commands.required_secrets_for_command("trufflehog git https://github.com/darklab/shell") == []
+        assert commands.required_secrets_for_command("trufflehog github --org darklab") == [
+            {"env": "GITHUB_TOKEN", "optional": False, "subcommands": ["github"]},
+        ]
+        assert commands.required_secrets_for_command("trufflehog gitlab --group-id 123") == [
+            {"env": "GITLAB_TOKEN", "optional": False, "subcommands": ["gitlab"]},
+        ]
+        assert {
+            (item["consumer"], item["env"])
+            for item in commands.command_secret_consumers()
+            if str(item["consumer"]).startswith("trufflehog ")
+        } == {
+            ("trufflehog github", "GITHUB_TOKEN"),
+            ("trufflehog gitlab", "GITLAB_TOKEN"),
+        }
+
+        from services.runs.private_data import resolve_secret_environment
+
+        def _trufflehog_secret(_scope, env_name, **_kwargs):
+            return {
+                "GITHUB_TOKEN": "github-secret",
+                "GITLAB_TOKEN": "gitlab-secret",
+            }.get(env_name)
+
+        github_env, github_names = resolve_secret_environment(
+            "trufflehog github --org darklab",
+            "trufflehog-secret-session",
+            get_secret_value_for_env_fn=_trufflehog_secret,
+        )
+        gitlab_env, gitlab_names = resolve_secret_environment(
+            "trufflehog gitlab --group-id 123",
+            "trufflehog-secret-session",
+            get_secret_value_for_env_fn=_trufflehog_secret,
+        )
+        assert github_env == {"GITHUB_TOKEN": "github-secret"}
+        assert github_names == ["GITHUB_TOKEN"]
+        assert gitlab_env == {"GITLAB_TOKEN": "gitlab-secret"}
+        assert gitlab_names == ["GITLAB_TOKEN"]
         puredns = by_root["puredns"]
         assert "puredns resolve" in puredns["policy"]["deny"]
         assert "puredns --bin" in puredns["policy"]["deny"]
@@ -17030,6 +17341,18 @@ class TestDerivedCommandRegistry:
                 (
                     "trufflehog git https://github.com/trufflesecurity/test_keys "
                     "--include-paths trufflehog-include.txt --exclude-paths trufflehog-exclude.txt --json"
+                ): (
+                    ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
+                ),
+                (
+                    "trufflehog github --org darklab --include-paths trufflehog-include.txt "
+                    "--exclude-paths trufflehog-exclude.txt --json"
+                ): (
+                    ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
+                ),
+                (
+                    "trufflehog gitlab --group-id 123 --include-paths trufflehog-include.txt "
+                    "--exclude-paths trufflehog-exclude.txt --json"
                 ): (
                     ["trufflehog-include.txt", "trufflehog-exclude.txt"], [],
                 ),
@@ -17837,6 +18160,7 @@ class TestCommandKnowledgeNormalization:
         assert "grep" in roots
         assert "head" in roots
         assert "tail" in roots
+        assert "tee" in roots
         jq = next(pipe for pipe in pipes if pipe["root"] == "jq")
         assert jq["description"] == "Select fields from JSON or JSONL"
         flags = cast(list, jq["flags"])
@@ -18213,7 +18537,7 @@ class TestThemeRegistry:
         assert theme["toolbar_button_text"] == app_config._THEME_DEFAULTS["dark"]["toolbar_button_text"]
 
     def test_theme_example_files_match_generated_defaults(self):
-        script_path = REPO_ROOT / "scripts" / "generate_theme_examples.py"
+        script_path = REPO_ROOT / "scripts" / "generate" / "generate_theme_examples.py"
         spec = importlib.util.spec_from_file_location("generate_theme_examples", script_path)
         assert spec and spec.loader
         module = importlib.util.module_from_spec(spec)
@@ -18524,7 +18848,9 @@ class TestThemeRegistry:
         assert "command | sort -rn" in built_in_html
         assert "command | uniq -c" in built_in_html
         assert "command | grep pattern | wc -l" in built_in_html
-        assert "General shell piping, arbitrary chaining, and redirection are still blocked." in built_in_html
+        assert "command &gt; file" in built_in_html
+        assert "command | tee file" in built_in_html
+        assert "General shell piping, arbitrary chaining, and raw redirection remain blocked." in built_in_html
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────
@@ -21597,6 +21923,26 @@ class TestOutputSignals:
             (entity["type"], entity["canonical_value"])
             for entity in trufflehog_entities
         } == {("domain", "github.com")}
+        for payload in (
+            {
+                "DetectorName": "PrivateKey",
+                "DetectorType": 27,
+                "Verified": False,
+                "Raw": "-----BEGIN RSA PRIVATE KEY-----\nprivate-key-data",
+                "Redacted": "-----BEGIN RSA PRIVATE KEY-----\nprivate-key-data",
+                "SecretParts": {"token": "-----BEGIN RSA PRIVATE KEY-----\nprivate-key-data"},
+                "SourceMetadata": {"Data": {"Filesystem": {"file": "id_rsa", "line": 1}}},
+            },
+            {
+                "DetectorType": 999,
+                "Verified": False,
+                "RawV2": "multipart-credential",
+                "SecretParts": {"username": "demo-user", "password": "demo-password"},
+            },
+        ):
+            assert OutputSignalClassifier("trufflehog filesystem --directory / --json").classify_line(
+                json.dumps(payload)
+            )["signals"] == ["findings"]
 
         puredns_metadata = OutputSignalClassifier(
             "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
@@ -22948,8 +23294,8 @@ class TestAutocompleteContextLoading:
 
         for arg_name, version, smoke_command in (
             ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
-            ("CDNCHECK_VERSION", "v1.2.43", "cdncheck -h"),
-            ("TRUFFLEHOG_VERSION", "v3.95.8", "trufflehog --help"),
+            ("CDNCHECK_VERSION", "v1.2.45", "cdncheck -h"),
+            ("TRUFFLEHOG_VERSION", "v3.95.9", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
         ):
@@ -23070,6 +23416,29 @@ class TestAutocompleteContextLoading:
                     {"value": "shodan host 8.8.8.8", "description": "Secret-required lookup"},
                 ],
             },
+            "trufflehog": {
+                "requires_secrets": [
+                    {
+                        "env": "GITHUB_TOKEN",
+                        "optional": False,
+                        "subcommands": ["github"],
+                    },
+                ],
+                "subcommands": {
+                    "git": {
+                        "examples": [{
+                            "value": "trufflehog git https://github.com/darklab/shell",
+                            "description": "Public Git scan",
+                        }],
+                    },
+                    "github": {
+                        "examples": [{
+                            "value": "trufflehog github --org darklab",
+                            "description": "Credentialed organization scan",
+                        }],
+                    },
+                },
+            },
         }
 
         with mock.patch(
@@ -23080,7 +23449,11 @@ class TestAutocompleteContextLoading:
                 result = load_container_smoke_test_commands()
 
         load_context.assert_called_once_with({"workspace_enabled": False})
-        assert result == ["curl -I https://ip.darklab.sh", "shodan --help"]
+        assert result == [
+            "curl -I https://ip.darklab.sh",
+            "shodan --help",
+            "trufflehog git https://github.com/darklab/shell",
+        ]
 
     def test_container_smoke_test_interactive_commands_include_only_pty_examples(self):
         registry_context = {
@@ -27096,6 +27469,8 @@ SQL syntax error near q</response>
             "Raw": raw_secret,
             "RawV2": raw_secret_v2,
             "Redacted": raw_secret,
+            "SecretParts": {"access_key": raw_secret, "secret_key": "raw-secret-value"},
+            "ExtraData": {"verification": f"rejected {raw_secret_v2}"},
         })
         output_filter = _TruffleHogOutputFilter("trufflehog git https://github.com/trufflesecurity/test_keys --json")
         filtered_line = output_filter.process_output_line(f"{line}\n")
@@ -27123,7 +27498,9 @@ SQL syntax error near q</response>
         assert len(recorded) == 1
         assert filtered_payload["Raw"] == "[redacted]"
         assert filtered_payload["RawV2"] == "[redacted]"
-        assert filtered_payload["Redacted"] == raw_secret
+        assert filtered_payload["Redacted"] == "[redacted]"
+        assert set(filtered_payload["SecretParts"].values()) == {"[redacted]"}
+        assert filtered_payload["ExtraData"]["verification"] == "rejected [redacted]"
         assert raw_secret not in filtered_payload["Raw"]
         assert "raw-secret-value" not in filtered_line
         assert finding["severity"] == "high"
@@ -27134,7 +27511,7 @@ SQL syntax error near q</response>
         assert "raw-secret-value" not in finding["raw_line"]
         assert dict(entity) == {"type": "domain", "canonical_value": "github.com"}
 
-    def test_record_run_findings_uses_generic_trufflehog_redaction_hint(self):
+    def test_record_run_findings_does_not_persist_vendor_redaction_hint(self):
         from blueprints.run import _TruffleHogOutputFilter
         from services.projects.findings import record_run_findings
 
@@ -27179,7 +27556,7 @@ SQL syntax error near q</response>
             conn.close()
 
         persisted = json.dumps(dict(finding))
-        assert "redacted=[redacted]" in finding["raw_line"]
+        assert "redacted=[redacted]" not in finding["raw_line"]
         assert raw_secret not in persisted
         assert raw_secret_v2 not in persisted
         assert provider_redacted not in persisted
@@ -27220,7 +27597,8 @@ SQL syntax error near q</response>
         with mock.patch.object(findings.log, "warning") as warning:
             text = findings._trufflehog_safe_finding_text(raw_line)
 
-        assert text == raw_line
+        assert text == "TruffleHog secret finding [redacted]"
+        assert "raw-secret-value" not in text
         warning.assert_called_once()
         assert warning.call_args.args == ("TRUFFLEHOG_FINDING_REDACTION_FALLBACK",)
         extra = warning.call_args.kwargs["extra"]

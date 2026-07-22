@@ -342,11 +342,21 @@ class TestGELFFormatter:
     def test_multiple_extras_all_prefixed(self):
         data = json.loads(_emit(
             GELFFormatter(), logging.INFO, "RUN_START",
-            extra={"ip": "1.2.3.4", "run_id": "abc", "exit_code": 0}
+            extra={
+                "ip": "1.2.3.4",
+                "run_id": "abc",
+                "exit_code": 0,
+                "version": "2.6.0",
+                "source": "config.local.yaml",
+            },
         ))
         assert data["_ip"] == "1.2.3.4"
         assert data["_run_id"] == "abc"
         assert data["_exit_code"] == 0
+        assert data["_event_version"] == "2.6.0"
+        assert data["_event_source"] == "config.local.yaml"
+        assert "_version" not in data
+        assert "_source" not in data
 
     def test_stdlib_attrs_not_leaked_as_underscore_fields(self):
         data = json.loads(_emit(GELFFormatter(), logging.INFO, "TEST"))
@@ -587,7 +597,7 @@ class TestConfigStartupLogging:
             assert failure["level"] == 3
             assert failure["_app"] == "startup-test"
             assert failure["_phase"] == "yaml_parse"
-            assert failure["_source"] == str(tmp_path / "local" / "config.local.yaml")
+            assert failure["_event_source"] == str(tmp_path / "local" / "config.local.yaml")
             assert failure["_error"] == "ParserError"
             assert "full_message" not in failure
         else:
@@ -1325,6 +1335,8 @@ class TestWorkerEntrypointLoggingSetup:
 
         call = next(c for c in mock_info.call_args_list if c[0][0] == "APP_INITIALIZED")
         extra = call.kwargs["extra"]
+        assert extra["app_version"] == shell_app_module.APP_VERSION
+        assert "version" not in extra
         assert extra["pid"] > 0
         assert extra["app_name"] == flask_app.name
         assert extra["blueprint_count"] == len(flask_app.blueprints)

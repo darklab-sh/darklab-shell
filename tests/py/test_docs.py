@@ -35,13 +35,35 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "4adc27411e224036d12a01e869a7b3301272f72e9b23b2181bbdf09d49c7afbc"
+_LOG_EVENT_INVENTORY_HASH = "0b47f05c0508bb553baecf5c39a5a84a436dd898c74c049620e4399ba9f64b43"
 _CHANGELOG_ARCHIVES = (
     _REPO_ROOT / "docs" / "changelog" / "2.x.md",
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",
 )
 
+_ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
+    "ai_api_key",
+    "ai_api_key_secret_name",
+    "ai_base_url",
+    "ai_enabled",
+    "ai_feature_next_commands",
+    "ai_feature_run_suggestions",
+    "ai_feature_summary",
+    "ai_model",
+    "ai_provider",
+    "database_backend",
+    "database_url",
+    "interactive_pty_enabled",
+    "prometheus_multiproc_dir",
+    "raw_packet_scanning_enabled",
+    "restricted_command_input_cidrs",
+    "workspace_backend",
+    "workspace_enabled",
+    "workspace_root",
+})
+
 _PUBLISHED_CHANGELOG_HASHES = {
+    "2.7.0": "5555b59b166f5008245919be88cd11e106f71ecaee60d0d88c10ad303945d69d",
     "2.6.0": "2301b6a3a70e07f14e5536c1b84aa25f5f5ba49fa67ddb8effd14814d6cc6351",
     "2.5.0": "57551c73e61a89420ac3bbc93427f260b177327f03b788c2f1658a362c29a7a8",
     "2.4": "6276e66a1f7dad33ec7e1f1334ced162ccaee30e4fc9d499c34e71d199e6e347",
@@ -102,6 +124,14 @@ def _config_default_keys() -> list[str]:
     raise AssertionError("Could not find load_config() defaults dict in app/config.py")
 
 
+def _operator_yaml_default_keys() -> list[str]:
+    """Return defaults that operators can set through YAML."""
+    return [
+        key for key in _config_default_keys()
+        if key not in _ENVIRONMENT_OWNED_CONFIG_KEYS
+    ]
+
+
 def _documented_default_config_keys() -> set[str]:
     """Return top-level config keys represented in app/conf/config.yaml."""
     keys = set()
@@ -113,11 +143,14 @@ def _documented_default_config_keys() -> set[str]:
 
 
 def _configuration_reference_table_keys() -> set[str]:
-    """Return setting names from the CONFIGURATION.md application settings table."""
+    """Return setting names from the CONFIGURATION.md application YAML table."""
     text = _CONFIGURATION.read_text()
-    match = re.search(r"^## Application Settings\n(?P<body>.*?)(?:^---\n\n## Files Under app/conf\n)",
-                      text, re.M | re.S)
-    assert match, "Could not find CONFIGURATION.md '## Application Settings' table"
+    match = re.search(
+        r"^## Application YAML Settings\n(?P<body>.*?)(?:^---\n\n## Files Under app/conf\n)",
+        text,
+        re.M | re.S,
+    )
+    assert match, "Could not find CONFIGURATION.md '## Application YAML Settings' table"
     return set(re.findall(r"^\|\s+`([^`]+)`\s+\|", match.group("body"), re.M))
 
 
@@ -470,6 +503,7 @@ class TestProjectStructureCoverage:
 
         assert not offenders, "Tests must build Flask apps through create_app():\n" + "\n".join(offenders)
 
+    @pytest.mark.release_integration
     def test_asset_build_output_does_not_depend_on_cwd(self, tmp_path):
         if shutil.which("node") is None:
             pytest.skip("node is not available")
@@ -478,23 +512,24 @@ class TestProjectStructureCoverage:
 
         root_out = tmp_path / "from-root"
         scripts_out = tmp_path / "from-scripts"
-        script = _REPO_ROOT / "scripts" / "build_assets.mjs"
+        script = _REPO_ROOT / "scripts" / "frontend" / "build_assets.mjs"
         subprocess.run(
-            ["node", str(script), "--out-dir", str(root_out)],
+            ["node", str(script), "--out-dir", str(root_out), "--no-precompress"],
             cwd=str(_REPO_ROOT),
             capture_output=True,
             text=True,
             check=True,
         )
         subprocess.run(
-            ["node", str(script), "--out-dir", str(scripts_out)],
-            cwd=str(_REPO_ROOT / "scripts"),
+            ["node", str(script), "--out-dir", str(scripts_out), "--no-precompress"],
+            cwd=str(_REPO_ROOT / "scripts" / "frontend"),
             capture_output=True,
             text=True,
             check=True,
         )
         root_files = sorted(path.relative_to(root_out) for path in root_out.rglob("*") if path.is_file())
         scripts_files = sorted(path.relative_to(scripts_out) for path in scripts_out.rglob("*") if path.is_file())
+        assert not any(str(path).endswith((".br", ".gz")) for path in root_files + scripts_files)
         changed = [
             str(path)
             for path in root_files
@@ -510,8 +545,52 @@ class TestProjectStructureCoverage:
             + "\n".join(f"  scripts-only: {path}" for path in sorted(set(scripts_files) - set(root_files)))
         )
 
+    def test_committed_asset_sidecars_roundtrip_to_source_bytes(self):
+        if shutil.which("node") is None:
+            pytest.skip("node is not available")
+
+        verification = r"""
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+const root = process.argv[1];
+const extensions = new Set(['.css', '.js', '.json', '.map', '.svg']);
+const files = fs.readdirSync(root).filter((name) => {
+  const fullPath = path.join(root, name);
+  return fs.statSync(fullPath).isFile()
+    && extensions.has(path.extname(name))
+    && fs.statSync(fullPath).size >= 100
+    && name !== 'manifest.json';
+});
+for (const name of files) {
+  const source = fs.readFileSync(path.join(root, name));
+  const brPath = path.join(root, `${name}.br`);
+  const gzPath = path.join(root, `${name}.gz`);
+  if (!fs.existsSync(brPath) || !fs.existsSync(gzPath)) {
+    throw new Error(`missing compressed sidecar for ${name}`);
+  }
+  if (!zlib.brotliDecompressSync(fs.readFileSync(brPath)).equals(source)) {
+    throw new Error(`Brotli sidecar does not match ${name}`);
+  }
+  if (!zlib.gunzipSync(fs.readFileSync(gzPath)).equals(source)) {
+    throw new Error(`gzip sidecar does not match ${name}`);
+  }
+}
+if (files.length === 0) throw new Error('no precompressed assets were checked');
+"""
+        result = subprocess.run(
+            ["node", "-e", verification, str(_REPO_ROOT / "app" / "static" / "build")],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
+
     def test_asset_build_logs_esm_bundle_failure_context(self):
-        script = (_REPO_ROOT / "scripts" / "build_assets.mjs").read_text(encoding="utf-8")
+        script = (
+            _REPO_ROOT / "scripts" / "frontend" / "build_assets.mjs"
+        ).read_text(encoding="utf-8")
         assert "[assets] ESM bundle failed" in script
         for field in ("bundle:", "entry,", "out_dir:", "check_only:", "message:"):
             assert field in script
@@ -562,11 +641,10 @@ class TestArchitectureRouteInventory:
 # ── Part 5: operator configuration docs ──────────────────────────────────────
 
 class TestOperatorConfigurationDocs:
-    """Operator-facing config defaults must stay represented in both the
-    checked-in config override file and the operator configuration reference."""
+    """Operator-facing YAML defaults must stay represented in both references."""
 
     def test_config_yaml_represents_app_defaults(self):
-        expected = _config_default_keys()
+        expected = _operator_yaml_default_keys()
         documented = _documented_default_config_keys()
         missing = [key for key in expected if key not in documented]
         assert not missing, (
@@ -575,11 +653,12 @@ class TestOperatorConfigurationDocs:
         )
 
     def test_configuration_reference_represents_app_defaults(self):
-        expected = _config_default_keys()
+        expected = _operator_yaml_default_keys()
         documented = _configuration_reference_table_keys()
         missing = [key for key in expected if key not in documented]
         assert not missing, (
-            "CONFIGURATION.md '## Application Settings' table is missing app/config.py default keys:\n"
+            "CONFIGURATION.md '## Application YAML Settings' table is missing "
+            "app/config.py default keys:\n"
             + "\n".join(f"  {key}" for key in missing)
         )
 
@@ -593,7 +672,7 @@ class TestChangelogArchives:
 
     def test_archive_coverage_matches_major_release_ranges(self):
         expected = {
-            "2.x.md": ("2.4", "2.3.1", "2.3", "2.2", "2.1", "2.0"),
+            "2.x.md": ("2.5.0", "2.4", "2.3.1", "2.3", "2.2", "2.1", "2.0"),
             "1.x.md": ("1.7", "1.6", "1.5", "1.4", "1.3", "1.2", "1.1", "1.0"),
         }
         actual = {
@@ -669,6 +748,17 @@ class TestReadmeStartPaths:
         quick_start = text.split("## Quick Start\n", 1)[1].split("\n## ", 1)[0]
         production = text.split("## Production Deployment\n", 1)[1].split("\n## ", 1)[0]
         development = text.split("## Running in a Development Environment\n", 1)[1].split("\n## ", 1)[0]
+        current_deployment_docs = "\n".join(
+            path.read_text()
+            for path in (
+                _README,
+                _REPO_ROOT / "CONFIGURATION.md",
+                _REPO_ROOT / "FEATURES.md",
+                _REPO_ROOT / "THEME.md",
+                _REPO_ROOT / "docs" / "logging.md",
+                _REPO_ROOT / "docs" / "postgres-migration.md",
+            )
+        )
 
         assert text.index("## Quick Start\n") < text.index("## Features\n")
         assert "curl -fsSL" in quick_start and "| sh -s --" in quick_start
@@ -686,7 +776,19 @@ class TestReadmeStartPaths:
         assert 'cd "$HOME/darklab-shell"' not in text
         assert "git clone https://gitlab.com/darklab.sh/darklab_shell.git" in development
         assert "bash examples/run_local.sh" in development
+        assert "docker compose -f compose.dev.yaml up --build" in development
         assert "git clone" not in quick_start and "examples/run_local.sh" not in quick_start
+        assert "repository-free" not in current_deployment_docs.lower()
+        assert "examples/docker-compose.prod.yml" not in current_deployment_docs
+        assert "docker-compose.yml" not in current_deployment_docs
+        assert "python scripts/backup_system.py" not in current_deployment_docs
+        config_reference = (_REPO_ROOT / "app" / "conf" / "config.yaml").read_text()
+        for key in _ENVIRONMENT_OWNED_CONFIG_KEYS:
+            assert not re.search(rf"(?m)^\s*#?\s*{re.escape(key)}\s*:", config_reference), key
+        assert "workspace_max_file_mb:" in config_reference
+        assert "interactive_pty_max_runtime_seconds:" in config_reference
+        assert "database_pool_min:" in config_reference
+        assert "ai_timeout_seconds:" in config_reference
 
 
 class TestReadmeInstalledTools:
@@ -898,8 +1000,11 @@ class TestSupportedRuntimeDocumentation:
         rows = _supported_runtime_rows()
 
         compose_match = re.search(r"^\s*platform:\s*([^\s#]+)", _PRODUCTION_COMPOSE.read_text(), re.M)
-        assert compose_match, "deploy/compose.yaml must declare the production platform"
-        assert compose_match.group(1) in rows["Production architecture"]
+        assert compose_match is None, (
+            "deploy/compose.yaml must let the verified release index select the native platform"
+        )
+        assert "AMD64" in rows["Production architecture"]
+        assert "ARM64" in rows["Production architecture"]
 
         compose_versions = set(re.findall(
             r"Docker Compose ([0-9]+(?:\.[0-9]+)+) or newer is required",
@@ -910,13 +1015,19 @@ class TestSupportedRuntimeDocumentation:
         assert f"Docker Compose {compose_version} or newer" in rows["Container orchestration"]
 
         ci_text = _GITLAB_CI.read_text()
+        platform_mode = re.search(
+            r'^\s*RELEASE_PLATFORM_MODE:\s*"([^"]+)"\s*$', ci_text, re.M
+        )
+        assert platform_mode and platform_mode.group(1) == "dual"
+        assert "supported" in rows["Native ARM64"].lower()
         gate_rows = {
-            "Native ARM64": "RELEASE_ARM64_COMPATIBILITY_ENABLED",
             "SELinux-enforcing Docker": "RELEASE_SELINUX_COMPATIBILITY_ENABLED",
             "Rootless Podman": "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED",
         }
         for row_name, variable in gate_rows.items():
             match = re.search(rf"^\s*{variable}:\s*\"([01])\"\s*$", ci_text, re.M)
             assert match, f".gitlab-ci.yml must declare {variable}"
-            expected = "disabled by default" if match.group(1) == "0" else "enabled by default"
-            assert expected in rows[row_name].lower()
+            if match.group(1) == "0":
+                assert "compatibility lane" in rows[row_name].lower()
+            else:
+                assert "supported" in rows[row_name].lower()

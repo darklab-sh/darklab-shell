@@ -18,6 +18,7 @@ import {
   getWorkspaceAutocompleteFileHints as importedGetWorkspaceAutocompleteFileHints,
   refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache,
 } from '../workspace/workspace_autocomplete_cache.js';
+import { loadWorkspaceFilesPayload as importedLoadWorkspaceFilesPayload } from '../../workspace_bridge.js';
 import {
   hasComposerPromptHandler as importedHasComposerPromptHandler,
   syncShellPrompt as importedSyncShellPrompt,
@@ -142,6 +143,46 @@ function _workspaceMoveCommand(cmd) {
   };
 }
 
+function _workspaceCopyCommand(cmd) {
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  if (root === 'cp') {
+    return {
+      source: parts.length === 3 ? parts[1] : '',
+      destination: parts.length === 3 ? parts[2] : '',
+      usage: 'Usage: cp <source> <destination>',
+      invalid: parts.length !== 3,
+    };
+  }
+  const action = (parts[1] || '').toLowerCase();
+  if (root !== 'file' || action !== 'copy') return null;
+  return {
+    source: parts.length === 4 ? parts[2] : '',
+    destination: parts.length === 4 ? parts[3] : '',
+    usage: 'Usage: file copy <source> <destination>',
+    invalid: parts.length !== 4,
+  };
+}
+
+function _workspaceTouchCommand(cmd) {
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  if (root === 'touch') {
+    return {
+      target: parts.length === 2 ? parts[1] : '',
+      usage: 'Usage: touch <file>',
+      invalid: parts.length !== 2,
+    };
+  }
+  const action = (parts[1] || '').toLowerCase();
+  if (root !== 'file' || action !== 'touch') return null;
+  return {
+    target: parts.length === 3 ? parts[2] : '',
+    usage: 'Usage: file touch <file>',
+    invalid: parts.length !== 3,
+  };
+}
+
 function _workspaceListCommand(parts) {
   const root = (parts[0] || '').toLowerCase();
   const parseListArgs = (args, usage) => {
@@ -202,6 +243,62 @@ function _workspaceDownloadTarget(cmd) {
   const action = (parts[1] || '').toLowerCase();
   if (root === 'file' && action === 'download' && parts.length === 3) return parts[2];
   return '';
+}
+
+function _workspaceDiffCommand(cmd) {
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  const isFileCommand = root === 'file';
+  if (isFileCommand && (parts[1] || '').toLowerCase() !== 'diff') return null;
+  if (!isFileCommand && root !== 'diff') return null;
+  const usage = isFileCommand
+    ? 'Usage: file diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]'
+    : 'Usage: diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]';
+  const modes = {
+    '-q': 'brief',
+    '--brief': 'brief',
+    '-u': 'unified',
+    '--unified': 'unified',
+    '-y': 'side_by_side',
+    '--side-by-side': 'side_by_side',
+  };
+  let mode = 'normal';
+  let modeSelected = false;
+  let parseOptions = true;
+  let invalid = false;
+  let last = false;
+  const operands = [];
+  parts.slice(isFileCommand ? 2 : 1).forEach((part) => {
+    if (parseOptions && part === '--') {
+      parseOptions = false;
+      return;
+    }
+    if (parseOptions && String(part || '').startsWith('-')) {
+      if (part === '--last') {
+        if (last) invalid = true;
+        last = true;
+        return;
+      }
+      const selected = modes[part];
+      if (!selected || (modeSelected && selected !== mode)) {
+        invalid = true;
+        return;
+      }
+      mode = selected;
+      modeSelected = true;
+      return;
+    }
+    operands.push(part);
+  });
+  if ((last && operands.length) || (!last && operands.length !== 2)) invalid = true;
+  return {
+    mode,
+    last,
+    left: invalid ? '' : operands[0],
+    right: invalid ? '' : operands[1],
+    usage,
+    invalid,
+  };
 }
 
 function _workspaceCommandTokens(cmd) {
@@ -356,6 +453,15 @@ function _resolveExistingWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCw
 }
 
 async function _ensureWorkspaceCache() {
+  const state = RUNNER_WORKSPACE_GLOBAL.DarklabWorkspaceState;
+  const loadFilesPayload = (
+    typeof importedLoadWorkspaceFilesPayload !== 'undefined'
+    && importedLoadWorkspaceFilesPayload
+  ) || RUNNER_WORKSPACE_GLOBAL.loadWorkspaceFilesPayload;
+  if ((!state || state.loaded !== true) && typeof loadFilesPayload === 'function') {
+    await loadFilesPayload();
+    return;
+  }
   const refresh = _workspaceCacheApi().refresh;
   if (typeof refresh === 'function') {
     await refresh();
@@ -397,12 +503,18 @@ function _isWorkspaceMoveCommand(cmd) {
   return !!_workspaceMoveCommand(cmd);
 }
 
-function _isWorkspaceTerminalCommand(cmd) {
+function _isWorkspaceCopyCommand(cmd) {
   if (!_runnerWorkspaceEnabled()) return false;
+  return !!_workspaceCopyCommand(cmd);
+}
+
+function _isWorkspaceTerminalCommand(cmd) {
   const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
-  if (['cd', 'pwd', 'ls', 'll', 'cat', 'mkdir', 'grep', 'head', 'tail', 'wc', 'sort', 'uniq'].includes(root)) return true;
-  if (root === 'file' && ['list', 'ls', 'show', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
+  if (root === 'diff') return true;
+  if (!_runnerWorkspaceEnabled()) return false;
+  if (['cd', 'pwd', 'ls', 'll', 'cat', 'mkdir', 'touch', 'grep', 'head', 'tail', 'wc', 'sort', 'uniq'].includes(root)) return true;
+  if (root === 'file' && ['list', 'ls', 'show', 'diff', 'touch', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
   return false;
 }
 
@@ -412,6 +524,7 @@ if (typeof window !== 'undefined') {
 export {
   _ensureWorkspaceCache,
   _isWorkspaceDeleteCommand,
+  _isWorkspaceCopyCommand,
   _isWorkspaceDownloadCommand,
   _isWorkspaceEditorCommand,
   _isWorkspaceMoveCommand,
@@ -421,9 +534,11 @@ export {
   _resolveWorkspaceCommandPath,
   _setWorkspaceCwd,
   _workspaceCommandTokens,
+  _workspaceCopyCommand,
   _workspaceCwd,
   _workspaceDeleteCommand,
   _workspaceDeleteTarget,
+  _workspaceDiffCommand,
   _workspaceDisplayPath,
   _workspaceDownloadTarget,
   _workspaceEditorCommand,
@@ -434,6 +549,7 @@ export {
   _workspaceListCommand,
   _workspaceListTarget,
   _workspaceMoveCommand,
+  _workspaceTouchCommand,
   _workspacePathExists,
   _workspacePathHasGlob,
 };

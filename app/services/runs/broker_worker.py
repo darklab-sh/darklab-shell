@@ -16,6 +16,7 @@ from typing import Any
 from config import resolve_effective_cfg
 from core.helpers import get_log_session_id
 from services.runs.contracts import create_run_capture
+from services.runs.broker_capture import publish_broker_captured_line as publish_broker_captured_line
 from services.runs.kinds import run_kind_for_cmd_type
 from services.runs.output_model import LineEvent, LineKind, LineRole, line_event_from_legacy
 
@@ -58,7 +59,15 @@ class BrokerOutputBatcher:
         self.last_flush_monotonic = 0.0
         self.coalesced_line_count = 0
 
-    def add(self, text: str, *, cls: str = "", kind: LineKind | str | None = None, event: LineEvent | None = None) -> None:
+    def add(
+        self,
+        text: str,
+        *,
+        cls: str = "",
+        kind: LineKind | str | None = None,
+        event: LineEvent | None = None,
+        publish: bool = True,
+    ) -> None:
         now = self.monotonic_fn()
         line_dt = datetime.now(timezone.utc)
         base_event = event or line_event_from_legacy(
@@ -73,7 +82,8 @@ class BrokerOutputBatcher:
             self.signal_classifier,
             event=base_event,
         )
-        self._append_live_event(captured_event, now=now)
+        if publish:
+            self._append_live_event(captured_event, now=now)
         if (
             len(self.events) >= self.live_batch_size
             or self._is_due(now=now)
@@ -147,41 +157,6 @@ class BrokerOutputBatcher:
         )
 
 
-def publish_broker_captured_line(
-    run_id: str,
-    capture,
-    signal_classifier,
-    event_type: str,
-    text: str,
-    *,
-    cls: str = "",
-    kind: LineKind | str | None = None,
-    event: LineEvent | None = None,
-    run_started_dt,
-    capture_event_with_signals_fn: Callable[..., tuple[Any, LineEvent]],
-    broker_output_payload_fn: Callable[..., dict[str, Any]],
-    publish_run_event_fn: Callable[[str, str, dict[str, Any]], Any],
-) -> None:
-    line_dt = datetime.now(timezone.utc)
-    base_event = event or line_event_from_legacy(
-        text,
-        cls,
-        kind=kind,
-        ts_clock=line_dt.strftime("%H:%M:%S"),
-        ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
-    )
-    _metadata, captured_event = capture_event_with_signals_fn(
-        capture,
-        signal_classifier,
-        event=base_event,
-    )
-    publish_run_event_fn(
-        run_id,
-        event_type,
-        broker_output_payload_fn(event_type, event=captured_event),
-    )
-
-
 def brokered_synthetic_run(
     original_command,
     session_id,
@@ -232,6 +207,7 @@ def brokered_synthetic_run(
                     str(event.get("text", "")),
                     cls=str(event.get("cls", "")),
                     run_started_dt=run_started_dt,
+                    publish=not bool(event.get("suppress_live")),
                 )
             elif event.get("type") == "clear":
                 publish_run_event_fn(run_id, "clear", {})
@@ -444,7 +420,10 @@ def brokered_real_run_worker(
                     continue
                 for line in lines:
                     for filtered_line in _process_real_output_line(line):
-                        output_batcher.add(filtered_line)
+                        output_batcher.add(
+                            filtered_line,
+                            publish=postfilter.should_publish_output_line(filtered_line),
+                        )
                 output_batcher.flush_due()
             else:
                 output_batcher.flush_due()
@@ -458,11 +437,19 @@ def brokered_real_run_worker(
         trailing_lines, _ = read_available_stream_lines_fn(stream_reader, finalize=True)
         for line in trailing_lines:
             for filtered_line in _process_real_output_line(line):
-                output_batcher.add(filtered_line)
+                output_batcher.add(
+                    filtered_line,
+                    publish=postfilter.should_publish_output_line(filtered_line),
+                )
         for filtered_line in postfilter.finalize_output_lines():
-            output_batcher.add(filtered_line)
+            output_batcher.add(
+                filtered_line,
+                publish=postfilter.should_publish_output_line(filtered_line),
+            )
         output_batcher.flush()
         exit_code = wait_for_proc_exit_code_fn(proc)
+        if postfilter.output_sink_error and exit_code == 0:
+            exit_code = 1
         finalize_info = finalize_completed_run_fn(
             run_id,
             session_id,

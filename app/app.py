@@ -560,7 +560,7 @@ def _log_app_initialized(config=None, *, flask_app=None, duration_ms: int | None
         before_count = sum(len(handlers) for handlers in getattr(flask_app, "before_request_funcs", {}).values())
         after_count = sum(len(handlers) for handlers in getattr(flask_app, "after_request_funcs", {}).values())
     log.info("APP_INITIALIZED", extra={
-        "version": APP_VERSION,
+        "app_version": APP_VERSION,
         "database_backend": str(active_config.get("database_backend") or "sqlite"),
         "workspace_enabled": bool(active_config.get("workspace_enabled")),
         "pid": os.getpid(),

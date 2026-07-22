@@ -19,8 +19,11 @@ import tarfile
 
 import pytest
 
+
+pytestmark = pytest.mark.release_integration
+
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = ROOT / "scripts" / "backup_system.py"
+SCRIPT_PATH = ROOT / "scripts" / "operations" / "backup_system.py"
 SPEC = importlib.util.spec_from_file_location("backup_system", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 backup_system = importlib.util.module_from_spec(SPEC)
@@ -71,7 +74,7 @@ def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(
     _write_sqlite_database(data_dir / "history.db")
     (data_dir / "run-output").mkdir()
     (data_dir / "run-output" / "artifact.txt").write_text("artifact body", encoding="utf-8")
-    compose_file = tmp_path / "docker-compose.yml"
+    compose_file = tmp_path / "compose.dev.yaml"
     compose_file.write_text("services:\n  shell:\n    volumes:\n      - ./data:/data\n", encoding="utf-8")
     conf_dir = tmp_path / "conf"
     _write_config(conf_dir, "workspace_enabled: false\n")
@@ -385,7 +388,7 @@ def test_workspace_tmpfs_skips_host_path_unless_bind_source_is_explicit(tmp_path
 
     workspace_dir = tmp_path / "workspaces"
     workspace_dir.mkdir()
-    base_compose = tmp_path / "docker-compose.yml"
+    base_compose = tmp_path / "compose.dev.yaml"
     base_compose.write_text(
         "\n".join([
             "services:",
@@ -397,9 +400,8 @@ def test_workspace_tmpfs_skips_host_path_unless_bind_source_is_explicit(tmp_path
         ]),
         encoding="utf-8",
     )
-    prod_compose = tmp_path / "examples" / "docker-compose.prod.yml"
-    prod_compose.parent.mkdir()
-    prod_compose.write_text(
+    workspace_override = tmp_path / "compose.workspace.yaml"
+    workspace_override.write_text(
         "\n".join([
             "services:",
             "  shell:",
@@ -426,7 +428,7 @@ def test_workspace_tmpfs_skips_host_path_unless_bind_source_is_explicit(tmp_path
             "--compose-file",
             str(base_compose),
             "--compose-file",
-            str(prod_compose),
+            str(workspace_override),
             "--dry-run",
         ]),
         output_dir=tmp_path / "compose-dry-run-backups",
@@ -538,7 +540,7 @@ def test_postgres_backup_uses_pg_dump_environment_without_password_argument(tmp_
     monkeypatch.setattr(backup_system, "_run", fake_run)
     compose_cfg = {"database_url": "postgresql://darklab:secret@postgres:5432/darklab_shell"}
     compose_dump = tmp_path / "compose-postgres.dump"
-    backup_system.backup_postgres(compose_ctx, compose_cfg, compose_dump, [tmp_path / "docker-compose.yml"])
+    backup_system.backup_postgres(compose_ctx, compose_cfg, compose_dump, [tmp_path / "compose.dev.yaml"])
 
     assert compose_dump.read_bytes() == b"compose postgres dump"
     assert any(label == "compose pg_dump" and "exec" in command for label, command in calls)
@@ -557,7 +559,7 @@ def test_postgres_backup_uses_pg_dump_environment_without_password_argument(tmp_
         ]),
         output_dir=tmp_path / "auto-compose-backups",
     )
-    compose_file = tmp_path / "docker-compose.yml"
+    compose_file = tmp_path / "compose.dev.yaml"
     compose_file.write_text("services:\n  postgres:\n    image: postgres:18-alpine\n", encoding="utf-8")
     with pytest.raises(backup_system.BackupError, match="compose pg_dump failed"):
         backup_system.backup_postgres(unavailable_ctx, compose_cfg, tmp_path / "auto-postgres.dump", [compose_file])
@@ -574,7 +576,7 @@ def test_postgres_auto_mode_keeps_remote_urls_on_local_pg_dump(tmp_path, monkeyp
         output_dir=tmp_path / "backups",
     )
     cfg = {"database_url": "postgresql://darklab:secret@db.example.com:5432/darklab_shell"}
-    compose_file = tmp_path / "docker-compose.yml"
+    compose_file = tmp_path / "compose.dev.yaml"
     compose_file.write_text("services:\n  postgres:\n    image: postgres:18-alpine\n", encoding="utf-8")
     container_checks = []
     calls = []

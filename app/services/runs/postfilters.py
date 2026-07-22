@@ -13,9 +13,14 @@ import re
 from typing import Any, Mapping
 
 import config as app_config
+from core.trufflehog_redaction import redact_trufflehog_json_line
 from services.commands.registry import command_root
 from services.teams.scope import OwnerContext, personal_owner_context
-from services.workspace.files import WorkspaceDisabled, owner_workspace_dir
+from services.workspace.files import (
+    WorkspaceDisabled,
+    owner_workspace_dir,
+)
+from services.runs.output_sinks import SyntheticPostFilterProcessor as SyntheticPostFilterProcessor
 
 log = logging.getLogger("shell")
 
@@ -208,37 +213,6 @@ class SyntheticPostFilterStageProcessor:
         return []
 
 
-class SyntheticPostFilterProcessor:
-    """Apply one or more narrow app-native post-filter stages in order."""
-
-    def __init__(self, spec):
-        self.spec = spec or {}
-        stages = self.spec.get("stages") if isinstance(self.spec, dict) else None
-        if stages:
-            self.stages = [SyntheticPostFilterStageProcessor(stage) for stage in stages]
-        else:
-            self.stages = [SyntheticPostFilterStageProcessor(self.spec)]
-
-    def process_output_line(self, line: str) -> list[str]:
-        lines = [line]
-        for stage in self.stages:
-            next_lines = []
-            for current in lines:
-                next_lines.extend(stage.process_output_line(current))
-            lines = next_lines
-        return lines
-
-    def finalize_output_lines(self) -> list[str]:
-        lines: list[str] = []
-        for stage in self.stages:
-            next_lines = []
-            for current in lines:
-                next_lines.extend(stage.process_output_line(current))
-            next_lines.extend(stage.finalize_output_lines())
-            lines = next_lines
-        return lines
-
-
 def parse_jq_input_values(lines: list[str]) -> list[Any] | str:
     non_empty = [str(line).strip() for line in lines if str(line).strip()]
     if not non_empty:
@@ -346,26 +320,10 @@ class WorkspacePathOutputFilter:
 
 
 class TruffleHogOutputFilter:
-    _SECRET_FIELDS = {"Raw", "RawV2"}
-
     def __init__(self, command: str):
         self.enabled = command_root(command) == "trufflehog"
 
     def process_output_line(self, line: str) -> str:
         if not self.enabled:
             return line
-        suffix = "\n" if str(line).endswith("\n") else ""
-        try:
-            parsed = json.loads(str(line).rstrip("\n"))
-        except (TypeError, ValueError):
-            return line
-        if not isinstance(parsed, dict):
-            return line
-        redacted = False
-        for secret_field in self._SECRET_FIELDS:
-            if secret_field in parsed and parsed[secret_field] not in ("", None):
-                parsed[secret_field] = "[redacted]"
-                redacted = True
-        if not redacted:
-            return line
-        return json.dumps(parsed, ensure_ascii=False, separators=(",", ":")) + suffix
+        return redact_trufflehog_json_line(line, assume_trufflehog=True)

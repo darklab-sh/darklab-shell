@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Sequence
 
 from services.runs.output_model import LineKind, LineRole, line_event_from_legacy, to_legacy_output_event
 
@@ -142,7 +142,7 @@ def ansi_exit_code(value: object) -> str:
     return ansi_green(code) if code == 0 else ansi_red(code)
 
 
-def text_lines(lines: list[str]) -> list[dict[str, object]]:
+def text_lines(lines: Sequence[str]) -> list[dict[str, object]]:
     return [{"type": "output", "text": line} for line in lines]
 
 

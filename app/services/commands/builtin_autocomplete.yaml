@@ -59,6 +59,26 @@ commands:
     description: "built-in: show the current server time"
     autocomplete:
       arguments: []
+  - root: diff
+    description: "built-in: compare session files or completed run output"
+    autocomplete:
+      flags:
+        - value: --last
+          description: "Compare the last two completed runs in this tab"
+        - value: -q
+          description: "Only report whether the sources differ"
+        - value: --brief
+          description: "Only report whether the sources differ"
+        - value: -u
+          description: "Show a unified comparison with - and + lines"
+        - value: --unified
+          description: "Show a unified comparison with - and + lines"
+        - value: -y
+          description: "Show both sources in side-by-side columns"
+        - value: --side-by-side
+          description: "Show both sources in side-by-side columns"
+      argument_limit: 2
+      arguments: []
   - root: df
     description: "built-in: show a compact filesystem summary"
     autocomplete:
@@ -79,7 +99,7 @@ commands:
       arguments: []
   - root: file
     description: >-
-      built-in: list, view, create, edit, download, move, or remove
+      built-in: list, view, compare, create, edit, download, copy, move, or remove
       session files
     feature_required: workspace
     autocomplete:
@@ -108,6 +128,14 @@ commands:
             value: "<file>"
             hint_only: true
             description: "Session file"
+        - value: diff
+          description: "Compare files or completed run output"
+          takes_value: true
+          insert: "diff "
+          value_hint:
+            value: "<source1> <source2>"
+            hint_only: true
+            description: "Files, run:<run-id> sources, or one of each"
         - value: add
           description: "Open the Files editor for a new session file"
           takes_value: true
@@ -150,6 +178,24 @@ commands:
             # Workspace path covers both files and folders; it is not a scan target.
             value_type: workspace_path
             description: "Session file or folder path"
+        - value: copy
+          description: "Copy a session file"
+          takes_value: true
+          insert: "copy "
+          value_hint:
+            value: "<source> <destination>"
+            hint_only: true
+            value_type: workspace_path
+            description: "Source file and destination path"
+        - value: touch
+          description: "Create an empty session file or update its timestamp"
+          takes_value: true
+          insert: "touch "
+          value_hint:
+            value: "<file>"
+            hint_only: true
+            value_type: workspace_path
+            description: "Session file path"
         - value: rm
           description: "Remove a session file from this session"
           takes_value: true
@@ -330,6 +376,16 @@ commands:
     autocomplete:
       argument_limit: 1
       arguments: []
+  - root: cp
+    description: "built-in: copy a session file"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 2
+      arguments:
+        - value: "<source> <destination>"
+          hint_only: true
+          value_type: workspace_path
+          description: "Source file and destination path"
   - root: mv
     description: "built-in: move or rename a session file or folder"
     feature_required: workspace
@@ -529,6 +585,16 @@ commands:
           description: "Remove folders recursively"
       argument_limit: 1
       arguments: []
+  - root: touch
+    description: "built-in: create an empty session file or update its timestamp"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 1
+      arguments:
+        - value: "<file>"
+          hint_only: true
+          value_type: workspace_path
+          description: "Session file path"
   - root: route
     description: "built-in: show the shell routing table summary"
     autocomplete:

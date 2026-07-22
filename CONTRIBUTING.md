@@ -141,7 +141,7 @@ Commit messages should describe the intent of the change, not just what files we
 Before merging a version branch back to `main`:
 
 - Confirm the branch is current with the target `main` branch, or intentionally document why it is not.
-- Update the release version in [app/config.py](app/config.py), [package.json](package.json), both root version fields in `package-lock.json`, the Dockerfile and development Compose build defaults, the production Compose and `.env.example` image defaults, `deploy/container-licenses.json`, and the release-version anchor in `tests/py/test_production_install.py`.
+- Update the release version in [app/config.py](app/config.py), [package.json](package.json), both root version fields in `package-lock.json`, the Dockerfile and development Compose build defaults, the production Compose and `deploy/.env.example` image defaults, `deploy/container-licenses.json`, and the release-version anchor in `tests/py/test_production_install.py`.
 - Run `python scripts/check_versions.sh --release-version <version>` and fix every reported app, npm, Docker, Compose, installer, license-inventory, OpenAPI, and production-install test mismatch before creating the tag.
 - Run `python scripts/check_container_licenses.py` after updating `reviewed_for_release` and confirming `reviewed_on` reflects the actual review. The version gate checks the inventory release, while this command checks its component coverage, sources, licenses, and notice paths.
 - After changing the app version, regenerate the checked-in API contract with `python scripts/generate_api_openapi.py` so [docs/api-v1-openapi.json](docs/api-v1-openapi.json) matches `/api/v1/openapi.json`.
@@ -155,7 +155,7 @@ Before merging a version branch back to `main`:
 - Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
 - Run container smoke validation when the release changes packaged tools, Dockerfile/base images, command examples, workspace file handling, or workflow command steps.
 - Ensure GitLab CI jobs are passing, including test, lint, audit, and build stages.
-- Confirm the protected `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER` tag pipeline pushed the canonical GitLab image, passed repository-free and compatibility smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, passed the fixed-Critical vulnerability gate, signed both image references, published the checksummed installer plus signed release evidence, and round-tripped API state through bundled-Postgres backup and restore with the normal process defaults. Confirm only the final tag created a GitLab Release, and only after that Postgres gate passed.
+- Confirm the protected `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER` tag pipeline pushed the canonical GitLab image, passed production-installation and compatibility smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, passed the fixed-Critical vulnerability gate, signed both image references, published the checksummed installer plus signed release evidence, and round-tripped API state through bundled-Postgres backup and restore with the normal process defaults. Confirm only the final tag created a GitLab Release, and only after that Postgres gate passed.
 - Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
 
 ---
@@ -172,7 +172,7 @@ Before merging a version branch back to `main`:
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
-**Configuration overlays** — `APP_CONF_DIR` selects the shipped/base config root and `APP_LOCAL_CONF_DIR` selects the operator overlay root for every supported `*.local.*` file. Source deployments default both roots to `app/conf`, preserving sibling behavior. When adding or changing an overlay-capable surface, use `app/config_paths.py`, keep its merge/reload/cache behavior explicit, and update the repository-free starter files and docs; don't make a filename look active when the runtime doesn't resolve it.
+**Configuration overlays** — `APP_CONF_DIR` selects the shipped/base config root and `APP_LOCAL_CONF_DIR` selects the operator overlay root for every supported `*.local.*` file. Development defaults both roots to `app/conf`, preserving sibling behavior. When adding or changing an overlay-capable surface, use `app/config_paths.py`, keep its merge/reload/cache behavior explicit, and update the production starter files and docs; don't make a filename look active when the runtime doesn't resolve it.
 
 **Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Front End Design](ARCHITECTURE.md#front-end-design). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
 
@@ -226,6 +226,18 @@ npm run test:e2e:source
 npm run test:e2e
 ```
 
+Use `npm run test:pytest:fast` for a quicker backend loop while you're editing.
+It leaves the slower installer, publication, signing, and backup/restore checks
+for `npm run test:pytest:release`. These two commands are the same required
+lanes CI runs in parallel, and a collection guard makes sure they remain an
+exact split of the suite. Run the unchanged `npm run test:pytest` command before
+merging or releasing; the fast lane isn't a substitute for that complete serial
+check. For one area, pass the file directly to the approved helper:
+
+```bash
+bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py/test_routes.py -v
+```
+
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
 integration tests against isolated test schemas. The helper uses
@@ -264,7 +276,7 @@ The checks and their scope:
 |---|---|---|---|
 | Python style | `ruff check` | `app/`, `tests/py/`, source-license checker | `npm run lint:py` |
 | Python security | `bandit` | `app/` | `python -m bandit -r app/ -ll -q` |
-| Python tests | `pytest` | `tests/py/` | `npm run test:pytest` |
+| Python tests | `pytest` | `tests/py/` | `npm run test:pytest` (complete) or `npm run test:pytest:fast` (iteration) |
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
 | JS style | `eslint` | `app/static/js/`, `tests/js/`, `.tooling/`, `scripts/` | `npm run lint:js` |
@@ -288,7 +300,7 @@ These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `bui
 
 ## Vendor JS Workflow
 
-The browser libraries used at runtime — `ansi_up`, `jspdf`, `@xterm/xterm`, and `@xterm/addon-fit` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `scripts/build_vendor.mjs`. The generated files are committed so the app works without a build step in local development and docker-compose.
+The browser libraries used at runtime — `ansi_up`, `jspdf`, `@xterm/xterm`, and `@xterm/addon-fit` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `npm run vendor:sync`. The generated files are committed so the app works without a build step in local development and Compose.
 
 **Regenerate vendor files after a version bump:**
 
@@ -306,7 +318,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 `vendor:check` runs automatically as part of `npm run lint` and the pre-commit hook (when `node_modules` is present).
 
-**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
+**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. The vendor build wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and Compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
 
 **Frontend bundles:** CSS and JavaScript bundle output works the same way. `assets.config.json` defines bundle membership and order, `npm run assets:sync` regenerates committed files in `app/static/build/`, and `npm run assets:check` verifies that the checked-in bundles and their precompressed siblings still match the current sources. The app serves content-hashed bundles by default, minifies generated ESM output with linked external source maps, negotiates Brotli or gzip for generated text assets when the browser supports it, and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete. Set `asset_bundle_mode: source` in `app/conf/config.local.yaml` for local edit-and-refresh work without rebuilding after every source change. Source mode keeps JS module URLs unversioned so lazy imports and relative ESM imports don't refetch the same file under two browser module identities.
 
@@ -329,13 +341,15 @@ Jobs carrying the default `self-hosted` tag, including `docker-build`, `containe
     image = "python:3.14.6-slim"
 ```
 
-The `volumes` entry belongs inside `[runners.docker]`; a top-level `volumes` key is ignored. Mounting the Docker socket gives a job control of that host's Docker daemon, so use an isolated runner and limit which projects and protected refs can reach it. Scheduled runners such as `bael`, `bune`, and `botis` need the same socket contract in addition to their own tags.
+The `volumes` entry belongs inside `[runners.docker]`; a top-level `volumes` key is ignored. Mounting the Docker socket gives a job control of that host's Docker daemon, so use an isolated runner and limit which projects and protected refs can reach it. The scheduled Docker fanout uses `bael`, `bune`, `botis`, `babi`, `bile`, `barbas`, `beleth`, `baka`, and `bana`; each runner needs the same socket contract in addition to its own host tag. The `baku` and `baal` fanout jobs use their dedicated SELinux Docker and rootless Podman runner contracts described below.
 
 The systemd runner reads `/etc/gitlab-runner/config.toml`. Registering as a non-root user writes `~/.gitlab-runner/config.toml` instead, so install the intended file where the service actually reads it.
 
 ### Hosted ARM64 Runner
 
-`release-image-arm64-smoke` uses GitLab's `saas-linux-small-arm64` runner. It builds in the publish stage beside the canonical AMD64 image, while Docker Hub promotion still waits for both when the gate is enabled. This is the one DinD path: the job starts the version-matched Docker service on `tcp://docker:2375` with TLS disabled and a conservative `1360` MTU inside GitLab's isolated hosted environment. The job builds directly into that daemon without a registry cache because the complete scanner and SecLists cache exceeds the small runner's storage budget. No self-managed runner configuration or `/certs/client` mount is used for this job.
+`release-image-arm64` and its native verification jobs use GitLab's `saas-linux-small-arm64` runner. This is the release chain's one DinD path: the jobs start the version-matched Docker service on `tcp://docker:2375` with TLS disabled and a conservative `1360` MTU inside GitLab's isolated hosted environment. The publisher pushes an immutable ARM64 child without a registry cache because the complete scanner and SecLists cache exceeds the small runner's storage budget. Its artifact records wall time, job timeout, daemon storage before and after publication, and `docker system df -v`.
+
+Three uncached protected rehearsals qualified this runner. They completed in 1,790 to 1,827 seconds against a 3,600-second job timeout and retained 23.62 to 26.72 percent free daemon storage after export. The accepted floor is completion within 75 percent of the timeout with at least 20 percent free after export. No self-managed runner configuration or `/certs/client` mount is used for this lane. Keep ARM64 caching disabled unless a replacement runner passes the same storage and timing checks with cache import and export enabled.
 
 ### SELinux Docker Runner
 
@@ -351,7 +365,9 @@ Complete this setup before creating a final or release-candidate tag:
 
 - In **Settings → Repository → Protected tags**, protect the tag namespace used by both `vMAJOR.MINOR.PATCH` and `vMAJOR.MINOR.PATCH-rc.NUMBER`. A single `v*` rule is the simplest option. Restrict tag creation to the intended maintainers, then confirm both a final example such as `v2.6.0` and a candidate example such as `v2.6.0-rc.1` resolve as protected.
 - In **Settings → CI/CD → Variables**, add `DOCKERHUB_USERNAME` as a protected variable and `DOCKERHUB_TOKEN` as a protected, masked, and hidden variable. The Docker Hub personal access token needs only **Read & Write** access to `darklabsh/darklab-shell`; CI doesn't need account credentials or repository-delete permission.
-- Keep `RELEASE_ARM64_COMPATIBILITY_ENABLED`, `RELEASE_SELINUX_COMPATIBILITY_ENABLED`, and `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED` set to `1` as protected project variables while their matching runners are release gates. The checked-in `0` values keep unavailable lanes from blocking ordinary work outside the configured project.
+- Keep `RELEASE_PLATFORM_MODE=dual` for normal protected releases. `RELEASE_PLATFORM_MODE=amd64-only` is an emergency-only override for a manually started protected web pipeline and also requires a nonempty, single-line `RELEASE_DEGRADED_REASON`. It never activates automatically, and the published tag stays permanently AMD64-only.
+- Keep `RELEASE_SELINUX_COMPATIBILITY_ENABLED` and `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED` set to `1` as protected project variables while their matching AMD64 runners are release gates. The checked-in `0` values keep unavailable compatibility lanes from blocking ordinary work outside the configured project.
+- Add `RELEASE_REGISTRY_CLEANUP_TOKEN` as a protected, masked, and hidden project access token with API permission before enabling `RELEASE_STAGING_CLEANUP_ENABLED=1` in a protected scheduled pipeline. The cleanup job reads every tag page and validates the complete expired match set before it starts deleting, so offset pagination can't shift and hide later candidates. It deletes only 14-day-old `*-staging-*` and `multiarch-rehearsal-*` tags; it never deletes a digest or a normal release-child anchor. Set `RELEASE_STAGING_CLEANUP_DRY_RUN=1` to review matches without deleting them.
 - Keep the GitLab project public, with the Container Registry, Package Registry, and Releases enabled. Confirm anonymous users can pull the canonical image and download Generic Package Registry files; the post-release job checks both without registry credentials.
 - Keep `docker.io/darklabsh/darklab-shell` public. Configure Docker Hub's immutable-tag rule as `^[0-9]+\.[0-9]+\.[0-9]+$` so final image tags can't move while `X.Y.Z-rc.N` tags remain removable after testing.
 - Keep the public Docker Hub repository overview synchronized with the reviewed `deploy/dockerhub-overview.txt`. The anonymous release check requires its GitLab OIDC issuer and final-or-candidate signing-identity pattern.
@@ -361,29 +377,32 @@ Complete this setup before creating a final or release-candidate tag:
 
 Ordinary branches and merge requests build verification-only images. A protected tag matching `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER` starts the public artifact path:
 
-1. skip the branch-only verification image, validate the reviewed container-license inventory, including Nmap's NPSL 0.95 record and hash-pinned license text, resolve the Python base tag to its exact Linux AMD64 manifest, then build the self-contained multi-stage image once with that pinned base and the release-line AMD64 registry cache before pushing the exact tag to the GitLab Container Registry
-2. immediately generate the CycloneDX SBOM and full Grype report and fail on fixed Critical findings while the repository-free AMD64, native ARM64, SELinux, and rootless Podman checks run in parallel; the AMD64 lane also records pull timing and installed size during its required pull
-3. after the early scan and every enabled compatibility lane pass, copy the canonical manifest directly between registries with Buildx imagetools, publish it at `docker.io/darklabsh/darklab-shell`, and require the Docker Hub digest to match
-4. consume the retained scan files, generate the deterministic build-input inventory, record the digest-pinned GitLab CLI image used for final release creation, bind the base manifest, tag, commit, pipeline, registry names, and shared digest into SLSA provenance, then keylessly sign both immutable image references with the protected pipeline's GitLab OIDC identity
-5. generate the byte-stable exact-version deployment archive, its checksum, `setup.sh`, and the bootstrap checksums using the retained compressed and unpacked image measurements
-6. add the evidence files to `SHA256SUMS`, keylessly sign that manifest, and publish the payload to the GitLab Generic Package Registry
-7. install that payload with the bundled Postgres profile and normal process defaults, save and mutate API state around a repository-free backup/restore round trip, then anonymously verify the signatures, evidence checksums, images, installer, and running stack; a final tag creates stable GitLab Release links only after the Postgres gate passes
+1. skip the branch-only verification image, validate the reviewed container-license inventory, including Nmap's NPSL 0.95 record and hash-pinned license text, and resolve the Python base tag once to one immutable index plus its Linux AMD64 and ARM64 manifests
+2. build native AMD64 and ARM64 children from that shared base snapshot and push immutable attempt references; AMD64 uses the serialized release-line registry cache, while ARM64 stays uncached on the hosted DinD runner
+3. pull each child by digest on its native architecture, run production-installation and bundled-tool checks, measure pull and installed size, generate a CycloneDX SBOM and full Grype report, and fail each platform independently on fixed Critical findings; SELinux Docker and rootless Podman verify the AMD64 child in parallel when enabled
+4. after every child required by `RELEASE_PLATFORM_MODE` passes, create durable child anchors and one canonical GitLab OCI index, then reject any descriptor, digest, base snapshot, source commit, or release-mode mismatch
+5. copy that complete index directly to `docker.io/darklabsh/darklab-shell` with Buildx imagetools and require Docker Hub to expose the same index digest and exact platform set
+6. consume the retained per-platform scans, generate the deterministic build-input inventory, bind the base index, child manifests, tag, commit, pipeline, registry names, and canonical index digest into SLSA provenance, then keylessly sign both registry indexes and every included child with the protected pipeline's GitLab OIDC identity
+7. generate the byte-stable exact-version deployment archive, its checksum, `setup.sh`, and the bootstrap checksums with an architecture-aware release manifest; add the evidence files to `SHA256SUMS`, sign that manifest, and publish the payload to the GitLab Generic Package Registry
+8. install that payload with the bundled Postgres profile and normal process defaults, save and mutate API state around a production backup/restore round trip, then anonymously verify the index signatures, selected child, evidence checksums, installer, and running stack; a final tag creates stable GitLab Release links only after the Postgres gate passes
 
 Final and release-candidate tags are immutable within the publication workflow. The promotion job fails when Docker Hub already holds different content at that tag, and it never rebuilds for the mirror. Use a new candidate number instead of moving `v2.6.0-rc.1` to another commit. Candidate image tags and generic-package versions can be removed after inspection because they stay outside the final-tag retention contract, but deleting them does not make tag reuse trustworthy. A retried payload job verifies and reuses an existing Sigstore bundle when the remote `SHA256SUMS` is identical; it refuses a changed checksum manifest instead of producing conflicting signature bytes. `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are protected, masked-and-hidden GitLab variables; GitLab's built-in job-scoped registry credentials handle the canonical push.
 
-For a verification-script or CI-only fix, start a web pipeline with `RECHECK_IMAGE`, `RECHECK_IMAGE_DIGEST`, `RECHECK_VERSION`, `RECHECK_REVISION`, and `RECHECK_PYTHON_BASE_DIGEST` set to the immutable image's expected metadata. Set `RECHECK_ARCHITECTURE` when it isn't `amd64`, then run the manual `release-image-recheck` job. It reruns repository-free startup, bundled-tool checks, Syft, and Grype against that digest without publishing another tag.
+For a verification-script or CI-only fix, start a web pipeline with `RECHECK_IMAGE`, `RECHECK_IMAGE_DIGEST`, `RECHECK_VERSION`, `RECHECK_REVISION`, and `RECHECK_PYTHON_BASE_DIGEST` set to the immutable image's expected metadata. Set `RECHECK_ARCHITECTURE` when it isn't `amd64`. For a child digest, leave `RECHECK_REFERENCE_KIND=child`; for a canonical index digest, set `RECHECK_REFERENCE_KIND=index` and provide `RECHECK_CHILD_DIGEST` for the selected architecture. The manual `release-image-recheck` job reruns production startup, bundled-tool checks, Syft, and Grype without republishing anything.
 
-Before creating a candidate tag, change every release-version source to the same value, including `app/config.py`, npm metadata, Docker build and Compose defaults, `.env.example`, `deploy/container-licenses.json`, and the OpenAPI snapshot. For example, the `v2.6.0-rc.1` tag requires `2.6.0-rc.1` everywhere checked by `python scripts/check_versions.sh --release-version 2.6.0-rc.1` and the license inventory gate. Confirm the candidate matches the protected final-and-candidate namespace described above so credentials, signing identity, and compatibility variables are available. The candidate runs the complete public validation chain but does not create a GitLab Release; the later final tag runs the same chain and adds that release object.
+Before creating a candidate tag, change every release-version source to the same value, including `app/config.py`, npm metadata, Docker build and Compose defaults, `deploy/.env.example`, `deploy/container-licenses.json`, and the OpenAPI snapshot. For example, the `v2.6.0-rc.1` tag requires `2.6.0-rc.1` everywhere checked by `python scripts/check_versions.sh --release-version 2.6.0-rc.1` and the license inventory gate. Confirm the candidate matches the protected final-and-candidate namespace described above so credentials, signing identity, and compatibility variables are available. The candidate runs the complete public validation chain but does not create a GitLab Release; the later final tag runs the same chain and adds that release object.
 
 The Docker Hub repository overview is maintained from `deploy/dockerhub-overview.txt`. Paste that reviewed text into the public repository overview before the protected tag runs; the anonymous post-release check reads Docker Hub's public repository API and fails when the expected GitLab OIDC issuer or semantic-version certificate-identity regexp is missing.
 
-Three compatibility gates are available on protected tags. The native GitLab-hosted runner tagged `saas-linux-small-arm64` uses an uncached, version-matched Docker-in-Docker build with a conservative `1360` MTU and `RELEASE_ARM64_COMPATIBILITY_ENABLED=1`. The SELinux-enforcing Fedora shell runner `baku`, selected by the `selinux`, `self-managed`, and `baku` tags, uses `RELEASE_SELINUX_COMPATIBILITY_ENABLED=1`. The non-root Debian shell runner `baal`, selected by the `podman`, `self-managed`, and `baal` tags, uses `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED=1`. Protected project variables enable all three for the v2.6.0 release chain and override the checked-in `0` defaults. These jobs passed the protected release candidates and block Docker Hub promotion on a failed architecture, packaged-tool execution, relabeled `/config`, `/data`, or `/workspaces` bind, durable restart, unprivileged SYN capability, or repository-free startup check. Scheduled fanout pipelines serialize the AMD64 registry-cache writer; the self-managed build jobs warm only their local daemons.
+Native AMD64 and ARM64 are required platform gates on normal protected tags. The GitLab-hosted `saas-linux-small-arm64` lane uses uncached, version-matched Docker-in-Docker with a `1360` MTU, while standard AMD64 publication uses the self-managed host socket and release-line registry cache. Two additional AMD64 compatibility gates are available: the SELinux-enforcing Fedora shell runner `baku`, selected by `selinux`, `self-managed`, and `baku`, uses `RELEASE_SELINUX_COMPATIBILITY_ENABLED=1`; the non-root Debian shell runner `baal`, selected by `podman`, `self-managed`, and `baal`, uses `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED=1`. These jobs block index assembly on packaged-tool execution, relabeled `/config`, `/data`, or `/workspaces` binds, durable restart, unprivileged SYN capability, or production startup failures. Scheduled fanout pipelines serialize the AMD64 registry-cache writer, warm each standard and SELinux runner's local Docker daemon, and warm `baal` through its rootless Podman image store.
+
+To rehearse the multi-platform publication path without creating release artifacts, start a protected branch web pipeline with `RELEASE_MULTIARCH_REHEARSAL=1` and keep `RELEASE_PLATFORM_MODE=dual`. It creates commit- and pipeline-addressed staging children plus a temporary GitLab index, then runs anonymous native AMD64 and ARM64 pulls. Tag-only Docker Hub promotion, signing, payload upload, Postgres release smoke, and GitLab Release jobs remain absent.
 
 Release verification failures name the stage, invariant, expected value, and a bounded actual value without printing registry credentials or token-bearing URLs. The canonical build and Docker Hub promotion retain only their allowlisted manifests, measurements, copy output, and bounded status summaries when a later check fails; Docker client configuration and credentials are never release artifacts.
 
 The vulnerability policy blocks Critical findings only when the report names an available fix. High findings and unfixed Critical findings remain visible in `vulnerability-report.json` without making every upstream package delay the release indefinitely. Any future suppression needs a reviewed, expiring rule with the affected package, vulnerability, reason, and follow-up owner; don't hide findings in an untracked CI command.
 
-The protected jobs call `scripts/publish_release_artifacts.sh` for canonical image publication, Docker Hub promotion, and immutable payload upload. Keep retry, conflict, malformed-response, and command-failure behavior in that script so the local fake-registry regression harness exercises the same branches CI runs.
+The protected jobs call `scripts/release/publish_release_artifacts.sh` for canonical image publication, Docker Hub promotion, and immutable payload upload. Keep retry, conflict, malformed-response, and command-failure behavior in that script so the local fake-registry regression harness exercises the same branches CI runs.
 
 Any Dockerfile tool-version or top-level apt, pip, or Git install change must update `deploy/container-licenses.json`. Run `python scripts/check_container_licenses.py` before publishing; it verifies that every install maps to a reviewed component with a source, license, and notice location and that the bundled WPScan terms still match upstream exactly. The image smoke job performs the second half of the gate against the built filesystem, including notice-path resolution and the generated RubyGem dependency manifest. Ordinary push and merge-request pipelines also run the offline release-version consistency check; the protected tag job repeats it against the tag itself.
 
@@ -403,7 +422,7 @@ Use the matching immutable digest reported by the two release-image jobs. The pr
 The normal development command stays source-mounted:
 
 ```bash
-docker compose up --build
+docker compose -f compose.dev.yaml up --build
 ```
 
 ---
@@ -433,7 +452,7 @@ SPDX-FileCopyrightText: 2026 Your Name
 SPDX-License-Identifier: AGPL-3.0-only
 ```
 
-Keep a script's shebang first and an HTML document's doctype first. Don't add the project notice to generated bundles, vendored libraries, fonts, or copied third-party material. `npm run lint:licenses` checks the project-owned boundary in `scripts/check_source_licenses.py`; review ownership before using its `--add-missing` maintenance option.
+Keep a script's shebang first and an HTML document's doctype first. Don't add the project notice to generated bundles, vendored libraries, fonts, or copied third-party material. `npm run lint:licenses` checks the project-owned boundary in `scripts/release/check_source_licenses.py`; review ownership before using its `--add-missing` maintenance option.
 
 ---
 

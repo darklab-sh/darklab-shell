@@ -27,7 +27,7 @@ from core.database_backend import PostgresSqliteCompatConnection
 from services.history.search import run_search_clause
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_SCRIPT = REPO_ROOT / "scripts" / "migrate_sqlite_to_postgres.py"
+MIGRATION_SCRIPT = REPO_ROOT / "scripts" / "operations" / "migrate_sqlite_to_postgres.py"
 
 
 def _quote_ident(identifier: str) -> str:

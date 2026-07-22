@@ -14,12 +14,26 @@ import hashlib
 import logging
 import re
 
+from core.trufflehog_redaction import redact_trufflehog_json_line
 from services.runs.output_model import LineEntity, LineEvent, LineKind, from_wire, line_event_from_legacy, to_legacy_wire
 
 
 log = logging.getLogger("shell")
 _ALLOWED_FLAGS = {"i", "m"}
 REDACTED_ENTITY_SENTINEL = "<redacted>"
+_PRIVATE_KEY_BEGIN_RE = re.compile(
+    r"-----\s*BEGIN[ A-Z0-9_.-]*PRIVATE KEY(?: BLOCK)?\s*-----",
+    re.IGNORECASE,
+)
+_PRIVATE_KEY_END_RE = re.compile(
+    r"-----\s*END[ A-Z0-9_.-]*PRIVATE KEY(?: BLOCK)?\s*-----",
+    re.IGNORECASE,
+)
+_PRIVATE_KEY_BLOCK_RE = re.compile(
+    _PRIVATE_KEY_BEGIN_RE.pattern + r"[\s\S]*?" + _PRIVATE_KEY_END_RE.pattern,
+    re.IGNORECASE,
+)
+_PRIVATE_KEY_REDACTED = "[private-key-redacted]"
 
 
 # These built-ins are intentionally conservative and share-focused. They are
@@ -30,6 +44,12 @@ _RAW_BUILTIN_SHARE_REDACTION_RULES = [
         "label": "bearer token",
         "pattern": r"Authorization:\s*Bearer\s+\S+",
         "replacement": "Authorization: Bearer [redacted]",
+        "flags": "i",
+    },
+    {
+        "label": "private key block",
+        "pattern": _PRIVATE_KEY_BLOCK_RE.pattern,
+        "replacement": _PRIVATE_KEY_REDACTED,
         "flags": "i",
     },
     {
@@ -246,10 +266,36 @@ def _redact_entity(entity: LineEntity, rules) -> LineEntity:
     )
 
 
+def _redact_private_key_blocks(events: Sequence[LineEvent]) -> list[LineEvent]:
+    redacted: list[LineEvent] = []
+    in_private_key = False
+    for event in events:
+        text = redact_trufflehog_json_line(event.text)
+        if text != event.text:
+            event = replace(event, text=text, target="", entities=())
+        if in_private_key:
+            end = _PRIVATE_KEY_END_RE.search(text)
+            if not end:
+                continue
+            in_private_key = False
+            text = text[end.end():]
+            if not text:
+                continue
+            redacted.append(replace(event, text=text, target="", entities=()))
+            continue
+        text = _PRIVATE_KEY_BLOCK_RE.sub(_PRIVATE_KEY_REDACTED, text)
+        begin = _PRIVATE_KEY_BEGIN_RE.search(text)
+        if begin:
+            text = text[:begin.start()] + _PRIVATE_KEY_REDACTED
+            in_private_key = not event.text.lstrip().startswith("{")
+        redacted.append(replace(event, text=text, target="", entities=()) if text != event.text else event)
+    return redacted
+
+
 def redact_line_entries(entries: Sequence[LineEvent | Mapping[str, object] | str] | None, rules) -> list[LineEvent]:
     """Redact share/export line events."""
     redacted: list[LineEvent] = []
-    for event in line_events_from_entries(entries):
+    for event in _redact_private_key_blocks(line_events_from_entries(entries)):
         redacted.append(replace(
             event,
             text=apply_redaction_rules(event.text, rules),

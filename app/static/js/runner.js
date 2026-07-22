@@ -80,6 +80,7 @@ import {
   finalizeClosingTab as importedFinalizeClosingTab,
 } from './features/tabs/tab_close_lifecycle.js';
 import {
+  copyWorkspacePath as importedCopyWorkspacePath,
   createWorkspaceDirectory as importedCreateWorkspaceDirectory,
   downloadWorkspaceFile as importedDownloadWorkspaceFile,
   _formatWorkspaceBytes as importedFormatWorkspaceBytes,
@@ -87,6 +88,8 @@ import {
   openWorkspaceEditorFromCommand as importedOpenWorkspaceEditorFromCommand,
   readWorkspaceFile as importedReadWorkspaceFile,
   refreshWorkspaceFiles as importedRefreshWorkspaceFiles,
+  touchWorkspaceFile as importedTouchWorkspaceFile,
+  writeWorkspaceTextFile as importedWriteWorkspaceTextFile,
   workspaceCanWrite as importedWorkspaceCanWrite,
 } from './workspace_bridge.js';
 import {
@@ -103,6 +106,7 @@ import {
 import { createRunnerPersistence as importedCreateRunnerPersistence } from './features/runner/runner_persistence.js';
 import {
   _ensureWorkspaceCache as importedEnsureWorkspaceCache,
+  _isWorkspaceCopyCommand as importedIsWorkspaceCopyCommand,
   _isWorkspaceDeleteCommand as importedIsWorkspaceDeleteCommand,
   _isWorkspaceDownloadCommand as importedIsWorkspaceDownloadCommand,
   _isWorkspaceEditorCommand as importedIsWorkspaceEditorCommand,
@@ -112,14 +116,17 @@ import {
   _resolveWorkspaceCommandPath as importedResolveWorkspaceCommandPath,
   _setWorkspaceCwd as importedSetWorkspaceCwd,
   _workspaceCommandTokens as importedWorkspaceCommandTokens,
+  _workspaceCopyCommand as importedWorkspaceCopyCommand,
   _workspaceCwd as importedWorkspaceCwd,
   _workspaceDeleteCommand as importedWorkspaceDeleteCommand,
+  _workspaceDiffCommand as importedWorkspaceDiffCommand,
   _workspaceDisplayPath as importedWorkspaceDisplayPath,
   _workspaceDownloadTarget as importedWorkspaceDownloadTarget,
   _workspaceEditorCommand as importedWorkspaceEditorCommand,
   _workspaceExpandPathPattern as importedWorkspaceExpandPathPattern,
   _workspaceListCommand as importedWorkspaceListCommand,
   _workspaceMoveCommand as importedWorkspaceMoveCommand,
+  _workspaceTouchCommand as importedWorkspaceTouchCommand,
   _workspacePathExists as importedWorkspacePathExists,
   _workspacePathHasGlob as importedWorkspacePathHasGlob,
 } from './features/runner/runner_workspace.js';
@@ -298,6 +305,7 @@ var addToHistory = (...args) => _runnerFn('addToHistory', importedAddToHistory)?
 var addToRecentPreview = (...args) => _runnerFn('addToRecentPreview', importedAddToRecentPreview)?.(...args);
 var hydrateCmdHistory = (...args) => _runnerFn('hydrateCmdHistory', importedHydrateCmdHistory)?.(...args);
 var _runnerEnsureWorkspaceCacheAdapter = (...args) => _runnerFn('_ensureWorkspaceCache', importedEnsureWorkspaceCache)?.(...args);
+var _runnerIsWorkspaceCopyCommandAdapter = (...args) => _runnerFn('_isWorkspaceCopyCommand', importedIsWorkspaceCopyCommand)?.(...args);
 var _runnerIsWorkspaceDeleteCommandAdapter = (...args) => _runnerFn('_isWorkspaceDeleteCommand', importedIsWorkspaceDeleteCommand)?.(...args);
 var _runnerIsWorkspaceDownloadCommandAdapter = (...args) => _runnerFn('_isWorkspaceDownloadCommand', importedIsWorkspaceDownloadCommand)?.(...args);
 var _runnerIsWorkspaceEditorCommandAdapter = (...args) => _runnerFn('_isWorkspaceEditorCommand', importedIsWorkspaceEditorCommand)?.(...args);
@@ -307,14 +315,17 @@ var _runnerResolveExistingWorkspaceCommandPathAdapter = (...args) => _runnerFn('
 var _runnerResolveWorkspaceCommandPathAdapter = (...args) => _runnerFn('_resolveWorkspaceCommandPath', importedResolveWorkspaceCommandPath)?.(...args);
 var _runnerSetWorkspaceCwdAdapter = (...args) => _runnerFn('_setWorkspaceCwd', importedSetWorkspaceCwd)?.(...args);
 var _runnerWorkspaceCommandTokensAdapter = (...args) => _runnerFn('_workspaceCommandTokens', importedWorkspaceCommandTokens)?.(...args);
+var _runnerWorkspaceCopyCommandAdapter = (...args) => _runnerFn('_workspaceCopyCommand', importedWorkspaceCopyCommand)?.(...args);
 var _runnerWorkspaceCwdAdapter = (...args) => _runnerFn('_workspaceCwd', importedWorkspaceCwd)?.(...args);
 var _runnerWorkspaceDeleteCommandAdapter = (...args) => _runnerFn('_workspaceDeleteCommand', importedWorkspaceDeleteCommand)?.(...args);
+var _runnerWorkspaceDiffCommandAdapter = (...args) => _runnerFn('_workspaceDiffCommand', importedWorkspaceDiffCommand)?.(...args);
 var _runnerWorkspaceDisplayPathAdapter = (...args) => _runnerFn('_workspaceDisplayPath', importedWorkspaceDisplayPath)?.(...args);
 var _runnerWorkspaceDownloadTargetAdapter = (...args) => _runnerFn('_workspaceDownloadTarget', importedWorkspaceDownloadTarget)?.(...args);
 var _runnerWorkspaceEditorCommandAdapter = (...args) => _runnerFn('_workspaceEditorCommand', importedWorkspaceEditorCommand)?.(...args);
 var _runnerWorkspaceExpandPathPatternAdapter = (...args) => _runnerFn('_workspaceExpandPathPattern', importedWorkspaceExpandPathPattern)?.(...args);
 var _runnerWorkspaceListCommandAdapter = (...args) => _runnerFn('_workspaceListCommand', importedWorkspaceListCommand)?.(...args);
 var _runnerWorkspaceMoveCommandAdapter = (...args) => _runnerFn('_workspaceMoveCommand', importedWorkspaceMoveCommand)?.(...args);
+var _runnerWorkspaceTouchCommandAdapter = (...args) => _runnerFn('_workspaceTouchCommand', importedWorkspaceTouchCommand)?.(...args);
 var _runnerWorkspacePathExistsAdapter = (...args) => _runnerFn('_workspacePathExists', importedWorkspacePathExists)?.(...args);
 var _runnerWorkspacePathHasGlobAdapter = (...args) => _runnerFn('_workspacePathHasGlob', importedWorkspacePathHasGlob)?.(...args);
 var _formatWorkspaceBytes = (...args) => _runnerFn('_formatWorkspaceBytes', importedFormatWorkspaceBytes)?.(...args);
@@ -332,6 +343,11 @@ var createWorkspaceDirectory = (...args) => {
   const fn = _runnerFn('createWorkspaceDirectory', importedCreateWorkspaceDirectory);
   if (typeof fn !== 'function') throw new Error('workspace folder creation is unavailable');
   return fn(...args);
+};
+var copyWorkspacePath = (...args) => {
+  const fn = (typeof importedCopyWorkspacePath === 'function' && importedCopyWorkspacePath)
+    || _runnerFn('copyWorkspacePath');
+  return typeof fn === 'function' ? fn(...args) : undefined;
 };
 var dismissMobileKeyboardAfterSubmit = (...args) => {
   const fn = (
@@ -381,6 +397,16 @@ var loadStarredFromServer = (...args) => _runnerFn('loadStarredFromServer', impo
 var moveWorkspacePath = (...args) => {
   const fn = (typeof importedMoveWorkspacePath === 'function' && importedMoveWorkspacePath)
     || _runnerFn('moveWorkspacePath');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var touchWorkspaceFile = (...args) => {
+  const fn = (typeof importedTouchWorkspaceFile === 'function' && importedTouchWorkspaceFile)
+    || _runnerFn('touchWorkspaceFile');
+  return typeof fn === 'function' ? fn(...args) : undefined;
+};
+var writeWorkspaceTextFile = (...args) => {
+  const fn = (typeof importedWriteWorkspaceTextFile === 'function' && importedWriteWorkspaceTextFile)
+    || _runnerFn('writeWorkspaceTextFile');
   return typeof fn === 'function' ? fn(...args) : undefined;
 };
 var notifyProjectWorkspaceChanged = (...args) => _runnerFn('notifyProjectWorkspaceChanged', importedNotifyProjectWorkspaceChanged)?.(...args);
@@ -3238,6 +3264,36 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId) {
       await _runnerEnsureWorkspaceCacheAdapter();
       const target = _runnerResolveExistingWorkspaceCommandPathAdapter(rawTarget, { cwd: _runnerWorkspaceCwdAdapter(tabId), kind: 'file' });
       outputLines = await _workspaceReadLines(target);
+    } else if (root === 'diff' || (root === 'file' && action === 'diff')) {
+      const parsed = _runnerWorkspaceDiffCommandAdapter(cmd);
+      if (!parsed || parsed.invalid) throw new Error(parsed?.usage || 'Usage: diff <source1> <source2>');
+      const cwd = _runnerWorkspaceCwdAdapter(tabId);
+      const explicitSources = parsed.last ? [] : [parsed.left, parsed.right];
+      const requiresFiles = explicitSources.some(source => !String(source || '').startsWith('run:'));
+      if (requiresFiles) await _runnerEnsureWorkspaceCacheAdapter();
+      const sourceReference = (source) => {
+        const value = String(source || '');
+        if (value.startsWith('run:')) return value;
+        const rawPath = value.startsWith('file:') ? value.slice(5) : value;
+        const path = _runnerResolveExistingWorkspaceCommandPathAdapter(rawPath, { cwd, kind: 'file' });
+        return `file:${path}`;
+      };
+      const resp = await apiFetch('/workspace/diff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          left: parsed.last ? '' : sourceReference(parsed.left),
+          right: parsed.last ? '' : sourceReference(parsed.right),
+          last: parsed.last,
+          tab_id: tabId,
+          mode: parsed.mode,
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.error || `diff failed (${resp.status})`);
+      const notices = Array.isArray(data.notices) ? data.notices : [];
+      const lines = Array.isArray(data.lines) ? data.lines : [];
+      outputLines = notices.concat(lines).map(_workspacePlainLine);
     } else if (root === 'mkdir' || (root === 'file' && ['add-dir', 'mkdir'].includes(action))) {
       if (!_workspaceTerminalCanWrite('create folders in Files')) {
         throw new Error(_workspaceTerminalDeniedMessage('create folders in Files'));
@@ -3250,6 +3306,21 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId) {
       const data = await createWorkspaceDirectory(target);
       const path = data && data.directory && data.directory.path ? data.directory.path : target;
       outputLines = [_workspacePlainLine(`file: created folder ${path}`)];
+    } else if (root === 'touch' || (root === 'file' && action === 'touch')) {
+      if (!_workspaceTerminalCanWrite('touch Files')) {
+        throw new Error(_workspaceTerminalDeniedMessage('touch Files'));
+      }
+      const parsed = _runnerWorkspaceTouchCommandAdapter(cmd);
+      if (!parsed || parsed.invalid || !parsed.target) {
+        throw new Error(parsed?.usage || 'Usage: touch <file>');
+      }
+      const target = _runnerResolveWorkspaceCommandPathAdapter(parsed.target, {
+        cwd: _runnerWorkspaceCwdAdapter(tabId),
+      });
+      const data = await touchWorkspaceFile(target);
+      const path = data && data.file && data.file.path ? data.file.path : target;
+      outputLines = [_workspacePlainLine(`file: touched ${path}`)];
+      _runnerWorkspaceCacheApi().refresh?.();
     } else {
       const parsed = _workspaceStandaloneFilterSpec(parts);
       if (!parsed || parsed.error) throw new Error(parsed && parsed.error ? parsed.error : 'unsupported workspace command');
@@ -3445,6 +3516,44 @@ async function _handleWorkspaceMoveCommand(cmd, tabId) {
   }
 }
 
+async function _handleWorkspaceCopyCommand(cmd, tabId) {
+  const parsed = _runnerWorkspaceCopyCommandAdapter(cmd);
+  appendCommandEcho(cmd);
+  if (!_workspaceTerminalCanWrite('copy Files')) {
+    appendLine(`[error] ${_workspaceTerminalDeniedMessage('copy Files')}`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  if (!parsed || parsed.invalid || !parsed.source || !parsed.destination) {
+    appendLine(parsed?.usage || 'Usage: file copy <source> <destination>', 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  try {
+    await _runnerEnsureWorkspaceCacheAdapter();
+    const source = _runnerResolveExistingWorkspaceCommandPathAdapter(parsed.source, {
+      cwd: _runnerWorkspaceCwdAdapter(tabId),
+      kind: 'file',
+    });
+    const destination = _runnerResolveWorkspaceCommandPathAdapter(parsed.destination, {
+      cwd: _runnerWorkspaceCwdAdapter(tabId),
+    });
+    const data = await copyWorkspacePath(source, destination);
+    const copied = data && data.copied ? data.copied : {};
+    const text = `file: copied ${copied.source || source} to ${copied.destination || destination}`;
+    const copiedLines = [{ text }];
+    appendLine(text, '', tabId);
+    _runnerWorkspaceCacheApi().refresh?.();
+    _recordSuccessfulLocalCommand(cmd);
+    _persistClientSideRun(cmd, copiedLines, 'ok');
+    setStatus('ok');
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'file copy failed'}`, 'exit-fail', tabId);
+    logClientError('file copy', err);
+    setStatus('fail');
+  }
+}
+
 async function _handleWorkspaceEditorCommand(cmd, tabId) {
   const parsed = _runnerWorkspaceEditorCommandAdapter(cmd);
   appendCommandEcho(cmd);
@@ -3577,14 +3686,47 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
 
   const pipeInputLines = spec ? _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) : capturedLines;
   const outputLines = spec ? _applySyntheticPostFilterLines(pipeInputLines, spec) : capturedLines;
-  outputLines.forEach((line) => {
+  const sinkErrorLines = [];
+  if (spec && spec.sink && !_pendingTerminalConfirm) {
+    try {
+      if (!_workspaceTerminalCanWrite('write Files')) {
+        throw new Error(_workspaceTerminalDeniedMessage('write Files'));
+      }
+      const destination = _runnerResolveWorkspaceCommandPathAdapter(spec.sink.path, {
+        cwd: _runnerWorkspaceCwdAdapter(tabId),
+      });
+      const text = outputLines.length
+        ? `${outputLines.map(line => String(line && line.text !== undefined ? line.text : line || '')).join('\n')}\n`
+        : '';
+      if (spec.sink.kind === 'append') {
+        await writeWorkspaceTextFile(destination, text, { append: true });
+      } else {
+        await writeWorkspaceTextFile(destination, text);
+      }
+      _runnerWorkspaceCacheApi().refresh?.();
+    } catch (err) {
+      const line = {
+        text: `[error] output redirection failed: ${err.message || 'workspace write failed'}`,
+        cls: 'exit-fail',
+      };
+      sinkErrorLines.push(line);
+      finalStatus = 'fail';
+      originalSetStatus('fail');
+      if (typeof setTabStatus === 'function') setTabStatus(tabId, 'fail');
+      logClientError('output redirection', err);
+    }
+  }
+  const displayedLines = spec && spec.sink && ['redirect', 'append'].includes(spec.sink.kind)
+    ? sinkErrorLines
+    : outputLines.concat(sinkErrorLines);
+  displayedLines.forEach((line) => {
     if (line.metadata) originalAppendLine(line.text, line.cls || '', tabId, line.metadata);
     else originalAppendLine(line.text, line.cls || '', tabId);
   });
   if (!_pendingTerminalConfirm) {
     _finalizeClientSideCommandStatus(tabId, finalStatus);
     if (finalStatus !== 'fail') _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, outputLines, finalStatus, tabId);
+    _persistClientSideRun(cmd, outputLines.concat(sinkErrorLines), finalStatus, tabId);
   } else if (typeof setTabStatus === 'function') {
     setTabStatus(tabId, finalStatus === 'fail' ? 'fail' : 'idle');
   }
@@ -3665,6 +3807,14 @@ function submitCommand(rawCmd) {
 
   // Client-side validation mirrors server-side checks for immediate feedback
   const shellOps = /&&|\|\|?|;;?|`|\$\(|>>?|</;
+  if (/(^|\s)\d+>>?/.test(cmd)) {
+    appendCommandEcho(cmd);
+    appendLine('[denied] Only stdout redirection with >, >>, or final | tee is supported.', 'denied');
+    setStatus('fail');
+    setLastExit(1);
+    setTabStatus(_runnerActiveTabId(), 'fail');
+    return false;
+  }
   if (shellOps.test(cmd) && !_isSyntheticPostFilterCommand(cmd) && !_isExactSpecialBuiltInCommand(cmd)) {
     appendCommandEcho(cmd);
     appendLine('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied');
@@ -3740,6 +3890,13 @@ function submitCommand(rawCmd) {
   if (_runnerIsWorkspaceMoveCommandAdapter(cmd)) {
     void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
       _handleWorkspaceMoveCommand(baseCommand, _runnerActiveTabId())
+    ));
+    return true;
+  }
+
+  if (_runnerIsWorkspaceCopyCommandAdapter(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
+      _handleWorkspaceCopyCommand(baseCommand, _runnerActiveTabId())
     ));
     return true;
   }

@@ -15,19 +15,19 @@ ARG SSLSCAN_VERSION=2.2.2
 ARG NUCLEI_VERSION=v3.11.0
 ARG SUBFINDER_VERSION=v2.14.0
 ARG HTTPX_VERSION=v1.10.0
-ARG DNSX_VERSION=v1.2.3
+ARG DNSX_VERSION=v1.3.0
 ARG NAABU_VERSION=v2.6.1
 ARG KATANA_VERSION=v1.6.1
 ARG TLSX_VERSION=v1.2.2
-ARG CDNCHECK_VERSION=v1.2.43
+ARG CDNCHECK_VERSION=v1.2.45
 ARG AMASS_VERSION=v5.1.1
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
-ARG FFUF_VERSION=v2.1.0
-ARG TRUFFLEHOG_VERSION=v3.95.8
+ARG FFUF_VERSION=v2.2.1
+ARG TRUFFLEHOG_VERSION=v3.95.9
 ARG MASSDNS_VERSION=v1.1.0
 ARG PUREDNS_VERSION=v2.1.1
-ARG TESTSSL_VERSION=v3.2.3
+ARG TESTSSL_VERSION=v3.2.4
 ARG SSLYZE_VERSION=6.3.1
 ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
@@ -35,7 +35,7 @@ ARG RUSTSCAN_LINUX_AMD64_ASSET=x86_64-linux-rustscan.tar.gz.zip
 ARG RUSTSCAN_LINUX_AMD64_SHA256=f3a4365d939e3b81f25ba8c37852ce9ac9e938c3cc882c5b3e6fff6152c740be
 ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
 ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
-ARG TCPING_VERSION=v2.7.1
+ARG TCPING_VERSION=v2.8.0
 ARG WPSCAN_VERSION=4.0.1
 ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
 ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
@@ -48,11 +48,12 @@ ARG NIKTO_COMMIT=69681e2e4213c15b85a90c53b2169ecb2a88fb01
 ARG SETUPTOOLS_VERSION=81.0.0
 ARG POSTGRESQL_CLIENT_VERSION=18
 ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
-ARG APP_VERSION=2.6.0
+ARG APP_VERSION=2.7.0
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG PYTHON_VERSION=3.14.6
 ARG PYTHON_BASE_DIGEST=unresolved
+ARG PYTHON_BASE_INDEX_DIGEST=unresolved
 
 # The Go builder base is shared by independent tool families. Its module and
 # compilation caches stay in builder layers and never enter the runtime image.
@@ -83,7 +84,7 @@ ENV PATH=/usr/local/go/bin:${PATH}
 ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 ENV GO_X_CRYPTO_VERSION=${GO_X_CRYPTO_VERSION}
-COPY scripts/install_go_tool.sh /usr/local/bin/install-go-tool
+COPY scripts/container/install_go_tool.sh /usr/local/bin/install-go-tool
 RUN chmod 0755 /usr/local/bin/install-go-tool && \
     mkdir -p /out/usr/local/bin /out/usr/sbin \
         /out/usr/share/doc/darklab-shell/licenses/go-modules && \
@@ -332,6 +333,7 @@ RUN gem install wpscan -v "${WPSCAN_VERSION}" && \
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 ARG TARGETARCH
 ARG PYTHON_BASE_DIGEST
+ARG PYTHON_BASE_INDEX_DIGEST
 ARG APP_VERSION
 ARG VCS_REF
 ARG BUILD_DATE
@@ -433,7 +435,7 @@ RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 # Development Compose mounts ./app over this copy; release images run directly
 # from the checked-in application tree.
 COPY app/ /app/
-COPY scripts/backup_system.py scripts/migrate_sqlite_to_postgres.py scripts/restore_system.py /app/tools/
+COPY scripts/operations/backup_system.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
 
 # Keep the reviewed redistribution inventory and notices with the image.
 COPY LICENSE /usr/share/doc/darklab-shell/LICENSE
@@ -463,4 +465,5 @@ LABEL org.opencontainers.image.title="darklab_shell" \
       sh.darklab.git.revision="${VCS_REF}" \
       sh.darklab.python.version="${PYTHON_VERSION}" \
       sh.darklab.python.base.digest="${PYTHON_BASE_DIGEST}" \
+      sh.darklab.python.base.index.digest="${PYTHON_BASE_INDEX_DIGEST}" \
       sh.darklab.image.architecture="${TARGETARCH}"

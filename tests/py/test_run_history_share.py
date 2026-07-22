@@ -27,7 +27,7 @@ import pytest
 import app as shell_app_module
 import config as app_config
 from conftest import build_test_config
-from conftest import make_test_app as _test_app
+from conftest import reusable_test_app
 import blueprints.run as run_routes
 import core.database as shell_db
 import services.secrets.storage as secrets_storage
@@ -43,7 +43,7 @@ from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 # the real SQLite/artifact flow rather than heavy mocking.
 
 def get_client(*, use_forwarded_for=True):
-    client = _test_app().test_client()
+    client = reusable_test_app(__name__).test_client()
     if use_forwarded_for:
         token = uuid.uuid4().hex
         client.environ_base["HTTP_X_FORWARDED_FOR"] = (
@@ -2275,9 +2275,50 @@ class TestRunStreaming:
                 json={"command": "cat urls.txt"},
                 headers={"X-Session-ID": session},
             )
+            cp_resp = _post_run(
+                client,
+                json={"command": "cp urls.txt urls-copy.txt"},
+                headers={"X-Session-ID": session},
+            )
+            touch_resp = _post_run(
+                client,
+                json={"command": "touch empty.txt"},
+                headers={"X-Session-ID": session},
+            )
+            redirect_resp = _post_run(
+                client,
+                json={"command": "cat urls.txt > redirected.txt"},
+                headers={"X-Session-ID": session},
+            )
+            append_resp = _post_run(
+                client,
+                json={"command": "cat urls.txt >> redirected.txt"},
+                headers={"X-Session-ID": session},
+            )
+            tee_resp = _post_run(
+                client,
+                json={"command": "cat urls.txt | tee tee.txt"},
+                headers={"X-Session-ID": session},
+            )
             help_resp = _post_run(
                 client,
                 json={"command": "file help"},
+                headers={"X-Session-ID": session},
+            )
+            copied = client.get(
+                "/workspace/files/read?path=urls-copy.txt",
+                headers={"X-Session-ID": session},
+            )
+            touched = client.get(
+                "/workspace/files/read?path=empty.txt",
+                headers={"X-Session-ID": session},
+            )
+            redirected = client.get(
+                "/workspace/files/read?path=redirected.txt",
+                headers={"X-Session-ID": session},
+            )
+            tee_file = client.get(
+                "/workspace/files/read?path=tee.txt",
                 headers={"X-Session-ID": session},
             )
 
@@ -2291,14 +2332,126 @@ class TestRunStreaming:
         assert "file: urls.txt\\n" in cat_body
         assert "https://ip.darklab.sh\\n" in cat_body
 
+        assert cp_resp.status_code == 200
+        assert "file: copied urls.txt to urls-copy.txt\\n" in cp_resp.get_data(as_text=True)
+        assert copied.get_json()["text"] == "https://ip.darklab.sh\n"
+        assert touch_resp.status_code == 200
+        assert touched.get_json()["text"] == ""
+        assert redirect_resp.status_code == 200
+        assert "https://ip.darklab.sh\\n" not in redirect_resp.get_data(as_text=True)
+        assert append_resp.status_code == 200
+        assert "https://ip.darklab.sh\\n" not in append_resp.get_data(as_text=True)
+        assert redirected.get_json()["text"] == (
+            "file: urls.txt\nhttps://ip.darklab.sh\n"
+            "file: urls.txt\nhttps://ip.darklab.sh\n"
+        )
+        assert tee_resp.status_code == 200
+        assert "https://ip.darklab.sh\\n" in tee_resp.get_data(as_text=True)
+        assert tee_file.get_json()["text"] == "file: urls.txt\nhttps://ip.darklab.sh\n"
+
         assert help_resp.status_code == 200
         help_body = help_resp.get_data(as_text=True)
         assert "Session file commands:\\n" in help_body
         assert "file ls [-lR] [folder]\\n" in help_body
         assert "file download <file>\\n" in help_body
+        assert "file copy <source> <destination>\\n" in help_body
+        assert "file touch <file>\\n" in help_body
+        assert "command >> file" in help_body
+        assert "command | tee file" in help_body
         assert "Aliases:\\n" in help_body
         assert "Create targets.txt from the Files panel.\\n" in help_body
         assert "curl -o response.html https://ip.darklab.sh\\n" in help_body
+
+    def test_builtin_workspace_diff_and_alias_share_shell_formats(self, tmp_path):
+        client = get_client()
+        session = "sess-workspace-diff"
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path / "workspaces"),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg):
+            for path, text in (
+                ("old.txt", "alpha\nbeta\n"),
+                ("new.txt", "alpha\ndelta\n"),
+            ):
+                created = client.post(
+                    "/workspace/files",
+                    json={"path": path, "text": text},
+                    headers={"X-Session-ID": session},
+                )
+                assert created.status_code == 200
+            unified = _post_run(
+                client,
+                json={"command": "file diff -u old.txt new.txt"},
+                headers={"X-Session-ID": session},
+            )
+            brief = _post_run(
+                client,
+                json={"command": "diff --brief old.txt new.txt"},
+                headers={"X-Session-ID": session},
+            )
+
+        assert unified.status_code == 200
+        unified_body = unified.get_data(as_text=True)
+        assert "--- old.txt\\n" in unified_body
+        assert "+++ new.txt\\n" in unified_body
+        assert "-beta\\n" in unified_body
+        assert "+delta\\n" in unified_body
+        assert brief.status_code == 200
+        assert "Files old.txt and new.txt differ\\n" in brief.get_data(as_text=True)
+
+    def test_builtin_diff_compares_completed_runs_and_last_two_tab_runs(self):
+        client = get_client()
+        session = "sess-run-output-diff"
+        tab_id = "tab-run-output-diff"
+        run_ids = ("run-output-diff-old", "run-output-diff-new")
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                "VALUES (?, ?, ?, 'printf old', ?, ?, 0, ?)",
+                (
+                    run_ids[0], session, tab_id, "2026-07-19T01:00:00+00:00",
+                    "2026-07-19T01:00:01+00:00", json.dumps(["alpha", "old"]),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                "VALUES (?, ?, ?, 'printf new', ?, ?, 0, ?)",
+                (
+                    run_ids[1], session, tab_id, "2026-07-19T01:01:00+00:00",
+                    "2026-07-19T01:01:01+00:00", json.dumps(["alpha", "new"]),
+                ),
+            )
+            conn.commit()
+
+        latest = _post_run(
+            client,
+            json={"command": "diff -u --last", "tab_id": tab_id},
+            headers={"X-Session-ID": session},
+        )
+        explicit = _post_run(
+            client,
+            json={"command": f"diff --brief run:{run_ids[0]} run:{run_ids[1]}"},
+            headers={"X-Session-ID": session},
+        )
+
+        assert latest.status_code == 200
+        latest_body = latest.get_data(as_text=True)
+        assert f"--- run:{run_ids[0]}" in latest_body
+        assert f"+++ run:{run_ids[1]}" in latest_body
+        latest_text = [str(event.get("text") or "") for event in _sse_events(latest_body)]
+        assert "-old" in latest_text
+        assert "+new" in latest_text
+        assert explicit.status_code == 200
+        assert f"Files run:{run_ids[0]}" in explicit.get_data(as_text=True)
 
     def test_builtin_workspace_show_reports_binary_files(self, tmp_path):
         client = get_client()
