@@ -10,6 +10,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Validate multi-platform release publication](#validate-multi-platform-release-publication)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Known Issues](#known-issues)
+  - [Redis live replay can falsely report trimmed output](#redis-live-replay-can-falsely-report-trimmed-output)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
@@ -94,7 +95,14 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
 
 ## Known Issues
 
-No open Known Issues are currently tracked.
+### Redis live replay can falsely report trimmed output
+
+A newly started, low-output command can occasionally begin with `[live replay starts here; earlier output was trimmed due to size]` and emit `BROKER_REPLAY_TRIMMED` even though no replay data was actually dropped. Redis replay currently reads the newest events with `XREVRANGE`, then checks the stream length with a separate `XLEN` call. If the active command publishes an event between those calls, the larger length is mistaken for evidence that the first read omitted older events. The narrow timing window makes the issue intermittent; a warning with `remaining_events=1` on a fresh short run is the characteristic symptom. This affects the live replay notice and warning log, not the separately captured saved preview or full-output artifact.
+
+- [ ] Replace the separate `XREVRANGE` and `XLEN` decision with one `XREVRANGE` request for `fetch_count + 1` records.
+- [ ] Treat the extra oldest record as the truncation sentinel: discard it, retain the newest `fetch_count` records, and emit the notice only when that extra record exists.
+- [ ] Update Redis replay coverage for both genuine tail truncation and an active stream growing immediately after a short initial replay; keep the existing bounded-line, trim-notice, resume-cursor, and in-memory replay contracts intact.
+- [ ] Confirm a fresh short command no longer emits the notice while a replay that genuinely exceeds the fetch window still logs `BROKER_REPLAY_TRIMMED` with an accurate retained-event count.
 
 ---
 

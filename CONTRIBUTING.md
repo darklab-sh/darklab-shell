@@ -114,16 +114,20 @@ Practical recommendations:
 
 ## Branch Workflow
 
-Create a feature branch from the current integration branch:
+`main` is the integration branch and should remain releasable. Create ordinary
+feature, fix, documentation, and test branches from the current `main` branch:
 
 ```bash
 git fetch origin
-git checkout main
+git switch main
 git pull --ff-only origin main
-git checkout -b feature/<short-topic>
+git switch -c feature/<short-topic>
 ```
 
-If active development is happening on a release branch such as `v1.x`, target that branch instead of `main`.
+Merge completed work back into `main` through a merge request. Do not use an
+active release branch as the integration target for the next release. Large or
+incomplete features stay on their feature branches until they are ready to
+merge.
 
 Recommended branch naming:
 
@@ -138,7 +142,27 @@ Commit messages should describe the intent of the change, not just what files we
 
 ## Release Branch Merge Checklist
 
-Before merging a version branch back to `main`:
+Release branches are short-lived stabilization branches, not development
+branches. Cut `release/MAJOR.MINOR` from `main` only after the planned release
+scope is complete and ready for release-candidate testing. For example:
+
+```bash
+git fetch origin
+git switch main
+git pull --ff-only origin main
+git switch -c release/2.8
+git push -u origin release/2.8
+```
+
+Once the release branch exists:
+
+- Treat the release as feature-frozen. Limit changes to release blockers, bug fixes, documentation corrections, version updates, and release metadata.
+- Protect both `main` and `release/*` from direct pushes. Make stabilization changes on short-lived branches based on the active release branch, then merge them through merge requests.
+- Keep the release-candidate cycle short. Hold unrelated feature merges to `main` until the final release is merged and tagged; new work can continue on feature branches during that freeze.
+- Create `vMAJOR.MINOR.PATCH-rc.NUMBER` tags from the release branch. Each candidate should represent the exact commit exercised by its protected tag pipeline.
+- Let the final release merge carry every stabilization fix back to `main`; do not leave release-only commits behind after the branch is retired.
+
+Before merging the release branch back to `main`:
 
 - Confirm the branch is current with the target `main` branch, or intentionally document why it is not.
 - Update the release version in [app/config.py](app/config.py), [package.json](package.json), both root version fields in `package-lock.json`, the Dockerfile and development Compose build defaults, the production Compose and `deploy/.env.example` image defaults, `deploy/container-licenses.json`, and the release-version anchor in `tests/py/test_production_install.py`.
@@ -155,8 +179,17 @@ Before merging a version branch back to `main`:
 - Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
 - Run container smoke validation when the release changes packaged tools, Dockerfile/base images, command examples, workspace file handling, or workflow command steps.
 - Ensure GitLab CI jobs are passing, including test, lint, audit, and build stages.
-- Confirm the protected `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER` tag pipeline pushed the canonical GitLab image, passed production-installation and compatibility smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, passed the fixed-Critical vulnerability gate, signed both image references, published the checksummed installer plus signed release evidence, and round-tripped API state through bundled-Postgres backup and restore with the normal process defaults. Confirm only the final tag created a GitLab Release, and only after that Postgres gate passed.
+- Confirm the latest protected `vMAJOR.MINOR.PATCH-rc.NUMBER` tag pipeline pushed the canonical GitLab image, passed production-installation and compatibility smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, passed the fixed-Critical vulnerability gate, signed both image references, published the checksummed installer plus signed release evidence, and round-tripped API state through bundled-Postgres backup and restore with the normal process defaults. Confirm the candidate did not create a GitLab Release.
 - Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
+
+When the checklist is complete, merge the release branch into `main`, then
+create the final annotated `vMAJOR.MINOR.PATCH` tag from that exact `main`
+commit. Push the tag and confirm its protected pipeline repeats the candidate
+image, installation, compatibility, vulnerability, signing, evidence, and
+Postgres gates and creates the GitLab Release only after the Postgres gate
+passes. Delete the release branch only after that pipeline succeeds. Keep
+`release/MAJOR.MINOR` only when that minor line will continue receiving patch
+releases while `main` advances.
 
 ---
 
@@ -497,13 +530,14 @@ If a tool's output has intentionally changed, run the capture script first. It r
 
 See [tests/README.md](tests/README.md) for the full smoke test workflow and [DECISIONS.md](DECISIONS.md) for the rationale behind the image-validation path.
 
-Once you have completed the verification steps above and have your code locally committed to your new feature branch:
+Once you have completed the verification steps above and have your code locally committed to your working branch:
 
 ```bash
-git push -u origin feature/<short-topic>
+git push -u origin <branch-name>
 ```
 
-Then open a GitLab merge request targeting the correct integration branch.
+Then open a GitLab merge request targeting `main`. During a release freeze,
+release-only fixes instead target the active `release/MAJOR.MINOR` branch.
 
 A good merge request should make it easy to answer:
 

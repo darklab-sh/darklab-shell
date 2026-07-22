@@ -13,7 +13,16 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [2.7.1] - Unreleased
 
-No changes yet.
+### Changed
+
+- **Contributor branches now merge into `main`, while release branches are reserved for short stabilization windows** — the documented lifecycle cuts `release/MAJOR.MINOR` only after the release scope is complete, routes candidate fixes through merge requests, freezes unrelated `main` merges during RC validation, merges the finished release back into `main`, and tags that exact merged commit before retiring the release branch.
+
+### Fixed
+
+- **Release signing tolerates registry signature propagation without adding duplicate signatures on job retries.**
+  - **Root cause:** the supply-chain job verified each image immediately after signing it, but Docker Hub could accept a signature before making it visible to the following verification request. Retrying the job then signed targets that had already completed successfully.
+  - **Fix:** each release target first reuses an existing signature that matches the protected tag identity. Missing signatures are created once, then verification polls with bounded exponential backoff while registry referrers become visible.
+  - **Tests:** the existing release-pipeline contract pins the reuse check, sign-once ordering, bounded retry count, and backoff behavior without adding a new test case.
 
 ---
 
