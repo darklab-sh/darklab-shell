@@ -714,8 +714,16 @@ class TestRateLimitEvent:
             with _test_app().test_request_context("/runs", method="POST"):
                 shell_app_module._rate_limit_handler(e)
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
-        assert call.kwargs["extra"]["limit"] == "5 per 1 second"
+        assert call.kwargs["extra"]["limit_policy"] == "5 per 1 second"
         assert call.kwargs["extra"]["scope"] == "global"
+        data = json.loads(_emit(
+            GELFFormatter(),
+            logging.WARNING,
+            "RATE_LIMIT",
+            extra=call.kwargs["extra"],
+        ))
+        assert data["_limit_policy"] == "5 per 1 second"
+        assert "_limit" not in data
 
     def test_rate_limit_returns_json_429(self):
         from werkzeug.exceptions import TooManyRequests

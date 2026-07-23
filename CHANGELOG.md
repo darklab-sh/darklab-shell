@@ -19,6 +19,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Rate-limit GELF events no longer conflict with numeric OpenSearch fields.**
+  - **Root cause:** worker and output events correctly recorded numeric values under `limit`, while `RATE_LIMIT` reused that field for descriptions such as `240 per minute; 60 per second`. GELF serialized both as `_limit`, so OpenSearch's numeric mapping rejected the descriptive rate policy.
+  - **Fix:** `RATE_LIMIT` now records its human-readable threshold as `limit_policy`, leaving `_limit` consistently numeric for existing events.
+  - **Tests:** existing Flask-Limiter, baseline HTTP guard, and GELF formatter assertions pin `_limit_policy` and reject the old string-valued `_limit` shape without changing the test count.
+
 - **Fresh Redis-backed live replays no longer show a false trimmed-output warning.**
   - **Root cause:** Redis read the newest retained events and then queried the stream length separately, so an active command publishing between those requests could make a short replay look truncated.
   - **Fix:** replay now requests one extra tail record in the same Redis read and treats only that extra oldest record as proof that the retained window omitted earlier events.

@@ -319,7 +319,7 @@ The current event inventory is:
 | WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
 | WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
-| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, request_id, path, limit, scope |
+| WARN | `RATE_LIMIT` | HTTP rate-limit handlers | ip, request_id, path, limit_policy, scope |
 | WARN | `RATE_LIMIT_STORAGE_FALLBACK` | rate-limit storage setup | reason, fallback, redis_configured |
 | WARN | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
 | WARN | `CMD_TIMEOUT_TERMINATE_FAILED` | brokered run timeout cleanup | ip, run_id, session, cmd (+ traceback) |

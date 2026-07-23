@@ -28,11 +28,11 @@ _LOCAL_LAST_PRUNE = 0.0
 @dataclass(frozen=True)
 class HttpRateLimitResult:
     allowed: bool
-    limit: str = ""
+    limit_policy: str = ""
     retry_after: int | None = None
 
 
-def dynamic_route_rate_limit_label(cfg: Mapping[str, Any]) -> str:
+def dynamic_route_rate_limit_policy(cfg: Mapping[str, Any]) -> str:
     return (
         f"{_coerce_positive_int(cfg.get('http_rate_limit_per_minute'), 240)} per minute; "
         f"{_coerce_positive_int(cfg.get('http_rate_limit_per_second'), 60)} per second"
@@ -62,7 +62,7 @@ def check_dynamic_route_rate_limit(
         (60, _coerce_positive_int(cfg.get("http_rate_limit_per_minute"), 240)),
         (1, _coerce_positive_int(cfg.get("http_rate_limit_per_second"), 60)),
     )
-    label = dynamic_route_rate_limit_label(cfg)
+    policy = dynamic_route_rate_limit_policy(cfg)
     for window_seconds, limit in checks:
         if limit <= 0:
             continue
@@ -75,7 +75,7 @@ def check_dynamic_route_rate_limit(
         if count > limit:
             return HttpRateLimitResult(
                 False,
-                limit=label,
+                limit_policy=policy,
                 retry_after=_retry_after_seconds(checked_at, window_seconds),
             )
     return HttpRateLimitResult(True)
