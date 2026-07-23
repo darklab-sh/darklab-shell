@@ -15,6 +15,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Scheduled Docker fanout now hydrates every Docker runner from one shared AMD64 cache.**
+  - **Before:** `bael` alone wrote a release-line-specific registry cache, while the remaining fanout jobs performed unrelated local builds that couldn't reuse it.
+  - **After:** one prerequisite cache warmer can run on any standard self-managed Docker runner and writes the stable `buildcache-amd64` reference under the same lock as release publication. Once it succeeds, every standard and SELinux Docker runner imports the recorded cache and pinned Python base digest read-only while the fanout runs concurrently; the rootless Podman job keeps its separate image store.
+  - **Tests:** the existing CI contract pins the prerequisite stage, generic cache reference, fixed writer lock, runner-agnostic warmer, read-only fanout imports, and the complete host-tag map without changing the test count.
+
 - **Contributor branches now merge into `main`, while release branches are reserved for short stabilization windows** — the documented lifecycle cuts `release/MAJOR.MINOR` only after the release scope is complete, routes candidate fixes through merge requests, freezes unrelated `main` merges during RC validation, merges the finished release back into `main`, and tags that exact merged commit before retiring the release branch.
 
 ### Fixed

@@ -23,7 +23,6 @@ variables:
   RELEASE_STAGING_CLEANUP_ENABLED: "0"
   RELEASE_STAGING_CLEANUP_DRY_RUN: "0"
   RELEASE_STAGING_KEEP_DAYS: "14"
-  RELEASE_CACHE_SCOPE: "v2-7"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 image: $CI_DEFAULT_IMAGE
@@ -40,6 +39,7 @@ stages:
   - test
   - lint
   - audit
+  - cache
   - build
   - publish
   - verify
@@ -410,28 +410,22 @@ docker-build:
       - branch-image-evidence/vulnerability-report.json
     expire_in: 1 week
 
-.scheduled-docker-build:
-  stage: build
+docker-build-cache-amd64:
+  stage: cache
   image: $CI_DOCKER_IMAGE
   interruptible: true
+  tags:
+    - self-hosted
   variables:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: "1"
-  before_script: []
+  resource_group: release-cache-amd64
+  before_script:
+    - apk add --no-cache jq
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
     - when: never
-  script:
-    - docker build --progress=plain -t darklab_shell:$CI_COMMIT_SHA .
-
-docker-build-bael:
-  extends: .scheduled-docker-build
-  tags:
-    - bael
-  resource_group: "release-cache-amd64-${RELEASE_CACHE_SCOPE}"
-  before_script:
-    - apk add --no-cache jq
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - |
@@ -444,7 +438,7 @@ docker-build-bael:
         ][0].digest // empty
       ' python-base-index.json)
       printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
-      cache_image="${CI_REGISTRY_IMAGE}:buildcache-amd64-${RELEASE_CACHE_SCOPE}"
+      cache_image="${CI_REGISTRY_IMAGE}:buildcache-amd64"
       docker buildx build --pull --platform linux/amd64 --provenance=false \
         --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
@@ -452,6 +446,48 @@ docker-build-bael:
         --cache-from "type=registry,ref=${cache_image}" \
         --cache-to "type=registry,ref=${cache_image},mode=max" \
         --output type=cacheonly .
+      printf '%s\n' \
+        "SCHEDULED_PYTHON_BASE_IMAGE=${python_base_image}" \
+        "SCHEDULED_PYTHON_BASE_DIGEST=${python_base_digest}" \
+        "SCHEDULED_AMD64_CACHE_REF=${cache_image}" \
+        > scheduled-docker-cache.env
+  artifacts:
+    reports:
+      dotenv: scheduled-docker-cache.env
+    expire_in: 1 day
+
+.scheduled-docker-build:
+  stage: build
+  image: $CI_DOCKER_IMAGE
+  interruptible: true
+  needs:
+    - job: docker-build-cache-amd64
+      artifacts: true
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: "1"
+  before_script: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - when: never
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - |
+      test -n "$SCHEDULED_PYTHON_BASE_IMAGE"
+      printf '%s' "$SCHEDULED_PYTHON_BASE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+      test "$SCHEDULED_AMD64_CACHE_REF" = "${CI_REGISTRY_IMAGE}:buildcache-amd64"
+      docker buildx build --pull --platform linux/amd64 --provenance=false \
+        --progress=plain \
+        --build-arg "PYTHON_BASE_IMAGE=${SCHEDULED_PYTHON_BASE_IMAGE}@${SCHEDULED_PYTHON_BASE_DIGEST}" \
+        --build-arg "PYTHON_BASE_DIGEST=${SCHEDULED_PYTHON_BASE_DIGEST}" \
+        --cache-from "type=registry,ref=${SCHEDULED_AMD64_CACHE_REF}" \
+        --load --tag "darklab_shell:${CI_COMMIT_SHA}" .
+
+docker-build-bael:
+  extends: .scheduled-docker-build
+  tags:
+    - bael
 
 docker-build-bune:
   extends: .scheduled-docker-build
@@ -594,7 +630,7 @@ release-image-amd64:
     DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: "1"
     RELEASE_ARCHITECTURE: "amd64"
-  resource_group: "release-cache-amd64-${RELEASE_CACHE_SCOPE}"
+  resource_group: release-cache-amd64
   before_script:
     - apk add --no-cache jq python3
   script:
