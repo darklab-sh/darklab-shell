@@ -852,7 +852,6 @@ def _run_platform_publisher(
     )
     env.update({
         "RELEASE_ARCHITECTURE": "amd64",
-        "RELEASE_CACHE_SCOPE": "v2-7",
         "FAKE_PLATFORM_DIGEST": _PUBLISHER_DIGESTS["amd64"],
     })
     if scenario == "conflict":
@@ -1968,8 +1967,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_STAGING_CLEANUP_ENABLED"] == "0"
     assert parsed_ci["variables"]["RELEASE_STAGING_KEEP_DAYS"] == "14"
-    assert parsed_ci["variables"]["RELEASE_CACHE_SCOPE"] == "v2-7"
+    assert "RELEASE_CACHE_SCOPE" not in parsed_ci["variables"]
     assert "RELEASE_CACHE_PROBE" not in ci_config
+    assert parsed_ci["stages"].index("cache") < parsed_ci["stages"].index("build")
     docker_build_rules = parsed_ci["docker-build"]["rules"]
     assert docker_build_rules[0]["if"] == (
         '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
@@ -2040,20 +2040,34 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert '"$python_base_image@$python_base_index_digest"' in publisher
     assert parsed_ci["release-image-amd64"]["artifacts"]["when"] == "always"
     assert parsed_ci["release-image-dockerhub"]["artifacts"]["when"] == "always"
-    amd64_resource_group = "release-cache-amd64-${RELEASE_CACHE_SCOPE}"
+    amd64_resource_group = "release-cache-amd64"
     assert parsed_ci["release-image-amd64"]["resource_group"] == (
         amd64_resource_group
     )
-    amd64_warmer = parsed_ci["docker-build-bael"]
+    amd64_warmer = parsed_ci["docker-build-cache-amd64"]
+    assert amd64_warmer["stage"] == "cache"
+    assert amd64_warmer["tags"] == ["self-hosted"]
     assert amd64_warmer["resource_group"] == amd64_resource_group
     assert parsed_ci[".scheduled-docker-build"]["interruptible"] is True
     amd64_warmer_script = "\n".join(amd64_warmer["script"])
-    assert "buildcache-amd64-${RELEASE_CACHE_SCOPE}" in amd64_warmer_script
+    assert 'cache_image="${CI_REGISTRY_IMAGE}:buildcache-amd64"' in amd64_warmer_script
     assert "--platform linux/amd64" in amd64_warmer_script
     assert "--cache-from" in amd64_warmer_script
     assert "--cache-to" in amd64_warmer_script
     assert "mode=max" in amd64_warmer_script
     assert "--output type=cacheonly" in amd64_warmer_script
+    assert amd64_warmer["artifacts"]["reports"]["dotenv"] == (
+        "scheduled-docker-cache.env"
+    )
+    scheduled_build = parsed_ci[".scheduled-docker-build"]
+    assert scheduled_build["needs"] == [
+        {"job": "docker-build-cache-amd64", "artifacts": True}
+    ]
+    scheduled_build_script = "\n".join(scheduled_build["script"])
+    assert "SCHEDULED_PYTHON_BASE_DIGEST" in scheduled_build_script
+    assert "--cache-from" in scheduled_build_script
+    assert "--load" in scheduled_build_script
+    assert "--cache-to" not in scheduled_build_script
     scheduled_build_tags = {
         "docker-build-bael": ["bael"],
         "docker-build-bune": ["bune"],
@@ -2075,8 +2089,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "docker.io/library/${python_base_image}" in podman_warmer_script
     assert '--build-arg "TARGETARCH=amd64"' in podman_warmer_script
     assert "--format docker" in podman_warmer_script
-    assert 'cache_image="${CI_REGISTRY_IMAGE}:buildcache-${architecture}-${cache_scope}"' in publisher
-    assert 'expected_cache_scope="v${release_major}-${release_minor}"' in publisher
+    assert 'cache_image="${CI_REGISTRY_IMAGE}:buildcache-${architecture}"' in publisher
+    assert "RELEASE_CACHE_SCOPE" not in publisher
     assert "--progress=plain" in publisher
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
     amd64_smoke_script = "\n".join(parsed_ci["release-image-amd64-smoke"]["script"])

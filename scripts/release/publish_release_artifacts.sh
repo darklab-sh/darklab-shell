@@ -129,11 +129,15 @@ publish_gitlab_platform_image() {
     case "$architecture" in
         amd64)
             python_base_digest=${PYTHON_BASE_AMD64_DIGEST:-}
+            cache_scope=shared
+            cache_image="${CI_REGISTRY_IMAGE}:buildcache-${architecture}"
             ;;
         arm64)
             [ "$release_mode" = dual ] \
                 || release_check_failed platform_image_preflight release_mode dual "$release_mode"
             python_base_digest=${PYTHON_BASE_ARM64_DIGEST:-}
+            cache_scope=disabled
+            cache_image=disabled
             ;;
         *) release_check_failed platform_image_preflight architecture amd64-or-arm64 "$architecture" ;;
     esac
@@ -144,17 +148,6 @@ publish_gitlab_platform_image() {
     require_nonempty platform_image_preflight build_date "${RELEASE_BUILD_DATE:-}"
     base_resolution_key=$(printf '%s' "${PYTHON_BASE_INDEX_DIGEST#sha256:}" | cut -c1-12)
     staging_image="${CI_REGISTRY_IMAGE}:${publication_tag}-staging-${CI_PIPELINE_ID}-${base_resolution_key}-${architecture}"
-    cache_scope=${RELEASE_CACHE_SCOPE:-v2-7}
-    release_major=${release_version%%.*}
-    release_remainder=${release_version#*.}
-    release_minor=${release_remainder%%.*}
-    expected_cache_scope="v${release_major}-${release_minor}"
-    cache_image="${CI_REGISTRY_IMAGE}:buildcache-${architecture}-${cache_scope}"
-    if [ "$architecture" = amd64 ]; then
-        require_equal platform_image_preflight cache_scope "$expected_cache_scope" "$cache_scope"
-    else
-        cache_image=disabled
-    fi
     env_file="release-image-${architecture}.env"
     status_file="release-image-${architecture}-status.txt"
     metrics_file="release-image-${architecture}-build-metrics.txt"
