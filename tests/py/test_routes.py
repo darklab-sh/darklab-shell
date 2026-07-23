@@ -7213,14 +7213,24 @@ class TestProjectRoutes:
             probe_path,
             environ_base={"REMOTE_ADDR": remote_addr},
         )
-        second = client.get(
-            probe_path,
-            environ_base={"REMOTE_ADDR": remote_addr},
-        )
+        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
+            second = client.get(
+                probe_path,
+                environ_base={"REMOTE_ADDR": remote_addr},
+            )
 
         assert first.status_code == 404
         assert second.status_code == 429
         assert json.loads(second.data)["error"] == "rate_limited"
+        rate_limit_call = next(
+            call for call in mock_warn.call_args_list
+            if call.args[0] == "RATE_LIMIT"
+        )
+        assert (
+            rate_limit_call.kwargs["extra"]["limit_policy"]
+            == "1 per minute; 1 per second"
+        )
+        assert "limit" not in rate_limit_call.kwargs["extra"]
 
     def test_default_baseline_http_rate_limit_allows_page_load_burst(self):
         client = get_client()

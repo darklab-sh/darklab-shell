@@ -339,7 +339,7 @@ def _rate_limit_handler(e):
         "ip": ip,
         "request_id": _current_request_id(),
         "path": request.path,
-        "limit": str(e.description),
+        "limit_policy": str(e.description),
         "scope": scope,
     })
     app_metrics.record_rate_limit_rejection(request.endpoint or "unknown", scope=scope)
@@ -368,7 +368,7 @@ def _enforce_dynamic_route_rate_limit():
         "ip": get_client_ip(),
         "request_id": _current_request_id(),
         "path": request.path,
-        "limit": result.limit,
+        "limit_policy": result.limit_policy,
         "scope": "http",
     })
     app_metrics.record_rate_limit_rejection(request.endpoint or "unknown", scope="http")
