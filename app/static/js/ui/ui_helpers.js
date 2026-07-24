@@ -931,8 +931,8 @@ import { requestWelcomeSettle as importedRequestWelcomeSettle } from '../welcome
     const openAbove = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
     const availableHeight = openAbove ? spaceAbove : spaceBelow;
     const maxHeight = Math.min(320, Math.max(48, availableHeight));
-    const width = Math.min(rect.width, Math.max(0, viewport.width - margin * 2));
-    const left = _clampNumber(rect.left, viewportLeft + margin, viewportRight - width - margin);
+    const maxWidth = Math.max(0, viewport.width - margin * 2);
+    const triggerWidth = Math.min(rect.width, maxWidth);
     if (menu.dataset.appSelectPortaled !== 'true') {
       menu._portalReturnTo = wrap;
       menu.dataset.appSelectPortaled = 'true';
@@ -947,11 +947,30 @@ import { requestWelcomeSettle as importedRequestWelcomeSettle } from '../welcome
     // otherwise both top and bottom apply and the element ends up zero-height.
     menu.style.bottom = 'auto';
     menu.style.right = 'auto';
-    menu.style.left = left + 'px';
-    menu.style.width = width + 'px';
+    menu.style.left = viewportLeft + margin + 'px';
+    menu.style.width = triggerWidth + 'px';
     menu.style.zIndex = '10000';
     menu.style.maxHeight = maxHeight + 'px';
     menu.style.overflowY = 'auto';
+    const optionContentWidth = Array.from(menu.querySelectorAll('[role="option"]'))
+      .reduce((widest, option) => Math.max(widest, option.scrollWidth || 0), 0);
+    const contentWidth = Math.max(menu.scrollWidth || 0, optionContentWidth);
+    const minimumReadableWidth = 144;
+    const width = Math.min(
+      maxWidth,
+      Math.max(triggerWidth, minimumReadableWidth, contentWidth + 2),
+    );
+    // Wider menus expand toward the inside edge of the control. This keeps
+    // right-aligned selects readable without pushing their menu through the
+    // dialog or viewport edge.
+    const preferredLeft = rect.right - width;
+    const left = _clampNumber(
+      preferredLeft,
+      viewportLeft + margin,
+      viewportRight - width - margin,
+    );
+    menu.style.left = left + 'px';
+    menu.style.width = width + 'px';
     const renderedHeight = menu.getBoundingClientRect?.().height || menu.offsetHeight || 0;
     const contentHeight = menu.scrollHeight || renderedHeight || maxHeight;
     const menuHeight = Math.min(maxHeight, Math.max(48, contentHeight));

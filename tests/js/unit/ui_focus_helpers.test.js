@@ -188,8 +188,9 @@ describe('app-native select enhancement', () => {
     document.body.innerHTML = `
       <div role="dialog" aria-modal="true">
         <select id="demo-select" class="form-select" aria-label="Dialog select">
-          <option value="one">One</option>
-          <option value="two">Two</option>
+          <option value="name">Name</option>
+          <option value="modified">Modified</option>
+          <option value="size">Size</option>
         </select>
       </div>
     `
@@ -205,11 +206,11 @@ describe('app-native select enhancement', () => {
     trigger.getBoundingClientRect = () => ({
       top: 530,
       bottom: 564,
-      left: 24,
-      right: 224,
-      width: 200,
+      left: 260,
+      right: 356,
+      width: 96,
       height: 34,
-      x: 24,
+      x: 260,
       y: 530,
     })
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 })
@@ -226,6 +227,10 @@ describe('app-native select enhancement', () => {
       expect(menu.classList.contains('dropdown-up')).toBe(true)
       expect(menu.style.position).toBe('fixed')
       expect(menu.style.top).toBe('410px')
+      expect(menu.style.width).toBe('144px')
+      expect(menu.style.left).toBe('212px')
+      expect([...menu.querySelectorAll('[role="option"]')].map(option => option.textContent))
+        .toEqual(['Name', 'Modified', 'Size'])
     } finally {
       if (originalScrollHeight) {
         Object.defineProperty(window.HTMLElement.prototype, 'scrollHeight', originalScrollHeight)

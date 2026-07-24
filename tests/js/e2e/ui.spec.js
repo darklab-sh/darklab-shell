@@ -1792,6 +1792,23 @@ test.describe('workspace modal', () => {
     await expect(row.locator('.workspace-context-cell')).toBeHidden()
     await expect(row.locator('.workspace-action-menu-trigger')).toBeVisible()
 
+    const sortTrigger = page.locator('#workspace-sort-select + .app-select .app-select-trigger')
+    await sortTrigger.click()
+    const sortMenu = page.locator('body > .app-select-menu[data-app-select-portaled="true"]')
+    await expect(sortMenu).toBeVisible()
+    await expect(sortMenu.getByRole('option', { name: 'Modified' })).toBeVisible()
+    const [sortTriggerBox, sortMenuBox] = await Promise.all([
+      sortTrigger.boundingBox(),
+      sortMenu.boundingBox(),
+    ])
+    expect(sortTriggerBox).not.toBeNull()
+    expect(sortMenuBox).not.toBeNull()
+    expect(sortMenuBox.width).toBeGreaterThan(sortTriggerBox.width)
+    expect(sortMenuBox.x).toBeLessThanOrEqual(sortTriggerBox.x)
+    expect(sortMenuBox.x + sortMenuBox.width).toBeLessThanOrEqual(390 - 8)
+    await sortTrigger.click()
+    await expect(sortMenu).toBeHidden()
+
     await (await workspaceRowAction(row, 'edit')).click()
     await expect(page.locator('#workspace-editor')).toBeVisible()
   })

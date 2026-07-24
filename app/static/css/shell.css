@@ -1436,6 +1436,9 @@ body.mobile-terminal-mode .output-follow-btn {
   appearance: none;
   -webkit-appearance: none;
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   width: 100%;
 }
 
