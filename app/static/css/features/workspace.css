@@ -671,10 +671,6 @@
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-.workspace-file-row:last-child {
-  border-bottom: none;
-}
-
 .workspace-file-row:hover,
 .workspace-file-row:focus-within {
   background: color-mix(in srgb, var(--green) 5%, var(--theme-panel-bg));

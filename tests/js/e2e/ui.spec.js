@@ -1647,6 +1647,15 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-inspector-empty')).toBeHidden()
     await expect(page.locator('.workspace-inspector-title')).toHaveText('targets.txt')
     await expect(page.locator('.workspace-inspector-preview')).toContainText('darklab.sh')
+    const selectedLastRowBorder = await row.evaluate((element) => {
+      const style = window.getComputedStyle(element)
+      return {
+        style: style.borderBottomStyle,
+        width: style.borderBottomWidth,
+      }
+    })
+    expect(selectedLastRowBorder.width).toBe('1px')
+    expect(selectedLastRowBorder.style).toBe('solid')
     const truncationNotice = page.locator(
       '.workspace-inspector-preview-section .workspace-preview-notice',
       { hasText: 'Preview truncated' },
@@ -1732,6 +1741,14 @@ test.describe('workspace modal', () => {
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
     const capturedRow = page.locator('.workspace-file-row').filter({ hasText: 'captured.txt' })
     await capturedRow.locator('[data-workspace-action="view"]').click()
+    const selectedMiddleRowBorder = await capturedRow.evaluate((element) => {
+      const style = window.getComputedStyle(element)
+      return {
+        style: style.borderBottomStyle,
+        width: style.borderBottomWidth,
+      }
+    })
+    expect(selectedMiddleRowBorder).toEqual(selectedLastRowBorder)
     await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer-text .workspace-line-text').filter({ hasText: /^darklab\.sh$/ })).toHaveCount(2)
     await expect(page.locator('#workspace-viewer-text .workspace-line-text').filter({ hasText: /^ip\.darklab\.sh$/ })).toHaveCount(2)
