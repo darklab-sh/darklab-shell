@@ -2,6 +2,16 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
+# Development mounts the checkout outside /app because native Linux preserves
+# host ownership and modes on bind mounts. Stage a fresh container-owned,
+# read-only snapshot before any config import or unprivileged process starts.
+if [ -n "${APP_SOURCE_DIR:-}" ]; then
+    /usr/local/libexec/darklab-stage-runtime-source \
+        "$APP_SOURCE_DIR" /app appuser:appuser \
+        || exit 1
+    unset APP_SOURCE_DIR
+fi
+
 # Fix /data ownership after Docker volume mount (which resets it to root)
 # and re-own any existing files (e.g. history.db created by a previous root run)
 # then drop to appuser to run Gunicorn

@@ -93,15 +93,17 @@ services:
     ports:
       - "${DEV_HOST_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8888}:${APP_PORT:-8888}"
     volumes:
-      - ./app:/app:ro
+      - ./app:/opt/darklab-source/app:ro
       - ./data:/data
     tmpfs:
       - /tmp
+      - /app
     cap_add:
       - NET_RAW
       - NET_ADMIN
     read_only: true
     environment:
+      - APP_SOURCE_DIR=/opt/darklab-source/app
       - REDIS_URL=redis://redis:6379/0
       - APP_PORT=${APP_PORT:-8888}
       - PROMETHEUS_MULTIPROC_DIR=${PROMETHEUS_MULTIPROC_DIR:-/tmp/darklab_shell-prom}

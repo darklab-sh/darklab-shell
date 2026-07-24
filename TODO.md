@@ -10,7 +10,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Validate multi-platform release publication](#validate-multi-platform-release-publication)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Known Issues](#known-issues)
-- [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -95,16 +94,6 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
 ## Known Issues
 
 No open Known Issues are currently tracked.
-
----
-
-## Technical Debt
-
-- **Stage source-mounted development code into a container-owned runtime tree.**
-  - `compose.dev.yaml` currently mounts `./app` directly at `/app`, so native Linux keeps the checkout's ownership and permissions. Files synced or edited as `0600` can't be imported after the container drops to `appuser`, even though Docker Desktop filesystem sharing can hide the problem.
-  - Mount the checkout at a separate read-only source path, copy it into an ephemeral `/app` runtime tree while the entrypoint still runs as root, and make the staged tree readable by `appuser` before Gunicorn or background workers start.
-  - Keep production unchanged and without source mounts. Preserve the development edit-and-restart loop, read-only container filesystem, `/app` path contracts, local configuration overlays, worker startup, and scanner separation.
-  - Add Linux-focused Compose and entrypoint regression coverage for owner-only source files, readable staged files, failed source staging, and the absence of a production source bind.
 
 ---
 

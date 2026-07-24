@@ -972,6 +972,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "platform" not in shell
     assert "build" not in shell
     assert all("/app" not in volume for volume in shell["volumes"])
+    assert "APP_SOURCE_DIR" not in shell["environment"]
     assert "./conf:/config:ro" in shell["volumes"]
     assert "./data:/data" in shell["volumes"]
     assert "./workspaces:/workspaces" in shell["volumes"]
@@ -1012,16 +1013,19 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert services["llama"]["profiles"] == ["llama"]
     assert all("container_name" not in service for service in services.values())
     development_services = development_compose["services"]
-    assert development_compose["services"]["shell"]["build"]["context"] == "."
-    assert "./app:/app:ro" in development_compose["services"]["shell"]["volumes"]
-    assert development_compose["services"]["shell"]["ports"] == [
+    development_shell = development_compose["services"]["shell"]
+    assert development_shell["build"]["context"] == "."
+    assert "./app:/opt/darklab-source/app:ro" in development_shell["volumes"]
+    assert all("./app:/app" not in volume for volume in development_shell["volumes"])
+    assert "/app" in development_shell["tmpfs"]
+    assert development_shell["read_only"] is True
+    assert development_shell["ports"] == [
         "${DEV_HOST_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8888}:${APP_PORT:-8888}"
     ]
-    assert development_compose["services"]["shell"]["labels"][
-        "sh.darklab.environment"
-    ] == "development"
+    assert development_shell["labels"]["sh.darklab.environment"] == "development"
     assert all("container_name" not in service for service in development_services.values())
-    development_environment = development_compose["services"]["shell"]["environment"]
+    development_environment = development_shell["environment"]
+    assert "APP_SOURCE_DIR=/opt/darklab-source/app" in development_environment
     assert "WORKSPACE_ENABLED=${WORKSPACE_ENABLED:-false}" in development_environment
     assert "WORKSPACE_BACKEND=${WORKSPACE_BACKEND:-tmpfs}" in development_environment
     assert "INTERACTIVE_PTY_ENABLED=${INTERACTIVE_PTY_ENABLED:-false}" in development_environment
@@ -1034,6 +1038,59 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert not (ROOT / "examples" / "docker-compose.prod.yml").exists()
 
 
+def test_development_source_staging_normalizes_private_files_and_fails_closed(
+    tmp_path: Path,
+):
+    stage_script = ROOT / "scripts" / "container" / "stage_runtime_source.sh"
+    source_dir = tmp_path / "source"
+    runtime_dir = tmp_path / "runtime"
+    source_dir.mkdir(mode=0o700)
+    runtime_dir.mkdir()
+    (runtime_dir / "stale.py").write_text("stale\n", encoding="utf-8")
+    private_source = source_dir / "config.py"
+    private_source.write_text("VALUE = 'private'\n", encoding="utf-8")
+    private_source.chmod(0o600)
+    (source_dir / "wsgi.py").write_text("application = object()\n", encoding="utf-8")
+
+    staged = subprocess.run(
+        [
+            "sh",
+            str(stage_script),
+            str(source_dir),
+            str(runtime_dir),
+            f"{os.getuid()}:{os.getgid()}",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert staged.returncode == 0, staged.stderr
+    assert not (runtime_dir / "stale.py").exists()
+    private_runtime = runtime_dir / "config.py"
+    assert private_runtime.read_text(encoding="utf-8") == "VALUE = 'private'\n"
+    assert stat.S_IMODE(private_source.stat().st_mode) == 0o600
+    assert stat.S_IMODE(private_runtime.stat().st_mode) == 0o400
+    assert private_runtime.stat().st_uid == os.getuid()
+    assert private_runtime.stat().st_gid == os.getgid()
+
+    failed = subprocess.run(
+        [
+            "sh",
+            str(stage_script),
+            str(tmp_path / "missing-source"),
+            str(runtime_dir),
+            f"{os.getuid()}:{os.getgid()}",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert failed.returncode != 0
+    assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=validate-source" in failed.stderr
+
+
 @pytest.mark.release_integration
 def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -1042,6 +1099,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     go_installer = (ROOT / "scripts" / "container" / "install_go_tool.sh").read_text(
         encoding="utf-8"
     )
+    source_stager = (
+        ROOT / "scripts" / "container" / "stage_runtime_source.sh"
+    ).read_text(encoding="utf-8")
     image_smoke = (
         ROOT / "scripts" / "release" / "verify_repository_free_image.sh"
     ).read_text(
@@ -1086,8 +1146,20 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
+    assert "!scripts/container/stage_runtime_source.sh" in dockerignore
     assert "!scripts/operations/migrate_sqlite_to_postgres.py" in dockerignore
     assert "!scripts/operations/restore_system.py" in dockerignore
+    assert (
+        "COPY scripts/container/stage_runtime_source.sh "
+        "/usr/local/libexec/darklab-stage-runtime-source"
+    ) in dockerfile
+    assert "/usr/local/libexec/darklab-stage-runtime-source" in entrypoint
+    assert entrypoint.index("/usr/local/libexec/darklab-stage-runtime-source") < (
+        entrypoint.index("stage_local_config_overlays")
+    )
+    assert 'cp -R "${source_dir%/}/."' in source_stager
+    assert 'chmod -R u+rX,a-w "$runtime_dir"' in source_stager
+    assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=$stage" in source_stager
     assert "wpscan-ruby-gems.json" in dockerfile
     assert (
         'File.write("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json", '

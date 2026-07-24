@@ -452,7 +452,9 @@ python scripts/build_release_payload.py \
 
 Use the matching immutable digest reported by the two release-image jobs. The protected pipeline also passes its generated `release-evidence/` directory so the public payload includes the SBOM, scan report, build-input inventory, provenance, and evidence index. The inventory documents why the deployment archive is byte-reproducible while the full image is verified by its signed digest and installed-package SBOM instead.
 
-The normal development command stays source-mounted:
+The normal development command stays source-mounted. Container startup stages
+that read-only checkout into its own `/app` snapshot, so Linux host ownership
+and private source-file modes don't prevent `appuser` from importing the code:
 
 ```bash
 docker compose -f compose.dev.yaml up --build
