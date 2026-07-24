@@ -113,15 +113,12 @@ async function openWorkflowWorkspace(page) {
   await expect(page.locator('#workflows-modal')).toBeVisible()
 }
 
-async function createAndOpenWorkspaceResponseFile(page) {
+async function createAndShowWorkspaceResponseFile(page) {
   await runCommand(page, WORKSPACE_CAPTURE_CMD)
   await page.locator('.rail-nav [data-action="workspace"]').click()
   await expect(page.locator('#workspace-modal')).toBeVisible()
   const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
   await expect(row).toBeVisible()
-  await row.locator('[data-workspace-action="view"]').click()
-  await expect(page.locator('#workspace-viewer')).toBeVisible()
-  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
 }
 
 async function openProjectsModalWithCaptureProject(page, themeName) {
@@ -387,7 +384,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await createAndOpenWorkspaceResponseFile(page)
+      await createAndShowWorkspaceResponseFile(page)
     },
   },
   {

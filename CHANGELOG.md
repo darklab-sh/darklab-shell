@@ -15,6 +15,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Files now feels like a compact file browser instead of a stack of oversized cards.**
+  - **Before:** folders, files, and the parent directory each occupied a large card with repeated action buttons, while quota details and linked-record context were packed into general metadata text.
+  - **After:** the modal uses a dense, responsive browser with folders first, familiar columns, file-type icons, breadcrumbs and an Up control, client-side search and sorting, separate quota indicators, and one accessible overflow menu per row. File names are the primary open action, linked projects and runs stay easy to scan, read-only team actions explain why they're unavailable, and mobile keeps the same controls in a compact two-column row.
+  - **Tests:** workspace unit coverage pins sorting, filtering, navigation, timestamps, quota state, and keyboard-operated action menus; Playwright exercises the live desktop workflow and narrow-screen layout in source and bundled asset modes.
+
 - **Scheduled Docker fanout now hydrates every Docker runner from one shared AMD64 cache.**
   - **Before:** `bael` alone wrote a release-line-specific registry cache, while the remaining fanout jobs performed unrelated local builds that couldn't reuse it.
   - **After:** one prerequisite cache warmer can run on any standard self-managed Docker runner and writes the stable `buildcache-amd64` reference under the same lock as release publication. Once it succeeds, every standard and SELinux Docker runner imports the recorded cache and pinned Python base digest read-only while the fanout runs concurrently; the rootless Podman job keeps its separate image store.

@@ -72,8 +72,18 @@ const historyPanel = document.getElementById('history-panel');
 const workspaceOverlay = document.getElementById('workspace-overlay');
 const workspaceModal = document.getElementById('workspace-modal');
 const workspaceSummary = document.getElementById('workspace-summary');
+const workspaceScopeBadge = document.getElementById('workspace-scope-badge');
+const workspaceFileUsage = document.getElementById('workspace-file-usage');
+const workspaceFileUsageFill = document.getElementById('workspace-file-usage-fill');
+const workspaceStorageUsage = document.getElementById('workspace-storage-usage');
+const workspaceStorageUsageFill = document.getElementById('workspace-storage-usage-fill');
 const workspaceMessage = document.getElementById('workspace-message');
 const workspaceBreadcrumbs = document.getElementById('workspace-breadcrumbs');
+const workspaceUpBtn = document.getElementById('workspace-up-btn');
+const workspaceSearchInput = document.getElementById('workspace-search-input');
+const workspaceSortSelect = document.getElementById('workspace-sort-select');
+const workspaceResultSummary = document.getElementById('workspace-result-summary');
+const workspaceReadOnlyStatus = document.getElementById('workspace-read-only-status');
 const workspaceFileList = document.getElementById('workspace-file-list');
 const workspaceViewerOverlay = document.getElementById('workspace-viewer-overlay');
 const workspaceViewer = document.getElementById('workspace-viewer');
@@ -250,6 +260,8 @@ export {
   workspaceEditor,
   workspaceEditorOverlay,
   workspaceEditorTitle,
+  workspaceFileUsage,
+  workspaceFileUsageFill,
   workspaceFileList,
   workspaceLabelsInput,
   workspaceMessage,
@@ -260,9 +272,17 @@ export {
   workspaceOverlay,
   workspacePathInput,
   workspaceRefreshBtn,
+  workspaceResultSummary,
+  workspaceReadOnlyStatus,
   workspaceSaveBtn,
+  workspaceScopeBadge,
+  workspaceSearchInput,
+  workspaceSortSelect,
+  workspaceStorageUsage,
+  workspaceStorageUsageFill,
   workspaceSummary,
   workspaceTextInput,
+  workspaceUpBtn,
   workspaceViewer,
   workspaceViewerAutoRefreshLabel,
   workspaceViewerAutoRefreshToggle,

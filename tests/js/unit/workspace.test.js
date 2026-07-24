@@ -27,19 +27,73 @@ describe('workspace UI helpers', () => {
       limits: { quota_bytes: 1024, max_files: 10 },
     })
 
-    expect(document.getElementById('workspace-summary').textContent).toBe('Personal · 1 / 10 files · 11 B / 1 KB')
+    expect(document.getElementById('workspace-scope-badge').textContent).toBe('Personal')
+    expect(document.getElementById('workspace-file-usage').textContent).toBe('1 / 10')
+    expect(document.getElementById('workspace-storage-usage').textContent).toBe('11 B / 1 KB')
+    expect(document.getElementById('workspace-file-usage-fill').style.width).toBe('10%')
+    expect(document.getElementById('workspace-summary').getAttribute('aria-label'))
+      .toBe('Personal, 1 / 10 files, 11 B / 1 KB')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('targets.txt')
-    expect(document.querySelector('.workspace-file-details').textContent)
+    expect(document.querySelector('.workspace-context-copy').textContent)
       .toContain('1 artifact · 1 run · Signal Case')
+    expect(document.querySelector('.workspace-modified-cell time').title)
+      .toBe('2026-01-01T00:00:00Z')
     expect([...document.querySelectorAll('.workspace-metadata-chip')].map(node => node.textContent))
       .toEqual(['important', 'note'])
     expect([...document.querySelectorAll('[data-workspace-action]')].map(btn => btn.textContent)).toEqual([
-      'View',
+      'targets.txt',
       'Edit',
       'Move',
       'Download',
       'Delete',
     ])
+  })
+
+  it('filters file context, sorts files within folders, and supports the action menu keyboard', () => {
+    const { renderWorkspaceFiles } = setupWorkspace()
+
+    renderWorkspaceFiles({
+      directories: [{ path: 'reports' }],
+      files: [
+        { path: 'alpha.txt', size: 10, mtime: '2026-01-01T00:00:00Z' },
+        {
+          path: 'zeta.json',
+          size: 50,
+          mtime: '2026-02-01T00:00:00Z',
+          artifact_count: 1,
+          project_names: ['Signal Case'],
+        },
+      ],
+      usage: { bytes_used: 60, file_count: 2 },
+      limits: { quota_bytes: 1024, max_files: 10 },
+    })
+
+    const visibleNames = () => [...document.querySelectorAll('.workspace-file-name')]
+      .map(node => node.textContent)
+    expect(visibleNames()).toEqual(['reports', 'alpha.txt', 'zeta.json'])
+
+    const sort = document.getElementById('workspace-sort-select')
+    sort.value = 'size'
+    sort.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(visibleNames()).toEqual(['reports', 'zeta.json', 'alpha.txt'])
+
+    const search = document.getElementById('workspace-search-input')
+    search.value = 'signal case'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(visibleNames()).toEqual(['zeta.json'])
+    expect(document.getElementById('workspace-result-summary').textContent).toBe('1 of 3 items')
+
+    const trigger = document.querySelector('.workspace-action-menu-trigger')
+    trigger.click()
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement.textContent).toBe('Edit')
+
+    const menu = document.querySelector('.workspace-action-menu')
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(document.activeElement.textContent).toBe('Move')
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('renders team viewer and archived Files as read-only while keeping preview and download available', async () => {
@@ -60,8 +114,12 @@ describe('workspace UI helpers', () => {
       limits: { quota_bytes: 1024, max_files: 10 },
     })
 
-    expect(document.getElementById('workspace-summary').textContent)
-      .toBe('Team Alpha · 1 / 10 files · 11 B / 1 KB · read-only')
+    expect(document.getElementById('workspace-scope-badge').textContent).toBe('Team Alpha')
+    expect(document.getElementById('workspace-summary').getAttribute('aria-label'))
+      .toBe('Team Alpha, 1 / 10 files, 11 B / 1 KB, read-only')
+    expect(document.getElementById('workspace-read-only-status').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-read-only-status').title)
+      .toBe("Team viewers can view Files but can't change them.")
     expect(document.getElementById('workspace-new-btn').disabled).toBe(true)
     expect(document.getElementById('workspace-new-folder-btn').disabled).toBe(true)
     expect(document.querySelector('.workspace-folder-row').draggable).toBe(false)
@@ -105,8 +163,8 @@ describe('workspace UI helpers', () => {
 
     expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(true)
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files', { cache: 'no-store' })
-    expect(document.getElementById('workspace-summary').textContent)
-      .toBe('Team Reload · 1 / 10 files · 9 B / 1 KB')
+    expect(document.getElementById('workspace-summary').getAttribute('aria-label'))
+      .toBe('Team Reload, 1 / 10 files, 9 B / 1 KB')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('team.txt')
   })
 
@@ -128,22 +186,21 @@ describe('workspace UI helpers', () => {
       'targets.txt',
     ])
     expect(document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').textContent)
-      .toBe('Open')
+      .toBe('amass-viz')
     expect([...document.querySelectorAll('.workspace-folder-row [data-workspace-action]')].map(btn => btn.textContent))
-      .toEqual(['Open', 'Move', 'Delete'])
-    expect(document.querySelector('.workspace-folder-row').dataset.pressableBound).toBe('1')
+      .toEqual(['amass-viz', 'Move', 'Delete'])
+    expect(document.querySelector('.workspace-folder-row').hasAttribute('tabindex')).toBe(false)
 
     document.querySelector('.workspace-folder-row .workspace-file-name').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
-      '..',
       'assets',
       'amass.html',
     ])
     expect([...document.querySelectorAll('#workspace-breadcrumbs [data-workspace-dir]')]
       .map(node => node.textContent)).toEqual(['Files', 'amass-viz'])
 
-    document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').click()
+    document.getElementById('workspace-up-btn').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
       'amass-viz',
@@ -151,10 +208,9 @@ describe('workspace UI helpers', () => {
     ])
 
     document.querySelector('.workspace-folder-row .workspace-file-name').click()
-    document.querySelectorAll('.workspace-folder-row .workspace-file-name')[1].click()
+    document.querySelector('.workspace-folder-row .workspace-file-name').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
-      '..',
       'app.js',
     ])
     expect([...document.querySelectorAll('#workspace-breadcrumbs [data-workspace-dir]')]
@@ -163,7 +219,6 @@ describe('workspace UI helpers', () => {
     document.querySelector('#workspace-breadcrumbs [data-workspace-dir="amass-viz"]').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
-      '..',
       'assets',
       'amass.html',
     ])
@@ -205,9 +260,9 @@ describe('workspace UI helpers', () => {
     document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
-      '..',
       'empty',
     ])
+    expect(document.getElementById('workspace-up-btn').disabled).toBe(false)
   })
 
   it('confirms folder deletion with file counts before deleting from the browser', async () => {
@@ -361,7 +416,7 @@ describe('workspace UI helpers', () => {
     renderWorkspaceFiles({ files: [], usage: { bytes_used: 0, file_count: 0 }, limits: { max_files: 10 } })
 
     expect(document.querySelector('.workspace-empty').textContent)
-      .toBe('No workspace files yet. Create a text file or save command output to use with file-enabled commands.')
+      .toBe('No Files yet. Create a text file or save command output to use with file-enabled commands.')
   })
 
   it('saves new files relative to the currently selected folder', async () => {
@@ -753,7 +808,8 @@ describe('workspace UI helpers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=targets.txt')
     expect(document.getElementById('workspace-viewer-title').textContent).toBe('targets.txt')
     expect(document.getElementById('workspace-viewer-text').textContent).toContain('updated target')
-    expect(document.getElementById('workspace-summary').textContent).toBe('Personal · 1 / 10 files · 18 B / 1 KB')
+    expect(document.getElementById('workspace-summary').getAttribute('aria-label'))
+      .toBe('Personal, 1 / 10 files, 18 B / 1 KB')
   })
 
   it('refreshes the viewer directly and keeps following when scrolled to the bottom', async () => {

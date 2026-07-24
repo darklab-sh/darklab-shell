@@ -100,7 +100,11 @@ No open Known Issues are currently tracked.
 
 ## Technical Debt
 
-No open Technical Debt is currently tracked.
+- **Stage source-mounted development code into a container-owned runtime tree.**
+  - `compose.dev.yaml` currently mounts `./app` directly at `/app`, so native Linux keeps the checkout's ownership and permissions. Files synced or edited as `0600` can't be imported after the container drops to `appuser`, even though Docker Desktop filesystem sharing can hide the problem.
+  - Mount the checkout at a separate read-only source path, copy it into an ephemeral `/app` runtime tree while the entrypoint still runs as root, and make the staged tree readable by `appuser` before Gunicorn or background workers start.
+  - Keep production unchanged and without source mounts. Preserve the development edit-and-restart loop, read-only container filesystem, `/app` path contracts, local configuration overlays, worker startup, and scanner separation.
+  - Add Linux-focused Compose and entrypoint regression coverage for owner-only source files, readable staged files, failed source staging, and the absence of a production source bind.
 
 ---
 
@@ -114,6 +118,8 @@ These are possible future improvements, split by whether they look worth carryin
   - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
 - **Extend comparison beyond run-to-run finding and artifact diffs.**
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
+- **Add a desktop inspector to the Files browser.**
+  - A side pane could show a quick preview, metadata, linked runs and projects, labels, notes, and common actions without replacing the focused mobile viewer.
 - **Package re-import preview/apply.**
   - Worth scoping once package handoff archives are used regularly. It should reuse the Atlas import preview/apply pattern and the package manifest import hints before it writes project data.
 - **Project Monitoring CLI surface.**

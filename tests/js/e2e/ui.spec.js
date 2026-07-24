@@ -45,6 +45,15 @@ async function saveWorkspaceEditor(page, { timeout = 15_000 } = {}) {
   await expect(page.locator('#workspace-editor')).not.toBeVisible({ timeout })
 }
 
+async function workspaceRowAction(row, action, { timeout = 15_000 } = {}) {
+  const trigger = row.locator('.workspace-action-menu-trigger')
+  await trigger.click()
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  const actionButton = row.locator(`[data-workspace-action="${action}"]`)
+  await expect(actionButton).toBeVisible({ timeout })
+  return actionButton
+}
+
 async function expectEntityMetadata(page, entityType, entityId, { labels = [], note = '' }, { timeout = 15_000 } = {}) {
   await expect.poll(async () => page.evaluate(async ({ entityType: type, entityId: id, expectedLabels }) => {
     const [labelsResp, noteResp] = await Promise.all([
@@ -1595,7 +1604,9 @@ test.describe('workspace modal', () => {
 
     await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
     await expect(page.locator('#workspace-modal .faq-title')).toHaveText('FILES')
-    await expect(page.locator('#workspace-summary')).toContainText('0 / 100 files')
+    await expect(page.locator('#workspace-scope-badge')).toHaveText('Personal')
+    await expect(page.locator('#workspace-file-usage')).toHaveText('0 / 100')
+    await expect(page.locator('#workspace-storage-usage')).toContainText('0 B')
     await expect(page.locator('#workspace-refresh-btn')).toHaveAttribute('aria-label', 'Refresh files')
     await expect(page.locator('#workspace-editor')).not.toBeVisible()
     await expect(page.locator('label[for="workspace-path-input"]')).toHaveText('File Name')
@@ -1615,7 +1626,16 @@ test.describe('workspace modal', () => {
 
     const row = page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })
     await expect(row).toBeVisible()
-    await expect(page.locator('#workspace-summary')).toContainText('1 / 100 files')
+    await expect(page.locator('#workspace-file-usage')).toHaveText('1 / 100')
+    await expect(page.locator('#workspace-result-summary')).toHaveText('1 item')
+
+    await page.locator('#workspace-search-input').fill('targets')
+    await expect(row).toBeVisible()
+    await page.locator('#workspace-search-input').fill('missing')
+    await expect(row).toHaveCount(0)
+    await expect(page.locator('.workspace-empty')).toContainText('No files or folders match')
+    await page.locator('[data-workspace-clear-filter]').click()
+    await expect(row).toBeVisible()
 
     await row.locator('[data-workspace-action="view"]').click()
     await expect(page.locator('#workspace-viewer')).toBeVisible()
@@ -1624,7 +1644,7 @@ test.describe('workspace modal', () => {
 
     await page.locator('#workspace-close-viewer-btn').click()
     await expect(page.locator('#workspace-viewer')).not.toBeVisible()
-    await row.locator('[data-workspace-action="edit"]').click()
+    await (await workspaceRowAction(row, 'edit')).click()
     await expect(page.locator('#workspace-editor')).toBeVisible()
     await page.locator('#workspace-text-input').fill('darklab.sh\nip.darklab.sh\n')
     await saveWorkspaceEditor(page)
@@ -1633,9 +1653,10 @@ test.describe('workspace modal', () => {
 
     await page.locator('#workspace-close-viewer-btn').click()
     await expect(page.locator('#workspace-viewer')).not.toBeVisible()
+    const downloadAction = await workspaceRowAction(row, 'download')
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      row.locator('[data-workspace-action="download"]').click(),
+      downloadAction.click(),
     ])
     expect(download.suggestedFilename()).toBe('targets.txt')
 
@@ -1648,7 +1669,7 @@ test.describe('workspace modal', () => {
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
     await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
 
-    await row.locator('[data-workspace-action="move"]').click()
+    await (await workspaceRowAction(row, 'move')).click()
     await page.locator('#confirm-host .form-input').fill('moved')
     await confirmWorkspaceAction(page, 'move')
     await expect(row).toHaveCount(0)
@@ -1704,7 +1725,7 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-path-input')).toHaveValue('')
     await page.locator('#workspace-cancel-edit-btn').click()
 
-    await page.locator('.workspace-folder-row').filter({ hasText: '..' }).locator('[data-workspace-action="open-folder"]').click()
+    await page.locator('#workspace-up-btn').click()
     await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
     await expect(page.locator('.workspace-folder-row').filter({ hasText: 'reports' })).toBeVisible()
 
@@ -1746,6 +1767,27 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-viewer')).not.toBeVisible()
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
     await expect(folder).toBeVisible()
+  })
+
+  test('keeps file navigation and secondary actions compact on narrow screens', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.locator('.rail-nav [data-action="workspace"]').evaluate((button) => button.click())
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
+
+    await page.locator('#workspace-new-btn').click()
+    await page.locator('#workspace-path-input').fill('mobile-notes.txt')
+    await page.locator('#workspace-text-input').fill('mobile workspace\n')
+    await saveWorkspaceEditor(page)
+
+    const row = page.locator('.workspace-file-row').filter({ hasText: 'mobile-notes.txt' })
+    await expect(row).toBeVisible()
+    await expect(page.locator('.workspace-browser-header')).toBeHidden()
+    await expect(row.locator('.workspace-file-details')).toBeVisible()
+    await expect(row.locator('.workspace-context-cell')).toBeHidden()
+    await expect(row.locator('.workspace-action-menu-trigger')).toBeVisible()
+
+    await (await workspaceRowAction(row, 'edit')).click()
+    await expect(page.locator('#workspace-editor')).toBeVisible()
   })
 })
 
