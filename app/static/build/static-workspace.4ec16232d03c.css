@@ -665,6 +665,7 @@
 
 .workspace-file-row {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  cursor: pointer;
   min-height: 50px;
   padding: 6px 10px;
   transition: background 120ms ease, border-color 120ms ease;

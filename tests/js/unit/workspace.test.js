@@ -62,7 +62,7 @@ describe('workspace UI helpers', () => {
       'Delete',
     ])
 
-    document.querySelector('[data-workspace-action="view"]').click()
+    document.querySelector('.workspace-context-cell').click()
     await flushWorkspacePromises()
 
     expect(document.querySelector('.workspace-file-row').classList.contains('is-selected')).toBe(true)
@@ -222,7 +222,7 @@ describe('workspace UI helpers', () => {
       .toEqual(['amass-viz', 'Move', 'Delete'])
     expect(document.querySelector('.workspace-folder-row').hasAttribute('tabindex')).toBe(false)
 
-    document.querySelector('.workspace-folder-row .workspace-file-name').click()
+    document.querySelector('.workspace-folder-row .workspace-context-cell').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
       '..',
@@ -258,7 +258,7 @@ describe('workspace UI helpers', () => {
     expect([...document.querySelectorAll('#workspace-breadcrumbs [data-workspace-dir]')]
       .map(node => node.textContent)).toEqual(['Files', 'amass-viz', 'assets'])
 
-    document.querySelector('#workspace-breadcrumbs [data-workspace-dir="amass-viz"]').click()
+    document.querySelector('.workspace-parent-row .workspace-context-cell').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
       '..',

@@ -1641,7 +1641,7 @@ test.describe('workspace modal', () => {
     await page.locator('[data-workspace-clear-filter]').click()
     await expect(row).toBeVisible()
 
-    await row.locator('[data-workspace-action="view"]').click()
+    await row.locator('.workspace-size-cell').click()
     await expect(row).toHaveClass(/is-selected/)
     await expect(page.locator('#workspace-inspector-content')).toBeVisible()
     await expect(page.locator('#workspace-inspector-empty')).toBeHidden()
@@ -1701,7 +1701,7 @@ test.describe('workspace modal', () => {
     await page.locator('#confirm-host .form-input').fill('moved')
     await confirmWorkspaceAction(page, 'move')
     await expect(row).toHaveCount(0)
-    await page.locator('.workspace-folder-row').filter({ hasText: 'moved' }).locator('.workspace-file-name').click()
+    await page.locator('.workspace-folder-row').filter({ hasText: 'moved' }).locator('.workspace-context-cell').click()
     await expect(page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })).toBeVisible()
 
     await page.locator('.workspace-close').click()
@@ -1760,11 +1760,11 @@ test.describe('workspace modal', () => {
     await expect(parentRow).toHaveAttribute('data-workspace-drop-target', 'folder')
     await expect(parentRow.locator('.workspace-file-name')).toHaveText('..')
     await expect(parentRow.locator('.workspace-file-details')).toHaveText('Parent folder · Files')
-    await parentRow.locator('.workspace-file-name').click()
+    await parentRow.locator('.workspace-context-cell').click()
     await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
     await expect(page.locator('.workspace-folder-row').filter({ hasText: 'reports' })).toBeVisible()
 
-    await page.locator('.workspace-folder-row').filter({ hasText: 'reports' }).locator('.workspace-file-name').click()
+    await page.locator('.workspace-folder-row').filter({ hasText: 'reports' }).locator('.workspace-context-cell').click()
     await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/reports')
 
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
@@ -1779,17 +1779,16 @@ test.describe('workspace modal', () => {
     await expect(folder).toBeVisible()
     await expect(page.locator('.workspace-file-row').filter({ hasText: 'amass.html' })).toHaveCount(0)
 
-    await folder.locator('.workspace-file-name').click()
+    await folder.locator('.workspace-context-cell').click()
     await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/amass-viz')
 
     const file = page.locator('.workspace-file-row').filter({ hasText: 'amass.html' })
     await expect(file).toBeVisible()
-    // Pre-locate and wait for the action button so the click doesn't burn the
-    // test budget in its hidden auto-wait when the row renders before its
-    // action buttons mount on slow CI runners.
-    const viewBtn = file.locator('[data-workspace-action="view"]')
-    await expect(viewBtn).toBeVisible({ timeout: 15_000 })
-    await viewBtn.click()
+    // Wait for a non-action cell so this exercises row activation without
+    // racing the rest of the row on slower CI runners.
+    const fileModifiedCell = file.locator('.workspace-modified-cell')
+    await expect(fileModifiedCell).toBeVisible({ timeout: 15_000 })
+    await fileModifiedCell.click()
 
     await expect(page.locator('#workspace-inspector-content')).toBeVisible()
     await expect(page.locator('.workspace-inspector-title')).toHaveText('amass.html')

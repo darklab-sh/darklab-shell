@@ -1348,6 +1348,7 @@ function _bindWorkspaceFolderRow(row, path) {
   row.className = 'workspace-file-row workspace-folder-row';
   row.dataset.kind = 'folder';
   row.dataset.path = path;
+  row.dataset.workspacePrimaryAction = 'open-folder';
   row.dataset.workspaceDropTarget = 'folder';
   row.setAttribute('role', 'row');
 }
@@ -1696,6 +1697,7 @@ function renderWorkspaceBrowser() {
     row.className = 'workspace-file-row selection-row';
     row.dataset.kind = 'file';
     row.dataset.path = file.path;
+    row.dataset.workspacePrimaryAction = 'view';
     row.setAttribute('role', 'row');
     const selected = file.path === _workspaceSelectedPath;
     row.classList.toggle('is-selected', selected);
@@ -2593,12 +2595,14 @@ workspaceFileList?.addEventListener('click', event => {
     renderWorkspaceBrowser();
     return;
   }
-  const btn = event.target && event.target.closest ? event.target.closest('[data-workspace-action]') : null;
-  if (!btn) return;
-  if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
-  const row = btn.closest('.workspace-file-row');
+  const target = event.target;
+  const btn = target && target.closest ? target.closest('[data-workspace-action]') : null;
+  if (btn && (btn.disabled || btn.getAttribute('aria-disabled') === 'true')) return;
+  const row = target && target.closest ? target.closest('.workspace-file-row') : null;
   if (!row || !workspaceFileList.contains(row)) return;
-  const action = btn.dataset.workspaceAction;
+  if (!btn && target.closest('.workspace-file-actions')) return;
+  const action = btn?.dataset.workspaceAction || row.dataset.workspacePrimaryAction;
+  if (!action) return;
   const path = row?.dataset.path || '';
   if (!path && action !== 'open-folder') return;
   _closeWorkspaceActionMenu();
