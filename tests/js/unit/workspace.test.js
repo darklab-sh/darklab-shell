@@ -194,9 +194,18 @@ describe('workspace UI helpers', () => {
     document.querySelector('.workspace-folder-row .workspace-file-name').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      '..',
       'assets',
       'amass.html',
     ])
+    const parentRow = document.querySelector('.workspace-parent-row')
+    expect(parentRow.dataset.path).toBe('')
+    expect(parentRow.dataset.workspaceDropTarget).toBe('folder')
+    expect(parentRow.draggable).toBe(false)
+    expect(parentRow.querySelector('.workspace-file-name').getAttribute('aria-label'))
+      .toBe('Open parent folder Files')
+    expect(parentRow.querySelector('.workspace-file-details').textContent)
+      .toBe('Parent folder · Files')
     expect([...document.querySelectorAll('#workspace-breadcrumbs [data-workspace-dir]')]
       .map(node => node.textContent)).toEqual(['Files', 'amass-viz'])
 
@@ -208,17 +217,20 @@ describe('workspace UI helpers', () => {
     ])
 
     document.querySelector('.workspace-folder-row .workspace-file-name').click()
-    document.querySelector('.workspace-folder-row .workspace-file-name').click()
+    document.querySelector('.workspace-folder-row:not(.workspace-parent-row) .workspace-file-name').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      '..',
       'app.js',
     ])
+    expect(document.querySelector('.workspace-parent-row').dataset.path).toBe('amass-viz')
     expect([...document.querySelectorAll('#workspace-breadcrumbs [data-workspace-dir]')]
       .map(node => node.textContent)).toEqual(['Files', 'amass-viz', 'assets'])
 
     document.querySelector('#workspace-breadcrumbs [data-workspace-dir="amass-viz"]').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      '..',
       'assets',
       'amass.html',
     ])
@@ -260,6 +272,7 @@ describe('workspace UI helpers', () => {
     document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').click()
 
     expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      '..',
       'empty',
     ])
     expect(document.getElementById('workspace-up-btn').disabled).toBe(false)
@@ -353,19 +366,21 @@ describe('workspace UI helpers', () => {
     expect(document.querySelector('.workspace-file-name').textContent).toBe('reports')
   })
 
-  it('moves a dragged file onto a workspace folder after confirmation', async () => {
+  it('moves a dragged file into a folder and back through the parent row after confirmation', async () => {
     const apiFetch = vi.fn((url, opts) => {
       if (String(url) === '/workspace/files/move' && opts?.method === 'POST') {
+        const request = JSON.parse(opts.body)
+        const movingToParent = request.source === 'reports/targets.txt'
         return Promise.resolve(responseJson({
           moved: {
-            source: 'targets.txt',
-            destination: 'reports/targets.txt',
+            source: request.source,
+            destination: movingToParent ? 'targets.txt' : 'reports/targets.txt',
             kind: 'file',
             file_count: 1,
           },
           workspace: {
             directories: [{ path: 'reports' }],
-            files: [{ path: 'reports/targets.txt', size: 11 }],
+            files: [{ path: movingToParent ? 'targets.txt' : 'reports/targets.txt', size: 11 }],
             usage: { bytes_used: 11, file_count: 1 },
             limits: { quota_bytes: 4096, max_files: 10 },
           },
@@ -391,14 +406,21 @@ describe('workspace UI helpers', () => {
       setData: vi.fn(),
       getData: vi.fn(() => 'targets.txt'),
     }
-    for (const [node, type] of [[source, 'dragstart'], [destination, 'dragover'], [destination, 'drop']]) {
-      const event = new Event(type, { bubbles: true, cancelable: true })
-      Object.defineProperty(event, 'dataTransfer', { configurable: true, value: dataTransfer })
-      node.dispatchEvent(event)
+    const dragTo = (dragSource, dragDestination) => {
+      for (const [node, type] of [
+        [dragSource, 'dragstart'],
+        [dragDestination, 'dragover'],
+        [dragDestination, 'drop'],
+      ]) {
+        const event = new Event(type, { bubbles: true, cancelable: true })
+        Object.defineProperty(event, 'dataTransfer', { configurable: true, value: dataTransfer })
+        node.dispatchEvent(event)
+      }
     }
+    dragTo(source, destination)
     await flushWorkspacePromises()
 
-    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+    expect(showConfirm).toHaveBeenNthCalledWith(1, expect.objectContaining({
       body: {
         text: 'Move file targets.txt?',
         note: 'Destination folder: reports',
@@ -407,6 +429,23 @@ describe('workspace UI helpers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files/move', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ source: 'targets.txt', destination: 'reports' }),
+    }))
+
+    document.querySelector('.workspace-folder-row[data-path="reports"] .workspace-file-name').click()
+    const nestedSource = document.querySelector('.workspace-file-row[data-path="reports/targets.txt"]')
+    const parentDestination = document.querySelector('.workspace-parent-row[data-path=""]')
+    dragTo(nestedSource, parentDestination)
+    await flushWorkspacePromises()
+
+    expect(showConfirm).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      body: {
+        text: 'Move file reports/targets.txt?',
+        note: 'Destination folder: Files',
+      },
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/move', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ source: 'reports/targets.txt', destination: '' }),
     }))
   })
 

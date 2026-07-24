@@ -344,6 +344,18 @@
   background: color-mix(in srgb, var(--theme-panel-bg) 96%, var(--border));
 }
 
+.workspace-parent-row {
+  background: color-mix(in srgb, var(--theme-panel-bg) 92%, var(--border));
+}
+
+.workspace-parent-row .workspace-file-icon {
+  border-style: dashed;
+}
+
+.workspace-parent-row .workspace-context-copy {
+  color: var(--text);
+}
+
 .workspace-file-icon {
   align-items: center;
   border: 1px solid color-mix(in srgb, var(--muted) 34%, var(--border));

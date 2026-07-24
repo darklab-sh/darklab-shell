@@ -1725,7 +1725,13 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-path-input')).toHaveValue('')
     await page.locator('#workspace-cancel-edit-btn').click()
 
-    await page.locator('#workspace-up-btn').click()
+    const parentRow = page.locator('.workspace-parent-row')
+    await expect(parentRow).toBeVisible()
+    await expect(parentRow).toHaveAttribute('data-path', '')
+    await expect(parentRow).toHaveAttribute('data-workspace-drop-target', 'folder')
+    await expect(parentRow.locator('.workspace-file-name')).toHaveText('..')
+    await expect(parentRow.locator('.workspace-file-details')).toHaveText('Parent folder · Files')
+    await parentRow.locator('.workspace-file-name').click()
     await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
     await expect(page.locator('.workspace-folder-row').filter({ hasText: 'reports' })).toBeVisible()
 

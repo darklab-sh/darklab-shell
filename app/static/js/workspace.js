@@ -1319,6 +1319,32 @@ function _workspaceSortedAndFilteredEntries() {
   };
 }
 
+function _workspaceParentRow() {
+  if (!_workspaceCurrentDir) return null;
+  const parentPath = _workspaceParentDir(_workspaceCurrentDir);
+  const parentLabel = parentPath ? `Files/${parentPath}` : 'Files';
+  const row = document.createElement('div');
+  _bindWorkspaceFolderRow(row, parentPath);
+  row.classList.add('workspace-parent-row');
+  row.dataset.workspaceParent = 'true';
+  row.draggable = false;
+  row.appendChild(_workspaceNameNode(
+    '..',
+    parentPath,
+    'folder',
+    `Parent folder · ${parentLabel}`,
+    { accessibleName: `Open parent folder ${parentLabel}` },
+  ));
+  row.appendChild(_workspaceContextNode('Parent folder'));
+  row.appendChild(_workspaceValueNode('', 'workspace-modified-cell'));
+  row.appendChild(_workspaceValueNode('', 'workspace-size-cell'));
+  const actions = document.createElement('div');
+  actions.className = 'workspace-file-actions workspace-parent-actions';
+  actions.setAttribute('role', 'cell');
+  row.appendChild(actions);
+  return row;
+}
+
 function renderWorkspaceBreadcrumbs() {
   if (!workspaceBreadcrumbs) return;
   workspaceBreadcrumbs.textContent = '';
@@ -1369,6 +1395,9 @@ function renderWorkspaceBrowser() {
       ? `${visible} of ${total} ${itemLabel}`
       : `${total} ${itemLabel}`;
   }
+
+  const parentRow = _workspaceParentRow();
+  if (parentRow) workspaceFileList.appendChild(parentRow);
 
   for (const folder of folders) {
     const row = document.createElement('div');
@@ -1456,7 +1485,7 @@ function renderWorkspaceBrowser() {
   }
 }
 
-function _workspaceNameNode(nameText, path, kind, detailsText = '') {
+function _workspaceNameNode(nameText, path, kind, detailsText = '', { accessibleName = '' } = {}) {
   const meta = document.createElement('div');
   meta.className = 'workspace-file-meta';
   meta.setAttribute('role', 'cell');
@@ -1472,7 +1501,10 @@ function _workspaceNameNode(nameText, path, kind, detailsText = '') {
   name.type = 'button';
   name.className = 'btn btn-ghost workspace-file-name workspace-item-open';
   name.dataset.workspaceAction = kind === 'folder' ? 'open-folder' : 'view';
-  name.setAttribute('aria-label', `${kind === 'folder' ? 'Open folder' : 'View file'} ${nameText}`);
+  name.setAttribute(
+    'aria-label',
+    accessibleName || `${kind === 'folder' ? 'Open folder' : 'View file'} ${nameText}`,
+  );
   name.textContent = nameText;
   const details = document.createElement('div');
   details.className = 'workspace-file-details';
