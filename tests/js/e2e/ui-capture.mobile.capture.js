@@ -82,16 +82,13 @@ async function openRecentsSheet(page) {
   await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 }
 
-async function createAndOpenWorkspaceResponseFileMobile(page) {
+async function createAndShowWorkspaceResponseFileMobile(page) {
   await runCommandMobile(page, WORKSPACE_CAPTURE_CMD)
   await openMenu(page)
   await page.locator('#mobile-menu-sheet [data-menu-action="workspace"]').click()
   await expect(page.locator('#workspace-modal')).toBeVisible()
   const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
   await expect(row).toBeVisible()
-  await row.locator('[data-workspace-action="view"]').click()
-  await expect(page.locator('#workspace-viewer')).toBeVisible()
-  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
 }
 
 async function openMobileProjectsWithCaptureProject(page, themeName) {
@@ -314,7 +311,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await createAndOpenWorkspaceResponseFileMobile(page)
+      await createAndShowWorkspaceResponseFileMobile(page)
     },
   },
   {

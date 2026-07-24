@@ -904,13 +904,30 @@
   <div id="workspace-modal" class="mobile-sheet-surface">
     <div class="faq-header">
       <span class="faq-title">FILES</span>
+      <span class="workspace-scope-badge badge" id="workspace-scope-badge">Personal</span>
       <button type="button" class="close-btn workspace-close" aria-label="Close files">✕</button>
     </div>
     <div class="workspace-body nice-scroll">
       <div class="workspace-toolbar">
-        <div>
-          <div class="workspace-heading">Session files</div>
-          <div class="workspace-subtitle" id="workspace-summary">Not loaded</div>
+        <div class="workspace-usage-summary" id="workspace-summary" aria-live="polite">
+          <div class="workspace-usage-item">
+            <div class="workspace-usage-copy">
+              <span class="workspace-usage-label">Files</span>
+              <span class="workspace-usage-value" id="workspace-file-usage">Not loaded</span>
+            </div>
+            <span class="workspace-usage-meter" aria-hidden="true">
+              <span class="workspace-usage-fill" id="workspace-file-usage-fill"></span>
+            </span>
+          </div>
+          <div class="workspace-usage-item">
+            <div class="workspace-usage-copy">
+              <span class="workspace-usage-label">Storage</span>
+              <span class="workspace-usage-value" id="workspace-storage-usage">Not loaded</span>
+            </div>
+            <span class="workspace-usage-meter" aria-hidden="true">
+              <span class="workspace-usage-fill" id="workspace-storage-usage-fill"></span>
+            </span>
+          </div>
         </div>
         <div class="workspace-toolbar-actions">
           <button type="button" class="btn btn-secondary btn-compact workspace-refresh-btn" id="workspace-refresh-btn" aria-label="Refresh files" title="Refresh files"><span class="workspace-refresh-glyph" aria-hidden="true">⟳</span></button>
@@ -919,8 +936,53 @@
         </div>
       </div>
       <div id="workspace-message" class="workspace-message u-hidden"></div>
-      <nav id="workspace-breadcrumbs" class="workspace-breadcrumbs" aria-label="Files folder path"></nav>
-      <div id="workspace-file-list" class="workspace-file-list" aria-live="polite"></div>
+      <div class="workspace-browser-tools">
+        <div class="workspace-navigation">
+          <button type="button" class="btn btn-secondary btn-compact workspace-up-btn" id="workspace-up-btn" aria-label="Open parent folder">
+            <span aria-hidden="true">↑</span>
+            <span>Up</span>
+          </button>
+          <nav id="workspace-breadcrumbs" class="workspace-breadcrumbs nice-scroll" aria-label="Files folder path"></nav>
+        </div>
+        <div class="workspace-browser-controls">
+          <label class="workspace-search-wrap" for="workspace-search-input">
+            <span class="workspace-search-glyph" aria-hidden="true">⌕</span>
+            <input id="workspace-search-input" class="form-input workspace-search-input" type="search" placeholder="Search this folder" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="search">
+          </label>
+          <label class="workspace-sort-wrap" for="workspace-sort-select">
+            <span>Sort</span>
+            <select id="workspace-sort-select" class="form-select workspace-sort-select" data-portal-menu="true">
+              <option value="name">Name</option>
+              <option value="modified">Modified</option>
+              <option value="size">Size</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="workspace-results-bar">
+        <span id="workspace-result-summary">0 items</span>
+        <span class="workspace-read-only-status u-hidden" id="workspace-read-only-status">Read-only</span>
+      </div>
+      <div class="workspace-browser-layout">
+        <div class="workspace-browser-table" role="table" aria-label="Files in the current folder">
+          <div class="workspace-browser-header" role="row">
+            <span role="columnheader">Name</span>
+            <span role="columnheader">Context</span>
+            <span role="columnheader">Modified</span>
+            <span role="columnheader">Size</span>
+            <span role="columnheader" aria-label="Actions"></span>
+          </div>
+          <div id="workspace-file-list" class="workspace-file-list nice-scroll" role="rowgroup" aria-live="polite"></div>
+        </div>
+        <aside id="workspace-inspector" class="workspace-inspector" aria-label="Selected file details" aria-live="polite">
+          <div id="workspace-inspector-empty" class="workspace-inspector-empty">
+            <span class="workspace-inspector-empty-icon" aria-hidden="true">◇</span>
+            <strong>Select a file</strong>
+            <span>Preview its contents, context, and metadata here.</span>
+          </div>
+          <div id="workspace-inspector-content" class="workspace-inspector-content nice-scroll u-hidden"></div>
+        </aside>
+      </div>
     </div>
   </div>
 </div>

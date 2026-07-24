@@ -45,6 +45,15 @@ async function saveWorkspaceEditor(page, { timeout = 15_000 } = {}) {
   await expect(page.locator('#workspace-editor')).not.toBeVisible({ timeout })
 }
 
+async function workspaceRowAction(row, action, { timeout = 15_000 } = {}) {
+  const trigger = row.locator('.workspace-action-menu-trigger')
+  await trigger.click()
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  const actionButton = row.locator(`[data-workspace-action="${action}"]`)
+  await expect(actionButton).toBeVisible({ timeout })
+  return actionButton
+}
+
 async function expectEntityMetadata(page, entityType, entityId, { labels = [], note = '' }, { timeout = 15_000 } = {}) {
   await expect.poll(async () => page.evaluate(async ({ entityType: type, entityId: id, expectedLabels }) => {
     const [labelsResp, noteResp] = await Promise.all([
@@ -1595,7 +1604,9 @@ test.describe('workspace modal', () => {
 
     await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
     await expect(page.locator('#workspace-modal .faq-title')).toHaveText('FILES')
-    await expect(page.locator('#workspace-summary')).toContainText('0 / 100 files')
+    await expect(page.locator('#workspace-scope-badge')).toHaveText('Personal')
+    await expect(page.locator('#workspace-file-usage')).toHaveText('0 / 100')
+    await expect(page.locator('#workspace-storage-usage')).toContainText('0 B')
     await expect(page.locator('#workspace-refresh-btn')).toHaveAttribute('aria-label', 'Refresh files')
     await expect(page.locator('#workspace-editor')).not.toBeVisible()
     await expect(page.locator('label[for="workspace-path-input"]')).toHaveText('File Name')
@@ -1609,33 +1620,80 @@ test.describe('workspace modal', () => {
     await pathInput.fill('targets.txt')
     await expect(pathInput).toHaveValue('targets.txt')
     await textInput.click()
-    await textInput.fill('darklab.sh\n')
-    await expect(textInput).toHaveValue('darklab.sh\n')
+    const initialTargets = [
+      'darklab.sh',
+      ...Array.from({ length: 90 }, (_, index) => `host-${index + 1}.darklab.sh`),
+    ].join('\n') + '\n'
+    await textInput.fill(initialTargets)
+    await expect(textInput).toHaveValue(initialTargets)
     await saveWorkspaceEditor(page)
 
     const row = page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })
     await expect(row).toBeVisible()
-    await expect(page.locator('#workspace-summary')).toContainText('1 / 100 files')
+    await expect(page.locator('#workspace-file-usage')).toHaveText('1 / 100')
+    await expect(page.locator('#workspace-result-summary')).toHaveText('1 item')
 
-    await row.locator('[data-workspace-action="view"]').click()
+    await page.locator('#workspace-search-input').fill('targets')
+    await expect(row).toBeVisible()
+    await page.locator('#workspace-search-input').fill('missing')
+    await expect(row).toHaveCount(0)
+    await expect(page.locator('.workspace-empty')).toContainText('No files or folders match')
+    await page.locator('[data-workspace-clear-filter]').click()
+    await expect(row).toBeVisible()
+
+    await row.locator('.workspace-size-cell').click()
+    await expect(row).toHaveClass(/is-selected/)
+    await expect(page.locator('#workspace-inspector-content')).toBeVisible()
+    await expect(page.locator('#workspace-inspector-empty')).toBeHidden()
+    await expect(page.locator('.workspace-inspector-title')).toHaveText('targets.txt')
+    await expect(page.locator('.workspace-inspector-preview')).toContainText('darklab.sh')
+    const selectedLastRowBorder = await row.evaluate((element) => {
+      const style = window.getComputedStyle(element)
+      return {
+        style: style.borderBottomStyle,
+        width: style.borderBottomWidth,
+      }
+    })
+    expect(selectedLastRowBorder.width).toBe('1px')
+    expect(selectedLastRowBorder.style).toBe('solid')
+    const truncationNotice = page.locator(
+      '.workspace-inspector-preview-section .workspace-preview-notice',
+      { hasText: 'Preview truncated' },
+    )
+    const detailsSection = page.locator('.workspace-inspector-section').filter({
+      has: page.getByRole('heading', { name: 'Details', exact: true }),
+    })
+    await expect(truncationNotice).toBeVisible()
+    await expect(detailsSection).toHaveCount(1)
+    const previewDetailsGap = await detailsSection.evaluate((details) => {
+      const previewNotice = details.previousElementSibling?.querySelector(
+        '.workspace-preview-notice:last-child',
+      )
+      if (!previewNotice) return Number.NEGATIVE_INFINITY
+      return details.getBoundingClientRect().top - previewNotice.getBoundingClientRect().bottom
+    })
+    expect(previewDetailsGap).toBeGreaterThanOrEqual(0)
+    await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer')).toBeVisible()
     await expect(page.locator('#workspace-viewer-title')).toHaveText('targets.txt')
     await expect(page.locator('#workspace-viewer-text .workspace-line-text').first()).toHaveText('darklab.sh')
 
     await page.locator('#workspace-close-viewer-btn').click()
     await expect(page.locator('#workspace-viewer')).not.toBeVisible()
-    await row.locator('[data-workspace-action="edit"]').click()
+    await (await workspaceRowAction(row, 'edit')).click()
     await expect(page.locator('#workspace-editor')).toBeVisible()
     await page.locator('#workspace-text-input').fill('darklab.sh\nip.darklab.sh\n')
     await saveWorkspaceEditor(page)
     await row.locator('[data-workspace-action="view"]').click()
+    await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer-text')).toContainText('ip.darklab.sh')
 
     await page.locator('#workspace-close-viewer-btn').click()
     await expect(page.locator('#workspace-viewer')).not.toBeVisible()
+    const downloadAction = await workspaceRowAction(row, 'download')
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      row.locator('[data-workspace-action="download"]').click(),
+      downloadAction.click(),
     ])
     expect(download.suggestedFilename()).toBe('targets.txt')
 
@@ -1648,11 +1706,11 @@ test.describe('workspace modal', () => {
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
     await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
 
-    await row.locator('[data-workspace-action="move"]').click()
+    await (await workspaceRowAction(row, 'move')).click()
     await page.locator('#confirm-host .form-input').fill('moved')
     await confirmWorkspaceAction(page, 'move')
     await expect(row).toHaveCount(0)
-    await page.locator('.workspace-folder-row').filter({ hasText: 'moved' }).locator('.workspace-file-name').click()
+    await page.locator('.workspace-folder-row').filter({ hasText: 'moved' }).locator('.workspace-context-cell').click()
     await expect(page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })).toBeVisible()
 
     await page.locator('.workspace-close').click()
@@ -1683,6 +1741,15 @@ test.describe('workspace modal', () => {
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
     const capturedRow = page.locator('.workspace-file-row').filter({ hasText: 'captured.txt' })
     await capturedRow.locator('[data-workspace-action="view"]').click()
+    const selectedMiddleRowBorder = await capturedRow.evaluate((element) => {
+      const style = window.getComputedStyle(element)
+      return {
+        style: style.borderBottomStyle,
+        width: style.borderBottomWidth,
+      }
+    })
+    expect(selectedMiddleRowBorder).toEqual(selectedLastRowBorder)
+    await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer-text .workspace-line-text').filter({ hasText: /^darklab\.sh$/ })).toHaveCount(2)
     await expect(page.locator('#workspace-viewer-text .workspace-line-text').filter({ hasText: /^ip\.darklab\.sh$/ })).toHaveCount(2)
   })
@@ -1704,11 +1771,17 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-path-input')).toHaveValue('')
     await page.locator('#workspace-cancel-edit-btn').click()
 
-    await page.locator('.workspace-folder-row').filter({ hasText: '..' }).locator('[data-workspace-action="open-folder"]').click()
+    const parentRow = page.locator('.workspace-parent-row')
+    await expect(parentRow).toBeVisible()
+    await expect(parentRow).toHaveAttribute('data-path', '')
+    await expect(parentRow).toHaveAttribute('data-workspace-drop-target', 'folder')
+    await expect(parentRow.locator('.workspace-file-name')).toHaveText('..')
+    await expect(parentRow.locator('.workspace-file-details')).toHaveText('Parent folder · Files')
+    await parentRow.locator('.workspace-context-cell').click()
     await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
     await expect(page.locator('.workspace-folder-row').filter({ hasText: 'reports' })).toBeVisible()
 
-    await page.locator('.workspace-folder-row').filter({ hasText: 'reports' }).locator('.workspace-file-name').click()
+    await page.locator('.workspace-folder-row').filter({ hasText: 'reports' }).locator('.workspace-context-cell').click()
     await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/reports')
 
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
@@ -1723,18 +1796,21 @@ test.describe('workspace modal', () => {
     await expect(folder).toBeVisible()
     await expect(page.locator('.workspace-file-row').filter({ hasText: 'amass.html' })).toHaveCount(0)
 
-    await folder.locator('.workspace-file-name').click()
+    await folder.locator('.workspace-context-cell').click()
     await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/amass-viz')
 
     const file = page.locator('.workspace-file-row').filter({ hasText: 'amass.html' })
     await expect(file).toBeVisible()
-    // Pre-locate and wait for the action button so the click doesn't burn the
-    // test budget in its hidden auto-wait when the row renders before its
-    // action buttons mount on slow CI runners.
-    const viewBtn = file.locator('[data-workspace-action="view"]')
-    await expect(viewBtn).toBeVisible({ timeout: 15_000 })
-    await viewBtn.click()
+    // Wait for a non-action cell so this exercises row activation without
+    // racing the rest of the row on slower CI runners.
+    const fileModifiedCell = file.locator('.workspace-modified-cell')
+    await expect(fileModifiedCell).toBeVisible({ timeout: 15_000 })
+    await fileModifiedCell.click()
 
+    await expect(page.locator('#workspace-inspector-content')).toBeVisible()
+    await expect(page.locator('.workspace-inspector-title')).toHaveText('amass.html')
+    await expect(page.locator('.workspace-inspector-preview')).toContainText('amass viz')
+    await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer')).toBeVisible()
     await expect(page.locator('#workspace-viewer-title')).toHaveText('amass-viz/amass.html')
     await expect(page.locator('#workspace-viewer-text')).toContainText('amass viz')
@@ -1746,6 +1822,48 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-viewer')).not.toBeVisible()
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
     await expect(folder).toBeVisible()
+  })
+
+  test('keeps file navigation and secondary actions compact on narrow screens', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.locator('.rail-nav [data-action="workspace"]').evaluate((button) => button.click())
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
+
+    await page.locator('#workspace-new-btn').click()
+    await page.locator('#workspace-path-input').fill('mobile-notes.txt')
+    await page.locator('#workspace-text-input').fill('mobile workspace\n')
+    await saveWorkspaceEditor(page)
+
+    const row = page.locator('.workspace-file-row').filter({ hasText: 'mobile-notes.txt' })
+    await expect(row).toBeVisible()
+    await expect(page.locator('.workspace-browser-header')).toBeHidden()
+    await expect(row.locator('.workspace-file-details')).toBeVisible()
+    await expect(row.locator('.workspace-context-cell')).toBeHidden()
+    await expect(row.locator('.workspace-action-menu-trigger')).toBeVisible()
+
+    const sortTrigger = page.locator('#workspace-sort-select + .app-select .app-select-trigger')
+    await sortTrigger.click()
+    const sortMenu = page.locator('body > .app-select-menu[data-app-select-portaled="true"]')
+    await expect(sortMenu).toBeVisible()
+    await expect(sortMenu.getByRole('option', { name: 'Modified' })).toBeVisible()
+    const [sortTriggerBox, sortMenuBox] = await Promise.all([
+      sortTrigger.boundingBox(),
+      sortMenu.boundingBox(),
+    ])
+    expect(sortTriggerBox).not.toBeNull()
+    expect(sortMenuBox).not.toBeNull()
+    expect(sortMenuBox.width).toBeGreaterThan(sortTriggerBox.width)
+    expect(sortMenuBox.x).toBeLessThanOrEqual(sortTriggerBox.x)
+    expect(sortMenuBox.x + sortMenuBox.width).toBeLessThanOrEqual(390 - 8)
+    await sortTrigger.click()
+    await expect(sortMenu).toBeHidden()
+
+    await row.locator('[data-workspace-action="view"]').click()
+    await expect(page.locator('#workspace-viewer')).toBeVisible()
+    await expect(page.locator('#workspace-inspector')).toBeHidden()
+    await page.locator('#workspace-close-viewer-btn').click()
+    await (await workspaceRowAction(row, 'edit')).click()
+    await expect(page.locator('#workspace-editor')).toBeVisible()
   })
 })
 

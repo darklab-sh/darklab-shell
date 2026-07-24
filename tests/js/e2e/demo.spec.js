@@ -330,6 +330,7 @@ async function openFilesPanelWithResponseFile(page) {
   await row.waitFor({ state: 'visible', timeout: 10_000 })
   await page.waitForTimeout(1_700)
   await row.locator('[data-workspace-action="view"]').click()
+  await page.locator('[data-workspace-inspector-action="full-view"]').click()
   await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
   await page.waitForTimeout(3_600)
   await page.locator('#workspace-close-viewer-btn').hover()

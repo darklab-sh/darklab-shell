@@ -37,10 +37,29 @@ export async function flushWorkspacePromises() {
 
 export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
   document.body.innerHTML = `
-    <div id="workspace-summary"></div>
+    <div id="workspace-summary">
+      <span id="workspace-file-usage"></span>
+      <span id="workspace-file-usage-fill"></span>
+      <span id="workspace-storage-usage"></span>
+      <span id="workspace-storage-usage-fill"></span>
+    </div>
+    <span id="workspace-scope-badge"></span>
     <div id="workspace-message" class="u-hidden"></div>
+    <button id="workspace-up-btn" type="button"></button>
     <nav id="workspace-breadcrumbs"></nav>
-    <div id="workspace-file-list"></div>
+    <input id="workspace-search-input">
+    <select id="workspace-sort-select">
+      <option value="name">Name</option>
+      <option value="modified">Modified</option>
+      <option value="size">Size</option>
+    </select>
+    <span id="workspace-result-summary"></span>
+    <span id="workspace-read-only-status">Read-only</span>
+    <div id="workspace-file-list" role="rowgroup"></div>
+    <aside id="workspace-inspector">
+      <div id="workspace-inspector-empty"></div>
+      <div id="workspace-inspector-content" class="u-hidden"></div>
+    </aside>
     <div id="workspace-viewer-overlay" class="u-hidden">
     <section id="workspace-viewer" class="u-hidden">
       <div id="workspace-viewer-title"></div>
@@ -77,6 +96,10 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     <button id="workspace-close-viewer-btn" type="button"></button>
   `
   const testWindow = Object.create(window)
+  Object.defineProperty(testWindow, 'innerWidth', {
+    configurable: true,
+    value: Number(overrides.workspaceViewportWidth || 1024),
+  })
   testWindow.requestAnimationFrame = (fn) => {
     if (typeof fn === 'function') fn()
     return 1
@@ -104,6 +127,12 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     _closeMajorOverlays: vi.fn(),
     blurVisibleComposerInputIfMobile: vi.fn(),
     refocusComposerAfterAction: vi.fn(),
+    focusElement: vi.fn((element, options = {}) => {
+      if (!element || typeof element.focus !== 'function') return false
+      element.focus(options)
+      return true
+    }),
+    syncAppSelect: vi.fn(),
     applyMobileTextInputDefaults: vi.fn((input) => {
       input.setAttribute('autocomplete', 'off')
       input.setAttribute('autocapitalize', 'none')
@@ -132,9 +161,22 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     setInterval: vi.fn(() => 0),
     clearInterval: vi.fn(),
     workspaceSummary: document.getElementById('workspace-summary'),
+    workspaceScopeBadge: document.getElementById('workspace-scope-badge'),
+    workspaceFileUsage: document.getElementById('workspace-file-usage'),
+    workspaceFileUsageFill: document.getElementById('workspace-file-usage-fill'),
+    workspaceStorageUsage: document.getElementById('workspace-storage-usage'),
+    workspaceStorageUsageFill: document.getElementById('workspace-storage-usage-fill'),
     workspaceMessage: document.getElementById('workspace-message'),
+    workspaceUpBtn: document.getElementById('workspace-up-btn'),
     workspaceBreadcrumbs: document.getElementById('workspace-breadcrumbs'),
+    workspaceSearchInput: document.getElementById('workspace-search-input'),
+    workspaceSortSelect: document.getElementById('workspace-sort-select'),
+    workspaceResultSummary: document.getElementById('workspace-result-summary'),
+    workspaceReadOnlyStatus: document.getElementById('workspace-read-only-status'),
     workspaceFileList: document.getElementById('workspace-file-list'),
+    workspaceInspector: document.getElementById('workspace-inspector'),
+    workspaceInspectorContent: document.getElementById('workspace-inspector-content'),
+    workspaceInspectorEmpty: document.getElementById('workspace-inspector-empty'),
     workspaceViewerOverlay: document.getElementById('workspace-viewer-overlay'),
     workspaceViewer: document.getElementById('workspace-viewer'),
     workspaceViewerTitle: document.getElementById('workspace-viewer-title'),
@@ -177,6 +219,7 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     anchor.remove()
   }
   Object.assign(globals, overrides)
+  globals.__darklabExtractGlobals = globals
   globals.window.apiFetch = apiFetch
   globals.window.showConfirm = globals.showConfirm
   globals.window.applyMobileTextInputDefaults = globals.applyMobileTextInputDefaults
