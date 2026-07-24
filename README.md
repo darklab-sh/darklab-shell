@@ -257,7 +257,7 @@ cd darklab_shell
 docker compose -f compose.dev.yaml up --build
 ```
 
-This uses the same Dockerfile and entrypoint as the released image, then mounts `./app:/app:ro` over the bundled copy for a quick edit-and-restart loop. The development stack binds to `127.0.0.1` by default, uses development labels, and deliberately omits production restart policy and fixed container names.
+This uses the same Dockerfile and entrypoint as the released image. Compose mounts `./app` at a separate read-only source path, and each container start stages a fresh, read-only runtime copy at `/app`. That keeps the edit-and-restart loop while making host files readable even when a native Linux checkout preserves private modes such as `0600`. The development stack binds to `127.0.0.1` by default, uses development labels, and deliberately omits production restart policy and fixed container names.
 
 ### Local Python Environment
 

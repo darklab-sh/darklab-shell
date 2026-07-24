@@ -89,7 +89,7 @@ Package presets and report templates are complete replacement catalogs rather th
 
 ## Config File Reload Behavior
 
-The table describes loader behavior when the app process can read an edited file directly, including source-mounted development. Production reads a private startup snapshot, so any host-side `conf/` change needs `docker compose restart shell` first.
+The table describes loader behavior after the app process can read the selected files. Source-mounted development stages the checkout into a fresh `/app` snapshot, while production stages its private overlay tree separately. In either mode, restart the shell container after a host-side configuration edit.
 
 | File | When changes take effect |
 |------|--------------------------|
@@ -1055,7 +1055,7 @@ docker compose -f compose.yaml -f compose.operator.yaml up -d
 
 ### Source-checkout development
 
-The repository-backed [compose.dev.yaml](compose.dev.yaml) is the supported development stack. It builds the same Dockerfile, mounts `./app:/app:ro` over the bundled application, binds the app to loopback by default, and omits production restart behavior. It isn't a production deployment path.
+The repository-backed [compose.dev.yaml](compose.dev.yaml) is the supported development stack. It builds the same Dockerfile, mounts `./app` read-only at `/opt/darklab-source/app`, and stages a fresh container-owned snapshot at `/app` before the app drops privileges. This keeps private Linux checkout modes readable without making the staged code writable, binds the app to loopback by default, and omits production restart behavior. It isn't a production deployment path.
 
 The base file starts the shell service, an ephemeral Redis sidecar, the shell's writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated Postgres 18 service with a named volume and healthcheck for backend development and testing:
 

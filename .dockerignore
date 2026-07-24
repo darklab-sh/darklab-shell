@@ -25,6 +25,7 @@ assets/
 scripts/*
 !scripts/container/
 !scripts/container/install_go_tool.sh
+!scripts/container/stage_runtime_source.sh
 !scripts/operations/
 !scripts/operations/backup_system.py
 !scripts/operations/migrate_sqlite_to_postgres.py

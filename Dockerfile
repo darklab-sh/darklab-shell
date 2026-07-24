@@ -432,8 +432,9 @@ RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
 
 RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 
-# Development Compose mounts ./app over this copy; release images run directly
-# from the checked-in application tree.
+# Release images run directly from this checked-in application tree.
+# Development Compose mounts the checkout separately and stages a private,
+# read-only runtime snapshot over /app before the app drops privileges.
 COPY app/ /app/
 COPY scripts/operations/backup_system.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
 
@@ -443,7 +444,8 @@ COPY deploy/THIRD_PARTY_NOTICES.txt deploy/container-licenses.json /usr/share/do
 COPY deploy/third-party-licenses/ /usr/share/doc/darklab-shell/licenses/
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY scripts/container/stage_runtime_source.sh /usr/local/libexec/darklab-stage-runtime-source
+RUN chmod +x /entrypoint.sh /usr/local/libexec/darklab-stage-runtime-source
 
 ARG APP_PORT=8888
 EXPOSE ${APP_PORT}

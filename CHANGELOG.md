@@ -29,6 +29,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Source-mounted development now starts reliably from private Linux checkouts.**
+  - **Root cause:** `compose.dev.yaml` bound `./app` directly over `/app`, so native Linux preserved host ownership and modes such as `0600` after the container dropped to `appuser`.
+  - **Fix:** development mounts the checkout read-only at `/opt/darklab-source/app` and gives `/app` an ephemeral tmpfs. The root entrypoint stages a fresh `appuser`-owned snapshot, preserves private read access, removes every write bit, and fails before config or workers start if staging can't complete. Production keeps using the bundled `/app` tree without a source bind or staging trigger.
+  - **Tests:** the Compose contract pins the separate source and runtime paths, a focused helper test covers owner-only files and fail-closed startup, and the opt-in Linux container smoke verifies an actual `0600` `config.py` becomes readable but not writable before the app starts.
+
 - **Rate-limit GELF events no longer conflict with numeric OpenSearch fields.**
   - **Root cause:** worker and output events correctly recorded numeric values under `limit`, while `RATE_LIMIT` reused that field for descriptions such as `240 per minute; 60 per second`. GELF serialized both as `_limit`, so OpenSearch's numeric mapping rejected the descriptive rate policy.
   - **Fix:** `RATE_LIMIT` now records its human-readable threshold as `limit_policy`, leaving `_limit` consistently numeric for existing events.

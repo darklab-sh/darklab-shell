@@ -180,6 +180,7 @@ def _smoke_image_cache_key(build_context: Path, dockerfile_path: Path) -> str:
     for path in (
         dockerfile_path,
         build_context / "entrypoint.sh",
+        build_context / "scripts" / "container" / "stage_runtime_source.sh",
     ):
         _hash_smoke_build_input(hasher, path)
     for path in sorted((build_context / "app").rglob("*")):
@@ -567,11 +568,14 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     requirements = app_dir / "requirements.txt"
     app_source = app_dir / "app.py"
     entrypoint = tmp_path / "entrypoint.sh"
+    source_stager = tmp_path / "scripts" / "container" / "stage_runtime_source.sh"
+    source_stager.parent.mkdir(parents=True)
 
     dockerfile.write_text("FROM python:3.14-slim\n", encoding="utf-8")
     requirements.write_text("flask==3.1.2\n", encoding="utf-8")
     app_source.write_text("APP_VERSION = '1.0.0'\n", encoding="utf-8")
     entrypoint.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
+    source_stager.write_text("#!/usr/bin/env sh\ncp -R \"$1/.\" \"$2/\"\n", encoding="utf-8")
 
     original_key = _smoke_image_cache_key(tmp_path, dockerfile)
 
@@ -588,7 +592,14 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     assert app_source_key != dockerfile_key
 
     entrypoint.write_text("#!/usr/bin/env sh\nexec \"$@\"\n", encoding="utf-8")
-    assert _smoke_image_cache_key(tmp_path, dockerfile) != app_source_key
+    entrypoint_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert entrypoint_key != app_source_key
+
+    source_stager.write_text(
+        "#!/usr/bin/env sh\ncp -R \"$1/.\" \"$2/\"\nchmod -R a-w \"$2\"\n",
+        encoding="utf-8",
+    )
+    assert _smoke_image_cache_key(tmp_path, dockerfile) != entrypoint_key
 
 
 def test_smoke_image_cache_status_requires_matching_label(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1288,6 +1299,18 @@ def container_smoke_test():
                 build_context = (compose_base / str(build_cfg["context"])).resolve()
             if "dockerfile" in build_cfg:
                 dockerfile_path = (build_context / str(build_cfg["dockerfile"])).resolve()
+        smoke_source_dir = tmp_path / "app-source"
+        shutil.copytree(
+            build_context / "app",
+            smoke_source_dir,
+            ignore=shutil.ignore_patterns(
+                "__pycache__",
+                "*.pyc",
+                "*.local.*",
+                ".ruff_cache",
+            ),
+        )
+        (smoke_source_dir / "config.py").chmod(0o600)
         shell.pop("build", None)
         shell["image"] = runtime_image_tag
         shell["ports"] = ["8888"]
@@ -1299,7 +1322,9 @@ def container_smoke_test():
         smoke_environment = []
         for item in shell.get("environment", []):
             value = str(item)
-            if value.startswith("RAW_PACKET_SCANNING_ENABLED="):
+            if value.startswith("APP_SOURCE_DIR="):
+                value = "APP_SOURCE_DIR=/opt/darklab-smoke-source"
+            elif value.startswith("RAW_PACKET_SCANNING_ENABLED="):
                 value = "RAW_PACKET_SCANNING_ENABLED=true"
             elif value.startswith("INTERACTIVE_PTY_ENABLED="):
                 value = "INTERACTIVE_PTY_ENABLED=true"
@@ -1367,6 +1392,15 @@ def container_smoke_test():
                 print(f"[container-smoke-test] building runtime image: {runtime_image_tag}", flush=True)
                 _run(["docker", "create", "--name", runtime_container_name, image_tag], timeout=30)
                 _run(
+                    [
+                        "docker",
+                        "cp",
+                        str(smoke_source_dir),
+                        f"{runtime_container_name}:/opt/darklab-smoke-source",
+                    ],
+                    timeout=30,
+                )
+                _run(
                     ["docker", "cp", str(config_dir), f"{runtime_container_name}:/config"],
                     timeout=30,
                 )
@@ -1432,6 +1466,50 @@ def container_smoke_test():
                     flush=True,
                 )
                 _wait_for_health(restricted_url)
+                shell_container = _run(
+                    compose + ["ps", "-q", "shell"],
+                    timeout=30,
+                ).stdout.strip()
+                assert shell_container, "shell container id was not available"
+                _run(
+                    [
+                        "docker",
+                        "exec",
+                        shell_container,
+                        "sh",
+                        "-c",
+                        'test "$(stat -c %a /opt/darklab-smoke-source/config.py)" = 600 '
+                        '&& test "$(stat -c %U:%G /app/config.py)" = appuser:appuser '
+                        '&& test "$(stat -c %a /app/config.py)" = 400',
+                    ],
+                    timeout=30,
+                )
+                _run(
+                    [
+                        "docker",
+                        "exec",
+                        "--user",
+                        "appuser",
+                        shell_container,
+                        "sh",
+                        "-c",
+                        "test -r /app/config.py && test ! -w /app/config.py",
+                    ],
+                    timeout=30,
+                )
+                _run(
+                    [
+                        "docker",
+                        "exec",
+                        "--user",
+                        "scanner",
+                        shell_container,
+                        "sh",
+                        "-c",
+                        "test ! -w /app/config.py",
+                    ],
+                    timeout=30,
+                )
                 print(f"[container-smoke-test] container ready: {base_url}", flush=True)
             except AssertionError as exc:
                 pytest.exit(f"container setup failed — {exc}", returncode=1)
