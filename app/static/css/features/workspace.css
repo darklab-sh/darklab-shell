@@ -497,7 +497,14 @@
   word-break: break-word;
 }
 
-.workspace-file-name.btn:hover,
+.workspace-file-name.btn:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--green);
+  outline: none;
+  transform: none;
+}
+
 .workspace-file-name.btn:focus-visible {
   background: transparent;
   border-color: transparent;
