@@ -56,6 +56,10 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     <span id="workspace-result-summary"></span>
     <span id="workspace-read-only-status">Read-only</span>
     <div id="workspace-file-list" role="rowgroup"></div>
+    <aside id="workspace-inspector">
+      <div id="workspace-inspector-empty"></div>
+      <div id="workspace-inspector-content" class="u-hidden"></div>
+    </aside>
     <div id="workspace-viewer-overlay" class="u-hidden">
     <section id="workspace-viewer" class="u-hidden">
       <div id="workspace-viewer-title"></div>
@@ -92,6 +96,10 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     <button id="workspace-close-viewer-btn" type="button"></button>
   `
   const testWindow = Object.create(window)
+  Object.defineProperty(testWindow, 'innerWidth', {
+    configurable: true,
+    value: Number(overrides.workspaceViewportWidth || 1024),
+  })
   testWindow.requestAnimationFrame = (fn) => {
     if (typeof fn === 'function') fn()
     return 1
@@ -166,6 +174,9 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     workspaceResultSummary: document.getElementById('workspace-result-summary'),
     workspaceReadOnlyStatus: document.getElementById('workspace-read-only-status'),
     workspaceFileList: document.getElementById('workspace-file-list'),
+    workspaceInspector: document.getElementById('workspace-inspector'),
+    workspaceInspectorContent: document.getElementById('workspace-inspector-content'),
+    workspaceInspectorEmpty: document.getElementById('workspace-inspector-empty'),
     workspaceViewerOverlay: document.getElementById('workspace-viewer-overlay'),
     workspaceViewer: document.getElementById('workspace-viewer'),
     workspaceViewerTitle: document.getElementById('workspace-viewer-title'),

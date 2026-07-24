@@ -9,10 +9,8 @@ describe('workspace UI helpers', () => {
     document.body.innerHTML = ''
   })
 
-  it('renders workspace files with usage summary and row actions', () => {
-    const { renderWorkspaceFiles } = setupWorkspace()
-
-    renderWorkspaceFiles({
+  it('renders workspace files with usage summary, row actions, and desktop file details', async () => {
+    const workspacePayload = {
       files: [{
         path: 'targets.txt',
         size: 11,
@@ -25,7 +23,23 @@ describe('workspace UI helpers', () => {
       }],
       usage: { bytes_used: 11, file_count: 1 },
       limits: { quota_bytes: 1024, max_files: 10 },
-    })
+    }
+    const apiFetch = vi.fn(url => Promise.resolve(responseJson(
+      String(url) === '/workspace/files'
+        ? workspacePayload
+        : {
+            path: 'targets.txt',
+            text: [
+              'darklab.sh',
+              'ip.darklab.sh',
+              ...Array.from({ length: 90 }, (_, index) => `target-${index + 1}.darklab.sh`),
+            ].join('\n'),
+            size: 26,
+          },
+    )))
+    const { renderWorkspaceFiles } = setupWorkspace(apiFetch, { workspaceViewportWidth: 1200 })
+
+    renderWorkspaceFiles(workspacePayload)
 
     expect(document.getElementById('workspace-scope-badge').textContent).toBe('Personal')
     expect(document.getElementById('workspace-file-usage').textContent).toBe('1 / 10')
@@ -47,6 +61,23 @@ describe('workspace UI helpers', () => {
       'Download',
       'Delete',
     ])
+
+    document.querySelector('[data-workspace-action="view"]').click()
+    await flushWorkspacePromises()
+
+    expect(document.querySelector('.workspace-file-row').classList.contains('is-selected')).toBe(true)
+    expect(document.querySelector('.workspace-file-row').getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('workspace-inspector-empty').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-inspector-content').textContent).toContain('targets.txt')
+    expect(document.getElementById('workspace-inspector-content').textContent).toContain('Linked runs1')
+    expect(document.getElementById('workspace-inspector-content').textContent).toContain('Signal Case')
+    expect(document.getElementById('workspace-inspector-content').textContent).toContain('important')
+    expect(document.getElementById('workspace-inspector-content').textContent)
+      .toContain('Retest after scanner update.')
+    expect(document.querySelector('.workspace-inspector-preview').textContent)
+      .toContain('ip.darklab.sh')
+    expect(document.querySelector('.workspace-inspector-preview-section').textContent)
+      .toContain('Preview truncated')
   })
 
   it('filters file context, sorts files within folders, and supports the action menu keyboard', () => {

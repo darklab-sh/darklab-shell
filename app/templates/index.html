@@ -963,15 +963,25 @@
         <span id="workspace-result-summary">0 items</span>
         <span class="workspace-read-only-status u-hidden" id="workspace-read-only-status">Read-only</span>
       </div>
-      <div class="workspace-browser-table" role="table" aria-label="Files in the current folder">
-        <div class="workspace-browser-header" role="row">
-          <span role="columnheader">Name</span>
-          <span role="columnheader">Context</span>
-          <span role="columnheader">Modified</span>
-          <span role="columnheader">Size</span>
-          <span role="columnheader" aria-label="Actions"></span>
+      <div class="workspace-browser-layout">
+        <div class="workspace-browser-table" role="table" aria-label="Files in the current folder">
+          <div class="workspace-browser-header" role="row">
+            <span role="columnheader">Name</span>
+            <span role="columnheader">Context</span>
+            <span role="columnheader">Modified</span>
+            <span role="columnheader">Size</span>
+            <span role="columnheader" aria-label="Actions"></span>
+          </div>
+          <div id="workspace-file-list" class="workspace-file-list nice-scroll" role="rowgroup" aria-live="polite"></div>
         </div>
-        <div id="workspace-file-list" class="workspace-file-list nice-scroll" role="rowgroup" aria-live="polite"></div>
+        <aside id="workspace-inspector" class="workspace-inspector" aria-label="Selected file details" aria-live="polite">
+          <div id="workspace-inspector-empty" class="workspace-inspector-empty">
+            <span class="workspace-inspector-empty-icon" aria-hidden="true">◇</span>
+            <strong>Select a file</strong>
+            <span>Preview its contents, context, and metadata here.</span>
+          </div>
+          <div id="workspace-inspector-content" class="workspace-inspector-content nice-scroll u-hidden"></div>
+        </aside>
       </div>
     </div>
   </div>

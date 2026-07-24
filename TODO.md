@@ -118,8 +118,6 @@ These are possible future improvements, split by whether they look worth carryin
   - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
 - **Extend comparison beyond run-to-run finding and artifact diffs.**
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
-- **Add a desktop inspector to the Files browser.**
-  - A side pane could show a quick preview, metadata, linked runs and projects, labels, notes, and common actions without replacing the focused mobile viewer.
 - **Package re-import preview/apply.**
   - Worth scoping once package handoff archives are used regularly. It should reuse the Atlas import preview/apply pattern and the package manifest import hints before it writes project data.
 - **Project Monitoring CLI surface.**

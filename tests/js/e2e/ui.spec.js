@@ -1620,8 +1620,12 @@ test.describe('workspace modal', () => {
     await pathInput.fill('targets.txt')
     await expect(pathInput).toHaveValue('targets.txt')
     await textInput.click()
-    await textInput.fill('darklab.sh\n')
-    await expect(textInput).toHaveValue('darklab.sh\n')
+    const initialTargets = [
+      'darklab.sh',
+      ...Array.from({ length: 90 }, (_, index) => `host-${index + 1}.darklab.sh`),
+    ].join('\n') + '\n'
+    await textInput.fill(initialTargets)
+    await expect(textInput).toHaveValue(initialTargets)
     await saveWorkspaceEditor(page)
 
     const row = page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })
@@ -1638,6 +1642,29 @@ test.describe('workspace modal', () => {
     await expect(row).toBeVisible()
 
     await row.locator('[data-workspace-action="view"]').click()
+    await expect(row).toHaveClass(/is-selected/)
+    await expect(page.locator('#workspace-inspector-content')).toBeVisible()
+    await expect(page.locator('#workspace-inspector-empty')).toBeHidden()
+    await expect(page.locator('.workspace-inspector-title')).toHaveText('targets.txt')
+    await expect(page.locator('.workspace-inspector-preview')).toContainText('darklab.sh')
+    const truncationNotice = page.locator(
+      '.workspace-inspector-preview-section .workspace-preview-notice',
+      { hasText: 'Preview truncated' },
+    )
+    const detailsSection = page.locator('.workspace-inspector-section').filter({
+      has: page.getByRole('heading', { name: 'Details', exact: true }),
+    })
+    await expect(truncationNotice).toBeVisible()
+    await expect(detailsSection).toHaveCount(1)
+    const previewDetailsGap = await detailsSection.evaluate((details) => {
+      const previewNotice = details.previousElementSibling?.querySelector(
+        '.workspace-preview-notice:last-child',
+      )
+      if (!previewNotice) return Number.NEGATIVE_INFINITY
+      return details.getBoundingClientRect().top - previewNotice.getBoundingClientRect().bottom
+    })
+    expect(previewDetailsGap).toBeGreaterThanOrEqual(0)
+    await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer')).toBeVisible()
     await expect(page.locator('#workspace-viewer-title')).toHaveText('targets.txt')
     await expect(page.locator('#workspace-viewer-text .workspace-line-text').first()).toHaveText('darklab.sh')
@@ -1649,6 +1676,7 @@ test.describe('workspace modal', () => {
     await page.locator('#workspace-text-input').fill('darklab.sh\nip.darklab.sh\n')
     await saveWorkspaceEditor(page)
     await row.locator('[data-workspace-action="view"]').click()
+    await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer-text')).toContainText('ip.darklab.sh')
 
     await page.locator('#workspace-close-viewer-btn').click()
@@ -1704,6 +1732,7 @@ test.describe('workspace modal', () => {
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
     const capturedRow = page.locator('.workspace-file-row').filter({ hasText: 'captured.txt' })
     await capturedRow.locator('[data-workspace-action="view"]').click()
+    await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer-text .workspace-line-text').filter({ hasText: /^darklab\.sh$/ })).toHaveCount(2)
     await expect(page.locator('#workspace-viewer-text .workspace-line-text').filter({ hasText: /^ip\.darklab\.sh$/ })).toHaveCount(2)
   })
@@ -1762,6 +1791,10 @@ test.describe('workspace modal', () => {
     await expect(viewBtn).toBeVisible({ timeout: 15_000 })
     await viewBtn.click()
 
+    await expect(page.locator('#workspace-inspector-content')).toBeVisible()
+    await expect(page.locator('.workspace-inspector-title')).toHaveText('amass.html')
+    await expect(page.locator('.workspace-inspector-preview')).toContainText('amass viz')
+    await page.locator('[data-workspace-inspector-action="full-view"]').click()
     await expect(page.locator('#workspace-viewer')).toBeVisible()
     await expect(page.locator('#workspace-viewer-title')).toHaveText('amass-viz/amass.html')
     await expect(page.locator('#workspace-viewer-text')).toContainText('amass viz')
@@ -1809,6 +1842,10 @@ test.describe('workspace modal', () => {
     await sortTrigger.click()
     await expect(sortMenu).toBeHidden()
 
+    await row.locator('[data-workspace-action="view"]').click()
+    await expect(page.locator('#workspace-viewer')).toBeVisible()
+    await expect(page.locator('#workspace-inspector')).toBeHidden()
+    await page.locator('#workspace-close-viewer-btn').click()
     await (await workspaceRowAction(row, 'edit')).click()
     await expect(page.locator('#workspace-editor')).toBeVisible()
   })

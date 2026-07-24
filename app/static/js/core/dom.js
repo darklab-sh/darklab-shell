@@ -85,6 +85,9 @@ const workspaceSortSelect = document.getElementById('workspace-sort-select');
 const workspaceResultSummary = document.getElementById('workspace-result-summary');
 const workspaceReadOnlyStatus = document.getElementById('workspace-read-only-status');
 const workspaceFileList = document.getElementById('workspace-file-list');
+const workspaceInspector = document.getElementById('workspace-inspector');
+const workspaceInspectorContent = document.getElementById('workspace-inspector-content');
+const workspaceInspectorEmpty = document.getElementById('workspace-inspector-empty');
 const workspaceViewerOverlay = document.getElementById('workspace-viewer-overlay');
 const workspaceViewer = document.getElementById('workspace-viewer');
 const workspaceViewerTitle = document.getElementById('workspace-viewer-title');
@@ -263,6 +266,9 @@ export {
   workspaceFileUsage,
   workspaceFileUsageFill,
   workspaceFileList,
+  workspaceInspector,
+  workspaceInspectorContent,
+  workspaceInspectorEmpty,
   workspaceLabelsInput,
   workspaceMessage,
   workspaceModal,
