@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 mmayhew -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="{{ current_theme.color_scheme }}">
+<title>{% block page_title %}{{ app_name }}{% endblock %}</title>
+{% block before_head_assets %}{% endblock %}
+<link rel="icon" type="image/x-icon" href="{{ static_asset('/static/favicon.ico') }}">
+{% block head_preload %}{% endblock %}
+{% include "app_stylesheets.html" %}
+{% block page_stylesheets %}{% endblock %}
+{% include "theme_vars_style.html" %}
+{% block theme_runtime %}{% endblock %}
+{% block head_scripts %}{% endblock %}
+{% block extra_head %}{% endblock %}
+</head>
+{% set body_classes %}{% block body_class %}{% endblock %}{% endset %}
+<body{% if body_classes|trim %} class="{{ body_classes|trim }}"{% endif %} data-theme="{{ current_theme.name }}">
+{% block content %}{% endblock %}
+{% block body_scripts %}{% endblock %}
+</body>
+</html>

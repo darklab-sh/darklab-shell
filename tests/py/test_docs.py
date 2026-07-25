@@ -370,6 +370,38 @@ def _template_static_url_violations() -> list[str]:
     return violations
 
 
+def _template_document_frame_violations() -> list[str]:
+    templates_root = _REPO_ROOT / "app" / "templates"
+    base_template = templates_root / "base.html"
+    violations: list[str] = []
+    base_text = base_template.read_text(encoding="utf-8")
+    for token in ("<!DOCTYPE html>", "<html lang=\"en\">", "<head>", "<body", "</body>", "</html>"):
+        if base_text.count(token) != 1:
+            violations.append(f"app/templates/base.html: expected one {token!r}")
+
+    for name in ("index.html", "permalink_base.html", "diag.html", "diag_audit.html"):
+        template = templates_root / name
+        text = template.read_text(encoding="utf-8")
+        if '{% extends "base.html" %}' not in text:
+            violations.append(f"app/templates/{name}: must extend base.html")
+        for label, pattern in (
+            ("<!DOCTYPE html>", r"<!DOCTYPE\s+html>"),
+            ("<html>", r"<html(?:\s|>)"),
+            ("<head>", r"<head(?:\s|>)"),
+            ("<body>", r"<body(?:\s|>)"),
+            ("</body>", r"</body>"),
+            ("</html>", r"</html>"),
+        ):
+            if re.search(pattern, text, flags=re.I):
+                violations.append(f"app/templates/{name}: document frame contains {label!r}")
+
+    for name in ("permalink.html", "permalink_error.html"):
+        text = (templates_root / name).read_text(encoding="utf-8")
+        if '{% extends "permalink_base.html" %}' not in text:
+            violations.append(f"app/templates/{name}: must extend permalink_base.html")
+    return violations
+
+
 def _git_tracked_files() -> list[str]:
     """Return git-tracked files that still exist in the current checkout."""
     result = subprocess.run(
@@ -603,6 +635,12 @@ if (files.length === 0) throw new Error('no precompressed assets were checked');
             "static_asset() or asset_bundle() so immutable cache headers always "
             "have content-hashed or versioned URLs:\n"
             + "\n".join(f"  {violation}" for violation in template_static_url_violations)
+        )
+        template_document_frame_violations = _template_document_frame_violations()
+        assert not template_document_frame_violations, (
+            "base.html must own the document frame while page templates own "
+            "only page-specific blocks:\n"
+            + "\n".join(f"  {violation}" for violation in template_document_frame_violations)
         )
         listed = _repository_layout_paths()
         tracked = _git_tracked_files()

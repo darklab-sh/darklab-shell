@@ -1,13 +1,11 @@
-<!DOCTYPE html>
 <!-- SPDX-FileCopyrightText: 2026 mmayhew -->
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="{{ current_theme.color_scheme }}">
-<title>{{ app_name }} — diagnostics</title>
+{% extends "base.html" %}
+
+{% block page_title %}{{ app_name }} — diagnostics{% endblock %}
+
+{% block before_head_assets %}
 <script>
   // Redirect once with the browser's UTC offset so activity counts use local
   // calendar boundaries instead of UTC.  Only runs when tz_offset is absent.
@@ -19,18 +17,20 @@
     }
   })();
 </script>
-<link rel="icon" type="image/x-icon" href="{{ static_asset('/static/favicon.ico') }}">
-{% include "app_stylesheets.html" %}
+{% endblock %}
+
+{% block page_stylesheets %}
 {% for href in asset_bundle('terminal-export') %}
 <link rel="stylesheet" href="{{ href }}">
 {% endfor %}
 {% for href in asset_bundle('diag') %}
 <link rel="stylesheet" href="{{ href }}">
 {% endfor %}
-{% include "theme_vars_style.html" %}
-</head>
-<body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">
+{% endblock %}
 
+{% block body_class %}permalink-page diag-page{% endblock %}
+
+{% block content %}
 <div class="diag-topbar">
   <header class="export-header diag-header">
     <div class="export-header-copy diag-header-copy">
@@ -788,6 +788,9 @@
   </section>
 
 </main>
+{% endblock %}
+
+{% block body_scripts %}
 <script>
   // Always-on live refresh: every 10s, fetch the same /diag URL (preserving
   // the tz_offset query string the initial-load redirect set) and swap only
@@ -1289,5 +1292,4 @@
     });
   })();
 </script>
-</body>
-</html>
+{% endblock %}

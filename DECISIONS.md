@@ -42,6 +42,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Blueprint Parent Modules and Size Ratchets](#blueprint-parent-modules-and-size-ratchets)
   - [Mutable Runtime State Uses Source-Owner Accessors](#mutable-runtime-state-uses-source-owner-accessors)
 - [Frontend Decisions](#frontend-decisions)
+  - [Shared Jinja Document Shell](#shared-jinja-document-shell)
   - [Shared Frontend State Layer](#shared-frontend-state-layer)
   - [Export Rendering Centralization (ExportHtmlUtils)](#export-rendering-centralization-exporthtmlutils)
   - [Client-Side PDF Export (jsPDF)](#client-side-pdf-export-jspdf)
@@ -511,6 +512,14 @@ The concrete event inventory, output formats, field contracts, redaction rules, 
 ---
 
 ## Frontend Decisions
+
+### Shared Jinja Document Shell
+
+**One lightweight base template owns the shared HTML document frame; page templates keep ownership of their payloads.**
+
+The shell, permalink pages, diagnostics, and audit log all need the same doctype, metadata, favicon, application styles, theme-variable styles, and themed body. Keeping those lines in every page made a small change easy to miss on one surface. `base.html` now owns that stable frame, while narrow blocks let each page keep its own title, extra assets, body classes, content, and scripts.
+
+The boundary deliberately stops at document-level structure. Moving the shell's lazy assets, diagnostic timezone behavior, permalink bootstrap reporting, or page markup into shared macros would make unrelated pages depend on one another and hide which page pays for each asset. Permalink content and error pages continue extending `permalink_base.html`, so their existing two-level inheritance stays intact.
 
 ### Shared Frontend State Layer
 
