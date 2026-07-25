@@ -39,7 +39,10 @@ The logging layer supports two output formats selected by `log_format` in instal
   - event context is emitted as `_`-prefixed additional fields such as `_ip`, `_run_id`, and `_cmd`
   - this makes the application logs directly indexable by a GELF-aware backend without extra parsing rules
 
-The Docker logging driver and the application formatter are intentionally separate controls. A production operator can create an installation-directory [Compose override](../CONFIGURATION.md#production-compose-overrides) to ship container stdout over Docker GELF transport, while `log_format: gelf` controls whether the application itself emits GELF-shaped records or plain text.
+Container log transport and the application formatter are intentionally
+separate controls. A host-local collector can forward container standard
+output, while `log_format: gelf` controls whether the application itself emits
+GELF-shaped records or plain text.
 
 ## Log Event Inventory
 
@@ -442,6 +445,6 @@ Free-form `message` text and numeric status or error codes are supporting contex
 ## Related Docs
 
 - [../ARCHITECTURE.md](../ARCHITECTURE.md#logging) - formatter, bootstrap, and runtime logging boundaries
-- [../CONFIGURATION.md](../CONFIGURATION.md) - `log_level`, `log_format`, GELF transport, and diagnostics settings
+- [../CONFIGURATION.md](../CONFIGURATION.md) - `log_level`, `log_format`, and diagnostics settings
 - [../FEATURES.md](../FEATURES.md#structured-logging) - user-visible observability benefits and limits
 - [../DECISIONS.md](../DECISIONS.md#structured-logging) - logging design rationale and tradeoffs
