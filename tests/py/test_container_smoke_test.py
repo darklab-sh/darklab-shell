@@ -180,9 +180,11 @@ def _smoke_image_cache_key(build_context: Path, dockerfile_path: Path) -> str:
     for path in (
         dockerfile_path,
         build_context / "entrypoint.sh",
-        build_context / "scripts" / "container" / "stage_runtime_source.sh",
     ):
         _hash_smoke_build_input(hasher, path)
+    for path in sorted((build_context / "scripts" / "container").rglob("*")):
+        if path.is_file():
+            _hash_smoke_build_input(hasher, path)
     for path in sorted((build_context / "app").rglob("*")):
         if path.is_file() and ".local." not in path.name:
             _hash_smoke_build_input(hasher, path)
@@ -570,12 +572,18 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     entrypoint = tmp_path / "entrypoint.sh"
     source_stager = tmp_path / "scripts" / "container" / "stage_runtime_source.sh"
     source_stager.parent.mkdir(parents=True)
+    go_installer = tmp_path / "scripts" / "container" / "install_go_tool.sh"
+    patch_dir = tmp_path / "scripts" / "container" / "patches"
+    patch_dir.mkdir()
+    nuclei_patch = patch_dir / "nuclei-kin-openapi-v0.144.patch"
 
     dockerfile.write_text("FROM python:3.14-slim\n", encoding="utf-8")
     requirements.write_text("flask==3.1.2\n", encoding="utf-8")
     app_source.write_text("APP_VERSION = '1.0.0'\n", encoding="utf-8")
     entrypoint.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
     source_stager.write_text("#!/usr/bin/env sh\ncp -R \"$1/.\" \"$2/\"\n", encoding="utf-8")
+    go_installer.write_text("#!/usr/bin/env sh\ngo install \"$1\"\n", encoding="utf-8")
+    nuclei_patch.write_text("initial compatibility patch\n", encoding="utf-8")
 
     original_key = _smoke_image_cache_key(tmp_path, dockerfile)
 
@@ -599,7 +607,18 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
         "#!/usr/bin/env sh\ncp -R \"$1/.\" \"$2/\"\nchmod -R a-w \"$2\"\n",
         encoding="utf-8",
     )
-    assert _smoke_image_cache_key(tmp_path, dockerfile) != entrypoint_key
+    source_stager_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert source_stager_key != entrypoint_key
+
+    go_installer.write_text(
+        "#!/usr/bin/env sh\ngo install -trimpath \"$1\"\n",
+        encoding="utf-8",
+    )
+    go_installer_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert go_installer_key != source_stager_key
+
+    nuclei_patch.write_text("updated compatibility patch\n", encoding="utf-8")
+    assert _smoke_image_cache_key(tmp_path, dockerfile) != go_installer_key
 
 
 def test_smoke_image_cache_status_requires_matching_label(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -378,6 +378,7 @@ docker-build:
         - Dockerfile
         - app/**/*
         - .dockerignore
+        - scripts/container/**/*
         - docker-compose*.yml
         - compose*.yaml
         - deploy/compose*.yaml

@@ -10,6 +10,8 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Validate multi-platform release publication](#validate-multi-platform-release-publication)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Known Issues](#known-issues)
+- [Technical Debt](#technical-debt)
+  - [Retire the local Nuclei kin-openapi compatibility patch](#retire-the-local-nuclei-kin-openapi-compatibility-patch)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -92,6 +94,20 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
 ## Known Issues
 
 No open Known Issues are currently tracked.
+
+---
+
+## Technical Debt
+
+### Retire the local Nuclei kin-openapi compatibility patch
+
+Nuclei 3.11.0 still pins the vulnerable kin-openapi 0.132.0 release and doesn't compile against the fixed API without a two-line source patch. The image currently raises kin-openapi to the secure 0.144.0 floor, applies the compatibility patch, and verifies the selected dependency is embedded in the finished Nuclei binary.
+
+- [ ] Wait for a released Nuclei version that supports kin-openapi 0.144.0 or newer without source modification.
+- [ ] Update `NUCLEI_VERSION`, build Nuclei without `GO_TOOL_SOURCE_PATCH`, and confirm its embedded kin-openapi version still meets the secure floor.
+- [ ] Remove the local patch, its Docker build-context and release-provenance wiring, and the patch-specific regression assertions. Keep the dependency floor and license tracking while kin-openapi remains embedded.
+- [ ] Build and scan the AMD64 and ARM64 runtime images. Confirm their SBOMs record the expected Nuclei and kin-openapi versions and Grype no longer reports `GHSA-r277-6w6q-xmqw`.
+- [ ] Update `CHANGELOG.md` and remove this item after the unpatched release path passes the protected image and supply-chain gates.
 
 ---
 

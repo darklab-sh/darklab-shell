@@ -25,6 +25,8 @@ assets/
 scripts/*
 !scripts/container/
 !scripts/container/install_go_tool.sh
+!scripts/container/patches/
+!scripts/container/patches/nuclei-kin-openapi-v0.144.patch
 !scripts/container/stage_runtime_source.sh
 !scripts/operations/
 !scripts/operations/backup_system.py

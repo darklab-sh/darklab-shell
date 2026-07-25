@@ -45,6 +45,7 @@ BUILD_INPUT_FILES = (
     "deploy/container-licenses.json",
     "entrypoint.sh",
     "scripts/container/install_go_tool.sh",
+    "scripts/container/patches/nuclei-kin-openapi-v0.144.patch",
 )
 NETWORK_BUILD_TOOLS = (
     "apt-get",

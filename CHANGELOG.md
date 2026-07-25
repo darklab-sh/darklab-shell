@@ -41,6 +41,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Nuclei no longer embeds a vulnerable kin-openapi release.**
+  - **Root cause:** Nuclei 3.11.0 still selected kin-openapi 0.132.0, which contains an authentication-bypass flaw and caused the required Critical vulnerability scan to fail.
+  - **Fix:** the image build raises kin-openapi to 0.144.0, applies the two-line Nuclei compatibility change needed for that API, and verifies the selected version is also embedded in the finished binary. The reviewed patch and dependency license are included in release provenance instead of suppressing the finding.
+  - **Tests:** the Go installer contract covers dependency floors, patch application, and selected-versus-embedded version mismatches; the container cache and release-evidence contracts track the helper and patch; and a real ProjectDiscovery-stage build confirms Nuclei 3.11.0 compiles with kin-openapi 0.144.0.
+
 - **Development tooling no longer installs vulnerable Brace Expansion, js-yaml, or PostCSS releases.**
   - **Root cause:** compatible dependency ranges still resolved to affected Brace Expansion and PostCSS versions, while Markdownlint pinned the affected js-yaml 5.2.1 release even after the project selected a newer parser.
   - **Fix:** the dependency policy now requires Brace Expansion 5.0.8 and PostCSS 8.5.23, pins the direct js-yaml dependency to 5.2.2, and narrowly overrides Markdownlint's parser dependency to the same compatible patched release. Markdownlint stays on 0.23.1 instead of taking npm's forced downgrade.
