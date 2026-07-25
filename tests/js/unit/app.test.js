@@ -12,6 +12,9 @@ import {
   isSyntheticJqCommand,
   parseSyntheticPostFilterCommand,
 } from '../../../app/static/js/core/runner_core.js'
+import {
+  createCommandExecution,
+} from '../../../app/static/js/features/runner/command_lifecycle.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -34,6 +37,20 @@ const THEME_BASE_KEYS = new Set([
   'terminal_font_size',
   'terminal_line_height',
 ])
+
+function createBrowserCommandExecution(command, tabId = 'tab-1') {
+  return createCommandExecution({
+    command,
+    safeCommand: command,
+    tabId,
+    persistence: 'client',
+    recordRecent: false,
+  })
+}
+
+function commandExecutionText(execution) {
+  return execution.state.lines.map(line => line.text).join('\n')
+}
 
 function loadSchedulesModalTestFns({
   apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) })),
@@ -2094,7 +2111,7 @@ describe('app helpers', () => {
   })
 
   it('applies a theme from the terminal theme command', async () => {
-    const { handleThemeCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
+    const { handleThemeCommand } =
       await loadAppFns({
         themeRegistry: {
           current: {
@@ -2119,18 +2136,18 @@ describe('app helpers', () => {
           ],
         },
       })
+    const execution = createBrowserCommandExecution('theme set theme_light_olive')
 
-    await handleThemeCommand('theme set theme_light_olive', 'tab-1')
+    await handleThemeCommand('theme set theme_light_olive', 'tab-1', execution)
 
-    expect(appendCommandEcho).toHaveBeenCalledWith('theme set theme_light_olive', 'tab-1')
     expect(document.body.dataset.theme).toBe('theme_light_olive')
     expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('theme set theme_light_olive')
-    expect(setStatus).toHaveBeenCalledWith('ok')
+    expect(execution.state.recordRecent).toBe(true)
+    expect(execution.state.status).toBe('ok')
   })
 
   it('groups terminal theme list output by color scheme', async () => {
-    const { handleThemeCommand, setStatus, recordSuccessfulLocalCommand } =
+    const { handleThemeCommand } =
       await loadAppFns({
         themeRegistry: {
           current: {
@@ -2164,11 +2181,11 @@ describe('app helpers', () => {
           ],
         },
       })
+    const execution = createBrowserCommandExecution('theme list')
 
-    await handleThemeCommand('theme list', 'tab-1')
+    await handleThemeCommand('theme list', 'tab-1', execution)
 
-    const output = [...document.querySelectorAll('#history-list .line-content')]
-      .map((line) => line.textContent)
+    const output = execution.state.lines.map(line => line.text)
     expect(output).toEqual([
       'current theme       Darklab Obsidian (current)',
       '',
@@ -2180,12 +2197,12 @@ describe('app helpers', () => {
       'Other themes:',
       '    theme_unknown             Unknown Scheme',
     ])
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('theme list')
-    expect(setStatus).toHaveBeenCalledWith('ok')
+    expect(execution.state.recordRecent).toBe(true)
+    expect(execution.state.status).toBe('ok')
   })
 
   it('requires explicit set before applying a theme from the terminal theme command', async () => {
-    const { handleThemeCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
+    const { handleThemeCommand } =
       await loadAppFns({
         themeRegistry: {
           current: {
@@ -2210,17 +2227,17 @@ describe('app helpers', () => {
           ],
         },
       })
+    const execution = createBrowserCommandExecution('theme theme_light_olive')
 
-    await handleThemeCommand('theme theme_light_olive', 'tab-1')
+    await handleThemeCommand('theme theme_light_olive', 'tab-1', execution)
 
     expect(document.body.dataset.theme).toBe('theme_light_blue')
-    expect(appendCommandEcho).toHaveBeenCalledWith('theme theme_light_olive', 'tab-1')
-    expect(recordSuccessfulLocalCommand).not.toHaveBeenCalled()
-    expect(setStatus).toHaveBeenCalledWith('fail')
+    expect(execution.state.recordRecent).toBe(false)
+    expect(execution.state.status).toBe('fail')
   })
 
   it('updates user options from the terminal config command', async () => {
-    const { handleConfigCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
+    const { handleConfigCommand } =
       await loadAppFns({
         cookies: {
           pref_line_numbers: 'off',
@@ -2235,21 +2252,27 @@ describe('app helpers', () => {
           pref_tour_seen_version: '',
         },
       })
+    const commands = [
+      'config set line-numbers on',
+      'config set welcome static',
+      'config set project-auto-link-runs off',
+      'config set project-auto-link-run-entities off',
+      'config set command-outcome-summaries off',
+      'config set prompt-username nona',
+      'config set compare-view changes-only',
+      'config set compare-context all',
+      'config get project-auto-link-run-entities',
+      'config get command-outcome-summaries',
+      'config get prompt-username',
+      'config list',
+    ]
+    const executions = []
+    for (const command of commands) {
+      const execution = createBrowserCommandExecution(command)
+      executions.push(execution)
+      await handleConfigCommand(command, 'tab-1', execution)
+    }
 
-    await handleConfigCommand('config set line-numbers on', 'tab-1')
-    await handleConfigCommand('config set welcome static', 'tab-1')
-    await handleConfigCommand('config set project-auto-link-runs off', 'tab-1')
-    await handleConfigCommand('config set project-auto-link-run-entities off', 'tab-1')
-    await handleConfigCommand('config set command-outcome-summaries off', 'tab-1')
-    await handleConfigCommand('config set prompt-username nona', 'tab-1')
-    await handleConfigCommand('config set compare-view changes-only', 'tab-1')
-    await handleConfigCommand('config set compare-context all', 'tab-1')
-    await handleConfigCommand('config get project-auto-link-run-entities', 'tab-1')
-    await handleConfigCommand('config get command-outcome-summaries', 'tab-1')
-    await handleConfigCommand('config get prompt-username', 'tab-1')
-    await handleConfigCommand('config list', 'tab-1')
-
-    expect(appendCommandEcho).toHaveBeenCalledWith('config set line-numbers on', 'tab-1')
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
@@ -2260,46 +2283,40 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_compare_view_mode=changes_only')
     expect(document.cookie).toContain('pref_compare_context=all')
     expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('nona@darklab.sh:~ $')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set line-numbers on')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-runs off')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-run-entities off')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set command-outcome-summaries off')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set prompt-username nona')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-view changes-only')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-context all')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get project-auto-link-run-entities')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get command-outcome-summaries')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
-    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
-    const configHeader = document.querySelector('.line.builtin-table-header')
-    const configRows = Array.from(document.querySelectorAll('.line.builtin-table-row'))
-      .map(line => line.textContent)
-    expect(configHeader?.textContent).toMatch(/^option\s+value$/)
+    expect(executions.every(execution => execution.state.recordRecent)).toBe(true)
+    expect(executions.every(execution => execution.state.status === 'ok')).toBe(true)
+    const configLines = executions.at(-1).state.lines
+    const configHeader = configLines.find(line => line.cls === 'builtin-table-header')
+    const configRows = configLines
+      .filter(line => line.cls === 'builtin-table-row')
+      .map(line => line.text)
+    expect(configHeader?.text).toMatch(/^option\s+value$/)
     expect(configRows).toEqual(expect.arrayContaining([
       expect.stringMatching(/^project-auto-link-run-entities\s+off$/),
       expect.stringMatching(/^command-outcome-summaries\s+off$/),
     ]))
-    expect(setStatus).toHaveBeenCalledWith('ok')
   })
 
   it('requires explicit set before updating user options from the terminal config command', async () => {
-    const { handleConfigCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
+    const { handleConfigCommand } =
       await loadAppFns({
         cookies: {
           pref_line_numbers: 'off',
         },
       })
+    const missingSetExecution = createBrowserCommandExecution('config line-numbers on')
+    const invalidValueExecution = createBrowserCommandExecution('config set prompt-username bad/path')
 
-    await handleConfigCommand('config line-numbers on', 'tab-1')
-    await handleConfigCommand('config set prompt-username bad/path', 'tab-1')
+    await handleConfigCommand('config line-numbers on', 'tab-1', missingSetExecution)
+    await handleConfigCommand('config set prompt-username bad/path', 'tab-1', invalidValueExecution)
 
     expect(document.body.classList.contains('ln-on')).toBe(false)
     expect(document.cookie).not.toContain('pref_line_numbers=on')
     expect(document.cookie).not.toContain('pref_prompt_username=bad')
-    expect(appendCommandEcho).toHaveBeenCalledWith('config line-numbers on', 'tab-1')
-    expect(recordSuccessfulLocalCommand).not.toHaveBeenCalled()
-    expect(setStatus).toHaveBeenCalledWith('fail')
+    expect(missingSetExecution.state.recordRecent).toBe(false)
+    expect(invalidValueExecution.state.recordRecent).toBe(false)
+    expect(missingSetExecution.state.status).toBe('fail')
+    expect(invalidValueExecution.state.status).toBe('fail')
   })
 
   it('keeps config command output pinned to the tail when the tab is already following', async () => {
@@ -2323,9 +2340,17 @@ describe('app helpers', () => {
       },
     })
 
-    await handleConfigCommand('config set welcome static', 'tab-1')
+    await handleConfigCommand(
+      'config set welcome static',
+      'tab-1',
+      createBrowserCommandExecution('config set welcome static'),
+    )
     scrollTop = 0
-    await handleConfigCommand('config set hud-clock local', 'tab-1')
+    await handleConfigCommand(
+      'config set hud-clock local',
+      'tab-1',
+      createBrowserCommandExecution('config set hud-clock local'),
+    )
 
     expect(tab.followOutput).toBe(true)
     expect(scrollTop).toBe(500)
@@ -2391,7 +2416,6 @@ describe('app helpers', () => {
     const {
       handleTourCommand,
       getTourSeenVersionPreference,
-      setStatus,
     } = await loadAppFns({
       apiFetch,
       getOutput: () => output,
@@ -2401,8 +2425,10 @@ describe('app helpers', () => {
       appConfig: tourConfig,
     })
 
-    await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 2)
-    await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 2)
+    const firstExecution = createBrowserCommandExecution('tour')
+    const secondExecution = createBrowserCommandExecution('tour')
+    await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1', firstExecution), 2)
+    await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1', secondExecution), 2)
 
     expect(output.textContent).toContain('Running commands')
     expect(output.textContent).toContain('Capture the output.')
@@ -2417,7 +2443,10 @@ describe('app helpers', () => {
     expect(submitVisibleComposerCommand).not.toHaveBeenCalled()
     expect(getTourSeenVersionPreference()).toBe(3)
     expect(apiFetch.mock.calls.filter(([url]) => url === '/session/tour-seen')).toHaveLength(1)
-    expect(setStatus).toHaveBeenLastCalledWith('ok')
+    expect(firstExecution.state.status).toBe('ok')
+    expect(secondExecution.state.status).toBe('ok')
+    expect(firstExecution.state.recordRecent).toBe(true)
+    expect(secondExecution.state.recordRecent).toBe(true)
   })
 
   it('omits the interactive tools chapter from the terminal tour on mobile', async () => {
@@ -2451,9 +2480,11 @@ describe('app helpers', () => {
       appConfig: tourConfig,
     })
     try {
-      await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 1)
+      const execution = createBrowserCommandExecution('tour')
+      await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1', execution), 1)
       expect(output.textContent).toContain('Running commands')
       expect(output.textContent).not.toContain('Interactive tools')
+      expect(execution.state.status).toBe('ok')
     } finally {
       restoreViewport()
     }
@@ -3274,20 +3305,28 @@ describe('app helpers', () => {
     const {
       renderWorkflowItems,
       handleWorkflowTerminalCommand,
-      appendCommandEcho,
     } = await loadAppFns({
       submitComposerCommand,
       apiFetch,
     })
     renderWorkflowItems([workflow], { emitCatalogEvent: false })
 
-    await handleWorkflowTerminalCommand('workflow run dns-troubleshooting --domain darklab.sh', 'tab-1')
-
-    expect(appendCommandEcho).toHaveBeenCalledWith(
+    const legacyExecution = createBrowserCommandExecution(
+      'workflow run dns-troubleshooting --domain darklab.sh',
+    )
+    await handleWorkflowTerminalCommand(
       'workflow run dns-troubleshooting --domain darklab.sh',
       'tab-1',
+      legacyExecution,
     )
-    expect(document.body.textContent).toContain('[workflow] DNS Troubleshooting: 1 step(s) queued.')
+
+    expect(commandExecutionText(legacyExecution)).toContain(
+      '[workflow] DNS Troubleshooting: 1 step(s) queued.',
+    )
+    expect(legacyExecution.state.delegated).toBe(true)
+    expect(legacyExecution.state.status).toBe('idle')
+    expect(legacyExecution.state.persistence).toBe('none')
+    expect(legacyExecution.state.recordRecent).toBe(false)
 
     const durableWorkflow = {
       ...workflow,
@@ -3313,12 +3352,22 @@ describe('app helpers', () => {
     })
     expect(document.body.textContent).not.toContain('wfx_terminal_test')
 
-    await handleWorkflowTerminalCommand('workflow run durable-dns --domain darklab.sh', 'tab-1')
-    await vi.waitFor(() => expect(document.body.textContent).toContain(
+    const durableExecution = createBrowserCommandExecution(
+      'workflow run durable-dns --domain darklab.sh',
+    )
+    await handleWorkflowTerminalCommand(
+      'workflow run durable-dns --domain darklab.sh',
+      'tab-1',
+      durableExecution,
+    )
+    await vi.waitFor(() => expect(commandExecutionText(durableExecution)).toContain(
       '[workflow] Durable DNS: execution wfx_terminal_test started with 1 input. '
         + 'Check progress with workflow status wfx_terminal_test.',
     ))
-    expect(document.body.textContent).not.toContain('step_1')
+    expect(commandExecutionText(durableExecution)).not.toContain('step_1')
+    expect(durableExecution.state.status).toBe('ok')
+    expect(durableExecution.state.persistence).toBe('none')
+    expect(durableExecution.state.recordRecent).toBe(false)
 
     const sensitiveWorkflow = {
       ...workflow,
@@ -3328,17 +3377,23 @@ describe('app helpers', () => {
       steps: [{ cmd: 'echo {{token}}', note: '' }],
     }
     renderWorkflowItems([sensitiveWorkflow], { emitCatalogEvent: false })
+    const sensitiveExecution = createBrowserCommandExecution(
+      'workflow run authenticated-dns --token super-secret-value',
+    )
     await handleWorkflowTerminalCommand(
       'workflow run authenticated-dns --token super-secret-value',
       'tab-1',
+      sensitiveExecution,
     )
 
-    expect(appendCommandEcho).toHaveBeenLastCalledWith(
+    expect(sensitiveExecution.state.safeCommand).toBe(
       'workflow run authenticated-dns --token [redacted]',
-      'tab-1',
     )
-    expect(document.body.textContent).not.toContain('super-secret-value')
-    expect(document.body.textContent).toContain("Sensitive parameters can't be supplied inline")
+    expect(commandExecutionText(sensitiveExecution)).not.toContain('super-secret-value')
+    expect(commandExecutionText(sensitiveExecution)).toContain(
+      "Sensitive parameters can't be supplied inline",
+    )
+    expect(sensitiveExecution.state.status).toBe('fail')
   })
 
   it('handles workflow runs, status, and cancel terminal commands without exposing inputs', async () => {
@@ -3396,20 +3451,41 @@ describe('app helpers', () => {
     const { renderWorkflowItems, handleWorkflowTerminalCommand } = await loadAppFns({ apiFetch })
     renderWorkflowItems([workflow], { emitCatalogEvent: false })
 
-    await handleWorkflowTerminalCommand('workflow runs', 'tab-1')
-    await handleWorkflowTerminalCommand('workflow status wfx_cli_test', 'tab-1')
-    await handleWorkflowTerminalCommand('workflow cancel wfx_cli_test', 'tab-1')
-    await handleWorkflowTerminalCommand('workflow status', 'tab-1')
-    await handleWorkflowTerminalCommand('workflow status not-visible', 'tab-1')
+    const commands = [
+      'workflow runs',
+      'workflow status wfx_cli_test',
+      'workflow cancel wfx_cli_test',
+      'workflow status',
+      'workflow status not-visible',
+    ]
+    const executions = commands.map(command => createBrowserCommandExecution(command))
+    for (const [index, command] of commands.entries()) {
+      await handleWorkflowTerminalCommand(command, 'tab-1', executions[index])
+    }
+    const terminalText = executions.map(commandExecutionText).join('\n')
 
-    expect(document.body.textContent).toContain('Recent workflow executions:')
-    expect(document.body.textContent).toContain('wfx_cli_test')
-    expect(document.body.textContent).toContain('CLI playbook (running, step inspect)')
-    expect(document.body.textContent).toContain('inspect: running, run run-cli-test, next complete (success), captures captured')
-    expect(document.body.textContent).toContain('[workflow] wfx_cli_test canceled.')
-    expect(document.body.textContent).toContain('[workflow] execution id is required')
-    expect(document.body.textContent).toContain('[workflow] workflow execution not found')
-    expect(document.body.textContent).not.toContain(privateValue)
+    expect(terminalText).toContain('Recent workflow executions:')
+    expect(terminalText).toContain('wfx_cli_test')
+    expect(terminalText).toContain('CLI playbook (running, step inspect)')
+    expect(terminalText).toContain('inspect: running, run run-cli-test, next complete (success), captures captured')
+    expect(terminalText).toContain('[workflow] wfx_cli_test canceled.')
+    expect(terminalText).toContain('[workflow] execution id is required')
+    expect(terminalText).toContain('[workflow] workflow execution not found')
+    expect(terminalText).not.toContain(privateValue)
+    expect(executions.map(item => item.state.status)).toEqual([
+      'ok',
+      'ok',
+      'ok',
+      'fail',
+      'fail',
+    ])
+    expect(executions.map(item => item.state.recordRecent)).toEqual([
+      true,
+      true,
+      true,
+      false,
+      false,
+    ])
     expect(apiFetch).toHaveBeenCalledWith(
       '/workflow-executions/wfx_cli_test/cancel',
       { method: 'POST' },
@@ -7423,9 +7499,10 @@ describe('app helpers', () => {
       const ok = await opts.actions.find(action => action.id === 'save').onActivate()
       return ok ? 'save' : null
     })
-    const { handleSecretCommand, setStatus } = await loadAppFns({ apiFetch, showConfirm })
+    const { handleSecretCommand } = await loadAppFns({ apiFetch, showConfirm })
 
-    await handleSecretCommand('secret set shodan_api_key', 'tab-1')
+    const execution = createBrowserCommandExecution('secret set shodan_api_key')
+    await handleSecretCommand('secret set shodan_api_key', 'tab-1', execution)
 
     expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
       body: expect.objectContaining({
@@ -7440,7 +7517,8 @@ describe('app helpers', () => {
     })
     expect(JSON.stringify(apiFetch.mock.calls)).toContain('terminal-secret-value')
     expect(document.body.textContent).not.toContain('terminal-secret-value')
-    expect(setStatus).toHaveBeenCalledWith('ok')
+    expect(execution.state.status).toBe('ok')
+    expect(execution.state.recordRecent).toBe(true)
   })
 
   it('deletes encrypted secrets from the options panel only after confirming', async () => {

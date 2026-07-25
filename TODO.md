@@ -22,7 +22,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Native ticketing integrations](#native-ticketing-integrations)
   - [Operator-extensible signal and parser rules](#operator-extensible-signal-and-parser-rules)
 - [Architecture](#architecture)
-  - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
   - [Interactive PTY transport future-state](#interactive-pty-transport-future-state)
 
@@ -204,17 +203,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Unified terminal built-in lifecycle
-- Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/runs`.
-- The long-term cleanup target is one terminal-command lifecycle after execution:
-  - normalize built-in output into a shared result shape
-  - apply pipe helpers against that shape
-  - mask sensitive command arguments once
-  - render transcript output once
-  - persist server-backed history once
-  - load recents and prompt history from the same saved run model
-- Keep execution ownership separate where it matters, but remove duplicated recents/history/pipe/persistence glue so browser-owned and server-owned built-ins cannot drift.
 
 ### Plugin-style helper command registry
 - Turn the built-in command layer into a cleaner extension point for future app-native helpers.

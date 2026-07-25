@@ -510,7 +510,6 @@ export async function loadAppFns({
   const appendLine = vi.fn()
   const appendCommandEcho = vi.fn()
   const setStatus = vi.fn()
-  const recordSuccessfulLocalCommand = vi.fn()
   const getTab = vi.fn((id) => tabsState.find((tab) => tab && tab.id === id) || null)
   const getActiveTab = vi.fn(
     () => tabsState.find((tab) => tab && tab.id === activeTabState) || null,
@@ -825,7 +824,6 @@ export async function loadAppFns({
       appendLine,
       appendCommandEcho,
       setStatus,
-      _recordSuccessfulLocalCommand: recordSuccessfulLocalCommand,
       tabs: tabsState,
       activeTabId: activeTabState,
       getTab,
@@ -1016,7 +1014,6 @@ export async function loadAppFns({
      window.setWelcomeState = setWelcomeState;
      window.appendCommandEcho = appendCommandEcho;
      window.setStatus = setStatus;
-     window._recordSuccessfulLocalCommand = _recordSuccessfulLocalCommand;
      window.apiFetch = apiFetch;
      window.logClientError = logClientError;
      window.SESSION_ID = SESSION_ID;
@@ -1205,7 +1202,6 @@ export async function loadAppFns({
     appendLine,
     appendCommandEcho,
     setStatus,
-    recordSuccessfulLocalCommand,
     acDropdown,
     acHide: acHideOverride,
     shellPromptWrap: shellPromptWrapEl,

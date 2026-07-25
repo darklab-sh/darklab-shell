@@ -7,14 +7,14 @@ const TOUR_CLI_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalTh
 
 let loadedHandleTourCommand = null;
 
-async function handleTourCommand(cmd, tabId = null) {
+async function handleTourCommand(cmd, tabId = null, execution = null) {
   if (typeof loadedHandleTourCommand === 'function' && loadedHandleTourCommand !== handleTourCommand) {
-    return loadedHandleTourCommand(cmd, tabId);
+    return loadedHandleTourCommand(cmd, tabId, execution);
   }
 
   const globalHandler = TOUR_CLI_BRIDGE_GLOBAL && TOUR_CLI_BRIDGE_GLOBAL.handleTourCommand;
   if (typeof globalHandler === 'function' && globalHandler !== handleTourCommand) {
-    return globalHandler(cmd, tabId);
+    return globalHandler(cmd, tabId, execution);
   }
 
   const load = (typeof importedLoadTourCliCommand === 'function' && importedLoadTourCliCommand)
@@ -25,7 +25,7 @@ async function handleTourCommand(cmd, tabId = null) {
   if (typeof loadedHandleTourCommand !== 'function' || loadedHandleTourCommand === handleTourCommand) {
     return false;
   }
-  return loadedHandleTourCommand(cmd, tabId);
+  return loadedHandleTourCommand(cmd, tabId, execution);
 }
 
 export { handleTourCommand };

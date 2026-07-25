@@ -15,6 +15,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Terminal commands now share one completion lifecycle without changing where they execute.**
+  - **Before:** browser-owned commands relied on a pipe wrapper that temporarily replaced output, status, recents, and persistence helpers; workflows completed through a separate direct path; and brokered commands repeated similar logic in the SSE exit handler.
+  - **After:** browser-owned handlers return normalized output and requested follow-up work, while server-owned commands keep streaming through `/runs`. One exactly-once coordinator now settles transcript output, tab and HUD status, eligible recents, notifications, refreshes, and `/run/client` persistence. `/run/client` returns the saved run summary, and successful browser-owned recents use that response's command instead of a separate optimistic copy. Prompt history remains available at submit time after client checks, while recents remain completion-time state. Server-run recents use the masked command instead of retaining sensitive raw arguments, and queued legacy workflows leave status ownership with the command they launch instead of briefly reporting success before it runs.
+  - **Tests:** six new Vitest cases cover the result contract, buffered and streamed ownership, exactly-once rendering and persistence, saved-run hydration, masked server recents, submit-time prompt-history eligibility, confirmation completion, and Files commands after removal of pipe monkey-patching. Existing workflow tests now execute the production lifecycle branches for legacy queues, durable runs, sensitive inputs, status, and cancel behavior.
+
 - **The main pages now share one lightweight Jinja document shell.**
   - **Before:** the shell, permalink base, diagnostics, and audit log each repeated their own doctype, root elements, shared metadata, favicon, application styles, theme variables, and body theme attribute.
   - **After:** `base.html` owns that stable frame, while each page keeps its own title, extra assets, body classes, content, and scripts. Permalink content and error pages still extend `permalink_base.html`, preserving their existing second inheritance level without pulling page-specific behavior into the shared base.

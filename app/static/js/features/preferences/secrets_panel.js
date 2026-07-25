@@ -3,9 +3,7 @@
 
 // Options modal encrypted secrets panel.
 import { showToast as importedShowToast } from '../../core/utils.js';
-import { appendLine as importedAppendLine } from '../../output_bridge.js';
 import { logClientError as importedLogClientError } from '../../runtime_bridge.js';
-import { setStatus as importedSetStatus } from '../../runner_bridge.js';
 import { apiFetch as importedApiFetch } from '../../session.js';
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import {
@@ -34,18 +32,6 @@ function _optionsSecretsApiFetch(...args) {
   const fetcher = (typeof importedApiFetch === 'function' && importedApiFetch)
     || _optionsSecretsGlobalFunction('apiFetch');
   return typeof fetcher === 'function' ? fetcher(...args) : Promise.reject(new Error('apiFetch unavailable'));
-}
-
-function _optionsSecretsAppendLine(...args) {
-  const append = (typeof importedAppendLine === 'function' && importedAppendLine)
-    || _optionsSecretsGlobalFunction('appendLine');
-  if (append) append(...args);
-}
-
-function _optionsSecretsSetStatus(...args) {
-  const set = (typeof importedSetStatus === 'function' && importedSetStatus)
-    || _optionsSecretsGlobalFunction('setStatus');
-  if (set) set(...args);
 }
 
 function _optionsSecretsShowToast(message, tone) {
@@ -836,34 +822,44 @@ async function deleteOptionsSecret(name) {
   return true;
 }
 
-async function handleSecretCommand(cmd, tabId = null) {
+async function handleSecretCommand(cmd, tabId = null, execution) {
+  if (!execution) {
+    throw new Error('Secret terminal commands require a command execution');
+  }
+  const append = (text, cls = '') => {
+    execution.appendLine(text, cls, tabId);
+  };
+  const finish = (status) => {
+    execution.setRecordRecent(status !== 'fail');
+    execution.setStatus(status);
+  };
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[1] || '').toLowerCase();
   if (sub !== 'set') {
-    _optionsSecretsAppendLine("secret: browser prompt is only used for 'secret set NAME'", '', tabId);
-    _optionsSecretsAppendLine("run 'secret list', 'secret unset NAME', or 'secret show-consumers' normally", '', tabId);
-    _optionsSecretsSetStatus('fail');
+    append("secret: browser prompt is only used for 'secret set NAME'");
+    append("run 'secret list', 'secret unset NAME', or 'secret show-consumers' normally");
+    finish('fail');
     return true;
   }
   if (parts.length !== 3) {
-    _optionsSecretsAppendLine('usage: secret set NAME', '', tabId);
-    _optionsSecretsAppendLine('Do not put the value on the command line. The browser prompt collects it safely.', 'builtin-note', tabId);
-    _optionsSecretsSetStatus('fail');
+    append('usage: secret set NAME');
+    append('Do not put the value on the command line. The browser prompt collects it safely.', 'builtin-note');
+    finish('fail');
     return true;
   }
   const name = _normalizeOptionsSecretName(parts[2]);
   if (!_optionsSecretNameIsValid(name)) {
-    _optionsSecretsAppendLine('secret: secret names must start with a letter and use letters, numbers, or underscores', 'exit-fail', tabId);
-    _optionsSecretsSetStatus('fail');
+    append('secret: secret names must start with a letter and use letters, numbers, or underscores', 'exit-fail');
+    finish('fail');
     return true;
   }
   const choice = await openSecretEditor({ name, source: 'terminal' });
   if (choice === 'save') {
-    _optionsSecretsAppendLine(`${name} stored.`, 'builtin-success', tabId);
-    _optionsSecretsSetStatus('ok');
+    append(`${name} stored.`, 'builtin-success');
+    finish('ok');
   } else {
-    _optionsSecretsAppendLine('Secret set canceled.', '', tabId);
-    _optionsSecretsSetStatus('idle');
+    append('Secret set canceled.');
+    finish('idle');
   }
   return true;
 }

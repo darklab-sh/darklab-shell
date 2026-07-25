@@ -115,6 +115,12 @@ import {
   markActiveRunDetachedForRestore,
 } from '../../../app/static/js/features/runner/runner_active_restore.js'
 import {
+  DarklabCommandLifecycle,
+  createCommandCompletionCoordinator,
+  createCommandExecution,
+  normalizeCommandResult,
+} from '../../../app/static/js/features/runner/command_lifecycle.js'
+import {
   DarklabRunnerPersistence,
   createRunnerPersistence,
 } from '../../../app/static/js/features/runner/runner_persistence.js'
@@ -484,6 +490,9 @@ describe('core ESM exports', () => {
     expect(DarklabAutocompleteCore.filterItems).toBe(filterItems)
     expect(DarklabRunOutputModel.fromWireLineEvent).toBe(fromWireLineEvent)
     expect(DarklabSearchCore.formatFindingSummary).toBe(formatFindingSummary)
+    expect(DarklabCommandLifecycle.normalizeCommandResult).toBe(normalizeCommandResult)
+    expect(createCommandExecution).toBeTypeOf('function')
+    expect(createCommandCompletionCoordinator).toBeTypeOf('function')
   })
 
   it('distinguishes loaded bridge wrappers from registered lazy handlers', () => {

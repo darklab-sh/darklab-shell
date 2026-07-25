@@ -48,6 +48,36 @@ def run_summary(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def client_run_response(
+    run_id: str,
+    command: str,
+    started: Any,
+    finished: Any,
+    exit_code: int,
+    output_line_count: int,
+    preview_truncated: bool,
+) -> dict[str, Any]:
+    """Return the saved-run envelope used by browser-owned terminal commands."""
+    saved_run = run_summary({
+        "id": run_id,
+        "command": command,
+        "started": started.isoformat(),
+        "finished": finished.isoformat(),
+        "exit_code": exit_code,
+        "run_kind": "builtin",
+        "output_line_count": output_line_count,
+        "preview_truncated": preview_truncated,
+        "full_output_available": False,
+        "full_output_truncated": False,
+    })
+    return {
+        "ok": True,
+        "run": saved_run,
+        "run_id": run_id,
+        "output_line_count": output_line_count,
+    }
+
+
 def _run_status(row: dict[str, Any]) -> str:
     if row.get("status"):
         return str(row["status"])

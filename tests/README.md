@@ -180,7 +180,7 @@ These summaries explain what belongs in each layer. Use the live-listing command
 
 ### Vitest
 
-`tests/js/unit/` covers browser-module logic in jsdom, including shared composer state, tab/output/history behavior, welcome sequencing, autocomplete, search, and export helpers.
+`tests/js/unit/` covers browser-module logic in jsdom, including shared composer state, tab/output/history behavior, welcome sequencing, autocomplete, search, and export helpers. Terminal lifecycle coverage pins normalized browser and server results, exactly-once completion and persistence, masked recents, submit-time prompt history, confirmations, and Files output piping or redirection.
 
 Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/` so high-change areas such as app chrome, session identity, and Files/workspace behavior can share setup without growing individual spec files.
 

@@ -11,6 +11,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
 - [Runtime and Coordination Decisions](#runtime-and-coordination-decisions)
   - [Real-time Output: SSE over WebSockets](#real-time-output-sse-over-websockets)
   - [Redis-Backed Run Broker](#redis-backed-run-broker)
+  - [Separate Command Execution, Shared Terminal Completion](#separate-command-execution-shared-terminal-completion)
   - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
   - [AI Assists: Private Provider, Worker, and Validation Boundary](#ai-assists-private-provider-worker-and-validation-boundary)
@@ -85,6 +86,16 @@ Redis Streams were chosen for production because darklab_shell already relies on
 The app still includes a single-process in-memory broker fallback for local development, but production live reattachment expects Redis. That split is intentional: local development should stay easy to start, while Docker/Gunicorn deployments need one shared broker so active run state, stream replay, and process control behave consistently no matter which worker handles the next request.
 
 The old request-owned `POST /run` execution route was removed instead of kept as a compatibility layer. Maintaining two command execution paths would have duplicated lifecycle behavior, increased test burden, and made active-run behavior more fragile. `POST /run/client` remains separate because browser-owned built-ins such as `theme`, `config`, and `session-token` need local DOM/storage behavior before their rendered transcript is saved to normal run history.
+
+### Separate Command Execution, Shared Terminal Completion
+
+**Browser-owned and server-owned commands execute in different places, but the terminal settles them through one completion contract.**
+
+Commands that need browser APIs still run in the browser: themes change live DOM state, preferences use local storage, secrets open a protected value prompt, and Files actions can launch an editor or download. Commands that launch tools or need authoritative policy enforcement still run through the backend broker and stream output over SSE. Moving either group across that boundary would either push trusted execution into the browser or force browser-only behavior into server routes.
+
+The shared boundary comes after execution. Both paths hand normalized lines, exit state, persistence ownership, recents eligibility, the masked command, and requested refreshes to one coordinator. This prevents browser pipes, workflows, confirmations, and SSE exits from each maintaining their own slightly different status and history logic. Completion is keyed so a late callback or repeated event can't render or persist the same command twice.
+
+Prompt history stays outside that coordinator by design. An accepted command enters prompt history at submit time so arrow-key recall works while it runs; rejected client-side input never enters it. Recents remain completion-time state and only include eligible results. Browser-owned commands use the saved `/run/client` response's command, while server-owned commands use the masked tab command. This keeps recents aligned with persisted history and closes the old gap where a server-run recent could retain a sensitive raw argument.
 
 ### Multi-worker Process Killing via Redis
 

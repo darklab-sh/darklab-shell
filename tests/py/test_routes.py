@@ -19136,6 +19136,27 @@ class TestRunRoute:
             assert resp.status_code == 200
             assert data["ok"] is True
             assert data["output_line_count"] == 2
+            assert data["run"] == {
+                "id": data["run_id"],
+                "command": "theme list",
+                "started": data["run"]["started"],
+                "finished": data["run"]["finished"],
+                "status": "succeeded",
+                "exit_code": 0,
+                "run_kind": "builtin",
+                "output_line_count": 2,
+                "preview_truncated": False,
+                "full_output_available": False,
+                "full_output_truncated": False,
+                "artifact_count": 0,
+                "finding_count": 0,
+                "label_count": 0,
+                "note_count": 0,
+                "atlas_entity_count": 0,
+                "atlas_finding_count": 0,
+                "scheduled": False,
+                "schedule_id": "",
+            }
 
             history = json.loads(
                 client.get(
