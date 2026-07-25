@@ -855,7 +855,6 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `DATABASE_POSTGRES_JIT` | Flask app | Optional environment override for the YAML Postgres JIT setting |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
 | `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
-| `DOCKER_GELF_ADDRESS` | Local Compose override | GELF log destination when an operator-created Compose override enables Docker's GELF logging driver |
 
 If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production stack keeps those defaults unless `.env` changes them. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
 
@@ -1014,7 +1013,7 @@ Before an upgrade, stop writes and verify a backup of the selected database, `.e
 
 ### Production Compose overrides
 
-The installed `compose.yaml` is release-owned. Its `shell` service includes a commented copy of the optional scanner-tuning settings for discoverability, but don't uncomment them in the managed file. Keep deployment-specific service settings in a separate file beside it so an upgrade can replace the managed stack without overwriting your choices. For example, create `compose.operator.yaml` to add scanner limits and Docker GELF transport:
+The installed `compose.yaml` is release-owned. Its `shell` service includes a commented copy of the optional scanner-tuning settings for discoverability, but don't uncomment them in the managed file. Keep deployment-specific service settings in a separate file beside it so an upgrade can replace the managed stack without overwriting your choices. For example, create `compose.operator.yaml` to add scanner limits:
 
 ```yaml
 services:
@@ -1028,22 +1027,6 @@ services:
       net.ipv4.tcp_tw_reuse: 1
       net.ipv4.tcp_fin_timeout: 15
       net.ipv4.tcp_max_tw_buckets: 131072
-    logging: &gelf
-      driver: gelf
-      options:
-        gelf-address: "${DOCKER_GELF_ADDRESS:?set DOCKER_GELF_ADDRESS in .env}"
-  redis:
-    logging: *gelf
-  postgres:
-    logging: *gelf
-  llama:
-    logging: *gelf
-```
-
-Set the destination in the installed `.env`, validate the merged stack, and use the same file order whenever you operate it:
-
-```env
-DOCKER_GELF_ADDRESS=udp://loghost.example.internal:12201/
 ```
 
 ```bash
@@ -1073,7 +1056,10 @@ Start the full development stack explicitly so Compose doesn't mistake it for an
 docker compose -f compose.dev.yaml up --build
 ```
 
-Application log format and Docker log transport are separate controls. Development can set `log_format: gelf` in `app/conf/config.local.yaml`. Production operators should use installed `conf/config.local.yaml` and a local Compose override such as `compose.operator.yaml` above.
+Application log format is independent of container log transport. Development
+can set `log_format: gelf` in `app/conf/config.local.yaml`, while production
+uses installed `conf/config.local.yaml`. A host-local collector can forward the
+resulting standard output without changing the application stack.
 
 ### Docker Labels
 
@@ -1377,7 +1363,8 @@ log_format: gelf
 log_level: INFO
 ```
 
-Use an installation-directory [Compose override](#production-compose-overrides) and `DOCKER_GELF_ADDRESS` if Docker should also ship container logs through the GELF driver.
+The application writes GELF-shaped JSON to standard output. Use a host-local
+collector when those container logs should be sent to a remote log service.
 
 ### Customize Package Presets
 
