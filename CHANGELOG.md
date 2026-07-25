@@ -15,6 +15,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **The main pages now share one lightweight Jinja document shell.**
+  - **Before:** the shell, permalink base, diagnostics, and audit log each repeated their own doctype, root elements, shared metadata, favicon, application styles, theme variables, and body theme attribute.
+  - **After:** `base.html` owns that stable frame, while each page keeps its own title, extra assets, body classes, content, and scripts. Permalink content and error pages still extend `permalink_base.html`, preserving their existing second inheritance level without pulling page-specific behavior into the shared base.
+  - **Tests:** route coverage pins one complete rendered document, page title, body classes, theme, and asset contract for the shell, permalink, permalink-error, diagnostics, and audit pages in the existing source and bundled modes. A repository guard rejects duplicate document markup or a broken inheritance boundary without changing the test count.
+
 - **Container logging guidance now keeps remote transport outside the app's Compose stack** — the operator docs still explain how to emit structured GELF JSON on standard output, but no longer recommend Docker's direct GELF driver or the retired `DOCKER_GELF_ADDRESS` setting. A host-local collector can forward container logs without making application startup depend on the remote log service.
 
 - **Files now feels like a compact file browser instead of a stack of oversized cards.**
@@ -30,6 +35,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Contributor branches now merge into `main`, while release branches are reserved for short stabilization windows** — the documented lifecycle cuts `release/MAJOR.MINOR` only after the release scope is complete, routes candidate fixes through merge requests, freezes unrelated `main` merges during RC validation, merges the finished release back into `main`, and tags that exact merged commit before retiring the release branch.
 
 ### Fixed
+
+- **Development tooling no longer installs vulnerable Brace Expansion, js-yaml, or PostCSS releases.**
+  - **Root cause:** compatible dependency ranges still resolved to affected Brace Expansion and PostCSS versions, while Markdownlint pinned the affected js-yaml 5.2.1 release even after the project selected a newer parser.
+  - **Fix:** the dependency policy now requires Brace Expansion 5.0.8 and PostCSS 8.5.23, pins the direct js-yaml dependency to 5.2.2, and narrowly overrides Markdownlint's parser dependency to the same compatible patched release. Markdownlint stays on 0.23.1 instead of taking npm's forced downgrade.
+  - **Tests:** the JavaScript dependency audit reports no vulnerabilities, the resolved dependency tree contains only the patched releases, and the affected theme parsing, Markdown lint, CSS lint, and asset-build paths remain green.
 
 - **Source-mounted development now starts reliably from private Linux checkouts.**
   - **Root cause:** `compose.dev.yaml` bound `./app` directly over `/app`, so native Linux preserved host ownership and modes such as `0600` after the container dropped to `appuser`.

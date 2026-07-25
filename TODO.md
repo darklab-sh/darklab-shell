@@ -24,7 +24,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Architecture](#architecture)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
-  - [Lightweight Jinja base template](#lightweight-jinja-base-template)
   - [Interactive PTY transport future-state](#interactive-pty-transport-future-state)
 
 ---
@@ -219,10 +218,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### Plugin-style helper command registry
 - Turn the built-in command layer into a cleaner extension point for future app-native helpers.
-
-### Lightweight Jinja base template
-- `index.html`, `permalink_base.html`, and `diag.html` now all share the same ~10 lines of `<head>` bootstrap (charset, viewport, color-scheme meta, favicon, `fonts.css`, `styles.css`, theme var includes, and the two vendor scripts). With three templates the duplication is starting to pay for the indirection.
-- A `base.html` factoring out the common `<head>` and `data-theme` body attribute would prevent drift and make adding a fourth page type trivial.
 
 ### Interactive PTY transport future-state
 - Revisit whether the current Redis-brokered SSE plus POST input/resize transport should move to WebSockets after real use.

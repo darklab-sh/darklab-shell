@@ -118,6 +118,41 @@ def _assert_no_audit_private_export_strings(text: str) -> None:
         assert value not in text
 
 
+def _assert_html_document_contract(
+    body: str,
+    *,
+    body_class: str | None,
+    title: str,
+) -> None:
+    assert body.count("<!DOCTYPE html>") == 1
+    for tag in ("html", "head", "body"):
+        assert len(re.findall(rf"<{tag}(?:\s|>)", body, flags=re.I)) == 1
+        assert len(re.findall(rf"</{tag}>", body, flags=re.I)) == 1
+    assert '<html lang="en">' in body
+    assert '<meta charset="UTF-8">' in body
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1.0">' in body
+    assert '<meta name="color-scheme" content="' in body
+    assert f"<title>{title}</title>" in body
+    assert '<link rel="icon" type="image/x-icon"' in body
+    if body_class is None:
+        assert re.search(r'<body data-theme="[^"]+">', body)
+    else:
+        assert re.search(
+            rf'<body class="{re.escape(body_class)}" data-theme="[^"]+">',
+            body,
+        )
+    assert body.rstrip().endswith("</html>")
+
+
+def _assert_html_fragments_in_order(body: str, *fragments: str) -> None:
+    previous = -1
+    for fragment in fragments:
+        current = body.find(fragment)
+        assert current >= 0, f"missing HTML fragment: {fragment}"
+        assert current > previous, f"HTML fragment rendered out of order: {fragment}"
+        previous = current
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def get_client(*, use_forwarded_for=True):
@@ -184,8 +219,22 @@ class TestIndexRoute:
     def test_returns_html(self):
         client = get_client()
         resp = client.get("/")
-        assert b"<!DOCTYPE html>" in resp.data or b"<html" in resp.data.lower()
         body = resp.get_data(as_text=True)
+        _assert_html_document_contract(
+            body,
+            body_class=None,
+            title=str(config.CFG["app_name"]),
+        )
+        _assert_html_fragments_in_order(
+            body,
+            '<link rel="icon" type="image/x-icon"',
+            "JetBrainsMono-400.woff2",
+            "/static/css/core/base.css",
+            ":root {",
+            "window.ThemeRegistry",
+            '<script defer src="/vendor/ansi_up.js',
+            '<script id="lazy-assets-json"',
+        )
         assert '/static/css/styles.css' not in body
         assert '/static/css/core/base.css?v=' in body
         assert '/static/css/mobile-chrome.css?v=' in body
@@ -13050,6 +13099,16 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             resp = client.get("/diag")
         assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        _assert_html_fragments_in_order(
+            body,
+            "Redirect once with the browser's UTC offset",
+            '<link rel="icon" type="image/x-icon"',
+            "/static/css/core/base.css",
+            "/static/css/terminal_export.css",
+            "/static/css/diag.css",
+            ":root {",
+        )
 
     def test_bundle_mode_renders_diag_css_bundles(self):
         client = self._allowed_client()
@@ -13058,6 +13117,11 @@ class TestDiagRoute:
             "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
         }):
             body = client.get("/diag").get_data(as_text=True)
+        _assert_html_document_contract(
+            body,
+            body_class="permalink-page diag-page",
+            title=f"{config.CFG['app_name']} — diagnostics",
+        )
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'href="/static/build/diag\.[a-f0-9]{12}\.css"', body)
@@ -14082,6 +14146,19 @@ class TestDiagRoute:
             resp = client.get(f"/diag/audit?target_id={target_id}")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
+        _assert_html_document_contract(
+            body,
+            body_class="permalink-page diag-page",
+            title=f"{config.CFG['app_name']} — audit log",
+        )
+        _assert_html_fragments_in_order(
+            body,
+            '<link rel="icon" type="image/x-icon"',
+            "/static/css/core/base.css",
+            "/static/css/terminal_export.css",
+            "/static/css/diag.css",
+            ":root {",
+        )
         assert "Audit logging is disabled" in body
         assert "project.link" in body
         assert target_id in body
@@ -22360,6 +22437,11 @@ class TestShareRoute:
         client = get_client()
         resp = client.get("/share/nonexistent-share-id")
         assert resp.status_code == 404
+        _assert_html_document_contract(
+            resp.get_data(as_text=True),
+            body_class="permalink-page",
+            title=f"{config.CFG['app_name']} — snapshot not found",
+        )
 
     def test_delete_share_removes_snapshot_for_current_session(self):
         client = get_client()
@@ -22535,6 +22617,22 @@ class TestShareRoute:
         client.set_cookie("pref_theme_name", "apricot_sand")
         resp = client.get(f"/share/{share_id}")
         body = resp.get_data(as_text=True)
+        _assert_html_document_contract(
+            body,
+            body_class="permalink-page",
+            title=f"{config.CFG['app_name']} — theme selector test",
+        )
+        _assert_html_fragments_in_order(
+            body,
+            '<link rel="icon" type="image/x-icon"',
+            "JetBrainsMono-400.woff2",
+            "/static/css/core/base.css",
+            "/static/css/terminal_export.css",
+            ":root {",
+            "window.ThemeRegistry",
+            '<script defer src="/vendor/ansi_up.js',
+            '<script id="lazy-assets-json"',
+        )
         assert 'class="permalink-page"' in body
         assert 'data-theme="apricot_sand"' in body
         assert '/static/css/core/base.css?v=' in body

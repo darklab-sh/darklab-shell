@@ -106,7 +106,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ### 3. Inject into the templates
 
-`app.py` and `permalinks.py` pass runtime CSS vars built from the built-in default palettes into the templates. `theme_vars_style.html` turns the selected theme's variables into a `<style>` block containing `:root { ... }` declarations. That means the browser never needs to guess at the current palette.
+The shell, permalink, diagnostics, and audit routes pass the selected theme and its runtime CSS vars into their templates. `base.html` includes `theme_vars_style.html`, which turns those values into a `<style>` block containing `:root { ... }` declarations, and applies the selected theme name to the page body. That means the browser never needs to guess at the current palette.
 
 ### 4. Expose the values to JS
 
@@ -128,6 +128,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 | `app/config.py` | Loads, validates, and resolves theme values |
 | `scripts/generate_theme_examples.py` | Regenerates the checked-in dark/light example files from `_THEME_DEFAULTS` |
 | `app/app.py` | Exposes `/themes` and injects the current theme into the main shell |
+| `app/templates/base.html` | Applies the shared document-level theme metadata, variables, and body theme name |
 | `app/templates/theme_vars_style.html` | Injects resolved CSS variables into the page |
 | `app/templates/theme_vars_script.html` | Exposes resolved theme values and the theme registry to browser JS |
 | `app/static/css/styles.css` | Consumes the theme vars for live UI styling |
@@ -198,7 +199,7 @@ There is no filename-based or palette-based group inference — `group` must be 
 - Theme YAML files are explicit and self-contained so operators can tune the shell without touching code.
 - Production resolves `themes/<name>.local.yaml` under mounted `/config`. An overlay can change a shipped named theme but doesn't add a new selector entry by itself. Restart the shell container after changing the host file because production stages a private overlay snapshot at startup.
 - Most values are safe to tweak live as long as they remain valid CSS values.
-- The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three.
+- The theme layer is shared by the live app, permalink pages, diagnostics, the audit log, and export HTML, so a change in these files can affect every surface.
 - If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.
 
 ---
