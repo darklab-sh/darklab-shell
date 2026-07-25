@@ -60,3 +60,6 @@ test-results/
 # OS
 .DS_Store
 Thumbs.db
+
+# Downloaded CI job artifacts
+artifacts/
