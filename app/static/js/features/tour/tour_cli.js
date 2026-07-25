@@ -8,13 +8,11 @@ import { shellPromptWrap as importedShellPromptWrap } from '../../core/dom.js';
 import { getActiveTabId as importedGetActiveTabId } from '../../core/state.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from '../mobile/mobile_shell_layout.js';
 import {
-  _cliAppendLine as importedCliAppendLine,
   _cliPreserveOutputTail as importedCliPreserveOutputTail,
   _cliRecordSuccess as importedCliRecordSuccess,
   _cliSetStatus as importedCliSetStatus,
   _cliShouldPreserveOutputTail as importedCliShouldPreserveOutputTail,
 } from '../terminal/local_commands.js';
-import { appendCommandEcho as importedAppendCommandEcho } from '../../runner.js';
 import {
   activateTab as importedActivateTab,
   createTab as importedCreateTab,
@@ -46,10 +44,8 @@ function _tourActiveTabId() {
   return TOUR_CLI_GLOBAL.activeTabId || null;
 }
 
-function _tourAppendLine(text, cls = '', tabId = null, options = undefined) {
-  const append = (typeof importedCliAppendLine !== 'undefined' && importedCliAppendLine)
-    || _tourGlobalFunction('_cliAppendLine');
-  if (typeof append === 'function') append(text, cls, tabId, options);
+function _tourAppendLine(text, cls = '', tabId = null, options = undefined, execution = null) {
+  execution.appendLine(text, cls, tabId, options);
 }
 
 function _tourPreserveOutputTail(tabId = null, preserveTail = true) {
@@ -58,16 +54,12 @@ function _tourPreserveOutputTail(tabId = null, preserveTail = true) {
   if (typeof preserve === 'function') preserve(tabId, preserveTail);
 }
 
-function _tourRecordSuccess(cmd) {
-  const record = (typeof importedCliRecordSuccess !== 'undefined' && importedCliRecordSuccess)
-    || _tourGlobalFunction('_cliRecordSuccess');
-  if (typeof record === 'function') record(cmd);
+function _tourRecordSuccess(cmd, execution = null) {
+  importedCliRecordSuccess(cmd, execution);
 }
 
-function _tourSetStatus(status) {
-  const setCliStatus = (typeof importedCliSetStatus !== 'undefined' && importedCliSetStatus)
-    || _tourGlobalFunction('_cliSetStatus');
-  if (typeof setCliStatus === 'function') setCliStatus(status);
+function _tourSetStatus(status, execution = null) {
+  importedCliSetStatus(status, execution);
 }
 
 function _tourShouldPreserveOutputTail(tabId = null) {
@@ -76,12 +68,6 @@ function _tourShouldPreserveOutputTail(tabId = null) {
     && importedCliShouldPreserveOutputTail
   ) || _tourGlobalFunction('_cliShouldPreserveOutputTail');
   return typeof shouldPreserve === 'function' ? shouldPreserve(tabId) : true;
-}
-
-function _tourAppendCommandEcho(cmd, tabId = null) {
-  const appendEcho = (typeof importedAppendCommandEcho !== 'undefined' && importedAppendCommandEcho)
-    || _tourGlobalFunction('appendCommandEcho');
-  if (typeof appendEcho === 'function') appendEcho(cmd, tabId);
 }
 
 function _tourUseMobileTerminalViewportMode() {
@@ -153,10 +139,10 @@ function _cliTourOutput(tabId = null) {
   return _tourGetOutput(id);
 }
 
-function _cliAppendTourDomLine(text = '', cls = '', tabId = null) {
+function _cliAppendTourDomLine(text = '', cls = '', tabId = null, execution = null) {
   const out = _cliTourOutput(tabId);
   if (!out || typeof document === 'undefined') {
-    if (String(text ?? '')) _tourAppendLine(text, cls, tabId);
+    if (String(text ?? '')) _tourAppendLine(text, cls, tabId, undefined, execution);
     return null;
   }
   const line = document.createElement('span');
@@ -171,6 +157,7 @@ function _cliAppendTourDomLine(text = '', cls = '', tabId = null) {
     : null;
   if (prompt) out.insertBefore(line, prompt);
   else out.appendChild(line);
+  if (execution) execution.captureRenderedLine(text, cls);
   return { line, content };
 }
 
@@ -181,11 +168,17 @@ function _cliTourAnimationFrame() {
   return new Promise(resolve => setTimeout(resolve, 0));
 }
 
-async function _cliAppendTypedTourLine(text, cls = '', tabId = null, preserveTail = true) {
+async function _cliAppendTypedTourLine(
+  text,
+  cls = '',
+  tabId = null,
+  preserveTail = true,
+  execution = null,
+) {
   const value = String(text ?? '');
   const rendered = _cliAppendTourDomLine('', cls, tabId);
   if (!rendered || !value) {
-    if (value) _tourAppendLine(value, cls, tabId);
+    if (value) _tourAppendLine(value, cls, tabId, undefined, execution);
     _tourPreserveOutputTail(tabId, preserveTail);
     return;
   }
@@ -196,6 +189,7 @@ async function _cliAppendTypedTourLine(text, cls = '', tabId = null, preserveTai
     _tourPreserveOutputTail(tabId, preserveTail);
     await _cliTourAnimationFrame();
   }
+  if (execution) execution.captureRenderedLine(value, cls);
 }
 
 function _openTourSampleInNewTab(command, sourceTabId = null) {
@@ -213,12 +207,18 @@ function _openTourSampleInNewTab(command, sourceTabId = null) {
   _tourRefocusComposerAfterAction({ defer: true });
 }
 
-function _cliAppendTourSampleChip(sample, tabId = null) {
+function _cliAppendTourSampleChip(sample, tabId = null, execution = null) {
   const command = String(sample || '').trim();
   if (!command) return;
   const rendered = _cliAppendTourDomLine('', 'builtin-help-row builtin-tour-sample', tabId);
   if (!rendered || typeof document === 'undefined') {
-    _tourAppendLine(command, 'builtin-help-row builtin-tour-sample', tabId, { faq_command: command });
+    _tourAppendLine(
+      command,
+      'builtin-help-row builtin-tour-sample',
+      tabId,
+      { faq_command: command },
+      execution,
+    );
     return;
   }
   const chip = document.createElement('span');
@@ -237,6 +237,13 @@ function _cliAppendTourSampleChip(sample, tabId = null) {
     activate();
   });
   rendered.content.appendChild(chip);
+  if (execution) {
+    execution.captureRenderedLine(
+      command,
+      'builtin-help-row builtin-tour-sample',
+      { faq_command: command },
+    );
+  }
   _tourPreserveOutputTail(tabId, true);
 }
 
@@ -245,11 +252,11 @@ function _isTourTabActive(tabId = null) {
   return _tourActiveTabId() === tabId;
 }
 
-function _tourWaitForContinue(tabId = null, isLastChapter = false) {
+function _tourWaitForContinue(tabId = null, isLastChapter = false, execution = null) {
   const prompt = isLastChapter
     ? 'Press any key to finish, or press q to quit the tour.'
     : 'Press any key to continue, or press q to quit the tour.';
-  _cliAppendTourDomLine(prompt, 'builtin-note builtin-tour-prompt', tabId);
+  _cliAppendTourDomLine(prompt, 'builtin-note builtin-tour-prompt', tabId, execution);
   _tourPreserveOutputTail(tabId, true);
   if (typeof document === 'undefined') return Promise.resolve(true);
   return new Promise(resolve => {
@@ -266,29 +273,29 @@ function _tourWaitForContinue(tabId = null, isLastChapter = false) {
   });
 }
 
-async function handleTourCommand(cmd, tabId = null) {
+async function handleTourCommand(cmd, tabId = null, execution) {
+  if (!execution) throw new Error('Tour terminal commands require a command execution');
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = String(parts[1] || '').toLowerCase();
   const preserveTail = _tourShouldPreserveOutputTail(tabId);
-  _tourAppendCommandEcho(cmd, tabId);
 
   if (!(_tourConfig().tour_enabled === true)) {
-    _tourAppendLine('tour: onboarding tour is disabled on this shell', 'exit-fail', tabId);
-    _tourSetStatus('fail');
+    _tourAppendLine('tour: onboarding tour is disabled on this shell', 'exit-fail', tabId, undefined, execution);
+    _tourSetStatus('fail', execution);
     return true;
   }
 
   if (parts.length > 1 && !['help', '--help', '-h'].includes(sub)) {
-    _tourAppendLine('usage: tour', 'exit-fail', tabId);
-    _tourSetStatus('fail');
+    _tourAppendLine('usage: tour', 'exit-fail', tabId, undefined, execution);
+    _tourSetStatus('fail', execution);
     return true;
   }
 
   if (['help', '--help', '-h'].includes(sub)) {
-    _tourAppendLine('usage: tour', '', tabId);
-    _tourAppendLine('Print the onboarding tour inside the terminal.', 'builtin-note', tabId);
-    _tourRecordSuccess(cmd);
-    _tourSetStatus('ok');
+    _tourAppendLine('usage: tour', '', tabId, undefined, execution);
+    _tourAppendLine('Print the onboarding tour inside the terminal.', 'builtin-note', tabId, undefined, execution);
+    _tourRecordSuccess(cmd, execution);
+    _tourSetStatus('ok', execution);
     return true;
   }
 
@@ -298,31 +305,41 @@ async function handleTourCommand(cmd, tabId = null) {
   if (typeof recordOpened === 'function') await recordOpened();
   const chapters = _tourChaptersForCurrentViewport();
   if (!chapters.length) {
-    _tourAppendLine('tour: no onboarding chapters are visible for this shell', 'exit-fail', tabId);
-    _tourSetStatus('fail');
+    _tourAppendLine('tour: no onboarding chapters are visible for this shell', 'exit-fail', tabId, undefined, execution);
+    _tourSetStatus('fail', execution);
     return true;
   }
 
   for (const [index, chapter] of chapters.entries()) {
-    if (index > 0) _cliAppendTourDomLine('', 'builtin-spacer', tabId);
-    await _cliAppendTypedTourLine(String(chapter.title || '').trim(), 'builtin-section', tabId, preserveTail);
+    if (index > 0) _cliAppendTourDomLine('', 'builtin-spacer', tabId, execution);
+    await _cliAppendTypedTourLine(
+      String(chapter.title || '').trim(),
+      'builtin-section',
+      tabId,
+      preserveTail,
+      execution,
+    );
     for (const line of _tourSummaryLines(chapter.summary)) {
-      await _cliAppendTypedTourLine(line, 'builtin-note', tabId, preserveTail);
+      await _cliAppendTypedTourLine(line, 'builtin-note', tabId, preserveTail, execution);
     }
     const sample = String(chapter.sample || '').trim();
     if (sample) {
-      await _cliAppendTypedTourLine('Try this:', 'builtin-note', tabId, preserveTail);
-      _cliAppendTourSampleChip(sample, tabId);
+      await _cliAppendTypedTourLine('Try this:', 'builtin-note', tabId, preserveTail, execution);
+      _cliAppendTourSampleChip(sample, tabId, execution);
     }
-    const shouldContinue = await _tourWaitForContinue(tabId, index === chapters.length - 1);
+    const shouldContinue = await _tourWaitForContinue(
+      tabId,
+      index === chapters.length - 1,
+      execution,
+    );
     if (!shouldContinue) {
-      _cliAppendTourDomLine('tour stopped', 'builtin-note', tabId);
+      _cliAppendTourDomLine('tour stopped', 'builtin-note', tabId, execution);
       break;
     }
   }
   _tourPreserveOutputTail(tabId, preserveTail);
-  _tourRecordSuccess(cmd);
-  _tourSetStatus('ok');
+  _tourRecordSuccess(cmd, execution);
+  _tourSetStatus('ok', execution);
   return true;
 }
 

@@ -13,8 +13,8 @@
 # tests/py/fixtures/container_smoke_test-expectations.json.
 # Pass --build to force a fresh cache-image build after Dockerfile or
 # dependency changes; otherwise the cache refreshes automatically when
-# Dockerfile, app/requirements.txt, entrypoint.sh, or the development
-# source-staging helper changes.
+# Dockerfile, application source, entrypoint.sh, or a container build helper
+# changes.
 #
 # A failure means a command is missing, broken, or producing unexpected
 # output in the new image — review the diff before merging the upgrade.

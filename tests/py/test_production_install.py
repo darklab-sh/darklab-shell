@@ -1146,6 +1146,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
+    assert "!scripts/container/patches/nuclei-kin-openapi-v0.144.patch" in dockerignore
     assert "!scripts/container/stage_runtime_source.sh" in dockerignore
     assert "!scripts/operations/migrate_sqlite_to_postgres.py" in dockerignore
     assert "!scripts/operations/restore_system.py" in dockerignore
@@ -1168,6 +1169,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'JSON.pretty_generate(payload) + "\\\\n"' not in dockerfile
     assert "ARG PYTHON_BASE_IMAGE=python:3.14.6-slim" in dockerfile
     assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
+    assert "ARG KIN_OPENAPI_VERSION=v0.144.0" in dockerfile
     assert "ARG GOSU_VERSION=1.19" in dockerfile
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
     assert 'install-go-tool "github.com/projectdiscovery/chaos-client' in dockerfile
@@ -1176,6 +1178,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert crypto_floor in go_installer
     assert tool_selection in go_installer
     assert go_installer.index(crypto_floor) < go_installer.index(tool_selection)
+    assert "Go tool dependency floor mismatch" in go_installer
+    assert 'git -C "$module_dir" apply --check "$GO_TOOL_SOURCE_PATCH"' in go_installer
+    assert "Applied Go tool source patch" in go_installer
     assert 'selected_version=$(go list -m -f \'{{.Version}}\' "$module_path")' in go_installer
     assert 'expected_version=$(go list -m -f \'{{.Version}}\'' in go_installer
     assert 'go version -m "$target"' in go_installer
@@ -1206,13 +1211,24 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         "FROM go-builder-base AS go-other-tools", 1
     )[1].split("FROM ${PYTHON_BASE_IMAGE} AS native-tools", 1)[0]
     assert "ARG NUCLEI_VERSION" not in go_builder_stage
+    assert "COPY scripts/container/patches/" not in go_builder_stage
     assert "ARG GOBUSTER_VERSION" not in go_builder_stage
     assert "ARG NUCLEI_VERSION" in projectdiscovery_stage
+    assert "COPY scripts/container/patches/" in projectdiscovery_stage
+    assert (
+        '"github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}"'
+        in projectdiscovery_stage
+    )
+    assert (
+        "GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/"
+        "nuclei-kin-openapi-v0.144.patch"
+    ) in projectdiscovery_stage
     assert "ARG GOBUSTER_VERSION" not in projectdiscovery_stage
     assert "ARG GOBUSTER_VERSION" in other_go_stage
     assert "ARG NUCLEI_VERSION" not in other_go_stage
     assert "/usr/share/doc/darklab-shell/licenses/Go-toolchain.txt" in dockerfile
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt" in dockerfile
+    assert "/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt" in dockerfile
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
     runtime_stage = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS runtime", 1)[1]
     assert "/usr/local/go" not in runtime_stage
@@ -1385,10 +1401,17 @@ def _run_fake_go_tool_installer(
     *,
     selected_version: str,
     embedded_version: str,
+    dependency_floor: str | None = None,
+    dependency_selected_version: str = "",
+    dependency_embedded_version: str = "",
+    source_patch: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     fake_bin = tmp_path / "fake-go-bin"
-    fake_bin.mkdir()
+    fake_bin.mkdir(parents=True)
     log_path = tmp_path / "fake-go.log"
+    git_log_path = tmp_path / "fake-git.log"
+    module_dir = tmp_path / "module-source"
+    module_dir.mkdir()
     target = tmp_path / "out" / "httpx"
     go_path = fake_bin / "go"
     go_path.write_text(
@@ -1414,8 +1437,12 @@ case "$1" in
             esac
         elif [ "$2" = "-m" ]; then
             candidate=$5
-            if [ "$candidate" = "golang.org/x/crypto" ]; then
+            if [ "$4" = "{{.Dir}}" ] && [ "$candidate" = "$FAKE_GO_MODULE" ]; then
+                printf '%s\\n' "$FAKE_GO_MODULE_DIR"
+            elif [ "$candidate" = "golang.org/x/crypto" ]; then
                 printf '%s\\n' "$FAKE_GO_X_CRYPTO_VERSION"
+            elif [ -n "$FAKE_GO_DEPENDENCY_MODULE" ] && [ "$candidate" = "$FAKE_GO_DEPENDENCY_MODULE" ]; then
+                printf '%s\\n' "$FAKE_GO_DEPENDENCY_SELECTED_VERSION"
             elif [ "$candidate" = "${FAKE_GO_MODULE}@${FAKE_GO_REQUESTED_VERSION}" ]; then
                 printf '%s\\n' "$FAKE_GO_EXPECTED_VERSION"
             elif [ "$candidate" = "$FAKE_GO_MODULE" ]; then
@@ -1432,6 +1459,9 @@ case "$1" in
         printf '%s: go1.26.5\\n' "$FAKE_GO_TARGET"
         printf '\\tpath\\t%s\\n' "$FAKE_GO_PACKAGE"
         printf '\\tmod\\t%s\\t%s\\th1:test\\n' "$FAKE_GO_MODULE" "$FAKE_GO_EMBEDDED_VERSION"
+        if [ -n "$FAKE_GO_DEPENDENCY_MODULE" ]; then
+            printf '\\tdep\\t%s\\t%s\\th1:test\\n' "$FAKE_GO_DEPENDENCY_MODULE" "$FAKE_GO_DEPENDENCY_EMBEDDED_VERSION"
+        fi
         ;;
     *)
         exit 93
@@ -1441,30 +1471,56 @@ esac
         encoding="utf-8",
     )
     go_path.chmod(0o755)
+    git_path = fake_bin / "git"
+    git_path.write_text(
+        """#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_GIT_LOG"
+""",
+        encoding="utf-8",
+    )
+    git_path.chmod(0o755)
     package = "github.com/projectdiscovery/httpx/cmd/httpx"
     module = "github.com/projectdiscovery/httpx"
     requested_version = "v1.10.0"
     expected_version = "v1.10.0"
+    dependency_module = (
+        dependency_floor.rsplit("@", 1)[0]
+        if dependency_floor is not None
+        else ""
+    )
     env = {
         **os.environ,
+        "FAKE_GO_DEPENDENCY_EMBEDDED_VERSION": dependency_embedded_version,
+        "FAKE_GO_DEPENDENCY_MODULE": dependency_module,
+        "FAKE_GO_DEPENDENCY_SELECTED_VERSION": dependency_selected_version,
         "FAKE_GO_EMBEDDED_VERSION": embedded_version,
         "FAKE_GO_EXPECTED_VERSION": expected_version,
         "FAKE_GO_LOG": str(log_path),
         "FAKE_GO_MODULE": module,
+        "FAKE_GO_MODULE_DIR": str(module_dir),
         "FAKE_GO_PACKAGE": package,
         "FAKE_GO_REQUESTED_VERSION": requested_version,
         "FAKE_GO_SELECTED_VERSION": selected_version,
         "FAKE_GO_TARGET": str(target),
         "FAKE_GO_X_CRYPTO_VERSION": "v0.53.0",
+        "FAKE_GIT_LOG": str(git_log_path),
         "GO_X_CRYPTO_VERSION": "v0.52.0",
         "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
     }
+    if source_patch:
+        patch_path = tmp_path / "tool.patch"
+        patch_path.write_text("test compatibility patch\n", encoding="utf-8")
+        env["GO_TOOL_SOURCE_PATCH"] = str(patch_path)
+    command = [
+        "sh",
+        str(ROOT / "scripts" / "container" / "install_go_tool.sh"),
+        f"{package}@{requested_version}",
+    ]
+    if dependency_floor is not None:
+        command.append(dependency_floor)
     result = subprocess.run(
-        [
-            "sh",
-            str(ROOT / "scripts" / "container" / "install_go_tool.sh"),
-            f"{package}@{requested_version}",
-        ],
+        command,
         cwd=ROOT,
         env=env,
         check=False,
@@ -1478,17 +1534,50 @@ esac
 def test_go_tool_installer_keeps_the_requested_release_above_the_crypto_floor(
     tmp_path: Path,
 ):
+    dependency = "github.com/getkin/kin-openapi"
     result, calls = _run_fake_go_tool_installer(
-        tmp_path,
+        tmp_path / "success",
         selected_version="v1.10.0",
         embedded_version="v1.10.0",
+        dependency_floor=f"{dependency}@v0.144.0",
+        dependency_selected_version="v0.144.0",
+        dependency_embedded_version="v0.144.0",
+        source_patch=True,
     )
 
     assert result.returncode == 0, result.stderr
     assert calls.index("get golang.org/x/crypto@v0.52.0") < calls.index(
+        f"get {dependency}@v0.144.0"
+    )
+    assert calls.index(f"get {dependency}@v0.144.0") < calls.index(
         "get github.com/projectdiscovery/httpx/cmd/httpx@v1.10.0"
     )
+    assert f"{dependency}=v0.144.0" in result.stdout
     assert "version=v1.10.0 x_crypto=v0.53.0" in result.stdout
+    assert "Applied Go tool source patch" in result.stdout
+    assert (tmp_path / "success" / "fake-git.log").read_text(
+        encoding="utf-8"
+    ).splitlines() == [
+        (
+            f"-C {tmp_path / 'success' / 'module-source'} apply --check "
+            f"{tmp_path / 'success' / 'tool.patch'}"
+        ),
+        (
+            f"-C {tmp_path / 'success' / 'module-source'} apply "
+            f"{tmp_path / 'success' / 'tool.patch'}"
+        ),
+    ]
+
+    rejected, _calls = _run_fake_go_tool_installer(
+        tmp_path / "mismatch",
+        selected_version="v1.10.0",
+        embedded_version="v1.10.0",
+        dependency_floor=f"{dependency}@v0.144.0",
+        dependency_selected_version="v0.144.0",
+        dependency_embedded_version="v0.132.0",
+    )
+    assert rejected.returncode == 1
+    assert "Go tool dependency floor mismatch" in rejected.stderr
 
 
 @pytest.mark.parametrize(
@@ -2052,6 +2141,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         index for index, rule in enumerate(docker_build_rules) if "changes" in rule
     )
     assert tag_skip_index < changes_index
+    assert "scripts/container/**/*" in docker_build_rules[changes_index]["changes"]
     assert parsed_ci["docker-build"]["interruptible"] is True
     branch_build_script = "\n".join(parsed_ci["docker-build"]["script"])
     assert "branch-image-evidence/darklab-shell.cdx.json" in branch_build_script
@@ -2564,6 +2654,10 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     assert build_inputs["source"]["commit_sha"] == evidence_args["commit_sha"]
     assert ".gitlab-ci.yml" in build_inputs["source"]["files"]
     assert "scripts/container/install_go_tool.sh" in build_inputs["source"]["files"]
+    assert (
+        "scripts/container/patches/nuclei-kin-openapi-v0.144.patch"
+        in build_inputs["source"]["files"]
+    )
     assert build_inputs["release_tool_images"] == {"gitlab_cli": GITLAB_CLI_IMAGE}
     assert evidence_index["release_tools"] == {"gitlab_cli_image": GITLAB_CLI_IMAGE}
     assert any(

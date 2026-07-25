@@ -29,7 +29,7 @@ function createRunnerPersistence({
 
   function persistClientSideRun(command, lineItems, statusValue, tabId = '') {
     const safeCommand = historySafeCommand(command);
-    if (!safeCommand || typeof apiFetch !== 'function') return;
+    if (!safeCommand || typeof apiFetch !== 'function') return Promise.resolve(null);
     const lines = (Array.isArray(lineItems) ? lineItems : []).map((line) => {
       const entry = {
         text: String(line && line.text !== undefined ? line.text : line || ''),
@@ -39,7 +39,7 @@ function createRunnerPersistence({
       if (typeof line?.role === 'string' && line.role) entry.role = line.role;
       return entry;
     });
-    apiFetch('/run/client', {
+    return apiFetch('/run/client', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -48,8 +48,16 @@ function createRunnerPersistence({
         lines,
         tab_id: String(tabId || ''),
       }),
-    }).then((resp) => {
+    }).then(async (resp) => {
       if (!resp || !resp.ok) throw new Error(String(resp && resp.status || 'unknown'));
+      const payload = typeof resp.json === 'function'
+        ? await resp.json().catch(() => ({}))
+        : {};
+      const savedRun = (
+        payload?.run
+        && typeof payload.run === 'object'
+        && !Array.isArray(payload.run)
+      ) ? payload.run : payload;
       if (
         typeof isHistoryPanelOpen === 'function'
         && isHistoryPanelOpen()
@@ -57,10 +65,12 @@ function createRunnerPersistence({
       ) {
         refreshHistoryPanel();
       }
+      return savedRun;
     }).catch((err) => {
       if (typeof logClientError === 'function') {
         logClientError('client-side run persistence failed', err);
       }
+      return null;
     });
   }
 

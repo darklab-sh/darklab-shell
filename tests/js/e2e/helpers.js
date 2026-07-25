@@ -650,8 +650,14 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
       const text = output ? output.textContent || '' : ''
       const sawNewLine = rawLines.length > previousLineCount
       const sawEcho = text.includes(`$${expectedCmd}`) || text.includes(`$ ${expectedCmd}`)
+      const sensitivePrefix = expectedCmd.match(
+        /^(session-token\s+(?:set|revoke))\b/i,
+      )?.[1] || ''
+      const sawMaskedEcho = sensitivePrefix && (
+        text.includes(`$${sensitivePrefix} `) || text.includes(`$ ${sensitivePrefix} `)
+      )
       if (tab.command === expectedCmd && sawNewLine) return true
-      return sawNewLine && sawEcho
+      return sawNewLine && (sawEcho || sawMaskedEcho)
     },
     { expectedCmd: cmd, previousLineCount: beforeLineCount },
     { timeout },

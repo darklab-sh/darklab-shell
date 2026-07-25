@@ -13,13 +13,8 @@ import {
   hasPendingOutputBatch as importedHasPendingOutputBatch,
 } from '../../output.js';
 import {
-  _finalizeClientSideCommandStatus as importedFinalizeClientSideCommandStatus,
-  _persistClientSideRun as importedPersistClientSideRun,
-  _recordSuccessfulLocalCommand as importedRecordSuccessfulLocalCommand,
   _setPendingTerminalConfirm as importedSetPendingTerminalConfirm,
   attachActiveRunFromMonitor as importedAttachActiveRunFromMonitor,
-  appendCommandEcho as importedAppendCommandEcho,
-  setStatus as importedSetStatus,
   submitComposerCommand as importedSubmitComposerCommand,
 } from '../../runner.js';
 import {
@@ -221,7 +216,7 @@ async function startServerWorkflowExecution(
   workflow,
   values,
   tabId = _workflowActiveTabId(),
-  { announceInTerminal = false } = {},
+  { announceInTerminal = false, execution: terminalExecution = null } = {},
 ) {
   if (typeof importedCreateWorkflowExecution !== 'function') {
     throw new Error('Workflow execution is unavailable');
@@ -241,11 +236,9 @@ async function startServerWorkflowExecution(
       : '';
     const executionSummary = executionId ? `execution ${executionId} started` : 'execution started';
     const statusHint = executionId ? ` Check progress with workflow status ${executionId}.` : '';
-    _workflowAppendLine(
-      `[workflow] ${workflow.title}: ${executionSummary}${inputSummary}.${statusHint}`,
-      'notice',
-      tabId,
-    );
+    const text = `[workflow] ${workflow.title}: ${executionSummary}${inputSummary}.${statusHint}`;
+    if (terminalExecution) terminalExecution.appendLine(text, 'notice', tabId);
+    else _workflowAppendLine(text, 'notice', tabId);
   }
   if (typeof importedShowToast === 'function') importedShowToast('Workflow started');
   const workflowsOverlay = document.getElementById('workflows-overlay');
@@ -993,38 +986,13 @@ function _workflowCommandTokens(cmd) {
   return tokens;
 }
 
-function _workflowCliAppend(text, cls = '', tabId = _workflowActiveTabId()) {
-  _workflowAppendLine(text, cls, tabId);
-}
-
-function _workflowCliSetStatus(status) {
-  const setStatus = (typeof importedSetStatus === 'function' && importedSetStatus)
-    || _workflowGlobalFunction('setStatus');
-  if (setStatus) setStatus(status);
-}
-
-function _workflowCliRecord(cmd) {
-  const record = (typeof importedRecordSuccessfulLocalCommand === 'function' && importedRecordSuccessfulLocalCommand)
-    || _workflowGlobalFunction('_recordSuccessfulLocalCommand');
-  if (record) record(cmd);
-}
-
-function _workflowCliPersist(cmd, lines, status = 'ok') {
-  const persist = (typeof importedPersistClientSideRun === 'function' && importedPersistClientSideRun)
-    || _workflowGlobalFunction('_persistClientSideRun');
-  if (persist) persist(cmd, lines, status);
-}
-
-function _workflowCliFinish(cmd, lines, status = 'ok', tabId = _workflowActiveTabId(), { record = false } = {}) {
-  if (record && status !== 'fail') _workflowCliRecord(cmd);
-  _workflowCliPersist(cmd, lines, status);
-  const finalize = (typeof importedFinalizeClientSideCommandStatus === 'function' && importedFinalizeClientSideCommandStatus)
-    || _workflowGlobalFunction('_finalizeClientSideCommandStatus');
-  if (finalize) {
-    finalize(tabId, status);
-  } else {
-    _workflowCliSetStatus(status);
-  }
+function _workflowCliFinish(
+  execution,
+  status = 'ok',
+  { record = false } = {},
+) {
+  execution.setRecordRecent(record && status !== 'fail');
+  execution.setStatus(status);
 }
 
 function _workflowFind(selector) {
@@ -1110,52 +1078,74 @@ function _workflowMissingInputs(workflow, values) {
   return (workflow.inputs || []).filter(input => input.required && !String(values[input.id] || '').trim());
 }
 
-function _workflowRunResolved(workflow, values, tabId) {
+async function _workflowRunResolved(workflow, values, tabId, execution) {
+  const append = (text, cls = '') => {
+    execution.appendLine(text, cls, tabId);
+  };
+  const finish = (status) => {
+    execution.setPersistence('none');
+    execution.setRecordRecent(false);
+    execution.setStatus(status);
+  };
   const rendered = buildRenderedWorkflow(workflow, values);
   if (!rendered.ready) {
-    _workflowCliAppend('[workflow] Required inputs are missing.', 'exit-fail', tabId);
-    _workflowCliSetStatus('fail');
+    append('[workflow] Required inputs are missing.', 'exit-fail');
+    finish('fail');
     return;
   }
   const commands = rendered.steps.map(step => step.renderedCmd).filter(Boolean);
   if (!commands.length) {
-    _workflowCliAppend('[workflow] No runnable steps.', 'exit-fail', tabId);
-    _workflowCliSetStatus('fail');
+    append('[workflow] No runnable steps.', 'exit-fail');
+    finish('fail');
     return;
   }
   persistWorkflowInputValues(workflow, values);
   if (Number(workflow.version || 1) === 2) {
-    startServerWorkflowExecution(workflow, values, tabId, { announceInTerminal: true }).catch((err) => {
-      _workflowCliAppend(`[workflow] ${err.message || 'Failed to start workflow'}`, 'exit-fail', tabId);
-      _workflowCliSetStatus('fail');
-    });
+    try {
+      await startServerWorkflowExecution(workflow, values, tabId, {
+        announceInTerminal: true,
+        execution,
+      });
+      finish('ok');
+    } catch (err) {
+      append(`[workflow] ${err.message || 'Failed to start workflow'}`, 'exit-fail');
+      finish('fail');
+    }
     return;
   }
-  _workflowCliAppend(`[workflow] ${workflow.title}: ${commands.length} step(s) queued.`, 'notice', tabId);
+  append(`[workflow] ${workflow.title}: ${commands.length} step(s) queued.`, 'notice');
   runWorkflowCommands(commands);
+  execution.delegate();
 }
 
-function _workflowPromptForInputs(workflow, values, missing, tabId) {
+function _workflowPromptForInputs(workflow, values, missing, tabId, execution) {
   const queue = missing.slice();
-  const askNext = () => {
+  const append = (text, cls = '') => {
+    execution.appendLine(text, cls, tabId);
+  };
+  const setCommandStatus = (status) => {
+    execution.setStatus(status);
+  };
+  const askNext = async () => {
     const input = queue.shift();
     if (!input) {
-      _workflowRunResolved(workflow, values, tabId);
+      await _workflowRunResolved(workflow, values, tabId, execution);
       return;
     }
     const label = input.label || input.id;
     const hint = input.placeholder ? ` (${input.placeholder})` : '';
-    _workflowCliAppend(`[workflow] ${label}${hint}:`, 'notice', tabId);
+    append(`[workflow] ${label}${hint}:`, 'notice');
     const setPendingTerminalConfirm = (typeof importedSetPendingTerminalConfirm === 'function' && importedSetPendingTerminalConfirm)
       || _workflowGlobalFunction('_setPendingTerminalConfirm');
     if (!setPendingTerminalConfirm) {
-      _workflowCliAppend(`[workflow] missing --${input.id.replace(/_/g, '-')}`, 'exit-fail', tabId);
-      _workflowCliSetStatus('fail');
+      append(`[workflow] missing --${input.id.replace(/_/g, '-')}`, 'exit-fail');
+      setCommandStatus('fail');
       return;
     }
     setPendingTerminalConfirm({
       kind: input.sensitive ? 'secret' : 'text',
       tabId,
+      execution,
       onAnswer: async (answer) => {
         const value = sanitizeWorkflowInputValue(input, answer);
         if (!value) {
@@ -1163,46 +1153,43 @@ function _workflowPromptForInputs(workflow, values, missing, tabId) {
         } else {
           values[input.id] = value;
         }
-        askNext();
+        await askNext();
       },
       onCancel: async () => {
-        _workflowCliAppend('[workflow] canceled.', 'notice', tabId);
-        _workflowCliSetStatus('idle');
+        append('[workflow] canceled.', 'notice');
+        execution.setPersistence('none');
+        execution.setRecordRecent(false);
+        setCommandStatus('idle');
       },
     });
-    _workflowCliSetStatus('idle');
+    setCommandStatus('idle');
   };
-  askNext();
+  void askNext();
 }
 
-async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()) {
-  const lines = [];
+async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId(), execution) {
+  if (!execution) {
+    throw new Error('Workflow terminal commands require a command execution');
+  }
   const append = (text, cls = '') => {
-    lines.push({ text, cls });
-    _workflowCliAppend(text, cls, tabId);
+    execution.appendLine(text, cls, tabId);
   };
-  const appendCommandEcho = (typeof importedAppendCommandEcho === 'function' && importedAppendCommandEcho)
-    || _workflowGlobalFunction('appendCommandEcho');
-  let echoed = false;
-  const echoCommand = (command) => {
-    if (!echoed && appendCommandEcho) appendCommandEcho(command, tabId);
-    echoed = true;
+  const finish = (_command, status = 'ok', { record = false } = {}) => {
+    _workflowCliFinish(execution, status, { record });
   };
   if (!workflowCatalogStore.getItems().length) {
     try { await reloadWorkflowCatalog(); }
     catch (err) {
-      echoCommand(cmd);
       append(`[workflow] failed to load workflows: ${err.message || 'network error'}`, 'exit-fail');
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
       return true;
     }
   }
   const parts = _workflowCommandTokens(cmd);
   const sub = String(parts[1] || 'list').toLowerCase();
-  if (sub !== 'run') echoCommand(cmd);
   if (sub === 'help' || sub === '--help' || sub === '-h') {
     _workflowCliUsageLines().forEach(line => append(line, ''));
-    _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    finish(cmd, 'ok', { record: true });
     return true;
   }
   if (sub === 'list' || parts.length === 1) {
@@ -1212,7 +1199,7 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
       const idHint = workflow.source === 'user' && workflow.id ? `, id: ${workflow.id}` : '';
       append(`  ${workflowCliName(workflow)}  ${workflow.title} (${workflow.steps?.length || 0} steps, ${kind}${idHint})`, 'builtin-help-row');
     });
-    _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    finish(cmd, 'ok', { record: true });
     return true;
   }
   if (sub === 'show') {
@@ -1220,7 +1207,7 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
     const { workflow, error } = _workflowFind(selector);
     if (!workflow) {
       append(`[workflow] ${error}`, 'exit-fail');
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
       return true;
     }
     append(`${workflow.title} (${workflowCliName(workflow)})`, 'builtin-section');
@@ -1230,7 +1217,7 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
       append(`  ${index + 1}. ${step.cmd}`, 'builtin-help-row');
       if (step.note) append(`     ${step.note}`, 'builtin-note');
     });
-    _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    finish(cmd, 'ok', { record: true });
     return true;
   }
   if (sub === 'runs') {
@@ -1242,10 +1229,10 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
         const step = execution.current_step_id ? `, step ${execution.current_step_id}` : '';
         append(`  ${execution.id}  ${execution.title} (${execution.status}${step})`, 'builtin-help-row');
       });
-      _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+      finish(cmd, 'ok', { record: true });
     } catch (err) {
       append(`[workflow] ${err.message || 'Failed to load workflow executions'}`, 'exit-fail');
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
     }
     return true;
   }
@@ -1253,7 +1240,7 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
     const executionId = String(parts[2] || '').trim();
     if (!executionId) {
       append('[workflow] execution id is required', 'exit-fail');
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
       return true;
     }
     try {
@@ -1271,10 +1258,10 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
           : '';
         append(`  ${step.step_id}: ${step.status}${run}${transition}${captures}`, 'builtin-help-row');
       });
-      _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+      finish(cmd, 'ok', { record: true });
     } catch (err) {
       append(`[workflow] ${err.message || 'Failed to load workflow execution'}`, 'exit-fail');
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
     }
     return true;
   }
@@ -1282,17 +1269,17 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
     const executionId = String(parts[2] || '').trim();
     if (!executionId) {
       append('[workflow] execution id is required', 'exit-fail');
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
       return true;
     }
     try {
       await importedCancelWorkflowExecution(_workflowApiFetch, executionId);
       append(`[workflow] ${executionId} canceled.`, 'notice');
       refreshWorkflowExecutions().catch(() => {});
-      _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+      finish(cmd, 'ok', { record: true });
     } catch (err) {
       append(`[workflow] ${err.message || 'Failed to cancel workflow execution'}`, 'exit-fail');
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
     }
     return true;
   }
@@ -1300,13 +1287,12 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
     const parsed = _workflowParseRunArgs(parts.slice(2));
     const { workflow, error } = _workflowFind(parsed.selector);
     if (!workflow) {
-      echoCommand(cmd);
       if (parsed.errors.length) {
         parsed.errors.forEach(parseError => append(`[workflow] ${parseError}`, 'exit-fail'));
       } else {
         append(`[workflow] ${error}`, 'exit-fail');
       }
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
       return true;
     }
     const sensitiveNames = new Set(
@@ -1316,30 +1302,31 @@ async function handleWorkflowTerminalCommand(cmd, tabId = _workflowActiveTabId()
     const safeCommand = inlineSensitiveNames.length
       ? _workflowRedactedRunCommand(parts, sensitiveNames)
       : cmd;
-    echoCommand(safeCommand);
+    execution.setSafeCommand(safeCommand);
     if (inlineSensitiveNames.length) {
       const flags = inlineSensitiveNames.map(name => `--${name.replace(/_/g, '-')}`).join(', ');
       append(`[workflow] Sensitive parameters can't be supplied inline (${flags}). Omit them to enter the values securely.`, 'exit-fail');
-      _workflowCliFinish(safeCommand, lines, 'fail', tabId);
+      finish(safeCommand, 'fail');
       return true;
     }
     if (parsed.errors.length) {
       parsed.errors.forEach(parseError => append(`[workflow] ${parseError}`, 'exit-fail'));
-      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      finish(cmd, 'fail');
       return true;
     }
     const values = _workflowResolvedValues(workflow, parsed.values);
     const missing = _workflowMissingInputs(workflow, values);
     if (missing.length) {
-      _workflowPromptForInputs(workflow, values, missing, tabId);
+      execution.setPersistence('none');
+      _workflowPromptForInputs(workflow, values, missing, tabId, execution);
       return true;
     }
-    _workflowRunResolved(workflow, values, tabId);
+    await _workflowRunResolved(workflow, values, tabId, execution);
     return true;
   }
   append(`[workflow] unknown subcommand '${sub}'`, 'exit-fail');
   _workflowCliUsageLines().forEach(line => append(line, ''));
-  _workflowCliFinish(cmd, lines, 'fail', tabId);
+  finish(cmd, 'fail');
   return true;
 }
 

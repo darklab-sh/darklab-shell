@@ -1389,6 +1389,10 @@ def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_schema):
 
     assert resp.status_code == 200
     assert data["ok"] is True
+    assert data["run"]["id"] == data["run_id"]
+    assert data["run"]["command"] == "theme current"
+    assert data["run"]["status"] == "succeeded"
+    assert data["run"]["output_line_count"] == 1
     assert row["session_id"] == session_id
     assert row["run_kind"] == "builtin"
     assert row["owner_tab_id"] == "tab-postgres"

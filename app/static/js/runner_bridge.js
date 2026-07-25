@@ -13,7 +13,6 @@ const RUNNER_BRIDGE_GLOBAL = typeof window !== 'undefined' ? window : globalThis
 const warnedMissingRunnerHandlers = new Set();
 const runnerHandlers = RUNNER_BRIDGE_GLOBAL.__darklabRunnerHandlers || {
   _readRunErrorMessage: null,
-  _recordSuccessfulLocalCommand: null,
   _seedLocalStorageStarsToServer: null,
   _setRunButtonDisabled: null,
   _sseMessageFromChunk: null,
@@ -119,7 +118,6 @@ function _callRunnerHandler(name, fallback, args) {
 }
 
 function _readRunErrorMessage(...args) { return _callRunnerHandler('_readRunErrorMessage', Promise.resolve(''), args); }
-function _recordSuccessfulLocalCommand(...args) { return _callRunnerHandler('_recordSuccessfulLocalCommand', undefined, args); }
 function _seedLocalStorageStarsToServer(...args) { return _callRunnerHandler('_seedLocalStorageStarsToServer', Promise.resolve(), args); }
 function _setRunButtonDisabled(...args) { return _callRunnerHandler('_setRunButtonDisabled', undefined, args); }
 function _sseMessageFromChunk(...args) { return _callRunnerHandler('_sseMessageFromChunk', null, args); }
@@ -147,7 +145,6 @@ function syncActiveRunTimer(...args) { return _callRunnerHandler('syncActiveRunT
 if (RUNNER_BRIDGE_GLOBAL) {
   RUNNER_BRIDGE_GLOBAL.DarklabRunner = {
     _readRunErrorMessage,
-    _recordSuccessfulLocalCommand,
     _seedLocalStorageStarsToServer,
     _setRunButtonDisabled,
     _sseMessageFromChunk,
@@ -178,7 +175,6 @@ if (RUNNER_BRIDGE_GLOBAL) {
 
 export {
   _readRunErrorMessage,
-  _recordSuccessfulLocalCommand,
   _seedLocalStorageStarsToServer,
   _setRunButtonDisabled,
   _sseMessageFromChunk,

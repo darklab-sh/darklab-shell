@@ -4,7 +4,7 @@
 // ── Terminal-native theme/config commands ──
 import { getActiveTabId, getTab as importedGetTab } from '../../core/state.js';
 import { DarklabPreferenceCore as importedPreferenceCore } from '../../core/app_preferences_core.js';
-import { appendLine as importedAppendLine, getLineNumberMode, getTimestampMode, _stickOutputToBottom as importedStickOutputToBottom } from '../../output.js';
+import { getLineNumberMode, getTimestampMode, _stickOutputToBottom as importedStickOutputToBottom } from '../../output.js';
 import { getOutput as importedGetOutput, updateOutputFollowButton as importedUpdateOutputFollowButton } from '../../tabs.js';
 import {
   applyLineNumberPreference as importedApplyLineNumberPreference,
@@ -39,12 +39,6 @@ import {
   _savedThemeName as importedSavedThemeName,
   applyThemeSelection as importedApplyThemeSelection,
 } from '../theme/theme.js';
-import {
-  _recordSuccessfulLocalCommand as importedRecordSuccessfulLocalCommand,
-  appendCommandEcho as importedAppendCommandEcho,
-  setStatus as importedSetStatus,
-} from '../../runner_bridge.js';
-
 const LOCAL_COMMAND_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
 function _cliGlobalFunction(name) {
@@ -52,9 +46,11 @@ function _cliGlobalFunction(name) {
   return typeof fn === 'function' ? fn : null;
 }
 
-function _cliAppendLineFn() {
-  return (typeof importedAppendLine !== 'undefined' && importedAppendLine)
-    || _cliGlobalFunction('appendLine');
+function _cliRequireExecution(execution) {
+  if (!execution || typeof execution.appendLine !== 'function') {
+    throw new Error('Terminal-native commands require a command execution');
+  }
+  return execution;
 }
 
 function _cliGetTab(id) {
@@ -74,9 +70,8 @@ function _cliActiveTabId() {
   return importedId || LOCAL_COMMAND_GLOBAL?.activeTabId || null;
 }
 
-function _cliAppendLine(text, cls = '', tabId = null, metadata = null) {
-  const appendLine = _cliAppendLineFn();
-  if (appendLine) appendLine(text, cls, tabId, metadata);
+function _cliAppendLine(text, cls = '', tabId = null, metadata = null, execution) {
+  _cliRequireExecution(execution).appendLine(text, cls, tabId, metadata);
 }
 
 function _cliShouldPreserveOutputTail(tabId = null) {
@@ -103,24 +98,12 @@ function _cliPreserveOutputTail(tabId = null, shouldPreserve = true) {
   if (updateOutputFollowButton) updateOutputFollowButton(id);
 }
 
-function _cliSetStatus(statusValue) {
-  const setStatus = (typeof importedSetStatus === 'function' && importedSetStatus)
-    || _cliGlobalFunction('setStatus');
-  if (setStatus) setStatus(statusValue);
+function _cliSetStatus(statusValue, execution) {
+  _cliRequireExecution(execution).setStatus(statusValue);
 }
 
-function _cliAppendCommandEcho(command, tabId = null) {
-  const appendCommandEcho = (typeof importedAppendCommandEcho === 'function' && importedAppendCommandEcho)
-    || _cliGlobalFunction('appendCommandEcho');
-  if (appendCommandEcho) appendCommandEcho(command, tabId);
-}
-
-function _cliRecordSuccess(command) {
-  const recordSuccessfulLocalCommand = (typeof importedRecordSuccessfulLocalCommand === 'function'
-    ? importedRecordSuccessfulLocalCommand
-    : null)
-    || _cliGlobalFunction('_recordSuccessfulLocalCommand');
-  if (recordSuccessfulLocalCommand) recordSuccessfulLocalCommand(command);
+function _cliRecordSuccess(_command, execution) {
+  _cliRequireExecution(execution).setRecordRecent(true);
 }
 
 function _cliPreferenceCore() {
@@ -222,43 +205,43 @@ function _cliThemeDescription(entry) {
   return `${label || slug}${current ? ' (current)' : ''}`;
 }
 
-async function handleThemeCommand(cmd, tabId = null) {
+async function handleThemeCommand(cmd, tabId = null, execution) {
+  _cliRequireExecution(execution);
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[1] || '').toLowerCase();
-  _cliAppendCommandEcho(cmd, tabId);
 
   if (parts.length === 1 || sub === 'list') {
     const current = _cliCurrentThemeEntry();
-    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(current)), 'builtin-kv', tabId);
-    _cliAppendLine('', 'builtin-spacer', tabId);
-    _cliAppendLine('Available themes:', 'builtin-section', tabId);
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(current)), 'builtin-kv', tabId, null, execution);
+    _cliAppendLine('', 'builtin-spacer', tabId, null, execution);
+    _cliAppendLine('Available themes:', 'builtin-section', tabId, null, execution);
     const grouped = _cliThemeEntriesByColorScheme();
     ['dark', 'light', 'other'].forEach((scheme) => {
       const entries = grouped[scheme] || [];
       if (!entries.length) return;
-      _cliAppendLine(_cliThemeColorSchemeLabel(scheme), 'builtin-section', tabId);
+      _cliAppendLine(_cliThemeColorSchemeLabel(scheme), 'builtin-section', tabId, null, execution);
       entries.forEach((entry) => {
         const slug = _cliThemeSlug(entry);
         const marker = slug === _cliCurrentThemeSlug() ? '*' : ' ';
-        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'builtin-help-row builtin-plain', tabId);
+        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'builtin-help-row builtin-plain', tabId, null, execution);
       });
     });
-    _cliRecordSuccess(cmd);
-    _cliSetStatus('ok');
+    _cliRecordSuccess(cmd, execution);
+    _cliSetStatus('ok', execution);
     return true;
   }
 
   if (sub === 'current') {
-    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(_cliCurrentThemeEntry())), 'builtin-kv', tabId);
-    _cliRecordSuccess(cmd);
-    _cliSetStatus('ok');
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(_cliCurrentThemeEntry())), 'builtin-kv', tabId, null, execution);
+    _cliRecordSuccess(cmd, execution);
+    _cliSetStatus('ok', execution);
     return true;
   }
 
   const requested = sub === 'set' ? parts.slice(2).join(' ').trim() : '';
   if (!requested) {
-    _cliAppendLine('usage: theme [list | current | set <theme>]', '', tabId);
-    _cliSetStatus('fail');
+    _cliAppendLine('usage: theme [list | current | set <theme>]', '', tabId, null, execution);
+    _cliSetStatus('fail', execution);
     return true;
   }
 
@@ -266,18 +249,18 @@ async function handleThemeCommand(cmd, tabId = null) {
     || _cliGlobalFunction('_findThemeEntry');
   const entry = typeof findThemeEntry === 'function' ? findThemeEntry(requested) : null;
   if (!entry) {
-    _cliAppendLine(`theme: unknown theme '${requested}'`, 'exit-fail', tabId);
-    _cliAppendLine("run 'theme list' to see available themes", '', tabId);
-    _cliSetStatus('fail');
+    _cliAppendLine(`theme: unknown theme '${requested}'`, 'exit-fail', tabId, null, execution);
+    _cliAppendLine("run 'theme list' to see available themes", '', tabId, null, execution);
+    _cliSetStatus('fail', execution);
     return true;
   }
 
   const applyThemeSelection = (typeof importedApplyThemeSelection !== 'undefined' && importedApplyThemeSelection)
     || _cliGlobalFunction('applyThemeSelection');
   if (typeof applyThemeSelection === 'function') applyThemeSelection(entry.name);
-  _cliAppendLine(`theme set: ${_cliThemeDescription(entry)}`, '', tabId);
-  _cliRecordSuccess(cmd);
-  _cliSetStatus('ok');
+  _cliAppendLine(`theme set: ${_cliThemeDescription(entry)}`, '', tabId, null, execution);
+  _cliRecordSuccess(cmd, execution);
+  _cliSetStatus('ok', execution);
   return true;
 }
 
@@ -581,16 +564,18 @@ function _cliConfigDisplayValue(value) {
   return _cliConfigValueLabels[value] || value;
 }
 
-function _printCliConfigEntry(entry, tabId) {
+function _printCliConfigEntry(entry, tabId, execution = null) {
   _cliAppendLine(
     _formatCliRecord(entry.key, _cliConfigDisplayValue(entry.get()), 19),
     'builtin-kv',
     tabId,
+    null,
+    execution,
   );
 }
 
-function _printCliConfigList(tabId) {
-  _cliAppendLine('Current user config:', 'builtin-section', tabId);
+function _printCliConfigList(tabId, execution = null) {
+  _cliAppendLine('Current user config:', 'builtin-section', tabId, null, execution);
   const rows = _cliConfigEntries().map(entry => ({
     option: entry.key,
     value: _cliConfigDisplayValue(entry.get()),
@@ -599,22 +584,22 @@ function _printCliConfigList(tabId) {
     Math.max('option'.length, ...rows.map(row => row.option.length)),
     Math.max('value'.length, ...rows.map(row => row.value.length)),
   ];
-  _cliAppendLine(_formatCliTableRow(['option', 'value'], widths), 'builtin-table-header', tabId);
+  _cliAppendLine(_formatCliTableRow(['option', 'value'], widths), 'builtin-table-header', tabId, null, execution);
   rows.forEach(row => {
-    _cliAppendLine(_formatCliTableRow([row.option, row.value], widths), 'builtin-table-row', tabId);
+    _cliAppendLine(_formatCliTableRow([row.option, row.value], widths), 'builtin-table-row', tabId, null, execution);
   });
 }
 
-async function handleConfigCommand(cmd, tabId = null) {
+async function handleConfigCommand(cmd, tabId = null, execution) {
+  _cliRequireExecution(execution);
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[1] || '').toLowerCase();
   const preserveTail = _cliShouldPreserveOutputTail(tabId);
-  _cliAppendCommandEcho(cmd, tabId);
 
   if (parts.length === 1 || sub === 'list') {
-    _printCliConfigList(tabId);
-    _cliRecordSuccess(cmd);
-    _cliSetStatus('ok');
+    _printCliConfigList(tabId, execution);
+    _cliRecordSuccess(cmd, execution);
+    _cliSetStatus('ok', execution);
     return true;
   }
 
@@ -622,14 +607,14 @@ async function handleConfigCommand(cmd, tabId = null) {
     const key = parts[2] || '';
     const entry = _findCliConfigEntry(key);
     if (!entry) {
-      _cliAppendLine(`config: unknown option '${key}'`, 'exit-fail', tabId);
-      _cliAppendLine("run 'config list' to see available options", '', tabId);
-      _cliSetStatus('fail');
+      _cliAppendLine(`config: unknown option '${key}'`, 'exit-fail', tabId, null, execution);
+      _cliAppendLine("run 'config list' to see available options", '', tabId, null, execution);
+      _cliSetStatus('fail', execution);
       return true;
     }
-    _printCliConfigEntry(entry, tabId);
-    _cliRecordSuccess(cmd);
-    _cliSetStatus('ok');
+    _printCliConfigEntry(entry, tabId, execution);
+    _cliRecordSuccess(cmd, execution);
+    _cliSetStatus('ok', execution);
     return true;
   }
 
@@ -639,24 +624,24 @@ async function handleConfigCommand(cmd, tabId = null) {
   const entry = _findCliConfigEntry(key);
 
   if (!entry || !value) {
-    _cliAppendLine('usage: config [list | get <option> | set <option> <value>]', '', tabId);
-    _cliSetStatus('fail');
+    _cliAppendLine('usage: config [list | get <option> | set <option> <value>]', '', tabId, null, execution);
+    _cliSetStatus('fail', execution);
     return true;
   }
 
   const normalizedValue = _normalizeCliConfigEntryValue(entry, value);
   if (normalizedValue === null) {
-    _cliAppendLine(`config: invalid value '${value}' for ${entry.key}`, 'exit-fail', tabId);
-    _cliAppendLine(`allowed values: ${entry.values ? entry.values.join(', ') : entry.valueHelp}`, '', tabId);
-    _cliSetStatus('fail');
+    _cliAppendLine(`config: invalid value '${value}' for ${entry.key}`, 'exit-fail', tabId, null, execution);
+    _cliAppendLine(`allowed values: ${entry.values ? entry.values.join(', ') : entry.valueHelp}`, '', tabId, null, execution);
+    _cliSetStatus('fail', execution);
     return true;
   }
 
   await entry.set(normalizedValue);
-  _cliAppendLine(`config set: ${entry.key}=${_cliConfigDisplayValue(entry.get())}`, '', tabId);
+  _cliAppendLine(`config set: ${entry.key}=${_cliConfigDisplayValue(entry.get())}`, '', tabId, null, execution);
   _cliPreserveOutputTail(tabId, preserveTail);
-  _cliRecordSuccess(cmd);
-  _cliSetStatus('ok');
+  _cliRecordSuccess(cmd, execution);
+  _cliSetStatus('ok', execution);
   return true;
 }
 

@@ -103,6 +103,11 @@ import {
   _pruneDetachedActiveRunRestoreIds as importedPruneDetachedActiveRunRestoreIds,
   clearActiveRunDetachedForRestore as importedClearActiveRunDetachedForRestore,
 } from './features/runner/runner_active_restore.js';
+import {
+  createCommandCompletionCoordinator as importedCreateCommandCompletionCoordinator,
+  createCommandExecution as importedCreateCommandExecution,
+  normalizeCommandResult as importedNormalizeCommandResult,
+} from './features/runner/command_lifecycle.js';
 import { createRunnerPersistence as importedCreateRunnerPersistence } from './features/runner/runner_persistence.js';
 import {
   _ensureWorkspaceCache as importedEnsureWorkspaceCache,
@@ -522,6 +527,7 @@ function _requestWelcomeSettle(tabId) {
 const _RUN_STREAM_MESSAGE_BATCH_LIMIT = 750;
 const _RUN_STREAM_MESSAGE_BATCH_MS = 12;
 let _runnerPersistence = null;
+let _runnerCommandCoordinator = null;
 let _activeRunPollTimer = null;
 
 function _runnerWorkspaceCacheApi() {
@@ -555,6 +561,28 @@ function _runnerPersistenceHelpers() {
     });
   }
   return _runnerPersistence;
+}
+
+function _normalizeTerminalCommandResult(result, defaults = {}) {
+  const normalize = (
+    typeof importedNormalizeCommandResult !== 'undefined'
+    && importedNormalizeCommandResult
+  ) || null;
+  if (typeof normalize !== 'function') {
+    throw new Error('Terminal command result normalization is unavailable');
+  }
+  return normalize(result, defaults);
+}
+
+function _createTerminalCommandExecution(options = {}) {
+  const createExecution = (
+    typeof importedCreateCommandExecution !== 'undefined'
+    && importedCreateCommandExecution
+  ) || null;
+  if (typeof createExecution !== 'function') {
+    throw new Error('Terminal command execution is unavailable');
+  }
+  return createExecution(options);
 }
 
 function _runnerIsActiveRunDetachedForRestore(runId) {
@@ -1795,53 +1823,54 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
       }
       return;
     }
-    const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
     stopTimer();
-    if (msg.preview_truncated) {
-      appendLine(_previewTruncationNotice(msg.output_line_count, msg.full_output_available), 'notice', tabId);
+    _appendHighVolumeOutputFinalSummary(tabId);
+    if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
+    if (typeof disableHighVolumeOutputResumeControls === 'function') {
+      disableHighVolumeOutputResumeControls(tabId);
     }
-    if (msg.code === 0) {
-      if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
-      _appendHighVolumeOutputFinalSummary(tabId);
-      if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
-      if (tabId === _runnerActiveTabId()) setStatus('ok');
-      setTabStatus(tabId, 'ok');
-      if (typeof disableHighVolumeOutputResumeControls === 'function') {
-        disableHighVolumeOutputResumeControls(tabId);
-      }
-    } else {
-      appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
-      _appendHighVolumeOutputFinalSummary(tabId);
-      if (typeof renderCommandOutcomeSummary === 'function') renderCommandOutcomeSummary(tabId);
-      if (tabId === _runnerActiveTabId()) setStatus('fail');
-      setTabStatus(tabId, 'fail');
-      if (typeof disableHighVolumeOutputResumeControls === 'function') {
-        disableHighVolumeOutputResumeControls(tabId);
-      }
-    }
-    if (typeof addToRecentPreview === 'function' && t && t.command && !t.unknownCommand) {
-      addToRecentPreview(t.command);
-    }
-    if (t && t.command) _refreshProjectContextAfterCommand(t.command, msg.code);
-    if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof importedLoadSessionVariables === 'function') {
-      importedLoadSessionVariables().catch(() => {});
-    }
+    const command = String(t && t.command || '');
+    const safeCommand = _historySafeCommand(command);
+    const closing = !!(t && t.closing);
+    const result = _normalizeTerminalCommandResult({
+      command,
+      safeCommand,
+      tabId,
+      source: 'server',
+      completionKey: `run:${String(t && t.historyRunId || msg.run_id || tabId)}`,
+      lines: msg.preview_truncated
+        ? [{
+            text: _previewTruncationNotice(msg.output_line_count, msg.full_output_available),
+            cls: 'notice',
+          }]
+        : [],
+      status: Number(msg.code) === 0 ? 'ok' : 'fail',
+      exitCode: msg.code,
+      persistence: 'server',
+      recordRecent: !!(safeCommand && t && !t.unknownCommand),
+      renderExit: true,
+      suppressExitLine: !!(t && t.syntheticClear && Number(msg.code) === 0),
+      elapsed: msg.elapsed || '',
+      effects: {
+        refreshProject: !!command,
+        refreshVariables: /^var(?:\s|$)/i.test(command),
+        refreshWorkspace: true,
+        notify: true,
+        settleControls: true,
+        refreshHistory: !closing,
+        mountDeferredPrompt: !closing,
+      },
+    });
     if (t) t.syntheticClear = false;
-    _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
-    if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: msg.code });
-    _setRunButtonDisabled(false); hideTabKillBtn(tabId);
-    _syncMobileRunButtonAfterRunSettled();
+    void _completeTerminalCommand(result);
     const finalizeTabClose = typeof importedFinalizeClosingTab === 'function'
       ? importedFinalizeClosingTab
       : (typeof finalizeClosingTab === 'function' ? finalizeClosingTab : null);
-    if (t && t.closing && finalizeTabClose) {
+    if (closing && finalizeTabClose) {
       finalizeTabClose(tabId);
       if (isHistoryPanelOpen()) refreshHistoryPanel();
       return;
     }
-    if (isHistoryPanelOpen()) refreshHistoryPanel();
-    _runnerWorkspaceCacheApi().refresh?.();
-    if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
   } else if (msg.type === 'error') {
     _clearStalledTimeout(tabId);
     appendLine('[error] ' + msg.text, 'exit-fail', tabId);
@@ -2248,12 +2277,6 @@ function _historySafeCommand(cmd) {
   return _runnerPersistenceHelpers().historySafeCommand(cmd);
 }
 
-function _recordSuccessfulLocalCommand(cmd) {
-  if (typeof addToRecentPreview !== 'function') return;
-  const value = _historySafeCommand(cmd);
-  if (value) addToRecentPreview(value);
-}
-
 function _isProjectWorkspaceCommand(cmd) {
   return String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase() === 'project';
 }
@@ -2300,33 +2323,127 @@ function _refreshProjectContextAfterCommand(cmd, exitCode) {
   }
 }
 
-function _clientSideRunExitCodeFromStatus(statusValue) {
-  return _runnerPersistenceHelpers().exitCodeFromStatus(statusValue);
+function _renderCompletedCommandLine(line, result) {
+  if (!line) return;
+  if (line.metadata) appendLine(line.text, line.cls || '', result.tabId, line.metadata);
+  else appendLine(line.text, line.cls || '', result.tabId);
 }
 
-function _finalizeClientSideCommandStatus(tabId, statusValue) {
-  const failed = statusValue === 'fail';
-  const exitCode = failed ? 1 : 0;
-  const finalStatus = failed ? 'fail' : 'ok';
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+function _renderCompletedCommandExit(result) {
+  const duration = result.elapsed ? ` in ${result.elapsed}s` : '';
+  const cls = result.exitCode === 0 ? 'exit-ok' : 'exit-fail';
+  appendLine(`[process exited with code ${result.exitCode}${duration}]`, cls, result.tabId);
+}
+
+function _applyCompletedCommandStatus(result) {
+  const tab = typeof getTab === 'function' ? getTab(result.tabId) : null;
   if (tab) {
-    tab.exitCode = exitCode;
+    tab.exitCode = result.exitCode;
     tab.runId = null;
     tab.reconnectedRun = false;
     tab.lastEventId = '';
     tab.attachMode = '';
   }
-  if (tabId === _runnerActiveTabId()) setStatus(finalStatus);
-  setTabStatus(tabId, finalStatus);
-  if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: exitCode });
+  const finalStatus = result.status === 'killed'
+    ? 'killed'
+    : (result.exitCode === 0 ? 'ok' : 'fail');
+  if (result.tabId === _runnerActiveTabId()) setStatus(finalStatus);
+  setTabStatus(result.tabId, finalStatus);
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:last-exit-changed', {
+      value: finalStatus === 'killed' ? 'killed' : result.exitCode,
+    });
+  }
 }
 
-function _persistClientSideRun(command, lineItems, statusValue, tabId = _runnerActiveTabId()) {
-  _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue, tabId);
+async function _afterCompletedCommand(result) {
+  const effects = result.effects || {};
+  if (effects.settleControls) {
+    _setRunButtonDisabled(false);
+    hideTabKillBtn(result.tabId);
+    _syncMobileRunButtonAfterRunSettled();
+  }
+  if (effects.refreshProject) {
+    _refreshProjectContextAfterCommand(result.safeCommand || result.command, result.exitCode);
+  }
+  if (
+    effects.refreshVariables
+    && typeof importedLoadSessionVariables === 'function'
+  ) {
+    await _runnerIgnoreFailure(importedLoadSessionVariables());
+  }
+  if (effects.refreshWorkspace) {
+    await _runnerIgnoreFailure(_runnerWorkspaceCacheApi().refresh?.());
+  }
+  if (effects.notify) {
+    _maybeNotify(
+      result.safeCommand || result.command,
+      result.status === 'killed' ? 'killed' : result.exitCode,
+      result.elapsed ? `${result.elapsed}s` : null,
+    );
+  }
+  if (effects.refreshHistory && isHistoryPanelOpen()) refreshHistoryPanel();
+  if (effects.refreshWorkspaceFiles) {
+    await _runnerIgnoreFailure(_runnerWorkspaceCacheApi().refresh?.());
+  }
+  if (effects.mountDeferredPrompt && typeof _maybeMountDeferredPrompt === 'function') {
+    _maybeMountDeferredPrompt(result.tabId);
+  }
 }
 
-function _persistSessionTokenRun(command, lineItems, statusValue = 'ok', tabId = _runnerActiveTabId()) {
-  _persistClientSideRun(command, lineItems, statusValue, tabId);
+function _runnerCommandCompletionCoordinator() {
+  if (!_runnerCommandCoordinator) {
+    const createCoordinator = (
+      typeof importedCreateCommandCompletionCoordinator !== 'undefined'
+      && importedCreateCommandCompletionCoordinator
+    ) || null;
+    if (typeof createCoordinator !== 'function') {
+      throw new Error('Terminal command completion coordinator is unavailable');
+    }
+    _runnerCommandCoordinator = createCoordinator({
+      renderLine: _renderCompletedCommandLine,
+      renderExit: _renderCompletedCommandExit,
+      applyStatus: _applyCompletedCommandStatus,
+      recordRecent: (safeCommand) => {
+        if (typeof addToRecentPreview === 'function') addToRecentPreview(safeCommand);
+      },
+      persistClient: (result) => (
+        _runnerPersistenceHelpers().persistClientSideRun(
+          result.safeCommand,
+          result.lines,
+          result.status,
+          result.tabId,
+        )
+      ),
+      afterComplete: _afterCompletedCommand,
+      onError: (error) => {
+        logClientError('terminal command completion failed', error);
+      },
+    });
+  }
+  return _runnerCommandCoordinator;
+}
+
+function _completeTerminalCommand(result, defaults = {}) {
+  return _runnerCommandCompletionCoordinator().complete(result, defaults);
+}
+
+function _sessionAppendLine(execution, text, cls = '', tabId = _runnerActiveTabId()) {
+  execution.appendLine(text, cls, tabId);
+}
+
+function _sessionSetStatus(execution, status) {
+  execution.setStatus(status);
+}
+
+function _sessionRecordSuccess(execution) {
+  execution.setPersistence('client');
+  execution.setRecordRecent(true);
+}
+
+function _sessionCancelPersistence(execution) {
+  execution.setPersistence('none');
+  execution.setRecordRecent(false);
 }
 
 function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentValueCount = 0) {
@@ -2359,7 +2476,7 @@ function _sessionMigrationResultText(data = {}) {
     + 'and saved user options when the destination had none';
 }
 
-async function _doSessionMigration(fromId, toId, tabId) {
+async function _doSessionMigration(fromId, toId, tabId, execution) {
   // Use an explicit fetch (not apiFetch) so X-Session-ID is the OLD session ID
   // regardless of what SESSION_ID has been updated to.
   // Returns true on success so the caller switches identity only after a
@@ -2376,13 +2493,13 @@ async function _doSessionMigration(fromId, toId, tabId) {
     });
     const data = await resp.json().catch(() => ({}));
     if (resp.ok && data.ok) {
-      appendLine(_sessionMigrationResultText(data), '', tabId);
+      _sessionAppendLine(execution, _sessionMigrationResultText(data), '', tabId);
       succeeded = true;
     } else {
-      appendLine(`[migration failed] ${data.error || resp.status}`, 'exit-fail', tabId);
+      _sessionAppendLine(execution, `[migration failed] ${data.error || resp.status}`, 'exit-fail', tabId);
     }
   } catch (err) {
-    appendLine(`[migration failed] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    _sessionAppendLine(execution, `[migration failed] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token migrate', err);
   }
   return succeeded;
@@ -2422,7 +2539,17 @@ async function _seedLocalStorageStarsToServer() {
 }
 
 function _setPendingTerminalConfirm(config) {
+  if (config && !config.execution) {
+    throw new Error('Terminal confirmations require a command execution');
+  }
   _pendingTerminalConfirm = config || null;
+  if (_pendingTerminalConfirm?.execution) {
+    _pendingTerminalConfirm.execution.setPending(true);
+    _publishPendingExecutionLines(_pendingTerminalConfirm.execution);
+    const promptTabId = _pendingTerminalConfirm.tabId || _pendingTerminalConfirm.execution.state.tabId;
+    if (promptTabId === _runnerActiveTabId()) setStatus('idle');
+    if (typeof setTabStatus === 'function') setTabStatus(promptTabId, 'idle');
+  }
   if (typeof setComposerPromptMode === 'function') {
     const mode = _pendingTerminalConfirm?.kind === 'secret' ? 'secret' : 'confirm';
     setComposerPromptMode(_pendingTerminalConfirm ? mode : null);
@@ -2433,19 +2560,38 @@ function hasPendingTerminalConfirm() {
   return !!_pendingTerminalConfirm;
 }
 
-async function _runPendingTerminalConfirmHandler(promptTabId, handler) {
-  const originalSetStatus = setStatus;
-  let finalStatus = 'idle';
-  try {
-    setStatus = (statusValue) => {
-      finalStatus = statusValue;
-      originalSetStatus(statusValue);
-    };
-    await Promise.resolve(typeof handler === 'function' ? handler() : undefined);
-  } finally {
-    setStatus = originalSetStatus;
+function _publishPendingExecutionLines(execution) {
+  if (!execution || !execution.state || !Array.isArray(execution.state.lines)) return;
+  execution.state.lines.forEach((line) => {
+    if (line.rendered === true) return;
+    _renderCompletedCommandLine(line, { tabId: execution.state.tabId });
+    line.rendered = true;
+  });
+}
+
+async function _runPendingTerminalConfirmHandler(promptTabId, handler, pending = null) {
+  const execution = pending?.execution;
+  if (!execution) {
+    throw new Error('Terminal confirmation is missing its command execution');
   }
-  _finalizeClientSideCommandStatus(promptTabId, finalStatus);
+  try {
+    await Promise.resolve(typeof handler === 'function' ? handler() : undefined);
+  } catch (err) {
+    execution.appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
+    execution.setStatus('fail');
+    execution.setRecordRecent(false);
+    logClientError('terminal confirmation failed', err);
+  }
+  const nextPendingUsesExecution = _pendingTerminalConfirm?.execution === execution;
+  if (nextPendingUsesExecution) {
+    _publishPendingExecutionLines(execution);
+    if (typeof setTabStatus === 'function') setTabStatus(promptTabId, 'idle');
+    return;
+  }
+  execution.setPending(false);
+  if (typeof execution.completePending === 'function') {
+    await execution.completePending();
+  }
 }
 
 function cancelPendingTerminalConfirm(tabId = _runnerActiveTabId()) {
@@ -2456,26 +2602,17 @@ function cancelPendingTerminalConfirm(tabId = _runnerActiveTabId()) {
   const cancelHandler = typeof pending.onCancel === 'function'
     ? pending.onCancel
     : (typeof pending.onNo === 'function' ? pending.onNo : null);
-  if (pending.kind === 'text' || pending.kind === 'secret') {
-    Promise.resolve(typeof cancelHandler === 'function' ? cancelHandler() : undefined).catch((err) => {
-      appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
-      setStatus('fail');
-    });
-    refocusComposerAfterAction();
-    return true;
-  }
-  _runPendingTerminalConfirmHandler(promptTabId, cancelHandler).catch((err) => {
+  _runPendingTerminalConfirmHandler(promptTabId, cancelHandler, pending).catch((err) => {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
     setStatus('fail');
-    _finalizeClientSideCommandStatus(promptTabId, 'fail');
   });
   refocusComposerAfterAction();
   return true;
 }
 
-function _appendSessionTokenSetLines(token, tabId) {
-  appendLine(`session token set: ${maskSessionToken(token)}`, '', tabId);
-  appendLine('reload other tabs to apply the new session token', '', tabId);
+function _appendSessionTokenSetLines(token, tabId, execution) {
+  _sessionAppendLine(execution, `session token set: ${maskSessionToken(token)}`, '', tabId);
+  _sessionAppendLine(execution, 'reload other tabs to apply the new session token', '', tabId);
 }
 
 function _clearVisibleSessionHistoryState() {
@@ -2493,14 +2630,14 @@ async function _activateSessionTokenIdentity(token) {
   if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
 }
 
-async function _sessionTokenGenerate(tabId) {
+async function _sessionTokenGenerate(tabId, execution) {
   const oldSessionId = _runnerCurrentSessionId();
   try {
     const resp = await apiFetch('/session/token/generate');
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      appendLine(`[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
-      setStatus('fail');
+      _sessionAppendLine(execution, `[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
+      _sessionSetStatus(execution, 'fail');
       return;
     }
     const data = await resp.json();
@@ -2526,37 +2663,36 @@ async function _sessionTokenGenerate(tabId) {
       }
     } catch (_) {}
 
-    appendLine(`session token generated:  ${maskSessionToken(newToken)}`, '', tabId);
-    appendLine('stored in localStorage as session_token', '', tabId);
-    appendLine('use session-token set <value> on another device to continue your session', '', tabId);
-    appendLine('warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
+    _sessionAppendLine(execution, `session token generated:  ${maskSessionToken(newToken)}`, '', tabId);
+    _sessionAppendLine(execution, 'stored in localStorage as session_token', '', tabId);
+    _sessionAppendLine(execution, 'use session-token set <value> on another device to continue your session', '', tabId);
+    _sessionAppendLine(execution, 'warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
 
     if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentValueCount > 0) {
       // Defer identity switch until the user answers the migration prompt so a
       // failed /session/migrate does not strand runs on the old session while
       // the active identity is already the new token.
-      appendLine(
+      _sessionAppendLine(
+        execution,
         `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentValueCount)} in your previous session. migrate history, files, workflows, and recent values to your new session token?`,
         '',
         tabId
       );
+      _sessionCancelPersistence(execution);
       _setPendingTerminalConfirm({
         tabId,
+        execution,
         onYes: async () => {
-          const migrated = await _doSessionMigration(oldSessionId, newToken, tabId);
+          const migrated = await _doSessionMigration(oldSessionId, newToken, tabId, execution);
           if (migrated) {
             localStorage.setItem('session_token', newToken);
             updateSessionId(newToken);
             await _seedLocalStorageStarsToServer();
             if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
             if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
-            _recordSuccessfulLocalCommand('session-token generate');
-            _persistSessionTokenRun('session-token generate', [
-              { text: `session token generated:  ${maskSessionToken(newToken)}` },
-              { text: 'history, files, workflows, and recent values migrated to the new session token' },
-            ]);
+            _sessionRecordSuccess(execution);
           }
-          setStatus('idle');
+          _sessionSetStatus(execution, 'idle');
         },
         onNo: async () => {
           localStorage.setItem('session_token', newToken);
@@ -2564,46 +2700,38 @@ async function _sessionTokenGenerate(tabId) {
           await _seedLocalStorageStarsToServer();
           if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
           if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
-          _recordSuccessfulLocalCommand('session-token generate');
-          appendLine('History, file, workflow, and recent-value migration skipped.', '', tabId);
-          _persistSessionTokenRun('session-token generate', [
-            { text: `session token generated:  ${maskSessionToken(newToken)}` },
-            { text: 'History, file, workflow, and recent-value migration skipped.' },
-          ]);
-          setStatus('idle');
+          _sessionRecordSuccess(execution);
+          _sessionAppendLine(execution, 'History, file, workflow, and recent-value migration skipped.', '', tabId);
+          _sessionSetStatus(execution, 'idle');
         },
       });
-      setStatus('idle');
+      _sessionSetStatus(execution, 'idle');
     } else {
       localStorage.setItem('session_token', newToken);
       updateSessionId(newToken);
       await _seedLocalStorageStarsToServer();
       if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-      _recordSuccessfulLocalCommand('session-token generate');
-      _persistSessionTokenRun('session-token generate', [
-        { text: `session token generated:  ${maskSessionToken(newToken)}` },
-        { text: 'stored in localStorage as session_token' },
-      ]);
-      setStatus('ok');
+      _sessionRecordSuccess(execution);
+      _sessionSetStatus(execution, 'ok');
     }
   } catch (err) {
-    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    _sessionAppendLine(execution, `[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token generate', err);
-    setStatus('fail');
+    _sessionSetStatus(execution, 'fail');
   }
 }
 
-async function _sessionTokenSet(value, tabId) {
+async function _sessionTokenSet(value, tabId, execution) {
   if (!value) {
-    appendLine('usage: session-token set <token>', '', tabId);
-    setStatus('fail');
+    _sessionAppendLine(execution, 'usage: session-token set <token>', '', tabId);
+    _sessionSetStatus(execution, 'fail');
     return;
   }
   const isTok = value.startsWith('tok_');
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
   if (!isTok && !isUuid) {
-    appendLine(`[error] invalid session token format — expected tok_... or a UUID`, 'exit-fail', tabId);
-    setStatus('fail');
+    _sessionAppendLine(execution, '[error] invalid session token format — expected tok_... or a UUID', 'exit-fail', tabId);
+    _sessionSetStatus(execution, 'fail');
     return;
   }
 
@@ -2629,8 +2757,8 @@ async function _sessionTokenSet(value, tabId) {
       verifyErr = 'token verification failed — server is unreachable';
     }
     if (verifyErr !== null) {
-      appendLine(`[error] ${verifyErr}`, 'exit-fail', tabId);
-      setStatus('fail');
+      _sessionAppendLine(execution, `[error] ${verifyErr}`, 'exit-fail', tabId);
+      _sessionSetStatus(execution, 'fail');
       return;
     }
   }
@@ -2661,92 +2789,81 @@ async function _sessionTokenSet(value, tabId) {
     // Defer identity switch until the user answers the migration prompt so a
     // failed /session/migrate does not strand runs on the old session while
     // the active identity is already the new token.
-    appendLine(
+    _sessionAppendLine(
+      execution,
       `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentValueCount)} in your current session. migrate history, files, workflows, and recent values to this session token?`,
       '',
       tabId
     );
+    _sessionCancelPersistence(execution);
     _setPendingTerminalConfirm({
       tabId,
+      execution,
       onYes: async () => {
-        const migrated = await _doSessionMigration(oldSessionId, value, tabId);
+        const migrated = await _doSessionMigration(oldSessionId, value, tabId, execution);
         if (migrated) {
           await _activateSessionTokenIdentity(value);
-          _appendSessionTokenSetLines(value, tabId);
-          _recordSuccessfulLocalCommand(`session-token set ${value}`);
-          _persistSessionTokenRun(`session-token set ${value}`, [
-            { text: `session token set: ${maskSessionToken(value)}` },
-            { text: 'reload other tabs to apply the new session token' },
-          ]);
+          _appendSessionTokenSetLines(value, tabId, execution);
+          _sessionRecordSuccess(execution);
         }
-        setStatus('idle');
+        _sessionSetStatus(execution, 'idle');
       },
       onNo: async () => {
         await _activateSessionTokenIdentity(value);
-        _appendSessionTokenSetLines(value, tabId);
-        _recordSuccessfulLocalCommand(`session-token set ${value}`);
-        appendLine('History, file, workflow, and recent-value migration skipped.', '', tabId);
-        _persistSessionTokenRun(`session-token set ${value}`, [
-          { text: `session token set: ${maskSessionToken(value)}` },
-          { text: 'reload other tabs to apply the new session token' },
-          { text: 'History, file, workflow, and recent-value migration skipped.' },
-        ]);
-        setStatus('idle');
+        _appendSessionTokenSetLines(value, tabId, execution);
+        _sessionRecordSuccess(execution);
+        _sessionAppendLine(execution, 'History, file, workflow, and recent-value migration skipped.', '', tabId);
+        _sessionSetStatus(execution, 'idle');
       },
       onCancel: async () => {
-        appendLine('Session token set canceled.', '', tabId);
-        setStatus('idle');
+        _sessionAppendLine(execution, 'Session token set canceled.', '', tabId);
+        _sessionCancelPersistence(execution);
+        _sessionSetStatus(execution, 'idle');
       },
     });
-    setStatus('idle');
+    _sessionSetStatus(execution, 'idle');
   } else {
     await _activateSessionTokenIdentity(value);
-    _appendSessionTokenSetLines(value, tabId);
-    _recordSuccessfulLocalCommand(`session-token set ${value}`);
-    _persistSessionTokenRun(`session-token set ${value}`, [
-      { text: `session token set: ${maskSessionToken(value)}` },
-      { text: 'reload other tabs to apply the new session token' },
-    ]);
-    setStatus('ok');
+    _appendSessionTokenSetLines(value, tabId, execution);
+    _sessionRecordSuccess(execution);
+    _sessionSetStatus(execution, 'ok');
   }
 }
 
-async function _sessionTokenCopy(tabId) {
+async function _sessionTokenCopy(tabId, execution) {
   if (typeof flushRecentValues === 'function') {
     await _runnerIgnoreFailure(flushRecentValues());
   }
   const token = localStorage.getItem('session_token');
   if (!token) {
-    appendLine('no session token is set — already using an anonymous session', '', tabId);
-    setStatus('idle');
+    _sessionAppendLine(execution, 'no session token is set — already using an anonymous session', '', tabId);
+    _sessionSetStatus(execution, 'idle');
     return;
   }
   try {
     await _runnerCopyTextToClipboardAdapter(token);
-    appendLine(`session token copied to clipboard: ${maskSessionToken(token)}`, '', tabId);
-    _recordSuccessfulLocalCommand('session-token copy');
-    _persistSessionTokenRun('session-token copy', [
-      { text: `session token copied to clipboard: ${maskSessionToken(token)}` },
-    ]);
-    setStatus('ok');
+    _sessionAppendLine(execution, `session token copied to clipboard: ${maskSessionToken(token)}`, '', tabId);
+    _sessionRecordSuccess(execution);
+    _sessionSetStatus(execution, 'ok');
   } catch (err) {
-    appendLine('[error] failed to copy the session token to clipboard', 'exit-fail', tabId);
+    _sessionAppendLine(execution, '[error] failed to copy the session token to clipboard', 'exit-fail', tabId);
     logClientError('session-token copy', err);
-    setStatus('fail');
+    _sessionSetStatus(execution, 'fail');
   }
 }
 
-async function _sessionTokenClear(tabId) {
+async function _sessionTokenClear(tabId, execution) {
   if (!localStorage.getItem('session_token')) {
-    appendLine('no session token is set — already using an anonymous session', '', tabId);
-    setStatus('idle');
+    _sessionAppendLine(execution, 'no session token is set — already using an anonymous session', '', tabId);
+    _sessionSetStatus(execution, 'idle');
     return;
   }
-  appendLine('warning: clearing the active session token removes it from this browser', 'notice', tabId);
-  appendLine("run 'session-token copy' first if you want to save the current token before clearing it", 'notice', tabId);
-  appendLine('clear the active session token and revert to an anonymous session?', '', tabId);
+  _sessionAppendLine(execution, 'warning: clearing the active session token removes it from this browser', 'notice', tabId);
+  _sessionAppendLine(execution, "run 'session-token copy' first if you want to save the current token before clearing it", 'notice', tabId);
+  _sessionAppendLine(execution, 'clear the active session token and revert to an anonymous session?', '', tabId);
   _setPendingTerminalConfirm({
     tabId,
+    execution,
     onYes: async () => {
       localStorage.removeItem('session_token');
       const uuid = localStorage.getItem('session_id') || _runnerCurrentSessionId();
@@ -2754,31 +2871,29 @@ async function _sessionTokenClear(tabId) {
       _clearVisibleSessionHistoryState();
       if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
       if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
-      appendLine(`session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
-      appendLine('your session token data remains in the server database', '', tabId);
-      _recordSuccessfulLocalCommand('session-token clear');
-      _persistSessionTokenRun('session-token clear', [
-        { text: `session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})` },
-        { text: 'your session token data remains in the server database' },
-      ]);
-      setStatus('ok');
+      _sessionAppendLine(execution, `session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
+      _sessionAppendLine(execution, 'your session token data remains in the server database', '', tabId);
+      _sessionRecordSuccess(execution);
+      _sessionSetStatus(execution, 'ok');
     },
     onNo: async () => {
-      appendLine('Session token clear canceled.', '', tabId);
-      setStatus('idle');
+      _sessionAppendLine(execution, 'Session token clear canceled.', '', tabId);
+      _sessionCancelPersistence(execution);
+      _sessionSetStatus(execution, 'idle');
     },
   });
-  setStatus('idle');
+  _sessionCancelPersistence(execution);
+  _sessionSetStatus(execution, 'idle');
 }
 
-async function _sessionTokenRotate(tabId) {
+async function _sessionTokenRotate(tabId, execution) {
   const oldSessionId = _runnerCurrentSessionId();
   try {
     const resp = await apiFetch('/session/token/generate');
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      appendLine(`[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
-      setStatus('fail');
+      _sessionAppendLine(execution, `[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
+      _sessionSetStatus(execution, 'fail');
       return;
     }
     const data = await resp.json();
@@ -2796,9 +2911,9 @@ async function _sessionTokenRotate(tabId) {
     const migrateData = await migrateResp.json().catch(() => ({}));
 
     if (!migrateResp.ok || !migrateData.ok) {
-      appendLine(`[error] migration failed — session token NOT rotated: ${migrateData.error || migrateResp.status}`, 'exit-fail', tabId);
-      appendLine('your previous session token is still active', '', tabId);
-      setStatus('fail');
+      _sessionAppendLine(execution, `[error] migration failed — session token NOT rotated: ${migrateData.error || migrateResp.status}`, 'exit-fail', tabId);
+      _sessionAppendLine(execution, 'your previous session token is still active', '', tabId);
+      _sessionSetStatus(execution, 'fail');
       return;
     }
 
@@ -2809,92 +2924,88 @@ async function _sessionTokenRotate(tabId) {
     else _runnerWorkspaceCacheApi().refresh?.()?.catch?.(() => {});
     if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
 
-    appendLine(`session token rotated: ${maskSessionToken(newToken)}`, '', tabId);
-    appendLine(_sessionMigrationResultText(migrateData), '', tabId);
-    appendLine('old session token is now inactive — reload other tabs to use the new token', '', tabId);
-    _recordSuccessfulLocalCommand('session-token rotate');
-    _persistSessionTokenRun('session-token rotate', [
-      { text: `session token rotated: ${maskSessionToken(newToken)}` },
-      { text: _sessionMigrationResultText(migrateData) },
-      { text: 'old session token is now inactive — reload other tabs to use the new token' },
-    ]);
-    setStatus('ok');
+    _sessionAppendLine(execution, `session token rotated: ${maskSessionToken(newToken)}`, '', tabId);
+    _sessionAppendLine(execution, _sessionMigrationResultText(migrateData), '', tabId);
+    _sessionAppendLine(execution, 'old session token is now inactive — reload other tabs to use the new token', '', tabId);
+    _sessionRecordSuccess(execution);
+    _sessionSetStatus(execution, 'ok');
   } catch (err) {
-    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    _sessionAppendLine(execution, `[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token rotate', err);
-    setStatus('fail');
+    _sessionSetStatus(execution, 'fail');
   }
 }
 
-async function _sessionTokenList(tabId) {
+async function _sessionTokenList(tabId, execution) {
   try {
     const resp = await apiFetch('/session/token/info');
     if (!resp.ok) {
-      appendLine('[error] failed to load session token info', 'exit-fail', tabId);
-      setStatus('fail');
+      _sessionAppendLine(execution, '[error] failed to load session token info', 'exit-fail', tabId);
+      _sessionSetStatus(execution, 'fail');
       return;
     }
     const data = await resp.json();
     const w = 14;
     const kv = (k, v) => k.padEnd(w) + '  ' + v;
     if (data.token) {
-      appendLine(kv('session token', maskSessionToken(data.token)), 'builtin-kv', tabId);
-      appendLine(kv('status', 'active'), 'builtin-kv', tabId);
-      if (data.created) appendLine(kv('created', data.created + ' UTC'), 'builtin-kv', tabId);
-      appendLine(kv('storage', 'localStorage (session_token)'), 'builtin-kv', tabId);
+      _sessionAppendLine(execution, kv('session token', maskSessionToken(data.token)), 'builtin-kv', tabId);
+      _sessionAppendLine(execution, kv('status', 'active'), 'builtin-kv', tabId);
+      if (data.created) _sessionAppendLine(execution, kv('created', data.created + ' UTC'), 'builtin-kv', tabId);
+      _sessionAppendLine(execution, kv('storage', 'localStorage (session_token)'), 'builtin-kv', tabId);
     } else {
-      appendLine(kv('session', maskSessionToken(_runnerCurrentSessionId())), 'builtin-kv', tabId);
-      appendLine(kv('status', 'anonymous (no session token set)'), 'builtin-kv', tabId);
-      appendLine(kv('tip', "run 'session-token generate' to create a persistent token"), 'builtin-kv', tabId);
+      _sessionAppendLine(execution, kv('session', maskSessionToken(_runnerCurrentSessionId())), 'builtin-kv', tabId);
+      _sessionAppendLine(execution, kv('status', 'anonymous (no session token set)'), 'builtin-kv', tabId);
+      _sessionAppendLine(execution, kv('tip', "run 'session-token generate' to create a persistent token"), 'builtin-kv', tabId);
     }
-    _recordSuccessfulLocalCommand('session-token list');
-    _persistSessionTokenRun('session-token list', [
-      { text: data.token ? `session token  ${maskSessionToken(data.token)}` : `session  ${maskSessionToken(_runnerCurrentSessionId())}`, cls: 'builtin-kv' },
-      { text: data.token ? 'status          active' : 'status          anonymous (no session token set)', cls: 'builtin-kv' },
-    ]);
-    setStatus('ok');
+    _sessionRecordSuccess(execution);
+    _sessionSetStatus(execution, 'ok');
   } catch (err) {
-    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    _sessionAppendLine(execution, `[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token list', err);
-    setStatus('fail');
+    _sessionSetStatus(execution, 'fail');
   }
 }
 
-async function _sessionTokenRevoke(token, tabId) {
+async function _sessionTokenRevoke(token, tabId, execution) {
   if (!token) {
-    appendLine('usage: session-token revoke <token>', '', tabId);
-    setStatus('fail');
+    _sessionAppendLine(execution, 'usage: session-token revoke <token>', '', tabId);
+    _sessionSetStatus(execution, 'fail');
     return;
   }
   if (!token.startsWith('tok_')) {
-    appendLine('[error] only tok_ tokens can be revoked', 'exit-fail', tabId);
-    setStatus('fail');
+    _sessionAppendLine(execution, '[error] only tok_ tokens can be revoked', 'exit-fail', tabId);
+    _sessionSetStatus(execution, 'fail');
     return;
   }
-  appendLine(`revoke session token ${maskSessionToken(token)}?`, '', tabId);
-  appendLine(
+  _sessionAppendLine(execution, `revoke session token ${maskSessionToken(token)}?`, '', tabId);
+  _sessionAppendLine(
+    execution,
     "warning: this token's history and workspace files will not be recoverable from the app after revocation.",
     'warning',
     tabId
   );
   _setPendingTerminalConfirm({
     tabId,
+    execution,
     onYes: async () => {
-      await _sessionTokenRevokeConfirmed(token, tabId);
+      await _sessionTokenRevokeConfirmed(token, tabId, execution);
     },
     onNo: async () => {
-      appendLine('Session token revoke canceled.', '', tabId);
-      setStatus('idle');
+      _sessionAppendLine(execution, 'Session token revoke canceled.', '', tabId);
+      _sessionCancelPersistence(execution);
+      _sessionSetStatus(execution, 'idle');
     },
     onCancel: async () => {
-      appendLine('Session token revoke canceled.', '', tabId);
-      setStatus('idle');
+      _sessionAppendLine(execution, 'Session token revoke canceled.', '', tabId);
+      _sessionCancelPersistence(execution);
+      _sessionSetStatus(execution, 'idle');
     },
   });
-  setStatus('idle');
+  _sessionCancelPersistence(execution);
+  _sessionSetStatus(execution, 'idle');
 }
 
-async function _sessionTokenRevokeConfirmed(token, tabId) {
+async function _sessionTokenRevokeConfirmed(token, tabId, execution) {
   try {
     const resp = await apiFetch('/session/token/revoke', {
       method: 'POST',
@@ -2903,31 +3014,28 @@ async function _sessionTokenRevokeConfirmed(token, tabId) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      appendLine(`[error] ${data.error || resp.status}`, 'exit-fail', tabId);
-      setStatus('fail');
+      _sessionAppendLine(execution, `[error] ${data.error || resp.status}`, 'exit-fail', tabId);
+      _sessionSetStatus(execution, 'fail');
       return;
     }
     const isCurrentToken = token === _runnerCurrentSessionId();
-    appendLine(`session token revoked: ${maskSessionToken(token)}`, '', tabId);
+    _sessionAppendLine(execution, `session token revoked: ${maskSessionToken(token)}`, '', tabId);
     if (isCurrentToken) {
       localStorage.removeItem('session_token');
       const uuid = localStorage.getItem('session_id') || _runnerCurrentSessionId();
       updateSessionId(uuid);
       _clearVisibleSessionHistoryState();
       if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-      appendLine(`reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
+      _sessionAppendLine(execution, `reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
     } else {
-      appendLine('token removed from server — any device using it is now on an empty anonymous session', '', tabId);
+      _sessionAppendLine(execution, 'token removed from server — any device using it is now on an empty anonymous session', '', tabId);
     }
-    _recordSuccessfulLocalCommand(`session-token revoke ${token}`);
-    _persistSessionTokenRun(`session-token revoke ${token}`, [
-      { text: `session token revoked: ${maskSessionToken(token)}` },
-    ]);
-    setStatus('ok');
+    _sessionRecordSuccess(execution);
+    _sessionSetStatus(execution, 'ok');
   } catch (err) {
-    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    _sessionAppendLine(execution, `[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token revoke', err);
-    setStatus('fail');
+    _sessionSetStatus(execution, 'fail');
   }
 }
 
@@ -3236,11 +3344,10 @@ function _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) {
   }
 }
 
-async function _handleWorkspaceTerminalCommand(cmd, tabId) {
+async function _handleWorkspaceTerminalCommand(cmd, tabId, execution) {
   const parts = _runnerWorkspaceCommandTokensAdapter(cmd);
   const root = (parts[0] || '').toLowerCase();
   const action = (parts[1] || '').toLowerCase();
-  appendCommandEcho(cmd, tabId);
   try {
     let outputLines = [];
     if (root === 'pwd') {
@@ -3329,56 +3436,61 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId) {
       const inputLines = await _workspaceReadLines(target);
       outputLines = _applySyntheticPostFilterLines(inputLines, parsed.spec);
     }
-    outputLines.forEach(line => appendLine(line.text, line.cls || '', tabId));
-    _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, outputLines, 'ok');
-    setStatus('ok');
+    outputLines.forEach(line => {
+      execution.appendLine(line.text, line.cls || '', tabId, line.metadata || null);
+    });
+    execution.setRecordRecent(true);
+    execution.setStatus('ok');
   } catch (err) {
-    appendLine(`[error] ${err.message || 'workspace command failed'}`, 'exit-fail', tabId);
+    execution.appendLine(`[error] ${err.message || 'workspace command failed'}`, 'exit-fail', tabId);
+    execution.setRecordRecent(false);
+    execution.setStatus('fail');
     logClientError('workspace terminal command', err);
-    setStatus('fail');
   }
 }
 
-async function _handleSessionTokenCommand(cmd, tabId) {
+async function _handleSessionTokenCommand(cmd, tabId, execution) {
   const parts = cmd.trim().split(/\s+/);
   const sub = (parts[1] || '').toLowerCase();
-  appendCommandEcho(cmd);
   if (sub === 'generate') {
-    await _sessionTokenGenerate(tabId);
+    await _sessionTokenGenerate(tabId, execution);
   } else if (sub === 'copy') {
-    await _sessionTokenCopy(tabId);
+    await _sessionTokenCopy(tabId, execution);
   } else if (sub === 'set') {
     const value = parts.slice(2).join(' ').trim();
-    await _sessionTokenSet(value, tabId);
+    await _sessionTokenSet(value, tabId, execution);
   } else if (sub === 'clear') {
-    await _sessionTokenClear(tabId);
+    await _sessionTokenClear(tabId, execution);
   } else if (sub === 'rotate') {
-    await _sessionTokenRotate(tabId);
+    await _sessionTokenRotate(tabId, execution);
   } else if (sub === 'list') {
-    await _sessionTokenList(tabId);
+    await _sessionTokenList(tabId, execution);
   } else if (sub === 'revoke') {
     const value = parts.slice(2).join(' ').trim();
-    await _sessionTokenRevoke(value, tabId);
+    await _sessionTokenRevoke(value, tabId, execution);
   } else {
-    appendLine(`session-token: unknown subcommand '${sub}'`, 'exit-fail', tabId);
-    appendLine('usage: session-token [generate | copy | set <value> | clear | rotate | list | revoke <token>]', '', tabId);
-    setStatus('fail');
+    _sessionAppendLine(execution, `session-token: unknown subcommand '${sub}'`, 'exit-fail', tabId);
+    _sessionAppendLine(execution, 'usage: session-token [generate | copy | set <value> | clear | rotate | list | revoke <token>]', '', tabId);
+    _sessionSetStatus(execution, 'fail');
   }
 }
 
-async function _handleWorkspaceDeleteCommand(cmd, tabId) {
+async function _handleWorkspaceDeleteCommand(cmd, tabId, execution) {
   const parsedDelete = _runnerWorkspaceDeleteCommandAdapter(cmd);
   let target = parsedDelete && !parsedDelete.invalid ? parsedDelete.target : '';
-  appendCommandEcho(cmd);
+  const append = (text, cls = '') => {
+    execution.appendLine(text, cls, tabId);
+    if (execution.isPending()) _publishPendingExecutionLines(execution);
+  };
+  const setCommandStatus = status => execution.setStatus(status);
   if (!_workspaceTerminalCanWrite('delete Files')) {
-    appendLine(`[error] ${_workspaceTerminalDeniedMessage('delete Files')}`, 'exit-fail', tabId);
-    setStatus('fail');
+    append(`[error] ${_workspaceTerminalDeniedMessage('delete Files')}`, 'exit-fail');
+    setCommandStatus('fail');
     return;
   }
   if (!target) {
-    appendLine(_workspaceDeleteUsageForCommand(parsedDelete), 'exit-fail', tabId);
-    setStatus('fail');
+    append(_workspaceDeleteUsageForCommand(parsedDelete), 'exit-fail');
+    setCommandStatus('fail');
     return;
   }
   let targetInfo = null;
@@ -3405,9 +3517,9 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
     targetInfo = targetInfos[0] || null;
     target = targetInfos.length === 1 ? String(targetInfo && targetInfo.path || target) : target;
   } catch (err) {
-    appendLine(`[error] ${err.message || 'file or folder was not found'}`, 'exit-fail', tabId);
+    append(`[error] ${err.message || 'file or folder was not found'}`, 'exit-fail');
     logClientError('file rm validate', err);
-    setStatus('fail');
+    setCommandStatus('fail');
     return;
   }
   const isMultiDelete = targetInfos.length > 1;
@@ -3417,25 +3529,23 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
   if (directoryInfos.length && !(parsedDelete && parsedDelete.recursive)) {
     const folderLabel = directoryInfos.length === 1 ? String(directoryInfos[0].path || target) : `${directoryInfos.length} folders`;
     const matchedText = isMultiDelete ? `${folderLabel} matched` : `${folderLabel} is a folder`;
-    appendLine(`[error] ${matchedText}; use rm -r ${target} or file delete -r ${target}`, 'exit-fail', tabId);
-    setStatus('fail');
+    append(`[error] ${matchedText}; use rm -r ${target} or file delete -r ${target}`, 'exit-fail');
+    setCommandStatus('fail');
     return;
   }
-  appendLine(
+  append(
     isMultiDelete
       ? `delete ${targetInfos.length} matched session items for '${target}'?`
       : `delete session ${isDirectory ? 'folder' : 'file'} '${target}'?`,
-    '',
-    tabId,
   );
   if (directoryInfos.length && fileCount > 0) {
-    appendLine(`warning: this will also delete ${fileCount} ${fileCount === 1 ? 'file' : 'files'} in this folder.`, 'warning', tabId);
+    append(`warning: this will also delete ${fileCount} ${fileCount === 1 ? 'file' : 'files'} in this folder.`, 'warning');
   }
   _setPendingTerminalConfirm({
     tabId,
+    execution,
     onYes: async () => {
       try {
-        const removedLines = [];
         for (const info of targetInfos) {
           const path = String(info && info.path || '').split('/').filter(Boolean).join('/');
           const resp = await apiFetch(`/workspace/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
@@ -3444,43 +3554,44 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
             throw new Error(data && data.error ? data.error : `file delete failed (${resp.status})`);
           }
           const removedText = info && info.kind === 'directory' ? `file: removed folder ${path}` : `file: removed ${path}`;
-          removedLines.push({ text: removedText });
-          appendLine(removedText, '', tabId);
+          append(removedText);
         }
-        _runnerWorkspaceCacheApi().refresh?.();
-        _recordSuccessfulLocalCommand(cmd);
-        _persistClientSideRun(cmd, removedLines, 'ok');
-        setStatus('ok');
+        execution.requestEffect('refreshWorkspace');
+        execution.setRecordRecent(true);
+        execution.setStatus('ok');
       } catch (err) {
-        appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+        append(`[error] ${err.message || 'network error'}`, 'exit-fail');
         logClientError('file rm', err);
-        setStatus('fail');
+        setCommandStatus('fail');
       }
     },
     onNo: async () => {
-      appendLine(`Session ${isMultiDelete ? 'items' : (isDirectory ? 'folder' : 'file')} delete canceled.`, '', tabId);
-      setStatus('idle');
+      append(`Session ${isMultiDelete ? 'items' : (isDirectory ? 'folder' : 'file')} delete canceled.`);
+      execution.setPersistence('none');
+      execution.setRecordRecent(false);
+      setCommandStatus('idle');
     },
   });
-  setStatus('idle');
+  setCommandStatus('idle');
 }
 
-async function _handleWorkspaceMoveCommand(cmd, tabId) {
+async function _handleWorkspaceMoveCommand(cmd, tabId, execution) {
   const parsed = _runnerWorkspaceMoveCommandAdapter(cmd);
-  appendCommandEcho(cmd);
   if (!_workspaceTerminalCanWrite('move Files')) {
-    appendLine(`[error] ${_workspaceTerminalDeniedMessage('move Files')}`, 'exit-fail', tabId);
-    setStatus('fail');
+    execution.appendLine(`[error] ${_workspaceTerminalDeniedMessage('move Files')}`, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   if (!parsed || parsed.invalid || !parsed.source || !parsed.destination) {
-    appendLine(parsed?.usage || 'Usage: file move <source> <destination>', 'exit-fail', tabId);
-    setStatus('fail');
+    const usage = parsed?.usage || 'Usage: file move <source> <destination>';
+    execution.appendLine(usage, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   if (typeof moveWorkspacePath !== 'function') {
-    appendLine('[error] Files move is not ready — reload the page and try again', 'exit-fail', tabId);
-    setStatus('fail');
+    const message = '[error] Files move is not ready — reload the page and try again';
+    execution.appendLine(message, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   try {
@@ -3496,37 +3607,34 @@ async function _handleWorkspaceMoveCommand(cmd, tabId) {
     if (movingMultiple && !_runnerWorkspacePathExistsAdapter(destination, 'directory')) {
       throw new Error('destination must be an existing folder when moving multiple matches');
     }
-    const movedLines = [];
     for (const sourceEntry of sources) {
       const source = String(sourceEntry && sourceEntry.path || '').split('/').filter(Boolean).join('/');
       const data = await moveWorkspacePath(source, destination);
       const moved = data && data.moved ? data.moved : {};
       const text = `file: moved ${moved.source || source} to ${moved.destination || destination}`;
-      movedLines.push({ text });
-      appendLine(text, '', tabId);
+      execution.appendLine(text, '', tabId);
     }
-    _runnerWorkspaceCacheApi().refresh?.();
-    _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, movedLines, 'ok');
-    setStatus('ok');
+    execution.requestEffect('refreshWorkspace');
+    execution.setRecordRecent(true);
+    execution.setStatus('ok');
   } catch (err) {
-    appendLine(`[error] ${err.message || 'file move failed'}`, 'exit-fail', tabId);
+    execution.appendLine(`[error] ${err.message || 'file move failed'}`, 'exit-fail', tabId);
+    execution.setStatus('fail');
     logClientError('file move', err);
-    setStatus('fail');
   }
 }
 
-async function _handleWorkspaceCopyCommand(cmd, tabId) {
+async function _handleWorkspaceCopyCommand(cmd, tabId, execution) {
   const parsed = _runnerWorkspaceCopyCommandAdapter(cmd);
-  appendCommandEcho(cmd);
   if (!_workspaceTerminalCanWrite('copy Files')) {
-    appendLine(`[error] ${_workspaceTerminalDeniedMessage('copy Files')}`, 'exit-fail', tabId);
-    setStatus('fail');
+    execution.appendLine(`[error] ${_workspaceTerminalDeniedMessage('copy Files')}`, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   if (!parsed || parsed.invalid || !parsed.source || !parsed.destination) {
-    appendLine(parsed?.usage || 'Usage: file copy <source> <destination>', 'exit-fail', tabId);
-    setStatus('fail');
+    const usage = parsed?.usage || 'Usage: file copy <source> <destination>';
+    execution.appendLine(usage, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   try {
@@ -3541,38 +3649,36 @@ async function _handleWorkspaceCopyCommand(cmd, tabId) {
     const data = await copyWorkspacePath(source, destination);
     const copied = data && data.copied ? data.copied : {};
     const text = `file: copied ${copied.source || source} to ${copied.destination || destination}`;
-    const copiedLines = [{ text }];
-    appendLine(text, '', tabId);
-    _runnerWorkspaceCacheApi().refresh?.();
-    _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, copiedLines, 'ok');
-    setStatus('ok');
+    execution.appendLine(text, '', tabId);
+    execution.requestEffect('refreshWorkspace');
+    execution.setRecordRecent(true);
+    execution.setStatus('ok');
   } catch (err) {
-    appendLine(`[error] ${err.message || 'file copy failed'}`, 'exit-fail', tabId);
+    execution.appendLine(`[error] ${err.message || 'file copy failed'}`, 'exit-fail', tabId);
+    execution.setStatus('fail');
     logClientError('file copy', err);
-    setStatus('fail');
   }
 }
 
-async function _handleWorkspaceEditorCommand(cmd, tabId) {
+async function _handleWorkspaceEditorCommand(cmd, tabId, execution) {
   const parsed = _runnerWorkspaceEditorCommandAdapter(cmd);
-  appendCommandEcho(cmd);
   const writeAction = parsed && parsed.action === 'edit' ? 'edit Files' : 'create Files';
   if (!_workspaceTerminalCanWrite(writeAction)) {
-    appendLine(`[error] ${_workspaceTerminalDeniedMessage(writeAction)}`, 'exit-fail', tabId);
-    setStatus('fail');
+    execution.appendLine(`[error] ${_workspaceTerminalDeniedMessage(writeAction)}`, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   if (!parsed || parsed.invalid || (parsed.action === 'edit' && !parsed.target)) {
     const action = parsed?.action || 'add';
     const operand = action === 'add' ? '[file]' : '<file>';
-    appendLine(`Usage: file ${action} ${operand}`, 'exit-fail', tabId);
-    setStatus('fail');
+    execution.appendLine(`Usage: file ${action} ${operand}`, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   if (typeof openWorkspaceEditorFromCommand !== 'function') {
-    appendLine('[error] Files panel is not ready — reload the page and try again', 'exit-fail', tabId);
-    setStatus('fail');
+    const message = '[error] Files panel is not ready — reload the page and try again';
+    execution.appendLine(message, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   try {
@@ -3585,28 +3691,28 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
     const opened = await openWorkspaceEditorFromCommand(parsed.action, target);
     if (opened === false) throw new Error(_workspaceTerminalDeniedMessage(writeAction));
     const targetLabel = target ? ` ${target}` : '';
-    appendLine(`file: opened${targetLabel} in the file editor`, '', tabId);
-    _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, [{ text: `file: opened${targetLabel} in the file editor` }], 'ok');
-    setStatus('ok');
+    const text = `file: opened${targetLabel} in the file editor`;
+    execution.appendLine(text, '', tabId);
+    execution.setRecordRecent(true);
+    execution.setStatus('ok');
   } catch (err) {
-    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    execution.appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    execution.setStatus('fail');
     logClientError(`file ${parsed.action}`, err);
-    setStatus('fail');
   }
 }
 
-async function _handleWorkspaceDownloadCommand(cmd, tabId) {
+async function _handleWorkspaceDownloadCommand(cmd, tabId, execution) {
   let target = _runnerWorkspaceDownloadTargetAdapter(cmd);
-  appendCommandEcho(cmd);
   if (!target) {
-    appendLine('Usage: file download <file>', 'exit-fail', tabId);
-    setStatus('fail');
+    execution.appendLine('Usage: file download <file>', 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   if (typeof downloadWorkspaceFile !== 'function') {
-    appendLine('[error] Files download is not ready — reload the page and try again', 'exit-fail', tabId);
-    setStatus('fail');
+    const message = '[error] Files download is not ready — reload the page and try again';
+    execution.appendLine(message, 'exit-fail', tabId);
+    execution.setStatus('fail');
     return;
   }
   try {
@@ -3615,79 +3721,31 @@ async function _handleWorkspaceDownloadCommand(cmd, tabId) {
     const downloaded = await downloadWorkspaceFile(target);
     if (!downloaded) throw new Error('file download failed');
     const text = `file: downloading ${target}`;
-    appendLine(text, '', tabId);
-    _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, [{ text }], 'ok');
-    setStatus('ok');
+    execution.appendLine(text, '', tabId);
+    execution.setRecordRecent(true);
+    execution.setStatus('ok');
   } catch (err) {
-    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    execution.appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    execution.setStatus('fail');
     logClientError('file download', err);
-    setStatus('fail');
   }
 }
 
-async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand) {
-  const spec = _parseSyntheticPostFilterCommand(cmd);
-  const baseCommand = spec ? (spec.baseCommand || cmd) : cmd;
-  const capturedLines = [];
-  const originalAppendLine = appendLine;
-  const originalAppendCommandEcho = appendCommandEcho;
-  const originalRecordSuccessfulLocalCommand = _recordSuccessfulLocalCommand;
-  const originalPersistSessionTokenRun = _persistSessionTokenRun;
-  const originalPersistClientSideRun = _persistClientSideRun;
-  const originalSetStatus = setStatus;
-  let finalStatus = 'idle';
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
-  if (tab) {
-    tab.command = cmd;
-  }
-
-  if (tabId === _runnerActiveTabId()) originalSetStatus('running');
-  if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
-  appendCommandEcho(cmd, tabId);
-  try {
-    _recordSuccessfulLocalCommand = () => {};
-    _persistSessionTokenRun = () => {};
-    _persistClientSideRun = () => {};
-    setStatus = (statusValue) => {
-      if (typeof _runnerActiveTabId() === 'undefined' || _runnerActiveTabId() === tabId) {
-        finalStatus = statusValue;
-      }
-      originalSetStatus(statusValue);
-    };
-    appendCommandEcho = (echoCommand, echoTabId = null) => {
-      const targetTabId = echoTabId || (typeof _runnerActiveTabId() !== 'undefined' ? _runnerActiveTabId() : tabId);
-      if (targetTabId === tabId) return;
-      originalAppendCommandEcho(echoCommand, echoTabId);
-    };
-    appendLine = (text, cls = '', lineTabId = null, metadata = null) => {
-      const targetTabId = lineTabId || (typeof _runnerActiveTabId() !== 'undefined' ? _runnerActiveTabId() : tabId);
-      if (targetTabId !== tabId) {
-        originalAppendLine(text, cls, lineTabId, metadata);
-        return;
-      }
-      capturedLines.push({
-        text: String(text ?? ''),
-        cls: String(cls || ''),
-        tabId: targetTabId,
-        metadata,
-      });
-    };
-    const result = runBaseCommand(baseCommand);
-    if (!_pendingTerminalConfirm) await result;
-  } finally {
-    appendLine = originalAppendLine;
-    appendCommandEcho = originalAppendCommandEcho;
-    _recordSuccessfulLocalCommand = originalRecordSuccessfulLocalCommand;
-    _persistSessionTokenRun = originalPersistSessionTokenRun;
-    _persistClientSideRun = originalPersistClientSideRun;
-    setStatus = originalSetStatus;
-  }
-
-  const pipeInputLines = spec ? _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) : capturedLines;
-  const outputLines = spec ? _applySyntheticPostFilterLines(pipeInputLines, spec) : capturedLines;
+async function _completeBufferedBrowserCommand(execution, {
+  command,
+  baseCommand,
+  spec,
+  tabId,
+} = {}) {
+  const capturedLines = execution.state.lines.slice();
+  const pipeInputLines = spec
+    ? _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId)
+    : capturedLines;
+  const outputLines = spec
+    ? _applySyntheticPostFilterLines(pipeInputLines, spec)
+    : capturedLines;
   const sinkErrorLines = [];
-  if (spec && spec.sink && !_pendingTerminalConfirm) {
+  if (spec && spec.sink) {
     try {
       if (!_workspaceTerminalCanWrite('write Files')) {
         throw new Error(_workspaceTerminalDeniedMessage('write Files'));
@@ -3703,33 +3761,118 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
       } else {
         await writeWorkspaceTextFile(destination, text);
       }
-      _runnerWorkspaceCacheApi().refresh?.();
+      execution.requestEffect('refreshWorkspace');
     } catch (err) {
-      const line = {
+      sinkErrorLines.push({
         text: `[error] output redirection failed: ${err.message || 'workspace write failed'}`,
         cls: 'exit-fail',
-      };
-      sinkErrorLines.push(line);
-      finalStatus = 'fail';
-      originalSetStatus('fail');
-      if (typeof setTabStatus === 'function') setTabStatus(tabId, 'fail');
+      });
+      execution.setStatus('fail');
+      execution.setRecordRecent(false);
       logClientError('output redirection', err);
     }
   }
-  const displayedLines = spec && spec.sink && ['redirect', 'append'].includes(spec.sink.kind)
-    ? sinkErrorLines
-    : outputLines.concat(sinkErrorLines);
-  displayedLines.forEach((line) => {
-    if (line.metadata) originalAppendLine(line.text, line.cls || '', tabId, line.metadata);
-    else originalAppendLine(line.text, line.cls || '', tabId);
+  const suppressOutput = !!(
+    spec
+    && spec.sink
+    && ['redirect', 'append'].includes(spec.sink.kind)
+  );
+  const persistedLines = outputLines.concat(sinkErrorLines).map(line => ({
+    ...line,
+    rendered: suppressOutput && !sinkErrorLines.includes(line),
+  }));
+  const result = execution.toResult({
+    command,
+    safeCommand: execution.state.safeCommand || _historySafeCommand(command),
+    lines: persistedLines,
+    recordRecent: execution.state.recordRecent && execution.state.status !== 'fail',
   });
-  if (!_pendingTerminalConfirm) {
-    _finalizeClientSideCommandStatus(tabId, finalStatus);
-    if (finalStatus !== 'fail') _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, outputLines.concat(sinkErrorLines), finalStatus, tabId);
-  } else if (typeof setTabStatus === 'function') {
-    setTabStatus(tabId, finalStatus === 'fail' ? 'fail' : 'idle');
+  execution.markCompleted();
+  return _completeTerminalCommand(result);
+}
+
+async function _runBufferedBrowserCommandWithOptionalPipe(cmd, tabId, runBaseCommand) {
+  const spec = _parseSyntheticPostFilterCommand(cmd);
+  const baseCommand = spec ? (spec.baseCommand || cmd) : cmd;
+  const safeCommand = _historySafeCommand(cmd);
+  const echoAfterHandler = String(baseCommand || '').trim().split(/\s+/, 1)[0].toLowerCase() === 'workflow';
+  const execution = _createTerminalCommandExecution({
+    command: cmd,
+    safeCommand,
+    tabId,
+    persistence: 'client',
+    recordRecent: false,
+    streamPendingLine: (line) => _renderCompletedCommandLine(line, { tabId }),
+  });
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  if (tab) tab.command = safeCommand;
+  if (tabId === _runnerActiveTabId()) setStatus('running');
+  if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
+  if (!echoAfterHandler) appendCommandEcho(safeCommand, tabId);
+  execution.completePending = () => {
+    if (execution.isCompleted()) return Promise.resolve();
+    return _completeBufferedBrowserCommand(execution, {
+      command: safeCommand,
+      baseCommand,
+      spec,
+      tabId,
+    });
+  };
+  try {
+    await Promise.resolve(runBaseCommand(baseCommand, execution));
+  } catch (err) {
+    execution.appendLine(`[error] ${err.message || 'browser command failed'}`, 'exit-fail');
+    execution.setStatus('fail');
+    execution.setRecordRecent(false);
+    logClientError('browser command', err);
   }
+  if (tab) tab.command = execution.state.safeCommand || safeCommand;
+  if (echoAfterHandler) appendCommandEcho(execution.state.safeCommand || safeCommand, tabId);
+  if (execution.isDelegated()) {
+    _publishPendingExecutionLines(execution);
+    execution.markCompleted();
+    return execution;
+  }
+  if (execution.isPending()) {
+    _publishPendingExecutionLines(execution);
+    if (tabId === _runnerActiveTabId()) setStatus('idle');
+    if (typeof setTabStatus === 'function') setTabStatus(tabId, 'idle');
+    return execution;
+  }
+  await execution.completePending();
+  return execution;
+}
+
+async function _runStreamingBrowserCommand(cmd, tabId, runCommandOwner) {
+  const safeCommand = _historySafeCommand(cmd);
+  const execution = _createTerminalCommandExecution({
+    command: cmd,
+    safeCommand,
+    tabId,
+    persistence: 'client',
+    recordRecent: false,
+    streamLine: (line) => _renderCompletedCommandLine(line, { tabId }),
+  });
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  if (tab) tab.command = safeCommand;
+  if (tabId === _runnerActiveTabId()) setStatus('running');
+  if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
+  appendCommandEcho(safeCommand, tabId);
+  try {
+    await Promise.resolve(runCommandOwner(safeCommand, execution));
+  } catch (err) {
+    execution.appendLine(`[error] ${err.message || 'browser command failed'}`, 'exit-fail');
+    execution.setStatus('fail');
+    execution.setRecordRecent(false);
+    logClientError('streaming browser command', err);
+  }
+  const result = execution.toResult({
+    safeCommand,
+    recordRecent: execution.state.recordRecent && execution.state.status !== 'fail',
+  });
+  execution.markCompleted();
+  await _completeTerminalCommand(result);
+  return execution;
 }
 
 // ── End session token handlers ───────────────────────────────────────────────
@@ -3757,7 +3900,11 @@ function submitCommand(rawCmd) {
     if (pending.kind !== 'secret') appendCommandEcho(cmd, promptTabId);
     if (pending.kind === 'text' || pending.kind === 'secret') {
       _setPendingTerminalConfirm(null);
-      Promise.resolve(typeof pending.onAnswer === 'function' ? pending.onAnswer(cmd) : undefined).catch((err) => {
+      _runPendingTerminalConfirmHandler(
+        promptTabId,
+        () => (typeof pending.onAnswer === 'function' ? pending.onAnswer(cmd) : undefined),
+        pending,
+      ).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
         setStatus('fail');
       });
@@ -3770,16 +3917,14 @@ function submitCommand(rawCmd) {
     }
     _setPendingTerminalConfirm(null);
     if (answer === 'yes' || answer === 'y') {
-      _runPendingTerminalConfirmHandler(promptTabId, pending.onYes).catch((err) => {
+      _runPendingTerminalConfirmHandler(promptTabId, pending.onYes, pending).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
         setStatus('fail');
-        _finalizeClientSideCommandStatus(promptTabId, 'fail');
       });
     } else {
-      _runPendingTerminalConfirmHandler(promptTabId, pending.onNo).catch((err) => {
+      _runPendingTerminalConfirmHandler(promptTabId, pending.onNo, pending).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
         setStatus('fail');
-        _finalizeClientSideCommandStatus(promptTabId, 'fail');
       });
     }
     return true;
@@ -3854,70 +3999,84 @@ function submitCommand(rawCmd) {
   // Session-token subcommands (generate / set / clear / rotate) run entirely
   // client-side.  The bare 'session-token' status command goes to the server.
   if (_isSessionTokenSubcommand(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-      _handleSessionTokenCommand(baseCommand, _runnerActiveTabId())
+    void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+      _handleSessionTokenCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
     return true;
   }
 
   if (_isClientSideSecretSetCommand(cmd)) {
     const safeCommand = _historySafeCommand(cmd);
-    void _runClientSideCommandWithOptionalPipe(safeCommand, _runnerActiveTabId(), (baseCommand) => {
+    void _runBufferedBrowserCommandWithOptionalPipe(safeCommand, _runnerActiveTabId(), (baseCommand, execution) => {
       if (typeof _runnerHandleSecretCommandAdapter === 'function') {
-        return _runnerHandleSecretCommandAdapter(baseCommand, _runnerActiveTabId());
+        return _runnerHandleSecretCommandAdapter(baseCommand, _runnerActiveTabId(), execution);
       }
-      appendLine('[error] secret prompt is not ready — reload the page and try again', 'exit-fail', _runnerActiveTabId());
-      setStatus('fail');
+      execution.appendLine(
+        '[error] secret prompt is not ready — reload the page and try again',
+        'exit-fail',
+        _runnerActiveTabId(),
+      );
+      execution.setStatus('fail');
       return true;
     });
     return true;
   }
 
   if (_runnerIsWorkspaceTerminalCommandAdapter(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-      _handleWorkspaceTerminalCommand(baseCommand, _runnerActiveTabId())
+    void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+      _handleWorkspaceTerminalCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
     return true;
   }
 
   if (_runnerIsWorkspaceDeleteCommandAdapter(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-      _handleWorkspaceDeleteCommand(baseCommand, _runnerActiveTabId())
+    void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+      _handleWorkspaceDeleteCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
     return true;
   }
 
   if (_runnerIsWorkspaceMoveCommandAdapter(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-      _handleWorkspaceMoveCommand(baseCommand, _runnerActiveTabId())
+    void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+      _handleWorkspaceMoveCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
     return true;
   }
 
   if (_runnerIsWorkspaceCopyCommandAdapter(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-      _handleWorkspaceCopyCommand(baseCommand, _runnerActiveTabId())
+    void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+      _handleWorkspaceCopyCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
     return true;
   }
 
   if (_runnerIsWorkspaceEditorCommandAdapter(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-      _handleWorkspaceEditorCommand(baseCommand, _runnerActiveTabId())
+    void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+      _handleWorkspaceEditorCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
     return true;
   }
 
   if (_runnerIsWorkspaceDownloadCommandAdapter(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-      _handleWorkspaceDownloadCommand(baseCommand, _runnerActiveTabId())
+    void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+      _handleWorkspaceDownloadCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
     return true;
   }
 
   if (String(cmd || '').trim().toLowerCase().split(/\s+/, 1)[0] === 'workflow') {
     if (typeof _runnerHandleWorkflowTerminalCommandAdapter === 'function') {
-      void _runnerHandleWorkflowTerminalCommandAdapter(cmd, _runnerActiveTabId());
+      void _runBufferedBrowserCommandWithOptionalPipe(
+        cmd,
+        _runnerActiveTabId(),
+        (baseCommand, execution) => (
+          _runnerHandleWorkflowTerminalCommandAdapter(
+            baseCommand,
+            _runnerActiveTabId(),
+            execution,
+          )
+        ),
+      );
       return true;
     }
     appendCommandEcho(cmd);
@@ -3929,21 +4088,32 @@ function submitCommand(rawCmd) {
   if (_isClientSideUiCommand(cmd)) {
     const root = cmd.trim().split(/\s+/, 1)[0].toLowerCase();
     if (root === 'theme' && typeof _runnerHandleThemeCommandAdapter === 'function') {
-      void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-        _runnerHandleThemeCommandAdapter(baseCommand, _runnerActiveTabId())
+      void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+        _runnerHandleThemeCommandAdapter(baseCommand, _runnerActiveTabId(), execution)
       ));
       return true;
     }
     if (root === 'config' && typeof _runnerHandleConfigCommandAdapter === 'function') {
-      void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-        _runnerHandleConfigCommandAdapter(baseCommand, _runnerActiveTabId())
+      void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
+        _runnerHandleConfigCommandAdapter(baseCommand, _runnerActiveTabId(), execution)
       ));
       return true;
     }
     if (root === 'tour' && typeof _runnerHandleTourCommandAdapter === 'function') {
-      void _runClientSideCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand) => (
-        _runnerHandleTourCommandAdapter(baseCommand, _runnerActiveTabId())
-      ));
+      const subcommand = cmd.trim().split(/\s+/)[1]?.toLowerCase() || '';
+      if (!subcommand) {
+        void _runStreamingBrowserCommand(cmd, _runnerActiveTabId(), (safeCommand, execution) => (
+          _runnerHandleTourCommandAdapter(safeCommand, _runnerActiveTabId(), execution)
+        ));
+      } else {
+        void _runBufferedBrowserCommandWithOptionalPipe(
+          cmd,
+          _runnerActiveTabId(),
+          (baseCommand, execution) => (
+            _runnerHandleTourCommandAdapter(baseCommand, _runnerActiveTabId(), execution)
+          ),
+        );
+      }
       return true;
     }
     appendCommandEcho(cmd);
@@ -4071,7 +4241,6 @@ function runCommand() {
 if (typeof importedSetRunnerHandlers === 'function') {
   importedSetRunnerHandlers({
     _readRunErrorMessage,
-    _recordSuccessfulLocalCommand,
     _seedLocalStorageStarsToServer,
     _setRunButtonDisabled,
     _sseMessageFromChunk,
@@ -4099,12 +4268,9 @@ if (typeof importedSetRunnerHandlers === 'function') {
 }
 
 export {
-  _finalizeClientSideCommandStatus,
   _handleRunStreamMessage,
   _markTabRunStarted,
-  _persistClientSideRun,
   _readRunErrorMessage,
-  _recordSuccessfulLocalCommand,
   _seedLocalStorageStarsToServer,
   _sseMessageFromChunk,
   _setPendingTerminalConfirm,

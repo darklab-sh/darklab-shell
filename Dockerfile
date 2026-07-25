@@ -8,6 +8,7 @@ ARG GO_LINUX_AMD64_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77b
 ARG GO_LINUX_ARM64_SHA256=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
 ARG GO_BUILD_PARALLELISM=2
 ARG GO_X_CRYPTO_VERSION=v0.52.0
+ARG KIN_OPENAPI_VERSION=v0.144.0
 ARG GOSU_VERSION=1.19
 ARG OPENSSL_VERSION=3.6.3
 ARG OPENSSL_SHA256=243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1
@@ -92,6 +93,8 @@ RUN chmod 0755 /usr/local/bin/install-go-tool && \
         /out/usr/share/doc/darklab-shell/licenses/Go-toolchain.txt
 
 FROM go-builder-base AS go-projectdiscovery
+COPY scripts/container/patches/ /usr/local/share/darklab/patches/
+ARG KIN_OPENAPI_VERSION
 ARG NUCLEI_VERSION
 ARG SUBFINDER_VERSION
 ARG HTTPX_VERSION
@@ -101,7 +104,12 @@ ARG KATANA_VERSION
 ARG TLSX_VERSION
 ARG CDNCHECK_VERSION
 ARG CHAOS_CLIENT_VERSION
-RUN install-go-tool "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}"
+# Nuclei 3.11.0 pins kin-openapi 0.132.0; keep the secure floor and API
+# compatibility patch paired until a released Nuclei version supports it.
+RUN GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/nuclei-kin-openapi-v0.144.patch \
+    install-go-tool \
+        "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}" \
+        "github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}"
@@ -117,7 +125,10 @@ RUN projectdiscovery_license=$(find "$(go env GOMODCACHE)/github.com/projectdisc
         /out/usr/share/doc/darklab-shell/licenses/go-modules/ProjectDiscovery.txt && \
     install -m 0644 \
         "$(go env GOMODCACHE)/golang.org/x/crypto@${GO_X_CRYPTO_VERSION}/LICENSE" \
-        /out/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt && \
+    install -m 0644 \
+        "$(go env GOMODCACHE)/github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}/LICENSE" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt
 
 FROM go-builder-base AS go-other-tools
 ARG GOSU_VERSION

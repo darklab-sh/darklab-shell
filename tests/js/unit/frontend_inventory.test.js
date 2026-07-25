@@ -71,25 +71,25 @@ describe('frontend browser global boundary inventory', () => {
       compatibility_read: 0,
     }),
     resolver_helper_calls_by_class: Object.freeze({
-      bridge_dispatch: 96,
-      global_only: 560,
+      bridge_dispatch: 95,
+      global_only: 545,
       import_first: 586,
     }),
     resolver_helper_calls_by_final_resolution: Object.freeze({
       allowlisted_global: 54,
-      bridge_dispatch_report_only: 92,
+      bridge_dispatch_report_only: 91,
       dynamic_or_non_literal: 27,
       fallback_imported_binding: 374,
       fallback_local_binding: 11,
       global_publish: 77,
-      guarded_compatibility_fallback: 521,
+      guarded_compatibility_fallback: 506,
       same_file_import_source: 86,
       unresolved_report_only: 0,
     }),
     bridge_dispatch: Object.freeze({
-      declaration_count: 85,
-      registration_count: 90,
-      dispatch_count: 92,
+      declaration_count: 84,
+      registration_count: 89,
+      dispatch_count: 91,
       dispatched_missing_declaration_count: 0,
       dispatched_missing_registration_count: 0,
       declared_not_dispatched_count: 0,
@@ -97,7 +97,7 @@ describe('frontend browser global boundary inventory', () => {
       by_bridge: Object.freeze({
         controller_action: Object.freeze({ declared_count: 6, registered_count: 6, dispatched_count: 6 }),
         output: Object.freeze({ declared_count: 12, registered_count: 12, dispatched_count: 12 }),
-        runner: Object.freeze({ declared_count: 25, registered_count: 25, dispatched_count: 25 }),
+        runner: Object.freeze({ declared_count: 24, registered_count: 24, dispatched_count: 24 }),
         tabs: Object.freeze({ declared_count: 18, registered_count: 18, dispatched_count: 18 }),
         workspace: Object.freeze({ declared_count: 17, registered_count: 17, dispatched_count: 17 }),
         workflows: Object.freeze({ declared_count: 7, registered_count: 7, dispatched_count: 7 }),
@@ -207,7 +207,6 @@ describe('frontend browser global boundary inventory', () => {
 
   it('reports string-keyed ESM resolver helper calls for follow-up guardrails', () => {
     const report = runInventoryJson()
-    const localCommands = moduleReport(report, '/static/js/features/terminal/local_commands.js')
     const tabs = moduleReport(report, '/static/js/tabs.js')
 
     expect(report.summary.resolver_helper_call_count).toBeGreaterThan(0)
@@ -216,12 +215,6 @@ describe('frontend browser global boundary inventory', () => {
     expect(report.summary.resolver_helper_calls_by_class.bridge_dispatch).toBeGreaterThan(0)
     expect(report.summary.resolver_helper_calls_by_resolution.dynamic_or_non_literal).toBeGreaterThan(0)
 
-    expect(localCommands.resolver_helper_calls).toContainEqual(expect.objectContaining({
-      helper: '_cliGlobalFunction',
-      class: 'global_only',
-      name: '_recordSuccessfulLocalCommand',
-      name_resolution: 'literal',
-    }))
     expect(tabs.resolver_helper_calls).toContainEqual(expect.objectContaining({
       helper: '_tabGlobalValue',
       class: 'import_first',

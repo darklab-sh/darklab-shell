@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { fromScript, fromDomScript, fromDomScripts, MemoryStorage } from './helpers/extract.js'
+import {
+  createCommandExecution,
+} from '../../../app/static/js/features/runner/command_lifecycle.js'
 
 const { DarklabRunnerCore } = fromScript('app/static/js/core/runner_core.js', 'DarklabRunnerCore')
 const {
@@ -19,6 +22,20 @@ const {
 
 async function flushPromises(times = 6) {
   for (let i = 0; i < times; i += 1) await Promise.resolve()
+}
+
+function createRunnerCommandExecution(command = 'session-token set', tabId = 'tab-1') {
+  return createCommandExecution({
+    command,
+    safeCommand: command,
+    tabId,
+    persistence: 'client',
+    recordRecent: false,
+  })
+}
+
+function runnerExecutionText(execution) {
+  return execution.state.lines.map(line => line.text).join('\n')
 }
 
 function brokerStreamResponse(payload) {
@@ -528,10 +545,11 @@ describe('client-side UI command pipe helpers', () => {
       writeWorkspaceTextFile,
       normalizeWorkspaceCommandPath: (path, cwd = '') => [cwd, path].filter(Boolean).join('/'),
       runnerInitCode: `
-        async function handleThemeCommand(cmd, tabId) {
-          appendCommandEcho(cmd, tabId);
-          appendLine('theme_dark_amber', 'builtin-help-row', tabId);
-          appendLine('theme_light_blue', 'builtin-help-row', tabId);
+        async function handleThemeCommand(cmd, tabId, execution) {
+          execution.appendLine('theme_dark_amber', 'builtin-help-row', tabId);
+          execution.appendLine('theme_light_blue', 'builtin-help-row', tabId);
+          execution.setRecordRecent(true);
+          execution.setStatus('ok');
         }
       `,
     })
@@ -586,11 +604,12 @@ describe('client-side UI command pipe helpers', () => {
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       appendLine,
       runnerInitCode: `
-        async function handleThemeCommand(cmd, tabId) {
-          appendCommandEcho(cmd, tabId);
-          appendLine('theme_dark_amber', 'builtin-help-row', tabId);
-          appendLine('theme_light_blue', 'builtin-help-row', tabId);
-          appendLine('theme_light_olive', 'builtin-help-row', tabId);
+        async function handleThemeCommand(cmd, tabId, execution) {
+          execution.appendLine('theme_dark_amber', 'builtin-help-row', tabId);
+          execution.appendLine('theme_light_blue', 'builtin-help-row', tabId);
+          execution.appendLine('theme_light_olive', 'builtin-help-row', tabId);
+          execution.setRecordRecent(true);
+          execution.setStatus('ok');
         }
       `,
     })
@@ -608,11 +627,12 @@ describe('client-side UI command pipe helpers', () => {
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       appendLine,
       runnerInitCode: `
-        async function handleConfigCommand(cmd, tabId) {
-          appendCommandEcho(cmd, tabId);
-          appendLine('line-numbers        off', 'builtin-kv', tabId);
-          appendLine('timestamps          off', 'builtin-kv', tabId);
-          appendLine('welcome             static', 'builtin-kv', tabId);
+        async function handleConfigCommand(cmd, tabId, execution) {
+          execution.appendLine('line-numbers        off', 'builtin-kv', tabId);
+          execution.appendLine('timestamps          off', 'builtin-kv', tabId);
+          execution.appendLine('welcome             static', 'builtin-kv', tabId);
+          execution.setRecordRecent(true);
+          execution.setStatus('ok');
         }
       `,
     })
@@ -631,7 +651,17 @@ describe('client-side UI command pipe helpers', () => {
     const addToRecentPreview = vi.fn()
     const apiFetch = vi.fn(() => Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({ ok: true, run_id: 'client-run-1' }),
+      json: () => Promise.resolve({
+        ok: true,
+        run_id: 'client-run-1',
+        output_line_count: 2,
+        run: {
+          id: 'client-run-1',
+          command: 'theme list',
+          exit_code: 0,
+          status: 'succeeded',
+        },
+      }),
     }))
     const { submitCommand } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
@@ -639,10 +669,11 @@ describe('client-side UI command pipe helpers', () => {
       addToRecentPreview,
       apiFetch,
       runnerInitCode: `
-        async function handleThemeCommand(cmd, tabId) {
-          appendCommandEcho(cmd, tabId);
-          appendLine('Available themes:', 'builtin-section', tabId);
-          appendLine('Dark themes:', 'builtin-section', tabId);
+        async function handleThemeCommand(cmd, tabId, execution) {
+          execution.appendLine('Available themes:', 'builtin-section', tabId);
+          execution.appendLine('Dark themes:', 'builtin-section', tabId);
+          execution.setRecordRecent(true);
+          execution.setStatus('ok');
         }
       `,
     })
@@ -652,9 +683,9 @@ describe('client-side UI command pipe helpers', () => {
       '/run/client',
       expect.objectContaining({ method: 'POST' }),
     ))
+    await vi.waitFor(() => expect(addToRecentPreview).toHaveBeenCalledWith('theme list'))
     const payload = JSON.parse(apiFetch.mock.calls[0][1].body)
 
-    expect(addToRecentPreview).toHaveBeenCalledWith('theme list')
     expect(payload).toEqual({
       command: 'theme list',
       exit_code: 0,
@@ -667,7 +698,11 @@ describe('client-side UI command pipe helpers', () => {
   })
 
   it('routes workflow commands to the client-side workflow handler', async () => {
-    const handleWorkflowTerminalCommand = vi.fn(() => Promise.resolve(true))
+    const handleWorkflowTerminalCommand = vi.fn((_cmd, _tabId, execution) => {
+      execution.setRecordRecent(true)
+      execution.setStatus('ok')
+      return Promise.resolve(true)
+    })
     const appendCommandEcho = vi.fn()
     const { submitCommand } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
@@ -677,7 +712,11 @@ describe('client-side UI command pipe helpers', () => {
 
     submitCommand('workflow list')
     await vi.waitFor(() =>
-      expect(handleWorkflowTerminalCommand).toHaveBeenCalledWith('workflow list', 'tab-1'),
+      expect(handleWorkflowTerminalCommand).toHaveBeenCalledWith(
+        'workflow list',
+        'tab-1',
+        expect.objectContaining({ appendLine: expect.any(Function) }),
+      ),
     )
     expect(appendCommandEcho).not.toHaveBeenCalled()
   })
@@ -693,7 +732,11 @@ describe('client-side UI command pipe helpers', () => {
 
     submitCommand('tour')
     await vi.waitFor(() =>
-      expect(handleTourCommand).toHaveBeenCalledWith('tour', 'tab-1'),
+      expect(handleTourCommand).toHaveBeenCalledWith(
+        'tour',
+        'tab-1',
+        expect.objectContaining({ captureRenderedLine: expect.any(Function) }),
+      ),
     )
     expect(appendCommandEcho).not.toHaveBeenCalled()
   })
@@ -719,14 +762,18 @@ describe('client-side UI command pipe helpers', () => {
     })
 
     submitCommand('tour')
-    await vi.waitFor(() => expect(handleTourCommand).toHaveBeenCalledWith('tour', 'tab-1'))
+    await vi.waitFor(() => expect(handleTourCommand).toHaveBeenCalledWith(
+      'tour',
+      'tab-1',
+      expect.objectContaining({ captureRenderedLine: expect.any(Function) }),
+    ))
 
     activateTab('tab-2')
     submitCommand('ping darklab.sh')
     _handleRunStreamMessage({ type: 'output', text: '64 bytes from darklab.sh' }, 'tab-2', {})
 
-    expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', null, null)
-    expect(appendLine).toHaveBeenCalledWith('64 bytes from darklab.sh', '', 'tab-2', null)
+    expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', undefined)
+    expect(appendLine).toHaveBeenCalledWith('64 bytes from darklab.sh', '', 'tab-2')
 
     finishTour(true)
     await flushPromises()
@@ -742,8 +789,10 @@ describe('client-side UI command pipe helpers', () => {
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const handleSecretCommand = vi.fn(async (cmd, tabId) => {
-      appendLine('Secret set canceled.', '', tabId)
+    const handleSecretCommand = vi.fn(async (cmd, tabId, execution) => {
+      execution.appendLine('Secret set canceled.', '', tabId)
+      execution.setRecordRecent(true)
+      execution.setStatus('idle')
       return true
     })
     const { submitCommand, tabs } = loadRunnerFns({
@@ -758,7 +807,11 @@ describe('client-side UI command pipe helpers', () => {
     await vi.waitFor(() => expect(handleSecretCommand).toHaveBeenCalled())
 
     expect(addToHistory).toHaveBeenCalledWith('secret set SHODAN_API_KEY')
-    expect(handleSecretCommand).toHaveBeenCalledWith('secret set SHODAN_API_KEY', 'tab-1')
+    expect(handleSecretCommand).toHaveBeenCalledWith(
+      'secret set SHODAN_API_KEY',
+      'tab-1',
+      expect.objectContaining({ appendLine: expect.any(Function) }),
+    )
     expect(appendLine).toHaveBeenCalledWith('secret set SHODAN_API_KEY', 'prompt-echo', 'tab-1')
     expect(tabs[0].command).toBe('secret set SHODAN_API_KEY')
 
@@ -799,10 +852,10 @@ describe('client-side UI command pipe helpers', () => {
       tabs: [{ id: 'tab-1', st: 'fail', exitCode: 2, runId: null, killed: false, pendingKill: false }],
       appendLine,
       runnerInitCode: `
-        async function handleThemeCommand(cmd, tabId) {
-          appendCommandEcho(cmd, tabId);
-          appendLine('current theme      Darklab Obsidian', 'builtin-kv', tabId);
-          setStatus('ok');
+        async function handleThemeCommand(cmd, tabId, execution) {
+          execution.appendLine('current theme      Darklab Obsidian', 'builtin-kv', tabId);
+          execution.setRecordRecent(true);
+          execution.setStatus('ok');
         }
       `,
     })
@@ -961,6 +1014,7 @@ function loadRunnerFns({
       'app/static/js/core/runner_core.js',
       'app/static/js/core/run_output_model.js',
       'app/static/js/features/runner/runner_active_restore.js',
+      'app/static/js/features/runner/command_lifecycle.js',
       'app/static/js/features/runner/runner_persistence.js',
       'app/static/js/features/runner/runner_workspace.js',
       'app/static/js/runner_bridge.js',
@@ -2036,11 +2090,13 @@ describe('runner helpers', () => {
   it('runCommand blocks shell operators client-side before calling the API', () => {
     const apiFetch = vi.fn(() => Promise.resolve())
     const appendLine = vi.fn()
+    const addToHistory = vi.fn()
     const { runCommand, status } = loadRunnerFns({
       cmdValue: 'ping google.com | cat /etc/passwd',
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       apiFetch,
       appendLine,
+      addToHistory,
     })
 
     runCommand()
@@ -2058,6 +2114,7 @@ describe('runner helpers', () => {
       'denied',
     )
     expect(status.className).toBe('status-pill fail')
+    expect(addToHistory).not.toHaveBeenCalled()
 
     const fdApiFetch = vi.fn(() => Promise.resolve())
     const fdAppendLine = vi.fn()
@@ -2138,6 +2195,28 @@ describe('runner helpers', () => {
     await flushPromises()
 
     expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 nope.darklab')
+  })
+
+  it('uses the canonical masked command for server-run preview recents', async () => {
+    const addToRecentPreview = vi.fn()
+    const { _handleRunStreamMessage } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-sensitive',
+        historyRunId: 'run-sensitive',
+        pendingKill: false,
+        killed: false,
+        command: 'session-token set tok_abcd1234secret',
+      }],
+      addToRecentPreview,
+    })
+
+    _handleRunStreamMessage({ type: 'exit', code: 0, elapsed: '0.1' }, 'tab-1')
+    await flushPromises()
+
+    expect(addToRecentPreview).toHaveBeenCalledWith('session-token set tok_abcd••••')
+    expect(addToRecentPreview).not.toHaveBeenCalledWith(expect.stringContaining('1234secret'))
   })
 
   it('does not add unsupported built-in commands to the preview recents', async () => {
@@ -2248,11 +2327,13 @@ describe('runner helpers', () => {
   it('runCommand blocks direct /tmp and /data paths client-side before calling the API', () => {
     const apiFetch = vi.fn(() => Promise.resolve())
     const appendLine = vi.fn()
+    const addToHistory = vi.fn()
     const { runCommand, status } = loadRunnerFns({
       cmdValue: 'curl /tmp/file',
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       apiFetch,
       appendLine,
+      addToHistory,
     })
 
     runCommand()
@@ -2265,20 +2346,24 @@ describe('runner helpers', () => {
       'denied',
     )
     expect(status.className).toBe('status-pill fail')
+    expect(addToHistory).not.toHaveBeenCalled()
   })
 
   it('runCommand shows a fetch error when the /runs request rejects', async () => {
     const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
     const appendLine = vi.fn()
+    const addToHistory = vi.fn()
     const { runCommand, status, runBtn } = loadRunnerFns({
       cmdValue: 'echo hello',
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'darklab' }],
       apiFetch,
       appendLine,
+      addToHistory,
     })
 
     runCommand()
     await Promise.resolve()
+    expect(addToHistory).toHaveBeenCalledWith('echo hello')
     await Promise.resolve()
 
     expect(apiFetch).toHaveBeenCalledWith(
@@ -3087,35 +3172,44 @@ function loadTokenSetFns({ apiFetch = vi.fn() } = {}) {
     },
     '{ _sessionTokenSet }',
   )
-  return { ...fns, appendLine, setStatus, appendPromptNewline, _storage: storage }
+  return {
+    ...fns,
+    appendLine,
+    setStatus,
+    appendPromptNewline,
+    execution: createRunnerCommandExecution(),
+    _storage: storage,
+  }
 }
 
 describe('_sessionTokenSet verify failure behavior', () => {
   it('blocks token activation when /session/token/verify returns non-OK', async () => {
     const apiFetch = vi.fn().mockResolvedValue({ ok: false, status: 500 })
-    const { _sessionTokenSet, appendLine, _storage } = loadTokenSetFns({ apiFetch })
+    const { _sessionTokenSet, execution, _storage } = loadTokenSetFns({ apiFetch })
 
-    await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
-
-    expect(appendLine).toHaveBeenCalledWith(
-      expect.stringContaining('token verification failed'),
-      'exit-fail',
+    await _sessionTokenSet(
+      'tok_abcd1234efgh5678ijkl9012mnop3456',
       'tab-1',
+      execution,
     )
+
+    expect(runnerExecutionText(execution)).toContain('token verification failed')
+    expect(execution.state.status).toBe('fail')
     expect(_storage.getItem('session_token')).toBeNull()
   })
 
   it('blocks token activation when /session/token/verify throws a network error', async () => {
     const apiFetch = vi.fn().mockRejectedValue(new Error('Failed to fetch'))
-    const { _sessionTokenSet, appendLine, _storage } = loadTokenSetFns({ apiFetch })
+    const { _sessionTokenSet, execution, _storage } = loadTokenSetFns({ apiFetch })
 
-    await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
-
-    expect(appendLine).toHaveBeenCalledWith(
-      expect.stringContaining('server is unreachable'),
-      'exit-fail',
+    await _sessionTokenSet(
+      'tok_abcd1234efgh5678ijkl9012mnop3456',
       'tab-1',
+      execution,
     )
+
+    expect(runnerExecutionText(execution)).toContain('server is unreachable')
+    expect(execution.state.status).toBe('fail')
     expect(_storage.getItem('session_token')).toBeNull()
   })
 
@@ -3124,15 +3218,16 @@ describe('_sessionTokenSet verify failure behavior', () => {
       ok: true,
       json: () => Promise.resolve({ ok: true, exists: false }),
     })
-    const { _sessionTokenSet, appendLine, _storage } = loadTokenSetFns({ apiFetch })
+    const { _sessionTokenSet, execution, _storage } = loadTokenSetFns({ apiFetch })
 
-    await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
-
-    expect(appendLine).toHaveBeenCalledWith(
-      expect.stringContaining('not issued by this server'),
-      'exit-fail',
+    await _sessionTokenSet(
+      'tok_abcd1234efgh5678ijkl9012mnop3456',
       'tab-1',
+      execution,
     )
+
+    expect(runnerExecutionText(execution)).toContain('not issued by this server')
+    expect(execution.state.status).toBe('fail')
     expect(_storage.getItem('session_token')).toBeNull()
   })
 
@@ -3140,9 +3235,13 @@ describe('_sessionTokenSet verify failure behavior', () => {
     // UUIDs are anonymous sessions — no tok_ prefix, so /session/token/verify
     // must not be called regardless of how apiFetch is configured.
     const apiFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ runs: [] }) })
-    const { _sessionTokenSet } = loadTokenSetFns({ apiFetch })
+    const { _sessionTokenSet, execution } = loadTokenSetFns({ apiFetch })
 
-    await _sessionTokenSet('a1b2c3d4-1234-4abc-8def-1234567890ab', 'tab-1')
+    await _sessionTokenSet(
+      'a1b2c3d4-1234-4abc-8def-1234567890ab',
+      'tab-1',
+      execution,
+    )
 
     const verifyCalls = apiFetch.mock.calls.filter(([url]) => url === '/session/token/verify')
     expect(verifyCalls).toHaveLength(0)
@@ -3164,9 +3263,18 @@ describe('_sessionTokenSet verify failure behavior', () => {
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { _sessionTokenSet, appendLine, _storage } = loadTokenSetFns({ apiFetch })
+    const {
+      _sessionTokenSet,
+      appendLine,
+      execution,
+      _storage,
+    } = loadTokenSetFns({ apiFetch })
 
-    await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
+    await _sessionTokenSet(
+      'tok_abcd1234efgh5678ijkl9012mnop3456',
+      'tab-1',
+      execution,
+    )
 
     expect(appendLine).toHaveBeenCalledWith(
       'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
@@ -4181,10 +4289,14 @@ describe('workspace file delete confirmation', () => {
     ))
 
     expect(appendLine).toHaveBeenCalledWith('file: removed targets.txt', '', 'tab-1')
-    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    await vi.waitFor(() => expect(refreshWorkspaceFileCache).toHaveBeenCalled())
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
     await vi.waitFor(() => expect(tabs[0].st).toBe('ok'))
     expect(status.className).toBe('status-pill ok')
+    const savedRuns = apiFetch.mock.calls.filter(([url]) => url === '/run/client')
+    expect(savedRuns).toHaveLength(1)
+    const savedRun = JSON.parse(savedRuns[0][1].body)
+    expect(savedRun.lines.filter(line => line.text === 'file: removed targets.txt')).toHaveLength(1)
   })
 
   it('deletes the workspace folder only after answering yes', async () => {
@@ -4232,7 +4344,7 @@ describe('workspace file delete confirmation', () => {
     ))
 
     expect(appendLine).toHaveBeenCalledWith('file: removed folder reports', '', 'tab-1')
-    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    await vi.waitFor(() => expect(refreshWorkspaceFileCache).toHaveBeenCalled())
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
     expect(status.className).toBe('status-pill ok')
   })
@@ -4291,7 +4403,7 @@ describe('workspace file delete confirmation', () => {
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files?path=darklab-b.txt', { method: 'DELETE' })
     expect(appendLine).toHaveBeenCalledWith('file: removed darklab-a.txt', '', 'tab-1')
     expect(appendLine).toHaveBeenCalledWith('file: removed darklab-b.txt', '', 'tab-1')
-    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    await vi.waitFor(() => expect(refreshWorkspaceFileCache).toHaveBeenCalled())
     expect(status.className).toBe('status-pill ok')
   })
 
@@ -4532,7 +4644,7 @@ describe('session-token set pending prompt', () => {
 
     expect(appendLine).toHaveBeenNthCalledWith(
       1,
-      'session-token set tok_abcd1234efgh5678ijkl9012mnop3456',
+      'session-token set tok_abcd••••',
       'prompt-echo',
       'tab-1',
     )
@@ -4616,15 +4728,26 @@ describe('session-token set pending prompt', () => {
     cancelPendingTerminalConfirm('tab-1')
     appendLine.mockClear()
     const secretAnswer = vi.fn()
+    const secretExecution = {
+      appendLine: vi.fn(),
+      completePending: vi.fn().mockResolvedValue(undefined),
+      setPending: vi.fn(),
+      setRecordRecent: vi.fn(),
+      setStatus: vi.fn(),
+      state: { tabId: 'tab-1', lines: [] },
+    }
     _setPendingTerminalConfirm({
       kind: 'secret',
       tabId: 'tab-1',
+      execution: secretExecution,
       onAnswer: secretAnswer,
     })
     await submitCommand('workflow-secret-value')
 
     expect(setComposerPromptMode).toHaveBeenCalledWith('secret')
     expect(secretAnswer).toHaveBeenCalledWith('workflow-secret-value')
+    expect(secretExecution.setPending).toHaveBeenCalledWith(false)
+    expect(secretExecution.completePending).toHaveBeenCalledOnce()
     expect(appendLine).not.toHaveBeenCalledWith(
       'workflow-secret-value',
       'prompt-echo',

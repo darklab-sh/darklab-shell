@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from flask import jsonify, request
 
 from blueprints import run as run_routes
+from services.api_v1.serialization import client_run_response
 
 
 @run_routes.run_bp.route("/run/client", methods=["POST"])
@@ -73,7 +74,6 @@ def save_client_side_run():
         output_search_text,
         run_routes.inline_threshold_bytes(active_cfg.get("runs_search_text_inline_max_bytes")),
     )
-
     run_routes.log.info("RUN_START", extra={
         "run_id": run_id, "session": run_routes.get_log_session_id(session_id), "ip": client_ip,
         "pid": 0, "cmd": command, "cmd_type": "client-builtin",
@@ -153,4 +153,4 @@ def save_client_side_run():
         "full_output_available": False,
         "artifact_count": 0,
     })
-    return jsonify({"ok": True, "run_id": run_id, "output_line_count": output_line_count})
+    return jsonify(client_run_response(run_id, command, started, finished, exit_code, output_line_count, preview_truncated))
