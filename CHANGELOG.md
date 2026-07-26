@@ -46,6 +46,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Branch image builds now reuse the shared AMD64 Docker cache.**
+  - **Root cause:** the branch image job built without a cache import and resolved its Python base from the bare tag, which selects the image index digest, while the scheduled cache warmer and fanout jobs pin the amd64 child manifest digest. The two paths therefore built separate cache chains, so a branch build missed every warmed layer starting at the first toolchain `RUN` — a step that depends only on the base image and its command rather than on any source change.
+  - **Fix:** the branch job now resolves the same amd64 child digest, imports the stable `buildcache-amd64` reference read-only, matches the platform and provenance flags, and builds from the same tracked Git archive context. Toolchain stages that run before any source copy restore from the warmed cache instead of rebuilding after each runner's scheduled prune.
+  - **Tests:** the existing CI contract now also pins the branch job's read-only cache import, pinned amd64 base digest, shared archive context, and absence of a cache export alongside the warmer and fanout assertions, without changing the test count.
+
 - **The shared AMD64 Docker cache now survives SELinux-hosted checkouts.**
   - **Root cause:** BuildKit included checkout metadata in `COPY` cache keys, so Fedora's `security.selinux` labels changed the first source-backed layer on `baku` and forced every later Go tool stage to rebuild despite a successful registry-cache import.
   - **Fix:** scheduled Docker cache writers and readers plus protected image publication now feed BuildKit the same tracked Git archive with fixed file modes. Host ownership, timestamps, ACLs, and xattrs stay outside the build context, while Git's executable bits remain intact. Rootless Podman keeps its separate local-store path.

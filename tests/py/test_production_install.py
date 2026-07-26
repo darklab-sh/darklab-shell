@@ -2177,6 +2177,21 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     branch_build_script = "\n".join(parsed_ci["docker-build"]["script"])
     assert "branch-image-evidence/darklab-shell.cdx.json" in branch_build_script
     assert "--only-fixed --fail-on critical" in branch_build_script
+    # The branch image must read the same cache chain the scheduled warmer fills. A bare
+    # base tag resolves to the index digest instead of the pinned amd64 child manifest,
+    # which misses every warmed layer from the first toolchain RUN onward.
+    assert (
+        "type=registry,ref=${CI_REGISTRY_IMAGE}:buildcache-amd64" in branch_build_script
+    )
+    assert '.platform.architecture == "amd64"' in branch_build_script
+    assert (
+        "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}"
+        in branch_build_script
+    )
+    assert "--platform linux/amd64" in branch_build_script
+    assert "create_portable_build_context.sh" in branch_build_script
+    assert '- < "$build_context"' in branch_build_script
+    assert "--cache-to" not in branch_build_script
     assert parsed_ci["docker-build"]["artifacts"]["when"] == "always"
     pytest_setup = "\n".join(parsed_ci[".pytest-lane"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bcurl\b", pytest_setup)
