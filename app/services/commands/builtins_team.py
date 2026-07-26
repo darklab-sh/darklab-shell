@@ -8,6 +8,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
 from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from services.audit.models import AuditEventType
@@ -140,9 +144,7 @@ def _record_team_audit(
 ) -> None:
     actor_member_id = actor_member_id or str((actor or {}).get("id") or "")
     actor_role = actor_role or str((actor or {}).get("role") or "")
-    actor_display_name = actor_display_name or str(
-        (actor or {}).get("display_name") or (actor or {}).get("name") or ""
-    )
+    actor_display_name = actor_display_name or str((actor or {}).get("display_name") or (actor or {}).get("name") or "")
     record_event(
         event_type,
         target_id=team_id,
@@ -229,19 +231,23 @@ def _team_rows(teams: list[dict[str, Any]]) -> list[dict[str, object]]:
     for team in teams:
         raw_member = team.get("member")
         member: dict[str, Any] = raw_member if isinstance(raw_member, dict) else {}
-        rows.append({
-            "id": str(team.get("id") or ""),
-            "role": str(member.get("role") or ""),
-            "name": str(team.get("name") or ""),
-        })
+        rows.append(
+            {
+                "id": str(team.get("id") or ""),
+                "role": str(member.get("role") or ""),
+                "name": str(team.get("name") or ""),
+            }
+        )
     id_width = max([len("id"), *(len(row["id"]) for row in rows)])
     role_width = max([len("role"), *(len(row["role"]) for row in rows)])
     lines.append(output_line(f"{'id':<{id_width}}  {'role':<{role_width}}  name", "builtin-table-header"))
     for row in rows:
-        lines.append(output_line(
-            f"{row['id']:<{id_width}}  {row['role']:<{role_width}}  {row['name']}",
-            "builtin-table-row",
-        ))
+        lines.append(
+            output_line(
+                f"{row['id']:<{id_width}}  {row['role']:<{role_width}}  {row['name']}",
+                "builtin-table-row",
+            )
+        )
     return lines
 
 
@@ -254,12 +260,14 @@ def _status(session_id: str, team_id: str) -> list[dict[str, object]]:
     if active:
         raw_member = active.get("member")
         member: dict[str, Any] = raw_member if isinstance(raw_member, dict) else {}
-        lines.extend([
-            output_line(format_native_record("scope", "team", width), "builtin-kv"),
-            output_line(format_native_record("team", str(active.get("name") or ""), width), "builtin-kv"),
-            output_line(format_native_record("team_id", str(active.get("id") or ""), width), "builtin-kv"),
-            output_line(format_native_record("role", str(member.get("role") or ""), width), "builtin-kv"),
-        ])
+        lines.extend(
+            [
+                output_line(format_native_record("scope", "team", width), "builtin-kv"),
+                output_line(format_native_record("team", str(active.get("name") or ""), width), "builtin-kv"),
+                output_line(format_native_record("team_id", str(active.get("id") or ""), width), "builtin-kv"),
+                output_line(format_native_record("role", str(member.get("role") or ""), width), "builtin-kv"),
+            ]
+        )
     else:
         lines.append(output_line(format_native_record("scope", "personal", width), "builtin-kv"))
     lines.append(output_line(format_native_record("joined_teams", str(len(teams)), width), "builtin-kv"))
@@ -319,24 +327,30 @@ def _members(parts: list[str], session_id: str, team_id: str) -> list[dict[str, 
     rows = []
     for member in members:
         current = " *" if member.get("is_current") else ""
-        rows.append({
-            "id": str(member.get("id") or ""),
-            "role": str(member.get("role") or ""),
-            "status": str(member.get("status") or ""),
-            "name": f"{member.get('display_name', '')}{current}",
-        })
+        rows.append(
+            {
+                "id": str(member.get("id") or ""),
+                "role": str(member.get("role") or ""),
+                "status": str(member.get("status") or ""),
+                "name": f"{member.get('display_name', '')}{current}",
+            }
+        )
     id_width = max([len("id"), *(len(row["id"]) for row in rows)])
     role_width = max([len("role"), *(len(row["role"]) for row in rows)])
     status_width = max([len("status"), *(len(row["status"]) for row in rows)])
-    lines.append(output_line(
-        f"{'id':<{id_width}}  {'role':<{role_width}}  {'status':<{status_width}}  name",
-        "builtin-table-header",
-    ))
+    lines.append(
+        output_line(
+            f"{'id':<{id_width}}  {'role':<{role_width}}  {'status':<{status_width}}  name",
+            "builtin-table-header",
+        )
+    )
     for row in rows:
-        lines.append(output_line(
-            f"{row['id']:<{id_width}}  {row['role']:<{role_width}}  {row['status']:<{status_width}}  {row['name']}",
-            "builtin-table-row",
-        ))
+        lines.append(
+            output_line(
+                f"{row['id']:<{id_width}}  {row['role']:<{role_width}}  {row['status']:<{status_width}}  {row['name']}",
+                "builtin-table-row",
+            )
+        )
     return lines
 
 
@@ -538,3 +552,76 @@ def run_builtin_team(command: str, session_id: str, *, team_id: str = "", team_r
             reason=getattr(exc, "code", exc.__class__.__name__),
         )
         return [output_line(f"team: {exc}", "exit-fail")]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "team": {
+        "root": "team",
+        "description": "built-in: create, join, inspect, and manage teams",
+        "autocomplete": {
+            "subcommands": [
+                {"value": "status", "description": "Show active personal/team scope", "closes": True},
+                {"value": "list", "description": "List teams joined by the current token", "closes": True},
+                {
+                    "value": "create",
+                    "description": "Create a team",
+                    "takes_value": True,
+                    "insert": "create ",
+                    "value_hint": {"value": "<name>", "hint_only": True, "description": "Team name"},
+                },
+                {
+                    "value": "members",
+                    "description": "List members for the active team or supplied team id",
+                    "takes_value": True,
+                    "insert": "members ",
+                    "value_hint": {"value": "<team-id>", "hint_only": True, "description": "Optional team id"},
+                },
+                {
+                    "value": "invite",
+                    "description": "Create or revoke team invites",
+                    "takes_value": True,
+                    "insert": "invite ",
+                    "value_hint": {"value": "create --role operator", "hint_only": True, "description": "Invite action"},
+                },
+                {
+                    "value": "join",
+                    "description": "Join a team with an invite code",
+                    "takes_value": True,
+                    "insert": "join ",
+                    "value_hint": {"value": "<invite-code>", "hint_only": True, "description": "Invite code"},
+                },
+                {
+                    "value": "leave",
+                    "description": "Leave the active team or supplied team id",
+                    "takes_value": True,
+                    "insert": "leave ",
+                    "value_hint": {"value": "<team-id>", "hint_only": True, "description": "Optional team id"},
+                },
+                {
+                    "value": "recovery",
+                    "description": "Rotate a team recovery code",
+                    "takes_value": True,
+                    "insert": "recovery rotate",
+                },
+                {"value": "switch", "description": "Show team scope switching guidance", "closes": True},
+            ]
+        },
+    }
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["team"],
+            handler_key="team",
+            handler=lambda command, context: run_builtin_team(
+                command,
+                context.session_id,
+                team_id=context.team_id,
+                team_role=context.team_role,
+            ),
+            name="team",
+            description="Create, join, inspect, and manage teams from the terminal.",
+        ),
+    )

@@ -486,18 +486,27 @@ def load_commands_registry_file(
     normalize_autocomplete: Callable[[str, object], dict],
 ) -> dict:
     loaded = load_yaml_mapping(path)
+    return normalize_commands_registry_data(loaded, normalize_autocomplete)
+
+
+def normalize_commands_registry_data(
+    loaded: object,
+    normalize_autocomplete: Callable[[str, object], dict],
+) -> dict:
+    """Normalize an in-memory registry mapping with the YAML registry schema."""
+    data = loaded if isinstance(loaded, dict) else {}
     commands = []
     pipe_helpers = []
-    for raw_entry in loaded.get("commands", []) or []:
+    for raw_entry in data.get("commands", []) or []:
         entry = normalize_commands_registry_entry(raw_entry, normalize_autocomplete)
         if entry:
             commands.append(entry)
-    for raw_entry in loaded.get("pipe_helpers", []) or []:
+    for raw_entry in data.get("pipe_helpers", []) or []:
         entry = normalize_commands_registry_entry(raw_entry, normalize_autocomplete, pipe_helper=True)
         if entry:
             pipe_helpers.append(entry)
     return {
-        "version": int(loaded.get("version") or 1),
+        "version": int(data.get("version") or 1),
         "commands": commands,
         "pipe_helpers": pipe_helpers,
     }

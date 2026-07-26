@@ -9,6 +9,10 @@ from datetime import datetime, timezone
 import logging
 from typing import Any
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
 from core import database
 from core.helpers import get_log_session_id
 from services.audit.automation import record_watcher_event, run_now_details
@@ -118,10 +122,12 @@ def _watch_lines(session_id: str) -> list[dict[str, object]]:
     for watcher in watchers:
         label = _watcher_label(watcher)
         cadence = _watcher_cadence(schedule_by_id.get(watcher.schedule_id))
-        lines.append(output_line(
-            f"{watcher.id:<36} {watcher.state:<12} {cadence:<12} {label}",
-            "builtin-table-row",
-        ))
+        lines.append(
+            output_line(
+                f"{watcher.id:<36} {watcher.state:<12} {cadence:<12} {label}",
+                "builtin-table-row",
+            )
+        )
     return lines
 
 
@@ -236,17 +242,20 @@ def _create_watch(parts: list[str], session_id: str) -> list[dict[str, object]]:
             conn=conn,
         )
         conn.commit()
-    log.info("BUILTIN_WATCH_CREATED", extra={
-        "session": get_log_session_id(session_id),
-        "source": "builtin",
-        "watcher_id": watcher.id,
-        "schedule_id": watcher.schedule_id,
-        "baseline_run_id": watcher.baseline_run_id,
-        "cron_expr": schedule.cron_expr,
-        "cadence_preset": schedule.cadence_preset or "",
-        "timezone": schedule.timezone,
-        "next_run_at": schedule.next_run_at,
-    })
+    log.info(
+        "BUILTIN_WATCH_CREATED",
+        extra={
+            "session": get_log_session_id(session_id),
+            "source": "builtin",
+            "watcher_id": watcher.id,
+            "schedule_id": watcher.schedule_id,
+            "baseline_run_id": watcher.baseline_run_id,
+            "cron_expr": schedule.cron_expr,
+            "cadence_preset": schedule.cadence_preset or "",
+            "timezone": schedule.timezone,
+            "next_run_at": schedule.next_run_at,
+        },
+    )
     return [
         output_line(f"watch: created {watcher.id}", "builtin-success"),
         output_line(format_native_record("baseline run", watcher.baseline_run_id or "pending first run", 13), "builtin-kv"),
@@ -281,16 +290,19 @@ def _run_watcher_now(watcher: Watcher) -> list[dict[str, object]]:
     lines.append(output_line(format_native_record("fired at", fired_at, 10), "builtin-kv"))
     if active.last_run_id:
         lines.append(output_line(format_native_record("run id", active.last_run_id, 10), "builtin-kv"))
-    log.info("BUILTIN_WATCH_RUN_NOW", extra={
-        "session": get_log_session_id(watcher.session_token),
-        "source": "builtin",
-        "watcher_id": watcher.id,
-        "schedule_id": watcher.schedule_id,
-        "status": status,
-        "fired_at": fired_at,
-        "run_id": active.last_run_id,
-        "last_error": active.last_error,
-    })
+    log.info(
+        "BUILTIN_WATCH_RUN_NOW",
+        extra={
+            "session": get_log_session_id(watcher.session_token),
+            "source": "builtin",
+            "watcher_id": watcher.id,
+            "schedule_id": watcher.schedule_id,
+            "status": status,
+            "fired_at": fired_at,
+            "run_id": active.last_run_id,
+            "last_error": active.last_error,
+        },
+    )
     return lines
 
 
@@ -300,12 +312,15 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
     if subcommand in {"help", "-h", "--help"}:
         return _watch_usage()
     if not _is_durable_session(session_id):
-        log.warning("BUILTIN_WATCH_REJECTED", extra={
-            "session": get_log_session_id(session_id),
-            "source": "builtin",
-            "subcommand": subcommand,
-            "error": "session token required",
-        })
+        log.warning(
+            "BUILTIN_WATCH_REJECTED",
+            extra={
+                "session": get_log_session_id(session_id),
+                "source": "builtin",
+                "subcommand": subcommand,
+                "error": "session token required",
+            },
+        )
         return [output_line(_durable_session_error(session_id))]
     try:
         if subcommand in {"list", "ls"}:
@@ -328,12 +343,15 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
                     conn=conn,
                 )
                 conn.commit()
-            log.info("BUILTIN_WATCH_PAUSED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "watcher_id": watcher.id,
-                "schedule_id": watcher.schedule_id,
-            })
+            log.info(
+                "BUILTIN_WATCH_PAUSED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "watcher_id": watcher.id,
+                    "schedule_id": watcher.schedule_id,
+                },
+            )
             return [output_line(f"watch: paused {(updated or watcher).id}", "builtin-success")]
         if subcommand == "resume":
             watcher = _watcher_for_session(_watcher_ref(parts, "Usage: watch resume <id>"), session_id)
@@ -348,12 +366,15 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
                     conn=conn,
                 )
                 conn.commit()
-            log.info("BUILTIN_WATCH_RESUMED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "watcher_id": watcher.id,
-                "schedule_id": watcher.schedule_id,
-            })
+            log.info(
+                "BUILTIN_WATCH_RESUMED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "watcher_id": watcher.id,
+                    "schedule_id": watcher.schedule_id,
+                },
+            )
             return [output_line(f"watch: resumed {(updated or watcher).id}", "builtin-success")]
         if subcommand in {"delete", "rm", "remove"}:
             watcher = _watcher_for_session(_watcher_ref(parts, "Usage: watch delete <id>"), session_id)
@@ -368,13 +389,16 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
                     conn=conn,
                 )
                 conn.commit()
-            log.info("BUILTIN_WATCH_DELETED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "watcher_id": watcher.id,
-                "schedule_id": watcher.schedule_id,
-                "removed": removed,
-            })
+            log.info(
+                "BUILTIN_WATCH_DELETED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "watcher_id": watcher.id,
+                    "schedule_id": watcher.schedule_id,
+                    "removed": removed,
+                },
+            )
             status_style = "builtin-success" if removed else "builtin-note"
             message = f"watch: deleted {watcher.id}" if removed else f"watch: not found {watcher.id}"
             return [output_line(message, status_style)]
@@ -393,12 +417,15 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
                     conn=conn,
                 )
                 conn.commit()
-            log.info("BUILTIN_WATCH_BASELINE_ACCEPTED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "watcher_id": updated.id,
-                "baseline_run_id": updated.baseline_run_id,
-            })
+            log.info(
+                "BUILTIN_WATCH_BASELINE_ACCEPTED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "watcher_id": updated.id,
+                    "baseline_run_id": updated.baseline_run_id,
+                },
+            )
             return [output_line(f"watch: accepted baseline {updated.baseline_run_id}", "builtin-success")]
         if subcommand in {"run", "run-now"}:
             watcher = _watcher_for_session(_watcher_ref(parts, "Usage: watch run <id>"), session_id)
@@ -419,10 +446,93 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
         message = str(exc)
         if message == "notification channels require a durable session token":
             message = _durable_session_error(session_id)
-        log.warning("BUILTIN_WATCH_REJECTED", extra={
-            "session": get_log_session_id(session_id),
-            "source": "builtin",
-            "subcommand": subcommand,
-            "error": message,
-        })
+        log.warning(
+            "BUILTIN_WATCH_REJECTED",
+            extra={
+                "session": get_log_session_id(session_id),
+                "source": "builtin",
+                "subcommand": subcommand,
+                "error": message,
+            },
+        )
         return [output_line(f"watch: {message}" if not message.startswith("watch:") else message)]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "watch": {
+        "root": "watch",
+        "description": "built-in: manage change-detection watchers",
+        "autocomplete": {
+            "subcommands": {
+                "list": {"description": "List current-session watchers", "closes": True},
+                "create": {
+                    "description": "Create a watcher from a completed baseline run",
+                    "arguments": [{"value": "<baseline-run-id>", "hint_only": True, "description": "Completed baseline run id"}],
+                    "flags": [
+                        {
+                            "value": "--cron",
+                            "takes_value": True,
+                            "description": "Five-field cron expression",
+                            "suggest": [
+                                {"value": "0 * * * *", "description": "Every hour"},
+                                {"value": "0 0 * * *", "description": "Every day"},
+                                {"value": "0 0 * * 0", "description": "Every week"},
+                            ],
+                        },
+                        {
+                            "value": "--every",
+                            "takes_value": True,
+                            "description": "Cadence preset",
+                            "suggest": [
+                                {"value": "hourly", "description": "Every hour"},
+                                {"value": "daily", "description": "Every day"},
+                                {"value": "weekly", "description": "Every week"},
+                            ],
+                        },
+                        {"value": "--label", "takes_value": True, "description": "Display label"},
+                        {"value": "--timezone", "takes_value": True, "description": "IANA timezone"},
+                    ],
+                },
+                "pause": {
+                    "description": "Pause a watcher",
+                    "arguments": [{"value": "<watcher-id>", "hint_only": True, "description": "Watcher id"}],
+                },
+                "resume": {
+                    "description": "Resume a watcher",
+                    "arguments": [{"value": "<watcher-id>", "hint_only": True, "description": "Watcher id"}],
+                },
+                "delete": {
+                    "description": "Delete a watcher",
+                    "arguments": [{"value": "<watcher-id>", "hint_only": True, "description": "Watcher id"}],
+                },
+                "accept": {
+                    "description": "Accept the latest watcher run as the baseline",
+                    "arguments": [{"value": "<watcher-id>", "hint_only": True, "description": "Watcher id"}],
+                },
+                "run": {
+                    "description": "Fire a watcher now",
+                    "arguments": [{"value": "<watcher-id>", "hint_only": True, "description": "Watcher id"}],
+                },
+                "info": {
+                    "description": "Show watcher details",
+                    "arguments": [{"value": "<watcher-id>", "hint_only": True, "description": "Watcher id"}],
+                },
+            }
+        },
+    }
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["watch"],
+            handler_key="watch",
+            handler=lambda command, context: run_builtin_watch(
+                command,
+                context.session_id,
+            ),
+            name="watch",
+            description=("Create, inspect, pause, resume, delete, and fire watchers."),
+        ),
+    )

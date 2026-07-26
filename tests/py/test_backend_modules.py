@@ -16792,9 +16792,17 @@ class TestDerivedCommandRegistry:
         assert commands._restricted_inline_input_reason("file move 10.0.0.5 archive/", cfg=cfg) == ""
 
     def test_workspace_required_specs_do_not_overload_target_value_type(self):
-        paths = [
-            REPO_ROOT / "app/services/commands/builtin_autocomplete.yaml",
-            REPO_ROOT / "app/conf/commands.yaml",
+        sources = [
+            (
+                "registered built-in command providers",
+                builtin_commands._BUILTIN_REGISTRY.autocomplete_registry_data(),
+            ),
+            (
+                "app/conf/commands.yaml",
+                yaml.safe_load(
+                    (REPO_ROOT / "app/conf/commands.yaml").read_text()
+                ) or {},
+            ),
         ]
         issues = []
 
@@ -16826,13 +16834,27 @@ class TestDerivedCommandRegistry:
         def _target_list_file_flag_allowed(flags_by_subcommand, flag, subcommand):
             return flag in flags_by_subcommand.get("", set()) or flag in flags_by_subcommand.get(subcommand, set())
 
-        def _scan_autocomplete(path, root, autocomplete, flags_by_subcommand, *, workspace_required=False, subcommand=""):
+        def _scan_autocomplete(source, root, autocomplete, flags_by_subcommand, *, workspace_required=False, subcommand=""):
             if not isinstance(autocomplete, dict):
                 return
             active_workspace_required = workspace_required or _workspace_required(autocomplete)
             for index, argument in enumerate(autocomplete.get("arguments") or []):
                 if (active_workspace_required or _workspace_required(argument)) and _value_type(argument) == "target":
-                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:{subcommand}:arguments[{index}]")
+                    issues.append(f"{source}:{root}:{subcommand}:arguments[{index}]")
+            for trigger, hints in (autocomplete.get("arg_hints") or {}).items():
+                for index, hint in enumerate(hints or []):
+                    if (
+                        (active_workspace_required or _workspace_required(hint))
+                        and _value_type(hint) == "target"
+                        and not _target_list_file_flag_allowed(
+                            flags_by_subcommand,
+                            str(trigger),
+                            subcommand,
+                        )
+                    ):
+                        issues.append(
+                            f"{source}:{root}:{subcommand}:arg_hints:{trigger}[{index}]"
+                        )
             for flag in autocomplete.get("flags") or []:
                 if not isinstance(flag, dict):
                     continue
@@ -16846,7 +16868,7 @@ class TestDerivedCommandRegistry:
                     flag_value,
                     subcommand,
                 ):
-                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:{subcommand}:flag:{flag_value}")
+                    issues.append(f"{source}:{root}:{subcommand}:flag:{flag_value}")
             subcommands = autocomplete.get("subcommands") or []
             if isinstance(subcommands, dict):
                 iterable_subcommands = [
@@ -16862,9 +16884,9 @@ class TestDerivedCommandRegistry:
                 sub_workspace_required = active_workspace_required or _workspace_required(sub)
                 value_hint = sub.get("value_hint") or {}
                 if sub_workspace_required and _value_type(value_hint) == "target":
-                    issues.append(f"{path.relative_to(REPO_ROOT)}:{root}:subcommand:{sub_name}")
+                    issues.append(f"{source}:{root}:subcommand:{sub_name}")
                 _scan_autocomplete(
-                    path,
+                    source,
                     root,
                     sub,
                     flags_by_subcommand,
@@ -16872,8 +16894,7 @@ class TestDerivedCommandRegistry:
                     subcommand=sub_name or subcommand,
                 )
 
-        for path in paths:
-            data = yaml.safe_load(path.read_text()) or {}
+        for source, data in sources:
             commands_data = data if isinstance(data, list) else data.get("commands") or []
             for command in commands_data:
                 if not isinstance(command, dict):
@@ -16881,7 +16902,7 @@ class TestDerivedCommandRegistry:
                 root = str(command.get("root") or "<unknown>")
                 autocomplete = command.get("autocomplete") or {}
                 _scan_autocomplete(
-                    path,
+                    source,
                     root,
                     autocomplete,
                     _target_list_file_flags(command),
@@ -16952,7 +16973,7 @@ class TestDerivedCommandRegistry:
         assert context["ping"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
         assert context["grep"]["pipe_command"] is True
 
-    def test_builtin_autocomplete_registry_uses_app_owned_yaml(self):
+    def test_builtin_autocomplete_registry_uses_app_owned_specs(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
         assert context["commands"]["flags"][0]["value"] == "--built-in"

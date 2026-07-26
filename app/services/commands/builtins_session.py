@@ -5,6 +5,11 @@
 
 from __future__ import annotations
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    BuiltinExecutionOwner,
+    build_builtin_command_spec,
+)
 from services.commands.builtins_format import (
     ansi_dim,
     ansi_green,
@@ -121,3 +126,81 @@ def run_builtin_var(cmd: str, session_id: str) -> list[dict[str, object]]:
         output_line(f"var: unknown subcommand '{subcommand}'"),
         output_line("Usage: var [list] | var set NAME value | var unset NAME"),
     ]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "session-token": {
+        "root": "session-token",
+        "description": "built-in: show or manage persistent session tokens",
+        "autocomplete": {
+            "subcommands": [
+                {"value": "generate", "description": "Generate a new session token and save it to this browser", "closes": True},
+                {
+                    "value": "set",
+                    "description": "Activate an existing session token from another device",
+                    "takes_value": True,
+                    "insert": "set ",
+                    "value_hint": {
+                        "value": "<token>",
+                        "hint_only": True,
+                        "description": "Paste a tok_... token or UUID from another device",
+                    },
+                },
+                {"value": "copy", "description": "Copy the active session token to the clipboard", "closes": True},
+                {"value": "clear", "description": "Confirm before removing the active session token", "closes": True},
+                {"value": "rotate", "description": "Generate a new token and migrate all history to it", "closes": True},
+                {"value": "list", "description": "Show the active session token and its creation date", "closes": True},
+                {
+                    "value": "revoke",
+                    "description": "Permanently invalidate a tok_ token on this server",
+                    "takes_value": True,
+                    "insert": "revoke ",
+                    "value_hint": {
+                        "value": "<token>",
+                        "hint_only": True,
+                        "description": "tok_ token to permanently invalidate on the server",
+                    },
+                },
+            ]
+        },
+    },
+    "var": {
+        "root": "var",
+        "description": "built-in: set, list, or unset session command variables",
+        "autocomplete": {
+            "close_after": {"list": 0, "set": 2, "unset": 1},
+            "subcommands": [
+                {"value": "list", "description": "Show session variables", "closes": True},
+                {"value": "set", "description": "Set a session variable", "takes_value": True, "insert": "set "},
+                {"value": "unset", "description": "Remove a session variable", "takes_value": True, "insert": "unset "},
+            ],
+        },
+    },
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["session-token"],
+            handler_key="session-token",
+            handler=lambda command, context: run_builtin_session_token(
+                command,
+                context.session_id,
+            ),
+            name="session-token",
+            description="Show session token status.",
+            execution_owner=BuiltinExecutionOwner.MIXED,
+            browser_owned_subcommands=("*",),
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["var"],
+            handler_key="var",
+            handler=lambda command, context: run_builtin_var(
+                command,
+                context.session_id,
+            ),
+            name="var",
+            description="Set, list, or unset session command variables.",
+        ),
+    )

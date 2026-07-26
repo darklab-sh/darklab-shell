@@ -8,6 +8,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
 from core.helpers import get_log_session_id
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
@@ -167,16 +171,8 @@ def _channel_secret_state(channel: dict[str, Any]) -> str:
     fields = channel.get("secret_fields")
     if not isinstance(fields, list) or not fields:
         return "none"
-    configured = [
-        str(field.get("name") or "")
-        for field in fields
-        if isinstance(field, dict) and field.get("configured")
-    ]
-    missing = [
-        str(field.get("name") or "")
-        for field in fields
-        if isinstance(field, dict) and not field.get("configured")
-    ]
+    configured = [str(field.get("name") or "") for field in fields if isinstance(field, dict) and field.get("configured")]
+    missing = [str(field.get("name") or "") for field in fields if isinstance(field, dict) and not field.get("configured")]
     chunks = []
     if configured:
         chunks.append("configured: " + ", ".join(configured))
@@ -209,10 +205,12 @@ def _notify_lines(session_id: str, *, team_id: str = "") -> list[dict[str, objec
     lines.append(output_line(f"{'id':<36} {'kind':<10} {'muted':<6} label", "builtin-table-header"))
     for channel in channels:
         muted = "yes" if channel.get("muted") else "no"
-        lines.append(output_line(
-            f"{channel.get('id', ''):<36} {channel.get('kind', ''):<10} {muted:<6} {channel.get('label', '')}",
-            "builtin-table-row",
-        ))
+        lines.append(
+            output_line(
+                f"{channel.get('id', ''):<36} {channel.get('kind', ''):<10} {muted:<6} {channel.get('label', '')}",
+                "builtin-table-row",
+            )
+        )
     return lines
 
 
@@ -267,13 +265,16 @@ def _create_channel(parts: list[str], session_id: str, *, team_id: str = "", tea
         audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
         audit_source="terminal_builtin",
     )
-    log.info("BUILTIN_NOTIFY_CREATED", extra={
-        "session": get_log_session_id(session_id),
-        "source": "builtin",
-        "channel_id": channel.get("id"),
-        "kind": channel.get("kind"),
-        "muted": bool(channel.get("muted")),
-    })
+    log.info(
+        "BUILTIN_NOTIFY_CREATED",
+        extra={
+            "session": get_log_session_id(session_id),
+            "source": "builtin",
+            "channel_id": channel.get("id"),
+            "kind": channel.get("kind"),
+            "muted": bool(channel.get("muted")),
+        },
+    )
     return [
         output_line(f"notify: created {channel.get('id')}", "builtin-success"),
         output_line(format_native_record("kind", channel.get("kind", ""), 8), "builtin-kv"),
@@ -294,12 +295,15 @@ def _update_channel(parts: list[str], session_id: str, *, team_id: str = "", tea
         audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
         audit_source="terminal_builtin",
     )
-    log.info("BUILTIN_NOTIFY_UPDATED", extra={
-        "session": get_log_session_id(session_id),
-        "source": "builtin",
-        "channel_id": channel_id,
-        "muted": bool(channel.get("muted")),
-    })
+    log.info(
+        "BUILTIN_NOTIFY_UPDATED",
+        extra={
+            "session": get_log_session_id(session_id),
+            "source": "builtin",
+            "channel_id": channel_id,
+            "muted": bool(channel.get("muted")),
+        },
+    )
     return [output_line(f"notify: updated {channel_id}", "builtin-success")]
 
 
@@ -312,11 +316,13 @@ def _events_lines(session_id: str, parts: list[str], *, team_id: str = "") -> li
     lines = [output_line(f"Notification events ({data.get('total', len(events))} total):", "builtin-section")]
     lines.append(output_line(f"{'created':<25} {'status':<10} {'trigger':<22} channel", "builtin-table-header"))
     for event in events:
-        lines.append(output_line(
-            f"{event.get('created', ''):<25} {event.get('status', ''):<10} "
-            f"{event.get('trigger', ''):<22} {event.get('channel_id', '')}",
-            "builtin-table-row",
-        ))
+        lines.append(
+            output_line(
+                f"{event.get('created', ''):<25} {event.get('status', ''):<10} "
+                f"{event.get('trigger', ''):<22} {event.get('channel_id', '')}",
+                "builtin-table-row",
+            )
+        )
         if event.get("last_error"):
             lines.append(output_line(f"  error: {event.get('last_error')}", "builtin-note"))
     if data.get("has_more"):
@@ -332,12 +338,15 @@ def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team
     if subcommand in {"kinds", "types"}:
         return _kind_lines()
     if not _is_durable_session(session_id):
-        log.warning("BUILTIN_NOTIFY_REJECTED", extra={
-            "session": get_log_session_id(session_id),
-            "source": "builtin",
-            "subcommand": subcommand,
-            "error": "session token required",
-        })
+        log.warning(
+            "BUILTIN_NOTIFY_REJECTED",
+            extra={
+                "session": get_log_session_id(session_id),
+                "source": "builtin",
+                "subcommand": subcommand,
+                "error": "session token required",
+            },
+        )
         return [output_line(_durable_session_error(session_id))]
     try:
         if subcommand in {"list", "ls"}:
@@ -347,11 +356,13 @@ def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team
         if subcommand == "update":
             return _update_channel(parts, session_id, team_id=team_id, team_role=team_role)
         if subcommand == "info":
-            return _info_lines(_channel_for_session(
-                _notify_ref(parts, "Usage: notify info <id>"),
-                session_id,
-                team_id=team_id,
-            ))
+            return _info_lines(
+                _channel_for_session(
+                    _notify_ref(parts, "Usage: notify info <id>"),
+                    session_id,
+                    team_id=team_id,
+                )
+            )
         if subcommand == "mute":
             channel_id = _notify_ref(parts, "Usage: notify mute <id>")
             channel = update_notification_channel(
@@ -362,11 +373,14 @@ def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team
                 audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
                 audit_source="terminal_builtin",
             )
-            log.info("BUILTIN_NOTIFY_MUTED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "channel_id": channel_id,
-            })
+            log.info(
+                "BUILTIN_NOTIFY_MUTED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "channel_id": channel_id,
+                },
+            )
             return [output_line(f"notify: muted {channel.get('id', channel_id)}", "builtin-success")]
         if subcommand == "unmute":
             channel_id = _notify_ref(parts, "Usage: notify unmute <id>")
@@ -378,11 +392,14 @@ def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team
                 audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
                 audit_source="terminal_builtin",
             )
-            log.info("BUILTIN_NOTIFY_UNMUTED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "channel_id": channel_id,
-            })
+            log.info(
+                "BUILTIN_NOTIFY_UNMUTED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "channel_id": channel_id,
+                },
+            )
             return [output_line(f"notify: unmuted {channel.get('id', channel_id)}", "builtin-success")]
         if subcommand == "delete":
             channel_id = _notify_ref(parts, "Usage: notify delete <id>")
@@ -393,12 +410,15 @@ def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team
                 audit_fields=_audit_fields(session_id, team_id=team_id, team_role=team_role),
                 audit_source="terminal_builtin",
             )
-            log.info("BUILTIN_NOTIFY_DELETED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "channel_id": channel_id,
-                "removed": bool(removed),
-            })
+            log.info(
+                "BUILTIN_NOTIFY_DELETED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "channel_id": channel_id,
+                    "removed": bool(removed),
+                },
+            )
             message = f"notify: deleted {channel_id}" if removed else f"notify: not found {channel_id}"
             return [output_line(message, "builtin-success" if removed else "builtin-note")]
         if subcommand == "test":
@@ -412,10 +432,12 @@ def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team
             )
             lines = [output_line(f"notify: queued {result.get('queued', 0)} test event(s)", "builtin-success")]
             for event in result.get("events") or []:
-                lines.append(output_line(
-                    format_native_record(str(event.get("event_id") or ""), str(event.get("status") or ""), 36),
-                    "builtin-kv",
-                ))
+                lines.append(
+                    output_line(
+                        format_native_record(str(event.get("event_id") or ""), str(event.get("status") or ""), 36),
+                        "builtin-kv",
+                    )
+                )
                 if event.get("last_error"):
                     lines.append(output_line(f"  error: {event.get('last_error')}", "builtin-note"))
             return lines
@@ -431,3 +453,113 @@ def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team
         return [output_line(f"notify: {exc}")]
     except ValueError as exc:
         return [output_line(f"notify: {exc}")]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "notify": {
+        "root": "notify",
+        "description": "built-in: manage outbound notification channels",
+        "autocomplete": {
+            "subcommands": {
+                "list": {"description": "List notification channels", "closes": True},
+                "kinds": {"description": "List supported notification channel types", "closes": True},
+                "create": {
+                    "description": "Create a channel when no secret values are required",
+                    "arguments": [
+                        {"value": "webhook", "description": "Generic JSON webhook"},
+                        {"value": "slack", "description": "Slack incoming webhook"},
+                        {"value": "discord", "description": "Discord incoming webhook"},
+                        {"value": "telegram", "description": "Telegram Bot API"},
+                        {"value": "pushover", "description": "Pushover"},
+                        {"value": "email", "description": "SMTP email"},
+                    ],
+                    "flags": [
+                        {"value": "--label", "takes_value": True, "description": "Display label"},
+                        {
+                            "value": "--trigger",
+                            "takes_value": True,
+                            "description": "Notification trigger",
+                            "suggest": [
+                                {"value": "run_complete", "description": "External run completed"},
+                                {"value": "pty_session_ended", "description": "PTY session ended"},
+                                {"value": "scheduled_run_failed", "description": "Scheduled run failed"},
+                                {"value": "watcher_changed", "description": "Watcher detected a change"},
+                                {"value": "watcher_error", "description": "Watcher failed"},
+                                {"value": "watcher_recovered", "description": "Watcher recovered"},
+                            ],
+                        },
+                        {"value": "--config", "takes_value": True, "description": "Channel config as KEY=VALUE"},
+                        {"value": "--muted", "description": "Create the channel muted"},
+                    ],
+                },
+                "update": {
+                    "description": "Update channel label, triggers, or config",
+                    "arguments": [{"value": "<channel-id>", "hint_only": True, "description": "Notification channel id"}],
+                    "flags": [
+                        {"value": "--label", "takes_value": True, "description": "Display label"},
+                        {"value": "--trigger", "takes_value": True, "description": "Replacement notification trigger"},
+                        {"value": "--config", "takes_value": True, "description": "Replacement config as KEY=VALUE"},
+                        {"value": "--muted", "description": "Set the channel muted"},
+                    ],
+                },
+                "info": {
+                    "description": "Show channel details",
+                    "arguments": [{"value": "<channel-id>", "hint_only": True, "description": "Notification channel id"}],
+                },
+                "mute": {
+                    "description": "Mute a channel",
+                    "arguments": [{"value": "<channel-id>", "hint_only": True, "description": "Notification channel id"}],
+                },
+                "unmute": {
+                    "description": "Unmute a channel",
+                    "arguments": [{"value": "<channel-id>", "hint_only": True, "description": "Notification channel id"}],
+                },
+                "delete": {
+                    "description": "Delete a channel",
+                    "arguments": [{"value": "<channel-id>", "hint_only": True, "description": "Notification channel id"}],
+                },
+                "test": {
+                    "description": "Send a test notification",
+                    "arguments": [{"value": "<channel-id>", "hint_only": True, "description": "Notification channel id"}],
+                },
+                "events": {
+                    "description": "List notification delivery events",
+                    "flags": [
+                        {"value": "--channel", "takes_value": True, "description": "Filter by channel id"},
+                        {
+                            "value": "--status",
+                            "takes_value": True,
+                            "description": "Filter by delivery status",
+                            "suggest": [
+                                {"value": "pending", "description": "Pending delivery"},
+                                {"value": "retry_wait", "description": "Waiting to retry"},
+                                {"value": "sent", "description": "Sent"},
+                                {"value": "dead", "description": "Dead-lettered"},
+                            ],
+                        },
+                        {"value": "--trigger", "takes_value": True, "description": "Filter by trigger"},
+                        {"value": "--limit", "takes_value": True, "description": "Rows to return"},
+                        {"value": "--offset", "takes_value": True, "description": "Rows to skip"},
+                    ],
+                },
+            }
+        },
+    }
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["notify"],
+            handler_key="notify",
+            handler=lambda command, context: run_builtin_notify(
+                command,
+                context.session_id,
+                team_id=context.team_id,
+                team_role=context.team_role,
+            ),
+            name="notify",
+            description=("List, inspect, mute, test, and delete outbound notification channels."),
+        ),
+    )

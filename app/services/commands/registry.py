@@ -60,7 +60,6 @@ log = logging.getLogger("shell")
 _HERE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _CONF = app_config.APP_CONF_DIR or os.path.join(_HERE, "conf")
 COMMANDS_REGISTRY_FILE = os.path.join(_CONF, "commands.yaml")
-BUILTIN_AUTOCOMPLETE_FILE = os.path.join(os.path.dirname(__file__), "builtin_autocomplete.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WORKFLOWS_FILE        = os.path.join(_CONF, "workflows.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
@@ -180,9 +179,7 @@ def _normalize_runtime_adaptations(raw_value) -> dict[str, object]:
 
 
 def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
-    if not isinstance(raw_spec, dict) or not raw_spec:
-        return {}
-    return _normalize_autocomplete_context({root: raw_spec}).get(root, {})
+    return registry_autocomplete.normalize_autocomplete_spec(root, raw_spec)
 
 
 def _coerce_positive_int(value: object, default: int) -> int:
@@ -337,13 +334,14 @@ def command_catalog_entry(
 
 
 def load_builtin_autocomplete_registry():
-    """Read app-owned built-in autocomplete grammar.
+    """Return normalized app-owned helper autocomplete grammar.
 
-    This lives outside app/conf because built-in command grammar is not an
-    operator-facing policy/config surface. It still uses the same registry
-    shape and normalizer as external command autocomplete.
+    Command providers normalize and own this metadata through their command
+    specifications, so this compatibility view must not normalize it twice.
     """
-    return _load_commands_registry_file(BUILTIN_AUTOCOMPLETE_FILE)
+    from services.commands.builtins import _BUILTIN_REGISTRY
+
+    return deepcopy(_BUILTIN_REGISTRY.autocomplete_registry_data())
 
 
 def load_command_policy():
@@ -542,9 +540,11 @@ def _attach_workspace_autocomplete_flags(spec: dict, workspace_flags: list[dict[
 
 
 def load_autocomplete_context_from_commands_registry(cfg=None) -> dict:
-    """Read autocomplete metadata from commands.yaml and app-owned built-ins."""
+    """Read external autocomplete metadata and registered app-owned helpers."""
+    from services.commands.builtins import get_builtin_autocomplete_context
+
     external = autocomplete_context_from_commands_registry(load_commands_registry(), cfg=cfg)
-    builtins = autocomplete_context_from_commands_registry(load_builtin_autocomplete_registry(), cfg=cfg)
+    builtins = get_builtin_autocomplete_context(app_config.CFG if cfg is None else cfg)
     return _merge_autocomplete_context(external, builtins)
 
 

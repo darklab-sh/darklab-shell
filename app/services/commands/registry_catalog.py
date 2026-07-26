@@ -136,6 +136,11 @@ def _catalog_autocomplete_spec(spec: object, cfg=None) -> dict[str, object]:
     }
 
 
+def autocomplete_catalog_details(spec: object, cfg=None) -> dict[str, object]:
+    """Return rich catalog fields for one normalized autocomplete grammar."""
+    return _catalog_autocomplete_spec(spec, cfg)
+
+
 def _catalog_workspace_flags(items: object) -> list[dict[str, object]]:
     flags: list[dict[str, object]] = []
     if not isinstance(items, list):

@@ -12,6 +12,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 - [Branch Workflow](#branch-workflow)
 - [Release Branch Merge Checklist](#release-branch-merge-checklist)
 - [Code Style](#code-style)
+- [Adding App-Owned Helper Commands](#adding-app-owned-helper-commands)
 - [Adding External Commands](#adding-external-commands)
 - [Changing the Database Schema](#changing-the-database-schema)
 - [Running Tests](#running-tests)
@@ -208,6 +209,16 @@ releases while `main` advances.
 **Configuration overlays** — `APP_CONF_DIR` selects the shipped/base config root and `APP_LOCAL_CONF_DIR` selects the operator overlay root for every supported `*.local.*` file. Development defaults both roots to `app/conf`, preserving sibling behavior. When adding or changing an overlay-capable surface, use `app/config_paths.py`, keep its merge/reload/cache behavior explicit, and update the production starter files and docs; don't make a filename look active when the runtime doesn't resolve it.
 
 **Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Front End Design](ARCHITECTURE.md#front-end-design). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
+
+---
+
+## Adding App-Owned Helper Commands
+
+App-owned terminal helpers are registered from the reviewed provider list in `app/services/commands/builtin_providers.py`. A command specification lives with its focused command family and carries the handler, help text, aliases, feature requirements, ownership, catalog details, and complete autocomplete grammar. Add a provider to the central list only when you introduce a new command family; adding another command to an existing family does not require changes to the registry or executor.
+
+Keep browser/server ownership explicit. Browser-owned commands are registered so help, discovery, autocomplete, feature gates, and stale clients agree, but their normal execution remains in the browser. Server-owned commands execute through the shared backend resolver and executor. Workspace aliases must keep their resolve-time path and argument validation before execution-time scope, role, and storage checks.
+
+Registry tests should pin duplicate rejection, the frozen root and exact-alias sets, discovery/catalog/autocomplete parity, and at least one representative execution path for the command family. The example-provider contract in `tests/py/test_request_kill_and_commands.py` demonstrates the extension boundary without changing production registration.
 
 ---
 

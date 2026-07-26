@@ -6,9 +6,15 @@
 from __future__ import annotations
 
 import random
+import re
 
 from config import resolve_effective_cfg
-from services.commands.builtins_catalog import (
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    BuiltinMatchStrategy,
+    build_builtin_command_spec,
+)
+from services.commands.builtins_copy import (
     _SNARKY_POWEROFF_RESPONSES,
     _SNARKY_REBOOT_RESPONSES,
     _SNARKY_RM_ROOT_RESPONSES,
@@ -18,6 +24,9 @@ from services.commands.builtins_catalog import (
 )
 from services.commands.builtins_format import text_lines as _text_lines
 from services.commands.registry import load_ascii_art, split_command_argv
+
+
+FORK_BOMB_RE = re.compile(r"^:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:$")
 
 
 def run_builtin_banner(load_ascii_art_func=load_ascii_art) -> list[dict[str, object]]:
@@ -100,16 +109,153 @@ def run_builtin_xyzzy() -> list[dict[str, object]]:
 
 
 def run_builtin_coffee() -> list[dict[str, object]]:
-    return _text_lines([
-        "HTTP/1.1 418 I'm a teapot",
-        "Content-Type: text/plain",
-        "",
-        "Brewing coffee with a teapot is unsupported.",
-    ])
+    return _text_lines(
+        [
+            "HTTP/1.1 418 I'm a teapot",
+            "Content-Type: text/plain",
+            "",
+            "Brewing coffee with a teapot is unsupported.",
+        ]
+    )
 
 
 def run_builtin_fork_bomb() -> list[dict[str, object]]:
-    return _text_lines([
-        "bash: fork bomb politely declined",
-        "system remains operational",
-    ])
+    return _text_lines(
+        [
+            "bash: fork bomb politely declined",
+            "system remains operational",
+        ]
+    )
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "banner": {"root": "banner", "description": "built-in: print the configured banner art", "autocomplete": {"arguments": []}},
+    "clear": {
+        "root": "clear",
+        "description": "built-in: clear the current terminal tab output",
+        "autocomplete": {"arguments": []},
+    },
+    "fortune": {
+        "root": "fortune",
+        "description": "built-in: print a short operator-themed one-liner",
+        "autocomplete": {"arguments": []},
+    },
+    "groups": {"root": "groups", "description": "built-in: show the shell group membership", "autocomplete": {"arguments": []}},
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["banner"],
+            handler_key="banner",
+            handler=lambda _command, _context: run_builtin_banner(load_ascii_art),
+            name="banner",
+            description=("Print the configured banner art without replaying welcome."),
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["clear"],
+            handler_key="clear",
+            handler=lambda _command, _context: run_builtin_clear(),
+            name="clear",
+            description="Clear the current terminal tab output.",
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["fortune"],
+            handler_key="fortune",
+            handler=lambda _command, _context: run_builtin_fortune(),
+            name="fortune",
+            description="Print a short operator-themed one-liner.",
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["groups"],
+            handler_key="groups",
+            handler=lambda _command, _context: run_builtin_groups(),
+            name="groups",
+            description="Show the shell group membership.",
+        ),
+        build_builtin_command_spec(
+            None,
+            handler_key="reboot",
+            handler=lambda _command, _context: run_builtin_reboot(),
+            name="reboot",
+            description="",
+            root="reboot",
+            user_facing=False,
+        ),
+        build_builtin_command_spec(
+            None,
+            handler_key="sudo",
+            handler=lambda command, _context: run_builtin_sudo(command),
+            name="sudo",
+            description="",
+            root="sudo",
+            user_facing=False,
+        ),
+        build_builtin_command_spec(
+            None,
+            handler_key="poweroff",
+            handler=lambda _command, _context: run_builtin_poweroff(),
+            name="poweroff",
+            description="",
+            root="",
+            exact_aliases=("halt", "poweroff", "shutdown now"),
+            user_facing=False,
+        ),
+        build_builtin_command_spec(
+            None,
+            handler_key="rm_root",
+            handler=lambda _command, _context: run_builtin_rm_root(),
+            name="rm_root",
+            description="",
+            root="",
+            exact_aliases=(
+                "rm -fr /",
+                "rm -rf /",
+                "rm -r -f /",
+                "rm -f -r /",
+            ),
+            user_facing=False,
+        ),
+        build_builtin_command_spec(
+            None,
+            handler_key="su_shell",
+            handler=lambda command, _context: run_builtin_su(command),
+            name="su_shell",
+            description="",
+            root="",
+            exact_aliases=("sudo -s", "sudo su", "su"),
+            user_facing=False,
+        ),
+        build_builtin_command_spec(
+            None,
+            handler_key="xyzzy",
+            handler=lambda _command, _context: run_builtin_xyzzy(),
+            name="xyzzy",
+            description="",
+            root="",
+            exact_aliases=("xyzzy",),
+            user_facing=False,
+        ),
+        build_builtin_command_spec(
+            None,
+            handler_key="coffee",
+            handler=lambda _command, _context: run_builtin_coffee(),
+            name="coffee",
+            description="",
+            root="",
+            exact_aliases=("coffee",),
+            user_facing=False,
+        ),
+        build_builtin_command_spec(
+            None,
+            handler_key="fork_bomb",
+            handler=lambda _command, _context: run_builtin_fork_bomb(),
+            name="fork_bomb",
+            description="",
+            root="",
+            exact_aliases=(":(){ :|:& };:",),
+            match_strategy=BuiltinMatchStrategy.FORK_BOMB,
+            user_facing=False,
+        ),
+    )

@@ -5,6 +5,10 @@
 
 from __future__ import annotations
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
 from services.commands.builtins_format import output_line
 from services.commands.registry import split_command_argv
 from services.commands.wordlists import filter_wordlists, find_wordlist, load_wordlist_catalog
@@ -89,3 +93,49 @@ def run_builtin_wordlist(command: str) -> list[dict[str, object]]:
         return [output_line(str(item.get("path") or ""), "builtin-plain")]
 
     return _wordlist_usage()
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "wordlist": {
+        "root": "wordlist",
+        "description": "built-in: list and search installed SecLists wordlists",
+        "autocomplete": {
+            "subcommands": [
+                {
+                    "value": "list",
+                    "description": "List curated wordlists",
+                    "takes_value": True,
+                    "insert": "list ",
+                    "value_hint": {"value": "<category>", "hint_only": True, "description": "Wordlist category"},
+                },
+                {
+                    "value": "search",
+                    "description": "Search curated wordlists",
+                    "takes_value": True,
+                    "insert": "search ",
+                    "value_hint": {"value": "<term>", "hint_only": True, "description": "Search term"},
+                },
+                {
+                    "value": "path",
+                    "description": "Print one wordlist path",
+                    "takes_value": True,
+                    "insert": "path ",
+                    "value_hint": {"value": "<name>", "hint_only": True, "description": "Wordlist name or relative path"},
+                },
+            ],
+            "flags": [{"value": "--all", "description": "List every installed SecLists file"}],
+        },
+    }
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["wordlist"],
+            handler_key="wordlist",
+            handler=lambda command, _context: run_builtin_wordlist(command),
+            name="wordlist",
+            description="List and search installed SecLists wordlists.",
+        ),
+    )

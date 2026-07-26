@@ -10,6 +10,12 @@ import re
 from typing import Any, Mapping, Sequence, cast
 
 from config import resolve_effective_cfg
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    BuiltinExecutionOwner,
+    BuiltinMatchStrategy,
+    build_builtin_command_spec,
+)
 from services.commands.builtins_format import (
     format_bytes,
     format_native_record,
@@ -85,13 +91,12 @@ def _workspace_list_rows(
 
     def relative_path(path: str) -> str:
         if target_prefix and path.startswith(target_prefix):
-            return path[len(target_prefix):]
+            return path[len(target_prefix) :]
         return path
 
     by_parent: dict[str, list[dict[str, object]]] = {}
     directory_paths = {
-        str(item["path"]) for item in directories
-        if str(item["path"]) != normalized_target and in_target(str(item["path"]))
+        str(item["path"]) for item in directories if str(item["path"]) != normalized_target and in_target(str(item["path"]))
     }
 
     for item in files:
@@ -128,33 +133,35 @@ def _workspace_list_rows(
     def add_directory(path: str) -> None:
         display_path = relative_path(path)
         depth = display_path.count("/")
-        rows.append({
-            "kind": "directory",
-            "path": path,
-            "display": f"{'  ' * depth}{display_path}/",
-        })
+        rows.append(
+            {
+                "kind": "directory",
+                "path": path,
+                "display": f"{'  ' * depth}{display_path}/",
+            }
+        )
 
         for item in sorted(by_parent.get(path, []), key=lambda candidate: str(candidate["path"])):
             name = str(item["path"]).rsplit("/", 1)[-1]
-            rows.append({
-                "kind": "file",
-                "path": str(item["path"]),
-                "display": f"{'  ' * (depth + 1)}{name}",
-                "item": item,
-            })
+            rows.append(
+                {
+                    "kind": "file",
+                    "path": str(item["path"]),
+                    "display": f"{'  ' * (depth + 1)}{name}",
+                    "item": item,
+                }
+            )
 
         child_prefix = f"{path}/"
         child_directories = sorted(
-            candidate for candidate in directory_paths
-            if candidate.startswith(child_prefix) and "/" not in candidate[len(child_prefix):]
+            candidate
+            for candidate in directory_paths
+            if candidate.startswith(child_prefix) and "/" not in candidate[len(child_prefix) :]
         )
         for child in child_directories:
             add_directory(child)
 
-    root_directories = sorted(
-        path for path in directory_paths
-        if "/" not in relative_path(path)
-    )
+    root_directories = sorted(path for path in directory_paths if "/" not in relative_path(path))
     for directory in root_directories:
         add_directory(directory)
 
@@ -216,10 +223,30 @@ def parse_workspace_list_command(parts: list[str]) -> tuple[bool, bool, str, str
     return _parse_workspace_list_command(parts)
 
 
-_WORKSPACE_DIFF_USAGE = (
-    "Usage: file diff [-q|--brief|-u|--unified|-y|--side-by-side] "
-    "[--last | <source1> <source2>]"
-)
+def _safe_workspace_alias_path(value: str) -> bool:
+    raw = str(value or "").strip()
+    if not raw or raw.startswith("/") or "\\" in raw or "\x00" in raw:
+        return False
+    parts = raw.split("/")
+    return all(part and part not in {".", ".."} and not part.startswith(".") for part in parts)
+
+
+def resolves_workspace_alias_command(parts: Sequence[str]) -> bool:
+    """Validate browser-compatible workspace aliases before dispatch."""
+    if not parts:
+        return False
+    root = parts[0].lower()
+    if root in {"ls", "ll"}:
+        _long, _recursive, target, usage_error = _parse_workspace_list_command(list(parts))
+        return not usage_error and (not target or _safe_workspace_alias_path(target))
+    if root in {"cat", "rm", "touch"}:
+        return len(parts) == 2 and _safe_workspace_alias_path(parts[1])
+    if root in {"cp", "mv"}:
+        return len(parts) == 3 and all(_safe_workspace_alias_path(part) for part in parts[1:])
+    return False
+
+
+_WORKSPACE_DIFF_USAGE = "Usage: file diff [-q|--brief|-u|--unified|-y|--side-by-side] [--last | <source1> <source2>]"
 
 
 def parse_workspace_diff_command(
@@ -424,10 +451,12 @@ def run_builtin_workspace(
         else:
             rows = _workspace_list_rows(files, directories, recursive=recursive, target=target)
         if not rows:
-            lines.append(output_line(
-                "  No matching workspace files." if target else "  No workspace files yet.",
-                "builtin-note",
-            ))
+            lines.append(
+                output_line(
+                    "  No matching workspace files." if target else "  No workspace files yet.",
+                    "builtin-note",
+                )
+            )
             return lines
 
         if not long:
@@ -465,15 +494,8 @@ def run_builtin_workspace(
         return run_builtin_diff(parts, owner, cfg, tab_id=tab_id)
 
     if subcommand in {"add", "edit", "download"}:
-        expected = (
-            "file add [file]"
-            if subcommand == "add"
-            else f"file {subcommand} <file>"
-        )
-        if (
-            (subcommand == "add" and len(parts) > 3)
-            or (subcommand in {"edit", "download"} and len(parts) != 3)
-        ):
+        expected = "file add [file]" if subcommand == "add" else f"file {subcommand} <file>"
+        if (subcommand == "add" and len(parts) > 3) or (subcommand in {"edit", "download"} and len(parts) != 3):
             return [output_line(f"Usage: {expected}")]
         if subcommand in {"add", "edit"} and not _can_manage_workspace_files(owner, team_role):
             return _workspace_write_denied()
@@ -483,9 +505,7 @@ def run_builtin_workspace(
             return [output_line(f"Usage: file {subcommand} <file>")]
         if subcommand == "download":
             return [output_line("file download requires the browser Files panel — reload the page and try again.")]
-        return [output_line(
-            f"file {subcommand} requires the browser Files panel — reload the page and try again."
-        )]
+        return [output_line(f"file {subcommand} requires the browser Files panel — reload the page and try again.")]
 
     if subcommand in {"rm", "delete"}:
         if len(parts) != 3:
@@ -505,8 +525,7 @@ def run_builtin_workspace(
                 if not matches:
                     return [output_line(f"file: no matches: {parts[2]}")]
                 destination_is_directory = parts[3] == "/" or any(
-                    directory["path"] == parts[3].strip("/")
-                    for directory in list_owner_workspace_directories(owner, cfg)
+                    directory["path"] == parts[3].strip("/") for directory in list_owner_workspace_directories(owner, cfg)
                 )
                 if len(matches) > 1 and not destination_is_directory:
                     return [output_line("file: destination must be an existing folder when moving multiple matches")]
@@ -529,10 +548,12 @@ def run_builtin_workspace(
             copied = copy_owner_workspace_file(owner, parts[2], parts[3], cfg)
         except Exception as exc:
             return _workspace_command_error(exc)
-        return [output_line(
-            f"file: copied {copied.source} to {copied.destination}",
-            "builtin-success",
-        )]
+        return [
+            output_line(
+                f"file: copied {copied.source} to {copied.destination}",
+                "builtin-success",
+            )
+        ]
 
     if subcommand == "touch":
         if len(parts) != 3:
@@ -622,8 +643,460 @@ def run_builtin_workspace_alias(
         return _workspace_write_denied()
     if root in {"cd", "grep", "head", "mkdir", "sort", "tail", "uniq", "wc"}:
         return [output_line(f"{root}: handled in the browser workspace terminal")]
-    return [output_line(
-        "Usage: file [list | show <file> | diff <source1> <source2> | add <file> | edit <file> | "
-        "download <file> | copy <source> <destination> | move <source> <destination> | "
-        "touch <file> | rm <file-or-folder> | help]"
-    )]
+    return [
+        output_line(
+            "Usage: file [list | show <file> | diff <source1> <source2> | add <file> | edit <file> | "
+            "download <file> | copy <source> <destination> | move <source> <destination> | "
+            "touch <file> | rm <file-or-folder> | help]"
+        )
+    ]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "cat": {
+        "root": "cat",
+        "description": "built-in: show a session file",
+        "feature_required": "workspace",
+        "autocomplete": {"argument_limit": 1, "arguments": []},
+    },
+    "cd": {
+        "root": "cd",
+        "description": "built-in: change the current workspace folder",
+        "feature_required": "workspace",
+        "autocomplete": {"argument_limit": 1, "arguments": []},
+    },
+    "cp": {
+        "root": "cp",
+        "description": "built-in: copy a session file",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "argument_limit": 2,
+            "arguments": [
+                {
+                    "value": "<source> <destination>",
+                    "hint_only": True,
+                    "value_type": "workspace_path",
+                    "description": "Source file and destination path",
+                }
+            ],
+        },
+    },
+    "diff": {
+        "root": "diff",
+        "description": "built-in: compare session files or completed run output",
+        "autocomplete": {
+            "flags": [
+                {"value": "--last", "description": "Compare the last two completed runs in this tab"},
+                {"value": "-q", "description": "Only report whether the sources differ"},
+                {"value": "--brief", "description": "Only report whether the sources differ"},
+                {"value": "-u", "description": "Show a unified comparison with - and + lines"},
+                {"value": "--unified", "description": "Show a unified comparison with - and + lines"},
+                {"value": "-y", "description": "Show both sources in side-by-side columns"},
+                {"value": "--side-by-side", "description": "Show both sources in side-by-side columns"},
+            ],
+            "argument_limit": 2,
+            "arguments": [],
+        },
+    },
+    "file": {
+        "root": "file",
+        "description": "built-in: list, view, compare, create, edit, download, copy, move, or remove session files",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "subcommands": [
+                {
+                    "value": "list",
+                    "description": "List current session files",
+                    "takes_value": True,
+                    "insert": "list ",
+                    "value_hint": {"value": "<folder>", "hint_only": True, "description": "Session folder"},
+                },
+                {
+                    "value": "ls",
+                    "description": "List current session files",
+                    "takes_value": True,
+                    "insert": "ls ",
+                    "value_hint": {"value": "<folder>", "hint_only": True, "description": "Session folder"},
+                },
+                {
+                    "value": "show",
+                    "description": "Print a session file in the terminal",
+                    "takes_value": True,
+                    "insert": "show ",
+                    "value_hint": {"value": "<file>", "hint_only": True, "description": "Session file"},
+                },
+                {
+                    "value": "diff",
+                    "description": "Compare files or completed run output",
+                    "takes_value": True,
+                    "insert": "diff ",
+                    "value_hint": {
+                        "value": "<source1> <source2>",
+                        "hint_only": True,
+                        "description": "Files, run:<run-id> sources, or one of each",
+                    },
+                },
+                {
+                    "value": "add",
+                    "description": "Open the Files editor for a new session file",
+                    "takes_value": True,
+                    "insert": "add ",
+                    "value_hint": {"value": "<file>", "hint_only": True, "description": "New session file name"},
+                },
+                {
+                    "value": "add-dir",
+                    "description": "Create a session folder",
+                    "takes_value": True,
+                    "insert": "add-dir ",
+                    "value_hint": {"value": "<folder>", "hint_only": True, "description": "New session folder"},
+                },
+                {
+                    "value": "edit",
+                    "description": "Open the Files editor for an existing session file",
+                    "takes_value": True,
+                    "insert": "edit ",
+                    "value_hint": {"value": "<file>", "hint_only": True, "description": "Session file"},
+                },
+                {
+                    "value": "download",
+                    "description": "Download a session file through the browser",
+                    "takes_value": True,
+                    "insert": "download ",
+                    "value_hint": {"value": "<file>", "hint_only": True, "description": "Session file"},
+                },
+                {
+                    "value": "move",
+                    "description": "Move or rename a session file or folder",
+                    "takes_value": True,
+                    "insert": "move ",
+                    "value_hint": {
+                        "value": "<source> <destination>",
+                        "hint_only": True,
+                        "value_type": "workspace_path",
+                        "description": "Session file or folder path",
+                    },
+                },
+                {
+                    "value": "copy",
+                    "description": "Copy a session file",
+                    "takes_value": True,
+                    "insert": "copy ",
+                    "value_hint": {
+                        "value": "<source> <destination>",
+                        "hint_only": True,
+                        "value_type": "workspace_path",
+                        "description": "Source file and destination path",
+                    },
+                },
+                {
+                    "value": "touch",
+                    "description": "Create an empty session file or update its timestamp",
+                    "takes_value": True,
+                    "insert": "touch ",
+                    "value_hint": {
+                        "value": "<file>",
+                        "hint_only": True,
+                        "value_type": "workspace_path",
+                        "description": "Session file path",
+                    },
+                },
+                {
+                    "value": "rm",
+                    "description": "Remove a session file from this session",
+                    "takes_value": True,
+                    "hidden": True,
+                    "insert": "rm ",
+                    "value_hint": {"value": "<file>", "hint_only": True, "description": "Session file"},
+                },
+                {
+                    "value": "delete",
+                    "description": "Remove a session file from this session",
+                    "takes_value": True,
+                    "insert": "delete ",
+                    "value_hint": {"value": "<file>", "hint_only": True, "description": "Session file"},
+                },
+                {"value": "help", "description": "Show file command usage", "closes": True},
+            ]
+        },
+    },
+    "grep": {
+        "root": "grep",
+        "description": "built-in: filter a session file",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "flags": [
+                {"value": "-i", "description": "Ignore case"},
+                {"value": "-v", "description": "Invert match"},
+                {"value": "-E", "description": "Extended regex"},
+            ],
+            "argument_limit": 2,
+            "arguments": [],
+        },
+    },
+    "head": {
+        "root": "head",
+        "description": "built-in: print the first lines of a session file",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "flags": [
+                {
+                    "value": "-n",
+                    "description": "Line count",
+                    "takes_value": True,
+                    "suggest": [{"value": "10", "description": "Ten lines"}],
+                }
+            ],
+            "argument_limit": 1,
+            "arguments": [],
+        },
+    },
+    "ll": {
+        "root": "ll",
+        "description": "built-in: long-list session files",
+        "feature_required": "workspace",
+        "autocomplete": {"flags": [{"value": "-R", "description": "Recursive listing"}], "argument_limit": 1, "arguments": []},
+    },
+    "ls": {
+        "root": "ls",
+        "description": "built-in: list session files",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "flags": [{"value": "-l", "description": "Long listing"}, {"value": "-R", "description": "Recursive listing"}],
+            "argument_limit": 1,
+            "arguments": [],
+        },
+    },
+    "mkdir": {
+        "root": "mkdir",
+        "description": "built-in: create a session folder",
+        "feature_required": "workspace",
+        "autocomplete": {"argument_limit": 1, "arguments": []},
+    },
+    "mv": {
+        "root": "mv",
+        "description": "built-in: move or rename a session file or folder",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "argument_limit": 2,
+            "arguments": [
+                {
+                    "value": "<source> <destination>",
+                    "hint_only": True,
+                    "value_type": "workspace_path",
+                    "description": "Session file or folder path",
+                }
+            ],
+        },
+    },
+    "rm": {
+        "root": "rm",
+        "description": "built-in: remove a session file after confirmation",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "flags": [
+                {"value": "-r", "description": "Remove folders recursively"},
+                {"value": "-f", "description": "Force-style flag; confirmation is still required"},
+                {"value": "-rf", "description": "Remove folders recursively"},
+            ],
+            "argument_limit": 1,
+            "arguments": [],
+        },
+    },
+    "sort": {
+        "root": "sort",
+        "description": "built-in: sort a session file",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "flags": [
+                {"value": "-r", "description": "Reverse sort"},
+                {"value": "-n", "description": "Numeric sort"},
+                {"value": "-u", "description": "Unique lines"},
+            ],
+            "argument_limit": 1,
+            "arguments": [],
+        },
+    },
+    "tail": {
+        "root": "tail",
+        "description": "built-in: print the last lines of a session file",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "flags": [
+                {
+                    "value": "-n",
+                    "description": "Line count",
+                    "takes_value": True,
+                    "suggest": [{"value": "10", "description": "Ten lines"}],
+                }
+            ],
+            "argument_limit": 1,
+            "arguments": [],
+        },
+    },
+    "touch": {
+        "root": "touch",
+        "description": "built-in: create an empty session file or update its timestamp",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "argument_limit": 1,
+            "arguments": [
+                {"value": "<file>", "hint_only": True, "value_type": "workspace_path", "description": "Session file path"}
+            ],
+        },
+    },
+    "uniq": {
+        "root": "uniq",
+        "description": "built-in: collapse adjacent duplicate lines in a session file",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "flags": [{"value": "-c", "description": "Prefix lines by duplicate count"}],
+            "argument_limit": 1,
+            "arguments": [],
+        },
+    },
+    "wc": {
+        "root": "wc",
+        "description": "built-in: count lines in a session file",
+        "feature_required": "workspace",
+        "autocomplete": {
+            "flags": [
+                {
+                    "value": "-l",
+                    "description": "Count lines",
+                    "takes_value": True,
+                    "value_hint": {"value": "<file>", "hint_only": True, "description": "Session file"},
+                }
+            ]
+        },
+    },
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    def alias_spec(
+        root: str,
+        *,
+        name: str,
+        description: str,
+    ) -> BuiltinCommandSpec:
+        return build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE[root],
+            handler_key=root,
+            handler=lambda command, context: run_builtin_workspace_alias(
+                command,
+                context.session_id,
+                owner_context=context.owner_context,
+                team_role=context.team_role,
+                tab_id=context.tab_id,
+            ),
+            name=name,
+            description=description,
+            execution_owner=BuiltinExecutionOwner.MIXED,
+            browser_owned_subcommands=("*",),
+            match_strategy=BuiltinMatchStrategy.WORKSPACE_ALIAS,
+        )
+
+    return (
+        alias_spec(
+            "cat",
+            name="cat <file>",
+            description="Show a session file.",
+        ),
+        alias_spec(
+            "cp",
+            name="cp <source> <destination>",
+            description="Copy a session file.",
+        ),
+        alias_spec(
+            "cd",
+            name="cd [folder]",
+            description="Change the current workspace folder for this tab.",
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["diff"],
+            handler_key="diff",
+            handler=lambda command, context: run_builtin_diff(
+                split_command_argv(command),
+                context.owner_context,
+                context.effective_cfg,
+                tab_id=context.tab_id,
+            ),
+            name="diff [-q|-u|-y] [--last | <source1> <source2>]",
+            description=("Compare session files, completed run output, or the last two runs in this tab."),
+        ),
+        alias_spec(
+            "grep",
+            name="grep <search> <file>",
+            description="Filter a session file.",
+        ),
+        alias_spec(
+            "head",
+            name="head [-n N] <file>",
+            description="Show the first lines of a session file.",
+        ),
+        alias_spec(
+            "ll",
+            name="ll",
+            description="Long-list session files.",
+        ),
+        alias_spec(
+            "ls",
+            name="ls",
+            description="List session files.",
+        ),
+        alias_spec(
+            "mkdir",
+            name="mkdir <folder>",
+            description="Create a session folder.",
+        ),
+        alias_spec(
+            "mv",
+            name="mv <source> <destination>",
+            description="Move or rename a session file or folder.",
+        ),
+        alias_spec(
+            "rm",
+            name="rm <file>",
+            description="Remove a session file after confirmation.",
+        ),
+        alias_spec(
+            "sort",
+            name="sort [-r|-n|-u] <file>",
+            description="Sort a session file.",
+        ),
+        alias_spec(
+            "tail",
+            name="tail [-n N] <file>",
+            description="Show the last lines of a session file.",
+        ),
+        alias_spec(
+            "touch",
+            name="touch <file>",
+            description="Create an empty session file or refresh its modified time.",
+        ),
+        alias_spec(
+            "uniq",
+            name="uniq [-c] <file>",
+            description="Collapse adjacent duplicate lines in a session file.",
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["file"],
+            handler_key="file",
+            handler=lambda command, context: run_builtin_workspace(
+                command,
+                context.session_id,
+                owner_context=context.owner_context,
+                team_role=context.team_role,
+                tab_id=context.tab_id,
+            ),
+            name="file",
+            description=("List, view, compare, create, edit, download, copy, move, or remove session files."),
+            execution_owner=BuiltinExecutionOwner.MIXED,
+            browser_owned_subcommands=("*",),
+        ),
+        alias_spec(
+            "wc",
+            name="wc -l <file>",
+            description="Count lines in a session file.",
+        ),
+    )

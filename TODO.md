@@ -24,7 +24,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Native ticketing integrations](#native-ticketing-integrations)
   - [Operator-extensible signal and parser rules](#operator-extensible-signal-and-parser-rules)
 - [Architecture](#architecture)
-  - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
   - [Interactive PTY transport future-state](#interactive-pty-transport-future-state)
 
 ---
@@ -219,9 +218,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Plugin-style helper command registry
-- Turn the built-in command layer into a cleaner extension point for future app-native helpers.
 
 ### Interactive PTY transport future-state
 - Revisit whether the current Redis-brokered SSE plus POST input/resize transport should move to WebSockets after real use.

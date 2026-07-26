@@ -1241,15 +1241,21 @@ Synthetic post-filters and output sinks also sit on this run-lifecycle boundary 
 
 `app/conf/commands.yaml` (plus optional `commands.local.yaml` overlays) is the single source of truth for every external-command surface: allow/deny policy, autocomplete grammar, runtime rewrites, workspace flags, `requires_secrets`, and the user-facing reference catalog. `command_catalog_from_registry()` projects each allow-listed entry into a normalized catalog — root, category, description, examples, flags, subcommands, `feature_required`, and an optional `knowledge` block — that feeds the discovery built-ins and the `/commands/catalog` route. `pipe_catalog_from_registry()` projects the `pipe_helpers` section the same way.
 
+App-owned helpers use a separate immutable Python registry because they execute trusted application behavior rather than operator-configured programs. `builtin_providers.py` contains the reviewed provider list; it does not scan directories, load Python paths from configuration, or expose package entry points. Each focused command family returns specifications that keep the handler identity, documented command, root or exact aliases, full autocomplete grammar, feature requirements, catalog details, and browser/server ownership together. Registration rejects duplicate identities and freezes before request handling, so adding a helper changes its focused provider and tests instead of a central dispatcher, catalog, or feature-gate branch.
+
+The resolver checks exact guards before ordinary roots and keeps workspace aliases on their existing two-step path: lookup first validates the alias arguments and safe relative paths, then execution applies workspace, scope, and role checks. Handlers receive one typed request context with direct session, tab, and team values; effective configuration and owner scope are resolved only if a handler asks for them, then memoized for that execution. Browser-owned commands such as `theme`, `config`, and `workflow` are registered for discovery, feature gating, autocomplete, and stale-client fallback messages, but their user-facing execution stays in the browser. `clear` remains server-owned and returns its existing clear event. This ownership model follows [Separate Command Execution, Shared Terminal Completion](DECISIONS.md#separate-command-execution-shared-terminal-completion).
+
+Built-in autocomplete metadata is kept in application code and normalized through the external registry's autocomplete schema. This gives `/autocomplete` one consistent browser contract without making app-owned execution configurable through `commands.yaml`.
+
 The `knowledge` block carries operator guidance only and never affects policy. It has four capped list fields — `notes`, `gotchas`, `safe_defaults`, and `common_flags` — and one scalar field, `artifact_behavior`. The registry loader normalizes every field (strip, dedupe, drop empties, list capped at five items, text capped at 200 characters); overlays replace scalar fields and extend list fields with dedupe. Unknown keys are silently ignored during normalization and surfaced only by the registry lint helper, so a malformed `.local` overlay never hard-fails a load.
 
-The discovery built-ins all read the same projected catalog and exclude entries whose `feature_required` is disabled on the instance:
+Terminal discovery merges the app-owned and external catalog projections and excludes entries whose `feature_required` is disabled on the instance:
 
 - `commands` lists built-ins and allow-listed external roots, then an app-native pipe-helpers section drawn from the `pipe_helpers` projection.
-- `commands info <root> [subcommand]` renders the catalog entry, including the `knowledge` sections, and `--json` collapses the entry to one deterministic, sorted JSON line for browser-terminal copy and debug use.
-- `commands search <term>` ranks catalog matches across root, category, description, example values, and knowledge notes/gotchas, grouped by category.
+- `commands info <root> [subcommand]` renders a built-in or external catalog entry, including available flags, arguments, examples, subcommands, ownership, and `knowledge` sections. `--json` collapses the entry to one deterministic, sorted JSON line for browser-terminal copy and debug use.
+- `commands search <term>` ranks built-in and external matches across root, category, description, example values, and knowledge notes/gotchas, grouped by category.
 
-The command-registry modal and the `| grep` autocomplete (which suggests tokens already visible in the active tab's output) consume the same catalog data, so terminal and browser surfaces stay in parity without re-reading YAML.
+The command-registry modal continues to present operator-configured external tools, while `/autocomplete` merges external and app-owned grammar for the terminal. The `| grep` autocomplete suggests tokens already visible in the active tab's output.
 
 ### Spawn And Stream
 
