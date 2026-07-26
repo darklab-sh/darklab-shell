@@ -11,16 +11,28 @@ from __future__ import annotations
 import random
 import re
 import subprocess
+from collections import defaultdict
+from collections.abc import Callable, Sequence
 
 from services.commands.registry import (
     command_root,
     load_all_faq,
     load_ascii_art,
+    load_builtin_autocomplete_registry,
     load_commands_registry,
     resolve_runtime_command,
     runtime_missing_command_name,
     split_command_argv,
 )
+from services.commands.builtin_registry import (
+    BuiltinCommandRegistry,
+    BuiltinCommandSpec,
+    BuiltinExecutionContext,
+    BuiltinExecutionOwner,
+    BuiltinHandler,
+    BuiltinMatchStrategy,
+)
+from services.commands.features import feature_enabled
 from services.commands.builtins_catalog import (
     _BUILTIN_COMMANDS,
     _DOCUMENTED_BUILTIN_COMMANDS,
@@ -94,8 +106,7 @@ from services.commands.builtins_workspace import (
 )
 from services.commands.builtins_wordlist import run_builtin_wordlist as _run_builtin_wordlist
 from services.commands.wordlists import load_wordlist_catalog
-from services.teams.scope import OwnerContext, owner_context_for_scope
-from config import resolve_effective_cfg
+from services.teams.scope import OwnerContext
 import core.process as process_state
 from core.process import active_runs_for_session
 
@@ -113,36 +124,26 @@ def _sync_builtin_module_hooks() -> None:
     builtins_wordlist.load_wordlist_catalog = load_wordlist_catalog
 
 
-def _workspace_feature_enabled() -> bool:
-    return bool(resolve_effective_cfg().get("workspace_enabled", False))
-
-
-def _tour_feature_enabled() -> bool:
-    return bool(resolve_effective_cfg().get("tour_enabled", True))
-
-
 def _active_documented_builtin_commands() -> list[dict[str, object]]:
-    commands: list[dict[str, object]] = [dict(entry) for entry in _DOCUMENTED_BUILTIN_COMMANDS]
-    if not _workspace_feature_enabled():
-        commands = [
-            entry for entry in commands
-            if str(entry.get("root") or "") not in _WORKSPACE_BUILTIN_ROOTS
-        ]
-    if not _tour_feature_enabled():
-        commands = [
-            entry for entry in commands
-            if str(entry.get("root") or "") != "tour"
-        ]
+    commands: list[dict[str, object]] = []
+    for entry in _DOCUMENTED_BUILTIN_COMMANDS:
+        handler_key = str(entry.get("root") or "").strip()
+        if not handler_key:
+            handler_key = _SPECIAL_BUILTIN_COMMANDS.get(
+                " ".join(str(entry.get("exact") or "").strip().lower().split()),
+                "",
+            )
+        spec = _BUILTIN_REGISTRY.spec_for_key(handler_key)
+        if spec is None:
+            continue
+        if not all(feature_enabled(feature) for feature in spec.feature_required):
+            continue
+        commands.append(dict(entry))
     return commands
 
 
 def _active_builtin_command_roots() -> set[str]:
-    roots = set(_BUILTIN_COMMANDS)
-    if not _workspace_feature_enabled():
-        roots -= _WORKSPACE_BUILTIN_ROOTS
-    if not _tour_feature_enabled():
-        roots.discard("tour")
-    return roots
+    return set(_BUILTIN_REGISTRY.roots())
 
 
 def _split_command(command: str) -> list[str]:
@@ -152,12 +153,8 @@ def _split_command(command: str) -> list[str]:
 
 
 def _resolve_special_builtin_command(command: str) -> str | None:
-    normalized = " ".join(command.strip().lower().split())
-    if normalized in _SPECIAL_BUILTIN_COMMANDS:
-        return _SPECIAL_BUILTIN_COMMANDS[normalized]
-    if _FORK_BOMB_RE.fullmatch(command.strip()):
-        return "fork_bomb"
-    return None
+    resolution = _BUILTIN_REGISTRY.resolve_exact(command)
+    return resolution.handler_key if resolution is not None else None
 
 
 def _safe_workspace_alias_path(value: str) -> bool:
@@ -168,12 +165,12 @@ def _safe_workspace_alias_path(value: str) -> bool:
     return all(part and part not in {".", ".."} and not part.startswith(".") for part in parts)
 
 
-def _resolve_workspace_alias_command(parts: list[str]) -> str | None:
+def _resolve_workspace_alias_command(parts: Sequence[str]) -> str | None:
     if not parts:
         return None
     root = parts[0].lower()
     if root in {"ls", "ll"}:
-        _long, _recursive, target, usage_error = _parse_workspace_list_command(parts)
+        _long, _recursive, target, usage_error = _parse_workspace_list_command(list(parts))
         if usage_error:
             return None
         return root if not target or _safe_workspace_alias_path(target) else None
@@ -185,19 +182,8 @@ def _resolve_workspace_alias_command(parts: list[str]) -> str | None:
 
 
 def resolve_builtin_command(command: str) -> str | None:
-    special = _resolve_special_builtin_command(command)
-    if special is not None:
-        return special
-    parts = _split_command(command)
-    if not parts:
-        return None
-    root = parts[0].lower()
-    active_roots = _active_builtin_command_roots()
-    if root in _WORKSPACE_ALIAS_ROOTS:
-        if root not in active_roots:
-            return None
-        return _resolve_workspace_alias_command(parts)
-    return root if root in active_roots else None
+    resolution = _BUILTIN_REGISTRY.resolve(command)
+    return resolution.handler_key if resolution is not None else None
 
 
 def resolves_exact_special_builtin_command(command: str) -> bool:
@@ -210,19 +196,36 @@ def get_special_command_keys() -> list[str]:
     The JS client uses this list to exempt these commands from the client-side
     shell-operator validation check before they reach the server.
     """
-    return list(_SPECIAL_BUILTIN_COMMANDS.keys())
+    return list(_BUILTIN_REGISTRY.exact_aliases())
 
 
 def get_builtin_command_roots() -> list[str]:
     """Return the command roots routed by the backend built-in command layer."""
-    exact_roots: set[str] = set()
-    for key in _SPECIAL_BUILTIN_COMMANDS:
-        root = command_root(key)
-        if root:
-            if not _workspace_feature_enabled() and root in _WORKSPACE_ALIAS_ROOTS:
-                continue
-            exact_roots.add(root)
-    return sorted(root for root in (_active_builtin_command_roots() | exact_roots) if root)
+    return list(_BUILTIN_REGISTRY.roots(include_exact_alias_roots=True))
+
+
+def get_registered_builtin_command_roots() -> tuple[str, ...]:
+    """Return every configured helper root for feature-independent storage use."""
+    return _BUILTIN_REGISTRY.registered_roots(include_exact_alias_roots=True)
+
+
+def get_builtin_autocomplete_context(cfg=None) -> dict[str, dict[str, object]]:
+    """Return complete app-owned autocomplete metadata from helper specs."""
+    return _BUILTIN_REGISTRY.autocomplete_context(cfg=cfg)
+
+
+def get_builtin_command_catalog(cfg=None) -> list[dict[str, object]]:
+    """Return rich discovery metadata for registered app-owned helpers."""
+    return _BUILTIN_REGISTRY.catalog(cfg=cfg)
+
+
+def get_builtin_command_catalog_entry(
+    root: str,
+    subcommand: str | None = None,
+    cfg=None,
+) -> dict[str, object] | None:
+    """Return one rich app-owned helper catalog entry."""
+    return _BUILTIN_REGISTRY.catalog_entry(root, subcommand, cfg=cfg)
 
 
 def get_current_shortcuts(is_mac: bool | None = None) -> dict:
@@ -264,6 +267,8 @@ def _run_builtin_commands(command: str) -> list[dict[str, object]]:
         _split_command,
         _active_documented_builtin_commands,
         load_commands_registry,
+        get_builtin_command_catalog,
+        get_builtin_command_catalog_entry,
     )
 
 
@@ -292,84 +297,246 @@ def _run_builtin_which(command: str) -> list[dict[str, object]]:
     return builtins_discovery.run_builtin_which(command, _split_command, _active_builtin_command_roots)
 
 
+def _builtin_handlers() -> dict[str, BuiltinHandler]:
+    def workspace_alias(
+        cmd: str,
+        context: BuiltinExecutionContext,
+    ) -> list[dict[str, object]]:
+        return _run_builtin_workspace_alias(
+            cmd,
+            context.session_id,
+            owner_context=context.owner_context,
+            team_role=context.team_role,
+            tab_id=context.tab_id,
+        )
+
+    return {
+        "banner":    lambda cmd, context: _run_builtin_banner(load_ascii_art),
+        "cat":       workspace_alias,
+        "cp":        workspace_alias,
+        "cd":        workspace_alias,
+        "clear":     lambda cmd, context: _run_builtin_clear(),
+        "commands":  lambda cmd, context: _run_builtin_commands(cmd),
+        "config":    lambda cmd, context: _run_builtin_client_side_command("config"),
+        "date":      lambda cmd, context: _run_builtin_date(),
+        "diff":      lambda cmd, context: _run_builtin_diff(
+            _split_command(cmd),
+            context.owner_context,
+            context.effective_cfg,
+            tab_id=context.tab_id,
+        ),
+        "env":       lambda cmd, context: _run_builtin_env(context.session_id),
+        "exit":      lambda cmd, context: _run_builtin_client_side_command("exit"),
+        "faq":       lambda cmd, context: _run_builtin_faq(),
+        "fortune":   lambda cmd, context: _run_builtin_fortune(),
+        "groups":    lambda cmd, context: _run_builtin_groups(),
+        "grep":      workspace_alias,
+        "head":      workspace_alias,
+        "help":      lambda cmd, context: _run_builtin_help(),
+        "history":   lambda cmd, context: _run_builtin_history(context.session_id),
+        "hostname":  lambda cmd, context: _run_builtin_hostname(),
+        "id":        lambda cmd, context: _run_builtin_id(),
+        "ip_addr":   lambda cmd, context: _run_builtin_ip_addr(),
+        "intel":     lambda cmd, context: _run_builtin_intel(
+            cmd,
+            context.session_id,
+            team_id=context.team_id,
+        ),
+        "jobs":      lambda cmd, context: _run_builtin_runs(cmd, context.session_id),
+        "last":      lambda cmd, context: _run_builtin_last(context.session_id),
+        "limits":    lambda cmd, context: _run_builtin_limits(),
+        "ll":        workspace_alias,
+        "ls":        workspace_alias,
+        "mkdir":     workspace_alias,
+        "mv":        workspace_alias,
+        "man":       lambda cmd, context: _run_builtin_man(cmd),
+        "notify":    lambda cmd, context: _run_builtin_notify(
+            cmd,
+            context.session_id,
+            team_id=context.team_id,
+            team_role=context.team_role,
+        ),
+        "providers": lambda cmd, context: _run_builtin_secret(
+            "secret show-consumers",
+            context.session_id,
+            team_id=context.team_id,
+            team_role=context.team_role,
+        ),
+        "ps":        lambda cmd, context: _run_builtin_ps(context.session_id, cmd),
+        "pwd":       lambda cmd, context: _run_builtin_pwd(),
+        "project":   lambda cmd, context: _run_builtin_project(
+            cmd,
+            context.session_id,
+            tab_id=context.tab_id,
+        ),
+        "quit":      lambda cmd, context: _run_builtin_client_side_command("quit"),
+        "poweroff":  lambda cmd, context: _run_builtin_poweroff(),
+        "reboot":    lambda cmd, context: _run_builtin_reboot(),
+        "retention": lambda cmd, context: _run_builtin_retention(),
+        "rm":        workspace_alias,
+        "rm_root":   lambda cmd, context: _run_builtin_rm_root(),
+        "route":     lambda cmd, context: _run_builtin_route(),
+        "runs":      lambda cmd, context: _run_builtin_runs(cmd, context.session_id),
+        "schedule":  lambda cmd, context: _run_builtin_schedule(cmd, context.session_id),
+        "secret":    lambda cmd, context: _run_builtin_secret(
+            cmd,
+            context.session_id,
+            team_id=context.team_id,
+            team_role=context.team_role,
+        ),
+        "session-token": lambda cmd, context: _run_builtin_session_token(
+            cmd,
+            context.session_id,
+        ),
+        "shortcuts": lambda cmd, context: _run_builtin_shortcuts(),
+        "sort":      workspace_alias,
+        "stats":     lambda cmd, context: _run_builtin_stats(context.session_id),
+        "status":    lambda cmd, context: _run_builtin_status(context.session_id),
+        "tail":      workspace_alias,
+        "touch":     workspace_alias,
+        "team":      lambda cmd, context: _run_builtin_team(
+            cmd,
+            context.session_id,
+            team_id=context.team_id,
+            team_role=context.team_role,
+        ),
+        "sudo":      lambda cmd, context: _run_builtin_sudo(cmd),
+        "su_shell":  lambda cmd, context: _run_builtin_su(cmd),
+        "theme":     lambda cmd, context: _run_builtin_client_side_command("theme"),
+        "tour":      lambda cmd, context: _run_builtin_client_side_command("tour"),
+        "tty":       lambda cmd, context: _run_builtin_tty(),
+        "type":      lambda cmd, context: _run_builtin_type(cmd),
+        "uname":     lambda cmd, context: _run_builtin_uname(cmd, _split_command),
+        "uptime":    lambda cmd, context: _run_builtin_uptime(),
+        "uniq":      workspace_alias,
+        "var":       lambda cmd, context: _run_builtin_var(cmd, context.session_id),
+        "version":   lambda cmd, context: _run_builtin_version(),
+        "watch":     lambda cmd, context: _run_builtin_watch(cmd, context.session_id),
+        "file":      lambda cmd, context: _run_builtin_workspace(
+            cmd,
+            context.session_id,
+            owner_context=context.owner_context,
+            team_role=context.team_role,
+            tab_id=context.tab_id,
+        ),
+        "wc":        workspace_alias,
+        "which":     lambda cmd, context: _run_builtin_which(cmd),
+        "who":       lambda cmd, context: _run_builtin_who(context.session_id),
+        "whoami":    lambda cmd, context: _run_builtin_whoami(),
+        "wordlist":  lambda cmd, context: _run_builtin_wordlist(cmd),
+        "workflow":  lambda cmd, context: _run_builtin_client_side_command("workflow"),
+        "xyzzy":     lambda cmd, context: _run_builtin_xyzzy(),
+        "coffee":    lambda cmd, context: _run_builtin_coffee(),
+        "fork_bomb": lambda cmd, context: _run_builtin_fork_bomb(),
+        "df":        lambda cmd, context: _run_builtin_df(cmd),
+        "free":      lambda cmd, context: _run_builtin_free(cmd),
+    }
+
+
+def _builtin_execution_owner(handler_key: str) -> tuple[
+    BuiltinExecutionOwner,
+    tuple[str, ...],
+    bool,
+]:
+    if handler_key in {"config", "exit", "quit", "theme", "tour", "workflow"}:
+        return BuiltinExecutionOwner.BROWSER, (), True
+    if handler_key == "secret":
+        return BuiltinExecutionOwner.MIXED, ("set",), False
+    if handler_key == "session-token":
+        return BuiltinExecutionOwner.MIXED, ("*",), False
+    if handler_key in _WORKSPACE_BUILTIN_ROOTS:
+        return BuiltinExecutionOwner.MIXED, ("*",), False
+    return BuiltinExecutionOwner.SERVER, (), False
+
+
+def _build_builtin_registry() -> BuiltinCommandRegistry:
+    registry = BuiltinCommandRegistry(
+        workspace_alias_validator=lambda parts: _resolve_workspace_alias_command(parts) is not None,
+        fork_bomb_matcher=lambda command: _FORK_BOMB_RE.fullmatch(command.strip()) is not None,
+    )
+    documented_by_root = {
+        str(entry.get("root") or "").strip(): entry
+        for entry in _DOCUMENTED_BUILTIN_COMMANDS
+        if entry.get("root")
+    }
+    documented_by_exact = {
+        " ".join(str(entry.get("exact") or "").strip().lower().split()): entry
+        for entry in _DOCUMENTED_BUILTIN_COMMANDS
+        if entry.get("exact")
+    }
+    autocomplete_entries = {
+        str(entry.get("root") or "").strip().lower(): entry
+        for entry in load_builtin_autocomplete_registry().get("commands", [])
+        if isinstance(entry, dict) and entry.get("root")
+    }
+    aliases_by_handler: defaultdict[str, list[str]] = defaultdict(list)
+    for alias, handler_key in _SPECIAL_BUILTIN_COMMANDS.items():
+        aliases_by_handler[handler_key].append(alias)
+
+    for handler_key, handler in _builtin_handlers().items():
+        documented = documented_by_root.get(handler_key)
+        if documented is None:
+            documented = next(
+                (
+                    documented_by_exact[alias]
+                    for alias in aliases_by_handler.get(handler_key, [])
+                    if alias in documented_by_exact
+                ),
+                None,
+            )
+        execution_owner, browser_subcommands, fallback_stub = _builtin_execution_owner(
+            handler_key
+        )
+        match_strategy = BuiltinMatchStrategy.ROOT
+        if handler_key in _WORKSPACE_ALIAS_ROOTS:
+            match_strategy = BuiltinMatchStrategy.WORKSPACE_ALIAS
+        elif handler_key == "fork_bomb":
+            match_strategy = BuiltinMatchStrategy.FORK_BOMB
+        autocomplete_root = "ip" if handler_key == "ip_addr" else (
+            handler_key if handler_key in autocomplete_entries else ""
+        )
+        raw_autocomplete = autocomplete_entries.get(
+            autocomplete_root,
+            {},
+        ).get("autocomplete")
+        autocomplete = raw_autocomplete if isinstance(raw_autocomplete, dict) else {}
+        registry.register(BuiltinCommandSpec(
+            handler_key=handler_key,
+            handler=handler,
+            name=str(documented.get("name") or handler_key) if documented else handler_key,
+            description=str(documented.get("description") or "") if documented else "",
+            root=handler_key if handler_key in _BUILTIN_COMMANDS else "",
+            autocomplete_root=autocomplete_root,
+            autocomplete_description=str(
+                autocomplete_entries.get(autocomplete_root, {}).get("description") or ""
+            ),
+            exact_aliases=tuple(aliases_by_handler.get(handler_key, [])),
+            feature_required=("workspace",) if handler_key in _WORKSPACE_BUILTIN_ROOTS else (
+                ("tour",) if handler_key == "tour" else ()
+            ),
+            execution_owner=execution_owner,
+            browser_owned_subcommands=browser_subcommands,
+            browser_fallback_stub=fallback_stub,
+            match_strategy=match_strategy,
+            autocomplete=autocomplete,
+            user_facing=documented is not None,
+        ))
+    return registry.freeze()
+
+
+_BUILTIN_REGISTRY = _build_builtin_registry()
+
+
+def _legacy_builtin_handler(spec: BuiltinCommandSpec) -> Callable[[str, str], object]:
+    return lambda command, session_id: spec.handler(
+        command,
+        BuiltinExecutionContext(session_id=session_id),
+    )
+
+
 _BUILTIN_COMMAND_DISPATCH = {
-    "banner":    lambda cmd, sid: _run_builtin_banner(load_ascii_art),
-    "cat":       lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "cp":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "cd":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "clear":     lambda cmd, sid: _run_builtin_clear(),
-    "commands":  lambda cmd, sid: _run_builtin_commands(cmd),
-    "config":    lambda cmd, sid: _run_builtin_client_side_command("config"),
-    "date":      lambda cmd, sid: _run_builtin_date(),
-    "diff":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "env":       lambda cmd, sid: _run_builtin_env(sid),
-    "exit":      lambda cmd, sid: _run_builtin_client_side_command("exit"),
-    "faq":       lambda cmd, sid: _run_builtin_faq(),
-    "fortune":   lambda cmd, sid: _run_builtin_fortune(),
-    "groups":    lambda cmd, sid: _run_builtin_groups(),
-    "grep":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "head":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "help":      lambda cmd, sid: _run_builtin_help(),
-    "history":   lambda cmd, sid: _run_builtin_history(sid),
-    "hostname":  lambda cmd, sid: _run_builtin_hostname(),
-    "id":        lambda cmd, sid: _run_builtin_id(),
-    "ip_addr":   lambda cmd, sid: _run_builtin_ip_addr(),
-    "intel":     lambda cmd, sid: _run_builtin_intel(cmd, sid),
-    "jobs":      lambda cmd, sid: _run_builtin_runs(cmd, sid),
-    "last":      lambda cmd, sid: _run_builtin_last(sid),
-    "limits":    lambda cmd, sid: _run_builtin_limits(),
-    "ll":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "ls":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "mkdir":     lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "mv":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "man":       lambda cmd, sid: _run_builtin_man(cmd),
-    "notify":    lambda cmd, sid: _run_builtin_notify(cmd, sid),
-    "providers": lambda cmd, sid: _run_builtin_secret("secret show-consumers", sid),
-    "ps":        lambda cmd, sid: _run_builtin_ps(sid, cmd),
-    "pwd":       lambda cmd, sid: _run_builtin_pwd(),
-    "project":   lambda cmd, sid: _run_builtin_project(cmd, sid),
-    "quit":      lambda cmd, sid: _run_builtin_client_side_command("quit"),
-    "poweroff":  lambda cmd, sid: _run_builtin_poweroff(),
-    "reboot":    lambda cmd, sid: _run_builtin_reboot(),
-    "retention": lambda cmd, sid: _run_builtin_retention(),
-    "rm":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "rm_root":   lambda cmd, sid: _run_builtin_rm_root(),
-    "route":     lambda cmd, sid: _run_builtin_route(),
-    "runs":      lambda cmd, sid: _run_builtin_runs(cmd, sid),
-    "schedule":  lambda cmd, sid: _run_builtin_schedule(cmd, sid),
-    "secret":    lambda cmd, sid: _run_builtin_secret(cmd, sid),
-    "session-token": lambda cmd, sid: _run_builtin_session_token(cmd, sid),
-    "shortcuts": lambda cmd, sid: _run_builtin_shortcuts(),
-    "sort":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "stats":     lambda cmd, sid: _run_builtin_stats(sid),
-    "status":    lambda cmd, sid: _run_builtin_status(sid),
-    "tail":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "touch":     lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "team":      lambda cmd, sid: _run_builtin_team(cmd, sid),
-    "sudo":      lambda cmd, sid: _run_builtin_sudo(cmd),
-    "su_shell":  lambda cmd, sid: _run_builtin_su(cmd),
-    "theme":     lambda cmd, sid: _run_builtin_client_side_command("theme"),
-    "tour":      lambda cmd, sid: _run_builtin_client_side_command("tour"),
-    "tty":       lambda cmd, sid: _run_builtin_tty(),
-    "type":      lambda cmd, sid: _run_builtin_type(cmd),
-    "uname":     lambda cmd, sid: _run_builtin_uname(cmd, _split_command),
-    "uptime":    lambda cmd, sid: _run_builtin_uptime(),
-    "uniq":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "var":       lambda cmd, sid: _run_builtin_var(cmd, sid),
-    "version":   lambda cmd, sid: _run_builtin_version(),
-    "watch":     lambda cmd, sid: _run_builtin_watch(cmd, sid),
-    "file":      lambda cmd, sid: _run_builtin_workspace(cmd, sid),
-    "wc":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
-    "which":     lambda cmd, sid: _run_builtin_which(cmd),
-    "who":       lambda cmd, sid: _run_builtin_who(sid),
-    "whoami":    lambda cmd, sid: _run_builtin_whoami(),
-    "wordlist":  lambda cmd, sid: _run_builtin_wordlist(cmd),
-    "workflow":  lambda cmd, sid: _run_builtin_client_side_command("workflow"),
-    "xyzzy":     lambda cmd, sid: _run_builtin_xyzzy(),
-    "coffee":    lambda cmd, sid: _run_builtin_coffee(),
-    "fork_bomb": lambda cmd, sid: _run_builtin_fork_bomb(),
-    "df":        lambda cmd, sid: _run_builtin_df(cmd),
-    "free":      lambda cmd, sid: _run_builtin_free(cmd),
+    spec.handler_key: _legacy_builtin_handler(spec)
+    for spec in _BUILTIN_REGISTRY.specs()
 }
 
 
@@ -382,62 +549,16 @@ def execute_builtin_command(
     team_role: str = "",
     owner_context: OwnerContext | None = None,
 ) -> tuple[list[dict[str, object]], int]:
-    # Built-in commands still return the same [{text, class}, ...], exit_code shape
-    # as real runs so the frontend path is identical.
+    # Built-in commands still return the same line-event plus exit-code shape as
+    # real runs so the frontend path is identical.
     _sync_builtin_module_hooks()
-    root = resolve_builtin_command(command)
-    handler = _BUILTIN_COMMAND_DISPATCH.get(root) if root is not None else None
-    if handler is None:
-        return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
-    if root == "diff":
-        diff_owner = owner_context
-        if diff_owner is None:
-            diff_owner = owner_context_for_scope(session_id, team_id=team_id)
-        return _run_builtin_diff(
-            _split_command(command),
-            diff_owner,
-            resolve_effective_cfg(),
+    return _BUILTIN_REGISTRY.execute(
+        command,
+        BuiltinExecutionContext(
+            session_id=session_id,
             tab_id=tab_id,
-        ), 0
-    if root in _WORKSPACE_BUILTIN_ROOTS:
-        workspace_owner = owner_context
-        if workspace_owner is None:
-            workspace_owner = owner_context_for_scope(session_id, team_id=team_id)
-        if root == "file":
-            result = _run_builtin_workspace(
-                command,
-                session_id,
-                owner_context=workspace_owner,
-                team_role=team_role,
-                tab_id=tab_id,
-            )
-        else:
-            result = _run_builtin_workspace_alias(
-                command,
-                session_id,
-                owner_context=workspace_owner,
-                team_role=team_role,
-                tab_id=tab_id,
-            )
-        return result, 0
-    if root == "project":
-        result = _run_builtin_project(command, session_id, tab_id=tab_id)
-        return result, 0
-    if root == "secret":
-        result = _run_builtin_secret(command, session_id, team_id=team_id, team_role=team_role)
-        return result, 0
-    if root == "providers":
-        result = _run_builtin_secret("secret show-consumers", session_id, team_id=team_id, team_role=team_role)
-        return result, 0
-    if root == "intel":
-        return _run_builtin_intel(command, session_id, team_id=team_id)
-    if root == "team":
-        result = _run_builtin_team(command, session_id, team_id=team_id, team_role=team_role)
-        return result, 0
-    if root == "notify":
-        result = _run_builtin_notify(command, session_id, team_id=team_id, team_role=team_role)
-        return result, 0
-    result = handler(command, session_id)
-    if isinstance(result, tuple):
-        return result
-    return result, 0
+            team_id=team_id,
+            team_role=team_role,
+            supplied_owner_context=owner_context,
+        ),
+    )

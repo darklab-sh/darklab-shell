@@ -11,6 +11,8 @@ import tempfile
 import json
 import uuid
 import unittest.mock as mock
+from typing import cast
+import pytest
 
 import app as shell_app_module
 from conftest import build_test_config
@@ -19,18 +21,29 @@ from blueprints.run import KILL_BIN, SUDO_BIN
 from core.helpers import get_session_id
 import services.commands.registry as commands
 from services.commands.builtins import (
+    _BUILTIN_REGISTRY,
     _DOCUMENTED_BUILTIN_COMMANDS,
     _BUILTIN_COMMAND_DISPATCH,
     _SPECIAL_BUILTIN_COMMANDS,
+    get_builtin_autocomplete_context,
+    get_builtin_command_catalog,
     _run_builtin_commands,
     execute_builtin_command,
     resolve_builtin_command,
+)
+from services.commands.builtin_registry import (
+    BuiltinCommandRegistry,
+    BuiltinCommandSpec,
+    BuiltinExecutionContext,
+    BuiltinExecutionOwner,
+    BuiltinMatchStrategy,
 )
 from services.commands.registry import (
     load_welcome,
     is_command_allowed,
     validate_command,
 )
+from services.teams.scope import OwnerContext
 
 
 _COMMAND_VALIDATION_HELPERS = None
@@ -1010,6 +1023,263 @@ class TestIsCommandAllowedEdges:
         assert "Session file targets.txt contains restricted IP/CIDR value: 10.9.8.7" in result.reason
 
 
+class TestBuiltinCommandRegistry:
+    @staticmethod
+    def _handler(
+        command: str,
+        context: BuiltinExecutionContext,
+    ) -> list[dict[str, object]]:
+        return [{"type": "output", "text": f"{command}:{context.session_id}"}]
+
+    def test_rejects_duplicate_keys_roots_exact_aliases_and_matchers(self):
+        registry = BuiltinCommandRegistry(fork_bomb_matcher=lambda command: True)
+        registry.register(BuiltinCommandSpec(
+            handler_key="alpha",
+            root="alpha",
+            exact_aliases=("alpha now",),
+            handler=self._handler,
+        ))
+
+        with pytest.raises(ValueError, match="handler key"):
+            registry.register(BuiltinCommandSpec(
+                handler_key="alpha",
+                root="other",
+                handler=self._handler,
+            ))
+        with pytest.raises(ValueError, match="root"):
+            registry.register(BuiltinCommandSpec(
+                handler_key="other",
+                root="alpha",
+                handler=self._handler,
+            ))
+        with pytest.raises(ValueError, match="exact alias"):
+            registry.register(BuiltinCommandSpec(
+                handler_key="exact",
+                root="exact",
+                exact_aliases=("alpha now",),
+                handler=self._handler,
+            ))
+
+        registry.register(BuiltinCommandSpec(
+            handler_key="fork-one",
+            handler=self._handler,
+            match_strategy=BuiltinMatchStrategy.FORK_BOMB,
+        ))
+        with pytest.raises(ValueError, match="fork-bomb matcher"):
+            registry.register(BuiltinCommandSpec(
+                handler_key="fork-two",
+                handler=self._handler,
+                match_strategy=BuiltinMatchStrategy.FORK_BOMB,
+            ))
+
+    def test_freeze_blocks_registration_and_spec_metadata_is_immutable(self):
+        spec = BuiltinCommandSpec(
+            handler_key="alpha",
+            root="alpha",
+            handler=self._handler,
+            autocomplete={"flags": [{"value": "--safe"}]},
+        )
+        registry = BuiltinCommandRegistry()
+        registry.register(spec)
+        registry.freeze()
+
+        assert registry.frozen
+        with pytest.raises(RuntimeError, match="frozen"):
+            registry.register(BuiltinCommandSpec(
+                handler_key="beta",
+                root="beta",
+                handler=self._handler,
+            ))
+        with pytest.raises(TypeError):
+            cast(dict[str, object], spec.autocomplete)["flags"] = ()
+
+    def test_exact_root_and_reviewed_shape_resolution(self):
+        registry = BuiltinCommandRegistry(
+            workspace_alias_validator=lambda parts: (
+                len(parts) == 2 and not parts[1].startswith("/")
+            ),
+            fork_bomb_matcher=lambda command: command == ":(){:|:&};:",
+        )
+        registry.register(BuiltinCommandSpec(
+            handler_key="sudo",
+            root="sudo",
+            handler=self._handler,
+        ))
+        registry.register(BuiltinCommandSpec(
+            handler_key="su-shell",
+            exact_aliases=("sudo su",),
+            handler=self._handler,
+        ))
+        registry.register(BuiltinCommandSpec(
+            handler_key="cat",
+            root="cat",
+            handler=self._handler,
+            match_strategy=BuiltinMatchStrategy.WORKSPACE_ALIAS,
+        ))
+        registry.register(BuiltinCommandSpec(
+            handler_key="fork",
+            handler=self._handler,
+            match_strategy=BuiltinMatchStrategy.FORK_BOMB,
+        ))
+        registry.freeze()
+
+        sudo = registry.resolve("sudo echo ok")
+        su_shell = registry.resolve(" sudo   su ")
+        cat = registry.resolve("cat notes.txt")
+        fork = registry.resolve(":(){:|:&};:")
+
+        assert sudo is not None and sudo.handler_key == "sudo"
+        assert su_shell is not None and su_shell.handler_key == "su-shell"
+        assert cat is not None and cat.handler_key == "cat"
+        assert registry.resolve("cat /etc/passwd") is None
+        assert fork is not None and fork.handler_key == "fork"
+
+    def test_context_derivations_are_lazy_and_memoized(self):
+        calls = {"cfg": 0, "owner": 0}
+        owner = OwnerContext(scope="team", owner_id="team-one")
+
+        def resolve_cfg():
+            calls["cfg"] += 1
+            return {"workspace_enabled": True}
+
+        def resolve_owner(session_id, *, team_id=""):
+            calls["owner"] += 1
+            assert session_id == "session-one"
+            assert team_id == "team-one"
+            return owner
+
+        context = BuiltinExecutionContext(
+            session_id="session-one",
+            team_id="team-one",
+            config_resolver=resolve_cfg,
+            owner_context_resolver=resolve_owner,
+        )
+
+        assert calls == {"cfg": 0, "owner": 0}
+        assert context.effective_cfg is context.effective_cfg
+        assert context.owner_context is owner
+        assert context.owner_context is owner
+        assert calls == {"cfg": 1, "owner": 1}
+
+    def test_ungated_execution_does_not_construct_lazy_context(self):
+        calls = {"cfg": 0, "owner": 0}
+        registry = BuiltinCommandRegistry()
+        registry.register(BuiltinCommandSpec(
+            handler_key="alpha",
+            root="alpha",
+            handler=self._handler,
+        ))
+        registry.freeze()
+        owner = OwnerContext(scope="personal", owner_id="session-one")
+
+        def resolve_owner(*args, **kwargs):
+            calls["owner"] += 1
+            return owner
+
+        context = BuiltinExecutionContext(
+            session_id="session-one",
+            config_resolver=lambda: calls.__setitem__("cfg", calls["cfg"] + 1) or {},
+            owner_context_resolver=resolve_owner,
+        )
+
+        events, exit_code = registry.execute("alpha", context)
+
+        assert exit_code == 0
+        assert events[0]["text"] == "alpha:session-one"
+        assert calls == {"cfg": 0, "owner": 0}
+
+    def test_feature_gates_and_nonzero_results_use_the_shared_contract(self):
+        registry = BuiltinCommandRegistry()
+        registry.register(BuiltinCommandSpec(
+            handler_key="workspace",
+            root="workspace",
+            feature_required=("workspace",),
+            handler=lambda _command, _context: (
+                [{"type": "output", "text": "denied"}],
+                7,
+            ),
+        ))
+        registry.freeze()
+
+        assert registry.resolve(
+            "workspace",
+            cfg={"workspace_enabled": False},
+        ) is None
+        events, exit_code = registry.execute(
+            "workspace",
+            BuiltinExecutionContext(
+                session_id="session-one",
+                config_resolver=lambda: {"workspace_enabled": True},
+            ),
+        )
+
+        assert events == [{"type": "output", "text": "denied"}]
+        assert exit_code == 7
+
+    def test_browser_owned_commands_require_explicit_fallback_stubs(self):
+        with pytest.raises(ValueError, match="fallback stub"):
+            BuiltinCommandSpec(
+                handler_key="theme",
+                root="theme",
+                handler=self._handler,
+                execution_owner=BuiltinExecutionOwner.BROWSER,
+            )
+
+        spec = BuiltinCommandSpec(
+            handler_key="theme",
+            root="theme",
+            handler=self._handler,
+            execution_owner=BuiltinExecutionOwner.BROWSER,
+            browser_fallback_stub=True,
+        )
+        assert spec.execution_owner is BuiltinExecutionOwner.BROWSER
+
+    def test_registered_catalog_autocomplete_and_aliases_match_legacy_sources(self):
+        cfg = {"workspace_enabled": True, "tour_enabled": True}
+        legacy_autocomplete = commands.autocomplete_context_from_commands_registry(
+            commands.load_builtin_autocomplete_registry(),
+            cfg=cfg,
+        )
+
+        assert get_builtin_autocomplete_context(cfg) == legacy_autocomplete
+        assert set(_BUILTIN_REGISTRY.exact_aliases()) == set(_SPECIAL_BUILTIN_COMMANDS)
+        catalog = get_builtin_command_catalog(cfg)
+        assert {
+            str(entry.get("root") or "")
+            for entry in catalog
+        } == {
+            spec.root or spec.autocomplete_root or spec.handler_key
+            for spec in _BUILTIN_REGISTRY.specs()
+            if spec.user_facing
+        }
+        ownership = {
+            str(entry["root"]): str(entry["execution_owner"])
+            for entry in catalog
+        }
+        assert ownership["clear"] == "server"
+        assert ownership["theme"] == "browser"
+        assert ownership["file"] == "mixed"
+
+    def test_exact_alias_roots_follow_the_registered_root_feature_gate(self):
+        cfg = {"workspace_enabled": False, "tour_enabled": True}
+
+        assert "rm" not in _BUILTIN_REGISTRY.roots(
+            cfg=cfg,
+            include_exact_alias_roots=True,
+        )
+        exact = _BUILTIN_REGISTRY.resolve("rm -rf /", cfg=cfg)
+        assert exact is not None and exact.handler_key == "rm_root"
+
+    def test_commands_info_returns_rich_builtin_details(self):
+        lines = _run_builtin_commands("commands info project --json")
+        entry = json.loads(str(lines[0]["text"]))
+
+        assert entry["root"] == "project"
+        assert entry["execution_owner"] == "server"
+        assert any(subcommand["name"] == "create" for subcommand in entry["subcommands"])
+        assert entry["arguments"][0]["value"] == "list"
+
+
 class TestBuiltinCommandResolution:
     def test_workspace_builtin_reads_team_files_and_denies_viewer_writes(self, tmp_path):
         cfg = {
@@ -1448,7 +1718,7 @@ class TestCommandsSearch:
                 lines = _run_builtin_commands("commands search workspace")
         text = self._text(lines)
         assert "workspace-tool" not in text
-        assert "no matches" in text
+        assert "project" in text
 
     def test_feature_required_included_when_enabled(self):
         with mock.patch("services.commands.registry.load_commands_registry", return_value=self._REGISTRY):

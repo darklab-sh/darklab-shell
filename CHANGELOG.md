@@ -15,6 +15,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Built-in terminal commands now use an immutable registry for resolution, execution, autocomplete, and rich discovery.**
+  - **Before:** app-owned helpers depended on separate resolver, dispatch, feature-gate, catalog, and autocomplete sources, while `commands info` and `commands search` could only describe external tools.
+  - **After:** one frozen runtime registry rejects duplicate command identities, preserves reviewed exact and workspace-alias matching, records browser/server ownership, and passes handlers a cheap typed context with lazy configuration and owner-scope lookups. Built-in autocomplete now comes from app-owned Python metadata normalized through the same grammar as external commands, and terminal info/search results include built-ins with structured flags, arguments, examples, and subcommands.
+  - **Tests:** focused registry coverage pins duplicate rejection, immutable metadata, feature gates, lazy memoization, exact/root/safe workspace resolution, ownership, nonzero exits, complete autocomplete/catalog parity, built-in JSON details, and workspace-disabled root exposure.
+
 - **Terminal commands now share one completion lifecycle without changing where they execute.**
   - **Before:** browser-owned commands relied on a pipe wrapper that temporarily replaced output, status, recents, and persistence helpers; workflows completed through a separate direct path; and brokered commands repeated similar logic in the SSE exit handler.
   - **After:** browser-owned handlers return normalized output and requested follow-up work, while server-owned commands keep streaming through `/runs`. One exactly-once coordinator now settles transcript output, tab and HUD status, eligible recents, notifications, refreshes, and `/run/client` persistence. `/run/client` returns the saved run summary, and successful browser-owned recents use that response's command instead of a separate optimistic copy. Prompt history remains available at submit time after client checks, while recents remain completion-time state. Server-run recents use the masked command instead of retaining sensitive raw arguments, and queued legacy workflows leave status ownership with the command they launch instead of briefly reporting success before it runs.

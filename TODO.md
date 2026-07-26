@@ -221,7 +221,24 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ## Architecture
 
 ### Plugin-style helper command registry
-- Turn the built-in command layer into a cleaner extension point for future app-native helpers.
+
+Turn the built-in command layer into a cleaner extension point for future app-native helpers. Adding a helper should mean defining one command specification and its handler instead of updating separate catalog, resolver, dispatch, feature-gate, and context branches. This is an internal Python extension contract, not a way to load arbitrary operator code or executable plugins from configuration.
+
+- [ ] Finish distributing command registration:
+  - Register app-owned modules from a reviewed, explicit module list at application startup. Do not scan directories, import Python paths from configuration, or expose third-party package entry points.
+  - Move the documented catalog, Python-backed flags/subcommands/arguments grammar, special aliases, ownership, and handlers into command specifications beside each focused command family.
+  - Keep related command families in their current focused modules; the registry should remove central wiring, not combine handlers back into one large file.
+  - Remove the legacy catalog and dispatch tables once every helper is registered and all compatibility callers read through the new registry.
+- [ ] Finish migrating registry consumers:
+  - Drive `help`, synthetic `man`, `type`, `which`, and frontend catalog metadata directly from registry specifications.
+  - Keep run-kind classification, history statistics, scheduler dispatch, workflow execution, brokered `/runs` startup, and direct helper execution on the same resolver and executor.
+  - Preserve workspace and tour feature gating, team-role enforcement, owner-scope resolution, variable expansion order, and the boundary between app-native helpers and YAML-backed external commands.
+- [ ] Complete migration regression coverage:
+  - Add a contract test proving every documented helper resolves to exactly one handler and every registered user-facing helper appears in discovery, rich command details, search, and autocomplete.
+  - Preserve representative direct, scheduled, workflow, workspace, team-scoped, and special-command execution tests while migrating command families.
+  - Compare the full registered command roots and exact aliases with the pre-migration set so the refactor cannot silently add, remove, or reclassify commands.
+  - Confirm an example helper can be added in one focused module plus tests without editing the central registry implementation or executor.
+- [ ] When the migration is complete, remove this item and update `ARCHITECTURE.md`, contributor and test documentation, and `CHANGELOG.md`. Keep `README.md` and `FEATURES.md` focused on user-visible behavior unless the registry changes what users can do.
 
 ### Interactive PTY transport future-state
 - Revisit whether the current Redis-brokered SSE plus POST input/resize transport should move to WebSockets after real use.

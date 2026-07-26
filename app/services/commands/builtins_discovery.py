@@ -106,14 +106,23 @@ _KNOWLEDGE_SECTION_ORDER: tuple[tuple[str, str], ...] = (
 )
 
 
-def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, object]]:
+def _run_builtin_commands_info(
+    parts: list[str],
+    builtin_catalog_entry: Callable[[str, str | None], dict[str, object] | None] | None = None,
+) -> list[dict[str, object]]:
     json_output = "--json" in {p.lower() for p in parts[2:]}
     non_flag_parts = [p for p in parts[2:] if p.lower() != "--json"]
     if len(non_flag_parts) not in {1, 2}:
         return [_output_line("Usage: commands info <command> [subcommand] [--json]")]
     root = non_flag_parts[0].lower()
     subcommand = non_flag_parts[1].lower() if len(non_flag_parts) == 2 else None
-    entry = command_catalog_entry(root, subcommand)
+    entry = (
+        builtin_catalog_entry(root, subcommand)
+        if builtin_catalog_entry is not None
+        else None
+    )
+    if entry is None:
+        entry = command_catalog_entry(root, subcommand)
     if not entry or not is_feature_required_enabled(entry.get("feature_required")):
         target = f"{root} {subcommand}" if subcommand else root
         return [_output_line(f"commands: no catalog entry for {target}")]
@@ -241,12 +250,16 @@ def _catalog_search_tier(term: str, entry: dict[str, object]) -> int | None:
 
 def _run_builtin_commands_search(
     parts: list[str],
+    builtin_catalog: Callable[[], list[dict[str, object]]] | None = None,
 ) -> list[dict[str, object]]:
     if len(parts) < 3 or not parts[2].strip():
         return [_output_line("Usage: commands search <term>")]
 
     term = " ".join(parts[2:]).strip().lower()
-    catalog = command_catalog_from_registry()
+    catalog = [
+        *(builtin_catalog() if builtin_catalog is not None else []),
+        *command_catalog_from_registry(),
+    ]
 
     ranked: list[tuple[int, str, dict[str, object]]] = []
     for entry in catalog:
@@ -292,12 +305,14 @@ def run_builtin_commands(
     split_command: Callable[[str], list[str]],
     active_documented_builtin_commands: Callable[[], list[dict[str, object]]],
     load_registry: Callable[[], dict] = load_commands_registry,
+    builtin_catalog: Callable[[], list[dict[str, object]]] | None = None,
+    builtin_catalog_entry: Callable[[str, str | None], dict[str, object] | None] | None = None,
 ) -> list[dict[str, object]]:
     parts = split_command(command)
     if len(parts) > 1 and parts[1].lower() == "info":
-        return _run_builtin_commands_info(parts)
+        return _run_builtin_commands_info(parts, builtin_catalog_entry)
     if len(parts) > 1 and parts[1].lower() == "search":
-        return _run_builtin_commands_search(parts)
+        return _run_builtin_commands_search(parts, builtin_catalog)
 
     filters = {part.lower() for part in parts[1:]}
     valid_filters = {"--built-in", "--external"}
