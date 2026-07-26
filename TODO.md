@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Validate multi-platform release publication](#validate-multi-platform-release-publication)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
@@ -29,13 +28,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ---
 
 ## Open TODOs
-
-### Validate multi-platform release publication
-
-The dual-platform publication path is implemented. Complete these live checks before shipping the first release that claims native Linux ARM64 support:
-
-- [ ] Complete three consecutive protected release-candidate pipelines in dual mode without manual repair. Each pipeline must build both children natively, pass both smoke and vulnerability lanes, publish one two-platform GitLab index, copy the identical index to Docker Hub, sign the index and both children, and produce matching evidence and payload contracts.
-- [ ] On native AMD64 and ARM64 hosts, validate a clean production install, upgrade, status check, backup, restore, bundled-tool verification, and Postgres-backed startup from the same canonical tag. Confirm an unsupported host architecture fails before startup with a clear error.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 
