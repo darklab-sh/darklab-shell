@@ -41,6 +41,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **The shared AMD64 Docker cache now survives SELinux-hosted checkouts.**
+  - **Root cause:** BuildKit included checkout metadata in `COPY` cache keys, so Fedora's `security.selinux` labels changed the first source-backed layer on `baku` and forced every later Go tool stage to rebuild despite a successful registry-cache import.
+  - **Fix:** scheduled Docker cache writers and readers plus protected image publication now feed BuildKit the same tracked Git archive with fixed file modes. Host ownership, timestamps, ACLs, and xattrs stay outside the build context, while Git's executable bits remain intact. Rootless Podman keeps its separate local-store path.
+  - **Tests:** the existing container and CI contracts inspect the normalized archive, pin executable and regular-file modes, reject archived xattrs, require the stdin context on every shared-cache BuildKit path, and keep Podman separate without changing the test count.
+
 - **Nuclei no longer embeds a vulnerable kin-openapi release.**
   - **Root cause:** Nuclei 3.11.0 still selected kin-openapi 0.132.0, which contains an authentication-bypass flaw and caused the required Critical vulnerability scan to fail.
   - **Fix:** the image build raises kin-openapi to 0.144.0, applies the two-line Nuclei compatibility change needed for that API, and verifies the selected version is also embedded in the finished binary. The reviewed patch and dependency license are included in release provenance instead of suppressing the finding.

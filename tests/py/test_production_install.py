@@ -1102,6 +1102,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     source_stager = (
         ROOT / "scripts" / "container" / "stage_runtime_source.sh"
     ).read_text(encoding="utf-8")
+    context_builder_path = (
+        ROOT / "scripts" / "container" / "create_portable_build_context.sh"
+    )
+    context_builder = context_builder_path.read_text(encoding="utf-8")
     image_smoke = (
         ROOT / "scripts" / "release" / "verify_repository_free_image.sh"
     ).read_text(
@@ -1161,6 +1165,33 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'cp -R "${source_dir%/}/."' in source_stager
     assert 'chmod -R u+rX,a-w "$runtime_dir"' in source_stager
     assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=$stage" in source_stager
+    assert "git -C \"$repo_root\" -c tar.umask=0022 archive --format=tar HEAD" in (
+        context_builder
+    )
+    build_context_path = tmp_path / "portable-build-context.tar"
+    context_result = subprocess.run(
+        ["sh", str(context_builder_path), str(build_context_path)],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert context_result.returncode == 0, context_result.stderr
+    with tarfile.open(build_context_path) as build_context:
+        context_members = {member.name: member for member in build_context.getmembers()}
+        go_installer_member = context_members["scripts/container/install_go_tool.sh"]
+        nuclei_patch_member = context_members[
+            "scripts/container/patches/nuclei-kin-openapi-v0.144.patch"
+        ]
+        assert stat.S_IMODE(go_installer_member.mode) == 0o755
+        assert stat.S_IMODE(nuclei_patch_member.mode) == 0o644
+        assert go_installer_member.uid == nuclei_patch_member.uid == 0
+        assert go_installer_member.gid == nuclei_patch_member.gid == 0
+        assert all(
+            not key.lower().startswith("schily.xattr.")
+            for member in context_members.values()
+            for key in member.pax_headers
+        )
     assert "wpscan-ruby-gems.json" in dockerfile
     assert (
         'File.write("/usr/share/doc/darklab-shell/wpscan-ruby-gems.json", '
@@ -2218,6 +2249,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "--cache-to" in amd64_warmer_script
     assert "mode=max" in amd64_warmer_script
     assert "--output type=cacheonly" in amd64_warmer_script
+    assert "create_portable_build_context.sh" in amd64_warmer_script
+    assert '- < "$build_context"' in amd64_warmer_script
     assert amd64_warmer["artifacts"]["reports"]["dotenv"] == (
         "scheduled-docker-cache.env"
     )
@@ -2230,6 +2263,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "--cache-from" in scheduled_build_script
     assert "--load" in scheduled_build_script
     assert "--cache-to" not in scheduled_build_script
+    assert "create_portable_build_context.sh" in scheduled_build_script
+    assert '- < "$build_context"' in scheduled_build_script
     scheduled_build_tags = {
         "docker-build-bael": ["bael"],
         "docker-build-bune": ["bune"],
@@ -2251,9 +2286,12 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "docker.io/library/${python_base_image}" in podman_warmer_script
     assert '--build-arg "TARGETARCH=amd64"' in podman_warmer_script
     assert "--format docker" in podman_warmer_script
+    assert "create_portable_build_context.sh" not in podman_warmer_script
     assert 'cache_image="${CI_REGISTRY_IMAGE}:buildcache-${architecture}"' in publisher
     assert "RELEASE_CACHE_SCOPE" not in publisher
     assert "--progress=plain" in publisher
+    assert "create_portable_build_context.sh" in publisher
+    assert '--push - < "$build_context"' in publisher
     assert "dockerhub-image-status.txt" in parsed_ci["release-image-dockerhub"]["artifacts"]["paths"]
     amd64_smoke_script = "\n".join(parsed_ci["release-image-amd64-smoke"]["script"])
     digest_pinned_gitlab_image = '"$AMD64_IMAGE@$AMD64_DIGEST"'
@@ -3110,6 +3148,7 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     )
     assert platform_first.returncode == 0, platform_first.stderr
     assert "docker buildx build" in platform_first_log
+    assert "--push -" in platform_first_log
     platform_metrics = dict(
         row.split("=", 1)
         for row in (tmp_path / "platform-first" / "release-image-amd64-build-metrics.txt")
