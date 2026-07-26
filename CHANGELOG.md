@@ -11,7 +11,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.7.1] - Unreleased
+## [2.8.0] - Unreleased
 
 ### Changed
 
