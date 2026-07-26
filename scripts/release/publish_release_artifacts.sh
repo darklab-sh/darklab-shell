@@ -237,10 +237,14 @@ publish_gitlab_platform_image() {
                 --cache-from "type=registry,ref=${cache_image}" \
                 --cache-to "type=registry,ref=${cache_image},mode=max"
         fi
-        if "$@" --metadata-file "$metadata_file" --tag "$staging_image" --push "$repo_root"; then
-            :
+        build_context=$(mktemp)
+        "$repo_root/scripts/container/create_portable_build_context.sh" "$build_context"
+        if "$@" --metadata-file "$metadata_file" --tag "$staging_image" \
+            --push - < "$build_context"; then
+            rm -f "$build_context"
         else
             image_action_status=$?
+            rm -f "$build_context"
             image_action_seconds=$(($(date +%s) - image_action_started))
             build_seconds=$image_action_seconds
             return "$image_action_status"

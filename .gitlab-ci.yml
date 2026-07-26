@@ -440,13 +440,16 @@ docker-build-cache-amd64:
       ' python-base-index.json)
       printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
       cache_image="${CI_REGISTRY_IMAGE}:buildcache-amd64"
+      build_context=$(mktemp)
+      trap 'rm -f "$build_context"' EXIT
+      scripts/container/create_portable_build_context.sh "$build_context"
       docker buildx build --pull --platform linux/amd64 --provenance=false \
         --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
         --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
         --cache-from "type=registry,ref=${cache_image}" \
         --cache-to "type=registry,ref=${cache_image},mode=max" \
-        --output type=cacheonly .
+        --output type=cacheonly - < "$build_context"
       printf '%s\n' \
         "SCHEDULED_PYTHON_BASE_IMAGE=${python_base_image}" \
         "SCHEDULED_PYTHON_BASE_DIGEST=${python_base_digest}" \
@@ -478,12 +481,15 @@ docker-build-cache-amd64:
       test -n "$SCHEDULED_PYTHON_BASE_IMAGE"
       printf '%s' "$SCHEDULED_PYTHON_BASE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
       test "$SCHEDULED_AMD64_CACHE_REF" = "${CI_REGISTRY_IMAGE}:buildcache-amd64"
+      build_context=$(mktemp)
+      trap 'rm -f "$build_context"' EXIT
+      scripts/container/create_portable_build_context.sh "$build_context"
       docker buildx build --pull --platform linux/amd64 --provenance=false \
         --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${SCHEDULED_PYTHON_BASE_IMAGE}@${SCHEDULED_PYTHON_BASE_DIGEST}" \
         --build-arg "PYTHON_BASE_DIGEST=${SCHEDULED_PYTHON_BASE_DIGEST}" \
         --cache-from "type=registry,ref=${SCHEDULED_AMD64_CACHE_REF}" \
-        --load --tag "darklab_shell:${CI_COMMIT_SHA}" .
+        --load --tag "darklab_shell:${CI_COMMIT_SHA}" - < "$build_context"
 
 docker-build-bael:
   extends: .scheduled-docker-build
