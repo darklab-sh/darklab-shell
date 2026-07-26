@@ -362,7 +362,8 @@ docker-build:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: "1"
-  before_script: []
+  before_script:
+    - apk add --no-cache jq
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
       when: never
@@ -386,7 +387,30 @@ docker-build:
     - when: manual
       allow_failure: true
   script:
-    - docker build --progress=plain -t darklab_shell:$CI_COMMIT_SHA .
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - |
+      # Build through the same inputs as docker-build-cache-amd64 and the fan-out jobs so
+      # this branch image shares one cache chain with them. Resolving the amd64 child
+      # manifest matters: the bare tag resolves to the index digest instead, which is a
+      # different base reference and misses every warmed layer from the first RUN onward.
+      python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
+      docker buildx imagetools inspect --raw "$python_base_image" > python-base-index.json
+      python_base_digest=$(jq -r '
+        [.manifests[]
+          | select(.platform.os == "linux" and .platform.architecture == "amd64")
+          | select((.annotations["vnd.docker.reference.type"] // "") != "attestation-manifest")
+        ][0].digest // empty
+      ' python-base-index.json)
+      printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+      build_context=$(mktemp)
+      trap 'rm -f "$build_context"' EXIT
+      scripts/container/create_portable_build_context.sh "$build_context"
+      docker buildx build --platform linux/amd64 --provenance=false \
+        --progress=plain \
+        --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
+        --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+        --cache-from "type=registry,ref=${CI_REGISTRY_IMAGE}:buildcache-amd64" \
+        --load --tag "darklab_shell:$CI_COMMIT_SHA" - < "$build_context"
     - docker pull "$SYFT_IMAGE"
     - docker pull "$GRYPE_IMAGE"
     - mkdir -p branch-image-evidence
