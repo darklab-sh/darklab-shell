@@ -20,11 +20,9 @@ from conftest import make_test_app as _test_app
 from blueprints.run import KILL_BIN, SUDO_BIN
 from core.helpers import get_session_id
 import services.commands.registry as commands
+import services.commands.builtins_discovery as builtins_discovery
 from services.commands.builtins import (
     _BUILTIN_REGISTRY,
-    _DOCUMENTED_BUILTIN_COMMANDS,
-    _BUILTIN_COMMAND_DISPATCH,
-    _SPECIAL_BUILTIN_COMMANDS,
     get_builtin_autocomplete_context,
     get_builtin_command_catalog,
     _run_builtin_commands,
@@ -37,6 +35,7 @@ from services.commands.builtin_registry import (
     BuiltinExecutionContext,
     BuiltinExecutionOwner,
     BuiltinMatchStrategy,
+    build_builtin_command_spec,
 )
 from services.commands.registry import (
     load_welcome,
@@ -44,6 +43,96 @@ from services.commands.registry import (
     validate_command,
 )
 from services.teams.scope import OwnerContext
+
+
+_EXPECTED_BUILTIN_EXACT_ALIASES = {
+    ":(){ :|:& };:",
+    "coffee",
+    "halt",
+    "ip a",
+    "poweroff",
+    "rm -f -r /",
+    "rm -fr /",
+    "rm -r -f /",
+    "rm -rf /",
+    "shutdown now",
+    "su",
+    "sudo -s",
+    "sudo su",
+    "xyzzy",
+}
+_EXPECTED_BUILTIN_ROOTS = {
+    "banner",
+    "cat",
+    "cd",
+    "clear",
+    "commands",
+    "config",
+    "cp",
+    "date",
+    "df",
+    "diff",
+    "env",
+    "exit",
+    "faq",
+    "file",
+    "fortune",
+    "free",
+    "grep",
+    "groups",
+    "head",
+    "help",
+    "history",
+    "hostname",
+    "id",
+    "intel",
+    "jobs",
+    "last",
+    "limits",
+    "ll",
+    "ls",
+    "man",
+    "mkdir",
+    "mv",
+    "notify",
+    "project",
+    "providers",
+    "ps",
+    "pwd",
+    "quit",
+    "reboot",
+    "retention",
+    "rm",
+    "route",
+    "runs",
+    "schedule",
+    "secret",
+    "session-token",
+    "shortcuts",
+    "sort",
+    "stats",
+    "status",
+    "sudo",
+    "tail",
+    "team",
+    "theme",
+    "touch",
+    "tour",
+    "tty",
+    "type",
+    "uname",
+    "uniq",
+    "uptime",
+    "var",
+    "version",
+    "watch",
+    "wc",
+    "which",
+    "who",
+    "whoami",
+    "wordlist",
+    "workflow",
+}
 
 
 _COMMAND_VALIDATION_HELPERS = None
@@ -1234,7 +1323,69 @@ class TestBuiltinCommandRegistry:
         )
         assert spec.execution_owner is BuiltinExecutionOwner.BROWSER
 
-    def test_registered_catalog_autocomplete_and_aliases_match_legacy_sources(self):
+    def test_focused_provider_populates_every_registry_view(self):
+        def example_provider():
+            return (
+                build_builtin_command_spec(
+                    {
+                        "root": "example-helper",
+                        "description": "built-in: demonstrate provider registration",
+                        "autocomplete": {
+                            "flags": [
+                                {
+                                    "value": "--json",
+                                    "description": "Return JSON output",
+                                },
+                            ],
+                            "examples": [
+                                {
+                                    "value": "example-helper --json",
+                                    "description": "Structured output",
+                                },
+                            ],
+                        },
+                    },
+                    handler_key="example-helper",
+                    handler=self._handler,
+                    name="example-helper",
+                    description="Demonstrate provider registration.",
+                ),
+            )
+
+        registry = BuiltinCommandRegistry()
+        registry.register_provider(example_provider)
+        registry.freeze()
+
+        resolution = registry.resolve("example-helper --json")
+        assert resolution is not None
+        assert resolution.handler_key == "example-helper"
+        events, exit_code = registry.execute(
+            "example-helper --json",
+            BuiltinExecutionContext(session_id="session-one"),
+        )
+        assert exit_code == 0
+        assert events[0]["text"] == "example-helper --json:session-one"
+        assert registry.documented_commands() == [{
+            "name": "example-helper",
+            "description": "Demonstrate provider registration.",
+            "root": "example-helper",
+        }]
+        catalog_entry = registry.catalog_entry("example-helper")
+        assert catalog_entry is not None
+        catalog_flags = catalog_entry["flags"]
+        assert isinstance(catalog_flags, list)
+        assert isinstance(catalog_flags[0], dict)
+        assert catalog_flags[0]["value"] == "--json"
+
+        autocomplete_flags = registry.autocomplete_context()["example-helper"]["flags"]
+        assert isinstance(autocomplete_flags, list)
+        assert isinstance(autocomplete_flags[0], dict)
+        assert autocomplete_flags[0]["value"] == "--json"
+        assert registry.provider_names() == (
+            f"{example_provider.__module__}.{example_provider.__qualname__}",
+        )
+
+    def test_registered_catalog_autocomplete_and_aliases_share_one_source(self):
         cfg = {"workspace_enabled": True, "tour_enabled": True}
         legacy_autocomplete = commands.autocomplete_context_from_commands_registry(
             commands.load_builtin_autocomplete_registry(),
@@ -1242,7 +1393,8 @@ class TestBuiltinCommandRegistry:
         )
 
         assert get_builtin_autocomplete_context(cfg) == legacy_autocomplete
-        assert set(_BUILTIN_REGISTRY.exact_aliases()) == set(_SPECIAL_BUILTIN_COMMANDS)
+        assert set(_BUILTIN_REGISTRY.registered_roots()) == _EXPECTED_BUILTIN_ROOTS
+        assert set(_BUILTIN_REGISTRY.exact_aliases()) == _EXPECTED_BUILTIN_EXACT_ALIASES
         catalog = get_builtin_command_catalog(cfg)
         assert {
             str(entry.get("root") or "")
@@ -1259,6 +1411,28 @@ class TestBuiltinCommandRegistry:
         assert ownership["clear"] == "server"
         assert ownership["theme"] == "browser"
         assert ownership["file"] == "mixed"
+
+    def test_every_user_facing_spec_appears_in_discovery_details_search_and_autocomplete(self):
+        cfg = {"workspace_enabled": True, "tour_enabled": True}
+        specs = tuple(spec for spec in _BUILTIN_REGISTRY.specs() if spec.user_facing)
+        catalog = {
+            str(entry["root"]): entry
+            for entry in _BUILTIN_REGISTRY.catalog(cfg=cfg)
+        }
+        autocomplete = _BUILTIN_REGISTRY.autocomplete_context(cfg=cfg)
+        with mock.patch.dict("config.CFG", cfg):
+            documented_output = "\n".join(
+                str(line.get("text") or "")
+                for line in _run_builtin_commands("commands --built-in")
+            )
+
+        assert len(catalog) == len(specs)
+        for spec in specs:
+            root = spec.root or spec.autocomplete_root or spec.handler_key
+            assert spec.name in documented_output
+            assert _BUILTIN_REGISTRY.catalog_entry(root, cfg=cfg) == catalog[root]
+            assert root in autocomplete
+            assert builtins_discovery._catalog_search_tier(root, catalog[root]) == 0
 
     def test_exact_alias_roots_follow_the_registered_root_feature_gate(self):
         cfg = {"workspace_enabled": False, "tour_enabled": True}
@@ -1319,13 +1493,33 @@ class TestBuiltinCommandResolution:
         assert any("can view Files but can't change them" in str(event.get("text", "")) for event in move_events)
 
     def test_documented_builtin_commands_are_backed_by_runtime_dispatch(self):
-        for entry in _DOCUMENTED_BUILTIN_COMMANDS:
-            if "root" in entry:
-                assert entry["root"] in _BUILTIN_COMMAND_DISPATCH
-            if "exact" in entry:
-                exact = entry["exact"]
-                assert exact in _SPECIAL_BUILTIN_COMMANDS
-                assert _SPECIAL_BUILTIN_COMMANDS[exact] in _BUILTIN_COMMAND_DISPATCH
+        cfg = {"workspace_enabled": True, "tour_enabled": True}
+        workspace_alias_examples = {
+            "cat": "cat notes.txt",
+            "cp": "cp notes.txt archive.txt",
+            "ll": "ll",
+            "ls": "ls",
+            "mv": "mv notes.txt archive.txt",
+            "rm": "rm notes.txt",
+            "touch": "touch notes.txt",
+        }
+        for spec in _BUILTIN_REGISTRY.specs():
+            if not spec.user_facing:
+                continue
+            command = workspace_alias_examples.get(
+                spec.root,
+                spec.root or spec.exact_aliases[0],
+            )
+            resolution = _BUILTIN_REGISTRY.resolve(command, cfg=cfg)
+            if (
+                resolution is None
+                and spec.match_strategy is BuiltinMatchStrategy.WORKSPACE_ALIAS
+            ):
+                assert spec.execution_owner is BuiltinExecutionOwner.MIXED
+                assert spec.browser_owned_subcommands == ("*",)
+                continue
+            assert resolution is not None
+            assert resolution.spec is spec
 
     def test_resolves_supported_builtin_commands(self):
         assert resolve_builtin_command("banner") == "banner"

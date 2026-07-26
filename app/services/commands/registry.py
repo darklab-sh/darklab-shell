@@ -179,9 +179,7 @@ def _normalize_runtime_adaptations(raw_value) -> dict[str, object]:
 
 
 def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
-    if not isinstance(raw_spec, dict) or not raw_spec:
-        return {}
-    return _normalize_autocomplete_context({root: raw_spec}).get(root, {})
+    return registry_autocomplete.normalize_autocomplete_spec(root, raw_spec)
 
 
 def _coerce_positive_int(value: object, default: int) -> int:
@@ -338,18 +336,12 @@ def command_catalog_entry(
 def load_builtin_autocomplete_registry():
     """Return normalized app-owned helper autocomplete grammar.
 
-    The source is Python-owned command metadata rather than operator-facing
-    policy. It still uses the external registry normalizer so both command
-    families expose the same autocomplete schema.
+    Command providers normalize and own this metadata through their command
+    specifications, so this compatibility view must not normalize it twice.
     """
-    from services.commands.builtin_autocomplete_data import (
-        BUILTIN_AUTOCOMPLETE_REGISTRY,
-    )
+    from services.commands.builtins import _BUILTIN_REGISTRY
 
-    return registry_loader.normalize_commands_registry_data(
-        deepcopy(BUILTIN_AUTOCOMPLETE_REGISTRY),
-        _normalize_registry_autocomplete,
-    )
+    return deepcopy(_BUILTIN_REGISTRY.autocomplete_registry_data())
 
 
 def load_command_policy():

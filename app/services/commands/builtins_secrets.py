@@ -7,6 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    BuiltinExecutionOwner,
+    build_builtin_command_spec,
+)
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import command_secret_consumers, split_command_argv
 from services.intel.registry import provider_status_catalog
@@ -38,20 +43,12 @@ def _provider_secret_names(provider: dict[str, Any]) -> list[str]:
             provider.get("secret_env"),
             *alias_names,
         ]
-    return [
-        str(name or "").strip().upper()
-        for name in names
-        if str(name or "").strip()
-    ]
+    return [str(name or "").strip().upper() for name in names if str(name or "").strip()]
 
 
 def _provider_display_secret_names(provider: dict[str, Any]) -> str:
     primary = str(provider.get("secret_env") or "").strip().upper()
-    required = [
-        str(name or "").strip().upper()
-        for name in provider.get("required_secret_envs") or []
-        if str(name or "").strip()
-    ]
+    required = [str(name or "").strip().upper() for name in provider.get("required_secret_envs") or [] if str(name or "").strip()]
     if primary and required:
         return " + ".join([primary, *required])
     if primary:
@@ -73,11 +70,7 @@ def _provider_secret_name_set(secret_scope_id: str) -> set[str]:
 
 
 def _provider_intel_subcommands(provider: dict[str, Any]) -> str:
-    uses = [
-        str(item or "").strip()
-        for item in provider.get("uses") or []
-        if str(item or "").strip()
-    ]
+    uses = [str(item or "").strip() for item in provider.get("uses") or [] if str(item or "").strip()]
     if uses:
         return ", ".join(uses)
     entity_types = [
@@ -93,16 +86,10 @@ def _provider_intel_subcommands(provider: dict[str, Any]) -> str:
 def _provider_status(provider: dict[str, Any], stored_secret_names: set[str]) -> tuple[bool, str]:
     secret_names = _provider_secret_names(provider)
     primary = str(provider.get("secret_env") or "").strip().upper()
-    required = [
-        str(name or "").strip().upper()
-        for name in provider.get("required_secret_envs") or []
-        if str(name or "").strip()
-    ]
+    required = [str(name or "").strip().upper() for name in provider.get("required_secret_envs") or [] if str(name or "").strip()]
     if required:
         aliases = [
-            str(name or "").strip().upper()
-            for name in provider.get("secret_env_aliases") or []
-            if str(name or "").strip()
+            str(name or "").strip().upper() for name in provider.get("secret_env_aliases") or [] if str(name or "").strip()
         ]
         primary_candidates = [name for name in [primary, *aliases] if name]
         primary_ok = not primary_candidates or any(name in stored_secret_names for name in primary_candidates)
@@ -121,11 +108,13 @@ def _provider_status(provider: dict[str, Any], stored_secret_names: set[str]) ->
 
 def _format_provider_status_row(provider: dict[str, Any], status_label: str) -> str:
     label = str(provider.get("label") or provider.get("id") or "Provider").strip()
-    detail = " · ".join([
-        status_label,
-        _provider_intel_subcommands(provider),
-        _provider_display_secret_names(provider),
-    ])
+    detail = " · ".join(
+        [
+            status_label,
+            _provider_intel_subcommands(provider),
+            _provider_display_secret_names(provider),
+        ]
+    )
     return format_native_record(label, detail, 22)
 
 
@@ -170,11 +159,13 @@ def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
     provider_rows = []
     for provider in providers:
         configured, status_label = _provider_status(provider, stored_secret_names)
-        provider_rows.append({
-            "configured": configured,
-            "label": str(provider.get("label") or provider.get("id") or ""),
-            "line": _format_provider_status_row(provider, status_label),
-        })
+        provider_rows.append(
+            {
+                "configured": configured,
+                "label": str(provider.get("label") or provider.get("id") or ""),
+                "line": _format_provider_status_row(provider, status_label),
+            }
+        )
 
     usable_count = sum(1 for row in provider_rows if row["configured"])
     needs_count = max(0, len(provider_rows) - usable_count)
@@ -207,19 +198,23 @@ def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
     command_rows = []
     for consumer in command_consumers:
         configured, status_label = _command_consumer_status(consumer, stored_secret_names)
-        command_rows.append({
-            "configured": configured,
-            "label": str(consumer.get("consumer") or ""),
-            "line": _format_command_consumer_row(consumer, status_label),
-        })
+        command_rows.append(
+            {
+                "configured": configured,
+                "label": str(consumer.get("consumer") or ""),
+                "line": _format_command_consumer_row(consumer, status_label),
+            }
+        )
     if command_rows:
         command_configured = sum(1 for row in command_rows if row["configured"])
         lines.append(output_line(""))
         lines.append(output_line("Command credentials:", "builtin-section"))
-        lines.append(output_line(
-            f"{command_configured} usable · {len(command_rows) - command_configured} not configured",
-            "builtin-note",
-        ))
+        lines.append(
+            output_line(
+                f"{command_configured} usable · {len(command_rows) - command_configured} not configured",
+                "builtin-note",
+            )
+        )
         for row in sorted(command_rows, key=lambda item: str(item["label"]).lower()):
             lines.append(output_line(str(row["line"]), "builtin-kv"))
 
@@ -302,3 +297,70 @@ def run_builtin_secret(command: str, session_id: str, *, team_id: str = "", team
         output_line(f"secret: unknown subcommand '{subcommand}'"),
         *_secret_usage(),
     ]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "providers": {
+        "root": "providers",
+        "description": "built-in: show app-native intel provider setup status",
+        "autocomplete": {"closes": True},
+    },
+    "secret": {
+        "root": "secret",
+        "description": "built-in: manage encrypted session secrets",
+        "autocomplete": {
+            "subcommands": [
+                {
+                    "value": "set",
+                    "description": "Store or replace an encrypted secret through the browser prompt",
+                    "takes_value": True,
+                    "insert": "set ",
+                    "value_hint": {"value": "<NAME>", "hint_only": True, "description": "Environment-style secret name"},
+                },
+                {"value": "list", "description": "List stored secret names without values", "closes": True},
+                {
+                    "value": "unset",
+                    "description": "Remove a stored secret",
+                    "takes_value": True,
+                    "insert": "unset ",
+                    "value_hint": {"value": "<NAME>", "hint_only": True, "description": "Environment-style secret name"},
+                },
+                {"value": "show-consumers", "description": "Show app-native intel provider setup status", "closes": True},
+            ]
+        },
+    },
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    def secret_handler(command, context):
+        return run_builtin_secret(
+            command,
+            context.session_id,
+            team_id=context.team_id,
+            team_role=context.team_role,
+        )
+
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["providers"],
+            handler_key="providers",
+            handler=lambda _command, context: run_builtin_secret(
+                "secret show-consumers",
+                context.session_id,
+                team_id=context.team_id,
+                team_role=context.team_role,
+            ),
+            name="providers",
+            description="Alias for `secret show-consumers`.",
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["secret"],
+            handler_key="secret",
+            handler=secret_handler,
+            name="secret",
+            description=("Set, list, and remove encrypted session secrets for API-backed tools."),
+            execution_owner=BuiltinExecutionOwner.MIXED,
+            browser_owned_subcommands=("set",),
+        ),
+    )

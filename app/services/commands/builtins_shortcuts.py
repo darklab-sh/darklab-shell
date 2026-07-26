@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 
-from services.commands.builtins_catalog import _CURRENT_SHORTCUTS
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
+from services.commands.builtins_copy import _CURRENT_SHORTCUTS
 from services.commands.builtins_format import (
     format_native_record as _format_native_record,
     output_line as _output_line,
@@ -80,3 +84,24 @@ def run_builtin_shortcuts() -> list[dict[str, object]]:
                 )
             )
     return lines
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "shortcuts": {
+        "root": "shortcuts",
+        "description": "built-in: show current keyboard shortcuts",
+        "autocomplete": {"arguments": []},
+    }
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["shortcuts"],
+            handler_key="shortcuts",
+            handler=lambda _command, _context: run_builtin_shortcuts(),
+            name="shortcuts",
+            description="Show current keyboard shortcuts.",
+        ),
+    )

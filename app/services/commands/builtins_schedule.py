@@ -10,6 +10,10 @@ import logging
 import shlex
 from typing import Any
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
 from core import database
 from core.helpers import get_log_session_id
 from services.audit.automation import record_schedule_event, run_now_details
@@ -101,10 +105,12 @@ def _schedule_lines(session_id: str) -> list[dict[str, object]]:
         state = "active" if schedule.enabled else "paused"
         next_run = schedule.next_run_at or "-"
         label = _display_schedule_label(schedule)
-        lines.append(output_line(
-            f"{schedule.id:<36} {state:<16} {next_run:<26} {label}",
-            "builtin-table-row",
-        ))
+        lines.append(
+            output_line(
+                f"{schedule.id:<36} {state:<16} {next_run:<26} {label}",
+                "builtin-table-row",
+            )
+        )
     return lines
 
 
@@ -136,8 +142,8 @@ def _parse_create(parts: list[str]) -> dict[str, Any]:
     try:
         separator_index = parts.index("--", 2)
     except ValueError as exc:
-        raise BuiltinScheduleError("Usage: schedule create --cron \"0 * * * *\" -- <cmd>") from exc
-    command_tokens = parts[separator_index + 1:]
+        raise BuiltinScheduleError('Usage: schedule create --cron "0 * * * *" -- <cmd>') from exc
+    command_tokens = parts[separator_index + 1 :]
     if not command_tokens:
         raise BuiltinScheduleError("schedule create: command is required after --")
 
@@ -186,16 +192,19 @@ def _create_schedule(parts: list[str], session_id: str) -> list[dict[str, object
             conn=conn,
         )
         conn.commit()
-    log.info("BUILTIN_SCHEDULE_CREATED", extra={
-        "session": get_log_session_id(session_id),
-        "source": "builtin",
-        "schedule_id": schedule.id,
-        "enabled": schedule.enabled,
-        "cron_expr": schedule.cron_expr,
-        "cadence_preset": schedule.cadence_preset or "",
-        "timezone": schedule.timezone,
-        "next_run_at": schedule.next_run_at,
-    })
+    log.info(
+        "BUILTIN_SCHEDULE_CREATED",
+        extra={
+            "session": get_log_session_id(session_id),
+            "source": "builtin",
+            "schedule_id": schedule.id,
+            "enabled": schedule.enabled,
+            "cron_expr": schedule.cron_expr,
+            "cadence_preset": schedule.cadence_preset or "",
+            "timezone": schedule.timezone,
+            "next_run_at": schedule.next_run_at,
+        },
+    )
     return [
         output_line(f"schedule: created {schedule.id}", "builtin-success"),
         output_line(format_native_record("next run", schedule.next_run_at, 10), "builtin-kv"),
@@ -227,15 +236,18 @@ def _run_schedule_now(schedule: Schedule) -> list[dict[str, object]]:
     lines.append(output_line(format_native_record("fired at", fired_at, 10), "builtin-kv"))
     if refreshed:
         lines.append(output_line(format_native_record("next run", refreshed.next_run_at or "-", 10), "builtin-kv"))
-    log.info("BUILTIN_SCHEDULE_RUN_NOW", extra={
-        "session": get_log_session_id(schedule.session_token),
-        "source": "builtin",
-        "schedule_id": schedule.id,
-        "status": status,
-        "fired_at": fired_at,
-        "run_id": (refreshed or schedule).last_run_id,
-        "last_error": (refreshed or schedule).last_error,
-    })
+    log.info(
+        "BUILTIN_SCHEDULE_RUN_NOW",
+        extra={
+            "session": get_log_session_id(schedule.session_token),
+            "source": "builtin",
+            "schedule_id": schedule.id,
+            "status": status,
+            "fired_at": fired_at,
+            "run_id": (refreshed or schedule).last_run_id,
+            "last_error": (refreshed or schedule).last_error,
+        },
+    )
     return lines
 
 
@@ -245,12 +257,15 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
     if subcommand in {"help", "-h", "--help"}:
         return _schedule_usage()
     if not _is_durable_session(session_id):
-        log.warning("BUILTIN_SCHEDULE_REJECTED", extra={
-            "session": get_log_session_id(session_id),
-            "source": "builtin",
-            "subcommand": subcommand,
-            "error": "session token required",
-        })
+        log.warning(
+            "BUILTIN_SCHEDULE_REJECTED",
+            extra={
+                "session": get_log_session_id(session_id),
+                "source": "builtin",
+                "subcommand": subcommand,
+                "error": "session token required",
+            },
+        )
         return [output_line(_durable_session_error(session_id))]
     try:
         if subcommand in {"list", "ls"}:
@@ -273,12 +288,15 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
                     conn=conn,
                 )
                 conn.commit()
-            log.info("BUILTIN_SCHEDULE_PAUSED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "schedule_id": schedule.id,
-                "enabled": bool((updated or schedule).enabled),
-            })
+            log.info(
+                "BUILTIN_SCHEDULE_PAUSED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "schedule_id": schedule.id,
+                    "enabled": bool((updated or schedule).enabled),
+                },
+            )
             return [output_line(f"schedule: paused {(updated or schedule).id}", "builtin-success")]
         if subcommand == "resume":
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule resume <id>"), session_id)
@@ -293,13 +311,16 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
                     conn=conn,
                 )
                 conn.commit()
-            log.info("BUILTIN_SCHEDULE_RESUMED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "schedule_id": schedule.id,
-                "enabled": bool((updated or schedule).enabled),
-                "next_run_at": (updated or schedule).next_run_at,
-            })
+            log.info(
+                "BUILTIN_SCHEDULE_RESUMED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "schedule_id": schedule.id,
+                    "enabled": bool((updated or schedule).enabled),
+                    "next_run_at": (updated or schedule).next_run_at,
+                },
+            )
             return [output_line(f"schedule: resumed {(updated or schedule).id}", "builtin-success")]
         if subcommand in {"delete", "rm", "remove"}:
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule delete <id>"), session_id)
@@ -314,12 +335,15 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
                     conn=conn,
                 )
                 conn.commit()
-            log.info("BUILTIN_SCHEDULE_DELETED", extra={
-                "session": get_log_session_id(session_id),
-                "source": "builtin",
-                "schedule_id": schedule.id,
-                "removed": removed,
-            })
+            log.info(
+                "BUILTIN_SCHEDULE_DELETED",
+                extra={
+                    "session": get_log_session_id(session_id),
+                    "source": "builtin",
+                    "schedule_id": schedule.id,
+                    "removed": removed,
+                },
+            )
             status_style = "builtin-success" if removed else "builtin-note"
             message = f"schedule: deleted {schedule.id}" if removed else f"schedule: not found {schedule.id}"
             return [output_line(message, status_style)]
@@ -341,10 +365,89 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
         message = str(exc)
         if message == "notification channels require a durable session token":
             message = _durable_session_error(session_id)
-        log.warning("BUILTIN_SCHEDULE_REJECTED", extra={
-            "session": get_log_session_id(session_id),
-            "source": "builtin",
-            "subcommand": subcommand,
-            "error": message,
-        })
+        log.warning(
+            "BUILTIN_SCHEDULE_REJECTED",
+            extra={
+                "session": get_log_session_id(session_id),
+                "source": "builtin",
+                "subcommand": subcommand,
+                "error": message,
+            },
+        )
         return [output_line(f"schedule: {message}" if not message.startswith("schedule:") else message)]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "schedule": {
+        "root": "schedule",
+        "description": "built-in: manage saved recurring commands",
+        "autocomplete": {
+            "subcommands": {
+                "list": {"description": "List current-session schedules", "closes": True},
+                "create": {
+                    "description": "Create a saved schedule",
+                    "flags": [
+                        {
+                            "value": "--cron",
+                            "takes_value": True,
+                            "description": "Five-field cron expression",
+                            "suggest": [
+                                {"value": "0 * * * *", "description": "Every hour"},
+                                {"value": "0 0 * * *", "description": "Every day"},
+                                {"value": "0 0 * * 0", "description": "Every week"},
+                            ],
+                        },
+                        {
+                            "value": "--every",
+                            "takes_value": True,
+                            "description": "Cadence preset",
+                            "suggest": [
+                                {"value": "hourly", "description": "Every hour"},
+                                {"value": "daily", "description": "Every day"},
+                                {"value": "weekly", "description": "Every week"},
+                            ],
+                        },
+                        {"value": "--label", "takes_value": True, "description": "Display label"},
+                        {"value": "--timezone", "takes_value": True, "description": "IANA timezone"},
+                    ],
+                    "arguments": [{"value": "--", "description": "Start of command to schedule"}],
+                },
+                "pause": {
+                    "description": "Pause a schedule",
+                    "arguments": [{"value": "<schedule-id>", "hint_only": True, "description": "Schedule id"}],
+                },
+                "resume": {
+                    "description": "Resume a schedule",
+                    "arguments": [{"value": "<schedule-id>", "hint_only": True, "description": "Schedule id"}],
+                },
+                "delete": {
+                    "description": "Delete a schedule",
+                    "arguments": [{"value": "<schedule-id>", "hint_only": True, "description": "Schedule id"}],
+                },
+                "run": {
+                    "description": "Fire a schedule now",
+                    "arguments": [{"value": "<schedule-id>", "hint_only": True, "description": "Schedule id"}],
+                },
+                "info": {
+                    "description": "Show schedule details",
+                    "arguments": [{"value": "<schedule-id>", "hint_only": True, "description": "Schedule id"}],
+                },
+            }
+        },
+    }
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["schedule"],
+            handler_key="schedule",
+            handler=lambda command, context: run_builtin_schedule(
+                command,
+                context.session_id,
+            ),
+            name="schedule",
+            description=("List, create, pause, resume, delete, and fire saved schedules."),
+        ),
+    )

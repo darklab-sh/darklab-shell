@@ -16792,14 +16792,10 @@ class TestDerivedCommandRegistry:
         assert commands._restricted_inline_input_reason("file move 10.0.0.5 archive/", cfg=cfg) == ""
 
     def test_workspace_required_specs_do_not_overload_target_value_type(self):
-        from services.commands.builtin_autocomplete_data import (
-            BUILTIN_AUTOCOMPLETE_REGISTRY,
-        )
-
         sources = [
             (
-                "app/services/commands/builtin_autocomplete_data.py",
-                BUILTIN_AUTOCOMPLETE_REGISTRY,
+                "registered built-in command providers",
+                builtin_commands._BUILTIN_REGISTRY.autocomplete_registry_data(),
             ),
             (
                 "app/conf/commands.yaml",
@@ -16845,6 +16841,20 @@ class TestDerivedCommandRegistry:
             for index, argument in enumerate(autocomplete.get("arguments") or []):
                 if (active_workspace_required or _workspace_required(argument)) and _value_type(argument) == "target":
                     issues.append(f"{source}:{root}:{subcommand}:arguments[{index}]")
+            for trigger, hints in (autocomplete.get("arg_hints") or {}).items():
+                for index, hint in enumerate(hints or []):
+                    if (
+                        (active_workspace_required or _workspace_required(hint))
+                        and _value_type(hint) == "target"
+                        and not _target_list_file_flag_allowed(
+                            flags_by_subcommand,
+                            str(trigger),
+                            subcommand,
+                        )
+                    ):
+                        issues.append(
+                            f"{source}:{root}:{subcommand}:arg_hints:{trigger}[{index}]"
+                        )
             for flag in autocomplete.get("flags") or []:
                 if not isinstance(flag, dict):
                     continue

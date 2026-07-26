@@ -13,7 +13,10 @@ import subprocess
 from typing import cast
 
 from config import PROJECT_SOURCE, resolve_effective_cfg
-from services.commands.builtins_catalog import _SYNTHETIC_MAN_EXCLUDED_ROOTS
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
 from services.commands.builtins_format import (
     format_terminal_link as _format_terminal_link,
     output_line as _output_line,
@@ -31,10 +34,12 @@ from services.commands.registry import (
     resolve_runtime_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
+    split_command_argv,
 )
 
 
 _BACKSPACE_RE = re.compile(r".\x08")
+_SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "diff", "ll", "ls", "rm"}
 
 
 def run_builtin_help() -> list[dict[str, object]]:
@@ -59,10 +64,7 @@ def run_builtin_help() -> list[dict[str, object]]:
 
 
 def documented_builtin_rows(active_documented_builtin_commands: Callable[[], list[dict[str, object]]]) -> list[tuple[str, str]]:
-    rows = [
-        (str(entry["name"]), str(entry["description"]))
-        for entry in active_documented_builtin_commands()
-    ]
+    rows = [(str(entry["name"]), str(entry["description"])) for entry in active_documented_builtin_commands()]
     return sorted(rows, key=lambda item: item[0].lower())
 
 
@@ -116,11 +118,7 @@ def _run_builtin_commands_info(
         return [_output_line("Usage: commands info <command> [subcommand] [--json]")]
     root = non_flag_parts[0].lower()
     subcommand = non_flag_parts[1].lower() if len(non_flag_parts) == 2 else None
-    entry = (
-        builtin_catalog_entry(root, subcommand)
-        if builtin_catalog_entry is not None
-        else None
-    )
+    entry = builtin_catalog_entry(root, subcommand) if builtin_catalog_entry is not None else None
     if entry is None:
         entry = command_catalog_entry(root, subcommand)
     if not entry or not is_feature_required_enabled(entry.get("feature_required")):
@@ -318,11 +316,11 @@ def run_builtin_commands(
     valid_filters = {"--built-in", "--external"}
     invalid_filters = sorted(filters - valid_filters)
     if invalid_filters:
-        return [_output_line(
-            "Usage: commands [--built-in] [--external]"
-            " | commands info <command> [subcommand]"
-            " | commands search <term>"
-        )]
+        return [
+            _output_line(
+                "Usage: commands [--built-in] [--external] | commands info <command> [subcommand] | commands search <term>"
+            )
+        ]
 
     show_builtins = True
     show_external = True
@@ -349,13 +347,15 @@ def run_builtin_commands(
             lines.append(_output_line("", "builtin-spacer"))
         lines.append(_output_line("Allowed external commands:", "builtin-section"))
         if external_groups is None:
-            lines.extend([
-                _output_line("  No allowlist is configured on this instance.", "builtin-note"),
-                _output_line(
-                    "  External commands are unrestricted here, so there is no finite catalog to print.",
-                    "builtin-note",
-                ),
-            ])
+            lines.extend(
+                [
+                    _output_line("  No allowlist is configured on this instance.", "builtin-note"),
+                    _output_line(
+                        "  External commands are unrestricted here, so there is no finite catalog to print.",
+                        "builtin-note",
+                    ),
+                ]
+            )
         else:
             for name, commands in external_groups:
                 if name:
@@ -368,18 +368,17 @@ def run_builtin_commands(
             if lines and lines[-1].get("text", "") == "":
                 lines.pop()
 
-        pipes = [
-            p for p in pipe_catalog_from_registry(registry)
-            if is_feature_required_enabled(p.get("feature_required"))
-        ]
+        pipes = [p for p in pipe_catalog_from_registry(registry) if is_feature_required_enabled(p.get("feature_required"))]
         if pipes:
             if lines:
                 lines.append(_output_line("", "builtin-spacer"))
             lines.append(_output_line("App-native pipe helpers:", "builtin-section"))
-            lines.append(_output_line(
-                "  App-managed filters — not arbitrary shell pipelines.",
-                "builtin-note",
-            ))
+            lines.append(
+                _output_line(
+                    "  App-managed filters — not arbitrary shell pipelines.",
+                    "builtin-note",
+                )
+            )
             width = max((len(str(p.get("root") or "")) for p in pipes), default=0)
             for pipe in pipes:
                 root = str(pipe.get("root") or "").strip()
@@ -407,20 +406,24 @@ def _run_builtin_man_for_synthetic_topic(
         if name == "uname -a":
             roots.add("uname")
         if topic in roots:
-            return _text_lines([
-                "Built-in commands:",
-                f"  {name:<10} {topic_help.get(topic, description)}",
-            ])
+            return _text_lines(
+                [
+                    "Built-in commands:",
+                    f"  {name:<10} {topic_help.get(topic, description)}",
+                ]
+            )
     return run_builtin_help()
 
 
 def run_builtin_faq() -> list[dict[str, object]]:
     entries = load_all_faq(resolve_effective_cfg()["app_name"], PROJECT_SOURCE)
     if not entries:
-        return _text_lines([
-            "No configured FAQ entries are available in the web shell.",
-            f"README: {_format_terminal_link(PROJECT_SOURCE, PROJECT_SOURCE)}",
-        ])
+        return _text_lines(
+            [
+                "No configured FAQ entries are available in the web shell.",
+                f"README: {_format_terminal_link(PROJECT_SOURCE, PROJECT_SOURCE)}",
+            ]
+        )
 
     lines = [_output_line("Configured FAQ entries:", "builtin-section")]
     for entry in entries:
@@ -557,3 +560,115 @@ def run_builtin_which(
     else:
         text = f"{target}: missing"
     return [{"type": "output", "text": text}]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "commands": {
+        "root": "commands",
+        "description": "built-in: list built-in and allowed external commands",
+        "autocomplete": {
+            "flags": [
+                {"value": "--built-in", "description": "Show only built-in shell commands"},
+                {"value": "--external", "description": "Show only allowed external commands"},
+            ],
+            "subcommands": [
+                {"value": "info", "description": "Show details for one supported command", "takes_value": True, "insert": "info "}
+            ],
+        },
+    },
+    "faq": {"root": "faq", "description": "built-in: show configured FAQ entries", "autocomplete": {"arguments": []}},
+    "help": {
+        "root": "help",
+        "description": "built-in: show README, FAQ, shortcuts, and command-discovery guidance",
+        "autocomplete": {"arguments": []},
+    },
+    "man": {
+        "root": "man",
+        "description": "built-in: show a real or built-in manual page",
+        "autocomplete": {"argument_limit": 1, "arguments": []},
+    },
+    "type": {
+        "root": "type",
+        "description": "built-in: describe whether a command is built-in, installed, or missing",
+        "autocomplete": {"argument_limit": 1, "arguments": []},
+    },
+    "which": {
+        "root": "which",
+        "description": "built-in: locate a built-in command or allowed runtime command",
+        "autocomplete": {"argument_limit": 1, "arguments": []},
+    },
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    def active_roots(context) -> set[str]:
+        return set(context.command_registry.roots())
+
+    def commands_handler(command, context):
+        registry = context.command_registry
+        return run_builtin_commands(
+            command,
+            split_command_argv,
+            registry.documented_commands,
+            load_commands_registry,
+            registry.catalog,
+            registry.catalog_entry,
+        )
+
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["commands"],
+            handler_key="commands",
+            handler=commands_handler,
+            name="commands",
+            description="List built-in and allowed external commands.",
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["faq"],
+            handler_key="faq",
+            handler=lambda _command, _context: run_builtin_faq(),
+            name="faq",
+            description=("Show configured FAQ entries inside the terminal with question and answer formatting."),
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["help"],
+            handler_key="help",
+            handler=lambda _command, _context: run_builtin_help(),
+            name="help",
+            description=("Show guidance for README, FAQ, shortcuts, and command discovery."),
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["man"],
+            handler_key="man",
+            handler=lambda command, context: run_builtin_man(
+                command,
+                split_command_argv,
+                lambda: active_roots(context),
+                lambda: documented_builtin_rows(context.command_registry.documented_commands),
+            ),
+            name="man <cmd>",
+            description="Show the real man page for an allowed command.",
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["type"],
+            handler_key="type",
+            handler=lambda command, context: run_builtin_type(
+                command,
+                split_command_argv,
+                lambda: active_roots(context),
+            ),
+            name="type <cmd>",
+            description=("Describe whether a command is built in, installed, or missing."),
+        ),
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["which"],
+            handler_key="which",
+            handler=lambda command, context: run_builtin_which(
+                command,
+                split_command_argv,
+                lambda: active_roots(context),
+            ),
+            name="which <cmd>",
+            description="Locate a built-in command or allowed runtime command.",
+        ),
+    )

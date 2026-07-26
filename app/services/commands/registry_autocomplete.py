@@ -423,6 +423,16 @@ def _normalize_autocomplete_context(data):
     return normalized
 
 
+def normalize_autocomplete_spec(root: str, raw_spec: object) -> dict:
+    """Normalize one command's declarative autocomplete grammar."""
+    normalized_root = str(root or "").strip().lower()
+    if not normalized_root or not isinstance(raw_spec, dict) or not raw_spec:
+        return {}
+    return _normalize_autocomplete_context({
+        normalized_root: raw_spec,
+    }).get(normalized_root, {})
+
+
 def _merge_autocomplete_context(base, overlay):
     merged = deepcopy(base if isinstance(base, dict) else {})
     for root, spec in (overlay or {}).items():

@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from typing import cast
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
 from core.database_access import get_db_connect
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
@@ -54,9 +58,7 @@ def _project_display_name(project: dict[str, object]) -> str:
 
 def _project_rows(session_id: str, *, include_archived: bool = False) -> list[dict[str, object]]:
     return [
-        cast(dict[str, object], project)
-        for project in list_projects(session_id, include_archived=include_archived)
-        if project
+        cast(dict[str, object], project) for project in list_projects(session_id, include_archived=include_archived) if project
     ]
 
 
@@ -86,15 +88,13 @@ def _resolve_project_ref(
     ref_lower = ref.lower()
     projects = _project_rows(session_id, include_archived=include_archived)
     id_or_slug_matches = [
-        project for project in projects
+        project
+        for project in projects
         if str(project.get("id") or "") == ref or str(project.get("slug") or "").lower() == ref_lower
     ]
     if id_or_slug_matches:
         return id_or_slug_matches[0]
-    name_matches = [
-        project for project in projects
-        if str(project.get("name") or "").lower() == ref_lower
-    ]
+    name_matches = [project for project in projects if str(project.get("name") or "").lower() == ref_lower]
     if len(name_matches) > 1:
         slugs = ", ".join(str(project.get("slug") or "") for project in name_matches)
         raise ProjectWorkspaceError(f"project name is ambiguous; use one of these slugs: {slugs}")
@@ -112,9 +112,7 @@ def _latest_run_id(session_id: str, *, tab_id: str = "") -> str:
             ).fetchone()
         else:
             row = conn.execute(
-                "SELECT id FROM runs "
-                "WHERE session_id = ? AND run_kind = 'external' "
-                "ORDER BY started DESC LIMIT 1",
+                "SELECT id FROM runs WHERE session_id = ? AND run_kind = 'external' ORDER BY started DESC LIMIT 1",
                 (session_id,),
             ).fetchone()
     return str(row["id"] or "") if row else ""
@@ -122,8 +120,7 @@ def _latest_run_id(session_id: str, *, tab_id: str = "") -> str:
 
 def _project_link_payload(parts: list[str], session_id: str, *, tab_id: str = "") -> tuple[str, str]:
     if len(parts) >= 3 and (
-        parts[2].lower() == "last"
-        or (len(parts) >= 4 and parts[2].lower() == "run" and parts[3].lower() == "last")
+        parts[2].lower() == "last" or (len(parts) >= 4 and parts[2].lower() == "run" and parts[3].lower() == "last")
     ):
         run_id = _latest_run_id(session_id, tab_id=tab_id)
         if not run_id:
@@ -165,10 +162,12 @@ def _project_target_lines(session_id: str, project: dict[str, object]) -> list[d
     for target in targets:
         label = str(target.get("label") or "")
         suffix = f"  {label}" if label else ""
-        lines.append(output_line(
-            f"{str(target.get('type') or ''):<8} {str(target.get('value') or '')}{suffix}",
-            "builtin-table-row",
-        ))
+        lines.append(
+            output_line(
+                f"{str(target.get('type') or ''):<8} {str(target.get('value') or '')}{suffix}",
+                "builtin-table-row",
+            )
+        )
     return lines
 
 
@@ -184,17 +183,23 @@ def _run_project_target_command(parts: list[str], session_id: str) -> list[dict[
     if action == "add":
         if len(parts) < 5:
             return [output_line("Usage: project target add <type> <value>")]
-        target = add_project_target(session_id, project_id, {
-            "type": parts[3],
-            "value": " ".join(parts[4:]).strip(),
-        })
+        target = add_project_target(
+            session_id,
+            project_id,
+            {
+                "type": parts[3],
+                "value": " ".join(parts[4:]).strip(),
+            },
+        )
         if not target:
             return [output_line("project: active project was not found")]
         target = cast(dict[str, object], target)
-        return [output_line(
-            f"project: target added {str(target.get('type') or '')} {str(target.get('value') or '')}",
-            "builtin-success",
-        )]
+        return [
+            output_line(
+                f"project: target added {str(target.get('type') or '')} {str(target.get('value') or '')}",
+                "builtin-success",
+            )
+        ]
     if action in {"quick-add", "quick"}:
         text = " ".join(parts[3:]).strip()
         if not text:
@@ -204,20 +209,24 @@ def _run_project_target_command(parts: list[str], session_id: str) -> list[dict[
         if not target:
             return [output_line("project: active project was not found")]
         target = cast(dict[str, object], target)
-        return [output_line(
-            f"project: target added {str(target.get('type') or '')} {str(target.get('value') or '')}",
-            "builtin-success",
-        )]
+        return [
+            output_line(
+                f"project: target added {str(target.get('type') or '')} {str(target.get('value') or '')}",
+                "builtin-success",
+            )
+        ]
     if action in {"remove", "rm", "delete"}:
         ref = " ".join(parts[3:]).strip()
         target = _resolve_project_target_ref(session_id, project_id, ref)
         if not target:
             return [output_line(f"project: target not found: {ref}")]
         removed = delete_project_target(session_id, project_id, str(target["id"]))
-        return [output_line(
-            f"project: target removed {str(target.get('value') or ref)}",
-            "builtin-success" if removed else "builtin-note",
-        )]
+        return [
+            output_line(
+                f"project: target removed {str(target.get('value') or ref)}",
+                "builtin-success" if removed else "builtin-note",
+            )
+        ]
     return [output_line(f"project: unknown target action '{action}'")]
 
 
@@ -239,10 +248,12 @@ def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> l
             for project in projects:
                 marker = "*" if str(project.get("id") or "") == active_id else " "
                 status = str(project.get("status") or "")
-                lines.append(output_line(
-                    f"{marker} {str(project.get('slug') or ''):<24}  {status:<8}  {str(project.get('name') or '')}",
-                    "builtin-table-row",
-                ))
+                lines.append(
+                    output_line(
+                        f"{marker} {str(project.get('slug') or ''):<24}  {status:<8}  {str(project.get('name') or '')}",
+                        "builtin-table-row",
+                    )
+                )
             return lines
         if subcommand == "create":
             name = " ".join(parts[2:]).strip()
@@ -260,10 +271,12 @@ def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> l
         if subcommand == "current":
             project = get_active_project(session_id)
             if not project:
-                return [output_line(
-                    "No active project. Run `project use <name-or-id>` or `project create <name>`.",
-                    "builtin-note",
-                )]
+                return [
+                    output_line(
+                        "No active project. Run `project use <name-or-id>` or `project create <name>`.",
+                        "builtin-note",
+                    )
+                ]
             project = cast(dict[str, object], project)
             return [
                 output_line("Active project:", "builtin-section"),
@@ -298,10 +311,12 @@ def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> l
             return [output_line(f"project: renamed {_project_display_name(renamed)}", "builtin-success")]
         if subcommand == "clear":
             cleared = clear_active_project(session_id)
-            return [output_line(
-                "project: active project cleared" if cleared else "project: no active project was set",
-                "builtin-success" if cleared else "builtin-note",
-            )]
+            return [
+                output_line(
+                    "project: active project cleared" if cleared else "project: no active project was set",
+                    "builtin-success" if cleared else "builtin-note",
+                )
+            ]
         if subcommand == "archive":
             ref = " ".join(parts[2:]).strip()
             project = _resolve_project_ref(session_id, ref, include_archived=True)
@@ -327,10 +342,12 @@ def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> l
             if not project:
                 return [output_line(f"project: not found: {ref}")]
             deleted = delete_project(session_id, str(project["id"]))
-            return [output_line(
-                f"project: deleted {_project_display_name(project)}" if deleted else f"project: not found: {ref}",
-                "builtin-success" if deleted else "builtin-note",
-            )]
+            return [
+                output_line(
+                    f"project: deleted {_project_display_name(project)}" if deleted else f"project: not found: {ref}",
+                    "builtin-success" if deleted else "builtin-note",
+                )
+            ]
         if subcommand in {"target", "targets"}:
             return _run_project_target_command(parts, session_id)
         if subcommand in {"link", "unlink"}:
@@ -344,23 +361,180 @@ def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> l
                 link = link_project_entity(session_id, str(project["id"]), payload)
                 if not link:
                     return [output_line("project: active project was not found")]
-                return [output_line(
-                    f"project: linked {entity_type} {entity_id} to {str(project.get('slug') or '')}",
-                    "builtin-success",
-                )]
+                return [
+                    output_line(
+                        f"project: linked {entity_type} {entity_id} to {str(project.get('slug') or '')}",
+                        "builtin-success",
+                    )
+                ]
             removed = unlink_project_entity(session_id, str(project["id"]), payload)
             message = (
                 f"project: unlinked {entity_type} {entity_id}"
                 if removed
                 else f"project: no link found for {entity_type} {entity_id}"
             )
-            return [output_line(
-                message,
-                "builtin-success" if removed else "builtin-note",
-            )]
+            return [
+                output_line(
+                    message,
+                    "builtin-success" if removed else "builtin-note",
+                )
+            ]
     except ProjectWorkspaceError as exc:
         return [output_line(f"project: {exc}")]
     return [
         output_line(f"project: unknown subcommand '{subcommand}'"),
         *_project_usage(),
     ]
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "project": {
+        "root": "project",
+        "description": "built-in: create, select, link, and annotate project workspaces",
+        "autocomplete": {
+            "subcommands": {
+                "list": {
+                    "description": "List current-session projects",
+                    "flags": [
+                        {"value": "--all", "description": "Include archived projects"},
+                        {"value": "-a", "description": "Include archived projects"},
+                    ],
+                },
+                "create": {
+                    "description": "Create and activate a project",
+                    "arguments": [{"value": "<name>", "hint_only": True, "description": "Project name"}],
+                },
+                "use": {
+                    "description": "Activate an existing project",
+                    "arguments": [{"value": "<name-or-id>", "hint_only": True, "description": "Project name, slug, or id"}],
+                },
+                "current": {"description": "Show the active project", "closes": True},
+                "rename": {
+                    "description": "Rename a project",
+                    "arguments": [
+                        {"value": "<name-or-id>", "hint_only": True, "description": "Project name, slug, or id"},
+                        {"value": "<new-name>", "hint_only": True, "description": "New project name"},
+                    ],
+                },
+                "clear": {"description": "Clear the active project", "closes": True},
+                "archive": {
+                    "description": "Archive a project",
+                    "arguments": [{"value": "<name-or-id>", "hint_only": True, "description": "Project name, slug, or id"}],
+                },
+                "unarchive": {
+                    "description": "Unarchive a project",
+                    "arguments": [{"value": "<name-or-id>", "hint_only": True, "description": "Project name, slug, or id"}],
+                },
+                "delete": {
+                    "description": "Delete a project",
+                    "arguments": [{"value": "<name-or-id>", "hint_only": True, "description": "Project name, slug, or id"}],
+                },
+                "link": {
+                    "description": "Link a run to the active project",
+                    "subcommands": {
+                        "last": {"description": "Link the latest run", "close_after": {"last": 0}},
+                        "run": {
+                            "description": "Link a run",
+                            "arguments": [
+                                {"value": "last", "description": "Link the latest run in this tab"},
+                                {"value": "<run-id>", "hint_only": True, "description": "Run id"},
+                            ],
+                            "close_after": {"run": 1},
+                        },
+                    },
+                },
+                "unlink": {
+                    "description": "Unlink a run from the active project",
+                    "subcommands": {
+                        "run": {
+                            "description": "Unlink a run",
+                            "arguments": [{"value": "<run-id>", "hint_only": True, "description": "Run id"}],
+                            "close_after": {"run": 1},
+                        }
+                    },
+                },
+                "target": {
+                    "description": "Manage active-project targets",
+                    "subcommands": {
+                        "list": {"description": "List project targets", "closes": True},
+                        "add": {
+                            "description": "Add a typed target",
+                            "subcommands": {
+                                "domain": {
+                                    "description": "Add a domain target",
+                                    "arguments": [
+                                        {
+                                            "value": "<domain>",
+                                            "hint_only": True,
+                                            "value_type": "domain",
+                                            "description": "Domain value",
+                                        }
+                                    ],
+                                    "close_after": {"domain": 1},
+                                },
+                                "url": {
+                                    "description": "Add a URL target",
+                                    "arguments": [
+                                        {"value": "<url>", "hint_only": True, "value_type": "url", "description": "URL value"}
+                                    ],
+                                    "close_after": {"url": 1},
+                                },
+                                "host": {
+                                    "description": "Add a host target",
+                                    "arguments": [
+                                        {"value": "<host>", "hint_only": True, "value_type": "host", "description": "Host value"}
+                                    ],
+                                    "close_after": {"host": 1},
+                                },
+                                "ip": {
+                                    "description": "Add an IP target",
+                                    "arguments": [
+                                        {"value": "<ip>", "hint_only": True, "value_type": "ip", "description": "IP address"}
+                                    ],
+                                    "close_after": {"ip": 1},
+                                },
+                                "cidr": {
+                                    "description": "Add a CIDR target",
+                                    "arguments": [
+                                        {"value": "<cidr>", "hint_only": True, "value_type": "cidr", "description": "CIDR range"}
+                                    ],
+                                    "close_after": {"cidr": 1},
+                                },
+                            },
+                        },
+                        "quick-add": {
+                            "description": "Infer and add a target from text",
+                            "arguments": [
+                                {
+                                    "value": "<text-or-value>",
+                                    "hint_only": True,
+                                    "description": "Text containing a URL, CIDR, IP, or domain",
+                                }
+                            ],
+                        },
+                        "remove": {
+                            "description": "Remove a target",
+                            "arguments": [{"value": "<id-or-value>", "hint_only": True, "description": "Target id or value"}],
+                        },
+                    },
+                },
+            }
+        },
+    }
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["project"],
+            handler_key="project",
+            handler=lambda command, context: run_builtin_project(
+                command,
+                context.session_id,
+                tab_id=context.tab_id,
+            ),
+            name="project",
+            description=("Create, select, and link project workspaces from the terminal."),
+        ),
+    )

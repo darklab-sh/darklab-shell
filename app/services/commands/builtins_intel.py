@@ -5,6 +5,10 @@
 
 from __future__ import annotations
 
+from services.commands.builtin_registry import (
+    BuiltinCommandSpec,
+    build_builtin_command_spec,
+)
 import ipaddress
 import logging
 from typing import Any
@@ -59,11 +63,14 @@ def _persist_lookup_snapshot(result: IntelLookupResult, session_id: str, *, team
     try:
         persist_lookup_for_existing_entity(session_id, result, team_id=team_id)
     except Exception:
-        log.exception("INTEL_LOOKUP_SNAPSHOT_PERSIST_FAILED", extra={
-            "session": get_log_session_id(session_id),
-            "entity_type": result.entity_type,
-            "team_id": team_id,
-        })
+        log.exception(
+            "INTEL_LOOKUP_SNAPSHOT_PERSIST_FAILED",
+            extra={
+                "session": get_log_session_id(session_id),
+                "entity_type": result.entity_type,
+                "team_id": team_id,
+            },
+        )
 
 
 def _intel_usage() -> list[dict[str, object]]:
@@ -268,11 +275,15 @@ def _format_greynoise(payload: dict[str, Any]) -> list[dict[str, object]]:
     message = str(payload.get("message") or "").strip()
     if message:
         lines.append(output_line(format_native_record("status", message, 14), "builtin-kv"))
-    lines.extend([
-        output_line(format_native_record("classification", str(payload.get("classification") or "unknown"), 14), "builtin-kv"),
-        output_line(format_native_record("name", str(payload.get("name") or "-"), 14), "builtin-kv"),
-        output_line(format_native_record("last seen", str(payload.get("last_seen") or "-"), 14), "builtin-kv"),
-    ])
+    lines.extend(
+        [
+            output_line(
+                format_native_record("classification", str(payload.get("classification") or "unknown"), 14), "builtin-kv"
+            ),
+            output_line(format_native_record("name", str(payload.get("name") or "-"), 14), "builtin-kv"),
+            output_line(format_native_record("last seen", str(payload.get("last_seen") or "-"), 14), "builtin-kv"),
+        ]
+    )
     if isinstance(payload.get("noise"), bool):
         lines.append(output_line(format_native_record("noise", "yes" if payload.get("noise") else "no", 14), "builtin-kv"))
     if isinstance(payload.get("riot"), bool):
@@ -505,10 +516,12 @@ def _format_urlhaus_host(payload: dict[str, Any]) -> list[dict[str, object]]:
         for item in urls[:5]:
             if not isinstance(item, dict):
                 continue
-            lines.append(output_line(
-                f"  {_truncate(str(item.get('url') or ''), 110)} {str(item.get('status') or '')}".rstrip(),
-                "builtin-kv",
-            ))
+            lines.append(
+                output_line(
+                    f"  {_truncate(str(item.get('url') or ''), 110)} {str(item.get('status') or '')}".rstrip(),
+                    "builtin-kv",
+                )
+            )
     return lines
 
 
@@ -525,10 +538,12 @@ def _format_urlhaus_hash(payload: dict[str, Any]) -> list[dict[str, object]]:
         for item in payloads[:5]:
             if not isinstance(item, dict):
                 continue
-            lines.append(output_line(
-                f"  {_truncate(str(item.get('sha256') or ''), 72)} {str(item.get('signature') or '')}".rstrip(),
-                "builtin-kv",
-            ))
+            lines.append(
+                output_line(
+                    f"  {_truncate(str(item.get('sha256') or ''), 72)} {str(item.get('signature') or '')}".rstrip(),
+                    "builtin-kv",
+                )
+            )
     return lines
 
 
@@ -548,10 +563,12 @@ def _format_urlhaus_url(payload: dict[str, Any]) -> list[dict[str, object]]:
         for item in payloads[:5]:
             if not isinstance(item, dict):
                 continue
-            lines.append(output_line(
-                f"  {_truncate(str(item.get('sha256') or ''), 72)} {str(item.get('signature') or '')}".rstrip(),
-                "builtin-kv",
-            ))
+            lines.append(
+                output_line(
+                    f"  {_truncate(str(item.get('sha256') or ''), 72)} {str(item.get('signature') or '')}".rstrip(),
+                    "builtin-kv",
+                )
+            )
     return lines
 
 
@@ -654,3 +671,67 @@ def _truncate(value: str, length: int) -> str:
 
 def _provider_label(provider: str) -> str:
     return provider_label(provider)
+
+
+_BUILTIN_AUTOCOMPLETE = {
+    "intel": {
+        "root": "intel",
+        "description": "built-in: query app-native external intel providers",
+        "autocomplete": {
+            "subcommands": [
+                {
+                    "value": "ip",
+                    "description": "Look up an IP address",
+                    "takes_value": True,
+                    "insert": "ip ",
+                    "value_hint": {"value": "<ip>", "hint_only": True, "value_type": "ip", "description": "IP address"},
+                },
+                {
+                    "value": "domain",
+                    "description": "Look up a domain",
+                    "takes_value": True,
+                    "insert": "domain ",
+                    "value_hint": {"value": "<domain>", "hint_only": True, "value_type": "domain", "description": "Domain"},
+                },
+                {
+                    "value": "url",
+                    "description": "Look up a URL",
+                    "takes_value": True,
+                    "insert": "url ",
+                    "value_hint": {"value": "<url>", "hint_only": True, "value_type": "url", "description": "URL"},
+                },
+                {
+                    "value": "hash",
+                    "description": "Look up a file hash",
+                    "takes_value": True,
+                    "insert": "hash ",
+                    "value_hint": {"value": "<md5|sha1|sha256>", "hint_only": True, "description": "File hash"},
+                },
+                {
+                    "value": "cve",
+                    "description": "Look up a CVE",
+                    "takes_value": True,
+                    "insert": "cve ",
+                    "value_hint": {"value": "<CVE-ID>", "hint_only": True, "value_type": "cve", "description": "CVE ID"},
+                },
+            ],
+            "flags": [{"value": "--include-private", "description": "Allow private or loopback IP lookups"}],
+        },
+    }
+}
+
+
+def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
+    return (
+        build_builtin_command_spec(
+            _BUILTIN_AUTOCOMPLETE["intel"],
+            handler_key="intel",
+            handler=lambda command, context: run_builtin_intel(
+                command,
+                context.session_id,
+                team_id=context.team_id,
+            ),
+            name="intel <type> <value>",
+            description="Look up passive intel from app-native providers.",
+        ),
+    )

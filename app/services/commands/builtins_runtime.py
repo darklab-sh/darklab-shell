@@ -74,8 +74,7 @@ def _recent_runs(session_id: str, limit: int | None = None):
     effective_limit = int(limit if limit is not None else resolve_effective_cfg()["recent_commands_limit"])
     with get_db_connect()() as conn:
         return conn.execute(
-            "SELECT id, command, started, finished, exit_code FROM runs "
-            "WHERE session_id = ? ORDER BY started DESC LIMIT ?",
+            "SELECT id, command, started, finished, exit_code FROM runs WHERE session_id = ? ORDER BY started DESC LIMIT ?",
             (session_id, effective_limit),
         ).fetchall()
 
@@ -85,8 +84,7 @@ def _session_history_runs(session_id: str):
     # session-scoped, chronological, and unclipped by the recent-command cache.
     with get_db_connect()() as conn:
         return conn.execute(
-            "SELECT id, command, started, finished, exit_code FROM runs "
-            "WHERE session_id = ? ORDER BY started ASC, id ASC",
+            "SELECT id, command, started, finished, exit_code FROM runs WHERE session_id = ? ORDER BY started ASC, id ASC",
             (session_id,),
         ).fetchall()
 
@@ -167,7 +165,7 @@ def run_builtin_history(session_id: str) -> list[dict[str, object]]:
 def _run_elapsed(started: str) -> str:
     try:
         start = _parse_dt(started)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return "-"
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
@@ -177,7 +175,7 @@ def _run_elapsed(started: str) -> str:
 def _format_run_started(started: str) -> str:
     try:
         start = _parse_dt(started)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return "-"
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
@@ -212,7 +210,7 @@ def _active_run_cpu_seconds(run: dict) -> float | None:
 def _active_run_elapsed_seconds(run: dict) -> float | None:
     try:
         start = _parse_dt(str(run.get("started", "")))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
@@ -258,9 +256,7 @@ def _active_run_json_rows(runs: list[dict]) -> list[dict[str, object]]:
         usage = _active_run_resource_usage(run)
         if usage:
             row["resource_usage"] = {
-                key: value
-                for key, value in usage.items()
-                if key in {"cpu_seconds", "memory_bytes", "process_count", "status"}
+                key: value for key, value in usage.items() if key in {"cpu_seconds", "memory_bytes", "process_count", "status"}
             }
         rows.append(row)
     return rows
@@ -347,19 +343,21 @@ def run_builtin_runs(
             strict=False,
         ):
             command_text = str(run.get("command", "")).strip()
-            lines.append(_output_line(
-                "  "
-                f"{_ansi_cell(run_label, run_width, '<', _ansi_cyan)}  "
-                f"{_ansi_cell(pid_label, pid_width, '>', _ansi_dim)}  "
-                f"{_ansi_cell(elapsed_label, elapsed_width, '>', _ansi_green)}  "
-                f"{_ansi_cell(cpu_label, cpu_width, '>', _ansi_amber)}  "
-                f"{_ansi_cell(cpu_time_label, cpu_time_width, '>', _ansi_dim)}  "
-                f"{_ansi_cell(memory_label, memory_width, '>', _ansi_dim)}  "
-                f"{_ansi_cell(started_label, started_width, '<', _ansi_dim)}  "
-                f"{_ansi_cell(source_label, source_width, '<', _ansi_cyan)}  "
-                f"{command_text}",
-                "builtin-table-row",
-            ))
+            lines.append(
+                _output_line(
+                    "  "
+                    f"{_ansi_cell(run_label, run_width, '<', _ansi_cyan)}  "
+                    f"{_ansi_cell(pid_label, pid_width, '>', _ansi_dim)}  "
+                    f"{_ansi_cell(elapsed_label, elapsed_width, '>', _ansi_green)}  "
+                    f"{_ansi_cell(cpu_label, cpu_width, '>', _ansi_amber)}  "
+                    f"{_ansi_cell(cpu_time_label, cpu_time_width, '>', _ansi_dim)}  "
+                    f"{_ansi_cell(memory_label, memory_width, '>', _ansi_dim)}  "
+                    f"{_ansi_cell(started_label, started_width, '<', _ansi_dim)}  "
+                    f"{_ansi_cell(source_label, source_width, '<', _ansi_cyan)}  "
+                    f"{command_text}",
+                    "builtin-table-row",
+                )
+            )
         lines.append(_active_status_monitor_hint())
         return lines
 
@@ -397,16 +395,18 @@ def run_builtin_runs(
         strict=False,
     ):
         command_text = str(run.get("command", "")).strip()
-        lines.append(_output_line(
-            "  "
-            f"{_ansi_cell(run_label, run_width, '<', _ansi_cyan)}  "
-            f"{_ansi_cell(pid_label, pid_width, '>', _ansi_dim)}  "
-            f"{_ansi_cell(elapsed_label, elapsed_width, '>', _ansi_green)}  "
-            f"{_ansi_cell(cpu_label, cpu_width, '>', _ansi_amber)}  "
-            f"{_ansi_cell(memory_label, memory_width, '>', _ansi_dim)}  "
-            f"{command_text}",
-            "builtin-table-row",
-        ))
+        lines.append(
+            _output_line(
+                "  "
+                f"{_ansi_cell(run_label, run_width, '<', _ansi_cyan)}  "
+                f"{_ansi_cell(pid_label, pid_width, '>', _ansi_dim)}  "
+                f"{_ansi_cell(elapsed_label, elapsed_width, '>', _ansi_green)}  "
+                f"{_ansi_cell(cpu_label, cpu_width, '>', _ansi_amber)}  "
+                f"{_ansi_cell(memory_label, memory_width, '>', _ansi_dim)}  "
+                f"{command_text}",
+                "builtin-table-row",
+            )
+        )
     lines.append(_active_status_monitor_hint())
     return lines
 
@@ -444,11 +444,11 @@ def run_builtin_limits() -> list[dict[str, object]]:
             ),
             "builtin-kv",
         ),
-        _output_line(_format_native_record("live preview lines", str(cfg['max_output_lines']), width), "builtin-kv"),
+        _output_line(_format_native_record("live preview lines", str(cfg["max_output_lines"]), width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "full output save",
-                _ansi_yes_no(bool(cfg.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(cfg.get("persist_full_run_output", False))),
                 width,
             ),
             "builtin-kv",
@@ -461,8 +461,8 @@ def run_builtin_limits() -> list[dict[str, object]]:
             ),
             "builtin-kv",
         ),
-        _output_line(_format_native_record("history panel limit", str(cfg['history_panel_limit']), width), "builtin-kv"),
-        _output_line(_format_native_record("recent commands", str(cfg['recent_commands_limit']), width), "builtin-kv"),
+        _output_line(_format_native_record("history panel limit", str(cfg["history_panel_limit"]), width), "builtin-kv"),
+        _output_line(_format_native_record("recent commands", str(cfg["recent_commands_limit"]), width), "builtin-kv"),
         _output_line(_format_native_record("tab limit", f"{cfg['max_tabs'] or 0} (0 = unlimited)", width), "builtin-kv"),
         _output_line(
             _format_native_record(
@@ -493,7 +493,7 @@ def run_builtin_limits() -> list[dict[str, object]]:
             "builtin-kv",
         ),
         _output_line(
-            _format_native_record("files max count", str(cfg.get('workspace_max_files', 0)), width),
+            _format_native_record("files max count", str(cfg.get("workspace_max_files", 0)), width),
             "builtin-kv",
         ),
         _output_line(
@@ -501,7 +501,7 @@ def run_builtin_limits() -> list[dict[str, object]]:
                 "files cleanup",
                 (
                     f"{cfg.get('workspace_inactivity_ttl_hours', 0)}h (0 = disabled)"
-                    if int(cfg.get('workspace_inactivity_ttl_hours', 0) or 0) > 0
+                    if int(cfg.get("workspace_inactivity_ttl_hours", 0) or 0) > 0
                     else _ansi_amber("disabled")
                 ),
                 width,
@@ -527,7 +527,7 @@ def run_builtin_retention() -> list[dict[str, object]]:
         _output_line(
             _format_native_record(
                 "full output save",
-                _ansi_yes_no(bool(cfg.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(cfg.get("persist_full_run_output", False))),
                 width,
             ),
             "builtin-kv",
@@ -567,10 +567,12 @@ def run_builtin_ps(
         cmd = str(job.get("command", "")).strip()
         pid = job.get("pid") or ""
         started_clock = _format_clock(job["started"]) if job.get("started") else "-"
-        lines.append(_output_line(
-            f"{str(pid):>5} pts/0    S    {started_clock:<8} {cmd}",
-            "builtin-ps-row",
-        ))
+        lines.append(
+            _output_line(
+                f"{str(pid):>5} pts/0    S    {started_clock:<8} {cmd}",
+                "builtin-ps-row",
+            )
+        )
     return lines
 
 
@@ -584,7 +586,7 @@ def run_builtin_status(
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
     lines = [
         _output_line("Shell status:", "builtin-section"),
-        _output_line(_format_native_record("app", cfg['app_name'], width), "builtin-kv"),
+        _output_line(_format_native_record("app", cfg["app_name"], width), "builtin-kv"),
         _output_line(_format_native_record("session", _ansi_dim(session_label), width), "builtin-kv"),
         _output_line(
             _format_native_record("session type", _ansi_status_label(_session_type_label(session_id)), width),
@@ -625,19 +627,19 @@ def run_builtin_status(
         _output_line(
             _format_native_record(
                 "full output save",
-                _ansi_yes_no(bool(cfg.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(cfg.get("persist_full_run_output", False))),
                 width,
             ),
             "builtin-kv",
         ),
         _output_line(
-            _format_native_record("tab limit", _format_limit_value(cfg['max_tabs']), width),
+            _format_native_record("tab limit", _format_limit_value(cfg["max_tabs"]), width),
             "builtin-kv",
         ),
         _output_line(
             _format_native_record(
                 "retention",
-                _format_limit_value(cfg['permalink_retention_days']),
+                _format_limit_value(cfg["permalink_retention_days"]),
                 width,
             ),
             "builtin-kv",
@@ -704,13 +706,16 @@ def run_builtin_stats(
         if is_builtin_root:
             continue
 
-        bucket = by_root.setdefault(root, {
-            "count": 0,
-            "success": 0,
-            "failed": 0,
-            "incomplete": 0,
-            "durations": [],
-        })
+        bucket = by_root.setdefault(
+            root,
+            {
+                "count": 0,
+                "success": 0,
+                "failed": 0,
+                "incomplete": 0,
+                "durations": [],
+            },
+        )
         bucket["count"] += 1
 
         if exit_code is None:
@@ -723,11 +728,7 @@ def run_builtin_stats(
         if elapsed is not None:
             bucket["durations"].append(float(elapsed))
 
-    avg_duration = (
-        sum(total_durations) / len(total_durations)
-        if total_durations
-        else None
-    )
+    avg_duration = sum(total_durations) / len(total_durations) if total_durations else None
     completed = success_total + failed_total
     width = 18
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
@@ -776,41 +777,43 @@ def run_builtin_stats(
     top_rows: list[dict[str, str]] = []
     for root, bucket in sorted_roots[:10]:
         durations = bucket["durations"]
-        avg = (
-            sum(durations) / len(durations)
-            if durations
-            else None
-        )
+        avg = sum(durations) / len(durations) if durations else None
         count = bucket["count"]
         success = bucket["success"]
         failed = bucket["failed"]
         completed_for_root = success + failed
-        top_rows.append({
-            "root": root,
-            "runs": f"{count} run{'s' if count != 1 else ''}",
-            "ok": f"{_format_percent(success, completed_for_root)} ok",
-            "avg": _format_stats_duration(avg),
-        })
+        top_rows.append(
+            {
+                "root": root,
+                "runs": f"{count} run{'s' if count != 1 else ''}",
+                "ok": f"{_format_percent(success, completed_for_root)} ok",
+                "avg": _format_stats_duration(avg),
+            }
+        )
 
     column_gap = "    "
     root_width = max(len("command"), *(len(row["root"]) for row in top_rows))
     runs_width = max(len("runs"), *(len(row["runs"]) for row in top_rows))
     ok_width = max(len("ok"), *(len(row["ok"]) for row in top_rows))
     avg_width = max(len("avg"), *(len(row["avg"]) for row in top_rows))
-    header = column_gap.join((
-        f"{'command':<{root_width}}",
-        f"{'runs':>{runs_width}}",
-        f"{'ok':>{ok_width}}",
-        f"{'avg':>{avg_width}}",
-    ))
+    header = column_gap.join(
+        (
+            f"{'command':<{root_width}}",
+            f"{'runs':>{runs_width}}",
+            f"{'ok':>{ok_width}}",
+            f"{'avg':>{avg_width}}",
+        )
+    )
     lines.append(_output_line(f"  {header}", "builtin-table-header"))
     for row in top_rows:
-        rendered = column_gap.join((
-            f"{row['root']:<{root_width}}",
-            f"{row['runs']:>{runs_width}}",
-            f"{row['ok']:>{ok_width}}",
-            f"{row['avg']:>{avg_width}}",
-        ))
+        rendered = column_gap.join(
+            (
+                f"{row['root']:<{root_width}}",
+                f"{row['runs']:>{runs_width}}",
+                f"{row['ok']:>{ok_width}}",
+                f"{row['avg']:>{avg_width}}",
+            )
+        )
         lines.append(_output_line(f"  {rendered}", "builtin-table-row"))
     return lines
 
