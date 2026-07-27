@@ -989,7 +989,7 @@ The production Compose file leaves platform selection to the release image index
 
 ## Docker Compose Files
 
-The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:2.8.0` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The app doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
+The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:2.8.1-rc.1` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The app doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Official builds link the rail footer, mobile menu footer, FAQ, and terminal help to the running release's exact GitLab source tag and README through `PROJECT_SOURCE` in `app/config.py`. A modified build exposed over a network must point that value at the complete corresponding source for the modified version and keep the source offer prominent for its remote users. The full [GNU AGPLv3 license](LICENSE) controls.
 
@@ -1093,7 +1093,7 @@ For a local development image, pass the metadata values you want Docker inventor
 
 ```bash
 docker compose -f compose.dev.yaml build \
-  --build-arg APP_VERSION=2.8.0 \
+  --build-arg APP_VERSION=2.8.1-rc.1 \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
