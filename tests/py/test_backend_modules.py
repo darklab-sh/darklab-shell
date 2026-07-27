@@ -8918,6 +8918,14 @@ class TestSchedulerFoundation:
         assert started_threads[0]["started"] is True
         assert started_threads[0]["kwargs"]["owner_tab_id"] == "schedule:sch_test"
         assert started_threads[0]["kwargs"]["postfilter"] == "postfilter"
+        assert started_threads[0]["kwargs"]["link_project_id"] == ""
+
+        started_threads.clear()
+        dispatch._launch_user_schedule_run(
+            self._schedule(command_text="ping -c 1 darklab.sh"),
+            link_project_id=None,
+        )
+        assert started_threads[0]["kwargs"]["link_project_id"] is None
 
     def test_scheduler_due_schedules_orders_limits_and_ignores_disabled(self, monkeypatch, tmp_path):
         from services.scheduler import service
@@ -11172,24 +11180,74 @@ class TestWatchersFoundation:
         from core.helpers import get_log_session_id
         from services.scheduler import dispatch as scheduler_dispatch
         from services.scheduler import service as schedule_service
+        from services.teams import storage as team_storage
         from services.watchers import runner as watcher_runner
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
             self._register_token(conn)
+            team = team_storage.create_team(
+                conn,
+                name="Watcher Scope Team",
+                creator_session_token="tok_watchers",
+            )
+            self._insert_project(conn, "prj_personal_watcher")
+            self._insert_project(conn, "prj_team_watcher", team_id=team["id"])
             watcher = watcher_service.create_watcher(
                 "tok_watchers",
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
+                project_id="prj_personal_watcher",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            team_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                team_id=team["id"],
+                command_text="nmap -sV team.darklab.sh",
+                baseline_run_id="run_team_baseline",
+                project_id="prj_team_watcher",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            unassigned_watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV unassigned.darklab.sh",
+                baseline_run_id="run_unassigned_baseline",
                 cadence_preset="hourly",
                 conn=conn,
             )
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
+            team_schedule = schedule_service.get_schedule(team_watcher.schedule_id, conn=conn)
+            unassigned_schedule = schedule_service.get_schedule(unassigned_watcher.schedule_id, conn=conn)
             assert schedule is not None
-            monkeypatch.setattr(scheduler_dispatch, "_launch_user_schedule_run", lambda _schedule: "run_fire")
+            assert team_schedule is not None
+            assert unassigned_schedule is not None
+            launch_calls = []
+            run_ids = {
+                watcher.id: "run_fire",
+                team_watcher.id: "run_team_fire",
+                unassigned_watcher.id: "run_unassigned_fire",
+            }
+
+            def launch_run(fired_schedule, **kwargs):
+                launch_calls.append((fired_schedule.owner_id, kwargs))
+                return run_ids[fired_schedule.owner_id]
+
+            monkeypatch.setattr(scheduler_dispatch, "_launch_user_schedule_run", launch_run)
 
             with mock.patch.object(watcher_runner.log, "info") as info_log:
                 status = scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00")
+                team_status = scheduler_dispatch.fire_schedule(
+                    conn,
+                    team_schedule,
+                    fired_at="2026-05-20T10:06:00+00:00",
+                )
+                unassigned_status = scheduler_dispatch.fire_schedule(
+                    conn,
+                    unassigned_schedule,
+                    fired_at="2026-05-20T10:07:00+00:00",
+                )
             refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
             fires, total = watcher_service.list_watcher_fires(watcher.id, conn=conn)
             schedule_fires = conn.execute(
@@ -11199,6 +11257,28 @@ class TestWatchersFoundation:
             schedule_refs = schedule_service.schedule_refs_by_run(conn, ["run_fire"])
 
         assert status == "fired"
+        assert team_status == "fired"
+        assert unassigned_status == "fired"
+        assert launch_calls == [
+            (
+                watcher.id,
+                {
+                    "link_project_id": "prj_personal_watcher",
+                },
+            ),
+            (
+                team_watcher.id,
+                {
+                    "link_project_id": "prj_team_watcher",
+                },
+            ),
+            (
+                unassigned_watcher.id,
+                {
+                    "link_project_id": None,
+                },
+            ),
+        ]
         assert refreshed is not None
         assert refreshed.state == "firing"
         assert refreshed.last_run_id == "run_fire"
@@ -11208,9 +11288,15 @@ class TestWatchersFoundation:
         assert [(row["status"], row["run_id"], row["reason"]) for row in schedule_fires] == [
             ("fired", "run_fire", "started watcher run"),
         ]
-        fired_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_FIRED",))
+        fired_log = next(
+            call
+            for call in info_log.call_args_list
+            if call.args == ("WATCHER_FIRED",)
+            and call.kwargs["extra"]["watcher_id"] == watcher.id
+        )
         assert fired_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
         assert fired_log.kwargs["extra"]["run_id"] == "run_fire"
+        assert fired_log.kwargs["extra"]["project_id"] == "prj_personal_watcher"
         assert schedule_refs["run_fire"]["schedule_id"] == watcher.schedule_id
         assert schedule_refs["run_fire"]["owner_kind"] == "watcher"
         assert schedule_refs["run_fire"]["owner_id"] == watcher.id
@@ -11240,7 +11326,11 @@ class TestWatchersFoundation:
             )
             assert watcher.baseline_run_id == ""
             assert watcher.state_reason == "pending_baseline"
-            monkeypatch.setattr(scheduler_dispatch, "_launch_user_schedule_run", lambda _schedule: next(next_run_ids))
+            monkeypatch.setattr(
+                scheduler_dispatch,
+                "_launch_user_schedule_run",
+                lambda _schedule, **_kwargs: next(next_run_ids),
+            )
 
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
             assert schedule is not None

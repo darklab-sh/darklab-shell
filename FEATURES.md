@@ -672,7 +672,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - The **Watchers** modal opens from the desktop rail, mobile menu, or Run Details and follows the active personal or team scope.
 - Run Details and the History drawer action menu include **Create watcher from this baseline**, which opens the modal with the completed run already selected as the baseline in the same scope as that run.
 - New watchers can use **First run** mode, which captures the first successful watcher fire as the baseline without needing an existing run id.
-- The modal includes a Project selector, so a watcher can appear on a Project Monitoring tab as soon as it is created. `darklab watch create --project PROJECT_ID` sets the same link for CLI-created watchers, and `darklab watch set-project` can add, change, or clear it later.
+- The modal includes a Project selector, so a watcher and its future external runs stay together on that Project's Monitoring tab even if another Project is active when a check finishes. Unassigned watchers don't inherit the active Project. `darklab watch create --project PROJECT_ID` sets the same link for CLI-created watchers, and `darklab watch set-project` can add, change, or clear it later.
 - The Baseline run field includes a short helper card for operators who prefer to paste a run id manually in **Existing run** mode.
 - Each watcher owns a schedule, reruns the watched command on that cadence, and compares each completed watcher run against the current baseline.
 - Watcher textual diffs ignore progress/status-line/PTY chrome and optional line patterns, and include entity-set deltas in the saved summary, so noisy redraws do not look like real changes and newly observed hosts, URLs, hashes, or CVEs are easier to spot.

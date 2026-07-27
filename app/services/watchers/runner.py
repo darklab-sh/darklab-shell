@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
+from typing import Protocol
 
 from core.helpers import get_log_session_id
 from services.scheduler.models import Schedule
@@ -15,7 +15,17 @@ from services.watchers.models import WATCHER_STATE_FIRING
 
 log = logging.getLogger("shell")
 
-LaunchRun = Callable[[Schedule], str]
+
+class LaunchRun(Protocol):
+    """Scheduled-run launcher contract used by watcher fires."""
+
+    def __call__(
+        self,
+        schedule: Schedule,
+        *,
+        link_project_id: str | None = "",
+    ) -> str:
+        ...
 
 
 def handle_fire(conn, schedule: Schedule, *, fired_at: str, launch_run: LaunchRun) -> str:
@@ -24,7 +34,10 @@ def handle_fire(conn, schedule: Schedule, *, fired_at: str, launch_run: LaunchRu
     if watcher is None:
         raise watcher_service.WatcherError("watcher not found for schedule")
 
-    run_id = launch_run(schedule)
+    run_id = launch_run(
+        schedule,
+        link_project_id=watcher.project_id or None,
+    )
     updated = watcher_service.set_watcher_state(
         watcher.id,
         state=WATCHER_STATE_FIRING,
@@ -47,6 +60,7 @@ def handle_fire(conn, schedule: Schedule, *, fired_at: str, launch_run: LaunchRu
         "schedule_id": schedule.id,
         "run_id": run_id,
         "baseline_run_id": watcher.baseline_run_id,
+        "project_id": watcher.project_id,
         "session": get_log_session_id(watcher.session_token),
         "fired_at": fired_at,
     })

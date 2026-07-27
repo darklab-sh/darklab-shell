@@ -2360,7 +2360,11 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
     baseline_run_id = _seed_run(token, command="nmap -sV darklab.sh", output="22/tcp open ssh")
     launched_run_id = "run_api_watcher_" + uuid.uuid4().hex[:8]
     monkeypatch.setattr(api_blueprint, "validate_schedule_command", lambda command, *_args, **_kwargs: command.strip())
-    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: launched_run_id)
+    monkeypatch.setattr(
+        dispatch,
+        "_launch_user_schedule_run",
+        lambda _schedule, **_kwargs: launched_run_id,
+    )
 
     create = client.post(
         "/api/v1/watchers",
@@ -2487,7 +2491,11 @@ def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(mon
         command="nmap -sV darklab.sh",
         output="443/tcp open https",
     )
-    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_api_team_watcher")
+    monkeypatch.setattr(
+        dispatch,
+        "_launch_user_schedule_run",
+        lambda _schedule, **_kwargs: "run_api_team_watcher",
+    )
     owner_headers = _team_headers(team_owner, team_id)
     viewer_headers = _team_headers(team_viewer, team_id)
     team_created = client.post(

@@ -640,7 +640,11 @@ class TestWatchersRoutes:
         _register_token(outsider)
         _insert_completed_run(owner, "run_watcher_team_baseline", team_id=team_id, command="nmap -sV darklab.sh")
         _insert_completed_run(owner, "run_watcher_personal_baseline", command="nmap -sV darklab.sh")
-        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda schedule: f"run_team_{schedule.owner_id[-8:]}")
+        monkeypatch.setattr(
+            dispatch,
+            "_launch_user_schedule_run",
+            lambda schedule, **_kwargs: f"run_team_{schedule.owner_id[-8:]}",
+        )
 
         created = client.post(
             "/watchers",
@@ -900,7 +904,11 @@ class TestWatchersRoutes:
             headers={"X-Session-ID": token},
             json={"baseline_run_id": "run_second_baseline", "cadence_preset": "hourly"},
         ).get_json()["watcher"]
-        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda schedule: f"run_fire_{schedule.owner_id[-8:]}")
+        monkeypatch.setattr(
+            dispatch,
+            "_launch_user_schedule_run",
+            lambda schedule, **_kwargs: f"run_fire_{schedule.owner_id[-8:]}",
+        )
 
         fired = client.post(f"/watchers/{first['id']}/run-now", headers={"X-Session-ID": token})
         first_fires = client.get(f"/watchers/{first['id']}/fires", headers={"X-Session-ID": token})
@@ -1025,7 +1033,11 @@ class TestWatchBuiltin:
         baseline_run_id = "run_watch_fire_baseline"
         _register_token(token)
         _insert_completed_run(token, baseline_run_id)
-        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda schedule: f"run_fire_{schedule.owner_id[-8:]}")
+        monkeypatch.setattr(
+            dispatch,
+            "_launch_user_schedule_run",
+            lambda schedule, **_kwargs: f"run_fire_{schedule.owner_id[-8:]}",
+        )
         execute_builtin_command(f"watch create {baseline_run_id} --cron \"0 * * * *\"", token)
         with db_connect() as conn:
             watcher_id = conn.execute("SELECT id FROM watchers WHERE session_token = ?", (token,)).fetchone()["id"]
