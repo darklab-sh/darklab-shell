@@ -3978,34 +3978,36 @@ class TestTeamRoutes:
             from blueprints import run as run_routes
             from services.runs.output_model import line_event_from_legacy
 
-            def save_finalized_team_run(run_id, *, link_project_id="", link_active_project=True):
+            def save_finalized_team_run(run_id, *, link_project_id=""):
                 capture = run_routes._run_output_capture(run_id)
                 capture.add_event(line_event_from_legacy("team finalizer output"))
-                run_routes._save_completed_run(
+                run_routes._finalize_completed_run(
                     run_id,
                     operator_token,
                     team_id,
+                    "scheduler",
                     "nmap finalized.example",
                     "2026-05-28T11:02:00+00:00",
-                    "2026-05-28T11:02:01+00:00",
                     0,
                     capture,
                     link_project_id=link_project_id,
-                    link_active_project=link_active_project,
                 )
 
             explicit_team_run_id = "run-team-project-finalized-explicit"
             explicit_personal_run_id = "run-team-project-finalized-personal"
+            unassigned_team_run_id = "run-team-project-finalized-unassigned"
             active_team_run_id = "run-team-project-finalized-active"
             save_finalized_team_run(
                 explicit_team_run_id,
                 link_project_id=project_id,
-                link_active_project=False,
             )
             save_finalized_team_run(
                 explicit_personal_run_id,
                 link_project_id=operator_personal_project_id,
-                link_active_project=False,
+            )
+            save_finalized_team_run(
+                unassigned_team_run_id,
+                link_project_id=None,
             )
             save_finalized_team_run(active_team_run_id)
             with db_connect() as conn:
@@ -4017,6 +4019,10 @@ class TestTeamRoutes:
                     "SELECT project_id, source FROM project_links WHERE entity_type = 'run' AND entity_id = ?",
                     (explicit_personal_run_id,),
                 ).fetchone()
+                unassigned_team_link = conn.execute(
+                    "SELECT project_id, source FROM project_links WHERE entity_type = 'run' AND entity_id = ?",
+                    (unassigned_team_run_id,),
+                ).fetchone()
                 active_team_link = conn.execute(
                     "SELECT project_id, source FROM project_links WHERE entity_type = 'run' AND entity_id = ?",
                     (active_team_run_id,),
@@ -4024,6 +4030,7 @@ class TestTeamRoutes:
 
             assert dict(explicit_team_link) == {"project_id": project_id, "source": "manual"}
             assert explicit_personal_link is None
+            assert unassigned_team_link is None
             assert dict(active_team_link) == {"project_id": project_id, "source": "active_project"}
         finally:
             for patcher in reversed(patchers):

@@ -450,7 +450,11 @@ def _enqueue_scheduled_fire_failed(conn, schedule: Schedule, error: str) -> None
         log.error("SCHEDULE_FAILURE_NOTIFICATION_ERROR", exc_info=True, extra={"schedule_id": schedule.id})
 
 
-def _launch_user_schedule_run(schedule: Schedule) -> str:
+def _launch_user_schedule_run(
+    schedule: Schedule,
+    *,
+    link_project_id: str | None = "",
+) -> str:
     from blueprints import run as run_blueprint  # noqa: PLC0415
     from services.commands.builtins import (  # noqa: PLC0415
         execute_builtin_command,
@@ -611,6 +615,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
                 schedule.session_token,
             ),
             "owner_tab_id": owner_tab_id,
+            "link_project_id": link_project_id,
         },
         name=f"schedule-run-broker-{started.run_id[:8]}",
         daemon=True,

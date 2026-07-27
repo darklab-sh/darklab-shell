@@ -14,7 +14,7 @@ Each watcher stores:
 - one baseline run id, or a pending first-run baseline
 - one command, usually inherited from the baseline run
 - one owned schedule row for cadence
-- optional Project membership for showing the watcher in a Project Monitoring tab
+- optional Project membership for keeping the watcher and its future external runs together in a Project Monitoring tab
 - a state such as `ok`, `changed`, `firing`, `paused`, or `error`
 - validated noise and notification policy fields
 - bounded diff details from the last completed check
@@ -23,7 +23,9 @@ Each watcher stores:
 Watchers belong to the active personal or team scope. Anonymous browser sessions cannot create watchers because the worker needs a durable `tok_` token after the browser closes, and token revocation must still stop later personal fires. Team-owned watchers stay with the team and are visible to other members when that team scope is active. Team viewers can read watchers and fire audit rows, while watcher creation, edits, deletes, manual fires, and baseline acceptance require automation-management permission.
 Archived teams pause their team-owned watchers. Reactivating a team restores access, but archive-paused watchers stay paused until someone resumes them.
 
-Project-linked watchers appear in that Project's **Monitoring** tab. A watcher can be assigned to a Project directly, or it can infer the Project from a baseline run when that run has exactly one same-scope Project link. Ambiguous, unlinked, or cross-scope baseline links leave the watcher unassigned. Deleting a Project clears watcher membership instead of deleting the watcher.
+Project-linked watchers appear in that Project's **Monitoring** tab. Their future external runs and captured Project evidence stay with that Project even if another Project is active when a check finishes. Unassigned watchers remain unassigned instead of inheriting the session's active Project.
+
+A watcher can be assigned to a Project directly, or it can infer the Project from a baseline run when that run has exactly one same-scope Project link. Ambiguous, unlinked, or cross-scope baseline links leave the watcher unassigned. Deleting a Project clears watcher membership instead of deleting the watcher.
 
 ---
 
