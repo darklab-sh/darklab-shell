@@ -730,6 +730,7 @@ class TestRunStreaming:
                 workspace_notices=["[workspace] writing scan.txt"],
                 workspace_artifacts=[],
                 owner_tab_id="tab-worker",
+                link_project_id=None,
             )
         capture.finalize()
 
@@ -769,6 +770,7 @@ class TestRunStreaming:
         assert published[-1][2]["code"] == 0
         assert published[-1][2]["output_line_count"] == 4
         finalize.assert_called_once()
+        assert finalize.call_args.kwargs["link_project_id"] is None
         assert fake_proc.stdout is not None
         assert fake_proc.stdout.closed is True
         pid_pop.assert_called_once_with("run-broker-worker")
