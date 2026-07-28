@@ -306,6 +306,19 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
     return bin_dir, log_path
 
 
+def _assert_compose_log_uses_operator_override(
+    log_text: str,
+    install_dir: Path,
+) -> None:
+    compose_lines = [
+        line for line in log_text.splitlines()
+        if line.startswith("compose --env-file ")
+    ]
+    operator_flag = f"{install_dir.name}/compose.operator.yaml"
+    assert compose_lines
+    assert all(operator_flag in line for line in compose_lines)
+
+
 def _fake_image_runtime(tmp_path: Path) -> tuple[Path, Path]:
     bin_dir = tmp_path / "image-runtime-bin"
     bin_dir.mkdir()
@@ -4116,6 +4129,13 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
     install_dir = tmp_path / "managed deployment"
     installed = _run_setup(payload, install_dir, tmp_path / "setup-run")
     assert installed.returncode == 0, installed.stderr
+    (install_dir / "compose.operator.yaml").write_text(
+        "services:\n"
+        "  shell:\n"
+        "    labels:\n"
+        '      test.operator: "true"\n',
+        encoding="utf-8",
+    )
     backup_source = _build_verified_backup(tmp_path / "backup-source")
     backup = install_dir / "backups" / "restore-test.tar.gz"
     shutil.copy2(backup_source, backup)
@@ -4148,7 +4168,9 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
 
     assert recreated.returncode == 0, recreated.stderr
     assert "environment settings changed" in recreated.stdout
-    assert " up -d --wait --force-recreate shell" in log_path.read_text(encoding="utf-8")
+    recreated_log = log_path.read_text(encoding="utf-8")
+    assert " up -d --wait --force-recreate shell" in recreated_log
+    _assert_compose_log_uses_operator_override(recreated_log, install_dir)
 
     log_path.unlink()
     env.pop("FAKE_RESTORE_ENV_APPEND")
@@ -4170,6 +4192,7 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
     assert "restore failed; the app remains stopped" in restored.stderr
     assert "Recover with: ./darklab-deploy restore" in restored.stderr
     docker_log = log_path.read_text(encoding="utf-8")
+    _assert_compose_log_uses_operator_override(docker_log, install_dir)
     assert " stop shell" in docker_log
     assert "/app/tools/restore_system.py" in docker_log
     assert f"--output-uid {os.getuid()}" in docker_log
@@ -4243,6 +4266,7 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
     assert migrated_env_stat.st_uid == os.getuid()
     assert stat.S_IMODE(migrated_env_stat.st_mode) == 0o600
     migration_log = log_path.read_text(encoding="utf-8")
+    _assert_compose_log_uses_operator_override(migration_log, install_dir)
     assert " up -d --wait postgres" in migration_log
     assert (
         "run --rm --no-deps --user 0:0 --entrypoint sh shell "
@@ -4418,6 +4442,9 @@ def test_online_upgrade_verifies_signed_manifest_before_downloading_archive(tmp_
     )
 
     assert upgraded.returncode == 0, upgraded.stderr
+    assert "docker compose --env-file .env -f compose.yaml pull" in upgraded.stdout
+    assert "docker compose --env-file .env -f compose.yaml up -d" in upgraded.stdout
+    assert "compose.operator.yaml" not in upgraded.stdout
     assert json.loads((install_dir / "release-manifest.json").read_text())["version"] == (
         next_version
     )
@@ -4452,6 +4479,12 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
 
     operator_files = {
         ".env": "OPERATOR_SENTINEL=env\n",
+        "compose.operator.yaml": (
+            "services:\n"
+            "  shell:\n"
+            "    labels:\n"
+            '      test.operator: "true"\n'
+        ),
         "conf/operator.txt": "conf\n",
         "data/operator.txt": "data\n",
         "workspaces/operator.txt": "workspace\n",
@@ -4662,6 +4695,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
         RELEASE_VERSION
     )
     (install_dir / "compose.yaml").write_bytes(original_compose)
+    log_path.write_text("", encoding="utf-8")
 
     upgraded = subprocess.run(
         [
@@ -4684,8 +4718,18 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert "  NEW_RELEASE_SETTING" in upgraded.stdout
     assert "NEW_RELEASE_SETTING=available" not in upgraded.stdout
     assert "Your existing .env was not changed" in upgraded.stdout
+    assert (
+        "docker compose --env-file .env -f compose.yaml "
+        "-f compose.operator.yaml pull"
+    ) in upgraded.stdout
+    assert (
+        "docker compose --env-file .env -f compose.yaml "
+        "-f compose.operator.yaml up -d"
+    ) in upgraded.stdout
     assert (install_dir / "backups" / "darklab-backup-auto.tar.gz").is_file()
-    assert "--result-path-only" in log_path.read_text(encoding="utf-8")
+    upgrade_log = log_path.read_text(encoding="utf-8")
+    assert "--result-path-only" in upgrade_log
+    _assert_compose_log_uses_operator_override(upgrade_log, install_dir)
     manifest = json.loads((install_dir / "release-manifest.json").read_text())
     assert manifest["version"] == next_version
     assert _dockerhub_image(next_version) in (
@@ -4720,6 +4764,10 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     )
     assert stopped_postgres_backup.returncode == 0, stopped_postgres_backup.stderr
     stopped_postgres_log = log_path.read_text(encoding="utf-8").splitlines()
+    _assert_compose_log_uses_operator_override(
+        "\n".join(stopped_postgres_log),
+        install_dir,
+    )
     postgres_start = next(
         index for index, line in enumerate(stopped_postgres_log)
         if " up -d --wait postgres" in line
@@ -4896,6 +4944,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert "--single-transaction" in captured_restore["command"]
     assert captured_restore["command"][-2:] == ["darklab_shell", str(tmp_path / "postgres.dump")]
 
+    log_path.write_text("", encoding="utf-8")
     removed = subprocess.run(
         [str(install_dir / "darklab-deploy"), "remove", "--yes"],
         cwd=install_dir,
@@ -4909,4 +4958,8 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert not (install_dir / "release-manifest.json").exists()
     assert (install_dir / ".env").is_file()
     assert all((install_dir / name).is_dir() for name in ("conf", "data", "workspaces", "backups"))
-    assert " down" in log_path.read_text(encoding="utf-8")
+    assert "compose.operator.yaml (when present)" in removed.stdout
+    remove_log = log_path.read_text(encoding="utf-8")
+    assert " down" in remove_log
+    _assert_compose_log_uses_operator_override(remove_log, install_dir)
+    assert (install_dir / "compose.operator.yaml").is_file()
