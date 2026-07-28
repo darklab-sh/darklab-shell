@@ -13,7 +13,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [2.8.2] - Unreleased
 
-No changes yet.
+### Fixed
+
+- **Unassigned watcher Project scope is now represented consistently in run-finalization type hints.** This removes a false editor error from the watcher-scope regression coverage without changing runtime behavior.
 
 ---
 
