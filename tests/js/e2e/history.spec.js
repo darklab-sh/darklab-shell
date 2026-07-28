@@ -653,7 +653,7 @@ test.describe('history drawer', () => {
     await expect(firstEntry).toHaveClass(/starred/)
   })
 
-  test('clear all history removes all chips including starred ones', async ({ page }) => {
+  test('clear all history counts and deletes only filtered runs', async ({ page }) => {
     await runCommand(page, CMD_A)
     await waitForHistoryRuns(page, 1)
     await runCommand(page, CMD_B)
@@ -669,19 +669,40 @@ test.describe('history drawer', () => {
 
     await expect(page.locator('.hist-chip')).toHaveCount(2)
 
-    // Open the history panel to access the clear-all button (it lives inside the panel)
+    // Filter down to one run, then confirm that bulk delete previews that exact selection.
     await openHistory(page)
+    await page.locator('#history-search-input').fill(CMD_A)
+    await expect(page.locator('.history-entry')).toHaveCount(1)
+    await expect(page.locator('.history-entry-cmd')).toContainText(CMD_A)
+
     await page.locator('#hist-clear-all-btn').click()
+    await expect(page.locator('#confirm-host')).toBeVisible()
+    await expect(page.locator('#confirm-host [data-confirm-body]')).toContainText(
+      'Delete 1 run matching the current filters?',
+    )
+    await expect(page.locator('#confirm-host [data-confirm-action-id="all"]')).toHaveText(
+      'Delete all (1)',
+    )
     await page.keyboard.press('Escape')
     await expect(page.locator('#confirm-host')).toBeHidden()
+
     await page.locator('#hist-clear-all-btn').click()
+    await page.locator('#confirm-host [data-confirm-action-id="all"]').click()
+    await page.locator('#confirm-host').waitFor({ state: 'hidden' })
+    await expect(page.locator('#history-row .hist-chip')).toHaveCount(1)
+
+    // Clearing the filter reveals the untouched run, then the unfiltered action removes it.
+    await page.locator('#history-clear-filters').click()
+    await expect(page.locator('.history-entry')).toHaveCount(1)
+    await expect(page.locator('.history-entry-cmd')).toContainText(CMD_B)
+    await page.locator('#hist-clear-all-btn').click()
+    await expect(page.locator('#confirm-host [data-confirm-body]')).toContainText('Delete all 1 run?')
     await page.locator('#confirm-host [data-confirm-action-id="all"]').click()
     await page.locator('#confirm-host').waitFor({ state: 'hidden' })
     await expect.poll(async () => page.evaluate(() => (
       Array.isArray(cmdHistory) ? cmdHistory.length : 0
     ))).toBe(0)
 
-    // All chips should be gone
     await expect(page.locator('#history-row .hist-chip')).toHaveCount(0)
   })
 

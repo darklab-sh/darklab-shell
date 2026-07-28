@@ -167,18 +167,32 @@ def bulk_delete_runs(
     return counts, results
 
 
-def clear_history_runs(*, owner_scope, audit_fields: dict[str, Any]) -> int:
+def clear_history_runs(
+    *,
+    owner_scope,
+    audit_fields: dict[str, Any],
+    run_ids: list[str] | None = None,
+) -> int:
     with get_db_connect()() as conn:
         scope_sql, scope_params = owner_scope.predicate()
-        run_ids = [
-            row["id"]
-            for row in conn.execute(
-                "SELECT id FROM runs WHERE " + scope_sql,  # nosec
-                scope_params,
-            ).fetchall()
-        ]
-        delete_run_artifacts(conn, run_ids)
-        cur = conn.execute("DELETE FROM runs WHERE " + scope_sql, scope_params)  # nosec
+        selected_ids = run_ids
+        if selected_ids is None:
+            selected_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM runs WHERE " + scope_sql,  # nosec
+                    scope_params,
+                ).fetchall()
+            ]
+        if selected_ids:
+            placeholders = ",".join("?" for _ in selected_ids)
+            delete_run_artifacts(conn, selected_ids)
+            cur = conn.execute(
+                f"DELETE FROM runs WHERE {scope_sql} AND id IN ({placeholders})",  # nosec
+                [*scope_params, *selected_ids],
+            )
+        else:
+            cur = conn.execute("DELETE FROM runs WHERE 1 = 0")
         if cur.rowcount:
             record_event(
                 AuditEventType.HISTORY_DELETE,
