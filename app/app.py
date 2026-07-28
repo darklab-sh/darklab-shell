@@ -31,6 +31,7 @@ from blueprints.atlas import atlas_bp
 from blueprints.content import content_bp
 from blueprints.run import run_bp
 from blueprints.history import history_bp
+from blueprints.history_clear import history_clear_bp
 from blueprints.notifications import notifications_bp
 from blueprints.schedules import schedules_bp
 from blueprints.session import session_bp
@@ -522,6 +523,7 @@ def create_app(config=None):
             content_bp,
             run_bp,
             history_bp,
+            history_clear_bp,
             notifications_bp,
             schedules_bp,
             session_bp,

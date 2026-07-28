@@ -800,6 +800,11 @@ export async function loadAppFns({
       navigateSearch,
       searchCaseSensitive: false,
       searchRegexMode: false,
+      historyClearContext: vi.fn(() => ({
+        deleteUrl: '/history',
+        previewUrl: '/history/delete-preview',
+        filtered: false,
+      })),
       confirmHistAction: vi.fn(),
       executeHistAction: vi.fn(),
       pendingHistAction: null,

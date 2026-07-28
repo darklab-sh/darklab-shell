@@ -135,6 +135,20 @@ var DarklabHistoryCore = (function (global) {
     return query ? `/history?${query}` : '/history';
   }
 
+  function buildDeleteContext(filters) {
+    const state = filters || {};
+    const requestUrl = new URL(buildRequestUrl(state, { page: 1, pageSize: 1 }), 'http://darklab.invalid');
+    requestUrl.searchParams.delete('page');
+    requestUrl.searchParams.delete('page_size');
+    requestUrl.searchParams.delete('include_total');
+    const query = requestUrl.searchParams.toString();
+    return {
+      deleteUrl: query ? `/history?${query}` : '/history',
+      previewUrl: query ? `/history/delete-preview?${query}` : '/history/delete-preview',
+      filtered: hasAnyFilters(state),
+    };
+  }
+
   function historyLimit(appConfig) {
     return Math.max(1, Number(appConfig && appConfig.recent_commands_limit) || 50);
   }
@@ -254,6 +268,7 @@ var DarklabHistoryCore = (function (global) {
 
   const api = Object.freeze({
     activeFilterItems,
+    buildDeleteContext,
     buildRequestUrl,
     commandRecallHistory,
     commandRootsFromRuns,

@@ -1237,6 +1237,33 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
     assert offloaded_data["runs"][0]["id"] == "run-pg-search-offloaded"
     assert offloaded_data["roots"] == ["katana"]
 
+    delete_preview = app.test_client().get(
+        "/history/delete-preview?q=104.21&scope=all",
+        headers={"X-Session-ID": session_id},
+    )
+    assert delete_preview.status_code == 200
+    assert delete_preview.get_json() == {
+        "ok": True,
+        "total_count": 1,
+        "non_starred_count": 1,
+    }
+
+    deleted = app.test_client().delete(
+        "/history?q=104.21&scope=all",
+        headers={"X-Session-ID": session_id},
+    )
+    assert deleted.status_code == 200
+    assert deleted.get_json() == {"ok": True, "deleted_count": 1}
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT id FROM runs WHERE session_id = %s ORDER BY id",
+            (session_id,),
+        )
+        assert [row["id"] for row in cursor.fetchall()] == [
+            "run-pg-search-2",
+            "run-pg-search-offloaded",
+        ]
+
 
 @pytest.mark.postgres
 def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):

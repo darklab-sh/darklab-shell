@@ -888,7 +888,7 @@ def finalize_completed_run(
     cmd_type="real",
     workspace_artifacts=None,
     owner_tab_id="",
-    link_project_id="",
+    link_project_id: str | None = "",
     cfg: Mapping[str, Any] | None = None,
     save_completed_run_fn: Callable = save_completed_run,
 ):

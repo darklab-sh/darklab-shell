@@ -60,6 +60,28 @@ docker_source_path() {
     esac
 }
 
+deployment_compose() {
+    darklab_compose_env_file=$1
+    darklab_compose_base_file=$2
+    shift 2
+    if [ -f "$script_dir/compose.operator.yaml" ]; then
+        docker compose --env-file "$darklab_compose_env_file" \
+            -f "$darklab_compose_base_file" \
+            -f "$script_dir/compose.operator.yaml" "$@"
+    else
+        docker compose --env-file "$darklab_compose_env_file" \
+            -f "$darklab_compose_base_file" "$@"
+    fi
+}
+
+print_deployment_compose_command() {
+    printf '  docker compose --env-file .env -f compose.yaml'
+    if [ -f "$script_dir/compose.operator.yaml" ]; then
+        printf ' -f compose.operator.yaml'
+    fi
+    printf ' %s\n' "$*"
+}
+
 sha256_file() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | sed 's/[[:space:]].*$//'
@@ -328,7 +350,9 @@ uses_bundled_postgres() {
 prepare_empty_bundled_postgres() {
     compose_env=$1
     postgres_table_count_sql="SELECT COUNT(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');"
-    if ! postgres_table_count=$(docker compose --env-file "$compose_env" -f "$script_dir/compose.yaml" \
+    # POSTGRES_USER and POSTGRES_DB expand inside the Postgres container.
+    # shellcheck disable=SC2016
+    if ! postgres_table_count=$(deployment_compose "$compose_env" "$script_dir/compose.yaml" \
         exec -T postgres sh -c '
             exec psql --no-password --tuples-only --no-align \
                 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
@@ -353,7 +377,9 @@ prepare_empty_bundled_postgres() {
     fi
 
     postgres_password_sql="ALTER ROLE :\"role_name\" WITH PASSWORD :'role_password';"
-    if ! docker compose --env-file "$compose_env" -f "$script_dir/compose.yaml" \
+    # POSTGRES_* values expand inside the Postgres container.
+    # shellcheck disable=SC2016
+    if ! deployment_compose "$compose_env" "$script_dir/compose.yaml" \
         exec -T postgres sh -c '
             printf "%s\n" "$1" | \
                 psql --no-password --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
@@ -477,10 +503,10 @@ create_repository_free_backup() {
     fi
     stop_postgres_after_backup=false
     if uses_bundled_postgres; then
-        if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+        if ! deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
             ps --status running --services postgres | grep -qx 'postgres'; then
             stop_postgres_after_backup=true
-            if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+            if ! deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
                 up -d --wait postgres >&2; then
                 rm -rf "$backup_log" "$backup_verify_stage"
                 fail "could not start the bundled Postgres service for backup"
@@ -488,7 +514,7 @@ create_repository_free_backup() {
         fi
     fi
     backup_failed=false
-    if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+    if ! deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
         run --rm --no-deps --user 0:0 --entrypoint python3 \
         --volume "$deployment_mount_source:/deployment:ro" \
         --volume "$backup_mount_source:/backups" \
@@ -500,7 +526,7 @@ create_repository_free_backup() {
         backup_failed=true
     fi
     if [ "$stop_postgres_after_backup" = true ] && \
-        ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+        ! deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
             stop postgres >&2; then
         cat "$backup_log" >&2
         rm -rf "$backup_log" "$backup_verify_stage"
@@ -622,13 +648,13 @@ restore_command() {
             *) restore_compose_profiles="${restore_compose_profiles},postgres" ;;
         esac
         set_env_value "$restore_compose_env" COMPOSE_PROFILES "$restore_compose_profiles"
-        if ! docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" config --quiet; then
+        if ! deployment_compose "$restore_compose_env" "$script_dir/compose.yaml" config --quiet; then
             rm -f "$restore_compose_env"
             fail "Postgres Compose configuration is invalid; the target was not changed"
         fi
-        if ! docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+        if ! deployment_compose "$restore_compose_env" "$script_dir/compose.yaml" \
             ps --status running --services postgres | grep -qx 'postgres'; then
-            if ! docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+            if ! deployment_compose "$restore_compose_env" "$script_dir/compose.yaml" \
                 up -d --wait postgres; then
                 rm -f "$restore_compose_env"
                 fail "could not start bundled Postgres for backend adoption; the target was not changed"
@@ -637,17 +663,17 @@ restore_command() {
         fi
         if ! prepare_empty_bundled_postgres "$restore_compose_env"; then
             if [ "$restore_started_postgres" = true ]; then
-                docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+                deployment_compose "$restore_compose_env" "$script_dir/compose.yaml" \
                     stop postgres >/dev/null 2>&1 || true
             fi
             rm -f "$restore_compose_env"
             fail "bundled Postgres is not an empty adoption target; the target was not changed"
         fi
     fi
-    docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" stop shell \
+    deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" stop shell \
         || {
             if [ "$restore_started_postgres" = true ]; then
-                docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+                deployment_compose "$restore_compose_env" "$script_dir/compose.yaml" \
                     stop postgres >/dev/null 2>&1 || true
             fi
             [ "$restore_compose_env" = "$script_dir/.env" ] || rm -f "$restore_compose_env"
@@ -666,14 +692,14 @@ restore_command() {
             --adopt-database-backend postgres \
             --compose-profiles "$restore_compose_profiles"
     fi
-    if ! docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+    if ! deployment_compose "$restore_compose_env" "$script_dir/compose.yaml" \
         run --rm --no-deps --user 0:0 --entrypoint python3 \
         --volume "$deployment_mount_source:/deployment" \
         --volume "$restore_archive_mount_source:/restore/backup.tar.gz:ro" \
         shell /app/tools/restore_system.py \
         "$@"; then
         if [ "$restore_started_postgres" = true ]; then
-            docker compose --env-file "$restore_compose_env" -f "$script_dir/compose.yaml" \
+            deployment_compose "$restore_compose_env" "$script_dir/compose.yaml" \
                 stop postgres >/dev/null 2>&1 || true
         fi
         [ "$restore_compose_env" = "$script_dir/.env" ] || rm -f "$restore_compose_env"
@@ -682,11 +708,11 @@ restore_command() {
     [ "$restore_compose_env" = "$script_dir/.env" ] || rm -f "$restore_compose_env"
     env_digest_after=$(sha256_file "$script_dir/.env")
     if [ "$env_digest_before" = "$env_digest_after" ]; then
-        docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" up -d --wait shell \
+        deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" up -d --wait shell \
             || fail "restore completed but the app could not be restarted"
     else
         printf '%s\n' 'Restored environment settings changed; recreating the app container.'
-        docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+        deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
             up -d --wait --force-recreate shell \
             || fail "restore completed but the app could not be recreated with the restored environment"
     fi
@@ -705,14 +731,14 @@ migrate_to_postgres() {
         || fail "migrate-to-postgres requires the installer-generated DATABASE_URL for the bundled Postgres service"
     [ -n "$(env_value POSTGRES_PASSWORD)" ] \
         || fail "migrate-to-postgres requires POSTGRES_PASSWORD in .env"
-    if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+    if ! deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
         run --rm --no-deps --user 0:0 --entrypoint sh shell \
         -c 'test -f /data/history.db && test -r /data/history.db'; then
         fail "could not verify the SQLite database inside the managed /data mount"
     fi
 
     postgres_was_running=false
-    if docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+    if deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
         ps --status running --services postgres | grep -qx 'postgres'; then
         postgres_was_running=true
     fi
@@ -730,18 +756,18 @@ migrate_to_postgres() {
         *) compose_profiles="${compose_profiles},postgres" ;;
     esac
     set_env_value "$migration_next_env" COMPOSE_PROFILES "$compose_profiles"
-    if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" config --quiet; then
+    if ! deployment_compose "$migration_next_env" "$script_dir/compose.yaml" config --quiet; then
         rm -f "$migration_original_env" "$migration_next_env"
         fail "Postgres Compose configuration is invalid; SQLite remains active"
     fi
 
-    if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" stop shell; then
+    if ! deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" stop shell; then
         rm -f "$migration_original_env" "$migration_next_env"
         fail "could not stop the app before migration"
     fi
     if ! safety_backup=$(create_repository_free_backup "" path); then
         rm -f "$migration_original_env" "$migration_next_env"
-        docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+        deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
             up -d shell >/dev/null 2>&1 \
             || fail "the pre-migration backup failed and the SQLite app could not be restarted"
         fail "the pre-migration backup failed; SQLite was restarted without changes"
@@ -751,19 +777,19 @@ migrate_to_postgres() {
         migration_failure=$1
         cp "$migration_original_env" "$script_dir/.env"
         chmod 600 "$script_dir/.env"
-        if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+        if ! deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
             up -d --force-recreate shell; then
             fail "$migration_failure SQLite data and settings remain intact, but the app could not be restarted. Recover with: ./darklab-deploy restore \"$safety_backup\""
         fi
         if [ "$postgres_was_running" = false ]; then
-            docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+            deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
                 stop postgres >/dev/null 2>&1 || true
         fi
         rm -f "$migration_original_env" "$migration_next_env"
         fail "$migration_failure SQLite data and settings remain active. The verified safety backup is $safety_backup"
     }
 
-    if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" \
+    if ! deployment_compose "$migration_next_env" "$script_dir/compose.yaml" \
         up -d --wait postgres; then
         recover_sqlite_migration "Bundled Postgres could not be started."
     fi
@@ -772,11 +798,11 @@ migrate_to_postgres() {
     fi
 
     migration_runner='from config import CFG; from core.database_backend import connect_postgres; from core.migrations import MIGRATIONS; from core.migrations.runner import run_migrations_with_advisory_lock; ctx = connect_postgres(CFG); conn = ctx.__enter__(); applied = run_migrations_with_advisory_lock(conn, MIGRATIONS); conn.commit(); ctx.__exit__(None, None, None); print(f"postgres migrations initialized; applied={len(applied)}")'
-    if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" \
+    if ! deployment_compose "$migration_next_env" "$script_dir/compose.yaml" \
         run --rm --no-deps --entrypoint python3 shell -c "$migration_runner"; then
         recover_sqlite_migration "Postgres schema initialization failed."
     fi
-    if ! docker compose --env-file "$migration_next_env" -f "$script_dir/compose.yaml" \
+    if ! deployment_compose "$migration_next_env" "$script_dir/compose.yaml" \
         run --rm --no-deps --entrypoint python3 \
         shell /app/tools/migrate_sqlite_to_postgres.py \
         --sqlite-db /data/history.db \
@@ -788,7 +814,7 @@ migrate_to_postgres() {
 
     mv "$migration_next_env" "$script_dir/.env"
     chmod 600 "$script_dir/.env"
-    if ! docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" \
+    if ! deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
         up -d --wait --force-recreate shell; then
         recover_sqlite_migration "Postgres data was copied, but the app did not start after cutover."
     fi
@@ -855,8 +881,7 @@ upgrade_release() {
     grep -q "^DARKLAB_IMAGE=${next_image}$" "$upgrade_stage/.env.next" \
         || fail ".env is missing DARKLAB_IMAGE"
     added_env_keys=$(new_env_keys "$script_dir/.env" "$bundle_root/.env.example")
-    docker compose --env-file "$upgrade_stage/.env.next" \
-        -f "$bundle_root/compose.yaml" config --quiet \
+    deployment_compose "$upgrade_stage/.env.next" "$bundle_root/compose.yaml" config --quiet \
         || fail "release Compose configuration is invalid"
 
     mkdir "$upgrade_stage/rollback" "$upgrade_stage/next"
@@ -984,13 +1009,15 @@ upgrade_release() {
         printf 'Your existing .env was not changed. Review .env.example before restarting.\n'
     fi
     printf 'The verified pre-upgrade backup is %s. Pull, verify, and restart when ready:\n' "$backup"
-    printf '  docker compose pull\n  ./verify-release-image.sh\n  docker compose up -d\n'
+    print_deployment_compose_command pull
+    printf '  ./verify-release-image.sh\n'
+    print_deployment_compose_command up -d
 }
 
 remove_managed() {
     [ "${1:-}" = "--yes" ] || fail "remove requires --yes"
     managed_status >/dev/null
-    docker compose --env-file "$script_dir/.env" -f "$script_dir/compose.yaml" down \
+    deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" down \
         || fail "could not stop the deployment"
     while IFS= read -r checksum_row || [ -n "$checksum_row" ]; do
         [ -n "$checksum_row" ] || continue
@@ -1000,7 +1027,7 @@ remove_managed() {
     rm -f "$script_dir/managed-files.sha256"
     cat <<EOF
 Removed release-managed files from $script_dir.
-Operator-owned .env, conf/, data/, workspaces/, and backups/ were left in place.
+Operator-owned .env, compose.operator.yaml (when present), conf/, data/, workspaces/, and backups/ were left in place.
 EOF
 }
 

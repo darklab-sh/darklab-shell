@@ -223,6 +223,7 @@ import {
   navigateCmdHistory,
 } from './features/history/history_recall.js';
 import {
+  historyClearContext,
   refreshHistoryPanel,
   resetHistoryMobileFilters,
   resetHistorySelectionOnClose,
@@ -1155,7 +1156,7 @@ searchRegexBtn.addEventListener('click', () => {
 // the action list and resolves the choice. Only the entry-point button
 // for the bulk clear path lives here.
 histClearAllBtn.addEventListener('click', () => {
-  confirmHistAction('clear');
+  confirmHistAction('clear', null, null, 'run', historyClearContext());
 });
 
 

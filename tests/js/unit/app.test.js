@@ -6657,7 +6657,17 @@ describe('app helpers', () => {
     const { confirmHistAction } = await loadAppFns()
     confirmHistAction.mockClear()
     document.getElementById('hist-clear-all-btn').click()
-    expect(confirmHistAction).toHaveBeenCalledWith('clear')
+    expect(confirmHistAction).toHaveBeenCalledWith(
+      'clear',
+      null,
+      null,
+      'run',
+      {
+        deleteUrl: '/history',
+        previewUrl: '/history/delete-preview',
+        filtered: false,
+      },
+    )
   })
 
   it('uses the persistent share redaction default before showing the modal prompt', async () => {

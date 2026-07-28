@@ -228,6 +228,80 @@ def history_structured_filter_run_ids(
     return run_ids
 
 
+def history_run_filter_clause(
+    *,
+    conn,
+    session_id: str,
+    owner_scope,
+    query: str,
+    structured_filters,
+    command_root: str,
+    exit_code_filter: str,
+    date_range: str,
+    project_id: str,
+    starred_only: bool,
+    run_kind: str,
+    scope: str,
+    has_run_kind_column: bool,
+    force_like: bool = False,
+) -> tuple[str, list[Any], str | None]:
+    offloaded_match_run_ids = []
+    if query and scope != "command":
+        offloaded_match_run_ids = history_offloaded_search_run_ids(
+            conn,
+            session_id,
+            owner_scope.team_id,
+            query,
+            command_root,
+            exit_code_filter,
+            date_range,
+            project_id,
+            starred_only=starred_only,
+            run_kind=run_kind,
+            has_run_kind_column=has_run_kind_column,
+        )
+    run_sql, run_params, fts_q = history_base_clause(
+        session_id,
+        owner_scope,
+        query,
+        command_root,
+        exit_code_filter,
+        date_range,
+        scope,
+        project_id,
+        starred_only=starred_only,
+        run_kind=run_kind,
+        has_run_kind_column=has_run_kind_column,
+        force_like=force_like,
+        offloaded_match_run_ids=offloaded_match_run_ids,
+    )
+    if structured_filters.active:
+        entity_sql, entity_params = entity_run_exists_clause(structured_filters, run_alias="r")
+        if entity_sql:
+            run_sql += entity_sql
+            run_params = [*run_params, *entity_params]
+        summary_sql, summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
+        if summary_sql and history_table_exists(conn, "run_output_summary"):
+            run_sql += summary_sql
+            run_params = [*run_params, *summary_params]
+        structured_ids = history_structured_filter_run_ids(
+            conn,
+            run_sql,
+            run_params,
+            structured_filters,
+            session_id=session_id,
+            team_id=str(getattr(owner_scope, "team_id", "") or ""),
+        )
+        if structured_ids is not None:
+            if structured_ids:
+                placeholders = ", ".join("?" for _ in structured_ids)
+                run_sql += f" AND r.id IN ({placeholders})"
+                run_params = [*run_params, *structured_ids]
+            else:
+                run_sql += " AND 1 = 0"
+    return run_sql, run_params, fts_q
+
+
 def history_snapshot_base_clause(owner_scope, query: str, date_range: str, project_id: str = ""):
     scope_sql, scope_params = owner_scope.predicate(table_alias="s")
     sql = f" FROM snapshots s WHERE {scope_sql}"
@@ -432,60 +506,22 @@ def list_history_items(
         has_run_kind_column = history_column_exists(conn, "runs", "run_kind")
         snapshots_available = history_table_exists(conn, "snapshots")
         if type_filter in {"all", "runs", "runs_builtin", "runs_external"}:
-            offloaded_match_run_ids = []
-            if query and scope != "command":
-                offloaded_match_run_ids = history_offloaded_search_run_ids(
-                    conn,
-                    session_id,
-                    owner_scope.team_id,
-                    query,
-                    command_root,
-                    exit_code_filter,
-                    date_range,
-                    project_id,
-                    starred_only=starred_only,
-                    run_kind=run_kind,
-                    has_run_kind_column=has_run_kind_column,
-                )
-            run_sql, run_params, fts_q = history_base_clause(
-                session_id,
-                owner_scope,
-                query,
-                command_root,
-                exit_code_filter,
-                date_range,
-                scope,
-                project_id,
+            run_sql, run_params, fts_q = history_run_filter_clause(
+                conn=conn,
+                session_id=session_id,
+                owner_scope=owner_scope,
+                query=query,
+                structured_filters=structured_filters,
+                command_root=command_root,
+                exit_code_filter=exit_code_filter,
+                date_range=date_range,
+                project_id=project_id,
                 starred_only=starred_only,
                 run_kind=run_kind,
+                scope=scope,
                 has_run_kind_column=has_run_kind_column,
                 force_like=force_like,
-                offloaded_match_run_ids=offloaded_match_run_ids,
             )
-            if structured_filters.active:
-                entity_sql, entity_params = entity_run_exists_clause(structured_filters, run_alias="r")
-                if entity_sql:
-                    run_sql += entity_sql
-                    run_params = [*run_params, *entity_params]
-                summary_sql, summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
-                if summary_sql and history_table_exists(conn, "run_output_summary"):
-                    run_sql += summary_sql
-                    run_params = [*run_params, *summary_params]
-                structured_ids = history_structured_filter_run_ids(
-                    conn,
-                    run_sql,
-                    run_params,
-                    structured_filters,
-                    session_id=session_id,
-                    team_id=str(getattr(owner_scope, "team_id", "") or ""),
-                )
-                if structured_ids is not None:
-                    if structured_ids:
-                        placeholders = ", ".join("?" for _ in structured_ids)
-                        run_sql += f" AND r.id IN ({placeholders})"
-                        run_params = [*run_params, *structured_ids]
-                    else:
-                        run_sql += " AND 1 = 0"
             root_command_rows = conn.execute(
                 "SELECT r.command, MAX(r.started) AS latest_started"
                 + run_sql
