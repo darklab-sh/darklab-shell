@@ -3978,7 +3978,11 @@ class TestTeamRoutes:
             from blueprints import run as run_routes
             from services.runs.output_model import line_event_from_legacy
 
-            def save_finalized_team_run(run_id, *, link_project_id=""):
+            def save_finalized_team_run(
+                run_id: str,
+                *,
+                link_project_id: str | None = "",
+            ):
                 capture = run_routes._run_output_capture(run_id)
                 capture.add_event(line_event_from_legacy("team finalizer output"))
                 run_routes._finalize_completed_run(

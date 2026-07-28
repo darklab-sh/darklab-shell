@@ -388,7 +388,7 @@ def _finalize_completed_run(
     cmd_type="real",
     workspace_artifacts=None,
     owner_tab_id="",
-    link_project_id="",
+    link_project_id: str | None = "",
 ):
     return run_finalization.finalize_completed_run(
         run_id,
