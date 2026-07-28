@@ -25,7 +25,11 @@ import {
   _getStarred as importedGetStarred,
   _toggleStar as importedToggleStar,
 } from './features/history/history_actions.js';
-import { openHistoryWithFilters as importedOpenHistoryWithFilters, resetHistoryMobileFilters as importedResetHistoryMobileFilters } from './history.js';
+import {
+  historyClearContext as importedHistoryClearContext,
+  openHistoryWithFilters as importedOpenHistoryWithFilters,
+  resetHistoryMobileFilters as importedResetHistoryMobileFilters,
+} from './history.js';
 import { confirmHistAction as importedConfirmHistAction } from './features/history/history_mutations.js';
 import {
   _historyAddRunToActiveProject as importedHistoryAddRunToActiveProject,
@@ -99,6 +103,10 @@ import {
   const historyEditEntityMetadata = (
     typeof importedHistoryEditEntityMetadata !== 'undefined'
     && importedHistoryEditEntityMetadata
+  ) || null;
+  const historyClearContext = (
+    typeof importedHistoryClearContext !== 'undefined'
+    && importedHistoryClearContext
   ) || null;
   const historyRelativeTime = (typeof importedHistoryRelativeTime !== 'undefined' && importedHistoryRelativeTime) || null;
   const onUiEvent = (typeof importedOnUiEvent !== 'undefined' && importedOnUiEvent) || null;
@@ -704,6 +712,26 @@ import {
     const query = params.toString();
     return query ? `/history?${query}` : '/history';
   }
+  function _recentsDeleteContext() {
+    if (typeof historyClearContext !== 'function') return null;
+    return historyClearContext({
+      type: _recentsFilterState.type,
+      q: _recentsSearchQuery.trim(),
+      commandRoot: _recentsFilterState.root.trim(),
+      signal: 'all',
+      kind: 'all',
+      entity: '',
+      entityType: 'all',
+      exitCode: _recentsFilterState.exit === 'success'
+        ? '0'
+        : (_recentsFilterState.exit === 'failed' ? 'nonzero' : 'all'),
+      dateRange: _recentsFilterState.date === 'today'
+        ? '24h'
+        : (_recentsFilterState.date === 'week' ? '7d' : 'all'),
+      projectId: 'all',
+      starredOnly: _recentsFilterState.starred,
+    });
+  }
   function _recentsSetPage(nextPage, { refresh = true } = {}) {
     _recentsPaging.page = Math.max(1, Number(nextPage) || 1);
     if (refresh) _recentsRefresh();
@@ -1227,7 +1255,7 @@ import {
       onActivate: () => {
         if (!_recentsCanManageHistory()) return;
         if (typeof confirmHistAction === 'function') {
-          confirmHistAction('clear');
+          confirmHistAction('clear', null, null, 'run', _recentsDeleteContext());
         }
       },
     });
@@ -1235,6 +1263,9 @@ import {
 
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:history-panel-refreshed', () => {
+      if (isRecentsSheetOpen()) _recentsRefresh();
+    });
+    onUiEvent('app:history-mutated', () => {
       if (isRecentsSheetOpen()) _recentsRefresh();
     });
   }

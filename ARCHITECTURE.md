@@ -329,7 +329,8 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
 | `GET` | `/history` | Returns paginated current-session history items with run/snapshot/run-subtype filters, linked-run project filters, command/output search, structured output selectors, starred-only filtering, labels/notes, Atlas entity/finding counts for source runs, and command-root summaries. |
-| `DELETE` | `/history` | Deletes all run history for the active personal/team scope and removes matching full-output artifacts; team scope requires history-management permission. |
+| `GET` | `/history/delete-preview` | Counts all active-scope runs selected by the current History filters and reports how many are not starred before bulk deletion. |
+| `DELETE` | `/history` | Deletes every active-scope run selected by the current History filters and removes matching full-output artifacts; `exclude_starred=1` limits the deletion to matching non-starred runs, and team scope requires history-management permission. |
 | `POST` | `/history/bulk-delete` | Deletes selected completed active-scope runs, returning per-run results while rejecting running or missing runs without failing the whole request; team scope requires history-management permission. |
 | `POST` | `/history/bulk-export` | Streams selected completed current-session runs and snapshots as `txt` or `jsonl`, preserving per-item skipped results for running, missing, or cross-session ids. |
 | `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |

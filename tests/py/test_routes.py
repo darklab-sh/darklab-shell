@@ -19816,9 +19816,62 @@ class TestHistoryRoute:
 
     def test_delete_all_returns_ok(self):
         client = get_client()
-        resp = client.delete("/history", headers={"X-Session-ID": "test-session"})
-        assert resp.status_code == 200
-        assert json.loads(resp.data)["ok"] is True
+        session_id = "history-filtered-delete-" + uuid.uuid4().hex[:8]
+        run_ids = [f"run-{uuid.uuid4().hex}" for _ in range(57)]
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.executemany(
+                    "INSERT INTO runs "
+                    "(id, session_id, command, started, finished, exit_code, output) "
+                    "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, '[]')",
+                    [
+                        (run_ids[0], session_id, "nmap darklab.sh", 0),
+                        *[
+                            (run_ids[index], session_id, f"nmap host-{index}.example", 0)
+                            for index in range(1, 56)
+                        ],
+                        (run_ids[56], session_id, "dig example.net", 0),
+                    ],
+                )
+                conn.execute(
+                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    (session_id, "nmap darklab.sh"),
+                )
+                conn.commit()
+
+            headers = {"X-Session-ID": session_id}
+            preview = client.get(
+                "/history/delete-preview?command_root=nmap",
+                headers=headers,
+            )
+            assert preview.status_code == 200
+            assert json.loads(preview.data) == {
+                "ok": True,
+                "total_count": 56,
+                "non_starred_count": 55,
+            }
+
+            non_favorites = client.delete(
+                "/history?command_root=nmap&exclude_starred=1",
+                headers=headers,
+            )
+            assert non_favorites.status_code == 200
+            assert json.loads(non_favorites.data) == {"ok": True, "deleted_count": 55}
+
+            matching = client.delete("/history?command_root=nmap", headers=headers)
+            assert matching.status_code == 200
+            assert json.loads(matching.data) == {"ok": True, "deleted_count": 1}
+            with sqlite3.connect(DB_PATH) as conn:
+                remaining = conn.execute(
+                    "SELECT id FROM runs WHERE session_id = ?",
+                    (session_id,),
+                ).fetchall()
+            assert remaining == [(run_ids[56],)]
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session_id,))
+                conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
+                conn.commit()
 
     def test_delete_specific_nonexistent_run_returns_ok(self):
         # Deleting a run_id that doesn't exist should still return ok (idempotent)

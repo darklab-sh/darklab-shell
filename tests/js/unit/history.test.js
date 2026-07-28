@@ -860,6 +860,7 @@ describe('history panel actions', () => {
         executeHistAction,
         confirmHistAction,
         clearHistoryFilters,
+        historyClearContext,
         _buildHistoryRequestUrl,
         _setHistoryFilter,
         _historySetPage,
@@ -4623,7 +4624,13 @@ describe('history panel actions', () => {
   })
 
   it('refreshHistoryPanel sends the active server-side filters to /history', async () => {
-    const { refreshHistoryPanel, apiFetch, _setHistoryFilter, _buildHistoryRequestUrl } =
+    const {
+      refreshHistoryPanel,
+      apiFetch,
+      historyClearContext,
+      _setHistoryFilter,
+      _buildHistoryRequestUrl,
+    } =
       loadHistoryPanel()
 
     _setHistoryFilter('q', 'dig')
@@ -4638,6 +4645,11 @@ describe('history panel actions', () => {
     expect(apiFetch).toHaveBeenLastCalledWith(
       '/history?page=1&page_size=8&include_total=1&q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
     )
+    expect(historyClearContext()).toEqual({
+      deleteUrl: '/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
+      previewUrl: '/history/delete-preview?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
+      filtered: true,
+    })
     expect(typeof refreshHistoryPanel).toBe('function')
   })
 
@@ -5276,10 +5288,18 @@ describe('history panel actions', () => {
       .toBe("View-only team members can't delete team history. Switch to Personal or ask for operator access.")
   })
 
-  it('executeHistAction shows a failure toast when clearing non-favorite history fails', async () => {
+  it('counts filtered runs before showing a bulk-delete failure', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('nonfav'))
     const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/history/delete-preview?q=ping') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ total_count: 123, non_starred_count: 120 }),
+        })
+      }
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?')) && (!options.method || options.method === 'GET')) {
         return Promise.resolve({
+          ok: true,
           json: () =>
             Promise.resolve({
               runs: [
@@ -5293,21 +5313,42 @@ describe('history panel actions', () => {
             }),
         })
       }
-      if (url === '/history/run-1' && options.method === 'DELETE') {
+      if (url === '/history?q=ping&exclude_starred=1' && options.method === 'DELETE') {
         return Promise.reject(new Error('bulk delete failed'))
       }
-      return Promise.resolve({ json: () => Promise.resolve({}) })
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel, executeHistAction } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, confirmHistAction } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      showConfirmImpl: showConfirm,
+    })
 
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
 
-    executeHistAction('clear-nonfav')
-    await Promise.resolve()
-    await Promise.resolve()
+    confirmHistAction('clear', null, null, 'run', {
+      deleteUrl: '/history?q=ping',
+      previewUrl: '/history/delete-preview?q=ping',
+      filtered: true,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
     await new Promise((resolve) => setImmediate(resolve))
 
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: {
+        text: 'Delete 123 runs matching the current filters?',
+        note: 'This cannot be undone.',
+      },
+      actions: expect.arrayContaining([
+        expect.objectContaining({ id: 'nonfav', label: 'Delete Non-Favorites (120)' }),
+        expect.objectContaining({ id: 'all', label: 'Delete all (123)' }),
+      ]),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/history?q=ping&exclude_starred=1',
+      { method: 'DELETE' },
+    )
     expect(document.getElementById('permalink-toast').textContent).toBe('Failed to clear history')
     expect(document.querySelectorAll('#history-list .history-entry')).toHaveLength(1)
   })

@@ -3,7 +3,10 @@
 
 // History delete/clear confirmations and shared loading state.
 import { historyLoadOverlay as importedHistoryLoadOverlay } from '../../core/dom.js';
-import { getAppState as importedGetAppState } from '../../core/state.js';
+import {
+  emitUiEvent as importedEmitUiEvent,
+  getAppState as importedGetAppState,
+} from '../../core/state.js';
 import { showToast as importedShowToast } from '../../core/utils.js';
 import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
@@ -12,6 +15,7 @@ import {
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import {
   _getStarred as importedGetStarred,
+  reloadSessionHistory as importedReloadSessionHistory,
   _saveStarred as importedSaveStarred,
 } from './history_actions.js';
 import {
@@ -83,6 +87,18 @@ function _historyMutationSaveStarred(starred) {
   const saveStarred = (typeof importedSaveStarred !== 'undefined' && importedSaveStarred)
     || HISTORY_MUTATIONS_GLOBAL._saveStarred;
   if (typeof saveStarred === 'function') saveStarred(starred);
+}
+
+function _historyMutationReloadSessionHistory() {
+  const reload = (typeof importedReloadSessionHistory !== 'undefined' && importedReloadSessionHistory)
+    || HISTORY_MUTATIONS_GLOBAL.reloadSessionHistory;
+  return typeof reload === 'function' ? reload() : _historyMutationRefreshHistoryPanel();
+}
+
+function _historyMutationEmitUiEvent(name, detail = {}) {
+  const emit = (typeof importedEmitUiEvent !== 'undefined' && importedEmitUiEvent)
+    || HISTORY_MUTATIONS_GLOBAL.emitUiEvent;
+  return typeof emit === 'function' ? emit(name, detail) : false;
 }
 
 function _historyMutationLoadOverlay() {
@@ -229,16 +245,44 @@ async function _loadHistoryAtlasCleanup(runId) {
   }
 }
 
-function confirmHistAction(type, id, command, itemType = 'run') {
+async function _loadHistoryDeletePreview(context) {
+  const resp = await _historyMutationApiFetch(context.previewUrl, { cache: 'no-store' });
+  if (!resp.ok) throw await _historyMutationError(resp, 'Failed to count matching history');
+  const data = await resp.json().catch(() => ({}));
+  return {
+    totalCount: Math.max(0, Number(data.total_count) || 0),
+    nonStarredCount: Math.max(0, Number(data.non_starred_count) || 0),
+  };
+}
+
+function _historyDeleteCountLabel(count) {
+  const total = Math.max(0, Number(count) || 0);
+  return `${total.toLocaleString()} ${total === 1 ? 'run' : 'runs'}`;
+}
+
+function confirmHistAction(type, id, command, itemType = 'run', bulkContext = null) {
   if ((type === 'delete' || type === 'clear') && !_historyCanManageHistory()) {
     _historyShowPermissionDenied('delete team history');
     return;
   }
-  _historySetPendingAction({ type, id, command, itemType });
+  const clearContext = type === 'clear'
+    ? {
+        deleteUrl: '/history',
+        previewUrl: '/history/delete-preview',
+        filtered: false,
+        ...(bulkContext || {}),
+      }
+    : null;
+  _historySetPendingAction({ type, id, command, itemType, clearContext });
   const runDelete = type === 'delete' && itemType !== 'snapshot' && id;
   const isBulk = type === 'clear';
-  const buildBody = (cleanup) => (isBulk
-    ? { text: 'Delete all runs and snapshots?', note: 'This cannot be undone.' }
+  const buildBody = (cleanup, preview) => (isBulk
+    ? {
+        text: clearContext.filtered
+          ? `Delete ${_historyDeleteCountLabel(preview.totalCount)} matching the current filters?`
+          : `Delete all ${_historyDeleteCountLabel(preview.totalCount)}?`,
+        note: 'This cannot be undone.',
+      }
     : itemType === 'snapshot'
       ? { text: 'Remove this snapshot from history?', note: 'This cannot be undone.' }
       : {
@@ -247,20 +291,30 @@ function confirmHistAction(type, id, command, itemType = 'run') {
             ? 'The run transcript will be removed. Atlas cleanup is optional.'
             : 'This cannot be undone.',
         });
-  const actions = isBulk
-    ? [
-        { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'nonfav', label: 'Delete Non-Favorites', role: 'secondary', tone: 'warning' },
-        { id: 'all',    label: 'Delete all', role: 'destructive', tone: 'warning' },
-      ]
-    : [
-        { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'one',    label: 'Delete', role: 'destructive', tone: 'warning' },
-      ];
-  const showDeleteConfirm = (cleanup) => {
+  const showDeleteConfirm = (cleanup, preview = null) => {
     const content = runDelete ? _buildHistoryAtlasCleanupContent(cleanup) : null;
+    const actions = isBulk
+      ? [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          ...(preview.nonStarredCount > 0 ? [{
+            id: 'nonfav',
+            label: `Delete Non-Favorites (${preview.nonStarredCount.toLocaleString()})`,
+            role: 'secondary',
+            tone: 'warning',
+          }] : []),
+          {
+            id: 'all',
+            label: `Delete all (${preview.totalCount.toLocaleString()})`,
+            role: 'destructive',
+            tone: 'warning',
+          },
+        ]
+      : [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'one', label: 'Delete', role: 'destructive', tone: 'warning' },
+        ];
     return _historyMutationShowConfirm({
-      body: buildBody(cleanup),
+      body: buildBody(cleanup, preview),
       content,
       tone: 'warning',
       actions,
@@ -284,6 +338,22 @@ function confirmHistAction(type, id, command, itemType = 'run') {
   };
   if (runDelete) {
     _loadHistoryAtlasCleanup(id).then(showDeleteConfirm);
+  } else if (isBulk) {
+    _loadHistoryDeletePreview(clearContext)
+      .then((preview) => {
+        if (!preview.totalCount) {
+          _historySetPendingAction(null);
+          _historyMutationShowToast(
+            clearContext.filtered ? 'No runs match the current filters.' : 'There are no runs to delete.',
+          );
+          return;
+        }
+        return showDeleteConfirm(null, preview);
+      })
+      .catch((err) => {
+        _historySetPendingAction(null);
+        _historyMutationShowToast(err.userFacing ? err.message : 'Failed to count matching history', 'error');
+      });
   } else {
     showDeleteConfirm(null);
   }
@@ -297,6 +367,7 @@ function executeHistAction(type) {
   const itemType = pending && pending.itemType;
   const pruneAtlas = !!(pending && pending.pruneAtlas);
   const pruneCuratedAtlas = !!(pending && pending.pruneCuratedAtlas);
+  const clearContext = pending && pending.clearContext;
   _historySetPendingAction(null);
   if (action === 'delete') {
     const params = new URLSearchParams();
@@ -329,35 +400,30 @@ function executeHistAction(type) {
       _historyMutationRenderHistory();
       _historyMutationRefreshHistoryPanel();
     }).catch((err) => _historyMutationShowToast(err.userFacing ? err.message : 'Failed to delete run', 'error'));
-  } else if (action === 'clear-nonfav') {
-    _historyMutationApiFetch('/history?type=runs')
-      .then(r => r.json())
-      .then(data => {
-        const starred   = _historyMutationGetStarred();
-        const toDelete  = data.runs.filter(r => !starred.has(r.command));
-        const deleteCmds = new Set(toDelete.map(r => r.command));
-        _historyMutationSetCmdHistory(_historyMutationCmdHistory().filter(c => !deleteCmds.has(c)));
-        _historyMutationSetRecentPreviewHistory(
-          _historyMutationRecentPreviewHistory().filter(c => !deleteCmds.has(c)),
-        );
-        _historyMutationRenderHistory();
-        return Promise.all(toDelete.map(async (r) => {
-          const resp = await _historyMutationApiFetch(`/history/${r.id}`, { method: 'DELETE' });
-          if (!resp.ok) throw await _historyMutationError(resp, 'Failed to clear history');
-          return resp;
-        }));
-      })
-      .then(() => _historyMutationRefreshHistoryPanel())
-      .catch((err) => _historyMutationShowToast(err.userFacing ? err.message : 'Failed to clear history', 'error'));
-  } else {
-    _historyMutationApiFetch('/history', { method: 'DELETE' }).then(async (resp) => {
+  } else if (action === 'clear-nonfav' || action === 'clear') {
+    const context = clearContext || {
+      deleteUrl: '/history',
+      filtered: false,
+    };
+    const deleteUrl = new URL(context.deleteUrl, 'http://darklab.invalid');
+    if (action === 'clear-nonfav') deleteUrl.searchParams.set('exclude_starred', '1');
+    const requestUrl = `${deleteUrl.pathname}${deleteUrl.search}`;
+    _historyMutationApiFetch(requestUrl, { method: 'DELETE' }).then(async (resp) => {
       if (!resp.ok) throw await _historyMutationError(resp, 'Failed to clear history');
-      _historyMutationSaveStarred(new Set());
-      _historyMutationApiFetch('/session/starred', { method: 'DELETE' }).catch(() => {});
-      _historyMutationSetCmdHistory([]);
-      _historyMutationSetRecentPreviewHistory([]);
-      _historyMutationRenderHistory();
-      _historyMutationRefreshHistoryPanel();
+      if (action === 'clear' && !context.filtered) {
+        _historyMutationSaveStarred(new Set());
+        _historyMutationApiFetch('/session/starred', { method: 'DELETE' }).catch(() => {});
+        _historyMutationSetCmdHistory([]);
+        _historyMutationSetRecentPreviewHistory([]);
+        _historyMutationRenderHistory();
+        _historyMutationRefreshHistoryPanel();
+      } else {
+        await _historyMutationReloadSessionHistory();
+      }
+      _historyMutationEmitUiEvent('app:history-mutated', {
+        action,
+        filtered: !!context.filtered,
+      });
     }).catch((err) => _historyMutationShowToast(err.userFacing ? err.message : 'Failed to clear history', 'error'));
   }
 }
@@ -382,6 +448,7 @@ export {
   _historyScopeDeniedMessage,
   _historyShowPermissionDenied,
   _loadHistoryAtlasCleanup,
+  _loadHistoryDeletePreview,
   _setHistoryLoadState,
   confirmHistAction,
   executeHistAction,

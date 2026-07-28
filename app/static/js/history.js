@@ -1607,6 +1607,10 @@ function _buildHistoryRequestUrl() {
   return _historyCore().buildRequestUrl(_historyFilters, _historyPaging);
 }
 
+function historyClearContext(filters = _historyFilters) {
+  return _historyCore().buildDeleteContext(filters);
+}
+
 function _applyHistoryClientFilters(runs) {
   return Array.isArray(runs) ? runs.slice() : [];
 }
@@ -2412,6 +2416,7 @@ export {
   _normalizeHistoryFilterValue,
   clearHistoryFilters,
   getHistoryProjectOptionsState,
+  historyClearContext,
   openHistoryWithFilters,
   refreshHistoryPanel,
   renderHistory,

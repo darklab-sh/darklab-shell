@@ -33,7 +33,6 @@ from services.history.queries import (
     bulk_delete_runs,
     bulk_delete_snapshots,
     bulk_export_rows,
-    clear_history_runs,
     delete_history_run,
     delete_snapshot,
     history_insights,
@@ -1237,27 +1236,6 @@ def bulk_delete_history():
         "failures": _bulk_delete_failures(results),
     })
     return jsonify({"ok": True, "counts": counts, "results": results})
-
-
-@history_bp.route("/history", methods=["DELETE"])
-def clear_history():
-    """Delete all runs for this session."""
-    session_id = get_session_id()
-    try:
-        owner_scope = current_request_scope(session_id, request)
-    except RequestScopeError as exc:
-        return _scope_error_response(exc)
-    capability_response = _require_history_mutation_capability(owner_scope)
-    if capability_response is not None:
-        return capability_response
-    deleted_count = clear_history_runs(
-        owner_scope=owner_scope,
-        audit_fields=route_audit_fields(session_id, request, owner_scope),
-    )
-    log.info("HISTORY_CLEARED", extra={
-        "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": deleted_count,
-    })
-    return jsonify({"ok": True})
 
 
 @history_bp.route("/share", methods=["POST"])
