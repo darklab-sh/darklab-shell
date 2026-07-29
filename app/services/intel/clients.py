@@ -83,7 +83,7 @@ class JsonApiClient:
                 if _url_origin(redirect_url) != _url_origin(url):
                     log.warning("INTEL_HTTP_REDIRECT_BLOCKED", extra={
                         "provider_host": parsed.hostname or "",
-                        "status": int(response.status),
+                        "http_status": int(response.status),
                         "redirect_host": urlsplit(redirect_url).hostname or "",
                     })
                     raise ProviderApiError(
@@ -104,7 +104,7 @@ class JsonApiClient:
                 "provider_host": parsed.hostname or "",
                 "method": method.upper(),
                 "path": safe_path,
-                "status": int(response.status),
+                "http_status": int(response.status),
                 "response_bytes": len(raw_bytes),
                 "elapsed_ms": int((time.perf_counter() - started) * 1000),
             })
@@ -137,7 +137,7 @@ class JsonApiClient:
                 "provider_host": parsed.hostname or "",
                 "method": method.upper(),
                 "path": parsed.path or "/",
-                "status": self.last_status or "",
+                "http_status": self.last_status,
             })
             raise ProviderApiError("provider returned invalid JSON", status=self.last_status) from exc
         return loaded
@@ -150,7 +150,7 @@ class JsonApiClient:
                 "provider_host": parsed.hostname or "",
                 "method": "GET",
                 "path": parsed.path or "/",
-                "status": self.last_status or "",
+                "http_status": self.last_status,
                 "shape": type(loaded).__name__,
             })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
@@ -176,7 +176,7 @@ class JsonApiClient:
                 "provider_host": parsed.hostname or "",
                 "method": "POST",
                 "path": parsed.path or "/",
-                "status": self.last_status or "",
+                "http_status": self.last_status,
                 "shape": type(loaded).__name__,
             })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
@@ -205,7 +205,7 @@ class JsonApiClient:
                 "provider_host": parsed.hostname or "",
                 "method": "POST",
                 "path": parsed.path or "/",
-                "status": self.last_status or "",
+                "http_status": self.last_status,
                 "shape": type(loaded).__name__,
             })
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)

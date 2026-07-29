@@ -28,12 +28,30 @@ _OPENSEARCH_METADATA_FIELDS = frozenset({
 })
 
 
-def gelf_additional_field_name(key: str) -> str:
-    """Return a GELF field name that cannot collide with OpenSearch metadata."""
+def gelf_additional_field_name(key: str, value: object = None) -> str:
+    """Return a GELF field name with a stable OpenSearch mapping."""
+    if key == "status":
+        return "_http_status" if isinstance(value, int) and not isinstance(value, bool) else "_event_status"
+    if key == "http_status" and value is not None and (
+        not isinstance(value, int) or isinstance(value, bool)
+    ):
+        return "_event_http_status"
     field_name = f"_{key}"
     if field_name in _OPENSEARCH_METADATA_FIELDS:
         return f"_event_{key}"
     return field_name
+
+
+def gelf_additional_field(key: str, value: object) -> tuple[str, object]:
+    """Return one GELF additional field with a mapping-safe value type."""
+    field_name = gelf_additional_field_name(key, value)
+    if key == "status" and field_name == "_event_status" and value is not None:
+        return field_name, str(value)
+    if key == "http_status" and field_name == "_event_http_status":
+        return field_name, str(value)
+    if key.endswith("_status") and key != "http_status" and value is not None:
+        return field_name, str(value)
+    return field_name, value
 
 
 def _safe_log_value(value: object, limit: int = 240) -> str:
@@ -117,6 +135,12 @@ class ConfigStartupLogger:
         }
         try:
             if self.log_format == "gelf":
+                additional_fields: dict[str, object] = {}
+                for key, value in fields.items():
+                    field_name, field_value = gelf_additional_field(key, value)
+                    if key == "status" and field_name in additional_fields:
+                        continue
+                    additional_fields[field_name] = field_value
                 payload = {
                     "version": "1.1",
                     "host": socket.getfqdn(),
@@ -126,10 +150,7 @@ class ConfigStartupLogger:
                     "_app": self.app_name,
                     "_app_version": self.app_version,
                     "_logger": record.name,
-                    **{
-                        gelf_additional_field_name(key): value
-                        for key, value in fields.items()
-                    },
+                    **additional_fields,
                 }
                 line = json.dumps(payload, separators=(",", ":"), default=str)
             else:

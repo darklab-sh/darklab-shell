@@ -1485,7 +1485,8 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 - The backend emits structured log events at four levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`.
 - Two output formats are supported: `text` (human-readable `key=value` pairs for local development) and `gelf` (JSON compatible with log aggregators).
-- Each event carries structured context fields — session ID, command root, run ID, status — rather than interpolated strings, so log lines are machine-parseable without regex.
+- Each event carries structured context fields — session ID, command root, run ID, HTTP code, or a feature-specific state — rather than interpolated strings, so log lines are machine-parseable without regex.
+- GELF fields keep a consistent type across events. HTTP codes stay numeric, feature states stay text, and the formatter avoids the ambiguous legacy `_status` field so OpenSearch can index the stream without status-mapping conflicts.
 - Event names are stable (e.g. `RUN_START`, `RUN_END`, `RUN_KILL`, `DIAG_VIEWED`, `UNTRUSTED_PROXY`), letting aggregators filter by name without string matching.
 - Browser reports preserve `DEBUG`, `INFO`, `WARNING`, and `ERROR` semantics on the server. Only warning/error reports increment the client-error metric, and safe correlation fields such as artifact IDs are allowlisted explicitly.
 - Startup configuration events honor the selected level and text/GELF format even though file loading happens before the runtime logger is ready. Fatal configuration errors keep bounded phase, source, key, and error-type context without logging file contents, values, or parser tracebacks.

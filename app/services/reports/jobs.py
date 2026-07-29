@@ -277,12 +277,15 @@ def _audit_failure_reason(status, reason=""):
 
 
 def _audit_log_extra(job, *, details):
+    log_details = dict(details)
+    if "status" in log_details:
+        log_details["job_status"] = log_details.pop("status")
     return {
         "job_id": str(job.get("id") or ""),
         "project_id": str(job.get("project_id") or ""),
         "team_id": str(job.get("team_id") or ""),
         "actor_member_id": str(job.get("actor_member_id") or ""),
-        **dict(details),
+        **log_details,
     }
 
 

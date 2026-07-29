@@ -293,7 +293,7 @@ def _lookup_provider(
                 "run_id": run_id,
                 "provider": provider.name,
                 "entity_type": entity_type,
-                "http_status": exc.status or "",
+                "http_status": exc.status,
                 "reset_at": _float_or_none(quota.get("reset_at")),
             })
             app_metrics.record_intel_lookup(provider.name, "rate_limited", time.perf_counter() - started)
@@ -308,7 +308,7 @@ def _lookup_provider(
             "run_id": run_id,
             "provider": provider.name,
             "entity_type": entity_type,
-            "http_status": exc.status or "",
+            "http_status": exc.status,
             "error_type": type(exc).__name__,
         })
         app_metrics.record_intel_lookup(provider.name, "error", time.perf_counter() - started)
@@ -358,7 +358,7 @@ def _lookup_provider(
         result.entity_type,
         run_id=run_id,
         cache_hit=False,
-        http_status=result.http_status or "",
+        http_status=result.http_status,
         entity_count=1 if result.payload.get("summary", {}).get("has_intel") else 0,
     )
     app_metrics.record_intel_lookup(provider.name, "success", time.perf_counter() - started)

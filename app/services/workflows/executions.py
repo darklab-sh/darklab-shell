@@ -77,7 +77,7 @@ def _record_execution_finished(execution_id: str, status: str) -> None:
     app_metrics.record_workflow_execution_outcome(status, duration_seconds)
     log.info("WORKFLOW_EXECUTION_COMPLETED", extra={
         "execution_id": execution_id,
-        "status": status,
+        "workflow_status": status,
         "duration_ms": int(duration_seconds * 1000),
     })
 

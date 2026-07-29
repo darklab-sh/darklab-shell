@@ -1365,6 +1365,12 @@ log_level: INFO
 
 The application writes GELF-shaped JSON to standard output. Use a host-local
 collector when those container logs should be sent to a remote log service.
+HTTP response codes are indexed under numeric `_http_status`; provider,
+workflow, schedule/watcher, AI, Project, team, and export states use their
+documented feature-specific fields. Existing Graylog/OpenSearch dashboards
+that query the older `_status` field should be updated to those names. The app
+doesn't need an index rotation to stop mapper failures because it no longer
+writes `_status`; rotate only when you want to remove that legacy mapping.
 
 ### Customize Package Presets
 

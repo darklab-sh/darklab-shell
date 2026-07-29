@@ -20,7 +20,7 @@ def emit_intel_lookup(
     *,
     run_id: str = "",
     cache_hit: bool = False,
-    http_status: int | str = "",
+    http_status: int | None = None,
     **extra: Any,
 ) -> None:
     payload: dict[str, Any] = {
@@ -31,7 +31,7 @@ def emit_intel_lookup(
     }
     if run_id:
         payload["run_id"] = run_id
-    if http_status != "":
+    if http_status is not None:
         payload["http_status"] = http_status
     payload.update(extra)
     payload.pop("api_key", None)

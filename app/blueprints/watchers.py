@@ -137,7 +137,7 @@ def _log_watcher_rejected(action: str, session_id: str, exc: Exception, response
         "source": "browser",
         "action": action,
         "watcher_id": watcher_id,
-        "status": _response_status(response),
+        "http_status": _response_status(response),
         "error": str(exc),
     })
 
@@ -512,7 +512,7 @@ def watchers_run_now(watcher_id):
     log.info("WATCHER_ROUTE_RUN_NOW", extra=_watcher_log_payload(
         refreshed,
         session_id=session_id,
-        status=status,
+        fire_status=status,
         fired_at=fired_at,
         run_id=refreshed.last_run_id,
         last_error=refreshed.last_error,

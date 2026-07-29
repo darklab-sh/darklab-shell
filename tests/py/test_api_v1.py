@@ -844,7 +844,7 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
     assert mock_error.call_args.kwargs["exc_info"] is True
     error_extra = mock_error.call_args.kwargs["extra"]
     assert error_extra["action"] == "create"
-    assert error_extra["status"] == 500
+    assert error_extra["http_status"] == 500
     assert team_actions[-1]["result"] == "ok"
 
     rollback_name = "API Rollback Team " + uuid.uuid4().hex[:8]
@@ -2794,7 +2794,7 @@ def test_api_v1_notification_channel_rejections_are_logged():
             "ip": "127.0.0.1",
             "session": "tok_" + token[4:8] + "********",
             "code": "invalid_kind",
-            "status": 400,
+            "http_status": 400,
             "route": "/api/v1/notification-channels",
             "method": "POST",
         },

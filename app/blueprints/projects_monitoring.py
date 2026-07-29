@@ -99,7 +99,7 @@ def projects_digest_settings_update(project_id):
             "session": project_routes.get_log_session_id(session_id),
             "team_id": team_id,
             "project_id": project_id,
-            "status": project_routes._project_error_status(exc),
+            "http_status": project_routes._project_error_status(exc),
             "reason": str(exc),
         })
         return project_routes._project_json_error(str(exc), project_routes._project_error_status(exc))
@@ -196,7 +196,7 @@ def projects_monitoring_fire_update(project_id, fire_id):
             "team_id": team_id,
             "project_id": project_id,
             "fire_id": fire_id,
-            "status": 400,
+            "http_status": 400,
             "reason": str(exc),
         })
         return jsonify({"error": "invalid_monitoring_fire_update", "message": str(exc)}), 400

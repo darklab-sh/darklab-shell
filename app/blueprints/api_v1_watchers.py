@@ -173,7 +173,7 @@ def api_watcher_run_now(watcher_id):
     api_routes.log.info("API_WATCHER_RUN_NOW", extra=api_routes._api_watcher_log_payload(
         refreshed,
         session_id=session_id,
-        status=status,
+        fire_status=status,
         fired_at=fired_at,
         run_id=refreshed.last_run_id,
         last_error=refreshed.last_error,

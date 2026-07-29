@@ -468,7 +468,7 @@ def _log_project_auto_promote_rejected(event, session_id, team_id, project_id, e
     log.warning(event, extra={
         **_project_auto_promote_log_context(session_id, team_id, project_id, rule_id=rule_id),
         **_project_auto_promote_safe_payload(data),
-        "status": status,
+        "http_status": status,
         "reason": str(exc),
     })
     return status

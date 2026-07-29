@@ -395,7 +395,7 @@ def _server_error_handler(e):
         "request_id": _current_request_id(),
         "method": request.method,
         "path": request.path,
-        "status": 500,
+        "http_status": 500,
     })
     if request.path.startswith("/api/v1/"):
         return jsonify(json_error("internal_error", "Internal server error.")), 500
@@ -487,7 +487,7 @@ def _log_response(response):
                 "method": request.method,
                 "path": request.path,
                 "endpoint": request.endpoint or "unknown",
-                "status": response.status_code,
+                "http_status": response.status_code,
                 "duration_ms": int(elapsed * 1000),
             },
         )
@@ -495,7 +495,7 @@ def _log_response(response):
         ip    = get_client_ip()
         extra = {
             "ip": ip, "request_id": _current_request_id(), "method": request.method,
-            "path": request.path, "status": response.status_code,
+            "path": request.path, "http_status": response.status_code,
         }
         if response.content_length is not None:
             extra["size"] = response.content_length

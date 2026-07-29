@@ -44,6 +44,22 @@ separate controls. A host-local collector can forward container standard
 output, while `log_format: gelf` controls whether the application itself emits
 GELF-shaped records or plain text.
 
+### Field type contract
+
+GELF field names keep one OpenSearch-compatible value type across every event.
+HTTP response codes use the numeric `http_status` field, while feature states
+use string fields such as `provider_status`, `workflow_status`,
+`fire_status`, `assist_status`, `project_status`, `team_status`, and
+`job_status`.
+
+The GELF boundary also protects older or dynamically-built records that still
+send a generic `status` extra. Integer values become `_http_status`; other
+values become the string `_event_status`. It never emits `_status`. A
+non-numeric `http_status` is isolated as `_event_http_status` instead of being
+sent to the numeric field, and other `*_status` values are serialized as
+strings. This keeps new records compatible with indexes where the legacy
+`_status` field is already mapped as a number.
+
 ## Log Event Inventory
 
 The current event inventory is:
@@ -51,7 +67,7 @@ The current event inventory is:
 | Level | Event | Where | Key extra fields |
 | ------- | ------- | ------- | ----------------- |
 | DEBUG | `REQUEST` | `before_request` | ip, request_id, method, path, qs |
-| DEBUG | `RESPONSE` | `after_request` | ip, request_id, method, path, status, size |
+| DEBUG | `RESPONSE` | `after_request` | ip, request_id, method, path, http_status, size |
 | DEBUG | `REQUEST_SESSION_RESOLUTION_FAILED` | `errorhandler(500)` | method, path, request_id (+ traceback) |
 | DEBUG | `RUNTIME_BOOTSTRAP_STEP_STARTED` | runtime bootstrap | step, runtime |
 | DEBUG | `RUNTIME_BOOTSTRAP_STEP_COMPLETED` | runtime bootstrap | step, runtime |
@@ -89,7 +105,9 @@ The current event inventory is:
 | DEBUG | `AI_COORDINATION_LEGACY_SLOT_DELETE_FAILED` | AI Redis coordination cleanup | (+ traceback) |
 | DEBUG | `NOTIFICATION_WORKER_TICK` | notification worker | delivered, limit |
 | DEBUG | `NOTIFICATION_HTTP_REQUEST` | notification HTTP channels | label, host, timeout, test_send |
-| DEBUG | `NOTIFICATION_HTTP_RESPONSE` | notification HTTP channels | label, status, test_send |
+| DEBUG | `NOTIFICATION_HTTP_RESPONSE` | notification HTTP channels | label, http_status, test_send |
+| DEBUG | `INTEL_HTTP_RESPONSE` | intel provider HTTP client | provider_host, method, path, http_status, response_bytes, elapsed_ms |
+| DEBUG / WARN | `PROJECT_OVERVIEW_INTEL_PAYLOAD_SKIPPED` | Project overview intel normalization | session, team_id, project_id, entity_id, snapshot_id, provider, provider_status, shape |
 | DEBUG | `NOTIFICATION_SMTP_SEND_ATTEMPT` | notification email channel | host, port, tls_mode, timeout, channel_id |
 | DEBUG | `SCHEDULE_FIRE_CLAIMED` | scheduler dispatch | schedule_id, owner_kind, session, claimed, fired_at, command_root |
 | DEBUG | `BODY_STORE_DELETE_MISS` | large body storage | rel_path, kind |
@@ -117,7 +135,7 @@ The current event inventory is:
 | INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
-| INFO | `REQUEST_COMPLETED` | `after_request` | ip, session, request_id, method, path, endpoint, status, duration_ms |
+| INFO | `REQUEST_COMPLETED` | `after_request` | ip, session, request_id, method, path, endpoint, http_status, duration_ms |
 | INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type, scan_transport (raw/connect scanner runs only) |
 | INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
 | INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
@@ -125,7 +143,7 @@ The current event inventory is:
 | INFO | `WORKFLOW_EXECUTION_STARTED` | durable workflow route | execution_id, workflow_id, workflow_source, step_count, team_id, session, ip |
 | INFO | `WORKFLOW_STEP_STARTED` | workflow execution engine | execution_id, step_id, run_id, cmd_type |
 | INFO | `WORKFLOW_STEP_COMPLETED` | workflow execution engine | execution_id, step_id, step_status, exit_code, duration_ms, transition, transition_reason |
-| INFO | `WORKFLOW_EXECUTION_COMPLETED` | workflow execution engine | execution_id, status, duration_ms |
+| INFO | `WORKFLOW_EXECUTION_COMPLETED` | workflow execution engine | execution_id, workflow_status, duration_ms |
 | INFO | `WORKFLOW_EXECUTION_CANCELED` | durable workflow route | execution_id, run_id, step_count, duration_ms, team_id, session, ip |
 | INFO | `WORKFLOW_RECOVERY_COMPLETED` | workflow startup recovery | examined, recovered, left_running, failed, ignored, errors, pid, recovery_owner |
 | INFO | `PTY_SESSION_STARTED` | interactive PTY service | ip, run_id, session, pid, cmd, rows, cols, allow_input |
@@ -133,7 +151,8 @@ The current event inventory is:
 | INFO | `PTY_OWNERSHIP_DISPLACED` | interactive PTY ownership claim | run_id, session, owner_client_id, owner_tab_id, displaced_client_id, displaced_tab_id |
 | INFO | `PTY_SNAPSHOT_PERSISTED` | interactive PTY service | run_id, session, rows, cols, forced |
 | INFO | `RUN_KILL` | `kill_command` | ip, run_id, session, team_id, actor_member_id, team_role, pid, pgid |
-| INFO | `TEAM_ACTION` | browser/API team management routes | action, team_id, session, ip, result, source, actor_member_id/target ids |
+| INFO | `TEAM_ACTION` | browser/API team management routes | action, team_id, session, ip, result, source, team_status, actor_member_id/target ids |
+| INFO | `TEAM_ARCHIVE_AUTOMATION_PAUSED` | browser/API team management routes | action, team_id, session, ip, source, team_status, paused_watchers, paused_schedules |
 | INFO | `DB_PRUNED` | `db_init` | runs, snapshots, retention_days |
 | INFO | `API_RUN_STARTED` | API run start routes | ip, session, run_id, cmd, cmd_type, project_id |
 | INFO | `API_ARTIFACT_DOWNLOADED` | API artifact download route | ip, session, run_id, artifact_id, byte_size |
@@ -170,7 +189,7 @@ The current event inventory is:
 | INFO | `SECRET_RETRIEVED` | secrets vault storage | session, consumer_envs |
 | INFO | `VAULT_KEY_LOADED` | secrets vault | source |
 | INFO | `VAULT_KEY_ROTATION_COMPLETED` | secrets vault storage | session, count |
-| INFO | `INTEL_PROVIDER_LOOKUP_COMPLETED` | Atlas intel refresh | session, entity_id, provider, status |
+| INFO | `INTEL_PROVIDER_LOOKUP_COMPLETED` | Atlas intel refresh | session, entity_id, provider, provider_status |
 | INFO | `NOTIFICATION_ENQUEUED` | notification dispatcher | trigger, queued, run_id, session |
 | INFO | `NOTIFICATION_DISPATCHED` | notification dispatcher | event_id, channel_id, trigger, session |
 | INFO | `NOTIFICATION_DEFERRED` | notification dispatcher | event_id, channel_id, trigger, session, reason |
@@ -207,17 +226,21 @@ The current event inventory is:
 | INFO | `PROJECT_AUTO_PROMOTE_RULE_CREATED` / `UPDATED` / `DELETED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, enabled, apply_on_run, target_entity_kind, match_mode |
 | INFO | `PROJECT_AUTO_PROMOTE_RULE_APPLIED` | Project auto-promote apply route | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, matched/linked/promoted/skipped/quota/cap counts, limit, truncated |
 | INFO | `PROJECT_AUTO_PROMOTE_RUN_APPLIED` | run finalization | run_id, session, team_id, project_ids, rule_ids, bounded rule_results, aggregate match/link/promote/quota/cap counts |
+| INFO | `PROJECT_UPDATED` | Project update route | ip, session, project_id, project_status |
 | INFO | `ATLAS_ENTITIES_CAPTURED` | run finalization | run_id, session, team_id, count, entity_type_counts, port_entity_count, scan_observation_count |
-| INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, team_id, source, schedule_id, status, fired_at, run_id, last_error |
+| INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, team_id, source, schedule_id, fire_status, fired_at, run_id, last_error |
 | INFO | `API_SCHEDULE_CREATED` | API schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `API_SCHEDULE_UPDATED` | API schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
 | INFO | `API_SCHEDULE_DELETED` | API schedule routes | ip, session, team_id, source, schedule_id, removed |
-| INFO | `API_SCHEDULE_RUN_NOW` | API schedule routes | ip, session, team_id, source, schedule_id, status, fired_at, run_id, last_error |
+| INFO | `API_SCHEDULE_RUN_NOW` | API schedule routes | ip, session, team_id, source, schedule_id, fire_status, fired_at, run_id, last_error |
 | INFO | `BUILTIN_SCHEDULE_CREATED` | terminal schedule built-in | session, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `BUILTIN_SCHEDULE_PAUSED` | terminal schedule built-in | session, source, schedule_id, enabled |
 | INFO | `BUILTIN_SCHEDULE_RESUMED` | terminal schedule built-in | session, source, schedule_id, enabled, next_run_at |
 | INFO | `BUILTIN_SCHEDULE_DELETED` | terminal schedule built-in | session, source, schedule_id, removed |
-| INFO | `BUILTIN_SCHEDULE_RUN_NOW` | terminal schedule built-in | session, source, schedule_id, status, fired_at, run_id, last_error |
+| INFO | `BUILTIN_SCHEDULE_RUN_NOW` | terminal schedule built-in | session, source, schedule_id, fire_status, fired_at, run_id, last_error |
+| INFO | `WATCHER_ROUTE_RUN_NOW` | browser watcher routes | ip, session, team_id, source, watcher_id, schedule_id, fire_status, fired_at, run_id, last_error |
+| INFO | `API_WATCHER_RUN_NOW` | API watcher routes | ip, session, team_id, source, watcher_id, schedule_id, fire_status, fired_at, run_id, last_error |
+| INFO | `BUILTIN_WATCH_RUN_NOW` | terminal watcher built-in | session, source, watcher_id, schedule_id, fire_status, fired_at, run_id, last_error |
 | INFO | `BUILTIN_NOTIFY_CREATED` | terminal notify built-in | session, source, channel_id, kind, muted |
 | INFO | `BUILTIN_NOTIFY_UPDATED` | terminal notify built-in | session, source, channel_id, muted |
 | INFO | `BUILTIN_NOTIFY_MUTED` | terminal notify built-in | session, source, channel_id |
@@ -232,7 +255,7 @@ The current event inventory is:
 | INFO | `WATCHER_CHANGED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
 | INFO | `WATCHER_RECOVERED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
 | INFO | `AI_RATE_LIMIT_SESSION_BYPASSED` | AI route rate limiting | ip, session, variant |
-| INFO | `AI_ASSIST_ENQUEUE_RESULT` | AI assist route enqueue | assist_id, run_id, session, variant, status, inserted, force, model, prompt_version, prompt_version_source, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes |
+| INFO | `AI_ASSIST_ENQUEUE_RESULT` | AI assist route enqueue | assist_id, run_id, session, variant, assist_status, inserted, force, model, prompt_version, prompt_version_source, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes |
 | INFO | `AI_WORKER_DEPENDENCIES_LOADED` | AI worker startup | variants, metrics_initialized |
 | INFO | `AI_WORKER_STARTED` | AI worker startup | — |
 | INFO | `AI_ASSIST_PROVIDER_REQUEST` | AI provider call start | assist_id, run_id, variant, model, connect_timeout_seconds, read_timeout_seconds |
@@ -256,7 +279,8 @@ The current event inventory is:
 | WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason, deny_kind, rule_id |
 | WARN | `RAW_PACKET_SCANNING_UNAVAILABLE` | app startup | tool, reason, availability_reason |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
-| WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, status |
+| WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, http_status |
+| WARN / ERROR | `TEAM_ACTION_REJECTED` / `TEAM_ROUTE_FAILED` / `TEAM_ACTION_FAILED` | browser/API team management routes | action, team_id, session, ip, result, source, reason, error_code, http_status, route, method |
 | WARN | `API_BROKER_UNAVAILABLE` | API run start routes | ip, reason |
 | WARN | `API_FULL_OUTPUT_LOAD_FAILED` | API output route | run_id, session, rel_path, error |
 | WARN | `RUN_FULL_OUTPUT_INDEX_FALLBACK` | run finalization | run_id, session, rel_path, error |
@@ -272,10 +296,12 @@ The current event inventory is:
 | WARN | `NOTIFICATION_WORKER_DATABASE_INTERRUPTED` | notification worker | phase, limit, poll_seconds, error_type, sqlstate |
 | WARN | `NOTIFICATION_HTTP_NETWORK_ERROR` | notification HTTP channels | label, host, error |
 | WARN | `NOTIFICATION_SMTP_SEND_FAILED` | notification email channel | host, port, tls_mode, channel_id, error |
-| WARN | `API_NOTIFICATION_CHANNEL_REJECTED` | API notification routes | ip, session, code, status, route, method |
+| WARN | `API_NOTIFICATION_CHANNEL_REJECTED` | API notification routes | ip, session, code, http_status, route, method |
 | WARN | `SCHEDULER_CONFIG_INVALID` | scheduler config readers | key, value, fallback |
-| WARN | `SCHEDULE_REQUEST_REJECTED` | browser schedule routes | ip, session, team_id, source, action, schedule_id, status, error |
-| WARN | `API_SCHEDULE_REJECTED` | API schedule routes | ip, session, team_id, code, status, route, method, error |
+| WARN | `SCHEDULE_REQUEST_REJECTED` | browser schedule routes | ip, session, team_id, source, action, schedule_id, http_status, error |
+| WARN | `API_SCHEDULE_REJECTED` | API schedule routes | ip, session, team_id, code, http_status, route, method, error |
+| WARN | `WATCHER_REQUEST_REJECTED` | browser watcher routes | ip, session, source, action, watcher_id, http_status, error |
+| WARN | `API_WATCHER_REJECTED` | API watcher routes | ip, session, code, http_status, route, method, error |
 | WARN | `BUILTIN_SCHEDULE_REJECTED` | terminal schedule built-in | session, source, subcommand, error |
 | WARN | `BUILTIN_NOTIFY_REJECTED` | terminal notify built-in | session, source, subcommand, error |
 | WARN | `SCHEDULE_DISABLED_REVOKED` | scheduler dispatch | schedule_id, owner_kind, session, team_id, fired_at, next_run_at, command_root |
@@ -296,13 +322,13 @@ The current event inventory is:
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
 | WARN | `PACKAGE_PRESETS_OVERRIDE_INVALID` | evidence package preset catalog loader | path, fallback_path, error |
-| WARN | `PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED` / `CREATE_REJECTED` / `UPDATE_REJECTED` / `APPLY_REJECTED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, status, reason |
-| WARN | `PROJECT_AUTO_PROMOTE_RULE_UPDATE_MISS` / `DELETE_MISS` / `APPLY_MISS` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, status, reason |
+| WARN | `PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED` / `CREATE_REJECTED` / `UPDATE_REJECTED` / `APPLY_REJECTED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, http_status, reason |
+| WARN | `PROJECT_AUTO_PROMOTE_RULE_UPDATE_MISS` / `DELETE_MISS` / `APPLY_MISS` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, http_status, reason |
 | WARN | `PROJECT_AUTO_PROMOTE_QUOTA_LIMITED` | Project auto-promote apply service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, quota_limited_count, linked_count, new_link_count, promoted_count |
 | WARN | `PROJECT_AUTO_PROMOTE_MATCH_CAP_LIMITED` | Project auto-promote matching service | session, team_id, project_id, run_id, rule_id, target_entity_kind, match_mode, matched/candidate/cap counts, candidate_scan_limit, limit, truncated |
 | WARN | `PROJECT_AUTO_PROMOTE_RULE_CAP_LIMITED` | Project auto-promote run-finalization service | session, team_id, run_id, rule_cap_limited_count, candidate_rule_count, rule_limit |
-| WARN | `ATLAS_IMPORT_PREVIEW_REJECTED` | Atlas import routes/workflow | ip, session, team_id, actor_member_id, actor_role, draft_id, format_id, source_tool_key, has_file, filename_present, content_length, upload_bytes, max_upload_bytes, request_limit_bytes, stage, status, reason |
-| WARN | `ATLAS_IMPORT_APPLY_REJECTED` | Atlas import routes/workflow | ip, session, team_id, actor_member_id, actor_role, draft_id, batch_id, project_id, project_present, status, reason, draft_status, required_capabilities, option_import_entities, option_import_findings, option_link_to_project, option_create_project_targets |
+| WARN | `ATLAS_IMPORT_PREVIEW_REJECTED` | Atlas import routes/workflow | ip, session, team_id, actor_member_id, actor_role, draft_id, format_id, source_tool_key, has_file, filename_present, content_length, upload_bytes, max_upload_bytes, request_limit_bytes, stage, http_status, reason |
+| WARN | `ATLAS_IMPORT_APPLY_REJECTED` | Atlas import routes/workflow | ip, session, team_id, actor_member_id, actor_role, draft_id, batch_id, project_id, project_present, http_status, reason, draft_status, required_capabilities, option_import_entities, option_import_findings, option_link_to_project, option_create_project_targets |
 | WARN | `ATLAS_IMPORT_LIMIT_REJECTED` | Atlas import workflow guardrails | limit_key, configured_limit, actual_count, draft_id, format_id, team_id, stage |
 | WARN | `ATLAS_IMPORT_WARNINGS_TRUNCATED` | Atlas import parser | format_id, skipped, warning_count, suppressed_warning_count, max_warnings, warning_codes |
 | WARN | `ATLAS_IMPORT_APPLY_STALE_CLEANED` | Atlas import draft cleanup | previewed_count, applying_count, cutoff |
@@ -312,11 +338,12 @@ The current event inventory is:
 | WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
 | WARN | `DIAG_REDIS_SCAN_INCOMPLETE` | `/diag` Redis probes | stage, error |
 | WARN | `INTEL_PROVIDERS_DISABLED` | Atlas intel refresh | session, entity_id, entity_type |
-| WARN | `INTEL_PROVIDER_LOOKUP_SKIPPED` | Atlas intel refresh | session, entity_id, provider, status, provider_message |
+| WARN | `INTEL_PROVIDER_LOOKUP_SKIPPED` | Atlas intel refresh | session, entity_id, provider, provider_status, provider_message |
+| WARN | `INTEL_HTTP_REDIRECT_BLOCKED` / `INTEL_HTTP_JSON_DECODE_FAILED` / `INTEL_HTTP_JSON_SHAPE_UNEXPECTED` | intel provider HTTP client | provider_host, method/path when available, http_status, redirect_host or shape |
 | WARN | `VAULT_DECRYPT_FAILED` | secrets vault | source |
 | WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, client_message |
-| WARN / ERROR | `HISTORY_COMPARE_CANDIDATES_FETCH_FAILED` / `HISTORY_COMPARE_MANUAL_CANDIDATES_FETCH_FAILED` | comparison launcher through `client_log` | ip, session, context, error_name, stage, status, run_id, route |
-| WARN / ERROR | `HISTORY_COMPARE_API_FETCH_FALLBACK` / `HISTORY_COMPARE_FETCH_FAILED` | comparison renderer through `client_log` | ip, session, context, error_name, status, left_run_id, right_run_id, route, compare_request_error |
+| WARN / ERROR | `HISTORY_COMPARE_CANDIDATES_FETCH_FAILED` / `HISTORY_COMPARE_MANUAL_CANDIDATES_FETCH_FAILED` | comparison launcher through `client_log` | ip, session, context, client_details with bounded error_name, stage, status, run_id, route |
+| WARN / ERROR | `HISTORY_COMPARE_API_FETCH_FALLBACK` / `HISTORY_COMPARE_FETCH_FAILED` | comparison renderer through `client_log` | ip, session, context, client_details with bounded error_name, status, left_run_id, right_run_id, route, compare_request_error |
 | WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
 | WARN | `SESSION_TOKEN_REVOKE_DENIED` | `session_token_revoke` | ip, session, reason |
 | WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
@@ -346,14 +373,14 @@ The current event inventory is:
 | WARN | `AI_PROVIDER_SCHEMA_RETRY` | AI provider JSON validation | variant, attempt, model, finish_reason, output_chars, error_type, provider_truncated |
 | WARN | `AI_SUGGESTION_SECRET_LOOKUP_FAILED` | AI suggestion validation | session, env, error_type (+ traceback) |
 | WARN | `AI_SUGGESTIONS_REJECTED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
-| WARN | `AI_DIAG_TEST_FAILED` | AI diagnostics test prompt | ip, provider, model, error_code, status |
-| WARN | `AI_PROVIDER_PROBE_FAILED` | AI provider diagnostics | provider, model, base_url_configured, error_code, status, latency_ms |
+| WARN | `AI_DIAG_TEST_FAILED` | AI diagnostics test prompt | ip, provider, model, error_code, http_status |
+| WARN | `AI_PROVIDER_PROBE_FAILED` | AI provider diagnostics | provider, model, base_url_configured, error_code, http_status, latency_ms |
 | WARN | `AI_COORDINATION_RELEASE_SKIPPED` | AI Redis coordination release | reason |
 | WARN | `AI_COORDINATION_RELEASE_FAILED` | AI Redis coordination release | (+ traceback) |
 | WARN | `AI_COORDINATION_HEARTBEAT_FAILED` | AI Redis coordination heartbeat | (+ traceback) |
 | WARN | `AI_WORKER_COORDINATION_UNAVAILABLE` | AI worker coordination | error |
 | WARN | `AI_ASSIST_STALE_RECLAIMED` | AI worker queue recovery | count, stale_after_seconds |
-| WARN | `AI_ASSIST_FAILED` | AI worker completion | assist_id, run_id, session, variant, model, prompt_version, prompt_version_source, context_hash, error_code, error_message |
+| WARN | `AI_ASSIST_FAILED` | AI worker completion | assist_id, run_id, session, variant, model, prompt_version, prompt_version_source, context_hash, error_code, error_message, http_status |
 | WARN | `AI_WORKER_DATABASE_INTERRUPTED` | AI worker database loop | error_type |
 | WARN | `ACTIVE_RUN_METADATA_DECODE_FAILED` | process tracking metadata | key, error |
 | WARN | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED` | active-run startup cleanup | reason, fallback, pid |
@@ -402,6 +429,7 @@ The current event inventory is:
 | ERROR | `WATCHER_BASELINE_DELETE_HOOK_ERROR` | run cleanup watcher hook | (+ traceback) |
 | ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
+| ERROR | `PACKAGE_BUILD_AUDIT_FAILED` / `REPORT_EXPORT_AUDIT_FAILED` | background export audit fallback | job_id, project_id, package_id when applicable, team_id, actor_member_id, job_status, reason, archive/count fields (+ traceback) |
 | ERROR | `PACKAGE_PRESETS_LOAD_FAILED` | Project package preset route | ip, session, error |
 | ERROR | `ATLAS_IMPORT_PREVIEW_FAILED` | Atlas import preview workflow | session, team_id, actor_member_id, actor_role, format_id, source_tool_key, stage, upload_bytes, has_filename, filename_present (+ traceback) |
 | ERROR | `ATLAS_IMPORT_APPLY_FAILED` | Atlas import apply workflow | session, team_id, actor_member_id, actor_role, draft_id, batch_id, project_id, format_id, source_tool_key, stage, draft_status, required_capabilities, option_import_entities, option_import_findings, option_link_to_project, option_create_project_targets (+ traceback) |
@@ -420,13 +448,14 @@ The current event inventory is:
 | ERROR | `MIGRATION_FAILED` | Schema migration runner | migration_version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
-| ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, request_id, method, path, status (+ traceback) |
+| ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, request_id, method, path, http_status (+ traceback) |
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
 
 - request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
 - GELF keeps its required top-level `version: "1.1"` field separate from the app release in `_app_version`. Structured context names that would become OpenSearch metadata fields are emitted under `_event_*` instead, such as `_event_version` and `_event_source`, so Graylog can index them without colliding with `_version` or `_source`
+- GELF never emits the legacy `_status` additional field. Numeric response codes use `_http_status`; string lifecycle fields keep their feature-specific names and one stable type
 - run lifecycle logs intentionally carry `ip`, `session`, and `run_id` so start/end/kill/failure events can be correlated without reconstructing request flow from surrounding lines
 - web bootstrap runs active-run metadata cleanup through a Redis-backed ownership guard; no-Redis deployments keep the previous per-worker cleanup fallback, while multi-worker startup without Redis fails closed with `REDIS_REQUIRED_FOR_MULTI_WORKER`
 - diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the command-execution path
@@ -440,7 +469,16 @@ The current event inventory is:
 4. Check `/diag` for current service and runtime state when the event points to database, Redis, workspace, provider, asset, or worker readiness.
 5. Lower the level after collecting the needed context. Do not add raw commands, search text, credentials, file contents, finding text, or unbounded exception details to an ad hoc log statement.
 
-Free-form `message` text and numeric status or error codes are supporting context, not stable selectors. Dashboards and alerts should key on the event name, level, and documented fields.
+Existing Graylog searches, dashboards, alerts, pipelines, and index templates
+that use `_status` should move HTTP filters to `_http_status` and lifecycle
+filters to the documented feature-specific field. The application change does
+not require an index rotation because it stops writing the conflicting field.
+Rotate only if you want to remove the old `_status` mapping from index
+metadata. Replaying a previously rejected raw record requires renaming its
+string `_status` value first; otherwise it will fail against the same numeric
+mapping again.
+
+Free-form `message` text and HTTP or error codes are supporting context, not stable selectors. Dashboards and alerts should key on the event name, level, and documented fields.
 
 ## Related Docs
 

@@ -1009,7 +1009,7 @@ class TestAIAssistContextAndStorage:
         assert extra["model"] == "Llama-3.1-8B-Instruct"
         assert extra["base_url_configured"] is True
         assert extra["error_code"] == "ai_unavailable"
-        assert extra["status"] == 503
+        assert extra["http_status"] == 503
         assert isinstance(extra["latency_ms"], int)
 
     def test_ai_provider_probe_reports_disabled_and_not_configured_without_client(self, monkeypatch):
@@ -1798,7 +1798,7 @@ class TestAIAssistContextAndStorage:
             "variant": "summary",
             "error_code": "ai_context_changed",
             "error_message": "Run context changed after assist was queued",
-            "status": None,
+            "http_status": None,
         }
 
     def test_ai_worker_validates_next_command_suggestions(self, monkeypatch, tmp_path):
@@ -5471,7 +5471,7 @@ class TestProjectOverviewContract:
             "entity_id": target["id"],
             "snapshot_id": "snap-overview-degraded-ok",
             "provider": "badshape",
-            "status": "ok",
+            "provider_status": "ok",
             "shape": "list",
         }]
         skipped_debug = [
@@ -5485,7 +5485,7 @@ class TestProjectOverviewContract:
             "entity_id": target["id"],
             "snapshot_id": "snap-overview-degraded-error",
             "provider": "nonfatal",
-            "status": "error",
+            "provider_status": "error",
             "shape": "str",
         }]
         app_port_skips = [
@@ -24471,7 +24471,7 @@ class TestAuditEvents:
         assert package_extra["package_id"] == "pkg_1"
         assert package_extra["team_id"] == "team_1"
         assert package_extra["actor_member_id"] == "tmem_1"
-        assert package_extra["status"] == "failed"
+        assert package_extra["job_status"] == "failed"
         assert package_extra["reason"] == "size_limit"
         assert package_extra["archive_bytes"] == 123
         assert package_extra["run_count"] == 2
@@ -24479,7 +24479,7 @@ class TestAuditEvents:
         assert report_extra["project_id"] == "proj_1"
         assert report_extra["team_id"] == "team_1"
         assert report_extra["actor_member_id"] == "tmem_1"
-        assert report_extra["status"] == "failed"
+        assert report_extra["job_status"] == "failed"
         assert report_extra["reason"] == "size_limit"
         assert report_extra["archive_bytes"] == 456
         assert report_extra["target_count"] == 5

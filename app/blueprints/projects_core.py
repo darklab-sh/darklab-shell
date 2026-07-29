@@ -292,7 +292,7 @@ def projects_update(project_id):
         "ip": project_routes.get_client_ip(),
         "session": project_routes.get_log_session_id(session_id),
         "project_id": project_id,
-        "status": project["status"],
+        "project_status": project["status"],
     })
     return jsonify({"ok": True, "project": project})
 
