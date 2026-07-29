@@ -266,7 +266,7 @@ def _log_enqueue_result(
             "run_id": run_id,
             "session": get_log_session_id(session_id),
             "variant": variant,
-            "status": str(public.get("status") or ""),
+            "assist_status": str(public.get("status") or ""),
             "inserted": inserted,
             "force": force,
             "model": settings["model"],

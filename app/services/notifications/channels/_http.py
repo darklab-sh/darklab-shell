@@ -186,7 +186,10 @@ def _post(
         with _open_http_request(request, timeout=timeout) as response:
             status = int(getattr(response, "status", response.getcode()))
     except HTTPError as exc:
-        log.debug("NOTIFICATION_HTTP_RESPONSE", extra={"label": label, "status": int(exc.code), "test_send": test_send})
+        log.debug(
+            "NOTIFICATION_HTTP_RESPONSE",
+            extra={"label": label, "http_status": int(exc.code), "test_send": test_send},
+        )
         return result_for_http_status(exc.code, label=label)
     except (TimeoutError, socket.timeout, URLError) as exc:
         log.warning(
@@ -194,7 +197,10 @@ def _post(
             extra={"label": label, "host": _safe_log_host(parsed_url), "error": network_error_message(exc, label=label)},
         )
         return ChannelResult.retry(network_error_message(exc, label=label))
-    log.debug("NOTIFICATION_HTTP_RESPONSE", extra={"label": label, "status": status, "test_send": test_send})
+    log.debug(
+        "NOTIFICATION_HTTP_RESPONSE",
+        extra={"label": label, "http_status": status, "test_send": test_send},
+    )
     return result_for_http_status(status, label=label)
 
 

@@ -252,7 +252,7 @@ def _process_assist(assist: dict, *, cfg: Mapping[str, Any] | None = None) -> No
             "variant": variant,
             "error_code": exc.code,
             "error_message": str(exc)[:240],
-            "status": exc.status,
+            "http_status": exc.status,
         })
     except Exception as exc:  # noqa: BLE001
         _record_worker_error_metric(variant, "ai_unavailable", active_cfg)

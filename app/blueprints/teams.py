@@ -221,7 +221,7 @@ def _log_team_exception(
         actor=actor,
         reason=code,
         error_code=code,
-        status=status,
+        http_status=status,
         **extra,
     )
     if status >= 500:
@@ -398,7 +398,7 @@ def session_teams_update(team_id):
                     session_token=session_token,
                     team_id=team_id,
                     actor=actor,
-                    status=team["status"],
+                    team_status=team["status"],
                     paused_watchers=paused["watchers"],
                     paused_schedules=paused["schedules"],
                 ),
@@ -408,7 +408,7 @@ def session_teams_update(team_id):
             session_token=session_token,
             team_id=team_id,
             actor=actor,
-            status=team["status"],
+            team_status=team["status"],
             paused_watchers=paused["watchers"],
             paused_schedules=paused["schedules"],
         )

@@ -118,7 +118,7 @@ def projects_auto_promote_rules_update(project_id, rule_id):
     if rule is None:
         project_routes.log.warning("PROJECT_AUTO_PROMOTE_RULE_UPDATE_MISS", extra={
             **project_routes._project_auto_promote_log_context(session_id, team_id, project_id, rule_id=rule_id),
-            "status": 404,
+            "http_status": 404,
             "reason": "auto-promote rule not found",
         })
         return project_routes._project_not_found("auto-promote rule not found")
@@ -144,7 +144,7 @@ def projects_auto_promote_rules_delete(project_id, rule_id):
     if deleted is None:
         project_routes.log.warning("PROJECT_AUTO_PROMOTE_RULE_DELETE_MISS", extra={
             **project_routes._project_auto_promote_log_context(session_id, team_id, project_id, rule_id=rule_id),
-            "status": 404,
+            "http_status": 404,
             "reason": "auto-promote rule not found",
         })
         return project_routes._project_not_found("auto-promote rule not found")
@@ -191,7 +191,7 @@ def projects_auto_promote_rules_apply(project_id, rule_id):
     if result is None:
         project_routes.log.warning("PROJECT_AUTO_PROMOTE_RULE_APPLY_MISS", extra={
             **project_routes._project_auto_promote_log_context(session_id, team_id, project_id, rule_id=rule_id),
-            "status": 404,
+            "http_status": 404,
             "reason": "auto-promote rule not found",
         })
         return project_routes._project_not_found("auto-promote rule not found")

@@ -129,7 +129,7 @@ def _log_schedule_rejected(action: str, session_id: str, exc: Exception, respons
         "source": "browser",
         "action": action,
         "schedule_id": schedule_id,
-        "status": _response_status(response),
+        "http_status": _response_status(response),
         "error": str(exc),
     })
 
@@ -459,7 +459,7 @@ def schedules_run_now(schedule_id):
     log.info("SCHEDULE_RUN_NOW", extra=_schedule_log_payload(
         refreshed or schedule,
         session_id=session_id,
-        status=status,
+        fire_status=status,
         fired_at=fired_at,
         run_id=refreshed.last_run_id,
         last_error=refreshed.last_error,

@@ -635,7 +635,7 @@ def diag_ai_test():
                 "provider": CFG.get("ai_provider", "openai_compatible"),
                 "model": CFG.get("ai_model", ""),
                 "error_code": exc.code,
-                "status": exc.status,
+                "http_status": exc.status,
             },
         )
         return jsonify({"ok": False, "error_code": exc.code, "error": str(exc)}), 502

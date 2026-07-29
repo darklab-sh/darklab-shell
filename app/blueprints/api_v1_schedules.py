@@ -170,7 +170,7 @@ def api_schedule_run_now(schedule_id):
     api_routes.log.info("API_SCHEDULE_RUN_NOW", extra=api_routes._api_schedule_log_payload(
         refreshed or schedule,
         session_id=session_id,
-        status=status,
+        fire_status=status,
         fired_at=fired_at,
         run_id=refreshed.last_run_id,
         last_error=refreshed.last_error,
