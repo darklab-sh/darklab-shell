@@ -88,7 +88,7 @@ def _atlas_import_request_too_large_response(session_id, scope, member):
         "content_length": int(content_length),
         "max_upload_bytes": max_upload_bytes,
         "request_limit_bytes": request_limit,
-        "status": 413,
+        "http_status": 413,
     })
     return jsonify({
         "error": "invalid_import_file",
@@ -204,7 +204,7 @@ def _log_atlas_import_preview_rejected(exc, *, session_id, scope, member):
     log.warning("ATLAS_IMPORT_PREVIEW_REJECTED", extra={
         **_atlas_import_preview_log_fields(session_id, scope, member),
         "reason": exc.code,
-        "status": exc.status_code,
+        "http_status": exc.status_code,
     })
 
 
@@ -271,7 +271,7 @@ def _log_atlas_import_apply_rejected(exc, *, session_id, scope, member, payload,
         "project_id": project_id,
         "project_present": bool(project_id),
         "reason": exc.code,
-        "status": exc.status_code,
+        "http_status": exc.status_code,
         **_atlas_import_option_log_fields(options),
     })
 
@@ -585,7 +585,7 @@ def atlas_import_preview():
         log.warning("ATLAS_IMPORT_PREVIEW_REJECTED", extra={
             **_atlas_import_preview_log_fields(session_id, scope, member),
             "reason": "file_required",
-            "status": 400,
+            "http_status": 400,
         })
         return jsonify({"error": "file_required", "message": "An import file is required."}), 400
     try:

@@ -195,7 +195,7 @@ def _notification_api_error(exc: Exception):
         "ip": get_client_ip(),
         "session": session,
         "code": code,
-        "status": status_code,
+        "http_status": status_code,
         "route": str(request.path or ""),
         "method": str(request.method or ""),
     })
@@ -350,7 +350,7 @@ def _log_api_team_exception(
         actor=actor,
         reason=code,
         error_code=code,
-        status=status,
+        http_status=status,
         **extra,
     )
     if status >= 500:
@@ -411,7 +411,7 @@ def _schedule_api_error(exc: Exception):
         "ip": get_client_ip(),
         "session": session,
         "code": code,
-        "status": status,
+        "http_status": status,
         "route": str(request.path or ""),
         "method": str(request.method or ""),
         "error": message,
@@ -498,7 +498,7 @@ def _watcher_api_error(exc: Exception):
         "ip": get_client_ip(),
         "session": session,
         "code": code,
-        "status": status,
+        "http_status": status,
         "route": str(request.path or ""),
         "method": str(request.method or ""),
         "error": message,
@@ -530,7 +530,7 @@ def _handle_api_auth_error(exc: ApiAuthError):
     log.warning("API_AUTH_FAILED", extra={
         "ip": get_client_ip(),
         "code": exc.code,
-        "status": exc.status_code,
+        "http_status": exc.status_code,
     })
     return _api_json_error(exc.code, exc.message, exc.status_code)
 

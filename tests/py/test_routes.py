@@ -1775,7 +1775,7 @@ SQL syntax error near q</response>
             assert oversized_warning.kwargs["extra"]["reason"] == "request_too_large"
             assert oversized_warning.kwargs["extra"]["session"].startswith("tok_atla")
             assert oversized_warning.kwargs["extra"]["session"].endswith("********")
-            assert oversized_warning.kwargs["extra"]["status"] == 413
+            assert oversized_warning.kwargs["extra"]["http_status"] == 413
 
             with mock.patch.object(atlas_import_workflow.log, "warning") as mock_import_warning:
                 unsupported = client.post(
@@ -1807,7 +1807,7 @@ SQL syntax error near q</response>
             assert preview_rejected_extra["session"].endswith("********")
             assert preview_rejected_extra["format_id"] == "content_sniff_me"
             assert preview_rejected_extra["source_tool_key"] == "external_csv"
-            assert preview_rejected_extra["status"] == 400
+            assert preview_rejected_extra["http_status"] == 400
 
             with mock.patch.dict(config.CFG, {"atlas_import_max_upload_mb": 1}, clear=False):
                 oversized = client.post(
@@ -1978,7 +1978,7 @@ SQL syntax error near q</response>
             digest_warning = mock_apply_warning.call_args
             assert digest_warning.args[0] == "ATLAS_IMPORT_APPLY_REJECTED"
             assert digest_warning.kwargs["extra"]["reason"] == "digest_mismatch"
-            assert digest_warning.kwargs["extra"]["status"] == 400
+            assert digest_warning.kwargs["extra"]["http_status"] == 400
             assert digest_warning.kwargs["extra"]["import_entities"] is True
             service_digest_warning = next(
                 call.kwargs["extra"]
@@ -2397,7 +2397,7 @@ class TestTeamRoutes:
             assert mock_error.call_args.kwargs["exc_info"] is True
             error_extra = mock_error.call_args.kwargs["extra"]
             assert error_extra["action"] == "create"
-            assert error_extra["status"] == 500
+            assert error_extra["http_status"] == 500
             assert error_extra["route"] == "/session/teams"
             with db_connect() as conn:
                 team_count = conn.execute(
@@ -6670,7 +6670,7 @@ class TestProjectRoutes:
             )
         assert rejected.status_code == 400
         assert warning_log.call_args.args == ("PROJECT_MONITORING_FIRE_ACK_REJECTED",)
-        assert warning_log.call_args.kwargs["extra"]["status"] == 400
+        assert warning_log.call_args.kwargs["extra"]["http_status"] == 400
         assert warning_log.call_args.kwargs["extra"]["fire_id"] == fire.id
 
         with mock.patch.object(project_routes.log, "debug") as debug_log:
@@ -9594,8 +9594,8 @@ class TestProjectRoutes:
         assert "skipped_suppressed_count" in applied_extra
         assert "match_cap_limited_count" in applied_extra
         warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
-        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED"]["status"] == 400
-        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_DELETE_MISS"]["status"] == 404
+        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED"]["http_status"] == 400
+        assert warning_events["PROJECT_AUTO_PROMOTE_RULE_DELETE_MISS"]["http_status"] == 404
         all_extras = [call.kwargs["extra"] for call in (
             debug_log.call_args_list + info_log.call_args_list + warning_log.call_args_list
         )]
@@ -13454,7 +13454,7 @@ class TestDiagRoute:
                 "provider": "openai_compatible",
                 "model": "Llama-3.1-8B-Instruct",
                 "error_code": "ai_unavailable",
-                "status": 503,
+                "http_status": 503,
             },
         )
         shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
@@ -20421,7 +20421,7 @@ class TestHistoryRoute:
                 "run_id": run_id,
                 "session": session,
                 "variant": "summary",
-                "status": "completed",
+                "assist_status": "completed",
                 "inserted": False,
                 "force": False,
                 "model": "llama3.1:8b",
@@ -20437,7 +20437,7 @@ class TestHistoryRoute:
                 "run_id": run_id,
                 "session": session,
                 "variant": "summary",
-                "status": "queued",
+                "assist_status": "queued",
                 "inserted": True,
                 "force": True,
                 "model": "llama3.1:8b",

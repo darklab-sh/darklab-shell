@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from config import APP_VERSION
-from core.startup_logging import drain_config_log_records, gelf_additional_field_name
+from core.startup_logging import drain_config_log_records, gelf_additional_field
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -95,7 +95,10 @@ class GELFFormatter(logging.Formatter):
         if record.exc_info:
             payload["full_message"] = self.formatException(record.exc_info)
         for key, val in _extra_fields(record).items():
-            payload[gelf_additional_field_name(key)] = val
+            field_name, field_value = gelf_additional_field(key, val)
+            if key == "status" and field_name in payload:
+                continue
+            payload[field_name] = field_value
         return json.dumps(payload, separators=(",", ":"), default=str)
 
 

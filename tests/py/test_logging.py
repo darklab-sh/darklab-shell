@@ -343,20 +343,60 @@ class TestGELFFormatter:
         data = json.loads(_emit(
             GELFFormatter(), logging.INFO, "RUN_START",
             extra={
+                "assist_status": "completed",
+                "fire_status": "fired",
+                "http_status": 202,
                 "ip": "1.2.3.4",
+                "project_status": "active",
+                "provider_status": "ok",
                 "run_id": "abc",
                 "exit_code": 0,
                 "version": "2.6.0",
                 "source": "config.local.yaml",
+                "workflow_status": "completed",
             },
         ))
+        numeric_status = json.loads(_emit(
+            GELFFormatter(), logging.INFO, "LEGACY_HTTP_EVENT",
+            extra={"status": 200},
+        ))
+        text_status = json.loads(_emit(
+            GELFFormatter(), logging.INFO, "LEGACY_STATE_EVENT",
+            extra={"status": "error"},
+        ))
+        explicit_status = json.loads(_emit(
+            GELFFormatter(), logging.INFO, "MIXED_COMPAT_EVENT",
+            extra={"http_status": 202, "status": 500},
+        ))
+        invalid_http_status = json.loads(_emit(
+            GELFFormatter(), logging.INFO, "INVALID_HTTP_STATUS_EVENT",
+            extra={"http_status": "upstream_error"},
+        ))
+        normalized_feature_status = json.loads(_emit(
+            GELFFormatter(), logging.INFO, "INVALID_FEATURE_STATUS_EVENT",
+            extra={"provider_status": 503},
+        ))
+        assert data["_assist_status"] == "completed"
+        assert data["_fire_status"] == "fired"
+        assert data["_http_status"] == 202
         assert data["_ip"] == "1.2.3.4"
+        assert data["_project_status"] == "active"
+        assert data["_provider_status"] == "ok"
         assert data["_run_id"] == "abc"
         assert data["_exit_code"] == 0
         assert data["_event_version"] == "2.6.0"
         assert data["_event_source"] == "config.local.yaml"
+        assert data["_workflow_status"] == "completed"
         assert "_version" not in data
         assert "_source" not in data
+        assert numeric_status["_http_status"] == 200
+        assert text_status["_event_status"] == "error"
+        assert explicit_status["_http_status"] == 202
+        assert invalid_http_status["_event_http_status"] == "upstream_error"
+        assert normalized_feature_status["_provider_status"] == "503"
+        assert "_status" not in numeric_status
+        assert "_status" not in text_status
+        assert "_http_status" not in invalid_http_status
 
     def test_stdlib_attrs_not_leaked_as_underscore_fields(self):
         data = json.loads(_emit(GELFFormatter(), logging.INFO, "TEST"))
@@ -1126,7 +1166,7 @@ class TestRequestResponseDebugEvents:
             completed_calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
             assert len(completed_calls) == 1
             assert completed_calls[0].kwargs["extra"]["path"] == "/health"
-            assert completed_calls[0].kwargs["extra"]["status"] == 200
+            assert completed_calls[0].kwargs["extra"]["http_status"] == 200
             assert "request_id" in completed_calls[0].kwargs["extra"]
         finally:
             shell_app_module.log.setLevel(original_level)
@@ -1141,7 +1181,7 @@ class TestRequestResponseDebugEvents:
             assert call.kwargs["extra"]["method"] == "GET"
             assert call.kwargs["extra"]["path"] == "/config"
             assert call.kwargs["extra"]["endpoint"] == "content.get_config"
-            assert call.kwargs["extra"]["status"] == 200
+            assert call.kwargs["extra"]["http_status"] == 200
             assert "duration_ms" in call.kwargs["extra"]
             assert "request_id" in call.kwargs["extra"]
             assert "qs" not in call.kwargs["extra"]
@@ -1205,14 +1245,14 @@ class TestRequestResponseDebugEvents:
         finally:
             shell_app_module.log.setLevel(original_level)
 
-    def test_response_debug_extra_has_status(self):
+    def test_response_debug_extra_has_http_status(self):
         original_level = shell_app_module.log.level
         shell_app_module.log.setLevel(logging.DEBUG)
         try:
             with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
                 get_client().get("/health")
             call = next(c for c in mock_debug.call_args_list if c[0][0] == "RESPONSE")
-            assert call.kwargs["extra"]["status"] == 200
+            assert call.kwargs["extra"]["http_status"] == 200
         finally:
             shell_app_module.log.setLevel(original_level)
 

@@ -242,7 +242,7 @@ def _run_schedule_now(schedule: Schedule) -> list[dict[str, object]]:
             "session": get_log_session_id(schedule.session_token),
             "source": "builtin",
             "schedule_id": schedule.id,
-            "status": status,
+            "fire_status": status,
             "fired_at": fired_at,
             "run_id": (refreshed or schedule).last_run_id,
             "last_error": (refreshed or schedule).last_error,

@@ -65,7 +65,7 @@ def provider_probe(cfg: Mapping[str, Any] | None = None) -> dict[str, Any]:
                 "model": settings["model"],
                 "base_url_configured": bool(settings["base_url"]),
                 "error_code": exc.code,
-                "status": exc.status,
+                "http_status": exc.status,
                 "latency_ms": latency_ms,
             },
         )

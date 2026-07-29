@@ -382,7 +382,7 @@ def _log_apply_rejected(
             options=options,
         ),
         "reason": exc.code,
-        "status": exc.status_code,
+        "http_status": exc.status_code,
         "draft_status": draft_status,
         "required_capabilities": _required_capability_values(required),
     })

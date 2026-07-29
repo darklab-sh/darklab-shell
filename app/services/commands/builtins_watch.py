@@ -297,7 +297,7 @@ def _run_watcher_now(watcher: Watcher) -> list[dict[str, object]]:
             "source": "builtin",
             "watcher_id": watcher.id,
             "schedule_id": watcher.schedule_id,
-            "status": status,
+            "fire_status": status,
             "fired_at": fired_at,
             "run_id": active.last_run_id,
             "last_error": active.last_error,

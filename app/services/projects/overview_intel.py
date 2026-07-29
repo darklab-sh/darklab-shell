@@ -182,7 +182,7 @@ def _log_skipped_provider_payload(
         "entity_id": entity_id,
         "snapshot_id": str(snapshot.get("id") or ""),
         "provider": provider,
-        "status": status,
+        "provider_status": status,
         "shape": type(payload).__name__,
     }
     if status == "ok":

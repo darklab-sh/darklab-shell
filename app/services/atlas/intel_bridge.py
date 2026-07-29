@@ -153,7 +153,7 @@ def _persist_lookup_snapshots(
                     "session": get_log_session_id(session_id),
                     "entity_id": entity_id,
                     "provider": provider,
-                    "status": status,
+                    "provider_status": status,
                 })
             else:
                 level = logging.WARNING if status in {"error", "rate_limited", "unreachable"} else logging.DEBUG
@@ -161,7 +161,7 @@ def _persist_lookup_snapshots(
                     "session": get_log_session_id(session_id),
                     "entity_id": entity_id,
                     "provider": provider,
-                    "status": status,
+                    "provider_status": status,
                     "provider_message": provider_lookup.message,
                 })
             snapshot_id = "intel_" + uuid.uuid4().hex

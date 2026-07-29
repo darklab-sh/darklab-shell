@@ -84,7 +84,7 @@ def api_teams_update(team_id: str):
                     session_token=session_id,
                     team_id=team_id,
                     actor=actor,
-                    status=team["status"],
+                    team_status=team["status"],
                     paused_watchers=paused["watchers"],
                     paused_schedules=paused["schedules"],
                 ),
@@ -94,7 +94,7 @@ def api_teams_update(team_id: str):
             session_token=session_id,
             team_id=team_id,
             actor=actor,
-            status=team["status"],
+            team_status=team["status"],
             paused_watchers=paused["watchers"],
             paused_schedules=paused["schedules"],
         )
