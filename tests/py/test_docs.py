@@ -63,6 +63,7 @@ _ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
 })
 
 _PUBLISHED_CHANGELOG_HASHES = {
+    "2.8.3": "7b013f8d97049eb4a99fb244c200d67a82e725484a8e9194a48fa2aae72ae1e7",
     "2.8.2": "9f614601724591b10b8eb0041ee2536196816ed9d002b98ed0427a77c1bf5fbf",
     "2.8.1": "f1d84e7ec2c77cefe754e153180a375b5955d4562f3b7c53786ba449f6424ee7",
     "2.8.0": "44c87ab5e1e7543251459fa8437da43f77778efba7c9c9edbcc1cbd1111e86f2",
@@ -714,6 +715,7 @@ class TestChangelogArchives:
     def test_archive_coverage_matches_major_release_ranges(self):
         expected = {
             "2.x.md": (
+                "2.8.1",
                 "2.8.0",
                 "2.7.0",
                 "2.6.0",
