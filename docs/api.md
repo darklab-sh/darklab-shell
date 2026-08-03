@@ -112,6 +112,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/atlas` | Active personal/team-scope Atlas summary counts with optional `project_id`, `run_id`, orphan, and suppression filters. |
 | `GET` | `/api/v1/atlas/runs` | Active-scope source runs that currently contribute Atlas entities or findings. |
 | `GET` | `/api/v1/atlas/entities` | Active-scope Atlas entity page with `entity_type`, `run_id`, `project_id`, `q`, orphan, and suppression filters. |
+| `POST` | `/api/v1/atlas/lookup` | Resolve one exact saved hostname, IP address, or HTTP(S) URL in the active personal/team and optional project scope. |
 | `GET` | `/api/v1/atlas/entities/<entity_id>` | One active-scope Atlas entity with source runs, findings, intel summary, labels, notes, and project links. |
 | `GET` | `/api/v1/atlas/findings` | Active-scope Atlas finding page with `review_state`, `run_id`, `project_id`, `q`, orphan, and suppression filters. |
 | `GET` | `/api/v1/atlas/findings/<finding_id>` | One active-scope Atlas finding with recent source occurrences. |
@@ -310,6 +311,15 @@ darklab atlas findings --review-state important --run-id run_123
 ```
 
 Entity and finding list routes use the same `limit`, `offset`, and filter names as the modal. API v1 responses include the page rows, `has_more`, `total`, and `total_exact`; API v1 asks the backend for exact totals by default, so `total_exact` is true for normal API v1 Atlas list calls. The browser Atlas overlay can skip that exact-count work on first-open pages unless it passes `include_total=1`; when exact totals are skipped, `total` is a lower bound and `total_exact` tells the caller whether the count is exact. `orphan_filter` and `suppression_filter` accept `hide`, `all`, or `only`. Entity detail includes source runs, related findings, project links, labels, notes, and intel summaries. Finding detail includes the normalized finding row plus recent source occurrences.
+
+Exact lookup accepts a JSON body with `mode` (`auto`, `hostname`, `ip`, or `url`), `value`, and an optional `project_id`. It returns `found`, `not_found`, or `ambiguous` without creating an entity or refreshing external Intel. A found result contains the same entity-detail payload as `GET /api/v1/atlas/entities/<entity_id>`. When the exact URL hasn't been saved but its hostname or IP has, `parent_host_candidate` identifies that record without presenting it as an exact URL match. Suppressed entities and entities whose source runs were removed remain available when they are visible in the requested scope.
+
+```bash
+curl -sS -X POST "$DARKLAB_API_URL/api/v1/atlas/lookup" \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"mode":"hostname","value":"example.com"}'
+```
 
 Atlas entity rows include `host_entity_id` for host-owned rows such as ports and URLs. Port rows point back to the scanned host entity; URL rows point to the scoped domain or IP entity derived from the canonical URL host. Rows can also include an `attributes` object for lightweight app-captured details such as protocol, service, version, or banner text. Ports are scan evidence, so they do not expose provider-refresh data the way provider-backed domains, IPs, URLs, hashes, and CVEs can.
 

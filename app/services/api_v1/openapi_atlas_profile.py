@@ -296,6 +296,111 @@ def atlas_profile_schemas() -> dict[str, Any]:
                 "detail_limits": {"type": "object", "additionalProperties": True},
             },
         },
+        "AtlasEntityLookupRequest": {
+            "type": "object",
+            "required": ["value"],
+            "additionalProperties": False,
+            "properties": {
+                "value": {"type": "string"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto", "hostname", "ip", "url"],
+                    "default": "auto",
+                },
+                "project_id": {"type": "string"},
+            },
+        },
+        "AtlasEntityLookupCandidate": {
+            "type": "object",
+            "required": [
+                "entity_id",
+                "type",
+                "canonical_value",
+                "provenance",
+                "first_seen_at",
+                "last_seen_at",
+                "occurrence_count",
+                "suppressed",
+            ],
+            "additionalProperties": False,
+            "properties": {
+                "entity_id": {"type": "string"},
+                "type": {"type": "string", "enum": ["domain", "ip", "url"]},
+                "canonical_value": {"type": "string"},
+                "provenance": {
+                    "type": "string",
+                    "enum": ["personal", "direct_team", "compatibility_visible"],
+                },
+                "first_seen_at": {"type": "string"},
+                "last_seen_at": {"type": "string"},
+                "occurrence_count": {"type": "integer"},
+                "suppressed": {"type": "boolean"},
+            },
+        },
+        "AtlasEntityLookupParentCandidate": {
+            "type": "object",
+            "required": [
+                "detected_type",
+                "canonical_value",
+                "match_state",
+                "entity",
+                "candidates",
+                "candidates_truncated",
+            ],
+            "additionalProperties": False,
+            "properties": {
+                "detected_type": {"type": "string", "enum": ["domain", "ip"]},
+                "canonical_value": {"type": "string"},
+                "match_state": {"type": "string", "enum": ["found", "ambiguous"]},
+                "entity": {
+                    "anyOf": [_ref("AtlasEntityLookupCandidate"), {"type": "null"}],
+                },
+                "candidates": {
+                    "type": "array",
+                    "items": _ref("AtlasEntityLookupCandidate"),
+                    "maxItems": 10,
+                },
+                "candidates_truncated": {"type": "boolean"},
+            },
+        },
+        "AtlasEntityLookupResponse": {
+            "type": "object",
+            "required": [
+                "requested_type",
+                "detected_type",
+                "canonical_value",
+                "project_id",
+                "match_state",
+                "detail",
+                "candidates",
+                "candidates_truncated",
+                "parent_host_candidate",
+            ],
+            "additionalProperties": False,
+            "properties": {
+                "requested_type": {
+                    "type": "string",
+                    "enum": ["auto", "hostname", "ip", "url"],
+                },
+                "detected_type": {"type": "string", "enum": ["domain", "ip", "url"]},
+                "canonical_value": {"type": "string"},
+                "project_id": {"type": "string"},
+                "match_state": {
+                    "type": "string",
+                    "enum": ["found", "not_found", "ambiguous"],
+                },
+                "detail": {"anyOf": [_ref("AtlasEntityDetail"), {"type": "null"}]},
+                "candidates": {
+                    "type": "array",
+                    "items": _ref("AtlasEntityLookupCandidate"),
+                    "maxItems": 10,
+                },
+                "candidates_truncated": {"type": "boolean"},
+                "parent_host_candidate": {
+                    "anyOf": [_ref("AtlasEntityLookupParentCandidate"), {"type": "null"}],
+                },
+            },
+        },
     }
 
 

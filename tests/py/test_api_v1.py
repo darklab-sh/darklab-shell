@@ -1581,6 +1581,87 @@ def test_api_v1_artifact_download_rejects_cross_run_artifact_id():
     assert json.loads(resp.data)["error"]["code"] == "not_found"
 
 
+def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
+    from services.atlas.materializer import upsert_entity
+
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    team_response = client.post(
+        "/session/teams",
+        headers={"X-Session-ID": token},
+        json={"name": "API Lookup " + uuid.uuid4().hex[:8], "display_name": "Lookup owner"},
+    )
+    team_id = json.loads(team_response.data)["team"]["id"]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        personal_id = upsert_entity(
+            conn,
+            token,
+            "domain",
+            "personal-lookup.example",
+            seen_at="2026-08-02T00:00:00+00:00",
+        )
+        team_entity_id = upsert_entity(
+            conn,
+            token,
+            "ip",
+            "2001:db8::42",
+            team_id=team_id,
+            seen_at="2026-08-02T00:00:01+00:00",
+        )
+        conn.commit()
+
+    personal_response = client.post(
+        "/api/v1/atlas/lookup",
+        headers=_headers(token),
+        json={"mode": "hostname", "value": "PERSONAL-LOOKUP.Example."},
+    )
+    cross_response = client.post(
+        "/api/v1/atlas/lookup",
+        headers=_headers(other_token),
+        json={"value": "personal-lookup.example"},
+    )
+    team_headers = {**_headers(token), "X-Team-ID": team_id}
+    team_response = client.post(
+        "/api/v1/atlas/lookup",
+        headers=team_headers,
+        json={"mode": "auto", "value": "2001:0db8::0042"},
+    )
+    team_from_personal_response = client.post(
+        "/api/v1/atlas/lookup",
+        headers=_headers(token),
+        json={"value": "2001:db8::42"},
+    )
+    invalid_response = client.post(
+        "/api/v1/atlas/lookup",
+        headers=_headers(token),
+        json={"mode": "port", "value": "personal-lookup.example:443"},
+    )
+    unauthenticated_response = client.post(
+        "/api/v1/atlas/lookup",
+        json={"value": "personal-lookup.example"},
+    )
+
+    assert personal_response.status_code == 200
+    personal = json.loads(personal_response.data)
+    assert personal["match_state"] == "found"
+    assert personal["detail"]["entity"]["id"] == personal_id
+    assert cross_response.status_code == 200
+    assert json.loads(cross_response.data)["match_state"] == "not_found"
+    assert team_response.status_code == 200
+    team_lookup = json.loads(team_response.data)
+    assert team_lookup["match_state"] == "found"
+    assert team_lookup["detail"]["entity"]["id"] == team_entity_id
+    assert team_lookup["detail"]["scope"]["owner_kind"] == "team"
+    assert team_from_personal_response.status_code == 200
+    assert json.loads(team_from_personal_response.data)["match_state"] == "not_found"
+    assert invalid_response.status_code == 400
+    assert json.loads(invalid_response.data)["error"]["code"] == "invalid_lookup_type"
+    assert unauthenticated_response.status_code == 401
+    assert json.loads(unauthenticated_response.data)["error"]["code"] == "missing_token"
+
+
 def test_api_v1_project_readers_are_token_scoped():
     client = get_client()
     token = _token(client)
@@ -3543,6 +3624,10 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "ApiError",
         "AtlasEntity",
         "AtlasEntityDetail",
+        "AtlasEntityLookupCandidate",
+        "AtlasEntityLookupParentCandidate",
+        "AtlasEntityLookupRequest",
+        "AtlasEntityLookupResponse",
         "AtlasEntityPage",
         "AtlasFinding",
         "AtlasFindingDetail",
@@ -3723,6 +3808,24 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         atlas_entity_params
     )
     assert "port" in atlas_entity_params["entity_type"]["schema"]["enum"]
+    assert spec["paths"]["/atlas/lookup"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AtlasEntityLookupRequest"
+    }
+    assert spec["paths"]["/atlas/lookup"]["post"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/AtlasEntityLookupResponse"}
+    assert schemas["AtlasEntityLookupRequest"]["required"] == ["value"]
+    assert schemas["AtlasEntityLookupResponse"]["properties"]["detail"] == {
+        "anyOf": [
+            {"$ref": "#/components/schemas/AtlasEntityDetail"},
+            {"type": "null"},
+        ]
+    }
+    assert schemas["AtlasEntityLookupResponse"]["properties"]["match_state"]["enum"] == [
+        "found",
+        "not_found",
+        "ambiguous",
+    ]
     atlas_finding_params = {param["name"] for param in spec["paths"]["/atlas/findings"]["get"]["parameters"]}
     assert {"q", "project_id", "run_id", "review_state", "orphan_filter", "suppression_filter", "limit", "offset"}.issubset(
         atlas_finding_params

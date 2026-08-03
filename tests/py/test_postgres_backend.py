@@ -278,8 +278,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     pre_comparison_migrations = tuple(
         migration for migration in MIGRATIONS if migration.version < "0044"
     )
-    comparison_migrations = tuple(
-        migration for migration in MIGRATIONS if migration.version == "0044"
+    head_migrations = tuple(
+        migration for migration in MIGRATIONS if migration.version >= "0044"
     )
     applied = run_migrations_with_advisory_lock(conn, pre_comparison_migrations)
     conn.execute(
@@ -308,7 +308,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             "2026-07-13T09:00:00Z",
         ),
     )
-    applied.extend(run_migrations_with_advisory_lock(conn, comparison_migrations))
+    applied.extend(run_migrations_with_advisory_lock(conn, head_migrations))
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
 
@@ -409,6 +409,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0042",
         "0043",
         "0044",
+        "0045",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -527,6 +528,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_findings_raw_line_trgm",
         "idx_findings_tool_root_trgm",
         "idx_entity_run_links_entity_seen",
+        "idx_entities_type_signature",
     }.issubset({row["indexname"] for row in atlas_index_rows})
     auto_promote_index_rows = conn.execute(
         """
@@ -570,6 +572,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
 def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.atlas.lookup_resolve import exact_lookup_candidate_query
     from services.atlas.scope import (
         entity_scope_params,
         entity_scope_sql,
@@ -611,6 +614,16 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
             + entity_scope_sql("e")
             + " AND e.type = ? ORDER BY e.last_seen_at DESC LIMIT ?",
             (*entity_scope_params("scope-session"), "domain", 10),
+        ).fetchall())
+        exact_lookup_sql, exact_lookup_params = exact_lookup_candidate_query(
+            "scope-session",
+            "domain",
+            "exact.example",
+            team_id="scope-team",
+        )
+        exact_lookup_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + exact_lookup_sql,
+            exact_lookup_params,
         ).fetchall())
 
         atlas_finding_plan = _postgres_plan_text(compat.execute(
@@ -719,6 +732,7 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
         "idx_entities_session_type_last_seen" in atlas_entity_plan
         or "idx_entities_session_last_seen_value" in atlas_entity_plan
     )
+    assert "idx_entities_type_signature" in exact_lookup_plan
     assert "idx_findings_session_run_seen" in atlas_finding_plan
     assert "idx_projects_personal_slug_unique" in project_slug_plan
     assert (

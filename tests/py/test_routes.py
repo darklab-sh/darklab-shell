@@ -15173,6 +15173,103 @@ class TestAtlasRoutes:
             conn.commit()
         return run_id, recorded
 
+    def test_exact_lookup_route_returns_scoped_profiles_and_explicit_result_states(self):
+        client = get_client()
+        session_id = self._session_id()
+        other_session_id = self._session_id()
+        self._register_session_token(session_id)
+        self._register_session_token(other_session_id)
+        _run_id, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        headers = {"X-Session-ID": session_id}
+        other_headers = {"X-Session-ID": other_session_id}
+        project = json.loads(client.post(
+            "/projects",
+            headers=headers,
+            json={"name": "Lookup Project " + uuid.uuid4().hex[:8]},
+        ).data)["project"]
+        empty_project = json.loads(client.post(
+            "/projects",
+            headers=headers,
+            json={"name": "Empty Lookup Project " + uuid.uuid4().hex[:8]},
+        ).data)["project"]
+        foreign_project = json.loads(client.post(
+            "/projects",
+            headers=other_headers,
+            json={"name": "Foreign Lookup Project " + uuid.uuid4().hex[:8]},
+        ).data)["project"]
+        link_response = client.post(
+            f"/atlas/entities/{domain_id}/project_links",
+            headers=headers,
+            json={"project_id": project["id"]},
+        )
+
+        found_response = client.post(
+            "/atlas/lookup",
+            headers=headers,
+            json={"mode": "hostname", "value": "DarkLab.SH."},
+        )
+        project_response = client.post(
+            "/atlas/lookup",
+            headers=headers,
+            json={"value": "darklab.sh", "project_id": project["id"]},
+        )
+        unlinked_response = client.post(
+            "/atlas/lookup",
+            headers=headers,
+            json={"value": "darklab.sh", "project_id": empty_project["id"]},
+        )
+        foreign_project_response = client.post(
+            "/atlas/lookup",
+            headers=headers,
+            json={"value": "darklab.sh", "project_id": foreign_project["id"]},
+        )
+        cross_session_response = client.post(
+            "/atlas/lookup",
+            headers=other_headers,
+            json={"value": "darklab.sh"},
+        )
+        parent_response = client.post(
+            "/atlas/lookup",
+            headers=headers,
+            json={"value": "https://darklab.sh/not-recorded?private=value#fragment"},
+        )
+        invalid_response = client.post(
+            "/atlas/lookup",
+            headers=headers,
+            json={"value": "darklab.sh/path"},
+        )
+        invalid_body_response = client.post(
+            "/atlas/lookup",
+            headers=headers,
+            json=["darklab.sh"],
+        )
+
+        assert link_response.status_code == 201
+        assert found_response.status_code == 200
+        found = json.loads(found_response.data)
+        assert found["requested_type"] == "hostname"
+        assert found["detected_type"] == "domain"
+        assert found["canonical_value"] == "darklab.sh"
+        assert found["match_state"] == "found"
+        assert found["detail"]["entity"]["id"] == domain_id
+        assert project_response.status_code == 200
+        assert json.loads(project_response.data)["detail"]["scope"]["project_id"] == project["id"]
+        assert unlinked_response.status_code == 200
+        assert json.loads(unlinked_response.data)["match_state"] == "not_found"
+        assert foreign_project_response.status_code == 400
+        assert json.loads(foreign_project_response.data)["error"] == "invalid_project"
+        assert cross_session_response.status_code == 200
+        assert json.loads(cross_session_response.data)["match_state"] == "not_found"
+        assert parent_response.status_code == 200
+        parent = json.loads(parent_response.data)
+        assert parent["match_state"] == "not_found"
+        assert parent["parent_host_candidate"]["entity"]["entity_id"] == domain_id
+        assert invalid_response.status_code == 400
+        assert json.loads(invalid_response.data)["error"] == "invalid_lookup_value"
+        assert invalid_body_response.status_code == 400
+        assert json.loads(invalid_body_response.data)["error"] == "invalid_body"
+
     def test_lists_session_entities_and_detail(self):
         from services.atlas.lookup import entity_detail
 

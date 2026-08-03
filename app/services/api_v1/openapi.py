@@ -1894,6 +1894,23 @@ OPENAPI_SPEC: dict = {
                 },
             },
         },
+        "/atlas/lookup": {
+            "post": {
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": _ref("AtlasEntityLookupRequest"),
+                        },
+                    },
+                },
+                "responses": {
+                    "200": _json_response("Exact Atlas entity lookup", _ref("AtlasEntityLookupResponse")),
+                    "400": _error_response("Invalid lookup value, type, or project scope"),
+                    **_common_errors(),
+                },
+            },
+        },
         "/atlas/entities/{entity_id}": {
             "get": {
                 "parameters": [

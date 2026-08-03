@@ -55,6 +55,7 @@ from . import (
     v0042_run_artifact_lookup_indexes,
     v0043_workflow_executions,
     v0044_finding_occurrence_comparison,
+    v0045_atlas_entity_exact_lookup_index,
 )
 
 _ = baseline
@@ -104,4 +105,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0042_run_artifact_lookup_indexes.MIGRATION,
     v0043_workflow_executions.MIGRATION,
     v0044_finding_occurrence_comparison.MIGRATION,
+    v0045_atlas_entity_exact_lookup_index.MIGRATION,
 )

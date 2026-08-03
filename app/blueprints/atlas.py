@@ -667,6 +667,7 @@ from blueprints.atlas_read import (  # noqa: E402,F401
     atlas_runs_list,
 )
 from blueprints.atlas_profile_read import atlas_entity_detail  # noqa: E402,F401
+from blueprints.atlas_lookup_read import atlas_entity_lookup  # noqa: E402,F401
 from blueprints.atlas_mutations import (  # noqa: E402,F401
     atlas_entities_bulk_delete,
     atlas_entities_bulk_suppression_update,
