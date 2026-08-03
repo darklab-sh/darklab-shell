@@ -1,0 +1,78 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "test:smoke",
+      "type": "shell",
+      "command": "bash \"${workspaceFolder}/scripts/container_smoke_test.sh\"",
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test:pytest",
+      "type": "shell",
+      "command": "npm run test:pytest",
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test:vitest",
+      "type": "shell",
+      "command": "npm run test:unit && ./scripts/run_postgres_tests.sh",
+      "options": {
+        "env": {
+          "VIRTUAL_ENV": "${workspaceFolder}/.venv",
+          "PATH": "${workspaceFolder}/.venv/bin:${env:PATH}"
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test:playwright",
+      "type": "shell",
+      "command": "npm run test:e2e:source && npm run test:e2e",
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test:lint-audit",
+      "type": "shell",
+      "command": "npm run lint && npm run audit",
+      "options": {
+        "env": {
+          "VIRTUAL_ENV": "${workspaceFolder}/.venv",
+          "PATH": "${workspaceFolder}/.venv/bin:${env:PATH}"
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test:all",
+      "dependsOn": [
+        "test:pytest",
+        "test:vitest",
+        "test:playwright",
+        "test:lint-audit"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    }
+  ]
+}
