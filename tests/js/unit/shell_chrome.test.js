@@ -54,7 +54,9 @@ const SHELL_CHROME_SRC = readScriptSource('app/static/js/shell_chrome.js').repla
   '\n})(globalThis);',
   `
   global.__darklabShellChromeExports = {
+    closeProjectWorkspace,
     openProjectWorkspace,
+    openProjectWorkspaceById,
     openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace,
   };
@@ -516,6 +518,8 @@ function loadShellChrome({
       var openFindingsBoard = exportedOpenFindingsBoard;
       ${SHELL_CHROME_SRC}
       global.openProjectWorkspace = global.__darklabShellChromeExports.openProjectWorkspace;
+      global.openProjectWorkspaceById = global.__darklabShellChromeExports.openProjectWorkspaceById;
+      global.closeProjectWorkspace = global.__darklabShellChromeExports.closeProjectWorkspace;
       global.openProjectAutoPromoteRuleFromAtlas = global.__darklabShellChromeExports.openProjectAutoPromoteRuleFromAtlas;
       global.refreshProjectWorkspace = global.__darklabShellChromeExports.refreshProjectWorkspace;
       global.openFindingsBoard = exportedOpenFindingsBoard;
@@ -613,7 +617,9 @@ function loadShellChrome({
     projectFindingsData: global.DarklabProjectFindingsData,
     openFindingsBoard: global.openFindingsBoard,
     openAtlas,
+    closeProjectWorkspace: global.closeProjectWorkspace,
     openProjectWorkspace: global.openProjectWorkspace,
+    openProjectWorkspaceById: global.openProjectWorkspaceById,
     openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
     enhanceAppSelects,
@@ -1117,6 +1123,19 @@ describe('shell chrome project workspace', () => {
     expect(rowText('project-1')).not.toContain('active')
     expect(rowText('project-2')).toContain('active')
     expect(orderedProjectIds()).toEqual(['project-2', 'project-4', 'project-1', 'project-3'])
+
+    const returnToAtlas = {
+      source: 'project-return',
+      tab: 'ip',
+      entityValue: '192.0.2.10',
+      forceView: 'profile',
+      profileView: 'findings',
+      findingBucket: 'related_ports',
+    }
+    await shell.openProjectWorkspaceById('project-1', { returnToAtlas })
+    shell.closeProjectWorkspace()
+    await tick()
+    expect(shell.openAtlas).toHaveBeenCalledWith(returnToAtlas)
   })
 
   it('pages and filters the project Details targets browser', async () => {

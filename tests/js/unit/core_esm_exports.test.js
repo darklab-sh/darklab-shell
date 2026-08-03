@@ -885,7 +885,7 @@ describe('core ESM exports', () => {
         tab: 'domain',
         entityType: 'domain',
         entityValue: 'ip.darklab.sh',
-        forceView: 'detail',
+        forceView: 'profile',
         refreshIntel: false,
         addActiveProject: false,
       })

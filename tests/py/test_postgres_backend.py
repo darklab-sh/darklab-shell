@@ -2732,7 +2732,11 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 
 
 @pytest.mark.postgres
-def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema, tmp_path):
+def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
+    monkeypatch,
+    postgres_schema,
+    tmp_path,
+):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.atlas import lookup as atlas_lookup
@@ -2743,6 +2747,8 @@ def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     entity_id = "ent-" + uuid.uuid4().hex
+    child_entity_id = "ent-" + uuid.uuid4().hex
+    finding_id = "fnd-" + uuid.uuid4().hex
     timestamp = "2026-05-17T00:00:00Z"
     conn.execute(
         """
@@ -2752,6 +2758,198 @@ def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema
         """,
         (entity_id, session_id, "sig-" + uuid.uuid4().hex, timestamp, timestamp, timestamp),
     )
+    conn.execute(
+        """
+        INSERT INTO entities
+        (id, session_id, type, canonical_value, signature_hash, host_entity_id,
+         first_seen_at, last_seen_at, occurrence_count, created)
+        VALUES (%s, %s, 'url', 'https://darklab.sh/login', %s, %s, %s, %s, 1, %s)
+        """,
+        (
+            child_entity_id,
+            session_id,
+            "sig-" + uuid.uuid4().hex,
+            entity_id,
+            timestamp,
+            timestamp,
+            timestamp,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO findings
+        (id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
+         first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
+        VALUES (%s, %s, %s, 'https://darklab.sh/login', %s, 'critical', 'finding', 'nuclei',
+                %s, %s, 1, 'new', 'Critical login finding', 'critical login finding', %s)
+        """,
+        (finding_id, session_id, child_entity_id, "sig-" + uuid.uuid4().hex, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO entities
+        (id, session_id, type, canonical_value, signature_hash, host_entity_id,
+         first_seen_at, last_seen_at, occurrence_count, created)
+        SELECT
+            'ent-profile-url-' || seq.n,
+            %s,
+            'url',
+            CASE WHEN seq.n = 1
+                THEN 'https://darklab.sh/' || repeat('deep-path-segment/', 80) || 'report'
+                ELSE 'https://darklab.sh/archive/' || seq.n
+            END,
+            'sig-profile-url-' || seq.n,
+            %s,
+            %s,
+            %s,
+            1,
+            %s
+        FROM generate_series(1, 250) AS seq(n)
+        """,
+        (session_id, entity_id, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO entities
+        (id, session_id, type, canonical_value, signature_hash, host_entity_id,
+         first_seen_at, last_seen_at, occurrence_count, created)
+        SELECT
+            'ent-profile-port-' || seq.n,
+            %s,
+            'port',
+            'darklab.sh:' || (8000 + seq.n) || '/tcp',
+            'sig-profile-port-' || seq.n,
+            %s,
+            %s,
+            %s,
+            1,
+            %s
+        FROM generate_series(1, 251) AS seq(n)
+        """,
+        (session_id, entity_id, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO entities
+        (id, session_id, type, canonical_value, signature_hash, host_entity_id,
+         first_seen_at, last_seen_at, occurrence_count, created)
+        SELECT
+            'ent-profile-unrelated-' || seq.n,
+            %s,
+            'url',
+            'https://unrelated-' || seq.n || '.invalid/',
+            'sig-profile-unrelated-' || seq.n,
+            'ent-unrelated-host-' || seq.n,
+            %s,
+            %s,
+            1,
+            %s
+        FROM generate_series(1, 20000) AS seq(n)
+        """,
+        (session_id, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO findings
+        (id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
+         first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
+        SELECT
+            'fnd-profile-url-' || seq.n,
+            %s,
+            'ent-profile-url-' || seq.n,
+            'https://darklab.sh/archive/' || seq.n,
+            'sig-fnd-profile-url-' || seq.n,
+            'high',
+            'finding',
+            'nuclei',
+            %s,
+            %s,
+            1,
+            'new',
+            'Related URL finding ' || seq.n,
+            'related URL evidence',
+            %s
+        FROM generate_series(1, 250) AS seq(n)
+        """,
+        (session_id, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO findings
+        (id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
+         first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
+        SELECT
+            'fnd-profile-port-' || seq.n,
+            %s,
+            'ent-profile-port-' || seq.n,
+            'darklab.sh:' || (8000 + seq.n) || '/tcp',
+            'sig-fnd-profile-port-' || seq.n,
+            'medium',
+            'finding',
+            'nmap',
+            %s,
+            %s,
+            1,
+            'new',
+            'Related port finding ' || seq.n,
+            'related port evidence',
+            %s
+        FROM generate_series(1, 251) AS seq(n)
+        """,
+        (session_id, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO findings
+        (id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
+         first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
+        SELECT
+            'fnd-profile-unrelated-' || seq.n,
+            %s,
+            'ent-profile-unrelated-' || seq.n,
+            'unrelated-' || seq.n,
+            'sig-fnd-profile-unrelated-' || seq.n,
+            'low',
+            'finding',
+            'nuclei',
+            %s,
+            %s,
+            1,
+            'new',
+            'Unrelated finding ' || seq.n,
+            'unrelated evidence',
+            %s
+        FROM generate_series(1, 20000) AS seq(n)
+        """,
+        (session_id, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO runs (id, session_id, run_kind, command, started, finished, output)
+        VALUES (%s, %s, 'external', 'nmap darklab.sh', %s, %s, '[]')
+        """,
+        ("run-profile-observation", session_id, timestamp, timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count)
+        SELECT id, %s, %s, %s, 1
+        FROM entities
+        WHERE session_id = %s AND type = 'port' AND host_entity_id = %s
+        """,
+        ("run-profile-observation", timestamp, timestamp, session_id, entity_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO scan_target_observations
+        (session_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind,
+         command_root, observed_at, port_entity_count, created)
+        VALUES (%s, '', %s, %s, 'domain', 'darklab.sh', 'port_scan', 'nmap', %s, 251, %s)
+        """,
+        (session_id, "run-profile-observation", entity_id, timestamp, timestamp),
+    )
+    conn.execute("ANALYZE entities")
+    conn.execute("ANALYZE findings")
     conn.commit()
 
     @contextmanager
@@ -2800,9 +2998,157 @@ def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema
     assert row["data_json"]["__darklab_body_store__"] == 1
 
     detail = atlas_lookup.entity_detail(PostgresSqliteCompatConnection(conn), session_id, entity_id)
+    last_relationship_page = atlas_lookup.entity_detail(
+        PostgresSqliteCompatConnection(conn),
+        session_id,
+        entity_id,
+        related_urls_offset=250,
+        related_ports_offset=250,
+    )
+    related_url_finding_page = atlas_lookup.entity_detail(
+        PostgresSqliteCompatConnection(conn),
+        session_id,
+        entity_id,
+        finding_bucket="related_urls",
+        findings_offset=250,
+    )
+    related_port_finding_page = atlas_lookup.entity_detail(
+        PostgresSqliteCompatConnection(conn),
+        session_id,
+        entity_id,
+        finding_bucket="related_ports",
+        findings_offset=250,
+    )
+    combined_finding_page = atlas_lookup.entity_detail(
+        PostgresSqliteCompatConnection(conn),
+        session_id,
+        entity_id,
+        finding_bucket="combined",
+    )
     assert detail is not None
+    assert last_relationship_page is not None
+    assert related_url_finding_page is not None
+    assert related_port_finding_page is not None
+    assert combined_finding_page is not None
     assert detail["intel_snapshots"][0]["data"]["summary"]["providers_with_data"] == ["crtsh"]
     assert detail["intel_snapshots"][0]["data"]["observations"] == ["x" * 128]
+    assert len(detail["related_urls"]) == 25
+    assert len(detail["related_ports"]) == 25
+    assert all(item["host_entity_id"] == entity_id for item in detail["related_urls"])
+    assert all(item["host_entity_id"] == entity_id for item in detail["related_ports"])
+    assert detail["detail_limits"]["related_urls"]["total"] == 251
+    assert detail["detail_limits"]["related_ports"]["total"] == 251
+    assert [item["id"] for item in last_relationship_page["related_urls"]] == [child_entity_id]
+    assert last_relationship_page["detail_limits"]["related_urls"]["has_more"] is False
+    assert last_relationship_page["detail_limits"]["related_ports"]["shown"] == 1
+    assert last_relationship_page["detail_limits"]["related_ports"]["has_more"] is False
+    assert len(detail["relationship_summary"]["related_urls"]["sample"]) == 5
+    assert len(detail["relationship_summary"]["related_ports"]["sample"]) == 5
+    assert detail["finding_summary"]["direct"]["total"] == 0
+    assert detail["finding_summary"]["related_urls"]["total"] == 251
+    assert detail["finding_summary"]["related_urls"]["by_severity"]["critical"] == 1
+    assert detail["finding_summary"]["related_urls"]["by_severity"]["high"] == 250
+    assert detail["finding_summary"]["related_ports"]["total"] == 251
+    assert detail["finding_summary"]["combined"]["total"] == 502
+    assert related_url_finding_page["detail_limits"]["findings"] == {
+        "bucket": "related_urls",
+        "limit": 50,
+        "offset": 250,
+        "shown": 1,
+        "total": 251,
+        "has_more": False,
+    }
+    assert len(related_url_finding_page["findings"]) == 1
+    assert related_port_finding_page["detail_limits"]["findings"] == {
+        "bucket": "related_ports",
+        "limit": 50,
+        "offset": 250,
+        "shown": 1,
+        "total": 251,
+        "has_more": False,
+    }
+    assert len(related_port_finding_page["findings"]) == 1
+    assert combined_finding_page["detail_limits"]["findings"] == {
+        "bucket": "combined",
+        "limit": 50,
+        "offset": 0,
+        "shown": 50,
+        "total": 502,
+        "has_more": True,
+    }
+    assert len(combined_finding_page["findings"]) == 50
+    assert detail["overview"]["observed"]["app_evidence"]["coverage_state"] == "app_ports_found"
+    assert detail["overview"]["observed"]["app_evidence"]["app_port_count"] == 251
+    assert detail["overview"]["observed"]["project_monitoring"]["applicable"] is False
+    assert detail["overview"]["observed"]["project_monitoring"]["state"] == "not_applicable"
+    assert detail["overview"]["observed"]["app_port_count"] == 251
+    assert len(detail["overview"]["observed"]["app_ports"]) == 24
+    assert detail["overview"]["observed"]["app_ports_truncated"] is True
+    assert all(
+        port["source_run_count"] == 1
+        for port in detail["overview"]["observed"]["app_ports"]
+    )
+    assert detail["overview"]["finding_summary"] == detail["finding_summary"]
+    assert detail["overview"]["intel"]["status"] == "available"
+    assert detail["overview"]["intel"]["freshness"] == "unknown"
+    assert detail["overview"]["intel"]["snapshot_count"] == 1
+    assert detail["overview"]["intel"]["provider_count"] == 1
+    assert detail["overview"]["intel"]["providers_with_data"] == ["crtsh"]
+    assert detail["overview"]["intel"]["last_refresh_at"]
+    assert detail["overview"]["intel"]["provider_ports"] == []
+    assert detail["overview"]["intel"]["provider_services"] == []
+    assert detail["overview"]["intel"]["certificate"]["status"] == "unknown"
+    assert detail["overview"]["intel"]["port_provenance"]["divergence"] == {
+        "app_only": list(range(8001, 8025)),
+        "provider_only": [],
+        "has_drift": True,
+    }
+
+    related_entities_plan = conn.execute(
+        """
+        EXPLAIN (ANALYZE, FORMAT JSON)
+        SELECT child_e.id
+        FROM entities child_e
+        WHERE child_e.session_id = %s
+          AND child_e.team_id = ''
+          AND child_e.type = 'url'
+          AND child_e.host_entity_id = %s
+          AND child_e.host_entity_id != ''
+          AND COALESCE(child_e.suppressed, FALSE) = FALSE
+        ORDER BY child_e.last_seen_at DESC, child_e.occurrence_count DESC,
+                 child_e.canonical_value ASC
+        LIMIT 25
+        """,
+        (session_id, entity_id),
+    ).fetchone()
+    related_findings_plan = conn.execute(
+        """
+        EXPLAIN (ANALYZE, FORMAT JSON)
+        SELECT f.id
+        FROM findings f
+        WHERE f.session_id = %s
+          AND f.team_id = ''
+          AND f.entity_id IN (
+              SELECT bucket_e.id
+              FROM entities bucket_e
+              WHERE bucket_e.host_entity_id = %s
+                AND bucket_e.host_entity_id != ''
+                AND bucket_e.type = 'url'
+                AND bucket_e.session_id = %s
+                AND bucket_e.team_id = ''
+          )
+        """,
+        (session_id, entity_id, session_id),
+    ).fetchone()
+    related_entities_plan_text = json.dumps(dict(related_entities_plan))
+    related_findings_plan_text = json.dumps(dict(related_findings_plan))
+    assert "idx_entities_host_entity" in related_entities_plan_text
+    assert "idx_entities_host_entity" in related_findings_plan_text
+    assert (
+        "idx_findings_session_entity_seen" in related_findings_plan_text
+        or '"Node Type": "Hash Join"' in related_findings_plan_text
+    )
+    assert '"Actual Rows": 251' in related_findings_plan_text
 
 
 @pytest.mark.postgres

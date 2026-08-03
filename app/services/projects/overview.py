@@ -9,16 +9,24 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
+from services.atlas.finding_rollups import (
+    FINDING_SEVERITY_RANK,
+    finding_counts_from_rollup,
+    finding_rollup_from_records,
+    finding_state_counts as finding_state_counts,
+    highest_actionable_finding_severity,
+    severity_rank,
+)
 from services.atlas.lookup import _row_to_intel_snapshot, summarize_intel_snapshots
 from services.atlas.scope import metadata_owner_id
-from services.projects.contracts import FINDING_REVIEW_STATES, FINDING_VERIFICATION_STATES
+from services.projects.contracts import FINDING_REVIEW_STATES
 from services.projects.metadata import _metadata_owner_where
 from services.projects.models import row_to_project, row_to_target
 from services.projects.monitoring import get_project_monitoring_summary
@@ -30,7 +38,6 @@ from services.projects.overview_intel import (
     CERT_STATUS_ORDER,
     CERT_STATUS_UNKNOWN,
     _overview_intel_extract,
-    _overview_snapshots_are_stale,
     classify_certificate_status as classify_certificate_status,
 )
 
@@ -59,22 +66,6 @@ RECENT_CHANGE_WINDOWED = "windowed"
 RECENT_CHANGE_WATCHER_CONTEXT_ONLY = "watcher-context-only"
 RECENT_CHANGE_NOT_MONITORED = "not-monitored"
 
-FINDING_SEVERITY_RANK = {
-    "critical": 0,
-    "high": 1,
-    "medium": 2,
-    "low": 3,
-    "info": 4,
-}
-
-FINDING_REVIEW_STATE_ORDER = ("new", "reviewed", "important", "needs_followup", "false_positive")
-FINDING_VERIFICATION_STATE_ORDER = (
-    "not_started",
-    "ready_to_verify",
-    "verified",
-    "needs_retest",
-    "not_applicable",
-)
 _TARGET_ENTITY_TYPES = {"domain", "ip", "url"}
 _PORT_LIST_LIMIT = 24
 _APP_PORT_LIST_LIMIT = _PORT_LIST_LIMIT
@@ -164,58 +155,6 @@ def overview_identity_for_target_payload(payload: Mapping[str, Any]) -> dict[str
         "canonical_value": canonical_value,
         "display_label": f"{entity_type}:{canonical_value}",
     }
-
-
-def severity_rank(severity: str) -> int:
-    return FINDING_SEVERITY_RANK.get(str(severity or "").strip().lower(), 99)
-
-
-def highest_actionable_finding_severity(findings: Iterable[Mapping[str, Any]]) -> str:
-    best = ""
-    best_rank = 99
-    for finding in findings:
-        if bool(finding.get("suppressed")):
-            continue
-        review_state = str(
-            finding.get("review_state")
-            or finding.get("status")
-            or ""
-        ).strip().lower()
-        if review_state == "false_positive":
-            continue
-        severity = str(finding.get("severity") or "").strip().lower()
-        rank = severity_rank(severity)
-        if severity and rank < best_rank:
-            best = severity
-            best_rank = rank
-    return best
-
-
-def finding_state_counts(findings: Iterable[Mapping[str, Any]], *, include_verification: bool = True) -> dict[str, Any]:
-    counts: dict[str, Any] = {
-        "by_review_state": {state: 0 for state in FINDING_REVIEW_STATE_ORDER},
-        "suppressed": 0,
-    }
-    if include_verification:
-        counts["by_verification_state"] = {state: 0 for state in FINDING_VERIFICATION_STATE_ORDER}
-    for finding in findings:
-        if bool(finding.get("suppressed")):
-            counts["suppressed"] += 1
-        review_state = str(
-            finding.get("review_state")
-            or finding.get("status")
-            or ""
-        ).strip().lower()
-        if review_state in FINDING_REVIEW_STATES:
-            counts["by_review_state"][review_state] += 1
-        verification_state = str(
-            finding.get("verification_status")
-            or finding.get("verification_state")
-            or ""
-        ).strip().lower()
-        if include_verification and verification_state in FINDING_VERIFICATION_STATES:
-            counts["by_verification_state"][verification_state] += 1
-    return counts
 
 
 def classify_recent_change_state(monitoring_payload: Mapping[str, Any] | None) -> str:
@@ -424,7 +363,7 @@ def _overview_findings_by_entity(
         "COALESCE(NULLIF(f.status, ''), COALESCE(NULLIF(f.review_state, ''), 'new')) AS review_state, "
         "COALESCE(f.suppressed, FALSE) AS suppressed, "
         "COALESCE(ftd.verification_status, 'not_started') AS verification_status, "
-        "f.title, f.last_seen_at, f.created "
+        "f.title, f.occurrence_count, f.last_seen_at, f.created "
         "FROM findings f "
         "LEFT JOIN finding_triage_details ftd ON ftd.finding_id = f.id AND " + triage_owner_sql + " "  # nosec
         "WHERE (COALESCE(f.entity_id, f.target_id) IN (" + placeholders + ") "  # nosec
@@ -447,6 +386,7 @@ def _overview_findings_by_entity(
             "suppressed": bool(row["suppressed"]),
             "verification_status": str(row["verification_status"] or "not_started"),
             "title": str(row["title"] or ""),
+            "occurrence_count": int(row["occurrence_count"] or 0),
             "last_seen_at": str(row["last_seen_at"] or ""),
             "created": str(row["created"] or ""),
         })
@@ -791,8 +731,9 @@ def _overview_target_rows(
         intel_summary = summarize_intel_snapshots(entity_type, snapshots)
         intel_extract = _overview_intel_extract(snapshots, entity_id=entity_id, log_context=log_context)
         has_intel = str(intel_summary.get("status") or "") == "available"
-        has_stale_intel = has_intel and _overview_snapshots_are_stale(snapshots)
+        has_stale_intel = str(intel_summary.get("freshness") or "") == "stale"
         findings = findings_by_entity.get(entity_id, [])
+        finding_summary = finding_rollup_from_records(findings)
         app_host_entity_id = url_host_entity_ids.get(entity_id, "") if entity_type == "url" else entity_id
         raw_app_ports = app_ports_by_host.get(app_host_entity_id, []) if app_host_entity_id else []
         app_port_total_count = 0
@@ -800,8 +741,9 @@ def _overview_target_rows(
             first_app_port = raw_app_ports[0]
             if isinstance(first_app_port, Mapping):
                 app_port_total_count = int(first_app_port.get("_host_total_count") or len(raw_app_ports))
-        project_entity_port_count = sum(
-            1 for port in raw_app_ports if isinstance(port, Mapping) and bool(port.get("_project_linked"))
+        project_entity_port_count = (
+            int(raw_app_ports[0].get("_host_project_linked_count") or 0)
+            if raw_app_ports and isinstance(raw_app_ports[0], Mapping) else 0
         )
         app_port_run_count = _overview_app_port_run_count(raw_app_ports)
         app_ports = [_overview_public_app_port_record(port) for port in raw_app_ports if isinstance(port, Mapping)]
@@ -861,7 +803,8 @@ def _overview_target_rows(
             "services": intel_extract["services"],
             "certificate": intel_extract["certificate"],
             "top_finding_severity": top_severity,
-            "finding_counts": finding_state_counts(findings),
+            "finding_counts": finding_counts_from_rollup(finding_summary),
+            "finding_summary": finding_summary,
             "intel_summary": {
                 **intel_summary,
                 "highlights": list(intel_summary.get("highlights") or [])[:OVERVIEW_TARGET_HIGHLIGHT_LIMIT],

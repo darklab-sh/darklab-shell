@@ -15,6 +15,7 @@ const projectContextHandlers = PROJECT_CONTEXT_GLOBAL.__darklabProjectContextHan
   openEntityMetadataEditor: null,
   openProjectAutoPromoteRuleFromAtlas: null,
   openProjectWorkspace: null,
+  openProjectWorkspaceById: null,
   refreshActiveProjectContext: null,
   refreshProjectWorkspace: null,
 };
@@ -44,6 +45,12 @@ function refreshActiveProjectContext(...args) {
 function openProjectWorkspace(...args) {
   return typeof projectContextHandlers.openProjectWorkspace === 'function'
     ? projectContextHandlers.openProjectWorkspace(...args)
+    : Promise.resolve(false);
+}
+
+function openProjectWorkspaceById(...args) {
+  return typeof projectContextHandlers.openProjectWorkspaceById === 'function'
+    ? projectContextHandlers.openProjectWorkspaceById(...args)
     : Promise.resolve(false);
 }
 
@@ -98,6 +105,7 @@ export {
   openEntityMetadataEditor,
   openProjectAutoPromoteRuleFromAtlas,
   openProjectWorkspace,
+  openProjectWorkspaceById,
   refreshActiveProjectContext,
   refreshProjectWorkspace,
   setProjectContextHandlers,

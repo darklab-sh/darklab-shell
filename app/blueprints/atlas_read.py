@@ -12,7 +12,6 @@ from services.atlas.lookup import (
     atlas_entities_export,
     atlas_entities_export_csv,
     atlas_entities_export_jsonl,
-    entity_detail,
     list_entities,
     list_findings,
     list_source_runs,
@@ -139,25 +138,3 @@ def atlas_findings_list():
             )))
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400
-
-
-@atlas_routes.atlas_bp.route("/atlas/entities/<entity_id>")
-def atlas_entity_detail(entity_id):
-    session_id = atlas_routes.get_session_id()
-    owner_scope, scope_response = atlas_routes._atlas_request_scope_response(session_id)
-    if scope_response:
-        return scope_response
-    assert owner_scope is not None
-    runs_offset = atlas_routes._parse_int(request.args.get("runs_offset"), 0, minimum=0, maximum=100000)
-    findings_offset = atlas_routes._parse_int(request.args.get("findings_offset"), 0, minimum=0, maximum=100000)
-    detail = atlas_routes.run_atlas_read(lambda conn: entity_detail(
-            conn,
-            session_id,
-            entity_id,
-            team_id=owner_scope.team_id,
-            runs_offset=runs_offset,
-            findings_offset=findings_offset,
-        ))
-    if detail is None:
-        return jsonify({"error": "entity not found"}), 404
-    return jsonify(detail)

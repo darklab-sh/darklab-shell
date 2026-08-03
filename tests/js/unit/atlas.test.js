@@ -66,6 +66,41 @@ const FINDING = {
   last_seen_at: '2026-05-15T00:01:00Z',
 }
 
+const RELATED_URL_FINDING = {
+  ...FINDING,
+  id: 'fnd_url_1',
+  title: 'Login page exposes a critical issue',
+  raw_line: 'critical issue on /login',
+  severity: 'critical',
+  entity_id: URL_ENTITY.id,
+  entity_type: URL_ENTITY.type,
+  entity_value: URL_ENTITY.canonical_value,
+}
+
+function findingRollup(overrides = {}) {
+  return {
+    applicable: true,
+    total: 0,
+    all_total: 0,
+    suppressed: 0,
+    occurrence_count: 0,
+    latest_activity_at: '',
+    by_severity: { critical: 0, high: 0, medium: 0, low: 0, info: 0, unknown: 0 },
+    by_review_state: { new: 0, needs_followup: 0, important: 0, reviewed: 0, false_positive: 0 },
+    by_verification_state: {
+      not_started: 0,
+      ready_to_verify: 0,
+      verified: 0,
+      needs_retest: 0,
+      not_applicable: 0,
+    },
+    by_suppression: { visible: 0, suppressed: 0 },
+    sample: [],
+    navigation_hint: {},
+    ...overrides,
+  }
+}
+
 function jsonResponse(data) {
   return {
     ok: true,
@@ -222,6 +257,7 @@ function loadAtlas({
   apiFetchInterceptor = null,
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
   openProjectAutoPromoteRuleFromAtlasImpl = vi.fn(() => Promise.resolve(true)),
+  openProjectWorkspaceByIdImpl = vi.fn(() => Promise.resolve(true)),
   closeMajorOverlaysImpl = vi.fn(),
   useRealSelectEnhancer = false,
   activeTeamScopeCanImpl = () => true,
@@ -384,9 +420,24 @@ function loadAtlas({
         },
       }))
     }
-    if (target === '/atlas/entities/ent_ip') {
+    if (target === '/atlas/entities/ent_ip' || target.startsWith('/atlas/entities/ent_ip?')) {
+      const params = new URL(target, 'https://example.test').searchParams
+      const relatedUrlsOffset = Number(params.get('related_urls_offset') || 0)
+      const relatedPortsOffset = Number(params.get('related_ports_offset') || 0)
+      const projectId = String(params.get('project_id') || '')
+      const findingBucket = String(params.get('finding_bucket') || 'direct')
+      const bucketFindings = {
+        direct: [FINDING],
+        related_urls: [RELATED_URL_FINDING],
+        related_ports: [],
+        combined: [FINDING, RELATED_URL_FINDING],
+      }[findingBucket] || [FINDING]
       return Promise.resolve(jsonResponse({
-        entity: ENTITY,
+        entity: {
+          ...ENTITY,
+          project_link_count: 1,
+          project_links: [{ project_id: 'prj_linked', project_name: 'Linked Case' }],
+        },
         import_sources: [{
           batch_id: 'impb_1',
           source_tool: 'Nuclei JSONL',
@@ -415,6 +466,9 @@ function loadAtlas({
         }],
         intel_summary: {
           status: 'available',
+          freshness: 'stale',
+          snapshot_count: 1,
+          provider_count: 1,
           providers_with_data: ['shodan'],
           highlight_count: 3,
           highlights: [
@@ -440,7 +494,121 @@ function loadAtlas({
               tone: 'neutral',
             },
           ],
+          last_refresh_at: '2026-05-15T00:02:00Z',
           updated_at: '2026-05-15T00:02:00Z',
+        },
+        overview: {
+          observed: {
+            state: 'observed',
+            source_run_count: 55,
+            occurrence_count: 2,
+            first_seen_at: '2026-05-15T00:00:00Z',
+            last_seen_at: '2026-05-15T00:02:00Z',
+            app_ports: [{
+              port: 443,
+              proto: 'tcp',
+              service: 'https',
+              version: 'nginx',
+              banner_available: true,
+              banner: 'nginx TLS listener',
+              occurrence_count: 4,
+              last_seen_at: '2026-05-15T00:02:00Z',
+              source_run_count: 2,
+            }],
+            app_port_count: 1,
+            app_ports_truncated: false,
+            app_services: ['https (nginx)'],
+            app_evidence: {
+              applicable: true,
+              coverage_state: 'app_ports_found',
+              scan_run_count: 3,
+              last_observed_at: '2026-05-15T00:02:00Z',
+              port_entity_count: 2,
+              app_port_count: 2,
+              app_port_run_count: 2,
+              project_entity_port_count: 1,
+              command_roots: ['nmap', 'naabu'],
+              host_entity_id: '',
+              scope_note: '',
+              coverage_caveat: '',
+            },
+            project_monitoring: projectId ? {
+              applicable: true,
+              project_id: projectId,
+              project_name: 'Linked Case',
+              state: 'changed',
+              watcher_count: 1,
+              counts: { active: 0, changed: 1, failed: 0, quiet: 0, paused: 0 },
+              latest_change_at: '2026-05-15T00:02:00Z',
+              recent_changes: [{
+                fire_id: 'fire_1',
+                watcher_id: 'watcher_1',
+                watcher_label: 'Watch edge ports',
+                fire_kind: 'changed',
+                created: '2026-05-15T00:02:00Z',
+                severity: 'high',
+                classifier: 'ports',
+                label: 'New open port 80/tcp',
+              }],
+              links: { project_monitoring: `/projects/${projectId}/monitoring` },
+            } : {
+              applicable: false,
+              project_id: '',
+              project_name: '',
+              state: 'not_applicable',
+              watcher_count: 0,
+              counts: { active: 0, changed: 0, failed: 0, quiet: 0, paused: 0 },
+              latest_change_at: '',
+              recent_changes: [],
+              links: {},
+            },
+          },
+          intel: {
+            status: 'available',
+            freshness: 'stale',
+            snapshot_count: 1,
+            provider_count: 1,
+            providers_with_data: ['shodan'],
+            last_refresh_at: '2026-05-15T00:02:00Z',
+            highlight_count: 3,
+            highlights: [
+              {
+                label: 'Open ports',
+                value: '80, 443',
+                provider: 'shodan',
+                provider_label: 'Shodan',
+                tone: 'neutral',
+              },
+              {
+                label: 'CVEs',
+                value: 'CVE-2026-0001',
+                provider: 'shodan',
+                provider_label: 'Shodan',
+                tone: 'warning',
+              },
+              {
+                label: 'ASN',
+                value: 'AS15169 Google LLC',
+                provider: 'censys',
+                provider_label: 'Censys',
+                tone: 'neutral',
+              },
+            ],
+            provider_ports: [80, 443],
+            provider_services: ['http', 'https'],
+            certificate: {
+              status: 'healthy',
+              expires_at: '2026-12-01T00:00:00Z',
+              days_until_expiry: 200,
+              last_checked_at: '2026-05-15T00:02:00Z',
+            },
+            port_provenance: {
+              app: [{ port: 443, proto: 'tcp' }],
+              provider: [80, 443],
+              divergence: { app_only: [], provider_only: [80], has_drift: true },
+            },
+            summary: {},
+          },
         },
         runs: [{
           run_id: 'run1',
@@ -449,20 +617,102 @@ function loadAtlas({
           last_seen_at: '2026-05-15T00:01:00Z',
         }],
         related_urls: [URL_ENTITY],
-        findings: [],
+        related_ports: [{ ...PORT_ENTITY, host_entity_id: ENTITY.id }],
+        findings: bucketFindings,
+        finding_summary: {
+          direct: findingRollup({
+            total: 1,
+            all_total: 1,
+            occurrence_count: 1,
+            by_severity: { critical: 0, high: 0, medium: 1, low: 0, info: 0, unknown: 0 },
+            by_review_state: { new: 1, needs_followup: 0, important: 0, reviewed: 0, false_positive: 0 },
+            by_verification_state: {
+              not_started: 1,
+              ready_to_verify: 0,
+              verified: 0,
+              needs_retest: 0,
+              not_applicable: 0,
+            },
+            by_suppression: { visible: 1, suppressed: 0 },
+            sample: [FINDING],
+          }),
+          related_urls: findingRollup({
+            total: 1,
+            all_total: 1,
+            occurrence_count: 1,
+            by_severity: { critical: 1, high: 0, medium: 0, low: 0, info: 0, unknown: 0 },
+            by_suppression: { visible: 1, suppressed: 0 },
+          }),
+          related_ports: findingRollup(),
+          combined: findingRollup({
+            total: 2,
+            all_total: 2,
+            occurrence_count: 2,
+            by_severity: { critical: 1, high: 0, medium: 1, low: 0, info: 0, unknown: 0 },
+            by_suppression: { visible: 2, suppressed: 0 },
+          }),
+        },
         detail_limits: {
-          related_urls: { limit: 25, offset: 0, shown: 1, total: 1, has_more: false },
+          related_urls: {
+            limit: 25,
+            offset: relatedUrlsOffset,
+            shown: 1,
+            total: 26,
+            has_more: relatedUrlsOffset === 0,
+          },
+          related_ports: {
+            limit: 25,
+            offset: relatedPortsOffset,
+            shown: 1,
+            total: 26,
+            has_more: relatedPortsOffset === 0,
+          },
           runs: { limit: 50, offset: 0, shown: 1, total: 55, has_more: true },
-          findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+          findings: {
+            bucket: findingBucket,
+            limit: 50,
+            offset: 0,
+            shown: bucketFindings.length,
+            total: bucketFindings.length,
+            has_more: false,
+          },
         },
       }))
     }
-    if (target === '/atlas/entities/ent_url') {
+    if (target === '/atlas/entities/ent_url' || target.startsWith('/atlas/entities/ent_url?')) {
       return Promise.resolve(jsonResponse({
         entity: URL_ENTITY,
+        parent_host: ENTITY,
         import_sources: [],
         intel_snapshots: [],
         intel_summary: { status: 'unsupported', providers_with_data: [], highlights: [] },
+        overview: {
+          observed: {
+            app_ports: [{
+              port: 443,
+              proto: 'tcp',
+              service: 'https',
+              version: 'nginx',
+              banner_available: false,
+              occurrence_count: 4,
+              last_seen_at: '2026-05-15T00:02:00Z',
+              source_run_count: 2,
+            }],
+            app_port_count: 1,
+            app_ports_truncated: false,
+            app_services: ['https (nginx)'],
+            app_evidence: {
+              applicable: true,
+              coverage_state: 'app_ports_found',
+              scan_run_count: 3,
+              last_observed_at: '2026-05-15T00:02:00Z',
+              app_port_count: 1,
+              command_roots: ['nmap'],
+              host_entity_id: ENTITY.id,
+              scope_note: 'App scan coverage and ports are tracked on the parent host, not this URL.',
+            },
+          },
+        },
         runs: [{
           run_id: 'run-url',
           command: 'curl https://107.178.109.44/login',
@@ -470,17 +720,31 @@ function loadAtlas({
           last_seen_at: '2026-05-15T00:03:00Z',
         }],
         related_urls: [],
+        related_ports: [],
         findings: [],
+        finding_summary: {
+          direct: findingRollup(),
+          related_urls: findingRollup({ applicable: false }),
+          related_ports: findingRollup({ applicable: false }),
+          combined: findingRollup({ applicable: false }),
+        },
         detail_limits: {
           related_urls: { limit: 25, offset: 0, shown: 0, total: 0, has_more: false },
+          related_ports: { limit: 25, offset: 0, shown: 0, total: 0, has_more: false },
           runs: { limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
           findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
         },
       }))
     }
-    if (target === '/atlas/entities/ent_port') {
+    if (target === '/atlas/entities/ent_port' || target.startsWith('/atlas/entities/ent_port?')) {
       return Promise.resolve(jsonResponse({
         entity: PORT_ENTITY,
+        parent_host: {
+          ...ENTITY,
+          id: 'ent_domain',
+          type: 'domain',
+          canonical_value: 'example.com',
+        },
         import_sources: [],
         intel_snapshots: [],
         intel_summary: { status: 'unsupported', providers_with_data: [], highlights: [] },
@@ -490,10 +754,27 @@ function loadAtlas({
           occurrence_count: 1,
           last_seen_at: '2026-05-15T00:01:00Z',
         }],
-        findings: [],
+        findings: [{
+          ...FINDING,
+          entity_id: PORT_ENTITY.id,
+          entity_type: PORT_ENTITY.type,
+          entity_value: PORT_ENTITY.canonical_value,
+        }],
+        finding_summary: {
+          direct: findingRollup({
+            total: 1,
+            all_total: 1,
+            occurrence_count: 1,
+            by_severity: { critical: 0, high: 0, medium: 1, low: 0, info: 0, unknown: 0 },
+            sample: [FINDING],
+          }),
+          related_urls: findingRollup({ applicable: false }),
+          related_ports: findingRollup({ applicable: false }),
+          combined: findingRollup({ applicable: false }),
+        },
         detail_limits: {
           runs: { limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
-          findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+          findings: { limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
         },
       }))
     }
@@ -546,6 +827,7 @@ function loadAtlas({
         },
         refocusComposerAfterAction: vi.fn(),
         openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
+        openProjectWorkspaceById: openProjectWorkspaceByIdImpl,
         closeMajorOverlays: closeMajorOverlaysImpl,
         downloadBlobAsAttachment,
         activeTeamScopeCan: activeTeamScopeCanImpl,
@@ -577,6 +859,7 @@ function loadAtlas({
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
         window.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
+        window.openProjectWorkspaceById = openProjectWorkspaceById;
         window.downloadBlobAsAttachment = downloadBlobAsAttachment;
         window.activeTeamScopeCan = activeTeamScopeCan;
         window.teamScopeDeniedMessage = teamScopeDeniedMessage;
@@ -597,6 +880,7 @@ function loadAtlas({
     showToast,
     logClientError,
     openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
+    openProjectWorkspaceById: openProjectWorkspaceByIdImpl,
     closeMajorOverlays: closeMajorOverlaysImpl,
     syncAppSelect,
     enhanceAppSelects,
@@ -797,7 +1081,13 @@ describe('Atlas overlay', () => {
   })
 
   it('opens as a first-class surface and renders entity detail', async () => {
-    const { openAtlas, isAtlasOverlayOpen, apiFetch, showToast } = loadAtlas()
+    const {
+      openAtlas,
+      isAtlasOverlayOpen,
+      apiFetch,
+      showToast,
+      openProjectWorkspaceById,
+    } = loadAtlas()
 
     await openAtlas({ source: 'test', tab: 'ip' })
 
@@ -815,12 +1105,88 @@ describe('Atlas overlay', () => {
     expect(rowSuppression?.classList.contains('btn-icon-only')).toBe(true)
     expect(rowSuppression?.getAttribute('aria-label')).toBe('Suppress entity')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Shodan')
-    expect(document.getElementById('atlas-detail')?.textContent).toContain('Intel summary')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('External intelligence')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Open ports')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('80, 443')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Freshness: Stale')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('1 provider')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Provider only: 80')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Created by Nuclei JSONL import')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Related URLs')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('https://107.178.109.44/login')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Related ports')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('example.com:443/tcp')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Scan coverage')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('App-captured ports found')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('nmap, naabu')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('App-captured ports')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('443/tcp · https (nginx)')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('nginx TLS listener')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Findings and work')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('On this entity')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('On related URLs')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('1 critical/high')
+    const groupTitles = [...document.querySelectorAll('#atlas-detail .atlas-detail-group-title')]
+      .map(element => element.textContent)
+    expect(groupTitles).toEqual([
+      'Observed by darklab_shell',
+      'Findings and work',
+      'Relationships',
+      'Evidence',
+      'Metadata',
+      'External intelligence',
+    ])
+    const observedSectionTitles = [...document.querySelectorAll(
+      '#atlas-detail .atlas-detail-group:first-of-type .atlas-detail-section-title',
+    )].map(element => element.textContent)
+    expect(observedSectionTitles).toEqual([
+      'Summary',
+      'Scan coverage',
+    ])
+    const evidenceGroup = [...document.querySelectorAll('#atlas-detail .atlas-detail-group')]
+      .find(group => group.querySelector('.atlas-detail-group-title')?.textContent === 'Evidence')
+    expect(evidenceGroup).toBeTruthy()
+    const evidenceSectionTitles = [...(evidenceGroup?.querySelectorAll('.atlas-detail-section-title') || [])]
+      .map(element => element.textContent)
+    expect(evidenceSectionTitles).toEqual([
+      'App-captured ports',
+      'Source runs',
+      'Import sources',
+    ])
+    const findingRow = document.querySelector('#atlas-detail button.atlas-finding-row.selection-row')
+    expect(findingRow?.classList.contains('btn')).toBe(false)
+    expect(findingRow?.classList.contains('panel-row-clickable')).toBe(true)
+    expect(document.querySelector('[data-atlas-finding-bucket="direct"]')?.textContent).toContain('1 new')
+    const relatedPortRow = document.querySelector('#atlas-detail button.atlas-related-port-row')
+    expect(relatedPortRow?.classList.contains('panel-row-clickable')).toBe(true)
+    expect(relatedPortRow?.querySelector('button')).toBeNull()
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('View all 26 related ports')
+    expect(document.querySelector('#atlas-detail .atlas-source-run-open')?.textContent)
+      .toContain('shodan host 107.178.109.44')
+    expect(document.querySelector('#atlas-detail .atlas-source-list .atlas-detail-action-menu')).toBeNull()
+    const detail = document.getElementById('atlas-detail')
+    detail.scrollTop = 137
+    findingRow?.click()
+    expect(detail.textContent).toContain('443/tcp open https')
+    expect(detail.querySelector('.atlas-detail-back')?.textContent).toContain('Back to entity')
+    expect(detail.scrollTop).toBe(0)
+    detail.querySelector('.atlas-detail-back')?.click()
+    expect(detail.querySelectorAll('.atlas-detail-group-title')).toHaveLength(6)
+    expect(detail.scrollTop).toBe(137)
+    const openProject = [...detail.querySelectorAll('.atlas-project-link-actions button')]
+      .find(button => button.textContent === 'Open Project')
+    openProject?.click()
+    await flushPromises()
+    expect(openProjectWorkspaceById).toHaveBeenCalledWith('prj_linked', {
+      returnToAtlas: expect.objectContaining({
+        source: 'project-return',
+        tab: 'ip',
+        entityValue: ENTITY.canonical_value,
+        forceView: 'detail',
+        profileView: 'overview',
+        findingBucket: 'direct',
+      }),
+    })
     expect(document.querySelectorAll('.atlas-intel-highlight-provider')).toHaveLength(2)
     expect(document.querySelector('.atlas-intel-highlight-provider')?.textContent).toContain('CVE-2026-0001')
     const intelToggle = document.querySelector('.atlas-intel-card-toggle')
@@ -835,10 +1201,121 @@ describe('Atlas overlay', () => {
     expect(document.querySelector('.atlas-intel-card-body')?.textContent).toContain('ports')
     expect(document.querySelector('.atlas-intel-card-body')?.textContent).toContain('nginx')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('shodan host 107.178.109.44')
-    expect(document.getElementById('atlas-detail')?.textContent).toContain('1-1 of 55 source runs')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('View all 55 source runs')
     expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('entity')
     expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.textContent).toBe('Actions')
     expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.textContent).toContain('Suppress entity')
+    const list = document.getElementById('atlas-list')
+    list.scrollTop = 93
+    detail.scrollTop = 63
+    document.querySelector('#atlas-detail .atlas-view-profile')?.click()
+    expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('profile')
+    expect(document.querySelector('#atlas-detail .atlas-profile-back')?.textContent).toContain('Back to results')
+    expect(document.querySelector('#atlas-detail .atlas-profile-tabs')?.getAttribute('role')).toBe('tablist')
+    expect(document.querySelector('#atlas-detail [data-atlas-profile-view="overview"]')?.getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelectorAll('#atlas-detail .atlas-detail-group-title')[0]?.textContent).toBe('Overview')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Relationships')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Source runs')
+
+    const entityListLoadsBeforeBucket = apiFetch.mock.calls
+      .filter(([url]) => String(url).startsWith('/atlas/entities?type='))
+      .length
+    document.querySelector('#atlas-detail [data-atlas-finding-bucket="related_urls"]')?.click()
+    await flushPromises()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/entities/ent_ip?finding_bucket=related_urls',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(document.querySelector('#atlas-detail [data-atlas-profile-view="findings"]')?.getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Findings on related URLs')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Login page exposes a critical issue')
+    expect(apiFetch.mock.calls.filter(([url]) => String(url).startsWith('/atlas/entities?type=')))
+      .toHaveLength(entityListLoadsBeforeBucket)
+
+    document.querySelector('#atlas-detail [data-atlas-finding-bucket="direct"]')?.click()
+    await flushPromises()
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Direct findings')
+    const profileFindingRow = document.querySelector('#atlas-detail button.atlas-finding-row.selection-row')
+    profileFindingRow?.click()
+    const listLoadsBeforeReview = apiFetch.mock.calls
+      .filter(([url]) => String(url).startsWith('/atlas/entities?type='))
+      .length
+    const directDetailLoadsBeforeReview = apiFetch.mock.calls
+      .filter(([url]) => String(url) === '/atlas/entities/ent_ip')
+      .length
+    const profileReview = document.querySelector('#atlas-detail .atlas-finding-review')
+    profileReview.value = 'reviewed'
+    profileReview.dispatchEvent(new Event('change', { bubbles: true }))
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Finding updated', 'success'))
+    expect(apiFetch.mock.calls.filter(([url]) => String(url).startsWith('/atlas/entities?type=')))
+      .toHaveLength(listLoadsBeforeReview)
+    expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/entities/ent_ip'))
+      .toHaveLength(directDetailLoadsBeforeReview + 1)
+    document.querySelector('#atlas-detail .atlas-detail-back')?.click()
+    expect(document.querySelector('#atlas-detail [data-atlas-profile-view="findings"]')?.getAttribute('aria-selected')).toBe('true')
+
+    document.querySelector('#atlas-detail [data-atlas-profile-view="intel"]')?.click()
+    const evidenceAction = [...document.querySelectorAll('#atlas-detail .atlas-intel-profile-actions button')]
+      .find(button => button.textContent === 'View app evidence')
+    evidenceAction?.click()
+    expect(document.querySelector('#atlas-detail [data-atlas-profile-view="evidence"]')?.getAttribute('aria-selected')).toBe('true')
+    document.querySelector('#atlas-detail [data-atlas-profile-view="intel"]')?.click()
+    const providerAction = [...document.querySelectorAll('#atlas-detail .atlas-intel-profile-actions button')]
+      .find(button => button.textContent === 'View provider data')
+    providerAction?.click()
+    expect(document.querySelector('#atlas-detail [data-atlas-profile-view="intel"]')?.getAttribute('aria-selected')).toBe('true')
+
+    document.querySelector('#atlas-detail [data-atlas-profile-view="overview"]')?.click()
+    const parentDetailLoadsBeforeRoundTrip = apiFetch.mock.calls
+      .filter(([url]) => String(url) === '/atlas/entities/ent_ip')
+      .length
+    document.querySelector('#atlas-detail .atlas-related-url-open')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(document.querySelector('#atlas-detail .atlas-profile-back')?.textContent)
+      .toContain('Back to previous entity')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain(URL_ENTITY.canonical_value)
+    document.querySelector('#atlas-detail .atlas-profile-back')?.click()
+    expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('profile')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain(ENTITY.canonical_value)
+    expect(document.querySelector('#atlas-detail [data-atlas-profile-view="overview"]')?.getAttribute('aria-selected')).toBe('true')
+    expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/entities/ent_ip'))
+      .toHaveLength(parentDetailLoadsBeforeRoundTrip)
+    detail.scrollTop = 211
+    document.querySelector('.atlas-related-url-list .atlas-detail-pager button:last-child')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(detail.scrollTop).toBe(211)
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/entities/ent_ip?related_urls_offset=25',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(document.querySelector('.atlas-related-url-list .atlas-detail-pager')?.textContent)
+      .toContain('26-26 of 26 related URLs')
+
+    document.querySelector('#atlas-detail [data-atlas-profile-view="evidence"]')?.click()
+    expect(document.querySelector('#atlas-detail [data-atlas-profile-view="evidence"]')?.getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Scan coverage')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Source runs')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('1-1 of 55 source runs')
+    expect(document.querySelector('#atlas-detail .atlas-source-list .atlas-detail-action-menu-list')?.textContent)
+      .toContain('Clean from Atlas')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Relationships')
+    document.querySelector('#atlas-detail [data-atlas-profile-view="findings"]')?.click()
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Direct findings')
+    document.querySelector('#atlas-detail [data-atlas-profile-view="intel"]')?.click()
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Cached provider data')
+    const detailLoadsBeforeResultsBack = apiFetch.mock.calls
+      .filter(([url]) => String(url) === '/atlas/entities/ent_ip')
+      .length
+    document.querySelector('#atlas-detail .atlas-profile-back')?.click()
+    await Promise.resolve()
+    expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('entity')
+    expect(list.scrollTop).toBe(93)
+    expect(detail.scrollTop).toBe(63)
+    expect(document.querySelector('[data-entity-id="ent_ip"]')?.getAttribute('aria-current')).toBe('true')
+    expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/entities/ent_ip'))
+      .toHaveLength(detailLoadsBeforeResultsBack)
     document.querySelector('#atlas-detail .atlas-detail-actions button')?.click()
     const refreshOverlay = document.querySelector('.atlas-intel-refresh-overlay')
     expect(refreshOverlay?.classList.contains('u-hidden')).toBe(false)
@@ -863,6 +1340,44 @@ describe('Atlas overlay', () => {
     )
     expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_url', expect.objectContaining({ cache: 'no-store' }))
     expect(document.getElementById('atlas-detail')?.textContent).toContain('curl https://107.178.109.44/login')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Parent host')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('107.178.109.44')
+    expect(document.getElementById('atlas-detail')?.textContent)
+      .toContain('App-captured ports (parent host)')
+    expect([...document.querySelectorAll('#atlas-detail .atlas-detail-group-title')]
+      .map(element => element.textContent)).toEqual([
+      'Observed by darklab_shell',
+      'Findings and work',
+      'Relationships',
+      'Evidence',
+      'Metadata',
+      'External intelligence',
+    ])
+    const urlRelationshipGroup = [...document.querySelectorAll('#atlas-detail .atlas-detail-group')]
+      .find(group => group.querySelector('.atlas-detail-group-title')?.textContent === 'Relationships')
+    expect([...(urlRelationshipGroup?.querySelectorAll('.atlas-detail-section-title') || [])]
+      .map(element => element.textContent)).toEqual(['Parent host', 'Projects'])
+    const urlEvidenceGroup = [...document.querySelectorAll('#atlas-detail .atlas-detail-group')]
+      .find(group => group.querySelector('.atlas-detail-group-title')?.textContent === 'Evidence')
+    expect([...(urlEvidenceGroup?.querySelectorAll('.atlas-detail-section-title') || [])]
+      .map(element => element.textContent)).toEqual([
+      'App-captured ports (parent host)',
+      'Source runs',
+      'Import sources',
+    ])
+    expect(document.querySelectorAll('#atlas-detail .atlas-finding-summary-card')).toHaveLength(1)
+    expect(document.querySelector('#atlas-detail .atlas-finding-summary-card')?.textContent)
+      .toContain('On this entity')
+    await openAtlas({ source: 'test', tab: 'ip', projectId: 'prj_linked', projectName: 'Linked Case' })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-detail')?.textContent).toContain('Project monitoring')
+    })
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Watch edge ports')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('New open port 80/tcp')
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/entities/ent_ip?project_id=prj_linked',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
   })
 
   it('does not close its own fallback shell while finishing a first open', async () => {
@@ -1549,13 +2064,13 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-next-btn')?.disabled).toBe(false)
   })
 
-  it('clears entity pagination when switching from a large tab to a single-page tab', async () => {
+  it('clears entity pagination and keeps hash and CVE details type-appropriate', async () => {
     const apiFetch = vi.fn((url) => {
       const target = String(url)
       if (target === '/atlas' || target.startsWith('/atlas?')) {
         return Promise.resolve(jsonResponse({
-          total: 466,
-          counts: { ip: 0, domain: 30, hash: 436, cve: 0, url: 0 },
+          total: 467,
+          counts: { ip: 0, domain: 30, hash: 436, cve: 1, url: 0 },
           findings: 0,
         }))
       }
@@ -1575,16 +2090,50 @@ describe('Atlas overlay', () => {
           offset: 0,
         }))
       }
-      if (target === '/atlas/entities/ent_hash' || target === '/atlas/entities/ent_domain') {
+      if (target.startsWith('/atlas/entities?type=cve')) {
+        return Promise.resolve(jsonResponse({
+          entities: [{ ...ENTITY, id: 'ent_cve', type: 'cve', canonical_value: 'CVE-2026-0001' }],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        }))
+      }
+      if (target === '/atlas/entities/ent_hash' || target === '/atlas/entities/ent_cve') {
         const entity = target.endsWith('ent_hash')
           ? { ...ENTITY, id: 'ent_hash', type: 'hash', canonical_value: 'a'.repeat(64) }
-          : { ...ENTITY, id: 'ent_domain', type: 'domain', canonical_value: 'darklab.sh' }
+          : { ...ENTITY, id: 'ent_cve', type: 'cve', canonical_value: 'CVE-2026-0001' }
         return Promise.resolve(jsonResponse({
           entity,
+          import_sources: [],
           intel_snapshots: [],
           intel_summary: { status: 'none', providers_with_data: [], highlights: [] },
+          overview: {
+            observed: {
+              app_ports: [],
+              app_port_count: 0,
+              app_ports_truncated: false,
+              app_services: [],
+              app_evidence: {
+                applicable: false,
+                coverage_state: 'not_applicable',
+                scan_run_count: 0,
+                app_port_count: 0,
+                command_roots: [],
+              },
+            },
+          },
           runs: [],
           findings: [],
+          finding_summary: {
+            direct: findingRollup(),
+            related_urls: findingRollup({ applicable: false }),
+            related_ports: findingRollup({ applicable: false }),
+            combined: findingRollup({ applicable: false }),
+          },
+          detail_limits: {
+            runs: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+            findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+          },
         }))
       }
       return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({ error: 'not found' }) })
@@ -1593,15 +2142,34 @@ describe('Atlas overlay', () => {
 
     await openAtlas({ source: 'test', tab: 'hash' })
     expect(document.getElementById('atlas-pagination-summary')?.textContent).toBe('1-50 of 436')
+    expect([...document.querySelectorAll('#atlas-detail .atlas-detail-group-title')]
+      .map(element => element.textContent)).toEqual([
+      'Observed by darklab_shell',
+      'Findings and work',
+      'Relationships',
+      'Evidence',
+      'Metadata',
+      'External intelligence',
+    ])
+    expect(document.querySelectorAll('#atlas-detail .atlas-finding-summary-card')).toHaveLength(1)
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Scan coverage')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Parent host')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Related URLs')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Related ports')
 
-    document.querySelector('[data-atlas-tab="domain"]')?.click()
+    document.querySelector('[data-atlas-tab="cve"]')?.click()
 
     await vi.waitFor(() => {
-      expect(document.getElementById('atlas-list')?.textContent).toContain('darklab.sh')
+      expect(document.getElementById('atlas-list')?.textContent).toContain('CVE-2026-0001')
     })
     expect(document.getElementById('atlas-pagination')?.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('atlas-pagination-summary')?.textContent).toBe('')
     expect(document.getElementById('atlas-next-btn')?.disabled).toBe(true)
+    expect(document.querySelectorAll('#atlas-detail .atlas-finding-summary-card')).toHaveLength(1)
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Scan coverage')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Parent host')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Related URLs')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('Related ports')
   })
 
   it('ignores stale entity list responses after switching tabs', async () => {
@@ -1629,6 +2197,21 @@ describe('Atlas overlay', () => {
           entity: { ...ENTITY, id: 'ent_domain', type: 'domain', canonical_value: 'darklab.sh' },
           intel_snapshots: [],
           intel_summary: { status: 'none', providers_with_data: [], highlights: [] },
+          overview: {
+            observed: {
+              app_ports: [],
+              app_port_count: 0,
+              app_ports_truncated: false,
+              app_services: [],
+              app_evidence: {
+                applicable: true,
+                coverage_state: 'not_scanned',
+                scan_run_count: 0,
+                app_port_count: 0,
+                command_roots: [],
+              },
+            },
+          },
           runs: [],
           findings: [],
         }))
@@ -1651,6 +2234,12 @@ describe('Atlas overlay', () => {
     expect(hashListCall?.[1]?.signal?.aborted).toBe(true)
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-list')?.textContent).toContain('darklab.sh')
+    })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-detail')?.textContent)
+        .toContain('Run a port scan for this host to add app-captured port and service evidence.')
+      expect(document.getElementById('atlas-detail')?.textContent)
+        .toContain('No cached provider data. Use Refresh intel to check configured providers.')
     })
 
     hashList.resolve(jsonResponse({
@@ -1905,6 +2494,31 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Prototcp')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Servicehttps')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Versionnginx')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Parent host')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('example.com')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('On this entity')
+    expect(document.getElementById('atlas-detail')?.textContent).not.toContain('On related URLs')
+    expect([...document.querySelectorAll('#atlas-detail .atlas-detail-group-title')]
+      .map(element => element.textContent)).toEqual([
+      'Observed by darklab_shell',
+      'Findings and work',
+      'Relationships',
+      'Evidence',
+      'Metadata',
+      'External intelligence',
+    ])
+    const portRelationshipGroup = [...document.querySelectorAll('#atlas-detail .atlas-detail-group')]
+      .find(group => group.querySelector('.atlas-detail-group-title')?.textContent === 'Relationships')
+    expect([...(portRelationshipGroup?.querySelectorAll('.atlas-detail-section-title') || [])]
+      .map(element => element.textContent)).toEqual(['Parent host', 'Projects'])
+    const portEvidenceGroup = [...document.querySelectorAll('#atlas-detail .atlas-detail-group')]
+      .find(group => group.querySelector('.atlas-detail-group-title')?.textContent === 'Evidence')
+    expect([...(portEvidenceGroup?.querySelectorAll('.atlas-detail-section-title') || [])]
+      .map(element => element.textContent)).toEqual(['Source runs', 'Import sources'])
+    expect(document.querySelectorAll('#atlas-detail .atlas-finding-summary-card')).toHaveLength(1)
+    expect(document.getElementById('atlas-detail')?.textContent)
+      .toContain('No cached provider data for port entities. Open the parent host to review provider data.')
+    expect(document.querySelector('#atlas-detail .atlas-open-intel-parent')?.textContent).toBe('Open parent host')
     expect(document.querySelector('#atlas-detail .atlas-detail-actions')?.textContent).not.toContain('Refresh intel')
     document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.click()
     expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.position).toBe('')
@@ -1930,7 +2544,37 @@ describe('Atlas overlay', () => {
     })
     expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('Servicehttps')
     expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('Versionnginx')
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('Parent host')
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('example.com')
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('On this entity')
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent).not.toContain('On related URLs')
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent)
+      .toContain('No cached provider data for port entities. Open the parent host to review provider data.')
+    expect(document.querySelector('#atlas-mobile-entity-body .atlas-open-intel-parent')?.textContent)
+      .toBe('Open parent host')
     expect(document.getElementById('atlas-mobile-entity-footer')?.textContent).not.toContain('Refresh intel')
+    const mobileEntityBody = document.getElementById('atlas-mobile-entity-body')
+    mobileEntityBody.scrollTop = 88
+    mobileEntityBody.querySelector('button.atlas-finding-row')?.click()
+    expect(document.getElementById('atlas-mobile-entity-topbar')?.textContent).toContain('443/tcp open https')
+    expect(mobileEntityBody.textContent).toContain('Evidence')
+    expect(document.getElementById('atlas-mobile-entity-footer')?.textContent).toContain('Triage')
+    expect(mobileEntityBody.scrollTop).toBe(0)
+    document.querySelector('#atlas-mobile-entity-topbar .atlas-mobile-back-btn')?.click()
+    expect(mobileEntityBody.textContent).toContain('example.com:443/tcp')
+    expect(mobileEntityBody.scrollTop).toBe(88)
+    expect(document.getElementById('atlas-mobile-entity-footer')?.textContent).toContain('View profile')
+    document.querySelector('#atlas-mobile-entity-footer .atlas-mobile-view-profile')?.click()
+    expect(mobileEntityBody.scrollTop).toBe(0)
+    expect(mobileEntityBody.querySelector('.atlas-profile-tabs')?.getAttribute('role')).toBe('tablist')
+    mobileEntityBody.querySelector('[data-atlas-profile-view="evidence"]')?.click()
+    expect(mobileEntityBody.textContent).toContain('Source runs')
+    expect(document.getElementById('atlas-mobile-entity-footer')?.textContent).not.toContain('View profile')
+    expect(document.querySelector('#atlas-mobile-entity-topbar .atlas-mobile-back-btn')?.getAttribute('aria-label'))
+      .toBe('Back to Atlas results')
+    document.querySelector('#atlas-mobile-entity-topbar .atlas-mobile-back-btn')?.click()
+    expect(document.getElementById('atlas-mobile-list-view')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('atlas-mobile-entity-view')?.classList.contains('u-hidden')).toBe(true)
     document.body.classList.remove('mobile-terminal-mode')
 
     const search = document.getElementById('atlas-search')

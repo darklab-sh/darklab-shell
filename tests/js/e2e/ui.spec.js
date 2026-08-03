@@ -342,7 +342,11 @@ import uuid
 data_dir, session_id = sys.argv[1:3]
 run_id = "run_auto_promote_e2e_" + uuid.uuid4().hex[:16]
 entity_id = "ent_auto_promote_e2e_" + uuid.uuid4().hex[:16]
+child_entity_id = "ent_auto_promote_url_e2e_" + uuid.uuid4().hex[:16]
+direct_finding_id = "fnd_auto_promote_direct_e2e_" + uuid.uuid4().hex[:16]
+child_finding_id = "fnd_auto_promote_url_e2e_" + uuid.uuid4().hex[:16]
 entity_value = "portal.autopromote-e2e.example.com"
+child_entity_value = "https://portal.autopromote-e2e.example.com/admin"
 now = "2026-05-31 00:00:00"
 
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
@@ -364,10 +368,49 @@ try:
         "VALUES (?, ?, ?, ?, 1)",
         (entity_id, run_id, now, now),
     )
+    conn.execute(
+        "INSERT INTO entities "
+        "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+        "first_seen_at, last_seen_at, created) "
+        "VALUES (?, ?, 'url', ?, ?, ?, ?, ?, ?)",
+        (child_entity_id, session_id, child_entity_value, "sig-" + child_entity_id, entity_id, now, now, now),
+    )
+    conn.execute(
+        "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, ?, ?, ?, 1)",
+        (child_entity_id, run_id, now, now),
+    )
+    for finding_id, finding_entity_id, subject, severity, title, line_number in (
+        (direct_finding_id, entity_id, entity_value, "medium", "Direct host finding", 1),
+        (child_finding_id, child_entity_id, child_entity_value, "critical", "Related URL finding", 2),
+    ):
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+            "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'finding', 'nuclei', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+            (
+                finding_id, session_id, run_id, finding_entity_id, subject, "sig-" + finding_id, severity,
+                run_id, run_id, now, now, title, title.lower(), now,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (finding_id, run_id, line_number, title.lower(), now),
+        )
     conn.commit()
 finally:
     conn.close()
-print(json.dumps({"entityId": entity_id, "entityValue": entity_value, "runId": run_id}))
+print(json.dumps({
+    "entityId": entity_id,
+    "entityValue": entity_value,
+    "childEntityId": child_entity_id,
+    "childEntityValue": child_entity_value,
+    "directFindingId": direct_finding_id,
+    "childFindingId": child_finding_id,
+    "runId": run_id,
+}))
 `
   const result = spawnSync(pythonForE2EFixture(), ['-c', script, dataDir, sessionId], {
     cwd: process.cwd(),
@@ -1145,7 +1188,16 @@ test.describe('project workspace modal', () => {
     const sessionId = await browserSessionId(page)
     const fixture = seedAutoPromoteAtlasEntity(testInfo, { sessionId })
     await openProjectsModal(page)
-    await createActiveProject(page, `Atlas Handoff ${Date.now()}`)
+    const projectId = await createActiveProject(page, `Atlas Handoff ${Date.now()}`)
+    const linked = await page.evaluate(async ({ id, entityId }) => {
+      const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/links`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_type: 'atlas_entity', entity_ids: [entityId], source: 'manual' }),
+      })
+      return { ok: resp.ok, status: resp.status }
+    }, { id: projectId, entityId: fixture.entityId })
+    expect(linked).toEqual({ ok: true, status: 200 })
     await page.locator('.project-workspace-close').click()
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
 
@@ -1155,6 +1207,59 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('[data-atlas-tab="domain"]')).toHaveClass(/\bis-active\b/)
     await page.locator('#atlas-search').fill(fixture.entityValue)
     await expect(page.locator('#atlas-list')).toContainText(fixture.entityValue, { timeout: 15_000 })
+    await expect(page.locator('#atlas-detail')).toContainText(fixture.entityValue, { timeout: 15_000 })
+
+    await page.locator('#atlas-list').evaluate((element) => { element.scrollTop = 24 })
+    await page.locator('#atlas-detail .atlas-view-profile').click()
+    await expect(page.locator('.atlas-shell')).toHaveAttribute('data-atlas-mode', 'profile')
+    await expect(page.locator('#atlas-detail .atlas-profile-tabs')).toBeVisible()
+    await expect(page.locator('#atlas-detail')).toContainText('Relationships')
+
+    await page.locator('#atlas-detail [data-atlas-finding-bucket="related_urls"]').click()
+    await expect(page.locator('#atlas-detail [data-atlas-profile-view="findings"]'))
+      .toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#atlas-detail')).toContainText('Findings on related URLs')
+    await expect(page.locator('#atlas-detail')).toContainText('Related URL finding')
+    await expect(page.locator('#atlas-detail')).not.toContainText('Direct host finding')
+
+    await page.locator('#atlas-detail [data-atlas-profile-view="overview"]').click()
+    await page.locator('#atlas-detail .atlas-related-url-open').filter({ hasText: fixture.childEntityValue }).click()
+    await expect(page.locator('#atlas-detail')).toContainText(fixture.childEntityValue)
+    await expect(page.locator('#atlas-detail .atlas-profile-back')).toContainText('Back to previous entity')
+    await page.locator('#atlas-detail .atlas-profile-back').click()
+    await expect(page.locator('#atlas-detail')).toContainText(fixture.entityValue)
+
+    await page.locator('#atlas-detail [data-atlas-profile-view="evidence"]').click()
+    await expect(page.locator('#atlas-detail')).toContainText('Source runs')
+    await page.locator('#atlas-detail .atlas-source-run-open').click()
+    await expect(page.locator('#history-run-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#history-run-overlay')).toContainText(`nmap ${fixture.entityValue}`)
+    await page.locator('#history-run-overlay .history-run-close').first().click()
+    await expect(page.locator('#history-run-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-detail [data-atlas-profile-view="evidence"]'))
+      .toHaveAttribute('aria-selected', 'true')
+
+    await page.locator('#atlas-detail [data-atlas-profile-view="overview"]').click()
+    await page.locator('#atlas-detail .atlas-project-link-actions .btn').filter({ hasText: 'Open Project' }).click()
+    await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('.project-workspace-close').click()
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('.atlas-shell')).toHaveAttribute('data-atlas-mode', 'profile')
+    await expect(page.locator('#atlas-detail')).toContainText(fixture.entityValue)
+
+    await page.locator('#atlas-detail .atlas-profile-back').click()
+    await expect(page.locator('.atlas-shell')).toHaveAttribute('data-atlas-mode', 'entity')
+    await expect(page.locator('#atlas-search')).toHaveValue(fixture.entityValue)
+    await expect(page.locator('#atlas-list [aria-current="true"]')).toContainText(fixture.entityValue)
+
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toBeFocused()
+    await page.locator('.rail-nav [data-action="atlas"]').click()
+    await expectAtlasInteractionReady(page)
+    await page.locator('[data-atlas-tab="domain"]').click()
+    await page.locator('#atlas-search').fill(fixture.entityValue)
     await expect(page.locator('#atlas-detail')).toContainText(fixture.entityValue, { timeout: 15_000 })
 
     await page.locator('#atlas-saved-view-create-rule').click()

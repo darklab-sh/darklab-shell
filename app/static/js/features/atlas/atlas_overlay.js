@@ -43,6 +43,7 @@ import {
 import {
   getActiveProjectContext as importedGetActiveProjectContext,
   openProjectAutoPromoteRuleFromAtlas as importedOpenProjectAutoPromoteRuleFromAtlas,
+  openProjectWorkspaceById as importedOpenProjectWorkspaceById,
   refreshActiveProjectContext as importedRefreshActiveProjectContext,
 } from '../projects/project_context_bridge.js';
 
@@ -245,11 +246,18 @@ let exportedCycleAtlasTab = null;
     refreshIntelOnSelect: false,
     addActiveProjectOnSelect: false,
     detail: null,
+    detailFinding: null,
+    detailFindingReturnScroll: { desktop: 0, mobile: 0 },
+    entityProfileMode: false,
+    entityProfileView: 'overview',
+    entityProfileFindingBucket: 'direct',
+    entityProfileStack: [],
+    entityProfileReturnScroll: { list: 0, detail: 0 },
     detailLoading: false,
     intelRefreshing: false,
     intelRefreshingEntityId: '',
     intelRefreshingLabel: '',
-    detailOffsets: { runs: 0, findings: 0 },
+    detailOffsets: { runs: 0, findings: 0, related_urls: 0, related_ports: 0 },
     importFlow: {
       open: false,
       previewLoading: false,
@@ -567,10 +575,20 @@ let exportedCycleAtlasTab = null;
     state.runOptionsQuery = '';
     state.requestedEntityValue = String(options && options.entityValue || '').trim();
     state.requestedFindingId = String(options && options.findingId || '').trim();
-    state.requestedView = ['detail', 'list'].includes(String(options && options.forceView || ''))
+    state.requestedView = ['detail', 'list', 'profile'].includes(String(options && options.forceView || ''))
       ? String(options.forceView)
       : 'list';
-    state.requestedViewStarted = state.requestedView === 'detail' ? Date.now() : 0;
+    state.requestedViewStarted = ['detail', 'profile'].includes(state.requestedView) ? Date.now() : 0;
+    state.entityProfileMode = state.requestedView === 'profile';
+    state.entityProfileView = ['overview', 'evidence', 'findings', 'intel'].includes(String(options && options.profileView || ''))
+      ? String(options.profileView)
+      : 'overview';
+    state.entityProfileFindingBucket = ['direct', 'related_urls', 'related_ports', 'combined']
+      .includes(String(options && options.findingBucket || ''))
+      ? String(options.findingBucket)
+      : 'direct';
+    state.entityProfileStack = [];
+    state.entityProfileReturnScroll = { list: 0, detail: 0 };
     state.refreshIntelOnSelect = !!(options && options.refreshIntel);
     state.addActiveProjectOnSelect = !!(options && options.addActiveProject);
     if (state.requestedEntityValue) {
@@ -582,9 +600,10 @@ let exportedCycleAtlasTab = null;
     }
     state.selectedId = '';
     state.selectedFindingId = '';
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     resetSelection({ selectMode: false, render: false });
     state.detail = null;
+    state.detailFinding = null;
     if (typeof importedResetAtlasMobileTransientState === 'function') importedResetAtlasMobileTransientState();
     show();
     if (typeof markInteractionSurfaceReady === 'function') {
@@ -641,6 +660,70 @@ let exportedCycleAtlasTab = null;
     if (render) render();
   }
 
+  function resetEntityProfileNavigation({ view = 'overview' } = {}) {
+    state.entityProfileView = view;
+    state.entityProfileFindingBucket = 'direct';
+    state.entityProfileStack = [];
+  }
+
+  function captureEntityProfileSnapshot() {
+    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
+    return {
+      activeTab: state.activeTab,
+      summary: state.summary,
+      baseSummary: state.baseSummary,
+      entities: state.entities,
+      findings: state.findings,
+      findingCounts: state.findingCounts,
+      selectedFindingId: state.selectedFindingId,
+      selectedFindingIds: new Set(state.selectedFindingIds),
+      selectedEntityIds: new Set(state.selectedEntityIds),
+      selectMode: state.selectMode,
+      total: state.total,
+      totalExact: state.totalExact,
+      hasMore: state.hasMore,
+      limit: state.limit,
+      offset: state.offset,
+      query: state.query,
+      selectedId: state.selectedId,
+      detail: state.detail,
+      detailFinding: state.detailFinding,
+      detailOffsets: { ...state.detailOffsets },
+      entityProfileView: state.entityProfileView,
+      entityProfileFindingBucket: state.entityProfileFindingBucket,
+      entityProfileReturnScroll: { ...state.entityProfileReturnScroll },
+      scroll: {
+        list: Number(listHost?.scrollTop || 0),
+        detail: Number(detailHost?.scrollTop || 0),
+        mobile: Number(mobileDetailHost?.scrollTop || 0),
+      },
+    };
+  }
+
+  function restorePreviousEntityProfile() {
+    const snapshot = state.entityProfileStack.pop();
+    if (!snapshot) return false;
+    Object.assign(state, {
+      ...snapshot,
+      entityProfileMode: true,
+      entityProfileStack: state.entityProfileStack,
+      detailLoading: false,
+    });
+    state.selectedFindingIds = new Set(snapshot.selectedFindingIds || []);
+    state.selectedEntityIds = new Set(snapshot.selectedEntityIds || []);
+    if (searchInput) searchInput.value = state.query;
+    render();
+    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
+    if (listHost) listHost.scrollTop = Math.max(0, Number(snapshot.scroll?.list || 0));
+    if (detailHost) detailHost.scrollTop = Math.max(0, Number(snapshot.scroll?.detail || 0));
+    if (mobileDetailHost) mobileDetailHost.scrollTop = Math.max(0, Number(snapshot.scroll?.mobile || 0));
+    window.setTimeout(() => {
+      const profileHost = isAtlasMobileMode() ? mobileDetailHost : detailHost;
+      profileHost?.querySelector?.('.atlas-profile-back, .atlas-mobile-back-btn')?.focus?.({ preventScroll: true });
+    }, 0);
+    return true;
+  }
+
   function setSelectMode(enabled) {
     state.selectMode = !!enabled;
     if (!state.selectMode) {
@@ -686,7 +769,7 @@ let exportedCycleAtlasTab = null;
     state.offset = 0;
     state.selectedId = '';
     state.selectedFindingId = '';
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     resetSelection({ selectMode: state.selectMode, render: false });
     state.requestedEntityValue = '';
     state.requestedView = '';
@@ -694,6 +777,9 @@ let exportedCycleAtlasTab = null;
     state.refreshIntelOnSelect = false;
     state.addActiveProjectOnSelect = false;
     state.detail = null;
+    state.detailFinding = null;
+    state.entityProfileMode = false;
+    resetEntityProfileNavigation();
     render();
     if (focus) {
       window.setTimeout(() => {
@@ -1653,9 +1739,12 @@ let exportedCycleAtlasTab = null;
     if (searchInput) searchInput.value = state.query;
     state.selectedId = '';
     state.selectedFindingId = '';
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     resetSelection({ selectMode: state.selectMode, render: false });
     state.detail = null;
+    state.detailFinding = null;
+    state.entityProfileMode = false;
+    resetEntityProfileNavigation();
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
@@ -1925,27 +2014,24 @@ let exportedCycleAtlasTab = null;
         ensureDetailApi();
         return;
       }
-      detailApi.renderFindingDetail?.(detailHost, finding, {
-        canTriageAtlasRows: canTriageAtlasRows(),
-        triageDisabledReason: teamScopeDeniedMessage('triage Atlas findings'),
-        canDeleteAtlasRows: canDeleteAtlasRows(),
-        deleteDisabledReason: teamScopeDeniedMessage('delete Atlas rows'),
-        onReviewState: (item, reviewState) => updateFindingReviewState(item, reviewState),
-        onSeeRun: (item) => openSourceRun({
-          id: item.run_id,
-          run_id: item.run_id,
-          command: item.run_command,
-          run_kind: item.run_kind,
-        }),
-        onOpenEntity: (item) => openEntityFromFinding(item),
-        onDeleteFinding: (item) => confirmDeleteFinding(item),
-        onEditTriage: (item) => openFindingTriageEditor(item),
-        onSuppressFinding: (item) => updateSuppression(item, !item.suppressed),
-      });
+      detailApi.renderFindingDetail?.(detailHost, finding, findingDetailHandlers());
       return;
     }
     if (!state.selectedId || !state.detail) {
       renderDetailMessage('Select an entity');
+      return;
+    }
+    if (state.detailFinding) {
+      if (typeof currentDetailApi().renderFindingDetail !== 'function') {
+        renderDetailMessage('Loading finding...');
+        ensureDetailApi();
+        return;
+      }
+      detailApi.renderFindingDetail?.(
+        detailHost,
+        state.detailFinding,
+        findingDetailHandlers({ onBack: closeEntityFindingDetail }),
+      );
       return;
     }
     if (typeof currentDetailApi().renderDetail !== 'function') {
@@ -1970,6 +2056,7 @@ let exportedCycleAtlasTab = null;
       intelRefreshing: state.intelRefreshing,
       onRefreshIntel: () => refreshIntel(),
       onAddToActiveProject: () => addToActiveProject(),
+      onOpenProject: (link) => openLinkedProject(link),
       onRemoveProjectLink: (link) => removeProjectLink(link),
       onSaveMetadata: (payload) => saveMetadata(payload),
       onSeeRun: (run) => openSourceRun(run),
@@ -1979,7 +2066,128 @@ let exportedCycleAtlasTab = null;
       onSuppressEntity: (entity) => updateSuppression(entity, !entity.suppressed),
       onPageRuns: (offset) => pageEntityDetail('runs', offset),
       onPageFindings: (offset) => pageEntityDetail('findings', offset),
+      onPageRelatedUrls: (offset) => pageEntityDetail('related_urls', offset),
+      onPageRelatedPorts: (offset) => pageEntityDetail('related_ports', offset),
+      onOpenFinding: (finding) => openEntityFindingDetail(finding),
+      onOpenFindingBucket: (bucket) => openEntityFindingBucket(bucket),
+      onOpenEvidence: () => openEntityProfileView('evidence'),
+      onOpenIntel: () => openEntityProfileView('intel'),
+      profileMode: state.entityProfileMode,
+      profileView: state.entityProfileView,
+      profileBackLabel: state.entityProfileStack.length ? 'Back to previous entity' : 'Back to results',
+      onViewProfile: (view) => enterEntityProfile(view),
+      onExitProfile: () => exitEntityProfile(),
+      onProfileViewChange: (view, options) => setEntityProfileView(view, options),
     });
+  }
+
+  function enterEntityProfile(view = 'overview') {
+    if (!state.selectedId || !state.detail) return false;
+    if (!state.entityProfileMode) {
+      state.entityProfileReturnScroll = {
+        list: Number(listHost?.scrollTop || 0),
+        detail: Number(detailHost?.scrollTop || 0),
+      };
+      state.entityProfileFindingBucket = 'direct';
+      state.entityProfileStack = [];
+    }
+    state.entityProfileMode = true;
+    state.entityProfileView = ['overview', 'evidence', 'findings', 'intel'].includes(String(view || ''))
+      ? String(view)
+      : 'overview';
+    state.detailFinding = null;
+    render();
+    if (detailHost) detailHost.scrollTop = 0;
+    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
+    if (mobileDetailHost) mobileDetailHost.scrollTop = 0;
+    if (isAtlasMobileMode()) {
+      document
+        .querySelector?.('#atlas-mobile-entity-topbar .atlas-mobile-back-btn')
+        ?.focus?.({ preventScroll: true });
+    } else {
+      detailHost?.querySelector?.('.atlas-profile-back')?.focus?.({ preventScroll: true });
+    }
+    return true;
+  }
+
+  function exitEntityProfile({ focusResult = true } = {}) {
+    if (!state.entityProfileMode) return false;
+    if (restorePreviousEntityProfile()) return true;
+    const returnScroll = state.entityProfileReturnScroll || {};
+    state.entityProfileMode = false;
+    state.entityProfileFindingBucket = 'direct';
+    render();
+    if (listHost) listHost.scrollTop = Math.max(0, Number(returnScroll.list || 0));
+    if (detailHost) detailHost.scrollTop = Math.max(0, Number(returnScroll.detail || 0));
+    if (focusResult && state.selectedId) {
+      window.setTimeout(() => {
+        listHost
+          ?.querySelector?.(`[data-entity-id="${selectorValue(state.selectedId)}"]`)
+          ?.focus?.({ preventScroll: true });
+      }, 0);
+    }
+    return true;
+  }
+
+  function setEntityProfileView(view, { focus = false } = {}) {
+    const next = String(view || '');
+    if (!state.entityProfileMode || !['overview', 'evidence', 'findings', 'intel'].includes(next)) return false;
+    state.entityProfileView = next;
+    renderDetail();
+    for (const fn of mobileRenderers) {
+      try { fn(state, atlasController); } catch (err) {
+        logImportClientError('atlas mobile render failed', err);
+      }
+    }
+    if (detailHost) detailHost.scrollTop = 0;
+    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
+    if (mobileDetailHost) mobileDetailHost.scrollTop = 0;
+    if (focus) {
+      const profileHost = isAtlasMobileMode() ? mobileDetailHost : detailHost;
+      profileHost
+        ?.querySelector?.(`[data-atlas-profile-view="${selectorValue(next)}"]`)
+        ?.focus?.({ preventScroll: true });
+    }
+    return true;
+  }
+
+  function openEntityProfileView(view) {
+    if (state.entityProfileMode) return setEntityProfileView(view, { focus: true });
+    return enterEntityProfile(view);
+  }
+
+  async function openEntityFindingBucket(bucket) {
+    const next = String(bucket || '').trim().toLowerCase();
+    if (!state.selectedId || !['direct', 'related_urls', 'related_ports', 'combined'].includes(next)) return false;
+    if (!state.entityProfileMode) enterEntityProfile('findings');
+    state.entityProfileView = 'findings';
+    state.entityProfileFindingBucket = next;
+    state.detailOffsets = { ...state.detailOffsets, findings: 0 };
+    await loadDetail(state.selectedId);
+    return true;
+  }
+
+  function findingDetailHandlers({ onBack = null, hideInlineActions = false, hideBackAction = false } = {}) {
+    return {
+      canTriageAtlasRows: canTriageAtlasRows(),
+      triageDisabledReason: teamScopeDeniedMessage('triage Atlas findings'),
+      canDeleteAtlasRows: canDeleteAtlasRows(),
+      deleteDisabledReason: teamScopeDeniedMessage('delete Atlas rows'),
+      hideInlineActions,
+      hideBackAction,
+      onBack,
+      onReviewState: (item, reviewState) => updateFindingReviewState(item, reviewState),
+      onSeeRun: (item) => openSourceRun({
+        id: item.run_id,
+        run_id: item.run_id,
+        command: item.run_command,
+        run_kind: item.run_kind,
+      }),
+      onOpenEntity: (item) => openEntityFromFinding(item),
+      onDeleteFinding: (item) => confirmDeleteFinding(item),
+      onEditTriage: (item) => openFindingTriageEditor(item),
+      onSuppressFinding: (item) => updateSuppression(item, !item.suppressed),
+    };
   }
 
   const mobileRenderers = [];
@@ -2014,7 +2222,10 @@ let exportedCycleAtlasTab = null;
   }
 
   function renderShellMode() {
-    shell?.setAttribute('data-atlas-mode', currentTab().id === 'findings' ? 'findings' : 'entity');
+    const mode = state.entityProfileMode
+      ? 'profile'
+      : (currentTab().id === 'findings' ? 'findings' : 'entity');
+    shell?.setAttribute('data-atlas-mode', mode);
   }
 
   function clearRunFilter() {
@@ -2046,8 +2257,11 @@ let exportedCycleAtlasTab = null;
     state.requestedViewStarted = 0;
     state.refreshIntelOnSelect = false;
     state.addActiveProjectOnSelect = false;
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     state.detail = null;
+    state.detailFinding = null;
+    state.entityProfileMode = false;
+    resetEntityProfileNavigation();
     resetSelection({ selectMode: false, render: false });
     if (searchInput) searchInput.value = '';
     if (runFilterSearch) runFilterSearch.value = '';
@@ -2075,8 +2289,11 @@ let exportedCycleAtlasTab = null;
     state.selectedFindingIds.clear();
     state.selectedId = '';
     state.selectedEntityIds.clear();
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     state.detail = null;
+    state.detailFinding = null;
+    state.entityProfileMode = false;
+    resetEntityProfileNavigation();
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
@@ -2099,8 +2316,11 @@ let exportedCycleAtlasTab = null;
     state.selectedFindingIds.clear();
     state.selectedId = '';
     state.selectedEntityIds.clear();
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     state.detail = null;
+    state.detailFinding = null;
+    state.entityProfileMode = false;
+    resetEntityProfileNavigation();
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
@@ -2318,7 +2538,7 @@ let exportedCycleAtlasTab = null;
           ));
           if (match) {
             state.selectedId = match.id;
-            state.detailOffsets = { runs: 0, findings: 0 };
+            state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
           }
           else {
             state.refreshIntelOnSelect = false;
@@ -2327,7 +2547,11 @@ let exportedCycleAtlasTab = null;
         }
         if (!state.selectedId && !state.requestedEntityValue && state.entities[0]) {
           state.selectedId = state.entities[0].id;
-          state.detailOffsets = { runs: 0, findings: 0 };
+          state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
+        }
+        if (!state.selectedId && state.entityProfileMode) {
+          state.entityProfileMode = false;
+          resetEntityProfileNavigation();
         }
         state.selectedEntityIds.forEach((entityId) => {
           if (!state.entities.some(entity => String(entity.id || '') === entityId)) {
@@ -2363,25 +2587,101 @@ let exportedCycleAtlasTab = null;
 
   async function selectEntity(entityId) {
     state.selectedId = String(entityId || '');
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailFinding = null;
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
+    state.entityProfileFindingBucket = 'direct';
+    state.entityProfileStack = [];
     renderList();
     await loadDetail(state.selectedId);
   }
 
   async function pageEntityDetail(kind, offset) {
-    if (!state.selectedId || !['runs', 'findings'].includes(String(kind || ''))) return;
+    if (!state.selectedId || !['runs', 'findings', 'related_urls', 'related_ports'].includes(String(kind || ''))) {
+      return;
+    }
+    const desktopScrollTop = Number(detailHost?.scrollTop || 0);
+    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
+    const mobileScrollTop = Number(mobileDetailHost?.scrollTop || 0);
     state.detailOffsets = {
       runs: Math.max(0, Number(state.detailOffsets?.runs || 0)),
       findings: Math.max(0, Number(state.detailOffsets?.findings || 0)),
+      related_urls: Math.max(0, Number(state.detailOffsets?.related_urls || 0)),
+      related_ports: Math.max(0, Number(state.detailOffsets?.related_ports || 0)),
       [kind]: Math.max(0, Number(offset || 0)),
     };
     await loadDetail(state.selectedId);
+    if (detailHost) detailHost.scrollTop = desktopScrollTop;
+    if (mobileDetailHost) mobileDetailHost.scrollTop = mobileScrollTop;
+  }
+
+  function openEntityFindingDetail(finding) {
+    if (!finding || !finding.id || !state.selectedId) return;
+    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
+    state.detailFindingReturnScroll = {
+      desktop: Number(detailHost?.scrollTop || 0),
+      mobile: Number(mobileDetailHost?.scrollTop || 0),
+    };
+    state.detailFinding = finding;
+    render();
+    if (detailHost) detailHost.scrollTop = 0;
+    if (mobileDetailHost) mobileDetailHost.scrollTop = 0;
+  }
+
+  function closeEntityFindingDetail() {
+    if (!state.detailFinding) return;
+    const returnScroll = state.detailFindingReturnScroll || {};
+    state.detailFinding = null;
+    render();
+    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
+    if (detailHost) detailHost.scrollTop = Math.max(0, Number(returnScroll.desktop || 0));
+    if (mobileDetailHost) mobileDetailHost.scrollTop = Math.max(0, Number(returnScroll.mobile || 0));
+  }
+
+  async function openLinkedProject(link) {
+    const projectId = String(link && link.project_id || '').trim();
+    if (!projectId || typeof importedOpenProjectWorkspaceById !== 'function') return;
+    try {
+      await importedOpenProjectWorkspaceById(projectId, {
+        returnToAtlas: {
+          source: 'project-return',
+          tab: state.activeTab,
+          projectId: state.projectId,
+          projectName: state.projectName,
+          runId: state.runId,
+          runLabel: state.runLabel,
+          entityValue: String(state.detail?.entity?.canonical_value || ''),
+          forceView: state.entityProfileMode ? 'profile' : 'detail',
+          profileView: state.entityProfileView,
+          findingBucket: state.entityProfileFindingBucket,
+        },
+      });
+    } catch (err) {
+      logImportClientError('failed to open linked Atlas project', err);
+      showToastSafe('Failed to open Project', 'error');
+    }
   }
 
   function selectFinding(findingId) {
     state.selectedFindingId = String(findingId || '');
     renderList();
     renderDetail();
+  }
+
+  async function refreshAfterFindingMutation(findingId, fallbackPatch = {}) {
+    if (currentTab().id === 'findings' || !state.selectedId) {
+      await refreshAtlas();
+      return;
+    }
+    const previousDetailFinding = String(state.detailFinding?.id || '') === String(findingId || '')
+      ? state.detailFinding
+      : null;
+    const detail = await loadDetail(state.selectedId, { renderLoading: false });
+    if (previousDetailFinding && !state.detailFinding) {
+      const refreshed = (detail?.findings || [])
+        .find(item => String(item?.id || '') === String(findingId || ''));
+      state.detailFinding = refreshed || { ...previousDetailFinding, ...fallbackPatch };
+      render();
+    }
   }
 
   async function openFindingTriageEditor(finding) {
@@ -2395,6 +2695,13 @@ let exportedCycleAtlasTab = null;
       canEdit: canTriageAtlasRows(),
       onSaved: async (triage) => {
         const compact = findingTriageEditor.compactTriage(triage);
+        if (currentTab().id !== 'findings' && state.selectedId) {
+          await refreshAfterFindingMutation(findingId, {
+            triage: compact,
+            verification_status: compact.verification_status,
+          });
+          return;
+        }
         state.findings = state.findings.map(item => (
           String(item && item.id || '') === findingId
             ? { ...item, triage: compact, verification_status: compact.verification_status }
@@ -2422,7 +2729,10 @@ let exportedCycleAtlasTab = null;
       });
       if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update finding', 'triage Atlas findings');
       showToastSafe('Finding updated', 'success');
-      await refreshAtlas();
+      await refreshAfterFindingMutation(findingId, {
+        review_state: reviewState,
+        status: reviewState,
+      });
     } catch (err) {
       logImportClientError('failed to update atlas finding', err);
       showToastSafe(err && err.message ? err.message : 'Failed to update finding', 'error');
@@ -2479,7 +2789,8 @@ let exportedCycleAtlasTab = null;
 
   async function updateSuppression(item, suppressed) {
     const tab = currentTab();
-    const isFindings = tab.id === 'findings';
+    const isFindings = tab.id === 'findings'
+      || (!!item?.entity_id && !item?.canonical_value);
     const itemId = String(item && item.id || '');
     if (!itemId) return;
     if (!canTriageAtlasRows()) {
@@ -2497,7 +2808,11 @@ let exportedCycleAtlasTab = null;
       });
       if (!resp.ok) throw await atlasMutationError(resp, 'Failed to update Atlas row', 'suppress Atlas rows');
       showToastSafe(suppressed ? 'Atlas row suppressed' : 'Atlas row restored', 'success');
-      await refreshAtlas();
+      if (isFindings) {
+        await refreshAfterFindingMutation(itemId, { suppressed: !!suppressed });
+      } else {
+        await refreshAtlas();
+      }
     } catch (err) {
       logImportClientError('failed to update atlas suppression', err);
       showToastSafe(err && err.message ? err.message : 'Failed to update Atlas row', 'error');
@@ -2612,6 +2927,8 @@ let exportedCycleAtlasTab = null;
       state.selectedId = '';
       state.selectedFindingId = '';
       state.detail = null;
+      state.entityProfileMode = false;
+      resetEntityProfileNavigation();
       await refreshAtlas({ resetOffset: state.offset >= state.total - ids.length });
     } catch (err) {
       logImportClientError('failed to bulk delete atlas rows', err);
@@ -2628,7 +2945,12 @@ let exportedCycleAtlasTab = null;
     state.activeTab = entityType;
     state.selectedId = entityId;
     state.selectedFindingId = '';
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailFinding = null;
+    state.entityProfileMode = true;
+    state.entityProfileView = 'overview';
+    state.entityProfileFindingBucket = 'direct';
+    state.entityProfileStack = [];
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     resetSelection({ selectMode: state.selectMode, render: false });
     state.query = '';
     if (searchInput) searchInput.value = '';
@@ -2639,10 +2961,15 @@ let exportedCycleAtlasTab = null;
     const entityId = String(entity && entity.id || '');
     const entityType = String(entity && entity.type || '');
     if (!entityId || !entityType) return;
+    if (state.entityProfileMode && state.detail) {
+      state.entityProfileStack.push(captureEntityProfileSnapshot());
+    }
     state.activeTab = entityType;
     state.selectedId = entityId;
     state.selectedFindingId = '';
-    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detailFinding = null;
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
+    state.entityProfileFindingBucket = 'direct';
     resetSelection({ selectMode: state.selectMode, render: false });
     state.query = '';
     if (searchInput) searchInput.value = '';
@@ -2661,8 +2988,16 @@ let exportedCycleAtlasTab = null;
       const params = new URLSearchParams();
       const runsOffset = Math.max(0, Number(state.detailOffsets?.runs || 0));
       const findingsOffset = Math.max(0, Number(state.detailOffsets?.findings || 0));
+      const relatedUrlsOffset = Math.max(0, Number(state.detailOffsets?.related_urls || 0));
+      const relatedPortsOffset = Math.max(0, Number(state.detailOffsets?.related_ports || 0));
+      if (state.projectId) params.set('project_id', state.projectId);
       if (runsOffset) params.set('runs_offset', String(runsOffset));
       if (findingsOffset) params.set('findings_offset', String(findingsOffset));
+      if (state.entityProfileFindingBucket !== 'direct') {
+        params.set('finding_bucket', state.entityProfileFindingBucket);
+      }
+      if (relatedUrlsOffset) params.set('related_urls_offset', String(relatedUrlsOffset));
+      if (relatedPortsOffset) params.set('related_ports_offset', String(relatedPortsOffset));
       const query = params.toString();
       const resp = await api()(
         `/atlas/entities/${encodeURIComponent(entityId)}${query ? `?${query}` : ''}`,
@@ -2672,12 +3007,21 @@ let exportedCycleAtlasTab = null;
       const detail = await resp.json();
       if (String(state.selectedId || '') !== String(entityId || '') || currentTab().id === 'findings') return;
       state.detail = detail;
+      state.entityProfileFindingBucket = String(detail.detail_limits?.findings?.bucket || 'direct');
+      if (state.detailFinding) {
+        const findingId = String(state.detailFinding.id || '');
+        state.detailFinding = (detail.findings || [])
+          .find(finding => String(finding?.id || '') === findingId) || null;
+      }
+      return detail;
     } catch (err) {
       if (isAbortError(err)) return;
       if (String(state.selectedId || '') !== String(entityId || '')) return;
       state.detail = null;
+      state.detailFinding = null;
       logImportClientError('failed to load atlas entity', err);
       showToastSafe('Failed to load entity', 'error');
+      return null;
     } finally {
       if (detailLoadController === controller) detailLoadController = null;
       if (String(state.selectedId || '') === String(entityId || '')) {
@@ -2827,6 +3171,9 @@ let exportedCycleAtlasTab = null;
       showToastSafe(prune ? 'Entity and related Atlas items deleted' : 'Entity deleted', 'success');
       state.selectedId = '';
       state.detail = null;
+      state.detailFinding = null;
+      state.entityProfileMode = false;
+      resetEntityProfileNavigation();
       await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
     } catch (err) {
       logImportClientError('failed to delete atlas entity', err);
@@ -2870,6 +3217,7 @@ let exportedCycleAtlasTab = null;
       showToastSafe(prune ? 'Finding and related Atlas items deleted' : 'Finding deleted', 'success');
       state.selectedFindingId = '';
       state.selectedFindingIds.delete(findingId);
+      if (String(state.detailFinding?.id || '') === findingId) state.detailFinding = null;
       await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
     } catch (err) {
       logImportClientError('failed to delete atlas finding', err);
@@ -2940,6 +3288,9 @@ let exportedCycleAtlasTab = null;
       if (Number(result.deleted_entities || 0) > 0) {
         state.selectedId = '';
         state.detail = null;
+        state.detailFinding = null;
+        state.entityProfileMode = false;
+        resetEntityProfileNavigation();
       }
       await refreshAtlas({ resetOffset: false });
       if (state.selectedId) await loadDetail(state.selectedId, { renderLoading: false });
@@ -3131,20 +3482,26 @@ let exportedCycleAtlasTab = null;
       state.orphanFilter = String(orphanFilter.value || 'hide') || 'hide';
       state.selectedId = '';
       state.selectedFindingId = '';
-      state.detailOffsets = { runs: 0, findings: 0 };
+      state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
       state.selectedFindingIds.clear();
       state.selectedEntityIds.clear();
       state.detail = null;
+      state.detailFinding = null;
+      state.entityProfileMode = false;
+      resetEntityProfileNavigation();
       refreshAtlas({ resetOffset: true });
     });
     suppressionFilter?.addEventListener('change', () => {
       state.suppressionFilter = String(suppressionFilter.value || 'hide') || 'hide';
       state.selectedId = '';
       state.selectedFindingId = '';
-      state.detailOffsets = { runs: 0, findings: 0 };
+      state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
       state.selectedFindingIds.clear();
       state.selectedEntityIds.clear();
       state.detail = null;
+      state.detailFinding = null;
+      state.entityProfileMode = false;
+      resetEntityProfileNavigation();
       refreshAtlas({ resetOffset: true });
     });
     savedViewSelect?.addEventListener('change', () => {
@@ -3283,12 +3640,20 @@ let exportedCycleAtlasTab = null;
     setActiveAtlasTab,
     cycleAtlasTab,
     selectEntity,
+    enterEntityProfile,
+    exitEntityProfile,
+    setEntityProfileView,
+    openEntityProfileView,
+    openEntityFindingBucket,
     pageEntityDetail,
     selectFinding,
     refreshAtlas,
     clearAtlasFilters,
     refreshIntel,
     addToActiveProject,
+    openLinkedProject,
+    openEntityFindingDetail,
+    closeEntityFindingDetail,
     removeProjectLink,
     saveMetadata,
     confirmDeleteEntity,

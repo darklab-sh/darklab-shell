@@ -5065,6 +5065,8 @@ class TestTeamRoutes:
             team_run_id = "run-team-atlas-shared"
             personal_entity_id = "ent_team_atlas_personal"
             team_entity_id = "ent_team_atlas_shared"
+            personal_child_entity_id = "ent_team_atlas_personal_child"
+            team_child_entity_id = "ent_team_atlas_shared_child"
             personal_finding_id = "fnd_team_atlas_personal"
             team_finding_id = "fnd_team_atlas_shared"
             seen_at = "2026-05-28T12:00:00+00:00"
@@ -5099,9 +5101,26 @@ class TestTeamRoutes:
                         "VALUES (?, ?, ?, ?, 1)",
                         (entity_id, run_id, seen_at, seen_at),
                     )
+                for entity_id, value, run_id in (
+                    (personal_child_entity_id, "https://shared.example/personal", personal_run_id),
+                    (team_child_entity_id, "https://shared.example/team", team_run_id),
+                ):
+                    conn.execute(
+                        "INSERT INTO entities "
+                        "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                        "first_seen_at, last_seen_at, created) "
+                        "VALUES (?, ?, 'url', ?, ?, ?, ?, ?, ?)",
+                        (entity_id, owner_token, value, "sig_" + entity_id, team_entity_id, seen_at, seen_at, seen_at),
+                    )
+                    conn.execute(
+                        "INSERT INTO entity_run_links "
+                        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                        "VALUES (?, ?, ?, ?, 1)",
+                        (entity_id, run_id, seen_at, seen_at),
+                    )
                 for finding_id, entity_id, run_id, title in (
-                    (personal_finding_id, personal_entity_id, personal_run_id, "personal finding"),
-                    (team_finding_id, team_entity_id, team_run_id, "shared finding"),
+                    (personal_finding_id, personal_child_entity_id, personal_run_id, "personal finding"),
+                    (team_finding_id, team_child_entity_id, team_run_id, "shared finding"),
                 ):
                     conn.execute(
                         "INSERT INTO findings "
@@ -5159,7 +5178,12 @@ class TestTeamRoutes:
             assert [item["id"] for item in team_runs.get_json()["runs"]] == [team_run_id]
             assert [item["id"] for item in team_entities.get_json()["entities"]] == [team_entity_id]
             assert team_entity_detail.status_code == 200
-            assert [item["run_id"] for item in team_entity_detail.get_json()["runs"]] == [team_run_id]
+            team_detail = team_entity_detail.get_json()
+            assert [item["run_id"] for item in team_detail["runs"]] == [team_run_id]
+            assert [item["id"] for item in team_detail["related_urls"]] == [team_child_entity_id]
+            assert team_detail["finding_summary"]["direct"]["total"] == 0
+            assert team_detail["finding_summary"]["related_urls"]["total"] == 1
+            assert team_detail["finding_summary"]["combined"]["total"] == 1
             assert [item["id"] for item in team_findings.get_json()["findings"]] == [team_finding_id]
             assert api_team_entity.status_code == 200
             assert api_team_entity.get_json()["entity"]["id"] == team_entity_id
@@ -15150,10 +15174,17 @@ class TestAtlasRoutes:
         return run_id, recorded
 
     def test_lists_session_entities_and_detail(self):
+        from services.atlas.lookup import entity_detail
+
         client = get_client()
         session_id = self._session_id()
         run_id, recorded = self._seed_entity_run(session_id)
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        related_entity_count = 251
+        extra_run_count = 75
+        long_related_url = "https://darklab.sh/" + ("deep-path-segment/" * 80) + "report"
+        unresolved_url_id = "ent_" + uuid.uuid4().hex
+        ipv6_entity_id = "ent_" + uuid.uuid4().hex
         with db_connect() as conn:
             url_run_id = "run-" + uuid.uuid4().hex
             conn.execute(
@@ -15171,15 +15202,194 @@ class TestAtlasRoutes:
                 }],
                 seen_at="2026-05-14T00:01:01+00:00",
             )
+            child_url = conn.execute(
+                "SELECT id FROM entities WHERE session_id = ? AND type = 'url' AND canonical_value = ?",
+                (session_id, "https://darklab.sh/login"),
+            ).fetchone()
+            child_url_id = str(child_url["id"])
+            conn.executemany(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                "first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'url', ?, ?, ?, ?, ?, 1, ?)",
+                [
+                    (
+                        "ent_" + uuid.uuid4().hex,
+                        session_id,
+                        long_related_url if index == 0 else f"https://darklab.sh/archive/{index}",
+                        "sig_" + uuid.uuid4().hex,
+                        domain_id,
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:05:00+00:00" if index == 0 else "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                    )
+                    for index in range(related_entity_count - 1)
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, host_entity_id, attributes_json, "
+                "first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'port', ?, ?, ?, ?, ?, ?, 1, ?)",
+                [
+                    (
+                        "ent_" + uuid.uuid4().hex,
+                        session_id,
+                        f"darklab.sh:{8000 + index}/tcp",
+                        "sig_" + uuid.uuid4().hex,
+                        domain_id,
+                        json.dumps({"port": 8000 + index, "transport": "tcp"}),
+                        "2026-05-14T00:03:00+00:00",
+                        "2026-05-14T00:03:00+00:00",
+                        "2026-05-14T00:03:00+00:00",
+                    )
+                    for index in range(related_entity_count)
+                ],
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links "
+                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "SELECT id, ?, ?, ?, 1 FROM entities "
+                "WHERE session_id = ? AND type = 'port' AND host_entity_id = ?",
+                (
+                    run_id,
+                    "2026-05-14T00:03:00+00:00",
+                    "2026-05-14T00:03:00+00:00",
+                    session_id,
+                    domain_id,
+                ),
+            )
+            conn.executemany(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                "first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, ?, ?, ?, '', ?, ?, 1, ?)",
+                [
+                    (
+                        unresolved_url_id,
+                        session_id,
+                        "url",
+                        "https://unresolved.invalid/path",
+                        "sig_" + uuid.uuid4().hex,
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                    ),
+                    (
+                        ipv6_entity_id,
+                        session_id,
+                        "ip",
+                        "2001:db8:85a3::8a2e:370:7334",
+                        "sig_" + uuid.uuid4().hex,
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                        "2026-05-14T00:00:00+00:00",
+                    ),
+                ],
+            )
+            extra_runs = [
+                (
+                    "run-" + uuid.uuid4().hex,
+                    session_id,
+                    "nmap darklab.sh",
+                    f"2026-05-14T00:02:{index % 60:02d}+00:00",
+                    "[]",
+                )
+                for index in range(extra_run_count)
+            ]
+            conn.executemany(
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 1)",
+                extra_runs,
+            )
+            conn.executemany(
+                "INSERT INTO entity_run_links "
+                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES (?, ?, ?, ?, 1)",
+                [
+                    (domain_id, extra_run[0], extra_run[3], extra_run[3])
+                    for extra_run in extra_runs
+                ],
+            )
+            conn.execute(
+                "INSERT INTO scan_target_observations "
+                "(session_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
+                "command_root, observed_at, port_entity_count, created) "
+                "VALUES (?, '', ?, ?, 'domain', 'darklab.sh', 'port_scan', 'nmap', ?, ?, ?)",
+                (
+                    session_id,
+                    run_id,
+                    domain_id,
+                    "2026-05-14T00:03:00+00:00",
+                    related_entity_count,
+                    "2026-05-14T00:03:00+00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, "
+                "raw_line, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'critical', 'finding', 'nuclei', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
+                (
+                    "fnd_" + uuid.uuid4().hex,
+                    session_id,
+                    url_run_id,
+                    child_url_id,
+                    "https://darklab.sh/login",
+                    "sig_" + uuid.uuid4().hex,
+                    url_run_id,
+                    url_run_id,
+                    "2026-05-14T00:04:00+00:00",
+                    "2026-05-14T00:04:00+00:00",
+                    "Critical child URL finding",
+                    "critical issue on login URL",
+                    "2026-05-14T00:04:00+00:00",
+                ),
+            )
             conn.commit()
 
         summary_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
         list_resp = client.get("/atlas/entities?type=domain", headers={"X-Session-ID": session_id})
         detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+        related_finding_resp = client.get(
+            f"/atlas/entities/{domain_id}?finding_bucket=related_urls",
+            headers={"X-Session-ID": session_id},
+        )
+        combined_finding_resp = client.get(
+            f"/atlas/entities/{domain_id}?finding_bucket=combined",
+            headers={"X-Session-ID": session_id},
+        )
+        invalid_finding_bucket_resp = client.get(
+            f"/atlas/entities/{domain_id}?finding_bucket=descendants",
+            headers={"X-Session-ID": session_id},
+        )
+        relationship_page_resp = client.get(
+            f"/atlas/entities/{domain_id}?related_urls_offset=250&related_ports_offset=250&runs_offset=50",
+            headers={"X-Session-ID": session_id},
+        )
+        child_detail_resp = client.get(
+            f"/atlas/entities/{child_url_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        unresolved_detail_resp = client.get(
+            f"/atlas/entities/{unresolved_url_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        ipv6_detail_resp = client.get(
+            f"/atlas/entities/{ipv6_entity_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            profile_statements = []
+            conn.set_trace_callback(profile_statements.append)
+            measured_detail = entity_detail(conn, session_id, domain_id)
+            conn.set_trace_callback(None)
 
         assert summary_resp.status_code == 200
         assert json.loads(summary_resp.data)["counts"]["domain"] == 1
-        assert json.loads(summary_resp.data)["findings"] == 1
+        assert json.loads(summary_resp.data)["findings"] == 2
         assert list_resp.status_code == 200
         data = json.loads(list_resp.data)
         assert data["total"] == 1
@@ -15188,11 +15398,117 @@ class TestAtlasRoutes:
         assert detail_resp.status_code == 200
         detail = json.loads(detail_resp.data)
         assert detail["entity"]["id"] == domain_id
-        assert detail["related_urls"][0]["canonical_value"] == "https://darklab.sh/login"
+        assert detail["related_urls"][0]["canonical_value"] == long_related_url
         assert detail["related_urls"][0]["host_entity_id"] == domain_id
-        assert detail["detail_limits"]["related_urls"]["total"] == 1
-        assert run_id in {run["run_id"] for run in detail["runs"]}
+        assert len(detail["related_urls"]) == 25
+        assert detail["detail_limits"]["related_urls"]["total"] == related_entity_count
+        assert detail["detail_limits"]["related_urls"]["has_more"] is True
+        assert len(detail["related_ports"]) == 25
+        assert detail["detail_limits"]["related_ports"]["total"] == related_entity_count
+        assert detail["detail_limits"]["related_ports"]["has_more"] is True
+        assert len(detail["runs"]) == 50
+        assert detail["detail_limits"]["runs"]["total"] == extra_run_count + 2
+        assert detail["detail_limits"]["runs"]["has_more"] is True
+        assert len(detail["relationship_summary"]["related_urls"]["sample"]) == 5
+        assert len(detail["relationship_summary"]["related_ports"]["sample"]) == 5
+        assert detail["finding_summary"]["direct"]["total"] == 1
+        assert detail["finding_summary"]["related_urls"]["total"] == 1
+        assert detail["finding_summary"]["related_urls"]["by_severity"]["critical"] == 1
+        assert detail["finding_summary"]["related_ports"]["total"] == 0
+        assert detail["finding_summary"]["combined"]["total"] == 2
+        assert detail["overview"]["observed"]["app_evidence"]["coverage_state"] == "app_ports_found"
+        assert detail["overview"]["observed"]["app_evidence"]["app_port_count"] == related_entity_count
+        assert detail["overview"]["observed"]["app_evidence"]["command_roots"] == ["nmap"]
+        assert detail["overview"]["observed"]["app_port_count"] == related_entity_count
+        assert len(detail["overview"]["observed"]["app_ports"]) == 24
+        assert detail["overview"]["observed"]["app_ports_truncated"] is True
+        assert detail["overview"]["observed"]["app_ports"][0] == {
+            "port": 8000,
+            "proto": "tcp",
+            "service": "",
+            "version": "",
+            "banner_available": False,
+            "occurrence_count": 1,
+            "last_seen_at": "2026-05-14T00:03:00+00:00",
+            "source_run_count": 1,
+        }
+        assert detail["overview"]["observed"]["app_services"] == []
+        assert detail["overview"]["finding_summary"] == detail["finding_summary"]
+        assert detail["overview"]["relationships"] == detail["relationship_summary"]
+        assert detail["overview"]["intel"]["summary"] == detail["intel_summary"]
+        assert detail["overview"]["intel"]["provider_ports"] == []
+        assert detail["overview"]["intel"]["provider_services"] == []
+        assert detail["overview"]["intel"]["certificate"]["status"] == "unknown"
+        assert detail["overview"]["intel"]["port_provenance"]["divergence"] == {
+            "app_only": list(range(8000, 8024)),
+            "provider_only": [],
+            "has_drift": False,
+        }
         assert detail["findings"][0]["raw_line"] == "443/tcp open https on darklab.sh"
+        assert detail["detail_limits"]["findings"]["bucket"] == "direct"
+        assert related_finding_resp.status_code == 200
+        related_finding_detail = json.loads(related_finding_resp.data)
+        assert [finding["title"] for finding in related_finding_detail["findings"]] == [
+            "Critical child URL finding"
+        ]
+        assert related_finding_detail["detail_limits"]["findings"] == {
+            "bucket": "related_urls",
+            "limit": 50,
+            "offset": 0,
+            "shown": 1,
+            "total": 1,
+            "has_more": False,
+        }
+        assert combined_finding_resp.status_code == 200
+        combined_finding_detail = json.loads(combined_finding_resp.data)
+        assert {finding["title"] for finding in combined_finding_detail["findings"]} == {
+            "Critical child URL finding",
+            "443/tcp open https on darklab.sh",
+        }
+        assert combined_finding_detail["detail_limits"]["findings"]["bucket"] == "combined"
+        assert combined_finding_detail["detail_limits"]["findings"]["total"] == 2
+        assert invalid_finding_bucket_resp.status_code == 400
+        assert json.loads(invalid_finding_bucket_resp.data)["error"] == "invalid finding bucket"
+        assert len(detail_resp.data) < 200_000
+        assert relationship_page_resp.status_code == 200
+        relationship_page = json.loads(relationship_page_resp.data)
+        assert relationship_page["detail_limits"]["related_urls"]["offset"] == 250
+        assert relationship_page["detail_limits"]["related_urls"]["shown"] == 1
+        assert relationship_page["detail_limits"]["related_urls"]["has_more"] is False
+        assert relationship_page["detail_limits"]["related_ports"]["offset"] == 250
+        assert relationship_page["detail_limits"]["related_ports"]["shown"] == 1
+        assert relationship_page["detail_limits"]["related_ports"]["has_more"] is False
+        assert relationship_page["detail_limits"]["runs"]["offset"] == 50
+        assert relationship_page["detail_limits"]["runs"]["shown"] == 27
+        assert relationship_page["detail_limits"]["runs"]["has_more"] is False
+        assert run_id in {run["run_id"] for run in relationship_page["runs"]}
+        assert child_detail_resp.status_code == 200
+        child_detail = json.loads(child_detail_resp.data)
+        assert child_detail["parent_host"]["id"] == domain_id
+        assert child_detail["finding_summary"]["direct"]["total"] == 1
+        assert child_detail["finding_summary"]["related_urls"]["applicable"] is False
+        assert child_detail["finding_summary"]["combined"]["applicable"] is False
+        assert child_detail["overview"]["observed"]["app_evidence"]["host_entity_id"] == domain_id
+        assert "parent host" in child_detail["overview"]["observed"]["app_evidence"]["scope_note"]
+        assert unresolved_detail_resp.status_code == 200
+        unresolved_detail = json.loads(unresolved_detail_resp.data)
+        assert unresolved_detail["parent_host"] is None
+        assert unresolved_detail["finding_summary"]["direct"]["total"] == 0
+        assert unresolved_detail["finding_summary"]["related_urls"]["applicable"] is False
+        assert unresolved_detail["overview"]["observed"]["app_evidence"]["coverage_state"] == "not_scanned"
+        assert "No stored parent host" in unresolved_detail["overview"]["observed"]["app_evidence"]["scope_note"]
+        assert ipv6_detail_resp.status_code == 200
+        ipv6_detail = json.loads(ipv6_detail_resp.data)
+        assert ipv6_detail["entity"]["canonical_value"] == "2001:db8:85a3::8a2e:370:7334"
+        assert ipv6_detail["detail_limits"]["related_urls"]["total"] == 0
+        assert ipv6_detail["detail_limits"]["related_ports"]["total"] == 0
+        assert ipv6_detail["intel_summary"]["status"] == "none"
+        assert measured_detail is not None
+        profile_reads = [
+            statement for statement in profile_statements
+            if statement.lstrip().upper().startswith(("SELECT", "WITH"))
+        ]
+        assert len(profile_reads) <= 34
 
     def test_findings_list_can_filter_by_source_run(self):
         client = get_client()
@@ -15504,6 +15820,7 @@ class TestAtlasRoutes:
             "has_more": True,
         }
         assert detail["detail_limits"]["findings"] == {
+            "bucket": "direct",
             "limit": 50,
             "offset": 0,
             "shown": 50,
@@ -15527,6 +15844,7 @@ class TestAtlasRoutes:
             "has_more": False,
         }
         assert paged_detail["detail_limits"]["findings"] == {
+            "bucket": "direct",
             "limit": 50,
             "offset": 50,
             "shown": 6,
@@ -16646,6 +16964,10 @@ class TestAtlasRoutes:
         detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
         detail = json.loads(detail_resp.data)
         assert detail["intel_summary"]["status"] == "available"
+        assert detail["intel_summary"]["freshness"] == "unknown"
+        assert detail["intel_summary"]["snapshot_count"] == 1
+        assert detail["intel_summary"]["provider_count"] == 1
+        assert detail["intel_summary"]["last_refresh_at"]
         assert detail["intel_summary"]["providers_with_data"] == ["crtsh"]
         assert {
             (item["label"], item["value"], item["provider"])

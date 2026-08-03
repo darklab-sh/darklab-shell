@@ -702,9 +702,12 @@ let exportedDarklabProjectOverview = null;
         ? target.source_flags
         : {};
       if (!sourceFlags.has_intel) return 'none';
-      const checkedAt = String(target?.certificate?.last_checked_at || '');
-      const staleText = sourceFlags.has_stale_intel ? 'stale' : 'current';
-      return checkedAt ? `${staleText} · checked ${formatDate(checkedAt)}` : `${staleText} · no check time`;
+      const summary = target?.intel_summary && typeof target.intel_summary === 'object'
+        ? target.intel_summary
+        : {};
+      const freshness = String(summary.freshness || (sourceFlags.has_stale_intel ? 'stale' : 'unknown'));
+      const checkedAt = String(summary.last_refresh_at || target?.certificate?.last_checked_at || '');
+      return checkedAt ? `${freshness} · checked ${formatDate(checkedAt)}` : `${freshness} · no check time`;
     }
 
     function appEvidenceText(target) {
@@ -795,7 +798,11 @@ let exportedDarklabProjectOverview = null;
         parts.push('not scanned');
       }
       if (target?.source_flags?.has_intel) {
-        parts.push(target?.source_flags?.has_stale_intel ? 'provider intel stale' : 'provider intel current');
+        const summary = target?.intel_summary && typeof target.intel_summary === 'object'
+          ? target.intel_summary
+          : {};
+        const freshness = String(summary.freshness || (target?.source_flags?.has_stale_intel ? 'stale' : 'unknown'));
+        parts.push(`provider intel ${freshness}`);
       } else {
         parts.push('no provider intel');
       }
@@ -914,6 +921,29 @@ let exportedDarklabProjectOverview = null;
       return button;
     }
 
+    function makeProfileButton(projectId, summary, target) {
+      if (typeof ctx.openProjectEntityInAtlas !== 'function') return null;
+      const entityId = String(target?.entity_id || target?.id || '').trim();
+      const entityType = String(target?.type || '').trim().toLowerCase();
+      const entityValue = String(target?.value || target?.canonical_value || '').trim();
+      if (!entityId || !entityType || !entityValue) return null;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-secondary btn-compact';
+      button.textContent = 'View profile';
+      button.dataset.projectOverviewProfile = entityId;
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        ctx.openProjectEntityInAtlas(projectId, summary, {
+          id: entityId,
+          type: entityType,
+          canonical_value: entityValue,
+        });
+      });
+      ctx.bindProjectRuntimePressable?.(button);
+      return button;
+    }
+
     function targetChips(target) {
       const chips = [];
       const severity = String(target?.top_finding_severity || '');
@@ -981,7 +1011,7 @@ let exportedDarklabProjectOverview = null;
       return '';
     }
 
-    function renderTargetRow(projectId, target, { mobile = false } = {}) {
+    function renderTargetRow(projectId, target, { mobile = false, summary = null } = {}) {
       const row = document.createElement('article');
       row.className = [
         'project-overview-target-row',
@@ -1044,6 +1074,8 @@ let exportedDarklabProjectOverview = null;
       actions.className = 'project-overview-target-actions';
       const hints = target?.deep_link_hints && typeof target.deep_link_hints === 'object' ? target.deep_link_hints : {};
       const portHints = hints.ports && typeof hints.ports === 'object' ? hints.ports : null;
+      const profileButton = makeProfileButton(projectId, summary, target);
+      if (profileButton) actions.appendChild(profileButton);
       actions.append(
         makeTabButton(projectId, 'Entities', 'entities', hints.entities || {}, 'ghost'),
         makeTabButton(projectId, 'Findings', 'findings', hints.findings || {}, target?.top_finding_severity ? 'secondary' : 'ghost'),
@@ -1086,7 +1118,7 @@ let exportedDarklabProjectOverview = null;
       return wrap;
     }
 
-    function renderTargetList(projectId, rows, st, { mobile = false } = {}) {
+    function renderTargetList(projectId, rows, st, { mobile = false, summary = null } = {}) {
       const wrap = document.createElement('div');
       wrap.className = 'project-overview-target-section';
       const visibleRows = filteredTargets(rows, st);
@@ -1094,7 +1126,11 @@ let exportedDarklabProjectOverview = null;
       const list = document.createElement('div');
       list.className = 'project-overview-target-list';
       const limit = Number(st?.targetsExpanded) ? visibleRows.length : TARGET_PREVIEW_LIMIT;
-      visibleRows.slice(0, limit).forEach(target => list.appendChild(renderTargetRow(projectId, target, { mobile })));
+      visibleRows.slice(0, limit).forEach(target => list.appendChild(renderTargetRow(
+        projectId,
+        target,
+        { mobile, summary },
+      )));
       if (!visibleRows.length) {
         const empty = document.createElement('div');
         empty.className = 'project-overview-target-filter-empty';
@@ -1176,7 +1212,10 @@ let exportedDarklabProjectOverview = null;
       if (!rows.length) {
         root.appendChild(ctx.emptyProjectPanel?.('No project targets yet.') || document.createTextNode('No project targets yet.'));
       } else {
-        root.appendChild(renderTargetList(normalized, rows, st, { mobile }));
+        root.appendChild(renderTargetList(normalized, rows, st, {
+          mobile,
+          summary: st.payload,
+        }));
       }
       container.replaceChildren(root);
     }

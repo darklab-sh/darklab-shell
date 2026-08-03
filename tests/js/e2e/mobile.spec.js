@@ -1497,6 +1497,7 @@ test.beforeEach(async ({ page }) => {
   })
 
   test('mobile Atlas opens list/detail flow and select mode', async ({ page }) => {
+    const longRelatedUrl = `https://darklab.sh/${'deep-path-segment/'.repeat(80)}report`
     await page.route(/https?:\/\/[^/]+\/atlas(?:\?|\/|$)/, async (route) => {
       const url = new URL(route.request().url())
       const entity = {
@@ -1533,8 +1534,60 @@ test.beforeEach(async ({ page }) => {
             entity,
             intel_snapshots: [],
             intel_summary: { status: 'none', providers_with_data: [], highlights: [] },
+            overview: {
+              observed: {
+                state: 'observed',
+                source_run_count: 1,
+                occurrence_count: 2,
+                first_seen_at: '2026-05-15T00:00:00Z',
+                last_seen_at: '2026-05-15T00:01:00Z',
+                app_ports: [],
+                app_port_count: 0,
+                app_ports_truncated: false,
+                app_services: [],
+                app_evidence: {
+                  applicable: true,
+                  coverage_state: 'scanned_no_ports_seen',
+                  scan_run_count: 1,
+                  last_observed_at: '2026-05-15T00:01:00Z',
+                  port_entity_count: 0,
+                  app_port_count: 0,
+                  app_port_run_count: 0,
+                  project_entity_port_count: 0,
+                  command_roots: ['nmap'],
+                  host_entity_id: '',
+                  scope_note: '',
+                  coverage_caveat: 'No app-captured ports were surfaced by the observed scan runs; this does not prove no ports exist.',
+                },
+              },
+            },
             runs: [{ run_id: 'run_mobile', command: 'nmap 107.178.109.44', occurrence_count: 2 }],
             findings: [],
+            parent_host: null,
+            related_urls: [{
+              id: 'ent_mobile_long_url',
+              session_id: 'mobile-session',
+              type: 'url',
+              canonical_value: longRelatedUrl,
+              host_entity_id: entity.id,
+              first_seen_at: '2026-05-15T00:00:00Z',
+              last_seen_at: '2026-05-15T00:01:00Z',
+              occurrence_count: 1,
+              created: '2026-05-15T00:00:00Z',
+            }],
+            related_ports: [],
+            finding_summary: {
+              direct: { applicable: true, total: 0, by_severity: {} },
+              related_urls: { applicable: true, total: 0, by_severity: {} },
+              related_ports: { applicable: true, total: 0, by_severity: {} },
+              combined: { applicable: true, total: 0, by_severity: {} },
+            },
+            detail_limits: {
+              runs: { limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
+              findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+              related_urls: { limit: 25, offset: 0, shown: 1, total: 1, has_more: false },
+              related_ports: { limit: 25, offset: 0, shown: 0, total: 0, has_more: false },
+            },
           }),
         })
         return
@@ -1633,6 +1686,27 @@ test.beforeEach(async ({ page }) => {
     await row.click()
     await expect(page.locator('#atlas-mobile-entity-view')).toBeVisible()
     await expect(page.locator('#atlas-mobile-entity-topbar')).toContainText('107.178.109.44')
+    await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Scan coverage')
+    await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Scanned, no ports surfaced')
+    await expect(page.locator('#atlas-mobile-entity-body')).toContainText('does not prove no ports exist')
+    const longUrlRow = page.locator('#atlas-mobile-entity-body .atlas-related-url-open')
+    await expect(longUrlRow).toContainText(longRelatedUrl)
+    const longUrlWidth = await longUrlRow.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }))
+    expect(longUrlWidth.scrollWidth).toBeLessThanOrEqual(longUrlWidth.clientWidth + 1)
+    await expect(page.locator('#atlas-mobile-entity-footer')).toContainText('View profile')
+    await page.locator('#atlas-mobile-entity-footer .atlas-mobile-view-profile').click()
+    await expect(page.locator('#atlas-mobile-entity-body .atlas-profile-tabs')).toBeVisible()
+    await expect(page.locator('#atlas-mobile-entity-body [data-atlas-profile-view="overview"]'))
+      .toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Relationships')
+    await page.locator('#atlas-mobile-entity-body [data-atlas-profile-view="evidence"]').click()
+    await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Scan coverage')
+    await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Scanned, no ports surfaced')
+    await expect(page.locator('#atlas-mobile-entity-topbar .atlas-mobile-back-btn'))
+      .toHaveAttribute('aria-label', 'Back to Atlas results')
     await page.locator('#atlas-mobile-entity-topbar .atlas-mobile-back-btn').click()
     await expect(page.locator('#atlas-mobile-list-view')).toBeVisible()
 

@@ -1476,7 +1476,7 @@ let exportedDarklabProjectEntities = null;
         projectName: project ? ctx.projectDisplayName(project) : '',
         tab: tab ? tab.id : String(entity.type || ''),
         entityValue: String(entity.canonical_value || entity.value || ''),
-        forceView: 'detail',
+        forceView: 'profile',
       });
     }
 

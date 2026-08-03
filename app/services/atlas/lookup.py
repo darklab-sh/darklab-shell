@@ -56,6 +56,18 @@ from services.atlas.lookup_search import (
     entity_metadata_search_exprs as _entity_metadata_search_exprs,
     finding_metadata_search_exprs as _finding_metadata_search_exprs,
 )
+from services.atlas.entity_profile import (
+    load_profile_finding_page,
+    load_profile_finding_summary,
+    load_profile_observed,
+    load_profile_relationships,
+    profile_intel_overview,
+    validate_profile_project,
+)
+from services.atlas.records import (
+    entity_row_to_dict as _row_to_entity,
+    finding_row_to_dict as _row_to_finding,
+)
 from services.atlas.schema import ATLAS_ENTITY_TYPES
 from services.atlas.scope import (
     entity_exists_in_scope as entity_exists_in_scope,
@@ -73,7 +85,6 @@ from services.atlas.scope import (
     run_scope_sql as _run_scope_sql,
 )
 from services.atlas.intel_summary import (
-    _load_json_dict,
     _row_to_intel_snapshot,
     _snapshot_has_intel as _snapshot_has_intel,
     summarize_intel_snapshots,
@@ -96,8 +107,6 @@ FINDING_STATUS_ORDER = {
 }
 
 ENTITY_DETAIL_RUN_LIMIT = 50
-ENTITY_DETAIL_FINDING_LIMIT = 50
-ENTITY_DETAIL_RELATED_URL_LIMIT = 25
 _T = TypeVar("_T")
 log = logging.getLogger("shell")
 
@@ -147,6 +156,10 @@ def atlas_entity_for_owner(
     team_id: str,
     runs_offset: int,
     findings_offset: int,
+    finding_bucket: str = "direct",
+    related_urls_offset: int = 0,
+    related_ports_offset: int = 0,
+    project_id: str = "",
 ) -> dict[str, Any] | None:
     return run_atlas_read(
         lambda conn: entity_detail(
@@ -156,6 +169,10 @@ def atlas_entity_for_owner(
             team_id=team_id,
             runs_offset=runs_offset,
             findings_offset=findings_offset,
+            finding_bucket=finding_bucket,
+            related_urls_offset=related_urls_offset,
+            related_ports_offset=related_ports_offset,
+            project_id=project_id,
         )
     )
 
@@ -197,24 +214,6 @@ def atlas_finding_for_owner(session_id: str, finding_id: str, *, team_id: str) -
     return run_atlas_read(lambda conn: finding_detail(conn, session_id, finding_id, team_id=team_id))
 
 
-def _row_to_entity(row) -> dict[str, Any]:
-    return {
-        "id": row["id"],
-        "session_id": row["session_id"],
-        "type": row["type"],
-        "canonical_value": row["canonical_value"],
-        "host_entity_id": (row["host_entity_id"] if "host_entity_id" in row.keys() else "") or "",
-        "attributes": _load_json_dict(row["attributes_json"] if "attributes_json" in row.keys() else "{}"),
-        "first_seen_at": row["first_seen_at"],
-        "last_seen_at": row["last_seen_at"],
-        "occurrence_count": int(row["occurrence_count"] or 0),
-        "suppressed": bool(row["suppressed"]) if "suppressed" in row.keys() else False,
-        "suppressed_reason": (row["suppressed_reason"] if "suppressed_reason" in row.keys() else "") or "",
-        "suppressed_at": (row["suppressed_at"] if "suppressed_at" in row.keys() else "") or "",
-        "created": row["created"],
-    }
-
-
 def _row_to_run_link(row) -> dict[str, Any]:
     return {
         "run_id": row["run_id"],
@@ -226,39 +225,6 @@ def _row_to_run_link(row) -> dict[str, Any]:
         "first_seen_at": row["first_seen_at"],
         "last_seen_at": row["last_seen_at"],
         "occurrence_count": int(row["occurrence_count"] or 0),
-    }
-
-
-def _row_to_finding(row) -> dict[str, Any]:
-    snippet = row["snippet"] if "snippet" in row.keys() else ""
-    raw_line = row["raw_line"] or ""
-    line_number = row["line_number"] if "line_number" in row.keys() else None
-    return {
-        "id": row["id"],
-        "entity_id": row["entity_id"] or "",
-        "entity_type": (row["entity_type"] if "entity_type" in row.keys() else "") or "",
-        "entity_value": (row["entity_value"] if "entity_value" in row.keys() else "") or "",
-        "subject_key": row["subject_key"] or "",
-        "severity": row["severity"] or "",
-        "kind": row["kind"] or "finding",
-        "tool_root": row["tool_root"] or "",
-        "first_run_id": row["first_run_id"] or "",
-        "last_run_id": row["last_run_id"] or "",
-        "run_id": row["last_run_id"] or "",
-        "run_command": row["run_command"] if "run_command" in row.keys() else "",
-        "run_kind": row["run_kind"] if "run_kind" in row.keys() else "",
-        "first_seen_at": row["first_seen_at"] or "",
-        "last_seen_at": row["last_seen_at"] or "",
-        "occurrence_count": int(row["occurrence_count"] or 0),
-        "status": row["status"] or "new",
-        "review_state": row["status"] or "new",
-        "suppressed": bool(row["suppressed"]) if "suppressed" in row.keys() else False,
-        "suppressed_reason": (row["suppressed_reason"] if "suppressed_reason" in row.keys() else "") or "",
-        "suppressed_at": (row["suppressed_at"] if "suppressed_at" in row.keys() else "") or "",
-        "title": row["title"] or "",
-        "raw_line": snippet or raw_line,
-        "line_number": line_number,
-        "created": row["created"] or "",
     }
 
 
@@ -843,6 +809,10 @@ def entity_detail(
     team_id: str = "",
     runs_offset: int = 0,
     findings_offset: int = 0,
+    finding_bucket: str = "direct",
+    related_urls_offset: int = 0,
+    related_ports_offset: int = 0,
+    project_id: str = "",
 ) -> dict[str, Any] | None:
     safe_runs_offset = max(0, int(runs_offset or 0))
     safe_findings_offset = max(0, int(findings_offset or 0))
@@ -850,8 +820,6 @@ def entity_detail(
     entity_scope_params = _entity_scope_params(session_id, team_id)
     run_scope_sql = _run_scope_sql("r", team_id)
     run_scope_params = _run_scope_params(session_id, team_id)
-    finding_scope_sql = _finding_source_scope_sql("f", team_id)
-    finding_scope_params = _finding_source_scope_params(session_id, team_id)
     row = conn.execute(
         "SELECT e.id, e.session_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
         "e.first_seen_at, e.last_seen_at, "
@@ -862,50 +830,47 @@ def entity_detail(
     if not row:
         return None
     entity = _row_to_entity(row)
+    normalized_project_id = str(project_id or "").strip()
+    if not validate_profile_project(
+        conn,
+        session_id,
+        entity_id,
+        team_id=team_id,
+        project_id=normalized_project_id,
+    ):
+        return None
     metadata = _metadata_for_entity(conn, session_id, entity["id"], team_id=team_id)
     entity.update(metadata)
+    run_project_sql = (
+        " AND EXISTS (SELECT 1 FROM project_links profile_run_link "
+        "WHERE profile_run_link.project_id = ? AND profile_run_link.entity_type = 'run' "
+        "AND profile_run_link.entity_id = r.id)"
+        if normalized_project_id
+        else ""
+    )
+    run_project_params = [normalized_project_id] if normalized_project_id else []
     run_total_row = conn.execute(
         "SELECT COUNT(*) AS count FROM entity_run_links erl JOIN runs r ON r.id = erl.run_id "
-        "WHERE erl.entity_id = ? AND " + run_scope_sql,  # nosec
-        [entity_id, *run_scope_params],
-    ).fetchone()
-    finding_total_row = conn.execute(
-        "SELECT COUNT(*) AS count FROM findings f WHERE " + finding_scope_sql + " AND entity_id = ? "  # nosec
-        "AND COALESCE(suppressed, FALSE) = FALSE",
-        [*finding_scope_params, entity_id],
+        "WHERE erl.entity_id = ? AND " + run_scope_sql + run_project_sql,  # nosec
+        [entity_id, *run_scope_params, *run_project_params],
     ).fetchone()
     run_total = int(run_total_row["count"] or 0) if run_total_row else 0
-    finding_total = int(finding_total_row["count"] or 0) if finding_total_row else 0
-    related_url_total = 0
-    related_url_rows = []
-    if entity["type"] in {"domain", "ip"}:
-        related_url_scope_sql = _entity_scope_sql("url_e", team_id)
-        related_url_scope_params = _entity_scope_params(session_id, team_id)
-        related_url_total_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM entities url_e "
-            "WHERE " + related_url_scope_sql + " AND url_e.type = 'url' AND url_e.host_entity_id = ? "  # nosec
-            "AND COALESCE(url_e.suppressed, FALSE) = FALSE",
-            [*related_url_scope_params, entity_id],
-        ).fetchone()
-        related_url_total = int(related_url_total_row["count"] or 0) if related_url_total_row else 0
-        related_url_rows = conn.execute(
-            "SELECT url_e.id, url_e.session_id, url_e.type, url_e.canonical_value, url_e.host_entity_id, "
-            "url_e.attributes_json, url_e.first_seen_at, url_e.last_seen_at, url_e.occurrence_count, "
-            "url_e.suppressed, url_e.suppressed_reason, url_e.suppressed_at, url_e.created "
-            "FROM entities url_e WHERE " + related_url_scope_sql + " "  # nosec
-            "AND url_e.type = 'url' AND url_e.host_entity_id = ? "
-            "AND COALESCE(url_e.suppressed, FALSE) = FALSE "
-            "ORDER BY url_e.last_seen_at DESC, url_e.occurrence_count DESC, url_e.canonical_value ASC "
-            "LIMIT ?",
-            [*related_url_scope_params, entity_id, ENTITY_DETAIL_RELATED_URL_LIMIT],
-        ).fetchall()
+    profile_relationships = load_profile_relationships(
+        conn,
+        session_id,
+        entity,
+        team_id=team_id,
+        project_id=normalized_project_id,
+        related_urls_offset=related_urls_offset,
+        related_ports_offset=related_ports_offset,
+    )
     run_rows = conn.execute(
         "SELECT erl.run_id, r.command, r.run_kind, r.started, r.finished, r.exit_code, "
         "erl.first_seen_at, erl.last_seen_at, erl.occurrence_count "
         "FROM entity_run_links erl JOIN runs r ON r.id = erl.run_id "
-        "WHERE erl.entity_id = ? AND " + run_scope_sql + " "  # nosec
+        "WHERE erl.entity_id = ? AND " + run_scope_sql + run_project_sql + " "  # nosec
         "ORDER BY erl.last_seen_at DESC, r.started DESC LIMIT ? OFFSET ?",
-        [entity_id, *run_scope_params, ENTITY_DETAIL_RUN_LIMIT, safe_runs_offset],
+        [entity_id, *run_scope_params, *run_project_params, ENTITY_DETAIL_RUN_LIMIT, safe_runs_offset],
     ).fetchall()
     snapshot_rows = conn.execute(
         "SELECT id, provider, status, summary, data_json, fetched_at, expires_at "
@@ -913,17 +878,16 @@ def entity_detail(
         "ORDER BY fetched_at DESC, provider ASC",
         (metadata_owner_id(session_id, team_id), entity_id),
     ).fetchall()
-    finding_rows = conn.execute(
-        "SELECT id, entity_id, subject_key, severity, kind, tool_root, first_run_id, last_run_id, "
-        "first_seen_at, last_seen_at, occurrence_count, status, suppressed, suppressed_reason, suppressed_at, "
-        "title, raw_line, created "
-        "FROM findings f WHERE " + finding_scope_sql + " AND entity_id = ? "  # nosec
-        "AND COALESCE(suppressed, FALSE) = FALSE "
-        "ORDER BY last_seen_at DESC, created DESC LIMIT ? OFFSET ?",
-        [*finding_scope_params, entity_id, ENTITY_DETAIL_FINDING_LIMIT, safe_findings_offset],
-    ).fetchall()
+    findings, finding_limit = load_profile_finding_page(
+        conn,
+        session_id,
+        entity,
+        bucket=finding_bucket,
+        team_id=team_id,
+        project_id=normalized_project_id,
+        offset=safe_findings_offset,
+    )
     intel_snapshots = [_row_to_intel_snapshot(snapshot) for snapshot in snapshot_rows]
-    findings = [_row_to_finding(finding) for finding in finding_rows]
     sources_by_finding = _finding_import_sources_by_id(
         conn,
         session_id,
@@ -932,31 +896,45 @@ def entity_detail(
     )
     for finding in findings:
         finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
-    related_urls = [_row_to_entity(related_url) for related_url in related_url_rows]
-    related_metadata = _list_metadata_for_entities(
+    finding_summary = load_profile_finding_summary(
         conn,
         session_id,
-        [str(related_url["id"]) for related_url in related_urls],
+        entity,
+        team_id=team_id,
+        project_id=normalized_project_id,
+    )
+    intel_summary = summarize_intel_snapshots(entity["type"], intel_snapshots)
+    observed = load_profile_observed(
+        conn,
+        session_id,
+        entity,
+        profile_relationships,
+        source_run_count=run_total,
         team_id=team_id,
     )
-    for related_url in related_urls:
-        related_url.update(related_metadata.get(str(related_url["id"]), {}))
+    normalized_intel = profile_intel_overview(entity, intel_snapshots, intel_summary, observed)
+    overview = {
+        "observed": observed,
+        "finding_summary": finding_summary,
+        "relationships": profile_relationships["relationship_summary"],
+        "intel": normalized_intel,
+    }
     return {
         "entity": entity,
+        "overview": overview,
         "runs": [_row_to_run_link(run) for run in run_rows],
         "import_sources": _entity_import_sources(conn, session_id, entity_id, team_id=team_id),
-        "related_urls": related_urls,
+        "scope": profile_relationships["scope"],
+        "parent_host": profile_relationships["parent_host"],
+        "related_urls": profile_relationships["related_urls"],
+        "related_ports": profile_relationships["related_ports"],
+        "relationship_summary": profile_relationships["relationship_summary"],
+        "finding_summary": finding_summary,
         "intel_snapshots": intel_snapshots,
-        "intel_summary": summarize_intel_snapshots(entity["type"], intel_snapshots),
+        "intel_summary": intel_summary,
         "findings": findings,
         "detail_limits": {
-            "related_urls": {
-                "limit": ENTITY_DETAIL_RELATED_URL_LIMIT,
-                "offset": 0,
-                "shown": len(related_urls),
-                "total": related_url_total,
-                "has_more": len(related_urls) < related_url_total,
-            },
+            **profile_relationships["detail_limits"],
             "runs": {
                 "limit": ENTITY_DETAIL_RUN_LIMIT,
                 "offset": safe_runs_offset,
@@ -965,11 +943,7 @@ def entity_detail(
                 "has_more": safe_runs_offset + len(run_rows) < run_total,
             },
             "findings": {
-                "limit": ENTITY_DETAIL_FINDING_LIMIT,
-                "offset": safe_findings_offset,
-                "shown": len(finding_rows),
-                "total": finding_total,
-                "has_more": safe_findings_offset + len(finding_rows) < finding_total,
+                **finding_limit,
             },
         },
     }
