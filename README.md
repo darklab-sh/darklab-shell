@@ -75,7 +75,7 @@ After changing one of these settings, run `docker compose up -d --force-recreate
 | --- | --- |
 | [Browser shell](FEATURES.md#output-streaming-and-display) | Live, searchable output across desktop and mobile tabs. |
 | [History and sharing](FEATURES.md#tabs--run-history) | Saved runs, comparisons, exports, permalinks, and redaction. |
-| [Projects and Atlas](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, and entities. |
+| [Projects, Atlas, and Quick Lookup](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, and a fast view of everything saved for one hostname, IP address, or URL. |
 | [Workflows and automation](FEATURES.md#guided-workflows) | Guided playbooks, schedules, watchers, and outbound notifications. |
 | [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context from supported providers. |
 | [Files, variables, and secrets](FEATURES.md#session-files) | A searchable personal or team file browser, terminal capture/copy helpers, reusable values, and encrypted tool credentials. |

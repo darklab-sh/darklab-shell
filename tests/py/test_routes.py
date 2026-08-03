@@ -531,6 +531,20 @@ class TestIndexRoute:
         assert rail_match and "u-hidden" not in rail_match.group(1)
         assert mobile_match and "u-hidden" not in mobile_match.group(1)
 
+    def test_quick_lookup_navigation_sits_beside_atlas(self):
+        body = get_client().get("/").get_data(as_text=True)
+
+        rail_atlas = body.index('data-action="atlas"')
+        rail_lookup = body.index('data-action="quick-lookup"')
+        rail_projects = body.index('data-action="projects"')
+        mobile_atlas = body.index('data-menu-action="atlas"')
+        mobile_lookup = body.index('data-menu-action="quick-lookup"')
+        mobile_projects = body.index('data-menu-action="projects"')
+
+        assert rail_atlas < rail_lookup < rail_projects
+        assert mobile_atlas < mobile_lookup < mobile_projects
+        assert "Quick Lookup saved Atlas entities (Alt+Q)" in body
+
     def test_bootstrapped_app_config_matches_config_route(self):
         client = get_client(use_forwarded_for=False)
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
@@ -15023,6 +15037,7 @@ class TestShortcutsRoute:
         data = json.loads(client.get("/shortcuts").data)
         keys = [item["key"] for section in data["sections"] for item in section["items"]]
         assert "Alt+T" in keys
+        assert "Alt+Q" in keys
         assert "Alt+C" in keys
         assert "Alt+P" in keys
         assert "Alt+Shift+P" in keys

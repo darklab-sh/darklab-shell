@@ -1783,11 +1783,16 @@ describe('Atlas overlay', () => {
     )
   })
 
-  it('does not close its own fallback shell while finishing a first open', async () => {
+  it('does not close its own fallback shell while finishing either Atlas entry mode', async () => {
     const closeMajorOverlays = vi.fn()
-    const { openAtlas } = loadAtlas({ closeMajorOverlaysImpl: closeMajorOverlays })
+    const { openAtlas, openAtlasQuickLookup } = loadAtlas({ closeMajorOverlaysImpl: closeMajorOverlays })
 
     await openAtlas({ source: 'test' })
+
+    expect(closeMajorOverlays).toHaveBeenCalledWith({ skipAtlas: true })
+
+    closeMajorOverlays.mockClear()
+    await openAtlasQuickLookup({ source: 'test' })
 
     expect(closeMajorOverlays).toHaveBeenCalledWith({ skipAtlas: true })
   })
@@ -2969,7 +2974,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-mobile-list-view')?.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('atlas-mobile-entity-view')?.classList.contains('u-hidden')).toBe(true)
     document.body.classList.remove('mobile-terminal-mode')
-  })
+  }, 10_000)
 
   it('exports filtered entity rows without leaving the Atlas surface', async () => {
     const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()

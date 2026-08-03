@@ -110,6 +110,7 @@ function loadShellChrome({
   appConfig = { workspace_enabled: true },
   fetchAndRenderHistoryComparison = vi.fn(),
   openAtlas = vi.fn(() => Promise.resolve()),
+  openAtlasQuickLookup = vi.fn(() => Promise.resolve()),
   bindDismissible = null,
   bindMobileSheet = null,
   bindOutsideClickClose = () => {},
@@ -148,6 +149,8 @@ function loadShellChrome({
         </section>
       </div>
       <nav id="rail-nav">
+        <button class="rail-nav-item nav-item" data-action="atlas" type="button"></button>
+        <button class="rail-nav-item nav-item" data-action="quick-lookup" type="button"></button>
         <button id="rail-more-btn" class="rail-nav-item nav-item" data-action="rail-more" type="button" aria-expanded="false" aria-controls="rail-more-menu"></button>
         <div id="rail-more-menu" class="u-hidden">
           <button class="rail-nav-item nav-item" data-action="status-monitor" type="button"></button>
@@ -305,13 +308,13 @@ function loadShellChrome({
     toggleRailCollapsed: null,
     openStatusMonitor,
     openAtlas,
+    openAtlasQuickLookup,
     openHistoryRunDetails,
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
     showToast,
     fetchAndRenderHistoryComparison,
-    openAtlas,
     bindDismissible,
     bindMobileSheet,
     enhanceAppSelects,
@@ -617,6 +620,7 @@ function loadShellChrome({
     projectFindingsData: global.DarklabProjectFindingsData,
     openFindingsBoard: global.openFindingsBoard,
     openAtlas,
+    openAtlasQuickLookup,
     closeProjectWorkspace: global.closeProjectWorkspace,
     openProjectWorkspace: global.openProjectWorkspace,
     openProjectWorkspaceById: global.openProjectWorkspaceById,
@@ -634,7 +638,8 @@ describe('shell chrome rail sections', () => {
       "loadFindingsBoard as importedLoadFindingsBoard",
       "loadSchedulesModal as importedLoadSchedulesModal",
       "loadWatchersModal as importedLoadWatchersModal",
-      "import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js'",
+      "openAtlas as importedOpenAtlas",
+      "openAtlasQuickLookup as importedOpenAtlasQuickLookup",
       "import { openCommandRegistry as importedOpenCommandRegistry } from './features/command-registry/command_registry_bridge.js'",
     ].forEach((snippet) => {
       expect(SHELL_CHROME_RAW_SRC).toContain(snippet)
@@ -651,8 +656,10 @@ describe('shell chrome rail sections', () => {
       .toContain('openFindingsBoard: _shellOpenFindingsBoard')
   })
 
-  it('opens Status Monitor and Findings Board from the desktop rail nav item', async () => {
+  it('opens Atlas surfaces, Status Monitor, and Findings Board from desktop rail items', async () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
+    const openAtlas = vi.fn(() => Promise.resolve(true))
+    const openAtlasQuickLookup = vi.fn(() => Promise.resolve(true))
     const apiFetch = vi.fn((url, options = {}) => {
       if (String(url).startsWith('/atlas/findings')) {
         return Promise.resolve({
@@ -687,7 +694,13 @@ describe('shell chrome rail sections', () => {
         }),
       }
     })
-    const shell = loadShellChrome({ apiFetch, openStatusMonitor, bindDismissible })
+    const shell = loadShellChrome({
+      apiFetch,
+      openStatusMonitor,
+      openAtlas,
+      openAtlasQuickLookup,
+      bindDismissible,
+    })
     const nav = document.getElementById('rail-nav')
     const rail = document.getElementById('rail')
     const trigger = document.getElementById('rail-more-btn')
@@ -715,6 +728,11 @@ describe('shell chrome rail sections', () => {
 
     expect(shell.openStatusMonitor).toHaveBeenCalledWith({ source: 'rail' })
     expect(nav.querySelector('#rail-more-menu').classList.contains('u-hidden')).toBe(true)
+
+    nav.querySelector('[data-action="atlas"]').click()
+    nav.querySelector('[data-action="quick-lookup"]').click()
+    expect(openAtlas).toHaveBeenCalledWith({ source: 'rail' })
+    expect(openAtlasQuickLookup).toHaveBeenCalledWith({ source: 'rail' })
 
     trigger.click()
     nav.querySelector('[data-action="findings-board"]').click()

@@ -24,7 +24,10 @@ import {
   loadSchedulesModal as importedLoadSchedulesModal,
   loadWatchersModal as importedLoadWatchersModal,
 } from './core/lazy_assets.js';
-import { openAtlas as importedOpenAtlas } from './features/atlas/atlas_bridge.js';
+import {
+  openAtlas as importedOpenAtlas,
+  openAtlasQuickLookup as importedOpenAtlasQuickLookup,
+} from './features/atlas/atlas_bridge.js';
 import { openCommandRegistry as importedOpenCommandRegistry } from './features/command-registry/command_registry_bridge.js';
 import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './features/history/history_recall.js';
 import { openHistoryRunDetails as importedOpenHistoryRunDetails } from './features/history/history_run_modal_state_bridge.js';
@@ -182,10 +185,16 @@ let importedProjectWorkspaceShell;
     return typeof open === 'function' ? open(...args) : undefined;
   }
 
+  async function _shellOpenAtlasQuickLookup(...args) {
+    const open = _shellFn('openAtlasQuickLookup', importedOpenAtlasQuickLookup);
+    return typeof open === 'function' ? open(...args) : undefined;
+  }
+
   function _reportSurfaceOpenFailure(surface, err, { source = '' } = {}) {
     const normalized = String(surface || '').toLowerCase();
-    const label = normalized === 'atlas' ? 'Atlas' : 'Projects';
-    const event = normalized === 'atlas' ? 'ATLAS_OPEN_FAILED' : 'PROJECT_WORKSPACE_OPEN_FAILED';
+    const isAtlasSurface = normalized === 'atlas' || normalized === 'atlas-lookup';
+    const label = normalized === 'atlas-lookup' ? 'Quick Lookup' : (isAtlasSurface ? 'Atlas' : 'Projects');
+    const event = isAtlasSurface ? 'ATLAS_OPEN_FAILED' : 'PROJECT_WORKSPACE_OPEN_FAILED';
     _shellLogClientError(`failed to open ${label}`, err, {
       event,
       level: 'error',
@@ -197,6 +206,11 @@ let importedProjectWorkspaceShell;
   function _openAtlasFromSurface(source = '') {
     void _shellOpenAtlas({ source })
       .catch((err) => _reportSurfaceOpenFailure('atlas', err, { source }));
+  }
+
+  function _openAtlasQuickLookupFromSurface(source = '') {
+    void _shellOpenAtlasQuickLookup({ source })
+      .catch((err) => _reportSurfaceOpenFailure('atlas-lookup', err, { source }));
   }
 
   function _openProjectWorkspaceFromSurface(source = '') {
@@ -929,6 +943,10 @@ let importedProjectWorkspaceShell;
     const openStatusMonitor = _shellFn('openStatusMonitor', importedOpenStatusMonitor);
     if (action === 'atlas') {
       _openAtlasFromSurface('rail');
+      return;
+    }
+    if (action === 'quick-lookup') {
+      _openAtlasQuickLookupFromSurface('rail');
       return;
     }
     if (action === 'findings-board') {

@@ -631,6 +631,7 @@ test.beforeEach(async ({ page }) => {
       'workflows',
       'scope',
       'atlas',
+      'quick-lookup',
       'projects',
       'history',
       'workspace',

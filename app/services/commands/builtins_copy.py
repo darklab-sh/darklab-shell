@@ -53,6 +53,7 @@ _CURRENT_SHORTCUTS = [
         [
             ({"mac": "Option+\\", "other": "Alt+\\"}, "toggle the desktop sidebar (rail) open / collapsed"),
             ({"mac": "Option+A", "other": "Alt+A"}, "open or close the Atlas"),
+            ({"mac": "Option+Q", "other": "Alt+Q"}, "open Atlas Quick Lookup"),
             ({"mac": "Option+C", "other": "Alt+C"}, "open or close the command registry"),
             ({"mac": "Option+P", "other": "Alt+P"}, "open or close the Projects modal"),
             ({"mac": "Option+M", "other": "Alt+M"}, "open or close the Status Monitor"),

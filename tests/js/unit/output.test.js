@@ -708,6 +708,14 @@ describe('appendLine', () => {
     const items = Array.from(menu?.querySelectorAll('[data-output-entity-action]') || [])
     expect(menu).not.toBeNull()
     expect(items).toHaveLength(6)
+    expect(items.map(item => [item.textContent, item.dataset.outputEntityAction])).toEqual([
+      ['Open in Atlas', 'open-atlas'],
+      ['Edit labels/notes', 'edit-metadata'],
+      ['Add to active project', 'promote'],
+      ['Refresh intel', 'lookup-intel'],
+      ['Copy value', 'copy-value'],
+      ['See in run', 'see-run'],
+    ])
     expect(document.activeElement?.dataset.outputEntityAction).toBe('open-atlas')
 
     items[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))

@@ -108,7 +108,7 @@ Add a global Quick Lookup entry point for hostnames, IP addresses, and HTTP(S) U
 
 #### Phase 4 — Add shell and mobile entry points
 
-- [ ] Make Quick Lookup easy to reach without confusing it with transcript search:
+- [x] Make Quick Lookup easy to reach without confusing it with transcript search:
   - Add a primary desktop rail action beside **Atlas** in `app/templates/index.html` and route it through the shared shell action helpers in `app/static/js/shell_chrome.js`.
   - Add a matching application-navigation item beside Atlas in the mobile menu and handle it in `app/static/js/features/mobile/mobile_menu_actions.js`. Desktop and mobile triggers must call the same lazy Atlas lookup API.
   - Do not place the action in the current-output search toolbar; that search is scoped to terminal transcript text, while Quick Lookup is a database-wide entity action.
