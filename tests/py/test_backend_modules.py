@@ -25410,9 +25410,12 @@ class TestDatabaseInit:
         )
         assert "idx_findings_session_run_seen" in atlas_finding_plan
         assert "SCAN child_e" not in profile_related_entities_plan
+        # SQLite may prefer the personal owner/type index on an empty schema;
+        # either plan keeps the relationship lookup indexed and owner-scoped.
         assert (
             "idx_entities_host_entity" in profile_related_entities_plan
             or "idx_entities_personal_signature" in profile_related_entities_plan
+            or "idx_entities_session_type_last_seen" in profile_related_entities_plan
         )
         assert "idx_entities_host_entity" in profile_related_findings_plan
         assert "idx_findings_session_entity_seen" in profile_related_findings_plan

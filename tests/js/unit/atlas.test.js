@@ -2478,8 +2478,8 @@ describe('Atlas overlay', () => {
     })
   })
 
-  it('exports filtered entity rows without leaving the Atlas surface', async () => {
-    const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()
+  it('renders app-first port details across desktop and mobile profiles', async () => {
+    const { openAtlas } = loadAtlas()
 
     await openAtlas({
       source: 'project-workspace',
@@ -2520,16 +2520,6 @@ describe('Atlas overlay', () => {
       .toContain('No cached provider data for port entities. Open the parent host to review provider data.')
     expect(document.querySelector('#atlas-detail .atlas-open-intel-parent')?.textContent).toBe('Open parent host')
     expect(document.querySelector('#atlas-detail .atlas-detail-actions')?.textContent).not.toContain('Refresh intel')
-    document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.click()
-    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.position).toBe('')
-    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.left).not.toBe('')
-    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.top).not.toBe('')
-    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.getAttribute('aria-expanded')).toBe('true')
-    document.getElementById('atlas-detail')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await Promise.resolve()
-    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.getAttribute('aria-expanded')).toBe('false')
-    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu')?.classList.contains('open')).toBe(false)
-    expect(apiFetch.mock.calls.some(([url]) => String(url).includes('/refresh_intel'))).toBe(false)
 
     document.body.classList.add('mobile-terminal-mode')
     await openAtlas({
@@ -2575,6 +2565,51 @@ describe('Atlas overlay', () => {
     document.querySelector('#atlas-mobile-entity-topbar .atlas-mobile-back-btn')?.click()
     expect(document.getElementById('atlas-mobile-list-view')?.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('atlas-mobile-entity-view')?.classList.contains('u-hidden')).toBe(true)
+    document.body.classList.remove('mobile-terminal-mode')
+  })
+
+  it('exports filtered entity rows without leaving the Atlas surface', async () => {
+    const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()
+
+    await openAtlas({
+      source: 'project-workspace',
+      projectId: 'prj_1',
+      projectName: 'Case Alpha',
+      tab: 'port',
+      forceView: 'detail',
+    })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-detail')?.textContent).toContain('example.com:443/tcp')
+    })
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Prototcp')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Servicehttps')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Versionnginx')
+    expect(document.querySelector('#atlas-detail .atlas-detail-actions')?.textContent).not.toContain('Refresh intel')
+    document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.click()
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.position).toBe('')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.left).not.toBe('')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.style.top).not.toBe('')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.getAttribute('aria-expanded')).toBe('true')
+    document.getElementById('atlas-detail')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu')?.classList.contains('open')).toBe(false)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).includes('/refresh_intel'))).toBe(false)
+
+    document.body.classList.add('mobile-terminal-mode')
+    await openAtlas({
+      source: 'project-workspace',
+      projectId: 'prj_1',
+      projectName: 'Case Alpha',
+      tab: 'port',
+      forceView: 'detail',
+    })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('example.com:443/tcp')
+    })
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('Servicehttps')
+    expect(document.getElementById('atlas-mobile-entity-body')?.textContent).toContain('Versionnginx')
+    expect(document.getElementById('atlas-mobile-entity-footer')?.textContent).not.toContain('Refresh intel')
     document.body.classList.remove('mobile-terminal-mode')
 
     const search = document.getElementById('atlas-search')
