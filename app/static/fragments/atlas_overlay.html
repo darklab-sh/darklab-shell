@@ -46,10 +46,14 @@
         </form>
       </div>
       <div id="atlas-lookup-outcome-view" class="atlas-lookup-outcome-view u-hidden">
-        <div class="atlas-lookup-empty-card">
+        <div class="atlas-lookup-empty-card" aria-live="polite">
           <span class="atlas-title" id="atlas-lookup-outcome-title">No saved Atlas entity</span>
           <p id="atlas-lookup-outcome-body"></p>
-          <button id="atlas-lookup-outcome-new" class="btn btn-primary" type="button">New lookup</button>
+          <div id="atlas-lookup-outcome-context" class="atlas-lookup-outcome-context u-hidden"></div>
+          <div id="atlas-lookup-outcome-candidates" class="atlas-lookup-candidates u-hidden"></div>
+          <div id="atlas-lookup-outcome-actions" class="atlas-lookup-outcome-actions">
+            <button id="atlas-lookup-outcome-new" class="btn btn-primary" type="button">New lookup</button>
+          </div>
         </div>
       </div>
       <div id="atlas-lookup-profile-view" class="atlas-lookup-profile-view u-hidden">

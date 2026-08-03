@@ -186,7 +186,11 @@ function setupAtlasDom() {
           <div id="atlas-lookup-outcome-view" class="u-hidden">
             <span id="atlas-lookup-outcome-title"></span>
             <p id="atlas-lookup-outcome-body"></p>
-            <button id="atlas-lookup-outcome-new" type="button">new lookup</button>
+            <div id="atlas-lookup-outcome-context" class="u-hidden"></div>
+            <div id="atlas-lookup-outcome-candidates" class="u-hidden"></div>
+            <div id="atlas-lookup-outcome-actions">
+              <button id="atlas-lookup-outcome-new" type="button">new lookup</button>
+            </div>
           </div>
           <div id="atlas-lookup-profile-view" class="u-hidden">
             <button id="atlas-lookup-profile-new" type="button">new lookup</button>
@@ -322,6 +326,11 @@ function loadAtlas({
   const syncAppSelect = vi.fn()
   const enhanceAppSelects = vi.fn()
   const downloadBlobAsAttachment = vi.fn()
+  const copyTextToClipboard = vi.fn(() => Promise.resolve(true))
+  const setComposerValue = vi.fn((value) => {
+    const input = document.getElementById('cmd')
+    if (input) input.value = String(value || '')
+  })
   const storage = new MemoryStorage()
   const projectEvents = []
   const apiFetch = apiFetchImpl || vi.fn((url, options = {}) => {
@@ -881,6 +890,8 @@ function loadAtlas({
           return true
         },
         refocusComposerAfterAction: vi.fn(),
+        setComposerValue,
+        copyTextToClipboard,
         openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
         openProjectWorkspaceById: openProjectWorkspaceByIdImpl,
         closeMajorOverlays: closeMajorOverlaysImpl,
@@ -914,6 +925,8 @@ function loadAtlas({
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
+        window.setComposerValue = setComposerValue;
+        window.copyTextToClipboard = copyTextToClipboard;
         window.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
         window.openProjectWorkspaceById = openProjectWorkspaceById;
         window.downloadBlobAsAttachment = downloadBlobAsAttachment;
@@ -942,6 +955,8 @@ function loadAtlas({
     syncAppSelect,
     enhanceAppSelects,
     downloadBlobAsAttachment,
+    copyTextToClipboard,
+    setComposerValue,
     projectEvents,
     storage,
   }
@@ -1056,6 +1071,244 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-search')?.value).toBe(ENTITY.canonical_value)
     expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/atlas?'))).toBe(true)
     expect(apiFetch.mock.calls.some(([url]) => String(url).includes('project_id=prj_1'))).toBe(true)
+  })
+
+  it('explains a missing saved entity and offers only explicit next steps', async () => {
+    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        return Promise.resolve(jsonResponse({
+          requested_type: 'hostname',
+          detected_type: 'domain',
+          canonical_value: 'missing.example',
+          project_id: '',
+          match_state: 'not_found',
+          detail: null,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: 'missing.example', mode: 'hostname', submit: true })
+
+    expect(document.getElementById('atlas-lookup-outcome-title')?.textContent).toBe('No saved Atlas entity')
+    expect(document.getElementById('atlas-lookup-outcome-body')?.textContent).toContain('does not mean the value itself is invalid')
+    expect(document.getElementById('atlas-lookup-outcome-context')?.textContent).toContain('missing.example')
+    expect(document.getElementById('atlas-lookup-outcome-actions')?.textContent).toContain('Open in Atlas')
+    expect(document.getElementById('atlas-lookup-outcome-actions')?.textContent).toContain('Switch scope')
+    expect(document.getElementById('atlas-lookup-outcome-actions')?.textContent).toContain('Prefill nmap scan')
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/runs'))).toBe(false)
+
+    Array.from(document.querySelectorAll('#atlas-lookup-outcome-actions button'))
+      .find(button => button.textContent === 'Prefill nmap scan')
+      ?.click()
+    expect(document.getElementById('cmd')?.value).toBe("nmap -sV 'missing.example'")
+    expect(document.getElementById('atlas-overlay')?.classList.contains('u-hidden')).toBe(true)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/runs'))).toBe(false)
+  })
+
+  it('requires an explicit bounded choice for an ambiguous saved entity', async () => {
+    const {
+      openAtlasQuickLookup,
+      apiFetch,
+      copyTextToClipboard,
+      showToast,
+    } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        return Promise.resolve(jsonResponse({
+          requested_type: 'ip',
+          detected_type: 'ip',
+          canonical_value: ENTITY.canonical_value,
+          project_id: '',
+          match_state: 'ambiguous',
+          detail: null,
+          candidates: [{
+            entity_id: ENTITY.id,
+            type: 'ip',
+            canonical_value: ENTITY.canonical_value,
+            provenance: 'compatibility_visible',
+            first_seen_at: ENTITY.first_seen_at,
+            last_seen_at: ENTITY.last_seen_at,
+            occurrence_count: 2,
+            suppressed: true,
+          }],
+          candidates_truncated: true,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'ip', submit: true })
+
+    expect(document.getElementById('atlas-lookup-outcome-title')?.textContent)
+      .toBe('More than one saved entity matched')
+    expect(document.getElementById('atlas-lookup-outcome-candidates')?.textContent)
+      .toContain('Compatibility-visible record')
+    expect(document.getElementById('atlas-lookup-outcome-candidates')?.textContent).toContain('Suppressed')
+    expect(document.getElementById('atlas-lookup-outcome-candidates')?.textContent)
+      .toContain('Only the first bounded set of matches is shown')
+    expect(document.getElementById('atlas-lookup-profile-view')?.classList.contains('u-hidden')).toBe(true)
+
+    document.querySelector('#atlas-lookup-outcome-candidates .atlas-lookup-candidate')?.click()
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain(ENTITY.canonical_value)
+    })
+    expect(apiFetch).toHaveBeenCalledWith(
+      `/atlas/entities/${ENTITY.id}`,
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain('Copy value')
+    expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain('First seen')
+    expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain('1 project link')
+    expect(apiFetch.mock.calls.some(([url]) => String(url).includes('/refresh_intel'))).toBe(false)
+
+    const profileActions = Array.from(document.querySelectorAll(
+      '#atlas-lookup-profile .atlas-detail-actions button',
+    ))
+    profileActions.find(button => button.textContent === 'Copy value')?.click()
+    await vi.waitFor(() => {
+      expect(copyTextToClipboard).toHaveBeenCalledWith(ENTITY.canonical_value)
+    })
+    expect(showToast).toHaveBeenCalledWith('Entity copied', 'success')
+
+    profileActions.find(button => button.textContent === 'Refresh intel')?.click()
+    await vi.waitFor(() => {
+      expect(apiFetch.mock.calls.some(([url, options]) => (
+        String(url) === `/atlas/entities/${ENTITY.id}/refresh_intel`
+          && options?.method === 'POST'
+      ))).toBe(true)
+    })
+  })
+
+  it('keeps New lookup at the form when an ambiguous candidate load becomes stale', async () => {
+    const detailLoad = deferred()
+    let detailSignal = null
+    const { openAtlasQuickLookup } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) === '/atlas/lookup') {
+          return Promise.resolve(jsonResponse({
+            requested_type: 'ip',
+            detected_type: 'ip',
+            canonical_value: ENTITY.canonical_value,
+            project_id: '',
+            match_state: 'ambiguous',
+            detail: null,
+            candidates: [{
+              entity_id: ENTITY.id,
+              type: 'ip',
+              canonical_value: ENTITY.canonical_value,
+              provenance: 'personal',
+            }],
+            candidates_truncated: false,
+            parent_host_candidate: null,
+          }))
+        }
+        if (String(url) === `/atlas/entities/${ENTITY.id}`) {
+          detailSignal = options.signal
+          return detailLoad.promise
+        }
+        return null
+      },
+    })
+
+    await openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'ip', submit: true })
+    document.querySelector('#atlas-lookup-outcome-candidates .atlas-lookup-candidate')?.click()
+    await vi.waitFor(() => expect(detailSignal).not.toBeNull())
+    document.getElementById('atlas-lookup-outcome-new')?.click()
+
+    expect(detailSignal?.aborted).toBe(true)
+    detailLoad.resolve(jsonResponse(lookupDetail()))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(document.getElementById('atlas-lookup-form-view')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('atlas-lookup-profile-view')?.classList.contains('u-hidden')).toBe(true)
+  })
+
+  it('keeps an unmatched URL visible while opening its known parent host', async () => {
+    const requestedUrl = 'https://107.178.109.44/admin?next=%2F'
+    const { openAtlasQuickLookup } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        return Promise.resolve(jsonResponse({
+          requested_type: 'url',
+          detected_type: 'url',
+          canonical_value: requestedUrl,
+          project_id: '',
+          match_state: 'not_found',
+          detail: null,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: {
+            detected_type: 'ip',
+            canonical_value: ENTITY.canonical_value,
+            match_state: 'found',
+            entity: {
+              entity_id: ENTITY.id,
+              type: 'ip',
+              canonical_value: ENTITY.canonical_value,
+              provenance: 'personal',
+              first_seen_at: ENTITY.first_seen_at,
+              last_seen_at: ENTITY.last_seen_at,
+              occurrence_count: 2,
+              suppressed: false,
+            },
+            candidates: [],
+            candidates_truncated: false,
+          },
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: requestedUrl, mode: 'url', submit: true })
+
+    expect(document.getElementById('atlas-lookup-outcome-title')?.textContent)
+      .toBe('No saved record for this URL')
+    expect(document.getElementById('atlas-lookup-outcome-context')?.textContent).toContain(requestedUrl)
+    expect(document.getElementById('atlas-lookup-outcome-candidates')?.textContent)
+      .toContain('Open known parent host')
+
+    document.querySelector('#atlas-lookup-outcome-candidates .atlas-lookup-candidate')?.click()
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain(ENTITY.canonical_value)
+    })
+    expect(document.getElementById('atlas-lookup-profile-scope')?.textContent)
+      .toBe(`Known parent for ${requestedUrl} · Personal`)
+  })
+
+  it('opens an explicit ordinary Atlas search from a no-record state', async () => {
+    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        return Promise.resolve(jsonResponse({
+          requested_type: 'hostname',
+          detected_type: 'domain',
+          canonical_value: 'missing.example',
+          project_id: '',
+          match_state: 'not_found',
+          detail: null,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: 'missing.example', mode: 'hostname', submit: true })
+    Array.from(document.querySelectorAll('#atlas-lookup-outcome-actions button'))
+      .find(button => button.textContent === 'Open in Atlas')
+      ?.click()
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-surface')?.classList.contains('is-atlas-lookup')).toBe(false)
+    })
+
+    expect(document.getElementById('atlas-search')?.value).toBe('missing.example')
+    expect(apiFetch.mock.calls.some(([url]) => String(url).includes('type=domain'))).toBe(true)
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).includes('orphan_filter=all') && String(url).includes('suppression_filter=all')
+    ))).toBe(true)
   })
 
   it('opens to the Findings tab by default', async () => {

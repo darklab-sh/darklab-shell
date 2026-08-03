@@ -20,6 +20,9 @@ function quickLookupElements(document) {
     outcomeView: byId('atlas-lookup-outcome-view'),
     outcomeTitle: byId('atlas-lookup-outcome-title'),
     outcomeBody: byId('atlas-lookup-outcome-body'),
+    outcomeContext: byId('atlas-lookup-outcome-context'),
+    outcomeCandidates: byId('atlas-lookup-outcome-candidates'),
+    outcomeActions: byId('atlas-lookup-outcome-actions'),
     outcomeNewButton: byId('atlas-lookup-outcome-new'),
     profileView: byId('atlas-lookup-profile-view'),
     profileHost: byId('atlas-lookup-profile'),
@@ -73,11 +76,19 @@ function lookupOutcomeCopy(result = {}) {
     };
   }
   if (result.match_state === 'not_found') {
+    if (result.parent_host_candidate) {
+      return {
+        title: 'No saved record for this URL',
+        body: canonical
+          ? `Atlas does not have a saved record for ${canonical} in this scope, but it does have data for the URL's parent host.`
+          : "Atlas does not have a saved record for this URL, but it does have data for the URL's parent host.",
+      };
+    }
     return {
       title: 'No saved Atlas entity',
       body: canonical
-        ? `Atlas does not have a saved record for ${canonical} in this scope.`
-        : 'Atlas does not have a saved record for this value in the current scope.',
+        ? `Atlas does not have a saved record for ${canonical} in this scope. That does not mean the value itself is invalid.`
+        : 'Atlas does not have a saved record for this value in the current scope. That does not mean the value itself is invalid.',
     };
   }
   return {
@@ -86,12 +97,39 @@ function lookupOutcomeCopy(result = {}) {
   };
 }
 
+function candidateProvenanceLabel(value) {
+  const labels = {
+    direct_team: 'Direct team record',
+    compatibility_visible: 'Compatibility-visible record',
+    personal: 'Personal record',
+  };
+  return labels[String(value || '')] || 'Saved record';
+}
+
+function lookupCommandSuggestion(result = {}) {
+  const entityType = String(result.detected_type || '').trim().toLowerCase();
+  const value = String(result.canonical_value || '').trim();
+  if (!value) return null;
+  const quoted = `'${value.replace(/'/g, `'"'"'`)}'`;
+  if (entityType === 'url') {
+    return { label: 'Prefill curl check', command: `curl -I -- ${quoted}` };
+  }
+  if (entityType === 'domain' || entityType === 'ip') {
+    return { label: 'Prefill nmap scan', command: `nmap -sV ${quoted}` };
+  }
+  return null;
+}
+
 function createAtlasQuickLookupMode({
   global = globalThis,
   elements = {},
   apiFetch,
   onFound = null,
   onOpenInAtlas = null,
+  onSelectCandidate = null,
+  onSwitchScope = null,
+  onPrefillCommand = null,
+  onReset = null,
   onStateChange = null,
   onError = null,
 } = {}) {
@@ -107,6 +145,9 @@ function createAtlasQuickLookupMode({
     outcomeView,
     outcomeTitle,
     outcomeBody,
+    outcomeContext,
+    outcomeCandidates,
+    outcomeActions,
     outcomeNewButton,
     profileView,
     profileHost,
@@ -218,6 +259,9 @@ function createAtlasQuickLookupMode({
   }
 
   function showForm({ focus = true, message = '' } = {}) {
+    abortRequest();
+    state.requestSeq += 1;
+    if (typeof onReset === 'function') onReset();
     state.root = 'form';
     state.requestStatus = 'idle';
     setStatus(message);
@@ -235,6 +279,14 @@ function createAtlasQuickLookupMode({
     return true;
   }
 
+  function profileContextLabel() {
+    const origin = state.result?.lookup_origin;
+    if (origin?.kind === 'url_parent' && origin.canonical_value) {
+      return `Known parent for ${origin.canonical_value} · ${state.launchScope.label || 'Personal'}`;
+    }
+    return state.launchScope.label || 'Personal';
+  }
+
   function syncProfileDetail(detail) {
     const entity = detail?.entity || null;
     if (!entity?.id || !entity?.type) return false;
@@ -249,14 +301,173 @@ function createAtlasQuickLookupMode({
     return true;
   }
 
-  function showOutcome(result) {
+  function makeOutcomeButton(label, className, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  function renderCandidate(candidate, { parent = false } = {}) {
+    const button = makeOutcomeButton(
+      parent ? 'Open known parent host' : 'Open saved record',
+      'btn btn-ghost panel-row panel-row-clickable atlas-lookup-candidate',
+      () => selectCandidate(candidate, { parent }),
+    );
+    const identity = document.createElement('span');
+    identity.className = 'atlas-lookup-candidate-identity';
+    const type = document.createElement('span');
+    type.className = 'badge badge-tone-muted';
+    type.textContent = String(candidate.type || '').toUpperCase();
+    const value = document.createElement('strong');
+    value.textContent = String(candidate.canonical_value || candidate.entity_id || 'Saved entity');
+    identity.append(type, value);
+
+    const meta = document.createElement('span');
+    meta.className = 'atlas-lookup-candidate-meta';
+    const details = [candidateProvenanceLabel(candidate.provenance)];
+    if (candidate.occurrence_count !== undefined) {
+      const count = Number(candidate.occurrence_count || 0);
+      details.push(`${count.toLocaleString()} observation${count === 1 ? '' : 's'}`);
+    }
+    if (candidate.last_seen_at) details.push(`Last seen ${String(candidate.last_seen_at)}`);
+    if (candidate.suppressed) details.push('Suppressed');
+    meta.textContent = details.join(' · ');
+    const action = document.createElement('span');
+    action.className = 'atlas-lookup-candidate-action';
+    action.textContent = parent ? 'Open known parent host' : 'Open saved record';
+    button.replaceChildren(identity, meta, action);
+    return button;
+  }
+
+  function renderOutcome(result) {
     const copy = lookupOutcomeCopy(result);
     if (outcomeTitle) outcomeTitle.textContent = copy.title;
     if (outcomeBody) outcomeBody.textContent = copy.body;
+    if (outcomeContext) {
+      outcomeContext.replaceChildren();
+      const value = document.createElement('code');
+      value.textContent = String(result.canonical_value || state.submittedRawValue || '');
+      if (value.textContent) outcomeContext.append('Requested value', value);
+      outcomeContext.classList.toggle('u-hidden', !value.textContent);
+    }
+    if (outcomeCandidates) {
+      outcomeCandidates.replaceChildren();
+      const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+      if (result.match_state === 'ambiguous' && candidates.length) {
+        const heading = document.createElement('strong');
+        heading.textContent = 'Choose a saved record';
+        outcomeCandidates.appendChild(heading);
+        candidates.forEach(candidate => outcomeCandidates.appendChild(renderCandidate(candidate)));
+        if (result.candidates_truncated) {
+          const note = document.createElement('span');
+          note.className = 'atlas-muted';
+          note.textContent = 'Only the first bounded set of matches is shown.';
+          outcomeCandidates.appendChild(note);
+        }
+      }
+      const parent = result.parent_host_candidate;
+      if (parent) {
+        const heading = document.createElement('strong');
+        heading.textContent = 'Known parent host';
+        outcomeCandidates.appendChild(heading);
+        if (parent.entity) outcomeCandidates.appendChild(renderCandidate(parent.entity, { parent: true }));
+        (Array.isArray(parent.candidates) ? parent.candidates : [])
+          .forEach(candidate => outcomeCandidates.appendChild(renderCandidate(candidate, { parent: true })));
+        if (parent.candidates_truncated) {
+          const note = document.createElement('span');
+          note.className = 'atlas-muted';
+          note.textContent = 'Only the first bounded set of parent-host matches is shown.';
+          outcomeCandidates.appendChild(note);
+        }
+      }
+      outcomeCandidates.classList.toggle('u-hidden', !outcomeCandidates.childElementCount);
+    }
+    if (outcomeActions) {
+      Array.from(outcomeActions.children).forEach(child => {
+        if (child !== outcomeNewButton) child.remove();
+      });
+      if (result.canonical_value && typeof onOpenInAtlas === 'function') {
+        outcomeActions.appendChild(makeOutcomeButton(
+          'Open in Atlas',
+          'btn btn-secondary',
+          () => onOpenInAtlas(result, { search: true }),
+        ));
+      }
+      if (typeof onSwitchScope === 'function') {
+        outcomeActions.appendChild(makeOutcomeButton(
+          'Switch scope',
+          'btn btn-ghost',
+          () => onSwitchScope(result),
+        ));
+      }
+      const suggestion = lookupCommandSuggestion(result);
+      if (suggestion && typeof onPrefillCommand === 'function') {
+        outcomeActions.appendChild(makeOutcomeButton(
+          suggestion.label,
+          'btn btn-ghost',
+          () => onPrefillCommand(suggestion.command, result),
+        ));
+      }
+    }
+  }
+
+  function showOutcome(result) {
+    renderOutcome(result);
     state.root = 'outcome';
     state.requestStatus = 'success';
     setStatus();
     render();
+  }
+
+  async function selectCandidate(candidate, { parent = false } = {}) {
+    if (!candidate?.entity_id || typeof onSelectCandidate !== 'function') return false;
+    const requestId = state.requestSeq + 1;
+    state.requestSeq = requestId;
+    state.requestStatus = 'loading';
+    const label = String(candidate.canonical_value || candidate.entity_id);
+    if (outcomeBody) outcomeBody.textContent = `Loading ${label}...`;
+    render();
+    try {
+      const resolved = await onSelectCandidate(candidate, {
+        parent,
+        lookupResult: state.result,
+      });
+      if (!state.active || requestId !== state.requestSeq || !resolved?.detail) return false;
+      const previous = state.result || {};
+      const nextResult = {
+        ...previous,
+        ...resolved,
+        match_state: 'found',
+        detected_type: String(candidate.type || resolved.detected_type || ''),
+        canonical_value: String(candidate.canonical_value || resolved.canonical_value || ''),
+        candidates: [],
+        candidates_truncated: false,
+        parent_host_candidate: null,
+      };
+      if (parent) {
+        nextResult.lookup_origin = {
+          kind: 'url_parent',
+          detected_type: String(previous.detected_type || 'url'),
+          canonical_value: String(previous.canonical_value || state.submittedCanonicalValue || state.submittedRawValue),
+        };
+      }
+      state.result = nextResult;
+      state.submittedCanonicalValue = nextResult.canonical_value;
+      state.root = 'profile';
+      if (typeof onFound === 'function') await onFound(nextResult);
+      if (!state.active || requestId !== state.requestSeq) return false;
+      return showProfile(nextResult);
+    } catch (err) {
+      if (requestId !== state.requestSeq || !state.active) return false;
+      state.requestStatus = 'error';
+      if (outcomeBody) outcomeBody.textContent = 'Atlas could not load that saved record. Choose another record or start a new lookup.';
+      render();
+      if (typeof onError === 'function') onError(err);
+      return false;
+    }
   }
 
   async function responseError(resp) {
@@ -373,6 +584,7 @@ function createAtlasQuickLookupMode({
     isActive: () => state.active,
     isProfileVisible: () => state.active && state.root === 'profile',
     render,
+    profileContextLabel,
     resumeResult,
     showForm,
     showProfile,

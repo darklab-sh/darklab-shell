@@ -93,7 +93,7 @@ Add a global Quick Lookup entry point for hostnames, IP addresses, and HTTP(S) U
 
 #### Phase 3 — Complete the result, empty, and action states
 
-- [ ] Make lookup outcomes understandable without implying data the app does not have:
+- [x] Make lookup outcomes understandable without implying data the app does not have:
   - Use the existing profile header to show the entity type, canonical value, first/last observation, project-link count, and suppression/orphan badges before the local profile tabs.
   - Keep Overview app-first: show saved scan coverage and services, direct and related finding rollups, one-hop stored relationships, and cached external Intel freshness/highlights before the longer source-run collection.
   - Show a specific no-record state for the active scope. Explain that no saved Atlas entity exists without suggesting that the hostname/IP/URL itself is invalid.
@@ -102,7 +102,7 @@ Add a global Quick Lookup entry point for hostnames, IP addresses, and HTTP(S) U
   - Offer non-destructive next steps such as **Search Atlas**, **Switch scope**, and type-appropriate command suggestions. Suggestions may prefill the active composer through the existing composer helper, but must never execute automatically or create terminal history merely by rendering the state.
   - Preserve existing profile actions for copy, project linking, finding review/suppression, Run Details, Project transitions, and explicit Intel refresh. Their permission, return-state, and audit behavior must remain identical to ordinary Atlas profile mode.
   - Render cached provider information as cached data with its existing freshness states. Do not describe an empty or stale provider snapshot as a live external lookup.
-- [ ] Keep optional discovery separate from exact resolution:
+- [x] Keep optional discovery separate from exact resolution:
   - Do not require typeahead for the initial release. If added during this work, keep it bounded and debounced, source suggestions from the active-scope `/atlas/entities` list, identify each suggestion by entity type and last-seen time, and still submit through the exact resolver.
   - Never send every keystroke to external providers or persist lookup drafts as Atlas entities, recent commands, or run records.
 

@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Session Entity Atlas overlay controller.
-import { downloadBlobAsAttachment as importedDownloadBlobAsAttachment, showToast as importedShowToast } from '../../core/utils.js';
+import {
+  copyTextToClipboard as importedCopyTextToClipboard,
+  downloadBlobAsAttachment as importedDownloadBlobAsAttachment,
+  showToast as importedShowToast,
+} from '../../core/utils.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
 import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
@@ -12,6 +16,7 @@ import {
   markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
   portalDropdownMenu as importedPortalDropdownMenu,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
+  setComposerValue as importedSetComposerValue,
   syncAppSelect as importedSyncAppSelect,
   syncModalOverlayState as importedSyncModalOverlayState,
   unportalDropdownMenu as importedUnportalDropdownMenu,
@@ -95,10 +100,12 @@ let exportedCycleAtlasTab = null;
   const cleanupSampleDetails = (typeof importedCleanupSampleDetails !== 'undefined' && importedCleanupSampleDetails) || null;
   const bindDisclosure = (typeof importedBindDisclosure !== 'undefined' && importedBindDisclosure) || null;
   const blurVisibleComposerInputIfMobile = (typeof importedBlurVisibleComposerInputIfMobile !== 'undefined' && importedBlurVisibleComposerInputIfMobile) || null;
+  const copyTextToClipboard = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard) || null;
   const downloadBlobAsAttachment = (typeof importedDownloadBlobAsAttachment !== 'undefined' && importedDownloadBlobAsAttachment) || null;
   const markInteractionSurfaceReady = (typeof importedMarkInteractionSurfaceReady !== 'undefined' && importedMarkInteractionSurfaceReady) || null;
   const portalDropdownMenu = (typeof importedPortalDropdownMenu !== 'undefined' && importedPortalDropdownMenu) || null;
   const refocusComposerAfterAction = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction) || null;
+  const setComposerValue = (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue) || null;
   const showConfirm = (typeof importedShowConfirm !== 'undefined' && importedShowConfirm) || null;
   const showToast = (typeof importedShowToast !== 'undefined' && importedShowToast) || null;
   const syncAppSelect = (typeof importedSyncAppSelect !== 'undefined' && importedSyncAppSelect) || null;
@@ -2094,6 +2101,7 @@ let exportedCycleAtlasTab = null;
           .some(link => String(link.project_id || '') === activeId);
       },
       intelRefreshing: state.intelRefreshing,
+      onCopyValue: (entity) => copyEntityValue(entity),
       onRefreshIntel: () => refreshIntel(),
       onAddToActiveProject: () => addToActiveProject(),
       onOpenProject: (link) => openLinkedProject(link),
@@ -2307,7 +2315,9 @@ let exportedCycleAtlasTab = null;
     if (!state.lookupMode || !quickLookupController) return;
     const scopeText = quickLookupController.state.launchScope?.label || 'Personal';
     if (subtitle) subtitle.textContent = `Quick lookup · ${scopeText}`;
-    if (lookupElements.profileScope) lookupElements.profileScope.textContent = scopeText;
+    if (lookupElements.profileScope) {
+      lookupElements.profileScope.textContent = quickLookupController.profileContextLabel?.() || scopeText;
+    }
     if (!quickLookupController.isProfileVisible()) return;
     quickLookupController.syncProfileDetail?.(state.detail);
     renderEntityDetailHost(quickLookupController.profileHost, {
@@ -3542,6 +3552,21 @@ let exportedCycleAtlasTab = null;
     }
   }
 
+  function copyEntityValue(entity) {
+    const value = String(entity?.canonical_value || entity?.value || '').trim();
+    if (!value || typeof copyTextToClipboard !== 'function') return false;
+    return Promise.resolve(copyTextToClipboard(value))
+      .then(() => {
+        showToastSafe('Entity copied', 'success');
+        return true;
+      })
+      .catch((err) => {
+        logImportClientError('failed to copy Atlas entity value', err);
+        showToastSafe('Copy failed', 'error');
+        return false;
+      });
+  }
+
   async function saveMetadata(payload) {
     if (!state.selectedId || !metadataApi.syncEntityLabels || !metadataApi.syncEntityNote) return;
     try {
@@ -3584,10 +3609,44 @@ let exportedCycleAtlasTab = null;
     return true;
   }
 
-  async function openQuickLookupResultInAtlas(result) {
+  async function resolveQuickLookupCandidate(candidate) {
+    const entityId = String(candidate?.entity_id || '');
+    const entityType = String(candidate?.type || '');
+    if (!entityId || !entityType) return null;
+    state.activeTab = entityType;
+    state.selectedId = entityId;
+    state.selectedFindingId = '';
+    state.detail = null;
+    state.detailFinding = null;
+    state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
+    state.entityProfileFindingBucket = 'direct';
+    const detail = await loadDetail(entityId);
+    if (!detail) throw new Error('Saved Atlas entity is no longer available in this scope');
+    return {
+      detected_type: entityType,
+      canonical_value: String(candidate.canonical_value || detail.entity?.canonical_value || ''),
+      detail,
+    };
+  }
+
+  async function openQuickLookupResultInAtlas(result, options = {}) {
     const detail = result && result.detail && typeof result.detail === 'object' ? result.detail : null;
     const entity = detail?.entity || null;
-    if (!entity?.id || !entity?.type) return false;
+    if (!entity?.id || !entity?.type) {
+      const detectedType = String(result?.detected_type || '');
+      const canonicalValue = String(result?.canonical_value || '').trim();
+      if (!canonicalValue || !['domain', 'ip', 'url'].includes(detectedType)) return false;
+      return openAtlas({
+        source: options.search ? 'quick-lookup-search' : 'quick-lookup',
+        tab: detectedType,
+        projectId: state.projectId,
+        projectName: state.projectName,
+        entityValue: canonicalValue,
+        forceView: 'list',
+        orphanFilter: 'all',
+        suppressionFilter: 'all',
+      });
+    }
     return openAtlas({
       source: 'quick-lookup',
       tab: String(entity.type),
@@ -3600,6 +3659,23 @@ let exportedCycleAtlasTab = null;
       orphanFilter: Array.isArray(entity.run_links) && entity.run_links.length === 0 ? 'all' : 'hide',
       suppressionFilter: entity.suppressed ? 'all' : 'hide',
     });
+  }
+
+  function openQuickLookupScopeSelector() {
+    if (typeof teamScope?.open === 'function') return teamScope.open();
+    showToastSafe('Scope selector is unavailable', 'error');
+    return false;
+  }
+
+  function prefillQuickLookupCommand(command) {
+    const value = String(command || '').trim();
+    if (!value || typeof setComposerValue !== 'function') return false;
+    closeAtlas({ refocus: false });
+    setComposerValue(value, value.length, value.length);
+    if (typeof refocusComposerAfterAction === 'function') {
+      refocusComposerAfterAction({ defer: true, preventScroll: true });
+    }
+    return true;
   }
 
   function handleQuickLookupScopeChange() {
@@ -3840,9 +3916,15 @@ let exportedCycleAtlasTab = null;
       apiFetch: (...args) => api()(...args),
       onFound: applyQuickLookupResult,
       onOpenInAtlas: openQuickLookupResultInAtlas,
+      onSelectCandidate: resolveQuickLookupCandidate,
+      onSwitchScope: openQuickLookupScopeSelector,
+      onPrefillCommand: prefillQuickLookupCommand,
+      onReset: abortDetailLoad,
       onStateChange: (lookupState) => {
         const scopeText = lookupState.launchScope?.label || 'Personal';
-        if (lookupElements.profileScope) lookupElements.profileScope.textContent = scopeText;
+        if (lookupElements.profileScope) {
+          lookupElements.profileScope.textContent = quickLookupController?.profileContextLabel?.() || scopeText;
+        }
         if (state.lookupMode) {
           state.entityProfileMode = lookupState.root === 'profile';
           if (subtitle) subtitle.textContent = `Quick lookup · ${scopeText}`;

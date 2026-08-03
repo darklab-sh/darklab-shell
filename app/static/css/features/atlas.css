@@ -179,6 +179,77 @@
   color: var(--muted);
 }
 
+.atlas-lookup-outcome-context {
+  display: grid;
+  gap: 6px;
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.atlas-lookup-outcome-context.u-hidden,
+.atlas-lookup-candidates.u-hidden {
+  display: none;
+}
+
+.atlas-lookup-outcome-context code {
+  overflow-wrap: anywhere;
+  color: var(--theme-text);
+  font-size: 13px;
+}
+
+.atlas-lookup-candidates {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.atlas-lookup-candidates > strong {
+  color: var(--theme-text);
+  font-size: 12px;
+}
+
+.atlas-lookup-candidate {
+  display: grid;
+  width: 100%;
+  gap: 6px;
+  justify-items: stretch;
+  padding: 11px 12px;
+  color: var(--theme-text);
+  text-align: left;
+}
+
+.atlas-lookup-candidate-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-lookup-candidate-identity strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.atlas-lookup-candidate-meta {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.atlas-lookup-candidate-action {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.atlas-lookup-outcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+
 .atlas-lookup-value-field {
   gap: 8px;
 }
@@ -271,6 +342,10 @@
   .atlas-lookup-empty-card {
     padding: 18px;
     box-shadow: none;
+  }
+
+  .atlas-lookup-outcome-actions .btn {
+    flex: 1 1 auto;
   }
 
   .atlas-lookup-controls {
@@ -987,12 +1062,42 @@ body.mobile-terminal-mode #atlas-findings-board-btn {
   font-weight: 800;
 }
 
+.atlas-profile-identity-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 4px;
+}
+
+.atlas-profile-identity-observations,
+.atlas-profile-identity-badges {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.atlas-profile-identity-observations {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .atlas-detail-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
   padding: 12px 0;
+}
+
+@media (max-width: 720px) {
+  .atlas-profile-identity-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .atlas-profile-back {

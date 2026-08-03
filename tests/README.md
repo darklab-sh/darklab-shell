@@ -180,7 +180,7 @@ These summaries explain what belongs in each layer. Use the live-listing command
 
 ### Vitest
 
-`tests/js/unit/` covers browser-module logic in jsdom, including shared composer state, tab/output/history behavior, welcome sequencing, autocomplete, search, and export helpers. Atlas coverage includes the lazy Quick Lookup bridge, list-free lookup mode, scoped request payloads, shared profile rendering, New lookup navigation, and the explicit handoff into ordinary Atlas. Terminal lifecycle coverage pins normalized browser and server results, exactly-once completion and persistence, masked recents, submit-time prompt history, confirmations, and Files output piping or redirection.
+`tests/js/unit/` covers browser-module logic in jsdom, including shared composer state, tab/output/history behavior, welcome sequencing, autocomplete, search, and export helpers. Atlas coverage includes the lazy Quick Lookup bridge, list-free lookup mode, scoped request payloads, shared profile rendering, New lookup navigation, stale candidate cancellation, no-record actions, bounded ambiguity choices, URL-parent handoff, command prefilling without execution, copy and explicit Intel refresh actions, and the explicit handoff into ordinary Atlas. Terminal lifecycle coverage pins normalized browser and server results, exactly-once completion and persistence, masked recents, submit-time prompt history, confirmations, and Files output piping or redirection.
 
 Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/` so high-change areas such as app chrome, session identity, and Files/workspace behavior can share setup without growing individual spec files.
 
