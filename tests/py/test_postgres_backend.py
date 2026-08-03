@@ -752,6 +752,108 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
 
 
 @pytest.mark.postgres
+def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run_or_import(
+    postgres_schema,
+    monkeypatch,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.atlas.lookup_resolve import exact_lookup_candidate_query, resolve_entity_lookup
+    from services.atlas.materializer import upsert_entity
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    compat = PostgresSqliteCompatConnection(conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    team_id = "team-exact-lookup"
+    session_id = "member-exact-lookup"
+    observed_at = "2026-08-03T00:00:00+00:00"
+
+    run_entity_id = upsert_entity(
+        compat,
+        session_id,
+        "domain",
+        "run-visible.lookup.example",
+        seen_at=observed_at,
+    )
+    import_entity_id = upsert_entity(
+        compat,
+        session_id,
+        "domain",
+        "import-visible.lookup.example",
+        seen_at=observed_at,
+    )
+    compat.execute(
+        "INSERT INTO runs "
+        "(id, session_id, team_id, run_kind, command, started, output_preview) "
+        "VALUES (?, ?, ?, 'external', 'nmap run-visible.lookup.example', ?, '[]')",
+        ("run-exact-lookup", session_id, team_id, observed_at),
+    )
+    compat.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, 'run-exact-lookup', ?, ?, 1)",
+        (run_entity_id, observed_at, observed_at),
+    )
+    compat.execute(
+        "INSERT INTO atlas_import_batches "
+        "(id, session_id, team_id, source_tool, import_name, created, applied_at) "
+        "VALUES ('batch-exact-lookup', ?, ?, 'generic_jsonl', 'Exact lookup import', ?, ?)",
+        (session_id, team_id, observed_at, observed_at),
+    )
+    compat.execute(
+        "INSERT INTO atlas_entity_import_links "
+        "(entity_id, batch_id, first_observed_at, last_observed_at, occurrence_count, "
+        "created_entity, created, updated) "
+        "VALUES (?, 'batch-exact-lookup', ?, ?, 1, FALSE, ?, ?)",
+        (import_entity_id, observed_at, observed_at, observed_at, observed_at),
+    )
+    conn.commit()
+
+    run_visible = resolve_entity_lookup(
+        compat,
+        session_id,
+        "RUN-VISIBLE.Lookup.Example.",
+        team_id=team_id,
+    )
+    import_visible = resolve_entity_lookup(
+        compat,
+        session_id,
+        "import-visible.lookup.example",
+        team_id=team_id,
+    )
+    hidden_from_personal = resolve_entity_lookup(
+        compat,
+        "other-session",
+        "run-visible.lookup.example",
+    )
+
+    lookup_sql, lookup_params = exact_lookup_candidate_query(
+        session_id,
+        "domain",
+        "run-visible.lookup.example",
+        team_id=team_id,
+    )
+    conn.execute("SET enable_seqscan = off")
+    try:
+        lookup_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + lookup_sql,
+            lookup_params,
+        ).fetchall())
+    finally:
+        conn.execute("RESET enable_seqscan")
+        conn.commit()
+
+    assert run_visible["match_state"] == "found"
+    assert run_visible["detail"]["entity"]["id"] == run_entity_id
+    assert import_visible["match_state"] == "found"
+    assert import_visible["detail"]["entity"]["id"] == import_entity_id
+    assert hidden_from_personal["match_state"] == "not_found"
+    assert "idx_entities_type_signature" in lookup_plan
+    assert "Seq Scan on entities" not in lookup_plan
+
+
+@pytest.mark.postgres
 def test_postgres_legacy_0038_ledger_refuses_unified_marker_when_head_drifted(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.reconciliation import SchemaReconciliationError

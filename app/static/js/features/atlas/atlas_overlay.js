@@ -2244,17 +2244,23 @@ let exportedCycleAtlasTab = null;
     const next = String(view || '');
     if (!state.entityProfileMode || !['overview', 'evidence', 'findings', 'intel'].includes(next)) return false;
     state.entityProfileView = next;
-    renderDetail();
-    for (const fn of mobileRenderers) {
-      try { fn(state, atlasController); } catch (err) {
-        logImportClientError('atlas mobile render failed', err);
+    if (state.lookupMode) {
+      render();
+    } else {
+      renderDetail();
+      for (const fn of mobileRenderers) {
+        try { fn(state, atlasController); } catch (err) {
+          logImportClientError('atlas mobile render failed', err);
+        }
       }
     }
-    if (detailHost) detailHost.scrollTop = 0;
+    const lookupProfileHost = state.lookupMode ? quickLookupController?.profileHost : null;
+    if (lookupProfileHost) lookupProfileHost.scrollTop = 0;
+    else if (detailHost) detailHost.scrollTop = 0;
     const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
-    if (mobileDetailHost) mobileDetailHost.scrollTop = 0;
+    if (!state.lookupMode && mobileDetailHost) mobileDetailHost.scrollTop = 0;
     if (focus) {
-      const profileHost = isAtlasMobileMode() ? mobileDetailHost : detailHost;
+      const profileHost = lookupProfileHost || (isAtlasMobileMode() ? mobileDetailHost : detailHost);
       profileHost
         ?.querySelector?.(`[data-atlas-profile-view="${selectorValue(next)}"]`)
         ?.focus?.({ preventScroll: true });
@@ -3604,7 +3610,7 @@ let exportedCycleAtlasTab = null;
       related_urls: Number(detail.detail_limits?.related_urls?.offset || 0),
       related_ports: Number(detail.detail_limits?.related_ports?.offset || 0),
     };
-    ensureDetailApi({ renderOnReady: false }).catch(() => {});
+    await ensureDetailApi({ renderOnReady: false }).catch(() => null);
     render();
     return true;
   }

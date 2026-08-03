@@ -25241,6 +25241,7 @@ class TestDatabaseInit:
         ("mode", "value", "requested_type", "detected_type", "canonical_value"),
         [
             ("auto", "BÜCHER.Example.", "auto", "domain", "xn--bcher-kva.example"),
+            ("auto", "192.0.2.10", "auto", "ip", "192.0.2.10"),
             ("auto", "2001:0db8::0001", "auto", "ip", "2001:db8::1"),
             (
                 "auto",
@@ -25251,6 +25252,14 @@ class TestDatabaseInit:
             ),
             ("hostname", "Example.COM.", "hostname", "domain", "example.com"),
             ("ip", "192.0.2.10", "ip", "ip", "192.0.2.10"),
+            ("ip", "2001:db8:0:0:0:0:0:42", "ip", "ip", "2001:db8::42"),
+            (
+                "url",
+                "HTTP://Example.COM:80/a/../report?next=%2Fadmin#private",
+                "url",
+                "url",
+                "http://example.com/a/../report?next=/admin",
+            ),
         ],
     )
     def test_atlas_exact_lookup_normalizes_supported_identity_modes(
@@ -25276,6 +25285,7 @@ class TestDatabaseInit:
             ("auto", "   ", "missing_lookup_value", "Enter a hostname"),
             ("auto", "example.com/path", "invalid_lookup_value", "including http:// or https://"),
             ("url", "example.com/path", "invalid_lookup_value", "including http:// or https://"),
+            ("auto", "ftp://example.com/report", "invalid_lookup_value", "including http:// or https://"),
             ("ip", "example.com", "invalid_lookup_value", "valid IP address"),
             ("hostname", "example.com/path", "invalid_lookup_value", "without a URL path"),
             ("url", "https://example.com/" + ("x" * 2100), "lookup_value_too_long", "2048 bytes"),
@@ -25314,16 +25324,34 @@ class TestDatabaseInit:
                     (entity_id,),
                 )
                 conn.commit()
-                before_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
-
-                found = resolve_entity_lookup(conn, "lookup-session", "KNOWN.Example.COM.")
-                cross_session = resolve_entity_lookup(conn, "other-session", "known.example.com")
-                parent = resolve_entity_lookup(
-                    conn,
-                    "lookup-session",
-                    "https://known.example.com/unseen?token=private#fragment",
+                protected_tables = (
+                    "entities",
+                    "project_links",
+                    "runs",
+                    "entity_intel_snapshots",
+                    "audit_events",
                 )
-                after_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
+                before_counts = {
+                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                    for table in protected_tables
+                }
+
+                raw_url = "https://known.example.com/unseen?token=private#fragment"
+                with mock.patch(
+                    "services.intel.lookup.lookup_entity",
+                    side_effect=AssertionError("exact Atlas lookup must not call Intel providers"),
+                ) as provider_lookup:
+                    found = resolve_entity_lookup(conn, "lookup-session", "KNOWN.Example.COM.")
+                    cross_session = resolve_entity_lookup(conn, "other-session", "known.example.com")
+                    parent = resolve_entity_lookup(conn, "lookup-session", raw_url)
+                after_counts = {
+                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                    for table in protected_tables
+                }
+                raw_url_audit_rows = int(conn.execute(
+                    "SELECT COUNT(*) AS count FROM audit_events WHERE details LIKE ?",
+                    (f"%{raw_url}%",),
+                ).fetchone()["count"])
                 expected_detail = entity_detail(conn, "lookup-session", entity_id)
                 lookup_sql, lookup_params = exact_lookup_candidate_query(
                     "lookup-session",
@@ -25351,7 +25379,10 @@ class TestDatabaseInit:
         assert parent["canonical_value"] == "https://known.example.com/unseen?token=private"
         assert parent["parent_host_candidate"]["match_state"] == "found"
         assert parent["parent_host_candidate"]["entity"]["entity_id"] == entity_id
-        assert before_count == after_count == 1
+        assert before_counts == after_counts
+        assert before_counts["entities"] == 1
+        assert raw_url_audit_rows == 0
+        provider_lookup.assert_not_called()
         assert "idx_entities_type_signature" in index_names
         assert "idx_entities_type_signature" in lookup_plan
 
@@ -25368,7 +25399,8 @@ class TestDatabaseInit:
             conn.row_factory = sqlite3.Row
             try:
                 personal_ids = []
-                for index, session_id in enumerate(("member-one", "member-two"), start=1):
+                member_sessions = tuple(f"member-{index}" for index in range(1, 12))
+                for index, session_id in enumerate(member_sessions, start=1):
                     entity_id = upsert_entity(
                         conn,
                         session_id,
@@ -25421,7 +25453,9 @@ class TestDatabaseInit:
                 conn.close()
 
         assert ambiguous["match_state"] == "ambiguous"
-        assert {candidate["entity_id"] for candidate in ambiguous["candidates"]} == set(personal_ids)
+        assert len(ambiguous["candidates"]) == 10
+        assert set(candidate["entity_id"] for candidate in ambiguous["candidates"]).issubset(personal_ids)
+        assert ambiguous["candidates_truncated"] is True
         assert {candidate["provenance"] for candidate in ambiguous["candidates"]} == {"compatibility_visible"}
         assert direct["match_state"] == "found"
         assert direct["detail"]["entity"]["id"] == direct_id

@@ -1010,6 +1010,11 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-lookup-form-view')?.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('atlas-lookup-profile-view')?.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain('Overview')
+    document.querySelector('#atlas-lookup-profile [data-atlas-profile-view="evidence"]')?.click()
+    expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain('Source runs')
+    expect(document.querySelector(
+      '#atlas-lookup-profile [data-atlas-profile-view="evidence"]',
+    )?.getAttribute('aria-selected')).toBe('true')
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('Quick lookup · Personal')
     expect(apiFetch).toHaveBeenCalledWith('/atlas/lookup', expect.objectContaining({
       method: 'POST',
@@ -1025,6 +1030,128 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-lookup-resume')?.classList.contains('u-hidden')).toBe(false)
     document.getElementById('atlas-lookup-resume')?.click()
     expect(document.getElementById('atlas-lookup-profile-view')?.classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('validates lookup input locally and lets a corrected request retry in place', async () => {
+    let lookupCalls = 0
+    const { openAtlasQuickLookup, apiFetch, logClientError } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        lookupCalls += 1
+        if (lookupCalls === 1) {
+          return Promise.resolve(errorResponse(400, {
+            error: 'invalid_lookup_value',
+            message: 'Enter a valid hostname without a URL path.',
+          }))
+        }
+        return Promise.resolve(jsonResponse({
+          requested_type: 'hostname',
+          detected_type: 'domain',
+          canonical_value: 'corrected.example',
+          project_id: '',
+          match_state: 'found',
+          detail: lookupDetail({
+            ...ENTITY,
+            id: 'ent_corrected',
+            type: 'domain',
+            canonical_value: 'corrected.example',
+          }),
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup()
+    document.getElementById('atlas-lookup-form')?.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    )
+    expect(document.getElementById('atlas-lookup-status')?.textContent)
+      .toContain('Enter a hostname, IP address, or absolute HTTP(S) URL')
+    expect(apiFetch.mock.calls.some(([url]) => String(url) === '/atlas/lookup')).toBe(false)
+
+    const input = document.getElementById('atlas-lookup-input')
+    input.value = 'invalid.example/path'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('atlas-lookup-mode').value = 'hostname'
+    document.getElementById('atlas-lookup-form')?.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    )
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-status')?.textContent)
+        .toContain('Enter a valid hostname without a URL path')
+    })
+    expect(logClientError).not.toHaveBeenCalled()
+
+    input.value = 'corrected.example'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('atlas-lookup-form')?.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    )
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-profile')?.textContent)
+        .toContain('corrected.example')
+    })
+    expect(lookupCalls).toBe(2)
+  })
+
+  it('cancels an owner-scoped lookup and reruns it when the active scope changes', async () => {
+    const firstLookup = deferred()
+    let firstSignal = null
+    let lookupCalls = 0
+    const detail = lookupDetail()
+    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) !== '/atlas/lookup') return null
+        lookupCalls += 1
+        if (lookupCalls === 1) {
+          firstSignal = options.signal
+          return firstLookup.promise
+        }
+        return Promise.resolve(jsonResponse({
+          requested_type: 'ip',
+          detected_type: 'ip',
+          canonical_value: ENTITY.canonical_value,
+          project_id: '',
+          match_state: 'found',
+          detail,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    const opening = openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'ip', submit: true })
+    await vi.waitFor(() => expect(firstSignal).not.toBeNull())
+    document.dispatchEvent(new CustomEvent('app:scope-changed', {
+      detail: { team_id: 'team_next', label: 'Next team' },
+    }))
+
+    await vi.waitFor(() => {
+      expect(lookupCalls).toBe(2)
+      expect(document.getElementById('atlas-lookup-profile')?.textContent)
+        .toContain(ENTITY.canonical_value)
+    })
+    expect(firstSignal?.aborted).toBe(true)
+    expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/lookup')).toHaveLength(2)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/atlas?'))).toBe(false)
+
+    firstLookup.resolve(jsonResponse({
+      requested_type: 'ip',
+      detected_type: 'ip',
+      canonical_value: ENTITY.canonical_value,
+      project_id: '',
+      match_state: 'not_found',
+      detail: null,
+      candidates: [],
+      candidates_truncated: false,
+      parent_host_candidate: null,
+    }))
+    await opening
+    expect(document.getElementById('atlas-lookup-profile')?.textContent)
+      .toContain(ENTITY.canonical_value)
   })
 
   it('carries a project-scoped Quick Lookup result into ordinary Atlas profile mode', async () => {

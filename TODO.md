@@ -120,7 +120,7 @@ Add a global Quick Lookup entry point for hostnames, IP addresses, and HTTP(S) U
 
 #### Phase 5 — Prove parity, privacy, and cross-surface behavior
 
-- [ ] Add backend and route regression coverage:
+- [x] Add backend and route regression coverage:
   - Cover auto and explicit detection for IDNA/case-normalized hostnames, IPv4, compressed IPv6, normalized URLs, default URL ports, fragments, paths, and queries, plus malformed schemes, whitespace-only input, unsupported types, and overlong values.
   - Prove exact resolution is independent of list page size and the normal orphan/suppression filters, while remaining isolated across personal sessions and team scopes.
   - Cover owner-wide and explicit project lookups, out-of-scope projects, entities not linked to the selected project, deleted-source-run entities, suppressed entities, URL parent candidates, direct-team precedence, bounded legacy ambiguity, and ordinary not-found results.
@@ -129,12 +129,12 @@ Add a global Quick Lookup entry point for hostnames, IP addresses, and HTTP(S) U
   - Exercise SQLite and Postgres query behavior and keep exact candidate lookup on the new type/signature index before owner-scope filtering; add query-plan coverage that protects against a full owner-wide entity scan.
   - Assert SQLite and Postgres use `idx_entities_type_signature` to bound exact lookup candidates before evaluating personal/team visibility, including a personally owned entity made team-visible through a scoped run or import.
   - Extend API v1 authentication, token/team isolation, OpenAPI generation, architecture boundaries, and module-size ratchet tests rather than creating a lookup-only test harness.
-- [ ] Add frontend unit coverage in the existing Atlas, shell-chrome, shortcut, and mobile-menu suites:
+- [x] Add frontend unit coverage in the existing Atlas, shell-chrome, shortcut, and mobile-menu suites:
   - Cover first open, input validation, successful lookup, invalid/not-found/parent-fallback states, stale-request cancellation, retry, New lookup, Open in Atlas, explicit Intel refresh, and owner-scope changes.
   - Assert lookup mode does not request Atlas lists, saved views, exports, imports, or provider refresh until the corresponding explicit action occurs.
   - Cover profile tabs, finding buckets, collection paging, related-entity stack restoration, project/Run Details return descriptors, Escape/close behavior, and composer refocus.
   - Cover desktop rail, mobile menu, and `Alt+Q` entry points with the same action payload and no duplicate overlay or focus trap, and assert existing output entity-token actions remain unchanged.
-- [ ] Add focused Playwright coverage using the approved helper in both asset modes:
+- [x] Add focused Playwright coverage using the approved helper in both asset modes:
   - Exercise a desktop hostname lookup through the rail, a URL parent fallback, an IP result with app and cached-provider evidence, Open in Atlas, and close-to-composer focus restoration.
   - Exercise the mobile menu, lookup form, focused profile tabs, related-entity navigation, New lookup, and owner-scope change in the mobile sheet.
   - Run the focused scenarios with `bash scripts/run_playwright.sh --asset-bundle-mode bundle ...` and `bash scripts/run_playwright.sh --asset-bundle-mode source ...`.
