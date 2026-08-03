@@ -3591,6 +3591,16 @@ class TestPackagePresetCatalog:
 
 
 class TestProjectOverviewContract:
+    @staticmethod
+    def _app_port_identity(rows):
+        return [
+            {
+                key: row[key]
+                for key in ("port", "proto", "service", "version")
+            }
+            for row in rows
+        ]
+
     def _project_db(self, monkeypatch, tmp_path):
         db_path = str(tmp_path / "project-overview.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
@@ -3689,7 +3699,7 @@ class TestProjectOverviewContract:
         assert counts["by_review_state"] == {
             "new": 1,
             "reviewed": 0,
-            "important": 1,
+            "important": 0,
             "needs_followup": 1,
             "false_positive": 1,
         }
@@ -4279,7 +4289,7 @@ class TestProjectOverviewContract:
             "entity_id": target["id"],
             "display_label": "domain:api.example.com",
             "reason": "awaiting_verification",
-            "detail": "2 findings awaiting verification.",
+            "detail": "1 finding awaiting verification.",
             "deep_link": {
                 "tab": "findings",
                 "hints": {
@@ -4347,12 +4357,25 @@ class TestProjectOverviewContract:
         assert target_row["open_ports"] == [80, 443]
         assert target_row["services"] == ["http", "https"]
         assert target_row["app_ports"] == [
-            {"port": 443, "proto": "tcp", "service": "https", "version": "nginx"},
+            {
+                "port": 443,
+                "proto": "tcp",
+                "service": "https",
+                "version": "nginx",
+                "banner_available": False,
+                "occurrence_count": 1,
+                "last_seen_at": now,
+                "source_run_count": 1,
+            },
             {
                 "port": 8443,
                 "proto": "tcp",
                 "service": "https-alt",
                 "version": "",
+                "banner_available": True,
+                "occurrence_count": 1,
+                "last_seen_at": now,
+                "source_run_count": 1,
                 "banner": "x" * 157 + "...",
             },
         ]
@@ -4371,8 +4394,12 @@ class TestProjectOverviewContract:
         assert target_row["finding_counts"]["suppressed"] == 1
         assert target_row["finding_counts"]["by_verification_state"]["not_started"] == 1
         assert target_row["finding_counts"]["by_verification_state"]["verified"] == 1
-        assert target_row["finding_counts"]["by_verification_state"]["needs_retest"] == 1
+        assert target_row["finding_counts"]["by_verification_state"]["needs_retest"] == 0
         assert target_row["intel_summary"]["providers_with_data"] == ["censys"]
+        assert target_row["intel_summary"]["freshness"] == "fresh"
+        assert target_row["intel_summary"]["snapshot_count"] == 1
+        assert target_row["intel_summary"]["provider_count"] == 1
+        assert target_row["intel_summary"]["last_refresh_at"] == now
         assert target_row["deep_link_hints"]["findings"]["target_id"] == target["id"]
         assert target_row["source_flags"]["has_app_scan_evidence"] is True
         assert target_row["app_evidence"]["coverage_state"] == "app_ports_found"
@@ -4381,6 +4408,10 @@ class TestProjectOverviewContract:
         assert target_row["app_evidence"]["command_roots"] == ["nmap"]
         assert quiet_row["certificate"]["status"] == "unknown"
         assert quiet_row["source_flags"]["has_intel"] is False
+        assert quiet_row["intel_summary"]["freshness"] == "not_available"
+        assert quiet_row["intel_summary"]["snapshot_count"] == 0
+        assert quiet_row["intel_summary"]["provider_count"] == 0
+        assert quiet_row["intel_summary"]["last_refresh_at"] == ""
         assert quiet_row["source_flags"]["has_app_scan_evidence"] is True
         assert quiet_row["source_flags"]["has_app_ports"] is False
         assert quiet_row["app_ports"] == []
@@ -4391,6 +4422,65 @@ class TestProjectOverviewContract:
         assert quiet_row["app_evidence"]["scan_run_count"] == 1
         assert quiet_row["app_evidence"]["port_entity_count"] == 0
         assert "does not prove no ports exist" in quiet_row["app_evidence"]["coverage_caveat"]
+        from services.atlas.lookup import entity_detail
+        with database.db_connect() as conn:
+            target_detail = entity_detail(
+                conn,
+                "tok_overview_rollup",
+                target["id"],
+                project_id=project["id"],
+            )
+            quiet_detail = entity_detail(
+                conn,
+                "tok_overview_rollup",
+                quiet_target["id"],
+                project_id=project["id"],
+            )
+        assert target_detail is not None
+        assert quiet_detail is not None
+        for key in ("coverage_state", "scan_run_count", "last_observed_at", "port_entity_count", "command_roots"):
+            assert target_detail["overview"]["observed"]["app_evidence"][key] == target_row["app_evidence"][key]
+            assert quiet_detail["overview"]["observed"]["app_evidence"][key] == quiet_row["app_evidence"][key]
+        assert target_detail["overview"]["observed"]["app_evidence"]["app_port_count"] == 2
+        assert target_detail["overview"]["observed"]["app_ports"] == target_row["app_ports"]
+        assert target_detail["overview"]["observed"]["app_services"] == target_row["app_services"]
+        assert target_detail["overview"]["observed"]["app_ports_truncated"] is False
+        assert quiet_detail["overview"]["observed"]["app_evidence"]["coverage_state"] == "scanned_no_ports_seen"
+        assert quiet_detail["overview"]["intel"]["status"] == "none"
+        for key in (
+            "total",
+            "all_total",
+            "suppressed",
+            "occurrence_count",
+            "latest_activity_at",
+            "by_severity",
+            "by_review_state",
+            "by_verification_state",
+            "by_suppression",
+        ):
+            assert target_detail["overview"]["finding_summary"]["direct"][key] == target_row["finding_summary"][key]
+        for key in (
+            "status",
+            "freshness",
+            "snapshot_count",
+            "provider_count",
+            "providers_with_data",
+            "last_refresh_at",
+            "highlight_count",
+            "highlights",
+        ):
+            assert target_detail["overview"]["intel"][key] == target_row["intel_summary"][key]
+        assert target_detail["overview"]["intel"]["provider_ports"] == target_row["open_ports"]
+        assert target_detail["overview"]["intel"]["provider_services"] == target_row["services"]
+        assert target_detail["overview"]["intel"]["certificate"] == target_row["certificate"]
+        assert target_detail["overview"]["intel"]["port_provenance"] == target_row["port_provenance"]
+        assert quiet_detail["overview"]["intel"]["provider_ports"] == []
+        assert quiet_detail["overview"]["intel"]["provider_services"] == []
+        assert quiet_detail["overview"]["intel"]["certificate"] == quiet_row["certificate"]
+        assert quiet_detail["overview"]["intel"]["port_provenance"] == quiet_row["port_provenance"]
+        assert target_detail["overview"]["finding_summary"] == target_detail["finding_summary"]
+        assert target_detail["overview"]["relationships"] == target_detail["relationship_summary"]
+        assert target_detail["overview"]["intel"]["summary"] == target_detail["intel_summary"]
 
     def test_project_intel_overview_does_not_mark_app_ports_as_drift_without_provider_intel(
         self,
@@ -4519,7 +4609,9 @@ class TestProjectOverviewContract:
 
         assert overview is not None
         row = overview["targets"][0]
-        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert self._app_port_identity(row["app_ports"]) == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": ""}
+        ]
         assert row["port_provenance"]["divergence"] == {
             "app_only": [443],
             "provider_only": [80],
@@ -4580,7 +4672,9 @@ class TestProjectOverviewContract:
         row = overview["targets"][0]
         assert row["source_flags"]["has_app_scan_evidence"] is False
         assert row["source_flags"]["has_app_ports"] is True
-        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert self._app_port_identity(row["app_ports"]) == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": ""}
+        ]
         assert row["app_evidence"]["coverage_state"] == "app_ports_found"
         assert row["app_evidence"]["scan_run_count"] == 0
         assert row["app_evidence"]["app_port_run_count"] == 1
@@ -4709,7 +4803,7 @@ class TestProjectOverviewContract:
 
         assert overview is not None
         row = overview["targets"][0]
-        assert row["app_ports"] == [
+        assert self._app_port_identity(row["app_ports"]) == [
             {"port": 443, "proto": "tcp", "service": "https", "version": ""},
             {"port": 444, "proto": "tcp", "service": "", "version": ""},
         ]
@@ -4770,6 +4864,25 @@ class TestProjectOverviewContract:
                 seen_at=now,
                 command="nmap busy.example.com",
             )
+            hidden_port = conn.execute(
+                "SELECT id FROM entities WHERE session_id = ? AND canonical_value = ?",
+                (
+                    "tok_overview_port_limit",
+                    f"busy.example.com:{8000 + total_port_count - 1}/tcp",
+                ),
+            ).fetchone()
+            assert hidden_port is not None
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'manual', ?)",
+                (
+                    "plink-overview-hidden-port",
+                    project["id"],
+                    hidden_port["id"],
+                    now,
+                ),
+            )
             conn.commit()
 
         overview = project_workspace.get_project_intel_overview("tok_overview_port_limit", project["id"])
@@ -4783,6 +4896,8 @@ class TestProjectOverviewContract:
         assert row["app_port_count"] == total_port_count
         assert row["app_evidence"]["coverage_state"] == "app_ports_found"
         assert row["app_evidence"]["port_entity_count"] == total_port_count
+        assert row["app_evidence"]["project_entity_port_count"] == 1
+        assert row["deep_link_hints"]["ports"]["host_entity_id"] == target["id"]
         assert overview["rollups"]["app_port_count"] == total_port_count
         assert overview["rollups"]["app_port_target_count"] == 1
 
@@ -4835,7 +4950,7 @@ class TestProjectOverviewContract:
         assert overview["rollups"]["app_port_count"] == 1
         assert overview["rollups"]["unscanned_target_count"] == 0
         assert overview["targets"][0]["app_evidence"]["coverage_state"] == "app_ports_found"
-        assert overview["targets"][0]["app_ports"] == [
+        assert self._app_port_identity(overview["targets"][0]["app_ports"]) == [
             {"port": 443, "proto": "tcp", "service": "https", "version": ""}
         ]
 
@@ -4908,7 +5023,7 @@ class TestProjectOverviewContract:
 
         assert overview is not None
         assert overview["rollups"]["app_port_count"] == 1
-        assert overview["targets"][0]["app_ports"] == [{
+        assert self._app_port_identity(overview["targets"][0]["app_ports"]) == [{
             "port": 22,
             "proto": "tcp",
             "service": "ssh",
@@ -4980,7 +5095,9 @@ class TestProjectOverviewContract:
         assert row["app_evidence"]["coverage_state"] == "app_ports_found"
         assert row["app_evidence"]["host_entity_id"] == host_id
         assert row["app_evidence"]["scope_note"] == "App ports are tracked on the URL host entity, not the URL itself."
-        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert self._app_port_identity(row["app_ports"]) == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": ""}
+        ]
         assert second_url_row["type"] == "url"
         assert second_url_row["app_evidence"]["host_entity_id"] == host_id
         assert second_url_row["app_ports"] == row["app_ports"]
@@ -5081,7 +5198,9 @@ class TestProjectOverviewContract:
         row = {item["entity_id"]: item for item in overview["targets"]}[target["id"]]
         assert row["type"] == "url"
         assert row["app_evidence"]["host_entity_id"] == team_host["id"]
-        assert row["app_ports"] == [{"port": 443, "proto": "tcp", "service": "https", "version": ""}]
+        assert self._app_port_identity(row["app_ports"]) == [
+            {"port": 443, "proto": "tcp", "service": "https", "version": ""}
+        ]
         assert row["app_services"] == ["https"]
         assert overview["rollups"]["app_port_count"] == 1
 
@@ -5207,8 +5326,25 @@ class TestProjectOverviewContract:
         mixed_row = rows_by_id[mixed_target["id"]]
         assert stale_row["source_flags"]["has_intel"] is True
         assert stale_row["source_flags"]["has_stale_intel"] is True
+        assert stale_row["intel_summary"]["freshness"] == "stale"
         assert mixed_row["source_flags"]["has_intel"] is True
         assert mixed_row["source_flags"]["has_stale_intel"] is False
+        assert mixed_row["intel_summary"]["freshness"] == "fresh"
+        from services.atlas.lookup import entity_detail
+        with database.db_connect() as conn:
+            stale_detail = entity_detail(
+                conn,
+                "tok_overview_stale",
+                stale_target["id"],
+                project_id=project["id"],
+            )
+        assert stale_detail is not None
+        assert stale_detail["overview"]["intel"]["status"] == "available"
+        assert stale_detail["overview"]["intel"]["freshness"] == "stale"
+        assert stale_detail["overview"]["intel"]["snapshot_count"] == 1
+        assert stale_detail["overview"]["intel"]["provider_count"] == 1
+        assert stale_detail["overview"]["intel"]["last_refresh_at"] == now.isoformat()
+        assert stale_detail["intel_snapshots"][0]["expires_at"] == expired_at
 
     def test_get_project_intel_overview_prefers_fresh_provider_snapshots_for_certificate(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
@@ -5268,6 +5404,7 @@ class TestProjectOverviewContract:
         assert target_row["open_ports"] == [443]
         assert target_row["services"] == ["https"]
         assert target_row["source_flags"]["has_stale_intel"] is False
+        assert target_row["intel_summary"]["freshness"] == "fresh"
 
     def test_get_project_intel_overview_logs_build_and_truncation_context(self, monkeypatch, tmp_path):
         from core.helpers import get_log_session_id
@@ -5552,6 +5689,7 @@ class TestProjectOverviewContract:
         }
 
     def test_get_project_intel_overview_marks_recent_changes_from_monitoring_targets(self, monkeypatch, tmp_path):
+        from services.atlas.lookup import entity_detail
         from services.watchers import service as watcher_service
 
         db_path = self._project_db(monkeypatch, tmp_path)
@@ -5649,6 +5787,43 @@ class TestProjectOverviewContract:
         assert target_row["recent_change_markers"][0]["target_ids"] == [target["id"]]
         assert quiet_row["source_flags"]["has_recent_changes"] is False
         assert quiet_row["recent_change_markers"] == []
+
+        with database.db_connect() as conn:
+            project_profile = entity_detail(
+                conn,
+                "tok_overview_recent",
+                target["id"],
+                project_id=project["id"],
+            )
+            owner_profile = entity_detail(
+                conn,
+                "tok_overview_recent",
+                target["id"],
+            )
+
+        assert project_profile is not None
+        project_monitoring = project_profile["overview"]["observed"]["project_monitoring"]
+        assert project_monitoring["applicable"] is True
+        assert project_monitoring["project_id"] == project["id"]
+        assert project_monitoring["state"] == "changed"
+        assert project_monitoring["watcher_count"] == 1
+        assert project_monitoring["counts"]["changed"] == 1
+        assert project_monitoring["recent_changes"][0]["fire_id"] == fire.id
+        assert project_monitoring["recent_changes"][0]["label"] == "New open port 443/tcp https"
+
+        assert owner_profile is not None
+        owner_monitoring = owner_profile["overview"]["observed"]["project_monitoring"]
+        assert owner_monitoring == {
+            "applicable": False,
+            "project_id": "",
+            "project_name": "",
+            "state": "not_applicable",
+            "watcher_count": 0,
+            "counts": {"active": 0, "changed": 0, "failed": 0, "quiet": 0, "paused": 0},
+            "latest_change_at": "",
+            "recent_changes": [],
+            "links": {},
+        }
 
     def test_project_intel_overview_prefers_crtsh_latest_expiry_over_historical_rows(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
@@ -25099,6 +25274,40 @@ class TestDatabaseInit:
                     (*finding_source_scope_params("scope-session"), "run-1", 10),
                 )
 
+                profile_related_entities_sql = (
+                    "SELECT child_e.id FROM entities child_e WHERE "
+                    + entity_scope_sql("child_e")
+                    + " AND child_e.type = ? AND child_e.host_entity_id = ? "
+                    "AND child_e.host_entity_id != '' "
+                    "ORDER BY child_e.last_seen_at DESC, child_e.occurrence_count DESC, "
+                    "child_e.canonical_value ASC LIMIT ?"
+                )
+                profile_related_entities_plan = self._sqlite_query_plan(
+                    conn,
+                    profile_related_entities_sql,
+                    (*entity_scope_params("scope-session"), "url", "host-entity", 25),
+                )
+
+                profile_related_findings_sql = (
+                    "SELECT f.id FROM findings f WHERE "
+                    + finding_source_scope_sql("f")
+                    + " AND f.entity_id IN (SELECT bucket_e.id FROM entities bucket_e "
+                    "WHERE bucket_e.host_entity_id = ? AND bucket_e.host_entity_id != '' "
+                    "AND bucket_e.type = ? AND "
+                    + entity_scope_sql("bucket_e")
+                    + ")"
+                )
+                profile_related_findings_plan = self._sqlite_query_plan(
+                    conn,
+                    profile_related_findings_sql,
+                    (
+                        *finding_source_scope_params("scope-session"),
+                        "host-entity",
+                        "url",
+                        *entity_scope_params("scope-session"),
+                    ),
+                )
+
                 project_owner_sql, project_owner_params = shared_owner_where("scope-session")
                 project_slug_plan = self._sqlite_query_plan(
                     conn,
@@ -25200,6 +25409,16 @@ class TestDatabaseInit:
             or "idx_entities_session_last_seen_value" in atlas_entity_plan
         )
         assert "idx_findings_session_run_seen" in atlas_finding_plan
+        assert "SCAN child_e" not in profile_related_entities_plan
+        # SQLite may prefer the personal owner/type index on an empty schema;
+        # either plan keeps the relationship lookup indexed and owner-scoped.
+        assert (
+            "idx_entities_host_entity" in profile_related_entities_plan
+            or "idx_entities_personal_signature" in profile_related_entities_plan
+            or "idx_entities_session_type_last_seen" in profile_related_entities_plan
+        )
+        assert "idx_entities_host_entity" in profile_related_findings_plan
+        assert "idx_findings_session_entity_seen" in profile_related_findings_plan
         assert "idx_projects_personal_slug_unique" in project_slug_plan
         assert (
             "idx_entities_session_type_last_seen" in project_entity_plan

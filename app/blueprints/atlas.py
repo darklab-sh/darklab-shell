@@ -663,10 +663,10 @@ def atlas_import_apply():
 from blueprints.atlas_read import (  # noqa: E402,F401
     atlas_entities_export_download,
     atlas_entities_list,
-    atlas_entity_detail,
     atlas_findings_list,
     atlas_runs_list,
 )
+from blueprints.atlas_profile_read import atlas_entity_detail  # noqa: E402,F401
 from blueprints.atlas_mutations import (  # noqa: E402,F401
     atlas_entities_bulk_delete,
     atlas_entities_bulk_suppression_update,

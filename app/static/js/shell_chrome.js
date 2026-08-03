@@ -296,6 +296,7 @@ let importedProjectWorkspaceShell;
   let projectMobileDetailBody = null;
   let projectWorkspaceOpenToken = 0;
   let projectWorkspaceDomPromise = null;
+  let projectWorkspaceReturnToAtlas = null;
   let projectTargetEditorOverlay = null;
   let projectTargetEditorTitle = null;
   let projectTargetCreateForm = null;
@@ -2133,6 +2134,7 @@ let importedProjectWorkspaceShell;
       projectFindingStatusFilterSet: _projectFindingStatusFilterSet,
       setProjectFindingOrphanFilter: (projectId, value) => _projectFiltersController().setFindingOrphanFilter(projectId, value),
       invalidateProjectFilteredFindings: _invalidateProjectFilteredFindings,
+      openProjectEntityInAtlas: _openProjectEntityInAtlas,
       logClientError: _shellLogClientError,
       mobileView: _projectMobileView,
     });
@@ -4699,6 +4701,25 @@ let importedProjectWorkspaceShell;
     return true;
   }
 
+  async function openProjectWorkspaceById(projectId, options = {}) {
+    const normalizedProjectId = String(projectId || '').trim();
+    if (!normalizedProjectId) return false;
+    projectWorkspaceReturnToAtlas = options?.returnToAtlas && typeof options.returnToAtlas === 'object'
+      ? { ...options.returnToAtlas }
+      : null;
+    const opened = await openProjectWorkspace();
+    if (!opened) {
+      projectWorkspaceReturnToAtlas = null;
+      return false;
+    }
+    projectWorkspaceState.setSelectedId(normalizedProjectId);
+    projectWorkspaceState.setTab('details');
+    await _ensureProjectSummary(normalizedProjectId);
+    _renderProjectWorkspace();
+    _renderProjectExplorer();
+    return true;
+  }
+
   function _autoPromoteProjectPickerContent(projects, preferredProjectId = '') {
     const wrap = document.createElement('div');
     wrap.className = 'history-project-picker';
@@ -4776,6 +4797,8 @@ let importedProjectWorkspaceShell;
   }
 
   function closeProjectWorkspace({ refocus = true } = {}) {
+    const returnToAtlas = refocus ? projectWorkspaceReturnToAtlas : null;
+    projectWorkspaceReturnToAtlas = null;
     projectWorkspaceOpenToken += 1;
     if (!_projectWorkspaceModulesReady()) {
       _refreshProjectWorkspaceElements();
@@ -4783,9 +4806,13 @@ let importedProjectWorkspaceShell;
       projectWorkspaceOverlay.classList.add('u-hidden');
       projectWorkspaceOverlay.classList.remove('open');
       projectWorkspaceOverlay.setAttribute('aria-hidden', 'true');
-      return;
+    } else {
+      _projectWorkspaceShellController().close({ refocus: refocus && !returnToAtlas });
     }
-    _projectWorkspaceShellController().close({ refocus });
+    if (returnToAtlas) {
+      void _shellOpenAtlas(returnToAtlas)
+        .catch((err) => _reportSurfaceOpenFailure('atlas', err, { source: 'project-return' }));
+    }
   }
 
   async function _projectWorkspaceRequest(url, options = {}) {
@@ -5072,6 +5099,7 @@ let importedProjectWorkspaceShell;
       openEntityMetadataEditor,
       openProjectAutoPromoteRuleFromAtlas,
       openProjectWorkspace,
+      openProjectWorkspaceById,
       refreshActiveProjectContext: loadActiveProjectContext,
       refreshProjectWorkspace,
     });

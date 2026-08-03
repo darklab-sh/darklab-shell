@@ -831,7 +831,7 @@ function _openAtlasForOutputEntity(token, options = {}) {
     tab,
     entityType,
     entityValue,
-    forceView: 'detail',
+    forceView: 'profile',
     refreshIntel: !!options.refreshIntel,
     addActiveProject: !!options.addActiveProject,
   });

@@ -8,6 +8,7 @@ import { setAtlasDetailHandlers as importedSetAtlasDetailHandlers } from './atla
 // Session Entity Atlas detail rendering helpers.
 
 const _darklabGlobal = window;
+const QUICK_DETAIL_PREVIEW_LIMIT = 3;
 
   function text(value, fallback = '') {
     return String(value ?? '').trim() || fallback;
@@ -68,7 +69,7 @@ const _darklabGlobal = window;
     return wrap;
   }
 
-  function renderProjectLinks(links, onRemove) {
+  function renderProjectLinks(links, onOpen, onRemove) {
     const wrap = node('div', 'atlas-project-links');
     const rows = Array.isArray(links) ? links : [];
     if (!rows.length) {
@@ -78,12 +79,22 @@ const _darklabGlobal = window;
     rows.forEach(link => {
       const row = node('div', 'atlas-project-link-row');
       const name = node('span', 'atlas-project-link-name', text(link.project_name, link.project_id || 'project'));
+      const actions = node('div', 'atlas-project-link-actions');
+      if (typeof onOpen === 'function') {
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'btn btn-secondary btn-compact';
+        open.textContent = 'Open Project';
+        open.addEventListener('click', () => onOpen(link));
+        actions.appendChild(open);
+      }
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'btn btn-ghost btn-compact';
       remove.textContent = 'Remove';
       remove.addEventListener('click', () => onRemove?.(link));
-      row.append(name, remove);
+      actions.appendChild(remove);
+      row.append(name, actions);
       wrap.appendChild(row);
     });
     return wrap;
@@ -192,11 +203,26 @@ const _darklabGlobal = window;
     return wrap;
   }
 
-  function renderIntelSnapshots(snapshots) {
+  function renderIntelSnapshots(snapshots, options = {}) {
     const wrap = node('div', 'atlas-intel-list');
     const rows = Array.isArray(snapshots) ? snapshots : [];
     if (!rows.length) {
-      wrap.appendChild(node('div', 'atlas-empty-inline', 'No intel snapshots'));
+      const portEntity = text(options.entityType).toLowerCase() === 'port';
+      wrap.appendChild(node(
+        'div',
+        'atlas-empty-inline',
+        portEntity
+          ? 'No cached provider data for port entities. Open the parent host to review provider data.'
+          : 'No cached provider data. Use Refresh intel to check configured providers.',
+      ));
+      if (portEntity && options.parentHost && typeof options.onOpenEntity === 'function') {
+        const openHost = document.createElement('button');
+        openHost.type = 'button';
+        openHost.className = 'btn btn-secondary btn-compact atlas-open-intel-parent';
+        openHost.textContent = 'Open parent host';
+        openHost.addEventListener('click', () => options.onOpenEntity(options.parentHost));
+        wrap.appendChild(openHost);
+      }
       return wrap;
     }
     rows.forEach(snapshot => {
@@ -243,10 +269,78 @@ const _darklabGlobal = window;
     return wrap;
   }
 
-  function renderIntelSummary(summary) {
+  function renderIntelSummary(summary, entityType, handlers = {}) {
     const highlights = Array.isArray(summary?.highlights) ? summary.highlights : [];
-    if (!highlights.length) return null;
+    const status = text(summary?.status, 'none');
+    const freshness = text(summary?.freshness, 'not_available');
+    const certificate = isRecord(summary?.certificate) ? summary.certificate : {};
+    const certificateStatus = text(certificate.status, 'unknown');
+    const divergence = isRecord(summary?.port_provenance?.divergence)
+      ? summary.port_provenance.divergence
+      : {};
+    const providerPorts = Array.isArray(summary?.provider_ports) ? summary.provider_ports : [];
+    const showCertificate = String(entityType || '') === 'domain' && certificateStatus !== 'unknown';
+    const showPortComparison = ['domain', 'ip'].includes(String(entityType || ''))
+      && (providerPorts.length || divergence.has_drift);
+    if (!highlights.length && status === 'none' && !showCertificate && !showPortComparison) return null;
     const wrap = node('div', 'atlas-intel-highlights');
+    const freshnessLabels = {
+      fresh: 'Fresh',
+      stale: 'Stale',
+      unknown: 'Unknown',
+      not_available: 'Not available',
+    };
+    const metaParts = [
+      `Freshness: ${freshnessLabels[freshness] || freshness}`,
+      formatCount(summary?.provider_count ?? summary?.providers_with_data?.length, 'provider'),
+    ];
+    if (text(summary?.last_refresh_at || summary?.updated_at)) {
+      metaParts.push(`refreshed ${formatDate(summary.last_refresh_at || summary.updated_at)}`);
+    }
+    wrap.appendChild(node('div', 'atlas-muted atlas-intel-profile-meta', metaParts.join(' · ')));
+    if (showCertificate || showPortComparison) {
+      const evidence = node('div', 'atlas-detail-meta atlas-intel-profile-evidence');
+      if (showCertificate) {
+        const certificateLabels = {
+          expired: 'Expired',
+          expiring_14d: 'Expires within 14 days',
+          expiring_30d: 'Expires within 30 days',
+          healthy: 'Healthy',
+        };
+        evidence.appendChild(metaRow('Certificate', certificateLabels[certificateStatus] || certificateStatus));
+        if (text(certificate.expires_at)) {
+          evidence.appendChild(metaRow('Certificate expiry', formatDate(certificate.expires_at)));
+        }
+      }
+      if (showPortComparison) {
+        const appOnly = Array.isArray(divergence.app_only) ? divergence.app_only : [];
+        const providerOnly = Array.isArray(divergence.provider_only) ? divergence.provider_only : [];
+        const differences = [];
+        if (appOnly.length) differences.push(`App only: ${appOnly.join(', ')}`);
+        if (providerOnly.length) differences.push(`Provider only: ${providerOnly.join(', ')}`);
+        evidence.appendChild(metaRow(
+          'Recorded port comparison',
+          differences.join(' · ') || 'No differences in recorded ports',
+        ));
+      }
+      wrap.appendChild(evidence);
+      if (divergence.has_drift) {
+        const actions = node('div', 'atlas-intel-profile-actions');
+        [
+          ['View app evidence', handlers.onOpenEvidence],
+          ['View provider data', handlers.onOpenIntel],
+        ].forEach(([label, handler]) => {
+          if (typeof handler !== 'function') return;
+          const action = document.createElement('button');
+          action.type = 'button';
+          action.className = 'btn btn-ghost btn-compact';
+          action.textContent = label;
+          action.addEventListener('click', handler);
+          actions.appendChild(action);
+        });
+        if (actions.childElementCount) wrap.appendChild(actions);
+      }
+    }
     const groups = new Map();
     highlights.forEach(item => {
       const providerId = text(item.provider, 'provider');
@@ -277,6 +371,148 @@ const _darklabGlobal = window;
       providerBlock.appendChild(itemList);
       wrap.appendChild(providerBlock);
     });
+    return wrap;
+  }
+
+  function renderAppEvidence(evidence) {
+    if (!evidence || evidence.applicable === false) return null;
+    const stateLabels = {
+      app_ports_found: 'App-captured ports found',
+      scanned_no_ports_seen: 'Scanned, no ports surfaced',
+      not_scanned: 'No app port scan recorded',
+    };
+    const wrap = node('div', 'atlas-detail-meta');
+    wrap.append(
+      metaRow('Status', stateLabels[text(evidence.coverage_state)] || 'No app port scan recorded'),
+      metaRow('Scan runs', Number(evidence.scan_run_count || 0).toLocaleString()),
+      metaRow('App ports', Number(evidence.app_port_count || 0).toLocaleString()),
+    );
+    if (text(evidence.last_observed_at)) {
+      wrap.appendChild(metaRow('Last scanned', formatDate(evidence.last_observed_at)));
+    }
+    const roots = Array.isArray(evidence.command_roots)
+      ? evidence.command_roots.map(root => text(root)).filter(Boolean)
+      : [];
+    if (roots.length) wrap.appendChild(metaRow('Scanners', roots.join(', ')));
+    if (text(evidence.scope_note)) {
+      wrap.appendChild(node('div', 'atlas-muted', text(evidence.scope_note)));
+    }
+    if (text(evidence.coverage_caveat)) {
+      wrap.appendChild(node('div', 'atlas-muted', text(evidence.coverage_caveat)));
+    }
+    if (text(evidence.coverage_state) === 'not_scanned') {
+      wrap.appendChild(node(
+        'div',
+        'atlas-empty-inline',
+        'Run a port scan for this host to add app-captured port and service evidence.',
+      ));
+    }
+    return wrap;
+  }
+
+  function renderProjectMonitoring(context) {
+    if (!context || context.applicable !== true) return null;
+    const state = text(context.state, 'not_monitored');
+    const stateLabels = {
+      not_monitored: 'Not monitored',
+      active: 'Active',
+      changed: 'Changed',
+      failed: 'Failed',
+      quiet: 'Quiet',
+      paused: 'Paused',
+      unavailable: 'Unavailable',
+    };
+    const wrap = node('div', 'atlas-project-monitoring');
+    const meta = node('div', 'atlas-detail-meta');
+    meta.append(
+      metaRow('Status', stateLabels[state] || state),
+      metaRow('Watchers', Number(context.watcher_count || 0).toLocaleString()),
+    );
+    if (text(context.project_name)) meta.appendChild(metaRow('Project', text(context.project_name)));
+    if (text(context.latest_change_at)) {
+      meta.appendChild(metaRow('Last change', formatDate(context.latest_change_at)));
+    }
+    wrap.appendChild(meta);
+
+    const changes = Array.isArray(context.recent_changes) ? context.recent_changes : [];
+    if (changes.length) {
+      const list = node('div', 'atlas-source-list atlas-project-monitoring-changes');
+      changes.forEach((change) => {
+        const row = node('div', 'panel-row atlas-source-row atlas-project-monitoring-change');
+        row.append(
+          node('div', 'atlas-source-command', text(change.label, 'Watcher change')),
+          node(
+            'div',
+            'atlas-muted',
+            [
+              text(change.watcher_label),
+              text(change.severity),
+              text(change.created) ? formatDate(change.created) : '',
+            ].filter(Boolean).join(' · '),
+          ),
+        );
+        list.appendChild(row);
+      });
+      wrap.appendChild(list);
+    } else {
+      wrap.appendChild(node('div', 'atlas-muted', 'No recent watcher changes for this entity'));
+    }
+    return wrap;
+  }
+
+  function appendCollectionAction(wrap, label, onOpen) {
+    if (!wrap || typeof onOpen !== 'function' || !text(label)) return;
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'btn btn-ghost btn-compact atlas-collection-open';
+    action.textContent = text(label);
+    action.addEventListener('click', () => onOpen());
+    wrap.appendChild(action);
+  }
+
+  function collectionTotal(meta, rows) {
+    return Math.max(
+      Array.isArray(rows) ? rows.length : 0,
+      Number(meta?.total || 0),
+    );
+  }
+
+  function renderAppPorts(observed, entityType, options = {}) {
+    if (String(entityType || '') === 'port') return null;
+    const allPorts = Array.isArray(observed?.app_ports) ? observed.app_ports : [];
+    if (!allPorts.length) return null;
+    const previewLimit = Math.max(0, Number(options.previewLimit || 0));
+    const ports = previewLimit ? allPorts.slice(0, previewLimit) : allPorts;
+    const wrap = node('div', 'atlas-source-list atlas-app-port-list');
+    ports.forEach((port) => {
+      const row = node('div', 'panel-row atlas-source-row atlas-app-port-row');
+      const service = text(port.service);
+      const version = text(port.version);
+      const serviceLabel = service ? ` · ${service}${version ? ` (${version})` : ''}` : '';
+      const title = node(
+        'div',
+        'atlas-source-command',
+        `${Number(port.port || 0).toLocaleString()}/${text(port.proto, 'tcp')}${serviceLabel}`,
+      );
+      const details = [
+        formatCount(port.occurrence_count, 'observation'),
+        formatCount(port.source_run_count, 'source run'),
+      ];
+      if (text(port.last_seen_at)) details.push(`last seen ${formatDate(port.last_seen_at)}`);
+      row.append(title, node('div', 'atlas-muted', details.join(' · ')));
+      if (text(port.banner)) row.appendChild(node('div', 'atlas-muted', text(port.banner)));
+      wrap.appendChild(row);
+    });
+    const total = Math.max(allPorts.length, Number(observed?.app_port_count || 0));
+    if (previewLimit && total > ports.length && typeof options.onViewAll === 'function') {
+      appendCollectionAction(
+        wrap,
+        `Open port evidence (${formatCount(total, 'port')})`,
+        options.onViewAll,
+      );
+    } else if (observed?.app_ports_truncated && total > ports.length) {
+      wrap.appendChild(node('div', 'atlas-muted', `+${(total - ports.length).toLocaleString()} more app-captured ports`));
+    }
     return wrap;
   }
 
@@ -314,44 +550,51 @@ const _darklabGlobal = window;
     return wrap;
   }
 
-  function renderRuns(runs, onSeeRun, meta = null, onPage = null, onCleanRunAtlas = null) {
+  function renderRuns(runs, onSeeRun, meta = null, onPage = null, onCleanRunAtlas = null, options = {}) {
     const wrap = node('div', 'atlas-source-list');
-    const rows = Array.isArray(runs) ? runs : [];
+    const allRows = Array.isArray(runs) ? runs : [];
+    const previewLimit = Math.max(0, Number(options.previewLimit || 0));
+    const rows = previewLimit ? allRows.slice(0, previewLimit) : allRows;
     if (!rows.length) {
       wrap.appendChild(node('div', 'atlas-empty-inline', 'No linked runs'));
       return wrap;
     }
     rows.forEach(run => {
       const row = node('div', 'panel-row atlas-source-row');
-      const title = node('div', 'atlas-source-command', text(run.command, run.run_id));
+      const title = node(
+        typeof onSeeRun === 'function' ? 'button' : 'div',
+        `atlas-source-command${typeof onSeeRun === 'function' ? ' atlas-source-run-open' : ''}`,
+        text(run.command, run.run_id),
+      );
+      if (title.tagName === 'BUTTON') {
+        title.type = 'button';
+        title.setAttribute('aria-label', `Open source run: ${text(run.command, run.run_id)}`);
+        title.addEventListener('click', () => onSeeRun(run));
+      }
       const meta = node(
         'div',
         'atlas-muted',
         `${formatCount(run.occurrence_count, 'hit')} · ${formatDate(run.last_seen_at || run.started)}`,
       );
       row.append(title, meta);
-      const actions = node('div', 'atlas-source-actions');
-      if (typeof onSeeRun === 'function') {
-        const action = document.createElement('button');
-        action.type = 'button';
-        action.className = 'btn btn-ghost btn-compact atlas-source-action';
-        action.textContent = 'See in run';
-        action.addEventListener('click', () => onSeeRun(run));
-        actions.appendChild(action);
+      if (options.showCleanup !== false && typeof onCleanRunAtlas === 'function') {
+        const menu = detailActionMenu([{
+          label: 'Clean from Atlas',
+          onSelect: () => onCleanRunAtlas(run),
+        }]);
+        if (menu) row.appendChild(menu);
       }
-      if (typeof onCleanRunAtlas === 'function') {
-        const cleanup = document.createElement('button');
-        cleanup.type = 'button';
-        cleanup.className = 'btn btn-ghost btn-compact atlas-source-action';
-        cleanup.textContent = 'Clean Atlas';
-        cleanup.addEventListener('click', () => onCleanRunAtlas(run));
-        actions.appendChild(cleanup);
-      }
-      if (actions.childElementCount) row.appendChild(actions);
       wrap.appendChild(row);
     });
-    const pager = renderCollectionPager(meta, 'source runs', onPage);
-    if (pager) wrap.appendChild(pager);
+    if (previewLimit) {
+      const total = collectionTotal(meta, allRows);
+      if (total > rows.length) {
+        appendCollectionAction(wrap, `View all ${formatCount(total, 'source run')}`, options.onViewAll);
+      }
+    } else {
+      const pager = renderCollectionPager(meta, 'source runs', onPage);
+      if (pager) wrap.appendChild(pager);
+    }
     return wrap;
   }
 
@@ -364,9 +607,11 @@ const _darklabGlobal = window;
     return source.created_record ? `Created by ${tool} import` : `Also seen in ${tool} import`;
   }
 
-  function renderImportSources(sources) {
+  function renderImportSources(sources, options = {}) {
     const wrap = node('div', 'atlas-source-list atlas-import-source-list');
-    const rows = Array.isArray(sources) ? sources : [];
+    const allRows = Array.isArray(sources) ? sources : [];
+    const previewLimit = Math.max(0, Number(options.previewLimit || 0));
+    const rows = previewLimit ? allRows.slice(0, previewLimit) : allRows;
     if (!rows.length) {
       wrap.appendChild(node('div', 'atlas-empty-inline', 'No import sources'));
       return wrap;
@@ -387,6 +632,13 @@ const _darklabGlobal = window;
       );
       wrap.appendChild(row);
     });
+    if (previewLimit && allRows.length > rows.length) {
+      appendCollectionAction(
+        wrap,
+        `View all ${formatCount(allRows.length, 'import source')}`,
+        options.onViewAll,
+      );
+    }
     return wrap;
   }
 
@@ -419,15 +671,28 @@ const _darklabGlobal = window;
     return wrap;
   }
 
-  function renderFindings(findings, meta = null, onPage = null) {
+  function renderFindings(
+    findings,
+    meta = null,
+    onPage = null,
+    onOpenFinding = null,
+    emptyLabel = '',
+    options = {},
+  ) {
     const wrap = node('div', 'atlas-finding-list');
-    const rows = Array.isArray(findings) ? findings : [];
+    const allRows = Array.isArray(findings) ? findings : [];
+    const previewLimit = Math.max(0, Number(options.previewLimit || 0));
+    const rows = previewLimit ? allRows.slice(0, previewLimit) : allRows;
     if (!rows.length) {
-      wrap.appendChild(node('div', 'atlas-empty-inline', 'No findings for this entity'));
+      wrap.appendChild(node('div', 'atlas-empty-inline', text(emptyLabel, 'No findings in this scope')));
       return wrap;
     }
     rows.forEach(finding => {
-      const row = node('div', 'panel-row atlas-finding-row');
+      const row = node(
+        typeof onOpenFinding === 'function' ? 'button' : 'div',
+        `panel-row${typeof onOpenFinding === 'function' ? ' panel-row-clickable' : ''} selection-row atlas-finding-row`,
+      );
+      if (row.tagName === 'BUTTON') row.type = 'button';
       const title = node('div', 'atlas-finding-title', text(finding.title || finding.raw_line, finding.id));
       const meta = node(
         'div',
@@ -435,42 +700,137 @@ const _darklabGlobal = window;
         [text(finding.status), text(finding.severity), text(finding.tool_root)].filter(Boolean).join(' · '),
       );
       row.append(title, meta);
+      if (typeof onOpenFinding === 'function') row.addEventListener('click', () => onOpenFinding(finding));
       wrap.appendChild(row);
     });
-    const pager = renderCollectionPager(meta, 'findings', onPage);
-    if (pager) wrap.appendChild(pager);
+    if (previewLimit) {
+      const total = collectionTotal(meta, allRows);
+      if (total > rows.length) {
+        appendCollectionAction(
+          wrap,
+          text(options.viewAllLabel, `View all ${formatCount(total, 'finding')}`),
+          options.onViewAll,
+        );
+      }
+    } else {
+      const pager = renderCollectionPager(meta, 'findings', onPage);
+      if (pager) wrap.appendChild(pager);
+    }
     return wrap;
   }
 
-  function renderRelatedUrls(urls, meta = null, onOpenEntity = null) {
-    const wrap = node('div', 'atlas-source-list atlas-related-url-list');
-    const rows = Array.isArray(urls) ? urls : [];
+  function renderRelatedEntities(entities, meta = null, options = {}) {
+    const noun = text(options.noun, 'entities');
+    const emptyLabel = text(options.emptyLabel, `No ${noun}`);
+    const wrap = node('div', `atlas-source-list atlas-related-${text(options.type, 'entity')}-list`);
+    const allRows = Array.isArray(entities) ? entities : [];
+    const previewLimit = Math.max(0, Number(options.previewLimit || 0));
+    const rows = previewLimit ? allRows.slice(0, previewLimit) : allRows;
     if (!rows.length) {
-      wrap.appendChild(node('div', 'atlas-empty-inline', 'No related URLs'));
-      return wrap;
+      wrap.appendChild(node('div', 'atlas-empty-inline', emptyLabel));
+    } else {
+      rows.forEach(relatedEntity => {
+        const actionable = typeof options.onOpenEntity === 'function';
+        const row = node(
+          actionable ? 'button' : 'div',
+          `panel-row${actionable ? ' panel-row-clickable selection-row' : ''} atlas-source-row atlas-related-${text(options.type, 'entity')}-row${actionable ? ` atlas-related-${text(options.type, 'entity')}-open` : ''}`,
+        );
+        if (row.tagName === 'BUTTON') row.type = 'button';
+        const title = node('div', 'atlas-source-command', text(relatedEntity.canonical_value, relatedEntity.id));
+        if (typeof options.onOpenEntity === 'function') {
+          row.addEventListener('click', () => options.onOpenEntity(relatedEntity));
+        }
+        const detail = node(
+          'div',
+          'atlas-muted',
+          `${formatCount(relatedEntity.occurrence_count, 'hit')} · ${formatDate(relatedEntity.last_seen_at)}`,
+        );
+        row.append(title, detail);
+        wrap.appendChild(row);
+      });
     }
-    rows.forEach(urlEntity => {
-      const row = node('div', 'panel-row atlas-source-row atlas-related-url-row');
-      const title = document.createElement(typeof onOpenEntity === 'function' ? 'button' : 'div');
-      title.className = typeof onOpenEntity === 'function'
-        ? 'btn btn-ghost btn-compact atlas-source-command atlas-related-url-open'
-        : 'atlas-source-command';
-      if (title.tagName === 'BUTTON') title.type = 'button';
-      title.textContent = text(urlEntity.canonical_value, urlEntity.id);
-      if (typeof onOpenEntity === 'function') {
-        title.addEventListener('click', () => onOpenEntity(urlEntity));
+    if (previewLimit) {
+      const total = collectionTotal(meta, allRows);
+      if (total > rows.length) {
+        appendCollectionAction(
+          wrap,
+          text(options.viewAllLabel, `View all ${total.toLocaleString()} ${noun}`),
+          options.onViewAll,
+        );
       }
-      const detail = node(
-        'div',
-        'atlas-muted',
-        `${formatCount(urlEntity.occurrence_count, 'hit')} · ${formatDate(urlEntity.last_seen_at)}`,
-      );
-      row.append(title, detail);
-      wrap.appendChild(row);
-    });
-    const pager = renderCollectionPager(meta, 'related URLs');
-    if (pager) wrap.appendChild(pager);
+    } else {
+      const pager = renderCollectionPager(meta, noun, options.onPage);
+      if (pager) wrap.appendChild(pager);
+    }
     return wrap;
+  }
+
+  function findingSummaryDetail(rollup) {
+    const total = Math.max(0, Number(rollup?.total || 0));
+    const severity = rollup?.by_severity || {};
+    const attention = Number(severity.critical || 0) + Number(severity.high || 0);
+    const parts = [];
+    if (attention) parts.push(`${attention.toLocaleString()} critical/high`);
+    if (Number(rollup?.suppressed || 0)) parts.push(`${Number(rollup.suppressed).toLocaleString()} suppressed`);
+    if (parts.length) return parts.join(' · ');
+    if (!total) return 'No findings in this scope';
+    const review = rollup?.by_review_state || {};
+    const reviewLabels = [
+      ['new', 'new'],
+      ['needs_followup', 'follow-up'],
+      ['important', 'important'],
+      ['reviewed', 'reviewed'],
+      ['false_positive', 'false positive'],
+    ];
+    const reviewSummary = reviewLabels
+      .map(([key, label]) => [Number(review[key] || 0), label])
+      .filter(([count]) => count > 0)
+      .slice(0, 2)
+      .map(([count, label]) => `${count.toLocaleString()} ${label}`);
+    return reviewSummary.join(' · ') || `${formatCount(total, 'active finding')}`;
+  }
+
+  function findingSummaryCard(label, rollup, bucket, onOpen, primary = false) {
+    const actionable = typeof onOpen === 'function' && rollup?.applicable !== false;
+    const card = node(
+      actionable ? 'button' : 'div',
+      `atlas-finding-summary-card${actionable ? ' btn btn-ghost' : ''}${primary ? ' is-primary' : ''}`,
+    );
+    if (actionable) {
+      card.type = 'button';
+      card.dataset.atlasFindingBucket = bucket;
+      card.setAttribute('aria-label', `${label}: ${formatCount(rollup?.total, 'finding')}`);
+      card.addEventListener('click', () => onOpen(bucket));
+    }
+    card.append(
+      node('strong', '', Number(rollup?.total || 0).toLocaleString()),
+      node('span', '', label),
+      node('div', 'atlas-muted', findingSummaryDetail(rollup)),
+    );
+    return card;
+  }
+
+  function renderFindingSummary(summary, entityType, onOpen) {
+    if (!summary || typeof summary !== 'object') return null;
+    const wrap = node('div', 'atlas-finding-summary-grid');
+    wrap.appendChild(findingSummaryCard('On this entity', summary.direct, 'direct', onOpen, true));
+    if (['domain', 'ip'].includes(String(entityType || ''))) {
+      wrap.append(
+        findingSummaryCard('On related URLs', summary.related_urls, 'related_urls', onOpen),
+        findingSummaryCard('On related ports', summary.related_ports, 'related_ports', onOpen),
+        findingSummaryCard('Across this host surface', summary.combined, 'combined', onOpen),
+      );
+    }
+    return wrap;
+  }
+
+  function renderParentHost(parentHost, onOpenEntity) {
+    return renderRelatedEntities(parentHost ? [parentHost] : [], null, {
+      type: 'host',
+      noun: 'parent host',
+      emptyLabel: 'No parent host recorded',
+      onOpenEntity,
+    });
   }
 
   function reviewStateSelect(value, onChange, options = {}) {
@@ -594,6 +954,14 @@ const _darklabGlobal = window;
       container.appendChild(node('div', 'atlas-empty-inline', 'Select a finding'));
       return;
     }
+    if (typeof handlers.onBack === 'function' && !handlers.hideBackAction) {
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'btn btn-ghost btn-compact atlas-detail-back';
+      back.textContent = '← Back to entity';
+      back.addEventListener('click', () => handlers.onBack(finding));
+      container.appendChild(back);
+    }
     const header = node('div', 'atlas-detail-identity');
     header.append(
       node('div', 'atlas-detail-type', text(finding.kind, 'FINDING').toUpperCase()),
@@ -703,6 +1071,112 @@ const _darklabGlobal = window;
     return wrap;
   }
 
+  const profileViews = [
+    ['overview', 'Overview'],
+    ['evidence', 'Evidence'],
+    ['findings', 'Findings'],
+    ['intel', 'Intel'],
+  ];
+
+  function normalizedProfileView(value) {
+    const requested = text(value, 'overview').toLowerCase();
+    return profileViews.some(([view]) => view === requested) ? requested : 'overview';
+  }
+
+  function renderProfileNavigation(activeView, onChange) {
+    const active = normalizedProfileView(activeView);
+    const wrap = node('div', 'atlas-profile-tabs tab-strip');
+    wrap.setAttribute('role', 'tablist');
+    wrap.setAttribute('aria-label', 'Entity profile views');
+    profileViews.forEach(([view, label], index) => {
+      const button = document.createElement('button');
+      const selected = view === active;
+      button.type = 'button';
+      button.className = `tab-strip-item atlas-profile-tab${selected ? ' is-active active' : ''}`;
+      button.dataset.atlasProfileView = view;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      button.textContent = label;
+      button.addEventListener('click', () => onChange?.(view, { focus: true }));
+      button.addEventListener('keydown', (event) => {
+        const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        event.preventDefault();
+        let nextIndex = index;
+        if (event.key === 'ArrowLeft') nextIndex = (index - 1 + profileViews.length) % profileViews.length;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % profileViews.length;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = profileViews.length - 1;
+        onChange?.(profileViews[nextIndex][0], { focus: true });
+      });
+      wrap.appendChild(button);
+    });
+    return wrap;
+  }
+
+  function renderProfileSections(detail, entity, handlers, parts) {
+    const activeView = normalizedProfileView(handlers.profileView);
+    if (activeView === 'evidence') {
+      return sectionGroup('Evidence', [
+        parts.appEvidence ? section('Scan coverage', parts.appEvidence) : null,
+        parts.appPorts ? section(
+          String(entity.type || '') === 'url'
+            ? 'App-captured ports (parent host)'
+            : 'App-captured ports',
+          parts.appPorts,
+        ) : null,
+        section('Source runs', renderRuns(
+          detail.runs,
+          handlers.onSeeRun,
+          detail.detail_limits?.runs,
+          handlers.onPageRuns,
+          handlers.onCleanRunAtlas,
+        )),
+        section('Import sources', renderImportSources(detail.import_sources)),
+      ]);
+    }
+    if (activeView === 'findings') {
+      const findingBucket = text(detail.detail_limits?.findings?.bucket, 'direct');
+      const findingLabels = {
+        direct: ['Direct findings', 'No direct findings on this entity'],
+        related_urls: ['Findings on related URLs', 'No findings on related URLs'],
+        related_ports: ['Findings on related ports', 'No findings on related ports'],
+        combined: ['Findings across this host surface', 'No findings across this host surface'],
+      };
+      const [findingTitle, findingEmpty] = findingLabels[findingBucket] || findingLabels.direct;
+      return sectionGroup('Findings', [
+        parts.findingSummary ? section('Summary', parts.findingSummary) : null,
+        section(findingTitle, renderFindings(
+          detail.findings,
+          detail.detail_limits?.findings,
+          handlers.onPageFindings,
+          handlers.onOpenFinding,
+          findingEmpty,
+        )),
+      ]);
+    }
+    if (activeView === 'intel') {
+      return sectionGroup('External intelligence', [
+        parts.intelSummary ? section('Summary', parts.intelSummary) : null,
+        section('Cached provider data', renderIntelSnapshots(detail.intel_snapshots, {
+          entityType: entity.type,
+          parentHost: detail.parent_host,
+          onOpenEntity: handlers.onOpenEntity,
+        })),
+      ]);
+    }
+    return [
+      sectionGroup('Overview', [
+        section('Summary', parts.meta),
+        parts.findingSummary ? section('Findings and work', parts.findingSummary) : null,
+        parts.projectMonitoring ? section('Project monitoring', parts.projectMonitoring) : null,
+      ]),
+      sectionGroup('Relationships', parts.relationshipSections),
+      sectionGroup('Metadata', parts.metadataSections),
+    ];
+  }
+
   function renderDetail(container, detail, handlers = {}) {
     clear(container);
     if (!container) return;
@@ -726,6 +1200,14 @@ const _darklabGlobal = window;
       metaRow('Last seen', formatDate(entity.last_seen_at)),
     );
 
+    if (handlers.profileMode && typeof handlers.onExitProfile === 'function' && !handlers.hideProfileBackAction) {
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'btn btn-ghost btn-compact atlas-profile-back';
+      back.textContent = `\u2190 ${text(handlers.profileBackLabel, 'Back to results')}`;
+      back.addEventListener('click', () => handlers.onExitProfile());
+      container.appendChild(back);
+    }
     container.append(header);
     if (!handlers.hideInlineActions) {
       const actions = node('div', 'atlas-detail-actions');
@@ -747,6 +1229,14 @@ const _darklabGlobal = window;
         promote.addEventListener('click', () => handlers.onAddToActiveProject?.(entity));
         actions.appendChild(promote);
       }
+      if (!handlers.profileMode && typeof handlers.onViewProfile === 'function') {
+        const profile = document.createElement('button');
+        profile.type = 'button';
+        profile.className = 'btn btn-primary btn-compact atlas-view-profile';
+        profile.textContent = 'View profile';
+        profile.addEventListener('click', () => handlers.onViewProfile?.('overview'));
+        actions.appendChild(profile);
+      }
       const menu = detailActionMenu([
         {
           label: entity.suppressed ? 'Restore entity' : 'Suppress entity',
@@ -765,33 +1255,147 @@ const _darklabGlobal = window;
       if (menu) actions.appendChild(menu);
       container.append(actions);
     }
-    container.append(meta);
-    const intelSummary = renderIntelSummary(detail.intel_summary);
-    if (intelSummary) container.append(section('Intel summary', intelSummary));
-    container.append(section('Projects', renderProjectLinks(entity.project_links, handlers.onRemoveProjectLink)));
-    container.append(section('Labels', renderLabels(entity.labels)));
-    container.append(section('Metadata', renderMetadataEditor(entity, handlers)));
-    container.append(section('Intel', renderIntelSnapshots(detail.intel_snapshots)));
-    container.append(section('Import sources', renderImportSources(detail.import_sources)));
-    if (['domain', 'ip'].includes(String(entity.type || ''))) {
-      container.append(section('Related URLs', renderRelatedUrls(
-        detail.related_urls,
-        detail.detail_limits?.related_urls,
-        handlers.onOpenEntity,
-      )));
-    }
-    container.append(section('Source runs', renderRuns(
-      detail.runs,
-      handlers.onSeeRun,
-      detail.detail_limits?.runs,
-      handlers.onPageRuns,
-      handlers.onCleanRunAtlas,
-    )));
-    container.append(section('Findings', renderFindings(
+    const quickDetail = !handlers.profileMode;
+    const appEvidence = renderAppEvidence(detail.overview?.observed?.app_evidence);
+    const appPorts = renderAppPorts(detail.overview?.observed, entity.type, quickDetail ? {
+      previewLimit: QUICK_DETAIL_PREVIEW_LIMIT,
+      onViewAll: handlers.onOpenEvidence,
+    } : {});
+    const projectMonitoring = renderProjectMonitoring(detail.overview?.observed?.project_monitoring);
+    const observedSections = [
+      section('Summary', meta),
+      appEvidence ? section('Scan coverage', appEvidence) : null,
+      projectMonitoring ? section('Project monitoring', projectMonitoring) : null,
+    ];
+    const findingSummary = renderFindingSummary(
+      detail.finding_summary,
+      entity.type,
+      handlers.onOpenFindingBucket,
+    );
+    const findingSections = [];
+    if (findingSummary) findingSections.push(section('Summary', findingSummary));
+    findingSections.push(section('Direct findings', renderFindings(
       detail.findings,
       detail.detail_limits?.findings,
       handlers.onPageFindings,
+      handlers.onOpenFinding,
+      'No direct findings on this entity',
+      quickDetail ? {
+        previewLimit: QUICK_DETAIL_PREVIEW_LIMIT,
+        onViewAll: () => handlers.onOpenFindingBucket?.('direct'),
+      } : {},
     )));
+    const relationshipSections = [];
+    if (detail.parent_host) {
+      relationshipSections.push(section('Parent host', renderParentHost(detail.parent_host, handlers.onOpenEntity)));
+    }
+    relationshipSections.push(section(
+      'Projects',
+      renderProjectLinks(entity.project_links, handlers.onOpenProject, handlers.onRemoveProjectLink),
+    ));
+    if (['domain', 'ip'].includes(String(entity.type || ''))) {
+      relationshipSections.push(section('Related URLs', renderRelatedEntities(
+        detail.related_urls,
+        detail.detail_limits?.related_urls,
+        {
+          type: 'url',
+          noun: 'related URLs',
+          onOpenEntity: handlers.onOpenEntity,
+          onPage: handlers.onPageRelatedUrls,
+          previewLimit: quickDetail ? QUICK_DETAIL_PREVIEW_LIMIT : 0,
+          onViewAll: quickDetail ? () => handlers.onViewProfile?.('overview') : null,
+        },
+      )));
+      relationshipSections.push(section('Related ports', renderRelatedEntities(
+        detail.related_ports,
+        detail.detail_limits?.related_ports,
+        {
+          type: 'port',
+          noun: 'related ports',
+          onOpenEntity: handlers.onOpenEntity,
+          onPage: handlers.onPageRelatedPorts,
+          previewLimit: quickDetail ? QUICK_DETAIL_PREVIEW_LIMIT : 0,
+          onViewAll: quickDetail ? () => handlers.onViewProfile?.('overview') : null,
+        },
+      )));
+    }
+    const evidenceSections = [
+      appPorts ? section(
+        String(entity.type || '') === 'url'
+          ? 'App-captured ports (parent host)'
+          : 'App-captured ports',
+        appPorts,
+      ) : null,
+      section('Source runs', renderRuns(
+        detail.runs,
+        handlers.onSeeRun,
+        detail.detail_limits?.runs,
+        handlers.onPageRuns,
+        handlers.onCleanRunAtlas,
+        {
+          previewLimit: QUICK_DETAIL_PREVIEW_LIMIT,
+          onViewAll: handlers.onOpenEvidence,
+          showCleanup: false,
+        },
+      )),
+      section('Import sources', renderImportSources(detail.import_sources, {
+        previewLimit: QUICK_DETAIL_PREVIEW_LIMIT,
+        onViewAll: handlers.onOpenEvidence,
+      })),
+    ];
+    const metadataSections = [
+      section('Labels', renderLabels(entity.labels)),
+      section('Edit metadata', renderMetadataEditor(entity, handlers)),
+    ];
+    const intelSummary = renderIntelSummary(
+      detail.overview?.intel || detail.intel_summary,
+      entity.type,
+      {
+        onOpenEvidence: handlers.onOpenEvidence,
+        onOpenIntel: handlers.onOpenIntel,
+      },
+    );
+    const intelSections = [];
+    if (intelSummary) intelSections.push(section('Summary', intelSummary));
+    intelSections.push(section('Cached provider data', renderIntelSnapshots(detail.intel_snapshots, {
+      entityType: entity.type,
+      parentHost: detail.parent_host,
+      onOpenEntity: handlers.onOpenEntity,
+    })));
+    if (handlers.profileMode) {
+      container.appendChild(renderProfileNavigation(handlers.profileView, handlers.onProfileViewChange));
+      const focused = renderProfileSections(detail, entity, handlers, {
+        appEvidence,
+        appPorts,
+        projectMonitoring,
+        findingSummary,
+        intelSummary,
+        meta,
+        relationshipSections,
+        metadataSections,
+      });
+      (Array.isArray(focused) ? focused : [focused]).filter(Boolean).forEach(item => container.appendChild(item));
+      return;
+    }
+    container.append(
+      sectionGroup('Observed by darklab_shell', observedSections),
+      sectionGroup('Findings and work', findingSections),
+      sectionGroup('Relationships', relationshipSections),
+      sectionGroup('Evidence', evidenceSections),
+      sectionGroup('Metadata', metadataSections),
+      sectionGroup('External intelligence', intelSections),
+    );
+  }
+
+  function sectionGroup(title, sections = []) {
+    const wrap = node('section', 'atlas-detail-group');
+    const heading = node('div', 'atlas-detail-group-title', title);
+    heading.setAttribute('role', 'heading');
+    heading.setAttribute('aria-level', '3');
+    const body = node('div', 'atlas-detail-group-body');
+    sections.filter(Boolean).forEach(item => body.appendChild(item));
+    wrap.append(heading, body);
+    return wrap;
   }
 
   function section(title, content) {

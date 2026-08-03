@@ -9,6 +9,11 @@ from typing import Any
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
+from services.atlas.intel_profile import (
+    _intel_provider_payload as _intel_provider_payload,
+    _snapshot_has_intel as _snapshot_has_intel,
+    intel_freshness,
+)
 from services.intel.registry import provider_label
 from services.storage.body_store import load_text_body, stored_body_pointer
 
@@ -38,34 +43,6 @@ def _row_to_intel_snapshot(row) -> dict[str, Any]:
         "fetched_at": row["fetched_at"],
         "expires_at": row["expires_at"],
     }
-
-
-def _intel_provider_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
-    provider = str(snapshot.get("provider") or "").strip().lower()
-    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
-    providers = data.get("providers") if isinstance(data, dict) else {}
-    if not isinstance(providers, dict):
-        return {}
-    payload = providers.get(provider)
-    if isinstance(payload, dict):
-        return payload
-    for key, value in providers.items():
-        if str(key or "").strip().lower() == provider and isinstance(value, dict):
-            return value
-    return {}
-
-
-def _snapshot_has_intel(snapshot: dict[str, Any]) -> bool:
-    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
-    summary = data.get("summary") if isinstance(data, dict) else None
-    if isinstance(summary, dict):
-        providers = summary.get("providers_with_data")
-        if isinstance(providers, list) and providers:
-            return True
-        has_intel = summary.get("has_intel")
-        if isinstance(has_intel, bool):
-            return has_intel
-    return bool(_intel_provider_payload(snapshot))
 
 
 def _highlight(label: str, value: object, provider: str, tone: str = "neutral") -> dict[str, str] | None:
@@ -366,8 +343,12 @@ def summarize_intel_snapshots(
         status = "available" if providers_with_data or highlights else "empty"
     return {
         "status": status,
+        "freshness": intel_freshness(snapshots),
+        "snapshot_count": len(snapshots),
+        "provider_count": len(providers_with_data),
         "providers_with_data": providers_with_data,
         "highlight_count": len(highlights),
         "highlights": highlights,
+        "last_refresh_at": latest_fetched_at,
         "updated_at": latest_fetched_at,
     }

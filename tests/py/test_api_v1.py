@@ -1646,12 +1646,20 @@ def test_api_v1_project_readers_are_token_scoped():
             "VALUES (?, ?, ?, ?, 'api.darklab.sh', ?, 'medium', 'finding', 'nmap', ?, ?, "
             "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:01+00:00', 1, 'new', "
             "'API finding', 'open port', '2026-05-19T00:00:01+00:00')",
-            (finding_id, token, run_id, entity_id, "sig_" + uuid.uuid4().hex, run_id, run_id),
+            (finding_id, token, run_id, port_entity_id, "sig_" + uuid.uuid4().hex, run_id, run_id),
         )
         conn.execute(
             "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
             "VALUES (?, ?, 2, 'open port', '2026-05-19T00:00:01+00:00')",
             (finding_id, run_id),
+        )
+        conn.execute(
+            "INSERT INTO scan_target_observations "
+            "(session_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
+            "command_root, observed_at, port_entity_count, created) "
+            "VALUES (?, '', ?, ?, 'domain', 'api.darklab.sh', 'port_scan', 'nmap', "
+            "'2026-05-19T00:00:01+00:00', 1, '2026-05-19T00:00:01+00:00')",
+            (token, run_id, entity_id),
         )
         conn.commit()
 
@@ -1666,6 +1674,19 @@ def test_api_v1_project_readers_are_token_scoped():
     atlas_entities = client.get("/api/v1/atlas/entities?entity_type=domain&q=api", headers=_headers(token))
     atlas_port_entities = client.get("/api/v1/atlas/entities?entity_type=port&q=443", headers=_headers(token))
     atlas_entity = client.get(f"/api/v1/atlas/entities/{entity_id}", headers=_headers(token))
+    atlas_related_port_findings = client.get(
+        f"/api/v1/atlas/entities/{entity_id}?finding_bucket=related_ports",
+        headers=_headers(token),
+    )
+    atlas_invalid_finding_bucket = client.get(
+        f"/api/v1/atlas/entities/{entity_id}?finding_bucket=descendants",
+        headers=_headers(token),
+    )
+    project_atlas_entity = client.get(
+        f"/api/v1/atlas/entities/{entity_id}?project_id={project['id']}",
+        headers=_headers(token),
+    )
+    atlas_port_entity = client.get(f"/api/v1/atlas/entities/{port_entity_id}", headers=_headers(token))
     atlas_findings = client.get("/api/v1/atlas/findings?q=finding&review_state=new", headers=_headers(token))
     atlas_finding = client.get(f"/api/v1/atlas/findings/{finding_id}", headers=_headers(token))
     cross_project = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(other_token))
@@ -1706,7 +1727,97 @@ def test_api_v1_project_readers_are_token_scoped():
     assert atlas_port_payload["entities"][0]["host_entity_id"] == entity_id
     assert atlas_port_payload["entities"][0]["attributes"] == {"service": "https"}
     assert atlas_entity.status_code == 200
-    assert json.loads(atlas_entity.data)["entity"]["id"] == entity_id
+    atlas_entity_payload = json.loads(atlas_entity.data)
+    assert atlas_entity_payload["entity"]["id"] == entity_id
+    assert atlas_entity_payload["related_ports"][0]["id"] == port_entity_id
+    assert atlas_entity_payload["finding_summary"]["direct"]["total"] == 0
+    assert atlas_entity_payload["finding_summary"]["related_ports"]["total"] == 1
+    assert atlas_entity_payload["finding_summary"]["related_ports"]["by_severity"]["medium"] == 1
+    assert atlas_entity_payload["finding_summary"]["combined"]["total"] == 1
+    assert atlas_related_port_findings.status_code == 200
+    atlas_related_port_payload = json.loads(atlas_related_port_findings.data)
+    assert [finding["id"] for finding in atlas_related_port_payload["findings"]] == [finding_id]
+    assert atlas_related_port_payload["detail_limits"]["findings"] == {
+        "bucket": "related_ports",
+        "limit": 50,
+        "offset": 0,
+        "shown": 1,
+        "total": 1,
+        "has_more": False,
+    }
+    assert atlas_invalid_finding_bucket.status_code == 400
+    assert json.loads(atlas_invalid_finding_bucket.data)["error"]["code"] == "invalid_request"
+    assert atlas_entity_payload["overview"]["observed"]["app_evidence"]["coverage_state"] == "app_ports_found"
+    assert atlas_entity_payload["overview"]["observed"]["app_evidence"]["app_port_count"] == 1
+    assert atlas_entity_payload["overview"]["observed"]["project_monitoring"]["applicable"] is False
+    assert atlas_entity_payload["overview"]["observed"]["project_monitoring"]["state"] == "not_applicable"
+    assert atlas_entity_payload["overview"]["observed"]["app_ports"] == [{
+        "port": 443,
+        "proto": "tcp",
+        "service": "https",
+        "version": "",
+        "banner_available": False,
+        "occurrence_count": 1,
+        "last_seen_at": "2026-05-19T00:00:00+00:00",
+        "source_run_count": 1,
+    }]
+    assert atlas_entity_payload["overview"]["observed"]["app_services"] == ["https"]
+    assert atlas_entity_payload["overview"]["observed"]["app_ports_truncated"] is False
+    assert atlas_entity_payload["overview"]["finding_summary"] == atlas_entity_payload["finding_summary"]
+    assert atlas_entity_payload["overview"]["intel"] == {
+        "status": "none",
+        "freshness": "not_available",
+        "snapshot_count": 0,
+        "provider_count": 0,
+        "providers_with_data": [],
+        "last_refresh_at": "",
+        "highlight_count": 0,
+        "highlights": [],
+        "provider_ports": [],
+        "provider_services": [],
+        "certificate": {
+            "status": "unknown",
+            "expires_at": "",
+            "days_until_expiry": None,
+            "last_checked_at": "",
+        },
+        "port_provenance": {
+            "app": atlas_entity_payload["overview"]["observed"]["app_ports"],
+            "provider": [],
+            "divergence": {
+                "app_only": [443],
+                "provider_only": [],
+                "has_drift": False,
+            },
+        },
+        "summary": atlas_entity_payload["intel_summary"],
+    }
+    assert project_atlas_entity.status_code == 200
+    project_atlas_payload = json.loads(project_atlas_entity.data)
+    assert project_atlas_payload["scope"] == {
+        "kind": "project",
+        "owner_kind": "personal",
+        "project_id": project["id"],
+        "team_id": "",
+    }
+    assert project_atlas_payload["related_ports"][0]["open_hint"] == {
+        "entity_id": port_entity_id,
+        "project_id": project["id"],
+    }
+    assert project_atlas_payload["finding_summary"]["combined"]["total"] == 1
+    assert project_atlas_payload["overview"]["observed"]["app_evidence"]["scan_run_count"] == 1
+    assert project_atlas_payload["overview"]["observed"]["app_evidence"]["project_entity_port_count"] == 1
+    assert project_atlas_payload["overview"]["observed"]["project_monitoring"]["applicable"] is True
+    assert project_atlas_payload["overview"]["observed"]["project_monitoring"]["project_id"] == project["id"]
+    assert project_atlas_payload["overview"]["observed"]["project_monitoring"]["state"] == "not_monitored"
+    assert project_atlas_payload["overview"]["observed"]["app_ports"] == atlas_entity_payload["overview"]["observed"]["app_ports"]
+    assert atlas_port_entity.status_code == 200
+    atlas_port_detail = json.loads(atlas_port_entity.data)
+    assert atlas_port_detail["parent_host"]["id"] == entity_id
+    assert atlas_port_detail["finding_summary"]["direct"]["total"] == 1
+    assert atlas_port_detail["finding_summary"]["related_ports"]["applicable"] is False
+    assert atlas_port_detail["overview"]["observed"]["app_evidence"]["host_entity_id"] == entity_id
+    assert atlas_port_detail["overview"]["observed"]["app_evidence"]["coverage_state"] == "app_ports_found"
     assert atlas_findings.status_code == 200
     assert json.loads(atlas_findings.data)["findings"][0]["id"] == finding_id
     assert atlas_finding.status_code == 200

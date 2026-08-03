@@ -267,6 +267,149 @@
         ],
         "type": "object"
       },
+      "AtlasAppEvidence": {
+        "properties": {
+          "app_port_count": {
+            "type": "integer"
+          },
+          "app_port_run_count": {
+            "type": "integer"
+          },
+          "applicable": {
+            "type": "boolean"
+          },
+          "command_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "coverage_caveat": {
+            "type": "string"
+          },
+          "coverage_state": {
+            "enum": [
+              "app_ports_found",
+              "scanned_no_ports_seen",
+              "not_scanned",
+              "not_applicable"
+            ],
+            "type": "string"
+          },
+          "host_entity_id": {
+            "type": "string"
+          },
+          "last_observed_at": {
+            "type": "string"
+          },
+          "port_entity_count": {
+            "type": "integer"
+          },
+          "project_entity_port_count": {
+            "type": "integer"
+          },
+          "scan_run_count": {
+            "type": "integer"
+          },
+          "scope_note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "applicable",
+          "coverage_state",
+          "scan_run_count",
+          "last_observed_at",
+          "port_entity_count",
+          "app_port_count",
+          "app_port_run_count",
+          "project_entity_port_count",
+          "command_roots",
+          "host_entity_id",
+          "scope_note",
+          "coverage_caveat"
+        ],
+        "type": "object"
+      },
+      "AtlasAppPortEvidence": {
+        "properties": {
+          "banner": {
+            "type": "string"
+          },
+          "banner_available": {
+            "type": "boolean"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "proto": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "source_run_count": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "port",
+          "proto",
+          "service",
+          "version",
+          "banner_available",
+          "occurrence_count",
+          "last_seen_at",
+          "source_run_count"
+        ],
+        "type": "object"
+      },
+      "AtlasCertificateEvidence": {
+        "properties": {
+          "days_until_expiry": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "last_checked_at": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "expired",
+              "expiring_14d",
+              "expiring_30d",
+              "healthy",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "expires_at",
+          "days_until_expiry",
+          "last_checked_at"
+        ],
+        "type": "object"
+      },
       "AtlasEntity": {
         "properties": {
           "attributes": {
@@ -354,6 +497,9 @@
           "entity": {
             "$ref": "#/components/schemas/AtlasEntity"
           },
+          "finding_summary": {
+            "$ref": "#/components/schemas/AtlasEntityFindingSummary"
+          },
           "findings": {
             "items": {
               "$ref": "#/components/schemas/AtlasFinding"
@@ -371,11 +517,34 @@
             "additionalProperties": true,
             "type": "object"
           },
+          "overview": {
+            "$ref": "#/components/schemas/AtlasEntityOverview"
+          },
+          "parent_host": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasEntity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "related_ports": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasEntity"
+            },
+            "type": "array"
+          },
           "related_urls": {
             "items": {
               "$ref": "#/components/schemas/AtlasEntity"
             },
             "type": "array"
+          },
+          "relationship_summary": {
+            "additionalProperties": true,
+            "type": "object"
           },
           "runs": {
             "items": {
@@ -383,16 +552,138 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "type": "object"
           }
         },
         "required": [
           "entity",
+          "overview",
+          "scope",
+          "parent_host",
           "runs",
           "related_urls",
+          "related_ports",
+          "relationship_summary",
+          "finding_summary",
           "findings",
           "intel_snapshots",
           "intel_summary",
           "detail_limits"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityFindingSummary": {
+        "properties": {
+          "combined": {
+            "$ref": "#/components/schemas/AtlasFindingRollup"
+          },
+          "direct": {
+            "$ref": "#/components/schemas/AtlasFindingRollup"
+          },
+          "related_ports": {
+            "$ref": "#/components/schemas/AtlasFindingRollup"
+          },
+          "related_urls": {
+            "$ref": "#/components/schemas/AtlasFindingRollup"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "scope",
+          "direct",
+          "related_urls",
+          "related_ports",
+          "combined"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityObservedSummary": {
+        "properties": {
+          "app_evidence": {
+            "$ref": "#/components/schemas/AtlasAppEvidence"
+          },
+          "app_port_count": {
+            "type": "integer"
+          },
+          "app_ports": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasAppPortEvidence"
+            },
+            "type": "array"
+          },
+          "app_ports_truncated": {
+            "type": "boolean"
+          },
+          "app_services": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "first_seen_at": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "project_monitoring": {
+            "$ref": "#/components/schemas/AtlasProjectMonitoringContext"
+          },
+          "source_run_count": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "observed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "source_run_count",
+          "occurrence_count",
+          "first_seen_at",
+          "last_seen_at",
+          "app_ports",
+          "app_port_count",
+          "app_ports_truncated",
+          "app_services",
+          "app_evidence",
+          "project_monitoring"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityOverview": {
+        "properties": {
+          "finding_summary": {
+            "$ref": "#/components/schemas/AtlasEntityFindingSummary"
+          },
+          "intel": {
+            "$ref": "#/components/schemas/AtlasIntelOverview"
+          },
+          "observed": {
+            "$ref": "#/components/schemas/AtlasEntityObservedSummary"
+          },
+          "relationships": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "observed",
+          "finding_summary",
+          "relationships",
+          "intel"
         ],
         "type": "object"
       },
@@ -585,6 +876,274 @@
           "total_exact",
           "counts",
           "counts_exact"
+        ],
+        "type": "object"
+      },
+      "AtlasFindingRollup": {
+        "properties": {
+          "all_total": {
+            "type": "integer"
+          },
+          "applicable": {
+            "type": "boolean"
+          },
+          "by_review_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "by_severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "by_suppression": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "by_verification_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "latest_activity_at": {
+            "type": "string"
+          },
+          "navigation_hint": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "sample": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasFinding"
+            },
+            "type": "array"
+          },
+          "suppressed": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applicable",
+          "total",
+          "all_total",
+          "suppressed",
+          "occurrence_count",
+          "latest_activity_at",
+          "by_severity",
+          "by_review_state",
+          "by_verification_state",
+          "by_suppression",
+          "sample",
+          "navigation_hint"
+        ],
+        "type": "object"
+      },
+      "AtlasIntelOverview": {
+        "properties": {
+          "certificate": {
+            "$ref": "#/components/schemas/AtlasCertificateEvidence"
+          },
+          "freshness": {
+            "enum": [
+              "fresh",
+              "stale",
+              "unknown",
+              "not_available"
+            ],
+            "type": "string"
+          },
+          "highlight_count": {
+            "type": "integer"
+          },
+          "highlights": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "last_refresh_at": {
+            "type": "string"
+          },
+          "port_provenance": {
+            "$ref": "#/components/schemas/AtlasPortProvenance"
+          },
+          "provider_count": {
+            "type": "integer"
+          },
+          "provider_ports": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "provider_services": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "providers_with_data": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "snapshot_count": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "none",
+              "empty",
+              "available"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "status",
+          "freshness",
+          "snapshot_count",
+          "provider_count",
+          "providers_with_data",
+          "last_refresh_at",
+          "highlight_count",
+          "highlights",
+          "provider_ports",
+          "provider_services",
+          "certificate",
+          "port_provenance",
+          "summary"
+        ],
+        "type": "object"
+      },
+      "AtlasPortDivergence": {
+        "properties": {
+          "app_only": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "has_drift": {
+            "type": "boolean"
+          },
+          "provider_only": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "app_only",
+          "provider_only",
+          "has_drift"
+        ],
+        "type": "object"
+      },
+      "AtlasPortProvenance": {
+        "properties": {
+          "app": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasAppPortEvidence"
+            },
+            "type": "array"
+          },
+          "divergence": {
+            "$ref": "#/components/schemas/AtlasPortDivergence"
+          },
+          "provider": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "app",
+          "provider",
+          "divergence"
+        ],
+        "type": "object"
+      },
+      "AtlasProjectMonitoringContext": {
+        "properties": {
+          "applicable": {
+            "type": "boolean"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "latest_change_at": {
+            "type": "string"
+          },
+          "links": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "recent_changes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "not_applicable",
+              "not_monitored",
+              "active",
+              "changed",
+              "failed",
+              "quiet",
+              "paused",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "watcher_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applicable",
+          "project_id",
+          "project_name",
+          "state",
+          "watcher_count",
+          "counts",
+          "latest_change_at",
+          "recent_changes",
+          "links"
         ],
         "type": "object"
       },
@@ -3791,6 +4350,27 @@
           },
           {
             "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "finding_bucket",
+            "schema": {
+              "default": "direct",
+              "enum": [
+                "direct",
+                "related_urls",
+                "related_ports",
+                "combined"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "runs_offset",
             "schema": {
               "default": 0,
@@ -3801,6 +4381,24 @@
           {
             "in": "query",
             "name": "findings_offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "related_urls_offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "related_ports_offset",
             "schema": {
               "default": 0,
               "minimum": 0,

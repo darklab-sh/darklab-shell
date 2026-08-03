@@ -65,6 +65,7 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     projectFindingStatusFilterSet: vi.fn(projectId => setFor(statusFilters, projectId)),
     setProjectFindingOrphanFilter: vi.fn(),
     invalidateProjectFilteredFindings: vi.fn(),
+    openProjectEntityInAtlas: vi.fn(),
     logClientError: vi.fn(),
     mobileView: vi.fn(() => 'desktop'),
     _sets: { targetFilters, runFilters, hostFilters, severityFilters, statusFilters },
@@ -239,6 +240,8 @@ const overviewPayload = {
       suppressed: 1,
     },
     intel_summary: {
+      freshness: 'stale',
+      last_refresh_at: '2026-06-24T00:00:00+00:00',
       providers_with_data: ['censys'],
       highlights: [{ label: 'Censys saw https on 443' }],
     },
@@ -365,6 +368,17 @@ describe('project overview controller', () => {
     expect(container.querySelector('.project-overview-severity-badge')?.getAttribute('title'))
       .toBe('Highest actionable finding severity for this target')
     expect(container.querySelector('.project-overview-highlights')?.textContent).toContain('Censys saw https on 443')
+
+    container.querySelector('[data-project-overview-profile="ent_1"]').click()
+    expect(ctx.openProjectEntityInAtlas).toHaveBeenCalledWith(
+      'prj_1',
+      overviewPayload,
+      {
+        id: 'ent_1',
+        type: 'domain',
+        canonical_value: 'api.example.com',
+      },
+    )
 
     container.querySelector('[data-project-overview-activity="findings"]').click()
     expect(ctx.setProjectWorkspaceTab).toHaveBeenLastCalledWith('findings')

@@ -8,6 +8,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from config import APP_VERSION
+from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.scheduler.models import CADENCE_PRESETS
 from services.watchers.models import (
     DIFF_KINDS,
@@ -614,27 +615,7 @@ OPENAPI_SPEC: dict = {
                     "counts_exact": {"type": "boolean"},
                 },
             },
-            "AtlasEntityDetail": {
-                "type": "object",
-                "required": [
-                    "entity",
-                    "runs",
-                    "related_urls",
-                    "findings",
-                    "intel_snapshots",
-                    "intel_summary",
-                    "detail_limits",
-                ],
-                "properties": {
-                    "entity": _ref("AtlasEntity"),
-                    "runs": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
-                    "related_urls": {"type": "array", "items": _ref("AtlasEntity")},
-                    "findings": {"type": "array", "items": _ref("AtlasFinding")},
-                    "intel_snapshots": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
-                    "intel_summary": {"type": "object", "additionalProperties": True},
-                    "detail_limits": {"type": "object", "additionalProperties": True},
-                },
-            },
+            **atlas_profile_schemas(),
             "AtlasFindingDetail": {
                 "type": "object",
                 "required": ["finding", "occurrences", "detail_limits"],
@@ -1917,8 +1898,7 @@ OPENAPI_SPEC: dict = {
             "get": {
                 "parameters": [
                     _path_param("entity_id", "Atlas entity id"),
-                    {"name": "runs_offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}},
-                    {"name": "findings_offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}},
+                    *atlas_profile_query_parameters(),
                 ],
                 "responses": {
                     "200": _json_response("Atlas entity detail", _ref("AtlasEntityDetail")),

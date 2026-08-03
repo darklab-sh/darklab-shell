@@ -2330,7 +2330,7 @@ function _openHistoryRunEntityInAtlas(entityId) {
     runId: run.id,
     runLabel: run.command || run.label || run.id,
     entityValue: entity.canonical_value || '',
-    forceView: 'detail',
+    forceView: 'profile',
   });
 }
 

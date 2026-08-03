@@ -17,7 +17,6 @@ from services.api_v1.openapi import openapi_spec
 from services.api_v1.serialization import artifact_summary, run_summary
 from services.atlas.lookup import (
     atlas_entities_for_owner,
-    atlas_entity_for_owner,
     atlas_finding_for_owner,
     atlas_findings_for_owner,
     atlas_source_runs_for_owner,
@@ -151,24 +150,6 @@ def api_atlas_entities():
         offset=offset,
         include_total=True,
     ))
-
-
-@api_routes.api_v1_bp.route("/atlas/entities/<entity_id>")
-@api_routes.require_api_auth
-def api_atlas_entity(entity_id):
-    owner_scope = api_routes._api_request_scope()
-    runs_offset = normalize_page_offset(request.args.get("runs_offset"))
-    findings_offset = normalize_page_offset(request.args.get("findings_offset"))
-    detail = atlas_entity_for_owner(
-        api_routes._require_session_id(),
-        entity_id,
-        team_id=owner_scope.team_id,
-        runs_offset=runs_offset,
-        findings_offset=findings_offset,
-    )
-    if detail is None:
-        return api_routes._api_json_error("not_found", "Atlas entity not found.", 404)
-    return jsonify(detail)
 
 
 @api_routes.api_v1_bp.route("/atlas/findings")

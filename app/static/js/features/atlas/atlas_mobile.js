@@ -259,6 +259,7 @@ let exportedDarklabAtlasMobile = null;
     state.selectedId = '';
     state.selectedFindingId = '';
     state.detail = null;
+    state.detailFinding = null;
   }
 
   function buildToolsOnce() {
@@ -1104,12 +1105,23 @@ let exportedDarklabAtlasMobile = null;
 
   function renderEntityTopbar(state) {
     entityTopbar.replaceChildren();
+    const detailFinding = state.detailFinding || null;
     const back = document.createElement('button');
     back.type = 'button';
     back.className = 'btn btn-ghost btn-compact atlas-mobile-back-btn';
-    back.setAttribute('aria-label', 'Back to Atlas list');
+    back.setAttribute('aria-label', detailFinding
+      ? 'Back to entity profile'
+      : (state.entityProfileMode
+        ? (state.entityProfileStack?.length ? 'Back to previous entity' : 'Back to Atlas results')
+        : 'Back to Atlas list'));
     back.textContent = '‹ Back';
-    back.addEventListener('click', () => setView('list'));
+    back.addEventListener('click', () => {
+      if (detailFinding) controller.closeEntityFindingDetail?.();
+      else if (state.entityProfileMode) {
+        controller.exitEntityProfile?.({ focusResult: false });
+        setView(controller.state.entityProfileMode ? 'entity' : 'list');
+      } else setView('list');
+    });
 
     const detail = state.detail || {};
     const entity = detail.entity || detail;
@@ -1117,17 +1129,20 @@ let exportedDarklabAtlasMobile = null;
     titleWrap.className = 'atlas-mobile-detail-title-wrap';
     const title = document.createElement('div');
     title.className = 'atlas-mobile-detail-title';
-    title.textContent = controller.text(entity.canonical_value, entity.id || '—');
+    title.textContent = detailFinding
+      ? controller.text(detailFinding.title || detailFinding.raw_line, detailFinding.id || 'Finding')
+      : controller.text(entity.canonical_value, entity.id || '—');
     titleWrap.appendChild(title);
-    if (entity.type) {
+    const subtitle = detailFinding ? detailFinding.severity : entity.type;
+    if (subtitle) {
       const sub = document.createElement('div');
       sub.className = 'atlas-mobile-detail-subtitle';
-      sub.textContent = String(entity.type);
+      sub.textContent = String(subtitle).toLowerCase();
       titleWrap.appendChild(sub);
     }
 
     entityTopbar.append(back, titleWrap);
-    const isOrphan = Array.isArray(entity.run_links) && entity.run_links.length === 0;
+    const isOrphan = !detailFinding && Array.isArray(entity.run_links) && entity.run_links.length === 0;
     if (isOrphan) {
       const orphan = document.createElement('span');
       orphan.className = 'badge badge-tone-amber atlas-mobile-orphan-badge';
@@ -1138,10 +1153,10 @@ let exportedDarklabAtlasMobile = null;
     more.type = 'button';
     more.className = 'btn btn-ghost btn-compact atlas-mobile-action-menu-trigger atlas-mobile-detail-more';
     more.textContent = '☰';
-    more.setAttribute('aria-label', 'More entity actions');
+    more.setAttribute('aria-label', detailFinding ? 'More finding actions' : 'More entity actions');
     more.addEventListener('click', () => {
-      const entity = state.detail?.entity || state.detail || {};
-      openEntityActionSheet(entity, more, 'Atlas entity actions');
+      if (detailFinding) openFindingActionSheet(detailFinding, more, 'Atlas finding actions');
+      else openEntityActionSheet(entity, more, 'Atlas entity actions');
     });
     entityTopbar.appendChild(more);
   }
@@ -1153,6 +1168,28 @@ let exportedDarklabAtlasMobile = null;
     }
     if (!state.detail) {
       entityBody.replaceChildren(rowMessage('Select an entity to see details.'));
+      return;
+    }
+    if (state.detailFinding) {
+      if (controller.detailApi && typeof controller.detailApi.renderFindingDetail === 'function') {
+        controller.detailApi.renderFindingDetail(entityBody, state.detailFinding, {
+          hideInlineActions: true,
+          hideBackAction: true,
+          onReviewState: (item, reviewState) => controller.updateFindingReviewState(item, reviewState),
+          onSeeRun: (item) => controller.openSourceRun({
+            id: item.run_id,
+            run_id: item.run_id,
+            command: item.run_command,
+            run_kind: item.run_kind,
+          }),
+          onOpenEntity: (item) => controller.openEntityFromFinding(item),
+          onDeleteFinding: (item) => controller.confirmDeleteFinding(item),
+          onEditTriage: (item) => controller.openFindingTriageEditor?.(item),
+          onSuppressFinding: (item) => controller.updateSuppression(item, !item.suppressed),
+        });
+      } else {
+        entityBody.replaceChildren(rowMessage('Finding renderer unavailable.'));
+      }
       return;
     }
     const activeProject = typeof importedGetActiveProjectContext === 'function'
@@ -1170,9 +1207,17 @@ let exportedDarklabAtlasMobile = null;
         // the sticky footer below is the single source of action truth on
         // mobile so the user does not see duplicate buttons.
         hideInlineActions: true,
+        hideProfileBackAction: true,
+        profileMode: !!state.entityProfileMode,
+        profileView: state.entityProfileView || 'overview',
+        profileBackLabel: state.entityProfileStack?.length ? 'Back to previous entity' : 'Back to results',
+        onViewProfile: (view) => controller.enterEntityProfile?.(view),
+        onExitProfile: () => controller.exitEntityProfile?.({ focusResult: false }),
+        onProfileViewChange: (profileView, options) => controller.setEntityProfileView?.(profileView, options),
         intelRefreshing: !!state.intelRefreshing,
         onRefreshIntel: () => controller.refreshIntel(),
         onAddToActiveProject: () => controller.addToActiveProject(),
+        onOpenProject: (link) => controller.openLinkedProject?.(link),
         onRemoveProjectLink: (link) => controller.removeProjectLink(link),
         onSaveMetadata: (payload) => controller.saveMetadata(payload),
         onSeeRun: (run) => controller.openSourceRun(run),
@@ -1182,6 +1227,12 @@ let exportedDarklabAtlasMobile = null;
         onSuppressEntity: (entity) => controller.updateSuppression(entity, !entity.suppressed),
         onPageRuns: (offset) => controller.pageEntityDetail?.('runs', offset),
         onPageFindings: (offset) => controller.pageEntityDetail?.('findings', offset),
+        onPageRelatedUrls: (offset) => controller.pageEntityDetail?.('related_urls', offset),
+        onPageRelatedPorts: (offset) => controller.pageEntityDetail?.('related_ports', offset),
+        onOpenFinding: (finding) => controller.openEntityFindingDetail?.(finding),
+        onOpenFindingBucket: (bucket) => controller.openEntityFindingBucket?.(bucket),
+        onOpenEvidence: () => controller.openEntityProfileView?.('evidence'),
+        onOpenIntel: () => controller.openEntityProfileView?.('intel'),
       });
     } else {
       entityBody.replaceChildren(rowMessage('Entity detail renderer unavailable.'));
@@ -1191,6 +1242,10 @@ let exportedDarklabAtlasMobile = null;
   function renderEntityFooter(state) {
     entityFooter.replaceChildren();
     if (!state.detail || state.detailLoading) return;
+    if (state.detailFinding) {
+      populateFindingFooter(entityFooter, state.detailFinding);
+      return;
+    }
     const entity = state.detail.entity || {};
     const activeProject = typeof importedGetActiveProjectContext === 'function'
       ? importedGetActiveProjectContext()
@@ -1200,6 +1255,15 @@ let exportedDarklabAtlasMobile = null;
     const activeLink = activeId
       ? links.find(link => String(link.project_id || '') === activeId)
       : null;
+
+    if (!state.entityProfileMode) {
+      const profile = document.createElement('button');
+      profile.type = 'button';
+      profile.className = 'btn btn-primary btn-compact atlas-mobile-view-profile';
+      profile.textContent = 'View profile';
+      profile.addEventListener('click', () => controller.enterEntityProfile?.());
+      entityFooter.appendChild(profile);
+    }
 
     if (String(entity.type || '') !== 'port') {
       const refresh = document.createElement('button');
@@ -1313,9 +1377,8 @@ let exportedDarklabAtlasMobile = null;
     }
   }
 
-  function renderFindingFooter(state) {
-    findingFooter.replaceChildren();
-    const finding = (state.findings || []).find(f => String(f.id) === String(state.selectedFindingId)) || null;
+  function populateFindingFooter(host, finding) {
+    host.replaceChildren();
     if (!finding) return;
 
     // Move the review-state picker from the body into the footer so mobile
@@ -1338,9 +1401,9 @@ let exportedDarklabAtlasMobile = null;
       if (select) {
         select.classList.add('atlas-mobile-footer-select');
         select.dataset.portalMenu = 'true';
-        findingFooter.appendChild(select);
+        host.appendChild(select);
         if (typeof enhanceAppSelects === 'function') {
-          enhanceAppSelects(findingFooter);
+          enhanceAppSelects(host);
         }
       }
     }
@@ -1350,7 +1413,7 @@ let exportedDarklabAtlasMobile = null;
     triage.className = 'btn btn-secondary btn-compact';
     triage.textContent = 'Triage';
     triage.addEventListener('click', () => controller.openFindingTriageEditor?.(finding));
-    findingFooter.appendChild(triage);
+    host.appendChild(triage);
 
     const seeRun = document.createElement('button');
     seeRun.type = 'button';
@@ -1362,7 +1425,7 @@ let exportedDarklabAtlasMobile = null;
       command: finding.run_command,
       run_kind: finding.run_kind,
     }));
-    findingFooter.appendChild(seeRun);
+    host.appendChild(seeRun);
 
     const suppression = document.createElement('button');
     suppression.type = 'button';
@@ -1371,7 +1434,7 @@ let exportedDarklabAtlasMobile = null;
     suppression.disabled = !canTriageAtlasRows();
     if (!canTriageAtlasRows()) suppression.title = triageDeniedReason('suppress Atlas rows');
     suppression.addEventListener('click', () => controller.updateSuppression(finding, !finding.suppressed));
-    findingFooter.appendChild(suppression);
+    host.appendChild(suppression);
 
     const del = document.createElement('button');
     del.type = 'button';
@@ -1380,7 +1443,12 @@ let exportedDarklabAtlasMobile = null;
     del.disabled = !canDeleteAtlasRows();
     if (!canDeleteAtlasRows()) del.title = triageDeniedReason('delete Atlas rows');
     del.addEventListener('click', () => controller.confirmDeleteFinding(finding));
-    findingFooter.appendChild(del);
+    host.appendChild(del);
+  }
+
+  function renderFindingFooter(state) {
+    const finding = (state.findings || []).find(f => String(f.id) === String(state.selectedFindingId)) || null;
+    populateFindingFooter(findingFooter, finding);
   }
 
   function syncViewAfterStateChange(state) {
@@ -1398,7 +1466,7 @@ let exportedDarklabAtlasMobile = null;
       state.requestedViewStarted = 0;
       return;
     }
-    if (state.requestedView !== 'detail') return;
+    if (!['detail', 'profile'].includes(state.requestedView)) return;
     if (state.selectedId && state.detail) {
       setView('entity');
       state.requestedView = '';
@@ -1415,6 +1483,7 @@ let exportedDarklabAtlasMobile = null;
     if (started && Date.now() - started > 1500) {
       state.requestedView = '';
       state.requestedViewStarted = 0;
+      state.entityProfileMode = false;
       setView('list');
       if (typeof showToast === 'function') {
         showToast('Entity not found in Atlas — showing list', 'warning');
