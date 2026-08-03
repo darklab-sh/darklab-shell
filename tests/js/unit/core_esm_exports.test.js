@@ -409,9 +409,13 @@ import {
   cycleAtlasTab,
   isAtlasOverlayOpen,
   openAtlas,
+  openAtlasQuickLookup,
   refreshAtlasOverlay,
 } from '../../../app/static/js/features/atlas/atlas_overlay.js'
-import { setAtlasHandlers } from '../../../app/static/js/features/atlas/atlas_bridge.js'
+import {
+  openAtlasQuickLookup as openAtlasQuickLookupBridge,
+  setAtlasHandlers,
+} from '../../../app/static/js/features/atlas/atlas_bridge.js'
 import { DarklabAtlasMobile } from '../../../app/static/js/features/atlas/atlas_mobile.js'
 import { ProjectTargetValidation } from '../../../app/static/js/features/projects/project_target_validation.js'
 import { cycleProjectWorkspaceTab } from '../../../app/static/js/features/projects/project_context_bridge.js'
@@ -893,6 +897,17 @@ describe('core ESM exports', () => {
       setAtlasHandlers({ openAtlas })
       document.body.innerHTML = originalBody
       restoreGlobals(bridgeGlobal, globals)
+    }
+  })
+
+  it('exposes Quick Lookup through the neutral Atlas bridge', () => {
+    const openSpy = vi.fn(() => true)
+    try {
+      setAtlasHandlers({ openAtlasQuickLookup: openSpy })
+      expect(openAtlasQuickLookupBridge({ value: 'example.com' })).toBe(true)
+      expect(openSpy).toHaveBeenCalledWith({ value: 'example.com' })
+    } finally {
+      setAtlasHandlers({ openAtlasQuickLookup })
     }
   })
 

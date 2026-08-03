@@ -6,6 +6,7 @@
 const atlasHandlers = {
   DarklabAtlasOverlay: null,
   openAtlas: null,
+  openAtlasQuickLookup: null,
   closeAtlas: null,
   isAtlasOverlayOpen: null,
   refreshAtlasOverlay: null,
@@ -55,6 +56,12 @@ function openAtlas(...args) {
     : undefined;
 }
 
+function openAtlasQuickLookup(...args) {
+  return typeof atlasHandlers.openAtlasQuickLookup === 'function'
+    ? atlasHandlers.openAtlasQuickLookup(...args)
+    : undefined;
+}
+
 function closeAtlas(...args) {
   return typeof atlasHandlers.closeAtlas === 'function'
     ? atlasHandlers.closeAtlas(...args)
@@ -87,6 +94,7 @@ export {
   isAtlasOverlayOpen,
   loadAtlasDetail,
   openAtlas,
+  openAtlasQuickLookup,
   refreshAtlasOverlay,
   setAtlasDetailHandlers,
   setAtlasDetailLoader,

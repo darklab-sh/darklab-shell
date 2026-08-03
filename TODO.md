@@ -76,14 +76,14 @@ Add a global Quick Lookup entry point for hostnames, IP addresses, and HTTP(S) U
 
 #### Phase 2 — Add a dedicated Quick Lookup mode to Atlas
 
-- [ ] Extend the Atlas controller contract instead of mounting another overlay:
+- [x] Extend the Atlas controller contract instead of mounting another overlay:
   - Add an explicit lookup launch mode to `openAtlas()` or expose a small `openAtlasQuickLookup()` bridge that delegates to it. Keep ordinary list, quick-detail, focused-profile, project-return, transcript-token, and Run Details launches unchanged.
   - Implement the lookup-mode state and transitions in `app/static/js/features/atlas/atlas_quick_lookup_mode.js`, with `atlas_overlay.js` delegating to it. Keep the module Atlas-owned and loaded with the existing lazy Atlas asset graph; do not add hundreds of lookup-specific lines to the current 3,700-plus-line overlay.
   - Let that module own the raw draft, selected mode, submitted canonical value, lookup result, request status, launch scope, lookup-root transitions, and decisions about which normal Atlas loads are skipped. Abort stale lookup and entity-detail requests through the existing Atlas request-controller lifecycle.
   - In lookup mode, skip the Atlas summary/list, saved-view, run-filter, import/export, select-mode, and bulk-action requests that are irrelevant to an exact lookup.
   - Reuse the current `atlas_entity_detail.js` focused renderer for Overview, Evidence, Findings, and Intel, including `direct`, `related_urls`, `related_ports`, and `combined` finding buckets. Preserve every backend pager rather than truncating long collections in the lookup view.
   - Keep one Atlas scrim, one focus trap, and one mobile sheet. Mark the shell with a dedicated lookup mode so Atlas list chrome can be hidden without maintaining a second copy of the entity profile markup or styles.
-- [ ] Give lookup mode its own clear navigation root:
+- [x] Give lookup mode its own clear navigation root:
   - Show a **QUICK LOOKUP** heading, one prominent input, an `Auto / Hostname / IP / URL` selector, current Personal/Team/Project scope, and a submit action using the established form and button primitives.
   - Make **New lookup** return to the lookup form, not the Atlas results list. Keep the current result available while a replacement lookup is loading so an error does not erase useful context.
   - Keep related-entity navigation on the Atlas-owned profile stack. Back from a related URL, port, or parent host returns to the prior lookup profile and local tab; Back at the stack root returns to the lookup form.

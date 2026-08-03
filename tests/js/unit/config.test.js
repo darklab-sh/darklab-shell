@@ -281,9 +281,11 @@ describe('frontend config bootstrap', () => {
         if (url.includes('/atlas_overlay.js')) {
           const DarklabAtlasOverlay = {}
           const openAtlas = vi.fn(async options => ({ atlas: options.source }))
+          const openAtlasQuickLookup = vi.fn(async options => ({ lookup: options.value }))
           window.DarklabAtlasOverlay = DarklabAtlasOverlay
           window.openAtlas = openAtlas
-          return { DarklabAtlasOverlay, openAtlas }
+          window.openAtlasQuickLookup = openAtlasQuickLookup
+          return { DarklabAtlasOverlay, openAtlas, openAtlasQuickLookup }
         }
         if (url.includes('/atlas_mobile.js')) {
           const DarklabAtlasMobile = {}
@@ -396,6 +398,10 @@ describe('frontend config bootstrap', () => {
 
     await expect(atlasPromise).resolves.toEqual({ atlas: 'rail' })
     expect(window.openAtlas).toHaveBeenCalledWith({ source: 'rail' })
+
+    const lookupPromise = window.openAtlasQuickLookup({ value: 'example.com' })
+    await expect(lookupPromise).resolves.toEqual({ lookup: 'example.com' })
+    expect(window.openAtlasQuickLookup).toHaveBeenCalledWith({ value: 'example.com' })
 
     const reportPromise = window.loadProjectReport()
     const reportApi = await reportPromise

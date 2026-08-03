@@ -101,6 +101,32 @@ function findingRollup(overrides = {}) {
   }
 }
 
+function lookupDetail(entity = ENTITY) {
+  return {
+    entity,
+    parent_host: null,
+    runs: [{ run_id: 'run1', command: `nmap ${entity.canonical_value}`, occurrence_count: 1 }],
+    related_urls: [],
+    related_ports: [],
+    import_sources: [],
+    findings: [FINDING],
+    intel_snapshots: [],
+    intel_summary: { status: 'empty', providers_with_data: [], highlights: [] },
+    finding_summary: {
+      direct: findingRollup({ total: 1, all_total: 1, occurrence_count: 1, sample: [FINDING] }),
+      related_urls: findingRollup(),
+      related_ports: findingRollup(),
+      combined: findingRollup({ total: 1, all_total: 1, occurrence_count: 1, sample: [FINDING] }),
+    },
+    detail_limits: {
+      runs: { limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
+      findings: { bucket: 'direct', limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
+      related_urls: { limit: 25, offset: 0, shown: 0, total: 0, has_more: false },
+      related_ports: { limit: 25, offset: 0, shown: 0, total: 0, has_more: false },
+    },
+  }
+}
+
 function jsonResponse(data) {
   return {
     ok: true,
@@ -141,6 +167,34 @@ function setupAtlasDom() {
         <button type="button" class="atlas-close">close</button>
         <div id="atlas-subtitle"></div>
         <div id="atlas-tabs" class="atlas-tabs tab-strip"></div>
+        <section id="atlas-quick-lookup" class="u-hidden">
+          <div id="atlas-lookup-form-view">
+            <form id="atlas-lookup-form">
+              <input id="atlas-lookup-input" />
+              <select id="atlas-lookup-mode">
+                <option value="auto">Auto</option>
+                <option value="hostname">Hostname</option>
+                <option value="ip">IP</option>
+                <option value="url">URL</option>
+              </select>
+              <span id="atlas-lookup-scope"></span>
+              <button type="submit">look up</button>
+              <span id="atlas-lookup-status" class="u-hidden"></span>
+              <button id="atlas-lookup-resume" class="u-hidden" type="button">resume</button>
+            </form>
+          </div>
+          <div id="atlas-lookup-outcome-view" class="u-hidden">
+            <span id="atlas-lookup-outcome-title"></span>
+            <p id="atlas-lookup-outcome-body"></p>
+            <button id="atlas-lookup-outcome-new" type="button">new lookup</button>
+          </div>
+          <div id="atlas-lookup-profile-view" class="u-hidden">
+            <button id="atlas-lookup-profile-new" type="button">new lookup</button>
+            <button id="atlas-lookup-open-atlas" type="button">open atlas</button>
+            <span id="atlas-lookup-profile-scope"></span>
+            <div id="atlas-lookup-profile"></div>
+          </div>
+        </section>
         <input id="atlas-search" />
         <input id="atlas-run-filter-search" />
         <select id="atlas-run-filter-select" class="form-select form-control-compact"></select>
@@ -798,6 +852,7 @@ function loadAtlas({
         'app/static/js/features/atlas/atlas_tabs.js',
         'app/static/js/features/atlas/atlas_entity_row.js',
         'app/static/js/features/atlas/atlas_entity_detail.js',
+        'app/static/js/features/atlas/atlas_quick_lookup_mode.js',
         'app/static/js/features/findings/findings_board_bridge.js',
         'app/static/js/features/atlas/atlas_overlay.js',
         'app/static/js/features/atlas/atlas_mobile_bridge.js',
@@ -840,6 +895,7 @@ function loadAtlas({
         downloadBlobAsAttachment,
         DarklabAtlasOverlay: exportedDarklabAtlasOverlay,
         openAtlas: exportedOpenAtlas,
+        openAtlasQuickLookup: exportedOpenAtlasQuickLookup,
         closeAtlas: exportedCloseAtlas,
         isAtlasOverlayOpen: exportedIsAtlasOverlayOpen,
         cycleAtlasTab: exportedCycleAtlasTab,
@@ -868,6 +924,7 @@ function loadAtlas({
   Object.assign(window, {
     DarklabAtlasOverlay: atlasFns.DarklabAtlasOverlay,
     openAtlas: atlasFns.openAtlas,
+    openAtlasQuickLookup: atlasFns.openAtlasQuickLookup,
     closeAtlas: atlasFns.closeAtlas,
     isAtlasOverlayOpen: atlasFns.isAtlasOverlayOpen,
     cycleAtlasTab: atlasFns.cycleAtlasTab,
@@ -906,6 +963,99 @@ function submitAtlasImportPreview() {
 describe('Atlas overlay', () => {
   beforeEach(() => {
     setupAtlasDom()
+  })
+
+  it('opens Quick Lookup as an Atlas-owned mode without loading list data', async () => {
+    const detail = lookupDetail()
+    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) !== '/atlas/lookup') return null
+        expect(options.method).toBe('POST')
+        return Promise.resolve(jsonResponse({
+          requested_type: 'auto',
+          detected_type: 'ip',
+          canonical_value: ENTITY.canonical_value,
+          project_id: '',
+          match_state: 'found',
+          detail,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'auto', submit: true })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain(ENTITY.canonical_value)
+    })
+
+    expect(document.getElementById('atlas-surface')?.classList.contains('is-atlas-lookup')).toBe(true)
+    expect(document.getElementById('atlas-quick-lookup')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('atlas-lookup-form-view')?.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('atlas-lookup-profile-view')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain('Overview')
+    expect(document.getElementById('atlas-subtitle')?.textContent).toBe('Quick lookup · Personal')
+    expect(apiFetch).toHaveBeenCalledWith('/atlas/lookup', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ mode: 'auto', value: ENTITY.canonical_value }),
+    }))
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/atlas?'))).toBe(false)
+    expect(apiFetch.mock.calls.some(([url]) => String(url) === '/atlas/views')).toBe(false)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/atlas/runs?'))).toBe(false)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/projects?'))).toBe(false)
+
+    document.getElementById('atlas-lookup-profile-new')?.click()
+    expect(document.getElementById('atlas-lookup-form-view')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('atlas-lookup-resume')?.classList.contains('u-hidden')).toBe(false)
+    document.getElementById('atlas-lookup-resume')?.click()
+    expect(document.getElementById('atlas-lookup-profile-view')?.classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('carries a project-scoped Quick Lookup result into ordinary Atlas profile mode', async () => {
+    const detail = lookupDetail()
+    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        return Promise.resolve(jsonResponse({
+          requested_type: 'ip',
+          detected_type: 'ip',
+          canonical_value: ENTITY.canonical_value,
+          project_id: 'prj_1',
+          match_state: 'found',
+          detail,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({
+      value: ENTITY.canonical_value,
+      mode: 'ip',
+      projectId: 'prj_1',
+      projectName: 'Case Alpha',
+      submit: true,
+    })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-profile')?.textContent).toContain(ENTITY.canonical_value)
+    })
+    expect(document.getElementById('atlas-lookup-scope')?.textContent).toBe('Project · Case Alpha')
+    expect(JSON.parse(apiFetch.mock.calls.find(([url]) => url === '/atlas/lookup')[1].body)).toEqual({
+      mode: 'ip',
+      value: ENTITY.canonical_value,
+      project_id: 'prj_1',
+    })
+
+    document.getElementById('atlas-lookup-open-atlas')?.click()
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-surface')?.classList.contains('is-atlas-lookup')).toBe(false)
+    })
+    expect(document.querySelector('.atlas-shell')?.getAttribute('data-atlas-mode')).toBe('profile')
+    expect(document.getElementById('atlas-search')?.value).toBe(ENTITY.canonical_value)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/atlas?'))).toBe(true)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).includes('project_id=prj_1'))).toBe(true)
   })
 
   it('opens to the Findings tab by default', async () => {
