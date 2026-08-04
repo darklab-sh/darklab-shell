@@ -32,6 +32,7 @@ import {
   isAtlasOverlayOpen as importedIsAtlasOverlayOpen,
   openAtlas as importedOpenAtlas,
 } from '../atlas/atlas_bridge.js';
+import { openAtlasQuickLookupFromSurface as importedOpenAtlasQuickLookupFromSurface } from '../atlas/atlas_quick_lookup_launch.js';
 import {
   closeProjectWorkspace as importedCloseProjectWorkspace,
   cycleProjectWorkspaceTab as importedCycleProjectWorkspaceTab,
@@ -99,6 +100,7 @@ const SHORTCUT_STABLE_FUNCTION_NAMES = [
   'isAtlasOverlayOpen',
   'cycleAtlasTab',
   'openAtlas',
+  'openAtlasQuickLookupFromSurface',
   'closeAtlas',
   'isCommandRegistryOverlayOpen',
   'openCommandRegistry',
@@ -136,6 +138,7 @@ const SHORTCUT_IMPORTED_FUNCTIONS = {
   isStatusMonitorShortcutOpen: importedIsStatusMonitorShortcutOpen,
   openCommandRegistry: importedOpenCommandRegistry,
   openAtlas: importedOpenAtlas,
+  openAtlasQuickLookupFromSurface: importedOpenAtlasQuickLookupFromSurface,
   openOptions: importedOpenOptions,
   openProjectWorkspace: importedOpenProjectWorkspace,
   openThemeSelector: importedOpenThemeSelector,
@@ -220,6 +223,7 @@ function eventMatchesCode(e, code) {
 
 const MAC_OPTION_KEY_ALIASES = {
   f: ['ƒ'],
+  q: ['œ'],
 };
 
 function eventMatchesLetter(e, letter) {
@@ -349,7 +353,7 @@ function handleActionShortcut(e) {
 // Files, projects, command registry, and Status Monitor).
 // The composer is allowed to pass through so prompt-focused users can still
 // trigger chrome toggles — each branch calls preventDefault so Option-glyphs
-// (`«`, `˙`, `µ`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS.
+// (`«`, `˙`, `µ`, `©`, `≤`, `ˇ`, `œ`, `ß`) never leak into the prompt on macOS.
 // Other editable targets (modal inputs, search field, options textarea)
 // remain gated so typing isn't hijacked.
 //
@@ -413,6 +417,12 @@ function handleChromeShortcut(e) {
     } else {
       void shortcutCall('openAtlas', { source: 'shortcut' });
     }
+    markShortcutHandled(e);
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesLetter(e, 'q')) {
+    void shortcutCall('openAtlasQuickLookupFromSurface', 'shortcut');
     markShortcutHandled(e);
     e.preventDefault();
     return true;

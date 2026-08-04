@@ -16,6 +16,155 @@ const TEST_IP_SEED = (Date.now() ^ process.pid) >>> 0
 
 let fixturePython = ''
 
+export function atlasQuickLookupDetail({
+  id = 'ent_lookup_host',
+  type = 'domain',
+  canonicalValue = 'lookup.example',
+  parentHost = null,
+  relatedUrls = [],
+  relatedPorts = [],
+  appPorts = [],
+  intel = false,
+} = {}) {
+  const observedAt = '2026-08-03T00:00:00Z'
+  const entity = {
+    id,
+    session_id: 'lookup-session',
+    team_id: '',
+    type,
+    canonical_value: canonicalValue,
+    first_seen_at: observedAt,
+    last_seen_at: observedAt,
+    occurrence_count: 3,
+    created: observedAt,
+    suppressed: false,
+    run_count: 1,
+    project_link_count: 0,
+    project_links: [],
+    run_links: [{ run_id: 'run_lookup', command: `nmap ${canonicalValue}` }],
+    labels: [],
+    note: null,
+  }
+  const intelSnapshots = intel ? [{
+    provider: 'shodan',
+    status: 'ok',
+    summary: 'Saved provider snapshot',
+    data: { ports: [80, 443], organization: 'Example Network' },
+    fetched_at: observedAt,
+  }] : []
+  const intelSummary = intel ? {
+    status: 'available',
+    freshness: 'cached',
+    snapshot_count: 1,
+    provider_count: 1,
+    providers_with_data: ['shodan'],
+    highlight_count: 2,
+    highlights: [
+      { label: 'Open ports', value: '80, 443', provider: 'shodan', provider_label: 'Shodan' },
+      { label: 'Organization', value: 'Example Network', provider: 'shodan', provider_label: 'Shodan' },
+    ],
+    last_refresh_at: observedAt,
+    updated_at: observedAt,
+  } : {
+    status: 'none',
+    freshness: 'none',
+    snapshot_count: 0,
+    provider_count: 0,
+    providers_with_data: [],
+    highlight_count: 0,
+    highlights: [],
+    last_refresh_at: '',
+    updated_at: '',
+  }
+  const emptyRollup = (applicable = true) => ({
+    applicable,
+    total: 0,
+    all_total: 0,
+    occurrence_count: 0,
+    by_severity: { critical: 0, high: 0, medium: 0, low: 0, info: 0, unknown: 0 },
+    by_review_state: { new: 0, reviewed: 0, important: 0, false_positive: 0, needs_followup: 0 },
+    by_verification_state: {
+      not_started: 0,
+      ready_to_verify: 0,
+      verified: 0,
+      needs_retest: 0,
+      not_applicable: 0,
+    },
+    by_suppression: { visible: 0, suppressed: 0 },
+    sample: [],
+    navigation_hint: {},
+  })
+  return {
+    entity,
+    scope: { owner_kind: 'personal', owner_id: 'lookup-session', project_id: '' },
+    parent_host: parentHost,
+    runs: [{
+      run_id: 'run_lookup',
+      command: `nmap ${canonicalValue}`,
+      occurrence_count: 1,
+      last_seen_at: observedAt,
+    }],
+    related_urls: relatedUrls,
+    related_ports: relatedPorts,
+    import_sources: [],
+    findings: [],
+    intel_snapshots: intelSnapshots,
+    intel_summary: intelSummary,
+    overview: {
+      observed: {
+        state: 'observed',
+        source_run_count: 1,
+        occurrence_count: 3,
+        first_seen_at: observedAt,
+        last_seen_at: observedAt,
+        app_ports: appPorts,
+        app_port_count: appPorts.length,
+        app_ports_truncated: false,
+        app_services: appPorts.map(port => String(port.service || '')).filter(Boolean),
+        app_evidence: {
+          applicable: ['domain', 'ip', 'url'].includes(type),
+          coverage_state: appPorts.length ? 'app_ports_found' : 'scanned_no_ports_seen',
+          scan_run_count: 1,
+          last_observed_at: observedAt,
+          port_entity_count: appPorts.length,
+          app_port_count: appPorts.length,
+          app_port_run_count: appPorts.length ? 1 : 0,
+          project_entity_port_count: 0,
+          command_roots: ['nmap'],
+          host_entity_id: parentHost?.id || '',
+          scope_note: '',
+          coverage_caveat: appPorts.length ? '' : 'No app-captured ports were surfaced by the observed scan runs.',
+        },
+      },
+      intel: intelSummary,
+    },
+    finding_summary: {
+      direct: emptyRollup(true),
+      related_urls: emptyRollup(['domain', 'ip'].includes(type)),
+      related_ports: emptyRollup(['domain', 'ip'].includes(type)),
+      combined: emptyRollup(['domain', 'ip'].includes(type)),
+    },
+    detail_limits: {
+      runs: { limit: 50, offset: 0, shown: 1, total: 1, has_more: false },
+      findings: { bucket: 'direct', limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+      related_urls: {
+        limit: 25,
+        offset: 0,
+        shown: relatedUrls.length,
+        total: relatedUrls.length,
+        has_more: false,
+      },
+      related_ports: {
+        limit: 25,
+        offset: 0,
+        shown: relatedPorts.length,
+        total: relatedPorts.length,
+        has_more: false,
+      },
+    },
+  }
+}
+
 function e2eDataDirForProject(testInfo) {
   const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
   if (!logDir) throw new Error('PW_E2E_SERVER_LOG_DIR is not set')

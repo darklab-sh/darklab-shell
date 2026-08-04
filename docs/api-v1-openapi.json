@@ -603,6 +603,214 @@
         ],
         "type": "object"
       },
+      "AtlasEntityLookupCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "canonical_value": {
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "provenance": {
+            "enum": [
+              "personal",
+              "direct_team",
+              "compatibility_visible"
+            ],
+            "type": "string"
+          },
+          "suppressed": {
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "domain",
+              "ip",
+              "url"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "type",
+          "canonical_value",
+          "provenance",
+          "first_seen_at",
+          "last_seen_at",
+          "occurrence_count",
+          "suppressed"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityLookupParentCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasEntityLookupCandidate"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "candidates_truncated": {
+            "type": "boolean"
+          },
+          "canonical_value": {
+            "type": "string"
+          },
+          "detected_type": {
+            "enum": [
+              "domain",
+              "ip"
+            ],
+            "type": "string"
+          },
+          "entity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasEntityLookupCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "match_state": {
+            "enum": [
+              "found",
+              "ambiguous"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "detected_type",
+          "canonical_value",
+          "match_state",
+          "entity",
+          "candidates",
+          "candidates_truncated"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityLookupRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "default": "auto",
+            "description": "Input type. Hostname resolves the stored Atlas domain type; URL requires an explicit http:// or https:// scheme.",
+            "enum": [
+              "auto",
+              "hostname",
+              "ip",
+              "url"
+            ],
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Optional visible Project scope for the exact lookup.",
+            "type": "string"
+          },
+          "value": {
+            "description": "One hostname, IP address, or absolute HTTP(S) URL. Canonical values may not exceed 2,048 UTF-8 bytes.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityLookupResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasEntityLookupCandidate"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "candidates_truncated": {
+            "type": "boolean"
+          },
+          "canonical_value": {
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasEntityDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detected_type": {
+            "enum": [
+              "domain",
+              "ip",
+              "url"
+            ],
+            "type": "string"
+          },
+          "match_state": {
+            "enum": [
+              "found",
+              "not_found",
+              "ambiguous"
+            ],
+            "type": "string"
+          },
+          "parent_host_candidate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasEntityLookupParentCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "requested_type": {
+            "enum": [
+              "auto",
+              "hostname",
+              "ip",
+              "url"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested_type",
+          "detected_type",
+          "canonical_value",
+          "project_id",
+          "match_state",
+          "detail",
+          "candidates",
+          "candidates_truncated",
+          "parent_host_candidate"
+        ],
+        "type": "object"
+      },
       "AtlasEntityObservedSummary": {
         "properties": {
           "app_evidence": {
@@ -4609,6 +4817,62 @@
               }
             },
             "description": "Atlas finding not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/lookup": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AtlasEntityLookupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasEntityLookupResponse"
+                }
+              }
+            },
+            "description": "Exact Atlas entity lookup"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid lookup value, type, or project scope"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
           },
           "429": {
             "content": {

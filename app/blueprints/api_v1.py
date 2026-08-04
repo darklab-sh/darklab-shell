@@ -774,6 +774,7 @@ def _artifacts_for_run(session_id: str, team_id: str, run_id: str) -> list[dict[
 
 
 from blueprints import api_v1_notifications as _api_v1_notifications  # noqa: E402,F401
+from blueprints import api_v1_atlas_lookup as _api_v1_atlas_lookup  # noqa: E402,F401
 from blueprints import api_v1_atlas_profile as _api_v1_atlas_profile, api_v1_read as _api_v1_read  # noqa: E402,F401
 from blueprints import api_v1_runs as _api_v1_runs  # noqa: E402,F401
 from blueprints import api_v1_schedules as _api_v1_schedules  # noqa: E402,F401
@@ -782,7 +783,7 @@ from blueprints import api_v1_watchers as _api_v1_watchers  # noqa: E402,F401
 
 
 def __getattr__(name: str):
-    for module in (_api_v1_atlas_profile, _api_v1_notifications, _api_v1_read, _api_v1_runs, _api_v1_schedules, _api_v1_teams, _api_v1_watchers):  # noqa: E501
+    for module in (_api_v1_atlas_lookup, _api_v1_atlas_profile, _api_v1_notifications, _api_v1_read, _api_v1_runs, _api_v1_schedules, _api_v1_teams, _api_v1_watchers):  # noqa: E501
         if hasattr(module, name):
             return getattr(module, name)
     raise AttributeError(name)

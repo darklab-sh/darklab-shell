@@ -665,6 +665,9 @@ let exportedLoadWatchersModal = null;
       openAtlas: _requireLazyModuleExport(overlayModule, 'openAtlas', value => (
         typeof value === 'function' && value !== lazyOpenAtlas
       )),
+      openAtlasQuickLookup: _requireLazyModuleExport(overlayModule, 'openAtlasQuickLookup', value => (
+        typeof value === 'function' && value !== lazyOpenAtlasQuickLookup
+      )),
       closeAtlas: overlayModule?.closeAtlas || null,
       isAtlasOverlayOpen: overlayModule?.isAtlasOverlayOpen || null,
       refreshAtlasOverlay: overlayModule?.refreshAtlasOverlay || null,
@@ -672,6 +675,9 @@ let exportedLoadWatchersModal = null;
     };
     if (typeof window !== 'undefined') {
       if (typeof atlasApi.openAtlas === 'function') window.openAtlas = atlasApi.openAtlas;
+      if (typeof atlasApi.openAtlasQuickLookup === 'function') {
+        window.openAtlasQuickLookup = atlasApi.openAtlasQuickLookup;
+      }
       if (typeof atlasApi.closeAtlas === 'function') window.closeAtlas = atlasApi.closeAtlas;
       if (typeof atlasApi.isAtlasOverlayOpen === 'function') window.isAtlasOverlayOpen = atlasApi.isAtlasOverlayOpen;
       if (typeof atlasApi.refreshAtlasOverlay === 'function') window.refreshAtlasOverlay = atlasApi.refreshAtlasOverlay;
@@ -1374,6 +1380,30 @@ let exportedLoadWatchersModal = null;
     }
   }
 
+  async function lazyOpenAtlasQuickLookup(options = {}) {
+    let shellFallback = null;
+    try {
+      shellFallback = await _openAtlasShellFallback();
+      const atlas = await loadAtlasOverlay();
+      if (shellFallback && typeof shellFallback.cancelled === 'function' && shellFallback.cancelled()) {
+        if (typeof shellFallback.dispose === 'function') shellFallback.dispose();
+        return false;
+      }
+      if (shellFallback && typeof shellFallback.dispose === 'function') shellFallback.dispose();
+      shellFallback = null;
+      const open = atlas?.openAtlasQuickLookup;
+      if (typeof open !== 'function' || open === lazyOpenAtlasQuickLookup) {
+        const error = new Error('Quick Lookup controller is unavailable');
+        error.quickLookupStage = 'controller';
+        throw error;
+      }
+      return open(options);
+    } catch (err) {
+      if (shellFallback && typeof shellFallback.dispose === 'function') shellFallback.dispose();
+      throw err;
+    }
+  }
+
   function lazyCloseAtlas(options = {}) {
     if (window.closeAtlas === lazyCloseAtlas) return false;
     if (typeof window.closeAtlas === 'function') return window.closeAtlas(options);
@@ -1759,12 +1789,16 @@ let exportedLoadWatchersModal = null;
   if (typeof importedSetAtlasDetailLoader === 'function') importedSetAtlasDetailLoader(loadAtlasDetailRenderer);
   if (typeof importedSetAtlasMobileLoader === 'function') importedSetAtlasMobileLoader(loadAtlasMobileController);
   if (typeof window.openAtlas !== 'function') window.openAtlas = lazyOpenAtlas;
+  if (typeof window.openAtlasQuickLookup !== 'function') {
+    window.openAtlasQuickLookup = lazyOpenAtlasQuickLookup;
+  }
   if (typeof window.closeAtlas !== 'function') window.closeAtlas = lazyCloseAtlas;
   if (typeof window.isAtlasOverlayOpen !== 'function') window.isAtlasOverlayOpen = lazyIsAtlasOverlayOpen;
   if (typeof window.cycleAtlasTab !== 'function') window.cycleAtlasTab = lazyCycleAtlasTab;
   if (typeof importedSetAtlasHandlers === 'function') {
     importedSetAtlasHandlers({
       openAtlas: lazyOpenAtlas,
+      openAtlasQuickLookup: lazyOpenAtlasQuickLookup,
       closeAtlas: lazyCloseAtlas,
       isAtlasOverlayOpen: lazyIsAtlasOverlayOpen,
       cycleAtlasTab: lazyCycleAtlasTab,

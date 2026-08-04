@@ -409,9 +409,16 @@ import {
   cycleAtlasTab,
   isAtlasOverlayOpen,
   openAtlas,
+  openAtlasQuickLookup,
   refreshAtlasOverlay,
 } from '../../../app/static/js/features/atlas/atlas_overlay.js'
-import { setAtlasHandlers } from '../../../app/static/js/features/atlas/atlas_bridge.js'
+import {
+  openAtlasQuickLookup as openAtlasQuickLookupBridge,
+  setAtlasHandlers,
+} from '../../../app/static/js/features/atlas/atlas_bridge.js'
+import {
+  openAtlasQuickLookupFromSurface,
+} from '../../../app/static/js/features/atlas/atlas_quick_lookup_launch.js'
 import { DarklabAtlasMobile } from '../../../app/static/js/features/atlas/atlas_mobile.js'
 import { ProjectTargetValidation } from '../../../app/static/js/features/projects/project_target_validation.js'
 import { cycleProjectWorkspaceTab } from '../../../app/static/js/features/projects/project_context_bridge.js'
@@ -894,6 +901,61 @@ describe('core ESM exports', () => {
       document.body.innerHTML = originalBody
       restoreGlobals(bridgeGlobal, globals)
     }
+  })
+
+  it('exposes Quick Lookup through the neutral Atlas bridge', () => {
+    const openSpy = vi.fn(() => true)
+    try {
+      setAtlasHandlers({ openAtlasQuickLookup: openSpy })
+      expect(openAtlasQuickLookupBridge({ value: 'example.com' })).toBe(true)
+      expect(openSpy).toHaveBeenCalledWith({ value: 'example.com' })
+    } finally {
+      setAtlasHandlers({ openAtlasQuickLookup })
+    }
+  })
+
+  it('reports Quick Lookup launch failures once across every shell entry surface', async () => {
+    for (const source of ['rail', 'mobile-menu', 'shortcut']) {
+      const rejectedLog = vi.fn()
+      const rejectedFailure = vi.fn()
+      await expect(openAtlasQuickLookupFromSurface(source, {
+        open: vi.fn(() => Promise.reject(new Error('lazy load failed'))),
+        logClientError: rejectedLog,
+        onFailure: rejectedFailure,
+      })).resolves.toBe(false)
+      expect(rejectedLog).toHaveBeenCalledOnce()
+      expect(rejectedLog).toHaveBeenCalledWith(
+        'failed to open Quick Lookup',
+        expect.any(Error),
+        {
+          event: 'ATLAS_QUICK_LOOKUP_OPEN_FAILED',
+          level: 'error',
+          source,
+          stage: 'lazy_load',
+        },
+      )
+      expect(rejectedFailure).toHaveBeenCalledOnce()
+
+      const unavailableLog = vi.fn()
+      await expect(openAtlasQuickLookupFromSurface(source, {
+        open: vi.fn(() => undefined),
+        logClientError: unavailableLog,
+      })).resolves.toBe(false)
+      expect(unavailableLog).toHaveBeenCalledOnce()
+      expect(unavailableLog.mock.calls[0][2]).toEqual({
+        event: 'ATLAS_QUICK_LOOKUP_OPEN_FAILED',
+        level: 'error',
+        source,
+        stage: 'controller',
+      })
+    }
+
+    const toggleCloseLog = vi.fn()
+    await expect(openAtlasQuickLookupFromSurface('shortcut', {
+      open: vi.fn(() => Promise.resolve(false)),
+      logClientError: toggleCloseLog,
+    })).resolves.toBe(false)
+    expect(toggleCloseLog).not.toHaveBeenCalled()
   })
 
   it('loads session-scoped lazy data through imported runtime fetch without a global mirror', async () => {

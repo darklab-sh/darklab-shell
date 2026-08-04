@@ -1,7 +1,7 @@
 {
   "_doc": [
     "Allowlist fixture for button_primitives_allowlist.test.js.",
-    "Every <button>, [role=\"button\"], and <a role=\"button\"> in app/templates/ must",
+    "Every <button>, [role=\"button\"], and <a role=\"button\"> in app/templates/ and app/static/fragments/ must",
     "either carry one of `allowed_primitive_classes` OR match one of `exceptions[].selector`.",
     "The primitive set includes structural controls such as app buttons, nav rows, dropdown items,",
     "form/control rows, HUD action cells, keyboard keys, and mobile gesture handles.",

@@ -21,6 +21,9 @@ _CLIENT_LOG_STRING_DETAIL_LIMITS = {
     "export_name": 160,
     "fragment_name": 120,
     "left_run_id": 160,
+    "lookup_mode": 40,
+    "match_state": 40,
+    "detected_type": 40,
     "operation": 120,
     "page": 120,
     "package_id": 160,
@@ -33,17 +36,28 @@ _CLIENT_LOG_STRING_DETAIL_LIMITS = {
     "right_run_id": 160,
     "run_id": 160,
     "source": 120,
+    "scope_kind": 40,
     "stage": 120,
     "tab": 80,
     "target_id": 160,
     "workspace_tab": 80,
 }
-_CLIENT_LOG_INT_DETAIL_KEYS = frozenset({"duration_ms", "limit", "offset", "status", "total"})
+_CLIENT_LOG_INT_DETAIL_KEYS = frozenset({
+    "candidate_count",
+    "duration_ms",
+    "limit",
+    "offset",
+    "request_seq",
+    "status",
+    "total",
+})
 _CLIENT_LOG_BOOL_DETAIL_KEYS = frozenset({
     "compare_request_error",
     "expected_global",
     "has_active_filter",
     "partial_summary_present",
+    "parent_candidate",
+    "project_scoped",
     "query_active",
     "used_initial_load",
 })

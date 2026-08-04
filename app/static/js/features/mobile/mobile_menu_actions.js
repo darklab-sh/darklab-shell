@@ -15,7 +15,10 @@ import {
   openOptions as importedOpenOptions,
   openThemeSelector as importedOpenThemeSelector,
 } from '../../app.js';
-import { openAtlas as importedOpenAtlas } from '../atlas/atlas_bridge.js';
+import {
+  openAtlas as importedOpenAtlas,
+} from '../atlas/atlas_bridge.js';
+import { openAtlasQuickLookupFromSurface as importedOpenAtlasQuickLookupFromSurface } from '../atlas/atlas_quick_lookup_launch.js';
 import { openTeamScopeSelector } from '../team_scope.js';
 import { openWorkflows as importedOpenWorkflows } from '../../controller_action_bridge.js';
 import { openProjectWorkspace as importedOpenProjectWorkspace } from '../projects/project_context_bridge.js';
@@ -127,6 +130,13 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'scope' && typeof openTeamScopeSelector === 'function') openTeamScopeSelector();
   if (action === 'projects') void _mobileMenuImportedCall(importedOpenProjectWorkspace, 'openProjectWorkspace');
   if (action === 'atlas') void _mobileMenuImportedCall(importedOpenAtlas, 'openAtlas', { source: 'mobile-menu' });
+  if (action === 'quick-lookup') {
+    void _mobileMenuImportedCall(
+      importedOpenAtlasQuickLookupFromSurface,
+      'openAtlasQuickLookupFromSurface',
+      'mobile-menu',
+    );
+  }
   if (action === 'status-monitor') void _mobileMenuImportedCall(importedOpenStatusMonitor, 'openStatusMonitor', { source: 'mobile-menu' });
   if (action === 'command-registry') _mobileMenuImportedCall(importedOpenCommandRegistry, 'openCommandRegistry');
   if (action === 'theme') _mobileMenuImportedCall(importedOpenThemeSelector, 'openThemeSelector');

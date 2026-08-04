@@ -1942,12 +1942,22 @@ describe('app helpers', () => {
     expect(sheet.classList.contains('u-hidden')).toBe(true)
   })
 
-  it('opens Status Monitor from the mobile menu and closes the sheet', async () => {
+  it('opens Atlas surfaces and Status Monitor from the mobile menu and closes the sheet', async () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
-    await loadAppFns({ openStatusMonitor })
+    const openAtlas = vi.fn(() => Promise.resolve(true))
+    const openAtlasQuickLookup = vi.fn(() => Promise.resolve(true))
+    await loadAppFns({ openStatusMonitor, openAtlas, openAtlasQuickLookup })
     const sheet = document.getElementById('mobile-menu-sheet')
     sheet.classList.remove('u-hidden')
 
+    document.querySelector('#mobile-menu-sheet [data-menu-action="atlas"]').click()
+    expect(openAtlas).toHaveBeenCalledWith({ source: 'mobile-menu' })
+
+    sheet.classList.remove('u-hidden')
+    document.querySelector('#mobile-menu-sheet [data-menu-action="quick-lookup"]').click()
+    expect(openAtlasQuickLookup).toHaveBeenCalledWith({ source: 'mobile-menu', toggle: true })
+
+    sheet.classList.remove('u-hidden')
     document.querySelector('#mobile-menu-sheet [data-menu-action="status-monitor"]').click()
 
     expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'mobile-menu' })
@@ -5920,6 +5930,38 @@ describe('app helpers', () => {
     )
 
     expect(createTab).toHaveBeenCalledWith('shell 2')
+  })
+
+  it('opens Atlas Quick Lookup with Alt+Q and the macOS Option+Q glyph fallback', async () => {
+    const openAtlasQuickLookup = vi.fn(() => Promise.resolve(true))
+    const { cmdInput } = await loadAppFns({
+      openAtlasQuickLookup,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    const altEvent = new KeyboardEvent('keydown', {
+      key: 'q',
+      code: 'KeyQ',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    cmdInput.dispatchEvent(altEvent)
+    expect(altEvent.defaultPrevented).toBe(true)
+
+    const optionGlyphEvent = new KeyboardEvent('keydown', {
+      key: 'œ',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    cmdInput.dispatchEvent(optionGlyphEvent)
+
+    expect(optionGlyphEvent.defaultPrevented).toBe(true)
+    expect(openAtlasQuickLookup).toHaveBeenCalledTimes(2)
+    expect(openAtlasQuickLookup).toHaveBeenNthCalledWith(1, { source: 'shortcut', toggle: true })
+    expect(openAtlasQuickLookup).toHaveBeenNthCalledWith(2, { source: 'shortcut', toggle: true })
+    expect(cmdInput.value).toBe('')
   })
 
   it('supports Alt+W and Ctrl+D to close the active tab', async () => {

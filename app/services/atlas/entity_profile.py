@@ -115,9 +115,32 @@ def validate_profile_project(
     project_id: str = "",
 ) -> bool:
     """Validate the project context and report whether the entity is visible in it."""
-    normalized_project_id = str(project_id or "").strip()
+    normalized_project_id = validate_profile_project_scope(
+        conn,
+        session_id,
+        team_id=team_id,
+        project_id=project_id,
+    )
     if not normalized_project_id:
         return True
+    linked = conn.execute(
+        "SELECT 1 FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
+        (normalized_project_id, entity_id),
+    ).fetchone()
+    return linked is not None
+
+
+def validate_profile_project_scope(
+    conn,
+    session_id: str,
+    *,
+    team_id: str = "",
+    project_id: str = "",
+) -> str:
+    """Validate and return an owner-scoped profile project id."""
+    normalized_project_id = str(project_id or "").strip()
+    if not normalized_project_id:
+        return ""
     owner_sql = project_scope_sql("profile_project", team_id)
     project = conn.execute(
         "SELECT 1 FROM projects profile_project WHERE " + owner_sql + " AND profile_project.id = ?",  # nosec
@@ -125,11 +148,7 @@ def validate_profile_project(
     ).fetchone()
     if not project:
         raise ProjectWorkspaceError("project not found")
-    linked = conn.execute(
-        "SELECT 1 FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
-        (normalized_project_id, entity_id),
-    ).fetchone()
-    return linked is not None
+    return normalized_project_id
 
 
 def _decorate_entities(

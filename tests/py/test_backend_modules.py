@@ -6688,6 +6688,7 @@ class TestPostgresMigrations:
             "0042",
             "0043",
             "0044",
+            "0045",
         ]
         for table_name in (
             "runs",
@@ -7138,7 +7139,7 @@ class TestPostgresMigrations:
             indexes={
                 name: index
                 for name, index in sqlite_inventory.indexes.items()
-                if name != "idx_runs_session_started"
+                if name not in {"idx_runs_session_started", "idx_entities_type_signature"}
             },
             triggers={
                 name: trigger
@@ -7160,6 +7161,7 @@ class TestPostgresMigrations:
                 "expected shared app constraint is absent",
             ),
             ("missing_index", "idx_runs_session_started", "expected shared app index is absent"),
+            ("missing_index", "idx_entities_type_signature", "expected shared app index is absent"),
             ("missing_trigger", "findings_ad", "expected shared app trigger is absent"),
             ("missing_backend_artifact", "runs_fts", "expected sqlite schema artifact is absent"),
         }
@@ -7463,6 +7465,7 @@ class TestPostgresMigrations:
         assert "runs" in manifest.tables
         assert "command" in manifest.tables["runs"]
         assert "idx_runs_session_started" in manifest.indexes
+        assert "idx_entities_type_signature" in manifest.indexes
 
     def test_dialect_specific_post_baseline_migrations_are_visible_to_drift_guard(self):
         from core.migrations import MIGRATIONS
@@ -7475,7 +7478,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0044",
+            "0046",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7527,7 +7530,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0044"
+        assert rows[-1]["version"] == "0045"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7916,7 +7919,7 @@ class TestPostgresMigrations:
         applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
         applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
-        assert applied == ["0039", "0040", "0041", "0042", "0043", "0044"]
+        assert applied == ["0039", "0040", "0041", "0042", "0043", "0044", "0045"]
         assert applied_again == []
         assert "0039" in conn.applied_versions
         assert "0040" in conn.applied_versions
@@ -7924,7 +7927,8 @@ class TestPostgresMigrations:
         assert "0042" in conn.applied_versions
         assert "0043" in conn.applied_versions
         assert "0044" in conn.applied_versions
-        assert conn.commit_count == 6
+        assert "0045" in conn.applied_versions
+        assert conn.commit_count == 7
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -25233,7 +25237,310 @@ class TestDatabaseInit:
         rows = conn.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
         return "\n".join(str(row["detail"]) for row in rows)
 
+    @pytest.mark.parametrize(
+        ("mode", "value", "requested_type", "detected_type", "canonical_value"),
+        [
+            ("auto", "BÜCHER.Example.", "auto", "domain", "xn--bcher-kva.example"),
+            ("auto", "192.0.2.10", "auto", "ip", "192.0.2.10"),
+            ("auto", "2001:0db8::0001", "auto", "ip", "2001:db8::1"),
+            (
+                "auto",
+                "HTTPS://Example.COM:443/path/?q=one#fragment",
+                "auto",
+                "url",
+                "https://example.com/path/?q=one",
+            ),
+            ("hostname", "Example.COM.", "hostname", "domain", "example.com"),
+            ("ip", "192.0.2.10", "ip", "ip", "192.0.2.10"),
+            ("ip", "2001:db8:0:0:0:0:0:42", "ip", "ip", "2001:db8::42"),
+            (
+                "url",
+                "HTTP://Example.COM:80/a/../report?next=%2Fadmin#private",
+                "url",
+                "url",
+                "http://example.com/a/../report?next=/admin",
+            ),
+        ],
+    )
+    def test_atlas_exact_lookup_normalizes_supported_identity_modes(
+        self,
+        mode,
+        value,
+        requested_type,
+        detected_type,
+        canonical_value,
+    ):
+        from services.atlas.lookup_resolve import normalize_lookup_identity
+
+        identity = normalize_lookup_identity(mode, value)
+
+        assert identity.requested_type == requested_type
+        assert identity.detected_type == detected_type
+        assert identity.canonical_value == canonical_value
+
+    @pytest.mark.parametrize(
+        ("mode", "value", "code", "message"),
+        [
+            ("banana", "example.com", "invalid_lookup_type", "auto, hostname, ip, or url"),
+            ("auto", "   ", "missing_lookup_value", "Enter a hostname"),
+            ("auto", "example.com/path", "invalid_lookup_value", "including http:// or https://"),
+            ("url", "example.com/path", "invalid_lookup_value", "including http:// or https://"),
+            ("auto", "ftp://example.com/report", "invalid_lookup_value", "including http:// or https://"),
+            ("ip", "example.com", "invalid_lookup_value", "valid IP address"),
+            ("hostname", "example.com/path", "invalid_lookup_value", "without a URL path"),
+            ("url", "https://example.com/" + ("x" * 2100), "lookup_value_too_long", "2048 bytes"),
+        ],
+    )
+    def test_atlas_exact_lookup_rejects_invalid_identity_inputs(self, mode, value, code, message):
+        from services.atlas.lookup_resolve import AtlasLookupError, normalize_lookup_identity
+
+        with pytest.raises(AtlasLookupError) as exc_info:
+            normalize_lookup_identity(mode, value)
+
+        assert exc_info.value.code == code
+        assert message in exc_info.value.message
+        if mode == "auto" and value == "example.com/path":
+            for network_range in ("10.0.0.0/8", "2001:db8::/32"):
+                with pytest.raises(AtlasLookupError) as network_exc:
+                    normalize_lookup_identity("auto", network_range)
+                assert network_exc.value.code == "invalid_lookup_value"
+                assert "single hosts, not network ranges" in network_exc.value.message
+        if mode == "ip" and value == "example.com":
+            with pytest.raises(AtlasLookupError) as network_exc:
+                normalize_lookup_identity("ip", "192.0.2.0/24")
+            assert network_exc.value.code == "invalid_lookup_value"
+            assert "single hosts, not network ranges" in network_exc.value.message
+
+    def test_atlas_exact_lookup_returns_normal_profile_and_url_parent_without_mutation(self):
+        from services.atlas.lookup import entity_detail
+        from services.atlas.lookup_resolve import exact_lookup_candidate_query, resolve_entity_lookup
+        from services.atlas.materializer import upsert_entity
+        from services.intel import cache as intel_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                entity_id = upsert_entity(
+                    conn,
+                    "lookup-session",
+                    "domain",
+                    "known.example.com",
+                    seen_at="2026-08-02T00:00:00+00:00",
+                    occurrence_count=3,
+                )
+                conn.execute(
+                    "UPDATE entities SET suppressed = 1, suppressed_reason = 'test' WHERE id = ?",
+                    (entity_id,),
+                )
+                unreadable_url = "https://known.example.com/private"
+                unreadable_url_id = upsert_entity(
+                    conn,
+                    "lookup-session",
+                    "url",
+                    unreadable_url,
+                    seen_at="2026-08-02T00:00:01+00:00",
+                )
+                conn.commit()
+                protected_tables = (
+                    "entities",
+                    "project_links",
+                    "runs",
+                    "entity_intel_snapshots",
+                    "audit_events",
+                )
+                before_counts = {
+                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                    for table in protected_tables
+                }
+
+                raw_url = "https://known.example.com/unseen?token=private#fragment"
+                with (
+                    mock.patch(
+                        "services.intel.lookup.lookup_entity",
+                        side_effect=AssertionError("exact Atlas lookup must not call Intel providers"),
+                    ) as provider_lookup,
+                    mock.patch.object(
+                        intel_cache,
+                        "get_cached_response",
+                        side_effect=AssertionError("exact Atlas lookup must not read cached Intel responses"),
+                    ) as cached_response,
+                    mock.patch.object(
+                        intel_cache,
+                        "get_quota_exhausted",
+                        side_effect=AssertionError("exact Atlas lookup must not read cached Intel quota state"),
+                    ) as cached_quota,
+                ):
+                    found = resolve_entity_lookup(conn, "lookup-session", "KNOWN.Example.COM.")
+                    cross_session = resolve_entity_lookup(conn, "other-session", "known.example.com")
+                    parent = resolve_entity_lookup(conn, "lookup-session", raw_url)
+                    with (
+                        mock.patch(
+                            "services.atlas.lookup_resolve.entity_detail",
+                            side_effect=lambda detail_conn, detail_session, detail_entity_id, **kwargs: (
+                                None
+                                if str(detail_entity_id) == unreadable_url_id
+                                else entity_detail(detail_conn, detail_session, detail_entity_id, **kwargs)
+                            ),
+                        ),
+                        mock.patch("services.atlas.lookup_resolve.log.warning") as lookup_warning,
+                    ):
+                        unreadable_parent = resolve_entity_lookup(
+                            conn,
+                            "lookup-session",
+                            unreadable_url,
+                        )
+                after_counts = {
+                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                    for table in protected_tables
+                }
+                raw_url_audit_rows = int(conn.execute(
+                    "SELECT COUNT(*) AS count FROM audit_events WHERE details LIKE ?",
+                    (f"%{raw_url}%",),
+                ).fetchone()["count"])
+                expected_detail = entity_detail(conn, "lookup-session", entity_id)
+                lookup_sql, lookup_params = exact_lookup_candidate_query(
+                    "lookup-session",
+                    "domain",
+                    "known.example.com",
+                    team_id="lookup-team",
+                )
+                lookup_plan = self._sqlite_query_plan(conn, lookup_sql, lookup_params)
+                index_names = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA index_list('entities')").fetchall()
+                }
+            finally:
+                conn.close()
+
+        assert found["match_state"] == "found"
+        assert found["detected_type"] == "domain"
+        assert found["canonical_value"] == "known.example.com"
+        assert found["detail"] == expected_detail
+        assert found["detail"]["entity"]["suppressed"] is True
+        assert found["detail"]["detail_limits"]["runs"]["total"] == 0
+        assert cross_session["match_state"] == "not_found"
+        assert cross_session["detail"] is None
+        assert parent["match_state"] == "not_found"
+        assert parent["canonical_value"] == "https://known.example.com/unseen?token=private"
+        assert parent["parent_host_candidate"]["match_state"] == "found"
+        assert parent["parent_host_candidate"]["entity"]["entity_id"] == entity_id
+        assert unreadable_parent["match_state"] == "not_found"
+        assert unreadable_parent["detail"] is None
+        assert unreadable_parent["parent_host_candidate"]["match_state"] == "found"
+        assert unreadable_parent["parent_host_candidate"]["entity"]["entity_id"] == entity_id
+        profile_warning = next(
+            call for call in lookup_warning.call_args_list
+            if call.args == ("ATLAS_LOOKUP_PROFILE_UNAVAILABLE",)
+        )
+        assert profile_warning.kwargs["extra"]["entity_id"] == unreadable_url_id
+        assert profile_warning.kwargs["extra"]["reason"] == "selected_entity_not_visible_to_profile"
+        assert unreadable_url not in repr(lookup_warning.call_args_list)
+        assert before_counts == after_counts
+        assert before_counts["entities"] == 2
+        assert raw_url_audit_rows == 0
+        provider_lookup.assert_not_called()
+        cached_response.assert_not_called()
+        cached_quota.assert_not_called()
+        assert "idx_entities_type_signature" in index_names
+        assert "idx_entities_type_signature" in lookup_plan
+
+    def test_atlas_exact_lookup_prefers_direct_team_entity_over_legacy_visible_candidates(self):
+        from services.atlas.lookup_resolve import resolve_entity_lookup
+        from services.atlas.materializer import upsert_entity
+
+        team_id = "team-lookup"
+        canonical_value = "shared.example.com"
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                personal_ids = []
+                member_sessions = tuple(f"member-{index}" for index in range(1, 12))
+                for index, session_id in enumerate(member_sessions, start=1):
+                    entity_id = upsert_entity(
+                        conn,
+                        session_id,
+                        "domain",
+                        canonical_value,
+                        seen_at=f"2026-08-02T00:00:0{index}+00:00",
+                    )
+                    run_id = f"team-lookup-run-{index}"
+                    conn.execute(
+                        "INSERT INTO runs (id, session_id, team_id, command, started, output_preview) "
+                        "VALUES (?, ?, ?, 'nmap shared.example.com', ?, '[]')",
+                        (run_id, session_id, team_id, f"2026-08-02T00:00:0{index}+00:00"),
+                    )
+                    conn.execute(
+                        "INSERT INTO entity_run_links "
+                        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                        "VALUES (?, ?, ?, ?, 1)",
+                        (
+                            entity_id,
+                            run_id,
+                            f"2026-08-02T00:00:0{index}+00:00",
+                            f"2026-08-02T00:00:0{index}+00:00",
+                        ),
+                    )
+                    personal_ids.append(entity_id)
+                conn.commit()
+
+                with (
+                    mock.patch("services.atlas.lookup_resolve.log.debug") as lookup_debug,
+                    mock.patch("services.atlas.lookup_resolve.log.warning") as lookup_warning,
+                ):
+                    ambiguous = resolve_entity_lookup(
+                        conn,
+                        "member-one",
+                        canonical_value,
+                        team_id=team_id,
+                    )
+                direct_id = upsert_entity(
+                    conn,
+                    "member-one",
+                    "domain",
+                    canonical_value,
+                    team_id=team_id,
+                    seen_at="2026-08-02T00:00:10+00:00",
+                )
+                conn.commit()
+                direct = resolve_entity_lookup(
+                    conn,
+                    "member-one",
+                    canonical_value,
+                    team_id=team_id,
+                )
+            finally:
+                conn.close()
+
+        assert ambiguous["match_state"] == "ambiguous"
+        assert len(ambiguous["candidates"]) == 10
+        assert set(candidate["entity_id"] for candidate in ambiguous["candidates"]).issubset(personal_ids)
+        assert ambiguous["candidates_truncated"] is True
+        assert {candidate["provenance"] for candidate in ambiguous["candidates"]} == {"compatibility_visible"}
+        candidate_log = next(
+            call for call in lookup_debug.call_args_list
+            if call.args == ("ATLAS_LOOKUP_CANDIDATES_RESOLVED",)
+        )
+        assert candidate_log.kwargs["extra"]["lookup_role"] == "requested"
+        assert candidate_log.kwargs["extra"]["match_state"] == "ambiguous"
+        assert candidate_log.kwargs["extra"]["row_count"] == 11
+        ambiguity_log = next(
+            call for call in lookup_warning.call_args_list
+            if call.args == ("ATLAS_LOOKUP_AMBIGUOUS",)
+        )
+        assert ambiguity_log.kwargs["extra"]["candidates_truncated"] is True
+        assert canonical_value not in repr(lookup_warning.call_args_list)
+        assert direct["match_state"] == "found"
+        assert direct["detail"]["entity"]["id"] == direct_id
+        assert direct["candidates"] == []
+
     def test_personal_scope_predicates_use_sqlite_partial_indexes(self):
+        from services.atlas.lookup_resolve import exact_lookup_candidate_query
         from services.atlas.scope import (
             entity_scope_params,
             entity_scope_sql,
@@ -25261,6 +25568,17 @@ class TestDatabaseInit:
                     conn,
                     atlas_entity_sql,
                     (*entity_scope_params("scope-session"), "domain", 10),
+                )
+                exact_lookup_sql, exact_lookup_params = exact_lookup_candidate_query(
+                    "scope-session",
+                    "domain",
+                    "exact.example",
+                    team_id="scope-team",
+                )
+                exact_lookup_plan = self._sqlite_query_plan(
+                    conn,
+                    exact_lookup_sql,
+                    exact_lookup_params,
                 )
 
                 atlas_finding_sql = (
@@ -25408,6 +25726,7 @@ class TestDatabaseInit:
             "idx_entities_session_type_last_seen" in atlas_entity_plan
             or "idx_entities_session_last_seen_value" in atlas_entity_plan
         )
+        assert "idx_entities_type_signature" in exact_lookup_plan
         assert "idx_findings_session_run_seen" in atlas_finding_plan
         assert "SCAN child_e" not in profile_related_entities_plan
         # SQLite may prefer the personal owner/type index on an empty schema;

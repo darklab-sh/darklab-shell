@@ -144,6 +144,7 @@
   ],
   "excluded": [
     "/static/css/styles.css",
+    "/static/js/features/atlas/atlas_quick_lookup_mode.js",
     "/static/js/features/workspace/workspace_viewer_formats.js",
     "/vendor/ansi_up.js"
   ]

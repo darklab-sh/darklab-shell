@@ -10,7 +10,7 @@ Configuration loading starts before runtime bootstrap can build the final logger
 
 Structured events use the `session` field for request correlation. Anonymous session IDs are logged as-is, while `tok_` session-token values are masked before logging because they are bearer credentials.
 
-Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
+Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Atlas Quick Lookup reports accept only bounded modes, result states, scope kinds, request sequence numbers, counts, booleans, failure stages, and timings. Submitted drafts, normalized values, canonical values, URL paths or queries, and request bodies aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
 
 ## Level Semantics
 
@@ -117,6 +117,9 @@ The current event inventory is:
 | DEBUG | `CONFIG_OVERLAY_APPLIED` | config loading | source, known_keys, unknown_keys |
 | DEBUG | `CONFIG_ENV_OVERRIDES_APPLIED` | config loading | env_keys |
 | DEBUG | `CONFIG_LEGACY_KEY_MIGRATED` | config loading | legacy_key, target_key, source |
+| DEBUG | `ATLAS_LOOKUP_CANDIDATES_RESOLVED` | exact Atlas lookup resolver | session, entity_type, scope_kind, project_scoped, lookup_role, row_count, preferred_count, direct_team_preferred, match_state, candidates_truncated, duration_ms |
+| DEBUG / WARN | `ATLAS_LOOKUP_REJECTED` | browser/API exact Atlas lookup routes | ip, session, request_id, team_id, surface, reason, scope_kind, project_scoped, http_status, duration_ms; rejected project scope also includes project_id and uses WARNING |
+| DEBUG | `ATLAS_QUICK_LOOKUP_REQUEST_STARTED` / `SETTLED` / `DISCARDED` | browser Quick Lookup state through `/log` | ip, session, context, client_details with lookup_mode, detected_type, match_state, scope_kind, project_scoped, candidate_count, parent_candidate, request_seq, reason, duration_ms |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
 | INFO | `CONFIG_LOADED` | app startup | conf_dir, local_conf_dir, local_overlay, supported_local_overlays, overlays, database_backend, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
@@ -173,6 +176,7 @@ The current event inventory is:
 | INFO | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
 | INFO | `RUN_COMPARISON_VIEWED` | `compare_history_runs` | owner_scope, project_scoped, left_run_id, right_run_id, duration_ms, left/right output sources, finding-change counts, derived_group_ids, output/changed-lines/findings/artifacts/derived truncation flags, comparison_partial |
 | INFO | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, output_search, command_root, exit_code_filter, date_range |
+| INFO | `ATLAS_LOOKUP_COMPLETED` / `API_ATLAS_LOOKUP_COMPLETED` | browser/API exact Atlas lookup routes | ip, session, request_id, team_id, surface, requested_type, detected_type, match_state, scope_kind, project_scoped, candidate_count, candidates_truncated, parent_candidate, detail_loaded, duration_ms |
 | INFO | `ATLAS_RUN_CLEANED` | Atlas cleanup route | ip, session, run_id, include_curated, detached_entities, detached_findings, deleted_entities, deleted_findings |
 | INFO | `ATLAS_ENTITY_SUPPRESSION_UPDATED` | Atlas suppression routes | ip, session, entity_id/count, suppressed, reason, bulk |
 | INFO | `ATLAS_FINDING_SUPPRESSION_UPDATED` | Atlas suppression routes | ip, session, finding_id/count, suppressed, reason, bulk |
@@ -335,6 +339,8 @@ The current event inventory is:
 | WARN | `ATLAS_IMPORT_CONFIG_LIMIT_INVALID` | Atlas import config readers | key, default, configured_type, configured_value |
 | WARN | `SCAN_TARGET_OBSERVATIONS_DROPPED` | Atlas entity materializer | session, team_id, run_id, command_root, deleted_count, reason |
 | WARN | `ATLAS_ENTITY_ATTRIBUTES_DECODE_FAILED` | Atlas entity materializer | session, team_id, entity_id, entity_type, value_type, reason |
+| WARN | `ATLAS_LOOKUP_AMBIGUOUS` | exact Atlas lookup resolver | session, entity_type, scope_kind, project_scoped, lookup_role, row_count, preferred_count, direct_team_preferred, match_state, candidates_truncated, duration_ms |
+| WARN | `ATLAS_LOOKUP_PROFILE_UNAVAILABLE` | exact Atlas lookup profile aggregation | session, entity_type, entity_id, scope_kind, project_scoped, reason |
 | WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
 | WARN | `DIAG_REDIS_SCAN_INCOMPLETE` | `/diag` Redis probes | stage, error |
 | WARN | `INTEL_PROVIDERS_DISABLED` | Atlas intel refresh | session, entity_id, entity_type |
@@ -342,6 +348,7 @@ The current event inventory is:
 | WARN | `INTEL_HTTP_REDIRECT_BLOCKED` / `INTEL_HTTP_JSON_DECODE_FAILED` / `INTEL_HTTP_JSON_SHAPE_UNEXPECTED` | intel provider HTTP client | provider_host, method/path when available, http_status, redirect_host or shape |
 | WARN | `VAULT_DECRYPT_FAILED` | secrets vault | source |
 | WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, client_message |
+| ERROR | `ATLAS_QUICK_LOOKUP_OPEN_FAILED` | desktop rail, mobile menu, or keyboard shortcut through `/log` | ip, session, context, client_message, client_details with source and stage |
 | WARN / ERROR | `HISTORY_COMPARE_CANDIDATES_FETCH_FAILED` / `HISTORY_COMPARE_MANUAL_CANDIDATES_FETCH_FAILED` | comparison launcher through `client_log` | ip, session, context, client_details with bounded error_name, stage, status, run_id, route |
 | WARN / ERROR | `HISTORY_COMPARE_API_FETCH_FALLBACK` / `HISTORY_COMPARE_FETCH_FAILED` | comparison renderer through `client_log` | ip, session, context, client_details with bounded error_name, status, left_run_id, right_run_id, route, compare_request_error |
 | WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |

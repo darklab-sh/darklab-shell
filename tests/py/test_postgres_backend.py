@@ -278,8 +278,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     pre_comparison_migrations = tuple(
         migration for migration in MIGRATIONS if migration.version < "0044"
     )
-    comparison_migrations = tuple(
-        migration for migration in MIGRATIONS if migration.version == "0044"
+    head_migrations = tuple(
+        migration for migration in MIGRATIONS if migration.version >= "0044"
     )
     applied = run_migrations_with_advisory_lock(conn, pre_comparison_migrations)
     conn.execute(
@@ -308,7 +308,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             "2026-07-13T09:00:00Z",
         ),
     )
-    applied.extend(run_migrations_with_advisory_lock(conn, comparison_migrations))
+    applied.extend(run_migrations_with_advisory_lock(conn, head_migrations))
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
 
@@ -409,6 +409,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0042",
         "0043",
         "0044",
+        "0045",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -527,6 +528,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_findings_raw_line_trgm",
         "idx_findings_tool_root_trgm",
         "idx_entity_run_links_entity_seen",
+        "idx_entities_type_signature",
     }.issubset({row["indexname"] for row in atlas_index_rows})
     auto_promote_index_rows = conn.execute(
         """
@@ -570,6 +572,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
 def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.atlas.lookup_resolve import exact_lookup_candidate_query
     from services.atlas.scope import (
         entity_scope_params,
         entity_scope_sql,
@@ -611,6 +614,16 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
             + entity_scope_sql("e")
             + " AND e.type = ? ORDER BY e.last_seen_at DESC LIMIT ?",
             (*entity_scope_params("scope-session"), "domain", 10),
+        ).fetchall())
+        exact_lookup_sql, exact_lookup_params = exact_lookup_candidate_query(
+            "scope-session",
+            "domain",
+            "exact.example",
+            team_id="scope-team",
+        )
+        exact_lookup_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + exact_lookup_sql,
+            exact_lookup_params,
         ).fetchall())
 
         atlas_finding_plan = _postgres_plan_text(compat.execute(
@@ -719,6 +732,7 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
         "idx_entities_session_type_last_seen" in atlas_entity_plan
         or "idx_entities_session_last_seen_value" in atlas_entity_plan
     )
+    assert "idx_entities_type_signature" in exact_lookup_plan
     assert "idx_findings_session_run_seen" in atlas_finding_plan
     assert "idx_projects_personal_slug_unique" in project_slug_plan
     assert (
@@ -735,6 +749,299 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
     assert "idx_run_file_artifacts_run_created_path" in artifact_created_path_plan
     assert "idx_run_file_artifacts_run_created_id" in artifact_created_id_plan
     assert "run_output_artifacts_pkey" in output_artifact_plan
+
+
+@pytest.mark.postgres
+def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run_or_import(
+    postgres_schema,
+    monkeypatch,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.atlas.lookup_resolve import exact_lookup_candidate_query, resolve_entity_lookup
+    from services.atlas.materializer import upsert_entity
+    from services.projects.contracts import ProjectWorkspaceError
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    compat = PostgresSqliteCompatConnection(conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield compat
+
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    team_id = "team-exact-lookup"
+    session_id = "member-exact-lookup"
+    observed_at = "2026-08-03T00:00:00+00:00"
+
+    run_entity_id = upsert_entity(
+        compat,
+        session_id,
+        "domain",
+        "run-visible.lookup.example",
+        seen_at=observed_at,
+    )
+    import_entity_id = upsert_entity(
+        compat,
+        session_id,
+        "domain",
+        "import-visible.lookup.example",
+        seen_at=observed_at,
+    )
+    compat.execute(
+        "INSERT INTO runs "
+        "(id, session_id, team_id, run_kind, command, started, output_preview) "
+        "VALUES (?, ?, ?, 'external', 'nmap run-visible.lookup.example', ?, '[]')",
+        ("run-exact-lookup", session_id, team_id, observed_at),
+    )
+    compat.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, 'run-exact-lookup', ?, ?, 1)",
+        (run_entity_id, observed_at, observed_at),
+    )
+    compat.execute(
+        "INSERT INTO atlas_import_batches "
+        "(id, session_id, team_id, source_tool, import_name, created, applied_at) "
+        "VALUES ('batch-exact-lookup', ?, ?, 'generic_jsonl', 'Exact lookup import', ?, ?)",
+        (session_id, team_id, observed_at, observed_at),
+    )
+    compat.execute(
+        "INSERT INTO atlas_entity_import_links "
+        "(entity_id, batch_id, first_observed_at, last_observed_at, occurrence_count, "
+        "created_entity, created, updated) "
+        "VALUES (?, 'batch-exact-lookup', ?, ?, 1, FALSE, ?, ?)",
+        (import_entity_id, observed_at, observed_at, observed_at, observed_at),
+    )
+    preferred_personal_id = upsert_entity(
+        compat,
+        session_id,
+        "domain",
+        "preferred.lookup.example",
+        seen_at=observed_at,
+    )
+    preferred_team_id = upsert_entity(
+        compat,
+        session_id,
+        "domain",
+        "preferred.lookup.example",
+        team_id=team_id,
+        seen_at=observed_at,
+    )
+    ambiguous_entity_ids = [
+        upsert_entity(
+            compat,
+            f"compat-member-{index}",
+            "domain",
+            "ambiguous.lookup.example",
+            seen_at=observed_at,
+        )
+        for index in (1, 2)
+    ]
+    compat.executemany(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, 'run-exact-lookup', ?, ?, 1)",
+        [
+            (entity_id, observed_at, observed_at)
+            for entity_id in [preferred_personal_id, *ambiguous_entity_ids]
+        ],
+    )
+
+    linked_project_id = "project-exact-lookup-linked"
+    empty_project_id = "project-exact-lookup-empty"
+    foreign_project_id = "project-exact-lookup-foreign"
+    compat.executemany(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "VALUES (?, ?, ?, ?, ?, '', 'active', '', ?, ?)",
+        [
+            (
+                linked_project_id,
+                session_id,
+                team_id,
+                "Linked exact lookup",
+                "linked-exact-lookup",
+                observed_at,
+                observed_at,
+            ),
+            (
+                empty_project_id,
+                session_id,
+                team_id,
+                "Empty exact lookup",
+                "empty-exact-lookup",
+                observed_at,
+                observed_at,
+            ),
+            (
+                foreign_project_id,
+                "foreign-member",
+                "foreign-team",
+                "Foreign exact lookup",
+                "foreign-exact-lookup",
+                observed_at,
+                observed_at,
+            ),
+        ],
+    )
+    project_entity_id = upsert_entity(
+        compat,
+        session_id,
+        "domain",
+        "project.lookup.example",
+        team_id=team_id,
+        seen_at=observed_at,
+    )
+    compat.execute(
+        "INSERT INTO project_links "
+        "(id, project_id, entity_type, entity_id, source, created) "
+        "VALUES ('link-exact-lookup', ?, 'atlas_entity', ?, 'manual', ?)",
+        (linked_project_id, project_entity_id, observed_at),
+    )
+
+    parent_entity_id = upsert_entity(
+        compat,
+        session_id,
+        "domain",
+        "parent.lookup.example",
+        team_id=team_id,
+        seen_at=observed_at,
+    )
+    orphan_entity_id = upsert_entity(
+        compat,
+        session_id,
+        "ip",
+        "192.0.2.88",
+        team_id=team_id,
+        seen_at=observed_at,
+    )
+    compat.execute(
+        "UPDATE entities SET suppressed = TRUE, suppressed_reason = 'postgres parity' WHERE id = ?",
+        (orphan_entity_id,),
+    )
+    compat.execute(
+        "INSERT INTO entity_intel_snapshots "
+        "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+        "VALUES ('snapshot-exact-lookup', ?, ?, 'routeviews', 'ok', 'Persisted owner snapshot', ?, ?, '')",
+        (
+            team_id,
+            orphan_entity_id,
+            Jsonb({"summary": {"has_intel": True, "providers_with_data": ["routeviews"]}}),
+            observed_at,
+        ),
+    )
+    conn.commit()
+
+    run_visible = resolve_entity_lookup(
+        compat,
+        session_id,
+        "RUN-VISIBLE.Lookup.Example.",
+        team_id=team_id,
+    )
+    import_visible = resolve_entity_lookup(
+        compat,
+        session_id,
+        "import-visible.lookup.example",
+        team_id=team_id,
+    )
+    hidden_from_personal = resolve_entity_lookup(
+        compat,
+        "other-session",
+        "run-visible.lookup.example",
+    )
+    preferred = resolve_entity_lookup(
+        compat,
+        session_id,
+        "preferred.lookup.example",
+        team_id=team_id,
+    )
+    ambiguous = resolve_entity_lookup(
+        compat,
+        session_id,
+        "ambiguous.lookup.example",
+        team_id=team_id,
+    )
+    project_linked = resolve_entity_lookup(
+        compat,
+        session_id,
+        "project.lookup.example",
+        team_id=team_id,
+        project_id=linked_project_id,
+    )
+    project_unlinked = resolve_entity_lookup(
+        compat,
+        session_id,
+        "project.lookup.example",
+        team_id=team_id,
+        project_id=empty_project_id,
+    )
+    with pytest.raises(ProjectWorkspaceError, match="project not found"):
+        resolve_entity_lookup(
+            compat,
+            session_id,
+            "project.lookup.example",
+            team_id=team_id,
+            project_id=foreign_project_id,
+        )
+    url_parent = resolve_entity_lookup(
+        compat,
+        session_id,
+        "https://parent.lookup.example/private?token=postgres#fragment",
+        team_id=team_id,
+    )
+    suppressed_orphan = resolve_entity_lookup(
+        compat,
+        session_id,
+        "192.0.2.88",
+        team_id=team_id,
+    )
+
+    lookup_sql, lookup_params = exact_lookup_candidate_query(
+        session_id,
+        "domain",
+        "run-visible.lookup.example",
+        team_id=team_id,
+    )
+    conn.execute("SET enable_seqscan = off")
+    try:
+        lookup_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + lookup_sql,
+            lookup_params,
+        ).fetchall())
+    finally:
+        conn.execute("RESET enable_seqscan")
+        conn.commit()
+
+    assert run_visible["match_state"] == "found"
+    assert run_visible["detail"]["entity"]["id"] == run_entity_id
+    assert import_visible["match_state"] == "found"
+    assert import_visible["detail"]["entity"]["id"] == import_entity_id
+    assert hidden_from_personal["match_state"] == "not_found"
+    assert preferred["match_state"] == "found"
+    assert preferred["detail"]["entity"]["id"] == preferred_team_id
+    assert preferred["detail"]["entity"]["id"] != preferred_personal_id
+    assert ambiguous["match_state"] == "ambiguous"
+    assert {candidate["entity_id"] for candidate in ambiguous["candidates"]} == set(ambiguous_entity_ids)
+    assert {candidate["provenance"] for candidate in ambiguous["candidates"]} == {"compatibility_visible"}
+    assert project_linked["match_state"] == "found"
+    assert project_linked["detail"]["entity"]["id"] == project_entity_id
+    assert project_linked["detail"]["scope"]["project_id"] == linked_project_id
+    assert project_unlinked["match_state"] == "not_found"
+    assert url_parent["match_state"] == "not_found"
+    assert url_parent["parent_host_candidate"]["match_state"] == "found"
+    assert url_parent["parent_host_candidate"]["entity"]["entity_id"] == parent_entity_id
+    assert suppressed_orphan["match_state"] == "found"
+    assert suppressed_orphan["detail"]["entity"]["id"] == orphan_entity_id
+    assert suppressed_orphan["detail"]["entity"]["suppressed"] is True
+    assert suppressed_orphan["detail"]["detail_limits"]["runs"]["total"] == 0
+    assert suppressed_orphan["detail"]["intel_snapshots"][0]["provider"] == "routeviews"
+    assert suppressed_orphan["detail"]["intel_snapshots"][0]["summary"] == "Persisted owner snapshot"
+    assert "idx_entities_type_signature" in lookup_plan
+    assert "Seq Scan on entities" not in lookup_plan
 
 
 @pytest.mark.postgres

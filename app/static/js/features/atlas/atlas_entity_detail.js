@@ -44,6 +44,33 @@ const QUICK_DETAIL_PREVIEW_LIMIT = 3;
     return row;
   }
 
+  function renderProfileIdentitySummary(detail, entity) {
+    const wrap = node('div', 'atlas-profile-identity-summary');
+    const observations = node('div', 'atlas-profile-identity-observations');
+    observations.append(
+      node('span', '', `First seen ${formatDate(entity.first_seen_at)}`),
+      node('span', '', `Last seen ${formatDate(entity.last_seen_at)}`),
+    );
+    const badges = node('div', 'atlas-profile-identity-badges');
+    const projectCount = Array.isArray(entity.project_links)
+      ? entity.project_links.length
+      : Number(entity.project_link_count || 0);
+    const projectBadge = node(
+      'span',
+      'badge badge-tone-muted',
+      `${projectCount.toLocaleString()} project link${projectCount === 1 ? '' : 's'}`,
+    );
+    badges.appendChild(projectBadge);
+    if (entity.suppressed) badges.appendChild(node('span', 'badge badge-tone-amber', 'Suppressed'));
+    const runCount = Number(detail.detail_limits?.runs?.total || 0);
+    const importCount = Array.isArray(detail.import_sources) ? detail.import_sources.length : 0;
+    if (runCount === 0 && importCount === 0) {
+      badges.appendChild(node('span', 'badge badge-tone-amber', 'No source runs'));
+    }
+    wrap.append(observations, badges);
+    return wrap;
+  }
+
   function portMetaRows(entity) {
     const formatPortEntityMetadata = typeof importedFormatPortEntityMetadata === 'function'
       ? importedFormatPortEntityMetadata
@@ -692,7 +719,10 @@ const QUICK_DETAIL_PREVIEW_LIMIT = 3;
         typeof onOpenFinding === 'function' ? 'button' : 'div',
         `panel-row${typeof onOpenFinding === 'function' ? ' panel-row-clickable' : ''} selection-row atlas-finding-row`,
       );
-      if (row.tagName === 'BUTTON') row.type = 'button';
+      if (row.tagName === 'BUTTON') {
+        row.type = 'button';
+        row.dataset.findingId = text(finding.id);
+      }
       const title = node('div', 'atlas-finding-title', text(finding.title || finding.raw_line, finding.id));
       const meta = node(
         'div',
@@ -1190,6 +1220,7 @@ const QUICK_DETAIL_PREVIEW_LIMIT = 3;
       node('div', 'atlas-detail-type', text(entity.type).toUpperCase()),
       node('div', 'atlas-detail-value', text(entity.canonical_value, entity.id)),
     );
+    if (handlers.profileMode) header.appendChild(renderProfileIdentitySummary(detail, entity));
 
     const meta = node('div', 'atlas-detail-meta');
     meta.append(
@@ -1228,6 +1259,14 @@ const QUICK_DETAIL_PREVIEW_LIMIT = 3;
         promote.textContent = 'Add to active project';
         promote.addEventListener('click', () => handlers.onAddToActiveProject?.(entity));
         actions.appendChild(promote);
+      }
+      if (typeof handlers.onCopyValue === 'function') {
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'btn btn-secondary btn-compact';
+        copy.textContent = 'Copy value';
+        copy.addEventListener('click', () => handlers.onCopyValue(entity));
+        actions.appendChild(copy);
       }
       if (!handlers.profileMode && typeof handlers.onViewProfile === 'function') {
         const profile = document.createElement('button');

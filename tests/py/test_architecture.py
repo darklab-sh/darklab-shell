@@ -163,7 +163,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_packages.py", 386, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_report.py", 301, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_targets.py", 111, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/api_v1.py", 794, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/api_v1.py", 795, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/api_v1_atlas_lookup.py", 27, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_atlas_profile.py", 33, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_notifications.py", 159, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_read.py", 401, "split-package-ratchet"),
@@ -172,7 +173,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_streaming.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_teams.py", 354, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_watchers.py", 240, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/atlas.py", 684, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/atlas.py", 685, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/atlas_lookup_read.py", 33, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas_mutations.py", 680, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas_profile_read.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas_read.py", 160, "split-package-ratchet"),
@@ -188,6 +190,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/intel_profile.py", 93, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_evidence.py", 335, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_summary.py", 370, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_query.py", 68, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_resolve.py", 347, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/lookup.py", 973, "split-target-phase4"),
     ModuleSizeBudget("app/services/atlas/lookup_export.py", 277, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/lookup_filters.py", 169, "split-package-ratchet"),
@@ -299,8 +303,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 189
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "543f2172491871f2348dde2a347c9839653a0aa0f0930bd6a31765dfbaa36ffa"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 191
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "17e86fe2b9b458c17476c3676057b6fbed5be0f1cabfdbf1c48cdd701857f8de"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

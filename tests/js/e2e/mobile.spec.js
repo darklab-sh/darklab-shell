@@ -9,6 +9,7 @@ import {
   waitForActiveOutputSettled,
   waitForHistoryRuns,
   browserSessionId,
+  atlasQuickLookupDetail,
   seedExternalHistoryRuns,
 } from './helpers.js'
 
@@ -631,6 +632,7 @@ test.beforeEach(async ({ page }) => {
       'workflows',
       'scope',
       'atlas',
+      'quick-lookup',
       'projects',
       'history',
       'workspace',
@@ -1724,5 +1726,131 @@ test.beforeEach(async ({ page }) => {
     await expect(page.locator('#atlas-mobile-bulk-bar')).toBeVisible()
     await row.click()
     await expect(page.locator('#atlas-mobile-bulk-bar')).toContainText('1 selected')
+  })
+
+  test('mobile Quick Lookup keeps profile navigation and owner-scope refresh in the Atlas sheet', async ({ page }) => {
+    test.setTimeout(60_000)
+    const hostname = 'mobile-lookup.e2e.example'
+    const childUrl = `https://${hostname}/admin`
+    const childDetail = atlasQuickLookupDetail({
+      id: 'ent_mobile_lookup_url',
+      type: 'url',
+      canonicalValue: childUrl,
+      parentHost: {
+        id: 'ent_mobile_lookup_host',
+        type: 'domain',
+        canonical_value: hostname,
+      },
+    })
+    childDetail.entity.host_entity_id = 'ent_mobile_lookup_host'
+    const hostDetail = atlasQuickLookupDetail({
+      id: 'ent_mobile_lookup_host',
+      type: 'domain',
+      canonicalValue: hostname,
+      relatedUrls: [childDetail.entity],
+    })
+    const lookupRequests = []
+
+    await page.route(/https?:\/\/[^/]+\/atlas(?:\?|\/|$)/, async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      if (url.pathname === '/atlas/lookup') {
+        const payload = request.postDataJSON()
+        const teamId = request.headers()['x-team-id'] || ''
+        lookupRequests.push({ payload, teamId })
+        const detail = JSON.parse(JSON.stringify(hostDetail))
+        if (teamId) {
+          detail.entity.team_id = teamId
+          detail.scope = { owner_kind: 'team', owner_id: teamId, project_id: '' }
+        }
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            requested_type: payload.mode,
+            detected_type: 'domain',
+            canonical_value: hostname,
+            project_id: '',
+            match_state: 'found',
+            detail,
+            candidates: [],
+            candidates_truncated: false,
+            parent_host_candidate: null,
+          }),
+        })
+        return
+      }
+      if (url.pathname === '/atlas/entities/ent_mobile_lookup_url') {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify(childDetail) })
+        return
+      }
+      if (url.pathname === '/atlas/entities/ent_mobile_lookup_host') {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify(hostDetail) })
+        return
+      }
+      if (url.pathname === '/atlas') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ total: 1, findings: 0, counts: { domain: 1 } }),
+        })
+        return
+      }
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) })
+    })
+
+    await page.setViewportSize(MOBILE)
+    await page.goto('/')
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')))
+    await expect.poll(async () => page.evaluate(
+      () => document.body.classList.contains('mobile-terminal-mode'),
+    )).toBe(true)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="quick-lookup"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-quick-lookup')).toBeVisible()
+    await expect(page.locator('#atlas-lookup-input')).toBeFocused()
+    await page.locator('#atlas-lookup-mode').selectOption('hostname')
+    await page.locator('#atlas-lookup-input').fill(hostname)
+    await page.locator('#atlas-lookup-form').evaluate(form => form.requestSubmit())
+
+    await expect(page.locator('#atlas-lookup-profile .atlas-profile-tabs')).toBeVisible()
+    await page.locator('#atlas-lookup-profile [data-atlas-profile-view="evidence"]').click()
+    await expect(page.locator('#atlas-lookup-profile')).toContainText('Source runs')
+    await page.locator('#atlas-lookup-profile [data-atlas-profile-view="overview"]').click()
+    await page.locator('#atlas-lookup-profile .atlas-related-url-open').click()
+    await expect(page.locator('#atlas-lookup-profile')).toContainText(childUrl)
+    await expect(page.locator('#atlas-lookup-profile .atlas-profile-back'))
+      .toContainText('Back to previous entity')
+    await page.locator('#atlas-lookup-profile .atlas-profile-back').click()
+    await expect(page.locator('#atlas-lookup-profile')).toContainText(hostname)
+
+    await page.locator('#atlas-lookup-profile-new').click()
+    await expect(page.locator('#atlas-lookup-form-view')).toBeVisible()
+    await page.locator('#atlas-lookup-input').fill(hostname)
+    await page.locator('#atlas-lookup-form').evaluate(form => form.requestSubmit())
+    await expect(page.locator('#atlas-lookup-profile')).toContainText(hostname)
+
+    await page.evaluate(() => {
+      window.DarklabTeamScope.replaceTeamScopes({
+        teams: [{
+          id: 'team_mobile_lookup',
+          name: 'Mobile Lookup Team',
+          slug: 'mobile-lookup-team',
+          member: {
+            role: 'owner',
+            capabilities: ['view_shared', 'run_commands'],
+          },
+        }],
+      })
+      window.DarklabTeamScope.setActiveTeamId('team_mobile_lookup', { source: 'e2e' })
+    })
+    await expect(page.locator('#atlas-lookup-scope')).toHaveText('Team · Mobile Lookup Team')
+    await expect.poll(() => lookupRequests.length).toBe(3)
+    expect(lookupRequests.at(-1)).toEqual({
+      payload: { mode: 'hostname', value: hostname },
+      teamId: 'team_mobile_lookup',
+    })
+    await expect(page.locator('#atlas-overlay')).toHaveCount(1)
+    await expect(page.locator('#atlas-lookup-profile')).toContainText(hostname)
   })
 })

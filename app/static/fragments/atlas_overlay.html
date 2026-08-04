@@ -12,6 +12,59 @@
       <button type="button" class="close-btn atlas-close" aria-label="Close Atlas">✕</button>
     </div>
     <div id="atlas-tabs" class="atlas-tabs tab-strip" role="tablist" aria-label="Atlas entity types"></div>
+    <section id="atlas-quick-lookup" class="atlas-quick-lookup u-hidden" aria-labelledby="atlas-lookup-title">
+      <div id="atlas-lookup-form-view" class="atlas-lookup-form-view">
+        <form id="atlas-lookup-form" class="atlas-lookup-form">
+          <div class="atlas-lookup-heading">
+            <span class="atlas-title" id="atlas-lookup-title">QUICK LOOKUP</span>
+            <p>Find a saved hostname, IP address, or HTTP(S) URL without searching Atlas lists.</p>
+          </div>
+          <label class="form-field atlas-lookup-value-field">
+            <span>Entity</span>
+            <input id="atlas-lookup-input" class="form-control" type="text" placeholder="example.com, 192.0.2.10, or https://example.com/path" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text">
+          </label>
+          <div class="atlas-lookup-controls">
+            <label class="form-field">
+              <span>Type</span>
+              <select id="atlas-lookup-mode" class="form-select form-control-compact">
+                <option value="auto">Auto</option>
+                <option value="hostname">Hostname</option>
+                <option value="ip">IP</option>
+                <option value="url">URL</option>
+              </select>
+            </label>
+            <div class="atlas-lookup-scope-field">
+              <span>Scope</span>
+              <strong id="atlas-lookup-scope" class="atlas-lookup-scope">Personal</strong>
+            </div>
+            <button class="btn btn-primary atlas-lookup-submit" type="submit">Look up</button>
+          </div>
+          <div class="atlas-lookup-form-footer">
+            <span id="atlas-lookup-status" class="atlas-lookup-status u-hidden" role="status" aria-live="polite"></span>
+            <button id="atlas-lookup-resume" class="btn btn-ghost btn-compact u-hidden" type="button">Return to current result</button>
+          </div>
+        </form>
+      </div>
+      <div id="atlas-lookup-outcome-view" class="atlas-lookup-outcome-view u-hidden">
+        <div class="atlas-lookup-empty-card" aria-live="polite">
+          <span class="atlas-title" id="atlas-lookup-outcome-title">No saved Atlas entity</span>
+          <p id="atlas-lookup-outcome-body"></p>
+          <div id="atlas-lookup-outcome-context" class="atlas-lookup-outcome-context u-hidden"></div>
+          <div id="atlas-lookup-outcome-candidates" class="atlas-lookup-candidates u-hidden"></div>
+          <div id="atlas-lookup-outcome-actions" class="atlas-lookup-outcome-actions">
+            <button id="atlas-lookup-outcome-new" class="btn btn-primary btn-compact" type="button">New lookup</button>
+          </div>
+        </div>
+      </div>
+      <div id="atlas-lookup-profile-view" class="atlas-lookup-profile-view u-hidden">
+        <div class="atlas-lookup-profile-actions">
+          <button id="atlas-lookup-profile-new" class="btn btn-secondary btn-compact" type="button">New lookup</button>
+          <button id="atlas-lookup-open-atlas" class="btn btn-ghost btn-compact" type="button">Open in Atlas</button>
+          <span id="atlas-lookup-profile-scope" class="atlas-muted"></span>
+        </div>
+        <div id="atlas-lookup-profile" class="atlas-lookup-profile nice-scroll" aria-live="polite"></div>
+      </div>
+    </section>
     <section id="atlas-mobile-root" class="atlas-mobile-root u-hidden" aria-label="Mobile Atlas">
       <div id="atlas-mobile-list-view" class="atlas-mobile-list-view">
         <div class="atlas-mobile-tabs-wrap">

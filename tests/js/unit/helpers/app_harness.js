@@ -55,6 +55,9 @@ export async function loadAppFns({
   closeProjectWorkspace: closeProjectWorkspaceOverride = vi.fn(),
   isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = vi.fn(() => false),
   cycleProjectWorkspaceTab: cycleProjectWorkspaceTabOverride = vi.fn(() => false),
+  openAtlas: openAtlasOverride = vi.fn(() => Promise.resolve(false)),
+  openAtlasQuickLookup: openAtlasQuickLookupOverride = vi.fn(() => Promise.resolve(false)),
+  openAtlasQuickLookupFromSurface: openAtlasQuickLookupFromSurfaceOverride = null,
   isAtlasOverlayOpen: isAtlasOverlayOpenOverride = vi.fn(() => false),
   cycleAtlasTab: cycleAtlasTabOverride = vi.fn(() => false),
   isHistoryRunOverlayOpen: isHistoryRunOverlayOpenOverride = vi.fn(() => false),
@@ -194,6 +197,8 @@ export async function loadAppFns({
           <button data-menu-action="clear"></button>
           <button data-menu-action="history"></button>
           <button class="mobile-scope-row" data-menu-action="scope"><span id="mobile-team-scope-label">Personal</span></button>
+          <button data-menu-action="atlas"></button>
+          <button data-menu-action="quick-lookup"></button>
           <button data-menu-action="status-monitor"></button>
           <button data-menu-action="command-registry"></button>
           <button data-menu-action="options"></button>
@@ -507,6 +512,9 @@ export async function loadAppFns({
   const clearSearch = vi.fn()
   const navigateSearch = vi.fn()
   const logClientError = vi.fn()
+  const openAtlasQuickLookupFromSurface = openAtlasQuickLookupFromSurfaceOverride || vi.fn(
+    source => openAtlasQuickLookupOverride({ source, toggle: true }),
+  )
   const appendLine = vi.fn()
   const appendCommandEcho = vi.fn()
   const setStatus = vi.fn()
@@ -859,6 +867,9 @@ export async function loadAppFns({
       closeProjectWorkspace: closeProjectWorkspaceOverride,
       isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride,
       cycleProjectWorkspaceTab: cycleProjectWorkspaceTabOverride,
+      openAtlas: openAtlasOverride,
+      openAtlasQuickLookup: openAtlasQuickLookupOverride,
+      openAtlasQuickLookupFromSurface,
       isAtlasOverlayOpen: isAtlasOverlayOpenOverride,
       cycleAtlasTab: cycleAtlasTabOverride,
       isHistoryRunOverlayOpen: isHistoryRunOverlayOpenOverride,
@@ -1120,6 +1131,9 @@ export async function loadAppFns({
     closeProjectWorkspace: closeProjectWorkspaceOverride,
     isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride,
     cycleProjectWorkspaceTab: cycleProjectWorkspaceTabOverride,
+    openAtlas: openAtlasOverride,
+    openAtlasQuickLookup: openAtlasQuickLookupOverride,
+    openAtlasQuickLookupFromSurface,
     openSchedulesModal: openSchedulesModalOverride,
     closeSchedulesModal: closeSchedulesModalOverride,
     isSchedulesOverlayOpen: isSchedulesOverlayOpenOverride,
@@ -1203,6 +1217,9 @@ export async function loadAppFns({
     submitComposerCommand: submitComposerCommandOverride,
     submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
     openTourModal: openTourModalOverride,
+    openAtlas: openAtlasOverride,
+    openAtlasQuickLookup: openAtlasQuickLookupOverride,
+    openAtlasQuickLookupFromSurface,
     logClientError,
     appendLine,
     appendCommandEcho,
