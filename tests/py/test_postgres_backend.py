@@ -412,6 +412,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0045",
         "0046",
         "0047",
+        "0048",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -476,7 +477,15 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'kev_listed',
                 'epss_active'
             ))
-            OR (table_name = 'risk_escalations' AND column_name = 'model_changed')
+            OR (table_name = 'risk_escalations' AND column_name IN (
+                'model_changed',
+                'old_source_version',
+                'new_source_version'
+            ))
+            OR (table_name = 'cve_risk_work_items' AND column_name IN (
+                'old_source_version',
+                'new_source_version'
+            ))
         )
         """,
         (postgres_schema.schema,),
@@ -542,6 +551,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("risk_escalation_states", "kev_listed", "boolean"),
         ("risk_escalation_states", "epss_active", "boolean"),
         ("risk_escalations", "model_changed", "boolean"),
+        ("risk_escalations", "old_source_version", "text"),
+        ("risk_escalations", "new_source_version", "text"),
+        ("cve_risk_work_items", "old_source_version", "text"),
+        ("cve_risk_work_items", "new_source_version", "text"),
     }
     runs_index_rows = conn.execute(
         """
@@ -1530,7 +1543,10 @@ finally:
         env=env,
         text=True,
         capture_output=True,
-        timeout=30,
+        # This is a functional cold-start smoke, not a startup-time SLA. A new
+        # schema also imports the release-pinned EPSS/KEV baseline, which can
+        # exceed 30 seconds on a contended shared CI runner.
+        timeout=90,
         check=False,
     )
 

@@ -138,7 +138,7 @@ The current event inventory is:
 | INFO | `MIGRATION_APPLIED` | Schema migration runner | migration_version, migration_name |
 | INFO | `CVE_RISK_BOOTSTRAP_LOADED` | bundled public-risk bootstrap | source, source_version, record_count, origin |
 | INFO | `CVE_RISK_REFRESH_COMPLETED` | public-risk feed refresh | source, source_version, record_count, outcome, attempt |
-| INFO | `CVE_ADVISORY_LOCAL_LOADED` | local NVD advisory loader | source, source_version, record_count |
+| INFO | `CVE_ADVISORY_LOCAL_LOADED` | local NVD advisory loader | source, source_version, record_count, transition_count |
 | INFO | `CVE_ADVISORY_LOOKUP_STORED` | explicit Atlas CVE Intel refresh | source, outcome, record_count |
 | INFO | `RISK_ESCALATION_CREATED` | changed-CVE work processor | source, transition_kind, feed_version, owner_kind, observation_count, project_count, model_changed |
 | INFO | `PROJECT_RISK_ESCALATION_ACK_UPDATED` | Project Monitoring risk-event route | ip, session, team_id, project_id, escalation_id, ack_state, note_chars |

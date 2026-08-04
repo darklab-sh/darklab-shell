@@ -193,7 +193,7 @@ def _relevant_current(conn: Any, source: str) -> dict[str, tuple[Any, ...]]:
     return {str(row["cve_id"]): (bool(row["kev_listed"]),) for row in rows}
 
 
-def _queue_work_item(
+def queue_work_item(
     conn: Any,
     *,
     source: str,
@@ -204,13 +204,16 @@ def _queue_work_item(
     new_value: Any,
     old_model_version: str = "",
     new_model_version: str = "",
+    old_source_version: str = "",
+    new_source_version: str = "",
     now: str,
 ) -> None:
     conn.execute(
         "INSERT INTO cve_risk_work_items ("
         "id, source, feed_version, cve_id, transition_kind, old_value, new_value, "
-        "old_model_version, new_model_version, status, next_attempt_at, created_at, updated_at"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?) "
+        "old_model_version, new_model_version, old_source_version, new_source_version, "
+        "status, next_attempt_at, created_at, updated_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?) "
         "ON CONFLICT(source, feed_version, cve_id, transition_kind) DO NOTHING",
         (
             "crw_" + uuid.uuid4().hex,
@@ -222,6 +225,8 @@ def _queue_work_item(
             "" if new_value is None else str(new_value),
             old_model_version,
             new_model_version,
+            old_source_version,
+            new_source_version,
             now,
             now,
             now,
@@ -292,7 +297,7 @@ def accept_feed(
                 new_percentile = record.get("epss_percentile") if record else None
                 if old[:2] == (new_probability, new_percentile) and old[2] == parsed.model_version:
                     continue
-                _queue_work_item(
+                queue_work_item(
                     conn,
                     source="epss",
                     feed_version=parsed.version,
@@ -302,6 +307,7 @@ def accept_feed(
                     new_value=new_probability,
                     old_model_version=str(old[2]),
                     new_model_version=parsed.model_version,
+                    new_source_version=parsed.version,
                     now=accepted_at,
                 )
     else:
@@ -344,7 +350,7 @@ def accept_feed(
                 new_listed = cve_id in incoming_ids
                 if old_listed == new_listed:
                     continue
-                _queue_work_item(
+                queue_work_item(
                     conn,
                     source="kev",
                     feed_version=parsed.version,
@@ -352,6 +358,7 @@ def accept_feed(
                     transition_kind="kev_added" if new_listed else "kev_removed",
                     old_value=old_listed,
                     new_value=new_listed,
+                    new_source_version=parsed.version,
                     now=accepted_at,
                 )
 

@@ -492,6 +492,7 @@ class CveRiskConfig(_ConfigModel):
     nvd_local_path: StrictStr = ""
     advisory_positive_ttl_seconds: StrictInt = Field(default=604800, ge=3600, le=2592000)
     advisory_negative_ttl_seconds: StrictInt = Field(default=86400, ge=300, le=604800)
+    advisory_cvss_downgrade_delta: StrictFloat = Field(default=1.0, gt=0, le=10)
     advisory_max_local_bytes: StrictInt = Field(default=268435456, ge=1024, le=1073741824)
     advisory_max_records: StrictInt = Field(default=500000, ge=1, le=1000000)
     allowed_hosts: list[StrictStr] = Field(default_factory=lambda: [
@@ -1279,6 +1280,7 @@ def load_config(conf_dir=None, local_conf_dir=None):
             "work_max_attempts": 5,
             "epss_activation_probability": 0.10,
             "epss_reset_probability": 0.08,
+            "advisory_cvss_downgrade_delta": 1.0,
             "allowed_hosts": ["epss.cyentia.com", "www.cisa.gov"],
         },
         "max_tabs":                   8,

@@ -94,10 +94,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Derive the stable remediation identity from owner, canonical affected subject, and normalized vulnerability/rule identity while preserving inferred, actively confirmed, imported, and manual observations separately. Count a remediation identity once in ranked worklists and headline rollups, then expose its observation and evidence counts in detail.
   - Add finding confidence, target exposure, and asset context as separate explainable signals. Keep KEV, EPSS, stored CVSS, and age as the shared deterministic order until a consistently deployed public-exploit source is approved; never let an owner-scoped provider result silently reorder another owner's work.
   - Show stored Vulners exploit references only to the owner who can already see that Intel result. Decide whether an operator-managed Exploit-DB/SearchSploit catalog satisfies license, update-trust, multi-architecture, image/storage, retention, and non-executable-reference requirements before adding public-exploit availability to shared ranking.
-- [ ] Extend risk transitions beyond the current KEV and EPSS escalation paths:
-  - Treat NVD withdrawal, rejection, dispute, reinstatement, and material CVSS downgrade as explicit source transitions with preserved old/new values and source versions. Do not silently erase an earlier signal or rewrite a finding's occurrence history.
-  - Deduplicate transitions per owner/remediation identity/source/version, keep baseline imports silent, process only changed CVEs through bounded resumable work, and preserve current Project Monitoring, notification preference, acknowledgement, archived-team, and privacy boundaries.
-
 #### Phase 1 — Define the assessment and evidence data contracts
 
 - [ ] Add the next available shared SQLite/Postgres migration after the Phase 0 risk-intelligence migration and register it in `app/core/migrations/__init__.py`:

@@ -222,7 +222,7 @@ FIRST, CISA, and NIST source URLs, publication and retrieval dates, model or cat
 
 The shared fix-first order is explainable: KEV-listed remediation groups first, then EPSS probability and percentile, then CVSS, with finding age as the final stable tie-breaker. Owner-scoped Vulners references remain context and do not change that shared order. A public-exploit signal may become a shared tie-breaker only if an Exploit-DB/SearchSploit dataset is approved and deployed consistently.
 
-Risk escalation always records a new KEV listing for an open remediation group. EPSS escalation activates when probability crosses upward through `0.10`, stays active while the score moves near that boundary, and rearms only after it falls below `0.08`; operators may change both values, but reset must remain below activation. Model-version crossings are labeled, delisting and material downgrade history are retained, and Project digest delivery is opt-in.
+Risk escalation always records a new KEV listing for an open remediation group. EPSS escalation activates when probability crosses upward through `0.10`, stays active while the score moves near that boundary, and rearms only after it falls below `0.08`; operators may change both values, but reset must remain below activation. NVD withdrawal, rejection, dispute, and reinstatement remain explicit history, as does a CVSS decrease of at least 1.0 point by default. Operators may change that material-downgrade threshold. Every NVD change keeps both source versions, the first accepted record is silent, model-version crossings stay labeled, and Project digest delivery is opt-in.
 
 ### Assessment History, Evidence, and Finding Identity
 

@@ -70,6 +70,11 @@ let exportedDarklabProjectMonitoring = null;
     kev_removed: 'Removed from CISA KEV',
     epss_activated: 'EPSS threshold crossed',
     epss_reset: 'EPSS threshold reset',
+    nvd_cvss_downgraded: 'NVD CVSS downgraded',
+    nvd_disputed: 'NVD marked disputed',
+    nvd_reinstated: 'NVD advisory reinstated',
+    nvd_rejected: 'NVD advisory rejected',
+    nvd_withdrawn: 'NVD advisory withdrawn',
   };
 
   function createProjectMonitoringController(context) {
@@ -832,14 +837,31 @@ let exportedDarklabProjectMonitoring = null;
     function riskTransitionTone(kind) {
       const normalized = String(kind || '');
       if (normalized === 'kev_added') return 'badge-tone-red';
-      if (normalized === 'epss_activated') return 'badge-tone-amber';
+      if (normalized === 'epss_activated' || normalized === 'nvd_reinstated') return 'badge-tone-amber';
       return 'badge-tone-muted';
     }
 
     function riskValueLabel(event) {
-      if (!String(event?.transition_kind || '').startsWith('epss_')) return '';
-      const parsed = Number(event?.new_value);
-      return Number.isFinite(parsed) ? `EPSS ${(parsed * 100).toFixed(1)}%` : '';
+      const transition = String(event?.transition_kind || '');
+      if (transition.startsWith('epss_')) {
+        const parsed = Number(event?.new_value);
+        return Number.isFinite(parsed) ? `EPSS ${(parsed * 100).toFixed(1)}%` : '';
+      }
+      if (transition === 'nvd_cvss_downgraded') {
+        const previous = Number(event?.old_value);
+        const current = Number(event?.new_value);
+        return Number.isFinite(previous) && Number.isFinite(current)
+          ? `CVSS ${previous.toFixed(1)} → ${current.toFixed(1)}`
+          : '';
+      }
+      if (transition.startsWith('nvd_')) {
+        const statusLabel = value => String(value || '').replaceAll('_', ' ')
+          .replace(/^./, first => first.toUpperCase());
+        const previous = statusLabel(event?.old_value);
+        const current = statusLabel(event?.new_value);
+        return previous && current ? `${previous} → ${current}` : '';
+      }
+      return '';
     }
 
     function renderRiskAckControls(projectId, riskEvent) {

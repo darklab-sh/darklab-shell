@@ -17,6 +17,12 @@ from typing import Any
 from config import resolve_effective_cfg
 from services.intel.canonical import CanonicalizationError, canonical_cve
 from services.intel.nvd import normalize_cve_payload
+from .nvd_transitions import (
+    linked_nvd_state,
+    linked_nvd_states,
+    queue_nvd_transitions,
+    state_from_values,
+)
 
 
 log = logging.getLogger("shell")
@@ -115,8 +121,11 @@ def parse_nvd_dataset(payload: bytes, *, max_records: int = 500000) -> ParsedNvd
         cve = row.get("cve") if isinstance(row, dict) else None
         if not isinstance(cve, dict):
             raise NvdAdvisoryError("NVD dataset contains a malformed vulnerability row")
+        raw_cve_id = cve.get("id")
+        if not isinstance(raw_cve_id, str):
+            raise NvdAdvisoryError("NVD dataset contains an invalid CVE id")
         try:
-            cve_id = canonical_cve(cve.get("id"))
+            cve_id = canonical_cve(raw_cve_id)
         except CanonicalizationError as exc:
             raise NvdAdvisoryError("NVD dataset contains an invalid CVE id") from exc
         if cve_id in seen:
@@ -214,7 +223,7 @@ def _upsert_record(
     source_version: str,
     fetched_at: str,
     expires_at: str,
-) -> None:
+) -> dict[str, Any]:
     item = _normalize_provider_payload(payload)
     conn.execute(
         "INSERT INTO cve_risk_records ("
@@ -234,6 +243,7 @@ def _upsert_record(
             item["published_at"], item["modified_at"], fetched_at, expires_at, origin, fetched_at,
         ),
     )
+    return item
 
 
 def _cache_result(
@@ -279,8 +289,9 @@ def persist_external_nvd_lookup(
     fetched_at = current.isoformat()
     expires_at = (current + timedelta(seconds=ttl)).isoformat()
     source_version = _text(provider_payload.get("last_modified") or fetched_at, limit=128)
+    previous = linked_nvd_state(conn, canonical) if positive else None
     if positive:
-        _upsert_record(
+        item = _upsert_record(
             conn,
             canonical,
             provider_payload,
@@ -288,6 +299,14 @@ def persist_external_nvd_lookup(
             source_version=source_version,
             fetched_at=fetched_at,
             expires_at=expires_at,
+        )
+        queue_nvd_transitions(
+            conn,
+            cve_id=canonical,
+            previous=previous,
+            current=state_from_values(item, source_version=source_version),
+            downgrade_delta=float(settings.get("advisory_cvss_downgrade_delta") or 1.0),
+            now=fetched_at,
         )
     _cache_result(
         conn,
@@ -334,8 +353,10 @@ def accept_local_nvd_dataset(
     fetched_at = current.isoformat()
     ttl = int(settings.get("advisory_positive_ttl_seconds") or 604800)
     expires_at = (current + timedelta(seconds=ttl)).isoformat()
+    previous = linked_nvd_states(conn)
+    queued = 0
     for cve_id, provider_payload in parsed.records:
-        _upsert_record(
+        item = _upsert_record(
             conn,
             cve_id,
             provider_payload,
@@ -343,6 +364,14 @@ def accept_local_nvd_dataset(
             source_version=parsed.version,
             fetched_at=fetched_at,
             expires_at=expires_at,
+        )
+        queued += queue_nvd_transitions(
+            conn,
+            cve_id=cve_id,
+            previous=previous.get(cve_id),
+            current=state_from_values(item, source_version=parsed.version),
+            downgrade_delta=float(settings.get("advisory_cvss_downgrade_delta") or 1.0),
+            now=fetched_at,
         )
     conn.execute(
         "UPDATE cve_risk_records SET advisory_status = 'unknown', cvss_version = '', "
@@ -365,6 +394,7 @@ def accept_local_nvd_dataset(
     )
     log.info("CVE_ADVISORY_LOCAL_LOADED", extra={
         "source": "nvd", "source_version": parsed.version, "record_count": len(parsed.records),
+        "transition_count": queued,
     })
     from services.metrics.cve_risk import CVE_ADVISORY_ACQUISITIONS  # noqa: PLC0415
 

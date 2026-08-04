@@ -365,6 +365,41 @@ describe('project monitoring controller', () => {
     expect(container.textContent).not.toContain('TLS')
   })
 
+  it('labels NVD advisory and CVSS transitions without presenting them as scanner findings', async () => {
+    const monitoringApi = loadMonitoringModule()
+    const payload = {
+      ...monitoringPayload,
+      risk_events: [{
+        ...monitoringPayload.risk_events[0],
+        id: 'rsk_nvd_cvss',
+        source: 'nvd',
+        transition_kind: 'nvd_cvss_downgraded',
+        old_value: '9.8',
+        new_value: '8.7',
+      }, {
+        ...monitoringPayload.risk_events[0],
+        id: 'rsk_nvd_status',
+        source: 'nvd',
+        transition_kind: 'nvd_reinstated',
+        old_value: 'disputed',
+        new_value: 'active',
+      }],
+    }
+    const controller = monitoringApi.createProjectMonitoringController(makeContext(
+      vi.fn(async () => apiResponse(payload)),
+    ))
+
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderMonitoring(container, 'prj_1')
+
+    expect(container.textContent).toContain('NVD CVSS downgraded')
+    expect(container.textContent).toContain('CVSS 9.8 → 8.7')
+    expect(container.textContent).toContain('NVD advisory reinstated')
+    expect(container.textContent).toContain('Disputed → Active')
+    expect(container.textContent).not.toContain('Added to CISA KEV')
+  })
+
   it('saves digest settings from the monitoring tab', async () => {
     const monitoringApi = loadMonitoringModule()
     const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {

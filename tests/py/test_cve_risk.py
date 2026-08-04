@@ -20,8 +20,13 @@ from core.migrations import MIGRATIONS
 from core.migrations.runner import run_migrations
 from services.cve_risk import bootstrap, refresh
 from services.cve_risk import escalation
-from services.cve_risk.escalation import acknowledge_escalation, process_risk_work
+from services.cve_risk.escalation import (
+    acknowledge_escalation,
+    list_project_risk_escalations,
+    process_risk_work,
+)
 from services.cve_risk.nvd_advisory import (
+    ParsedNvdDataset,
     accept_local_nvd_dataset,
     get_advisory_source_status,
     load_configured_local_nvd,
@@ -61,6 +66,30 @@ def _epss_feed(version: str, score_date: str, *rows: tuple[str, float, float]) -
             "epss_percentile": percentile,
         } for cve_id, probability, percentile in rows),
     )
+
+
+def _nvd_dataset(version: str, *, status: str, score: float) -> ParsedNvdDataset:
+    cve: dict[str, object] = {
+        "id": "CVE-2026-12345",
+        "vulnStatus": status,
+        "published": "2026-08-01T00:00:00Z",
+        "lastModified": version,
+        "metrics": {"cvssMetricV31": [{
+            "baseSeverity": "HIGH",
+            "cvssData": {
+                "version": "3.1",
+                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "baseScore": score,
+            },
+        }]},
+    }
+    if status == "Disputed":
+        cve["vulnStatus"] = "Analyzed"
+        cve["cveTags"] = [{"tags": ["disputed"]}]
+    return parse_nvd_dataset(json.dumps({
+        "timestamp": version,
+        "vulnerabilities": [{"cve": cve}],
+    }).encode())
 
 
 def _insert_project_finding(
@@ -134,6 +163,8 @@ def test_cve_risk_config_bounds_network_and_hysteresis_contracts():
         CveRiskConfig(advisory_mode="automatic")
     with pytest.raises(ValidationError, match="nvd_local_path"):
         CveRiskConfig(advisory_mode="local")
+    with pytest.raises(ValidationError, match="advisory_cvss_downgrade_delta"):
+        CveRiskConfig(advisory_cvss_downgrade_delta=0)
 
 
 def test_kev_parser_requires_catalog_provenance_and_complete_rows():
@@ -457,6 +488,113 @@ def test_local_nvd_dataset_replaces_prior_local_snapshot_and_enriches_ranking(ri
     )
     assert source["origin"] == "local"
     assert source["record_count"] == 1
+
+
+def test_local_nvd_changes_create_deduplicated_owner_events_with_source_versions(risk_db):
+    _insert_project_finding(risk_db, finding_id="finding-nvd", project_id="project-nvd")
+    cfg = {"cve_risk": {
+        "advisory_mode": "local",
+        "advisory_cvss_downgrade_delta": 1.0,
+    }}
+    baseline = _nvd_dataset("2026-08-01T00:00:00Z", status="Analyzed", score=9.8)
+    accept_local_nvd_dataset(risk_db, baseline, checksum="nvd-v1", cfg=cfg)
+    assert risk_db.execute(
+        "SELECT COUNT(*) AS count FROM cve_risk_work_items WHERE source = 'nvd'"
+    ).fetchone()["count"] == 0
+
+    disputed = _nvd_dataset("2026-08-02T00:00:00Z", status="Disputed", score=8.7)
+    accept_local_nvd_dataset(risk_db, disputed, checksum="nvd-v2", cfg=cfg)
+    work = risk_db.execute(
+        "SELECT transition_kind, old_value, new_value, old_source_version, new_source_version "
+        "FROM cve_risk_work_items WHERE source = 'nvd' ORDER BY transition_kind"
+    ).fetchall()
+    assert [dict(row) for row in work] == [{
+        "transition_kind": "nvd_cvss_downgraded",
+        "old_value": "9.8",
+        "new_value": "8.7",
+        "old_source_version": "2026-08-01T00:00:00Z",
+        "new_source_version": "2026-08-02T00:00:00Z",
+    }, {
+        "transition_kind": "nvd_disputed",
+        "old_value": "active",
+        "new_value": "disputed",
+        "old_source_version": "2026-08-01T00:00:00Z",
+        "new_source_version": "2026-08-02T00:00:00Z",
+    }]
+    assert process_risk_work(risk_db)["escalations"] == 2
+
+    active = _nvd_dataset("2026-08-03T00:00:00Z", status="Analyzed", score=8.7)
+    rejected = _nvd_dataset("2026-08-04T00:00:00Z", status="Rejected", score=8.7)
+    active_again = _nvd_dataset("2026-08-05T00:00:00Z", status="Analyzed", score=8.7)
+    withdrawn = _nvd_dataset("2026-08-06T00:00:00Z", status="Withdrawn", score=8.7)
+    for index, parsed in enumerate((active, rejected, active_again, withdrawn), start=3):
+        accept_local_nvd_dataset(risk_db, parsed, checksum=f"nvd-v{index}", cfg=cfg)
+        assert process_risk_work(risk_db)["escalations"] == 1
+
+    transitions = risk_db.execute(
+        "SELECT transition_kind FROM risk_escalations ORDER BY created_at, transition_kind"
+    ).fetchall()
+    assert sorted(row["transition_kind"] for row in transitions) == sorted([
+        "nvd_cvss_downgraded",
+        "nvd_disputed",
+        "nvd_reinstated",
+        "nvd_reinstated",
+        "nvd_rejected",
+        "nvd_withdrawn",
+    ])
+    event = risk_db.execute(
+        "SELECT old_source_version, new_source_version, observation_count "
+        "FROM risk_escalations WHERE transition_kind = 'nvd_disputed'"
+    ).fetchone()
+    assert dict(event) == {
+        "old_source_version": "2026-08-01T00:00:00Z",
+        "new_source_version": "2026-08-02T00:00:00Z",
+        "observation_count": 1,
+    }
+    assert risk_db.execute(
+        "SELECT COUNT(*) AS count FROM risk_escalation_projects WHERE project_id = 'project-nvd'"
+    ).fetchone()["count"] == 6
+    projected = list_project_risk_escalations(risk_db, "project-nvd")
+    disputed_event = next(
+        row for row in projected if row["transition_kind"] == "nvd_disputed"
+    )
+    assert disputed_event["old_source_version"] == "2026-08-01T00:00:00Z"
+    assert disputed_event["new_source_version"] == "2026-08-02T00:00:00Z"
+
+
+def test_explicit_external_nvd_refresh_queues_only_a_later_material_change(risk_db):
+    _insert_project_finding(risk_db, finding_id="finding-external", project_id="project-external")
+    cfg = {"cve_risk": {
+        "advisory_mode": "external",
+        "advisory_cvss_downgrade_delta": 1.0,
+    }}
+    first = {
+        "status": "active",
+        "published": "2026-08-01T00:00:00Z",
+        "last_modified": "2026-08-02T00:00:00Z",
+        "score": 9.0,
+    }
+    persist_external_nvd_lookup(risk_db, "CVE-2026-12345", first, cfg=cfg)
+    assert risk_db.execute(
+        "SELECT COUNT(*) AS count FROM cve_risk_work_items WHERE source = 'nvd'"
+    ).fetchone()["count"] == 0
+
+    later = {**first, "last_modified": "2026-08-03T00:00:00Z", "score": 8.4}
+    persist_external_nvd_lookup(risk_db, "CVE-2026-12345", later, cfg=cfg)
+    assert risk_db.execute(
+        "SELECT COUNT(*) AS count FROM cve_risk_work_items WHERE source = 'nvd'"
+    ).fetchone()["count"] == 0
+
+    downgraded = {**first, "last_modified": "2026-08-04T00:00:00Z", "score": 7.2}
+    persist_external_nvd_lookup(risk_db, "CVE-2026-12345", downgraded, cfg=cfg)
+    work = risk_db.execute(
+        "SELECT transition_kind, old_value, new_value FROM cve_risk_work_items WHERE source = 'nvd'"
+    ).fetchone()
+    assert dict(work) == {
+        "transition_kind": "nvd_cvss_downgraded",
+        "old_value": "8.4",
+        "new_value": "7.2",
+    }
 
 
 def test_failed_local_nvd_reload_preserves_last_known_good_dataset(risk_db, tmp_path):

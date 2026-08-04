@@ -60,7 +60,11 @@ MISSING_REF_LOG_LIMIT = 10
 def _risk_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     actionable = [
         event for event in events
-        if str(event.get("transition_kind") or "") in {"kev_added", "epss_activated"}
+        if str(event.get("transition_kind") or "") in {
+            "epss_activated",
+            "kev_added",
+            "nvd_reinstated",
+        }
     ]
     return {
         "event_count": len(events),

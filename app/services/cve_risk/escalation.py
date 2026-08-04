@@ -20,6 +20,13 @@ from .links import group_observations, observations_for_cve
 
 log = logging.getLogger("shell")
 ACK_STATES = frozenset({"new", "acknowledged", "expected", "needs_action", "resolved"})
+NVD_TRANSITIONS = frozenset({
+    "nvd_cvss_downgraded",
+    "nvd_disputed",
+    "nvd_reinstated",
+    "nvd_rejected",
+    "nvd_withdrawn",
+})
 MAX_ACK_NOTE_CHARS = 1000
 _FINDING_OCCURRENCE_RUNS_SQL = (
     "SELECT DISTINCT run_id FROM findings_occurrences "
@@ -176,9 +183,9 @@ def _create_escalation(
     conn.execute(
         "INSERT INTO risk_escalations ("
         "id, owner_session_id, owner_team_id, remediation_id, cve_id, source, transition_kind, "
-        "feed_version, old_value, new_value, source_published_at, model_version, model_changed, "
-        "observation_count, created_at, updated_at"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "feed_version, old_value, new_value, old_source_version, new_source_version, "
+        "source_published_at, model_version, model_changed, observation_count, created_at, updated_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(owner_session_id, owner_team_id, remediation_id, source, feed_version, transition_kind) "
         "DO NOTHING",
         (
@@ -192,6 +199,8 @@ def _create_escalation(
             str(work["feed_version"]),
             str(work["old_value"] or ""),
             str(work["new_value"] or ""),
+            str(work.get("old_source_version") or ""),
+            str(work.get("new_source_version") or work["feed_version"] or ""),
             published_at,
             str(work["new_model_version"] or ""),
             model_changed,
@@ -260,6 +269,23 @@ def _process_group(
         conn, owner_session_id, owner_team_id, remediation_id, str(work["cve_id"])
     )
     source = str(work["source"])
+    if source == "nvd":
+        transition = str(work["transition_kind"] or "")
+        if transition not in NVD_TRANSITIONS:
+            raise ValueError("unsupported NVD risk transition")
+        _create_escalation(
+            conn,
+            work=work,
+            owner_session_id=owner_session_id,
+            owner_team_id=owner_team_id,
+            remediation_id=remediation_id,
+            observations=observations,
+            transition_kind=transition,
+            published_at=published_at,
+            model_changed=False,
+            now=now,
+        )
+        return 1
     old_probability = _float(work["old_value"])
     new_probability = _float(work["new_value"])
     old_model = str(work["old_model_version"] or "")
@@ -278,7 +304,7 @@ def _process_group(
         if new_listed != kev_listed:
             transition = "kev_added" if new_listed else "kev_removed"
         kev_listed = new_listed
-    else:
+    elif source == "epss":
         if not epss_active and new_probability is not None and new_probability >= activation:
             transition = "epss_activated"
             epss_active = True
@@ -287,6 +313,8 @@ def _process_group(
             epss_active = False
         current_probability = new_probability
         current_model = new_model
+    else:
+        raise ValueError("unsupported CVE risk work source")
     _upsert_state(
         conn,
         owner_session_id=owner_session_id,
@@ -330,6 +358,19 @@ def _work_remaining(conn: Any, *, max_attempts: int) -> int:
     return int(row["count"] or 0) if row else 0
 
 
+def _source_published_at(conn: Any, source: str) -> str:
+    if source == "nvd":
+        row = conn.execute(
+            "SELECT published_at FROM cve_advisory_sources WHERE source = 'nvd'"
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT published_at FROM cve_risk_sources WHERE source = ?",
+            (source,),
+        ).fetchone()
+    return str(row["published_at"] or "") if row else ""
+
+
 def process_risk_work(
     conn: Any,
     *,
@@ -369,11 +410,7 @@ def process_risk_work(
                 key for key in sorted(groups) if not cursor or _owner_cursor(key) > cursor
             ]
             selected_groups = remaining_groups[:owner_batch]
-            source_row = conn.execute(
-                "SELECT published_at FROM cve_risk_sources WHERE source = ?",
-                (str(work["source"]),),
-            ).fetchone()
-            published_at = str(source_row["published_at"] or "") if source_row else ""
+            published_at = _source_published_at(conn, str(work["source"]))
             for key in selected_groups:
                 escalations += _process_group(
                     conn,
@@ -459,6 +496,8 @@ def list_project_risk_escalations(
         "feed_version": str(row["feed_version"]),
         "old_value": str(row["old_value"] or ""),
         "new_value": str(row["new_value"] or ""),
+        "old_source_version": str(row["old_source_version"] or ""),
+        "new_source_version": str(row["new_source_version"] or ""),
         "source_published_at": str(row["source_published_at"] or ""),
         "model_version": str(row["model_version"] or ""),
         "model_changed": bool(row["model_changed"]),
