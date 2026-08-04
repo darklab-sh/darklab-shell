@@ -127,6 +127,9 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 </td>
 <td>{{ finding.review_state or finding.status }}</td>
 <td>
+{% if finding.risk and finding.risk.priority_reasons %}
+<p><strong>Priority:</strong> {{ finding.risk.priority_reasons|join("; ") }}</p>
+{% endif %}
 {% if finding.triage %}
 {% if finding.triage.remediation %}<p><strong>Remediation:</strong> {{ finding.triage.remediation }}</p>{% endif %}
 {% if finding.triage.verification_status and finding.triage.verification_status != "not_started" %}
@@ -186,6 +189,18 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 </section>
 {% endif %}
 {% endfor %}
+{% if cve_risk_snapshot %}
+<section data-report-section="cve-risk-sources">
+<h2>CVE risk data sources</h2>
+{% for source in cve_risk_snapshot.sources %}
+<p><strong>{{ source.source|upper }}</strong> — {{ source.attribution }}<br>
+<span class="muted">Version {{ source.source_version or "unavailable" }};
+published {{ source.published_at or "unknown" }};
+fetched {{ source.retrieved_at or "unknown" }}; {{ source.status }}.</span></p>
+{% endfor %}
+<p class="muted">{{ cve_risk_snapshot.non_endorsement }}</p>
+</section>
+{% endif %}
 </main>
 </body>
 </html>
@@ -357,6 +372,10 @@ def _render_markdown_section(section: dict[str, Any], context: dict[str, Any]) -
                 for label, value in details:
                     if _md(value):
                         lines.append(f"  - {label}: {_md(value)}")
+                risk = finding.get("risk") if isinstance(finding.get("risk"), dict) else {}
+                reasons = risk.get("priority_reasons") if isinstance(risk.get("priority_reasons"), list) else []
+                if reasons:
+                    lines.append(f"  - Priority: {_md('; '.join(str(reason) for reason in reasons))}")
                 triage = finding.get("triage") if isinstance(finding.get("triage"), dict) else {}
                 for label, key in (
                     ("Remediation", "remediation"),
@@ -438,6 +457,17 @@ def render_report_markdown_from_context(
         if _section_enabled(section):
             lines.extend(_render_markdown_section(section, context))
             lines.append("")
+    snapshot = context.get("cve_risk_snapshot")
+    if isinstance(snapshot, dict) and snapshot:
+        lines.extend(("## CVE risk data sources", ""))
+        for source in snapshot.get("sources", []):
+            lines.append(
+                f"- **{_md(str(source.get('source') or '').upper())}:** "
+                f"{_md(source.get('attribution'))}; version {_md(source.get('source_version') or 'unavailable')}; "
+                f"published {_md(source.get('published_at') or 'unknown')}; "
+                f"fetched {_md(source.get('retrieved_at') or 'unknown')}; {_md(source.get('status') or 'unavailable')}"
+            )
+        lines.extend(("", _md(snapshot.get("non_endorsement")), ""))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -482,4 +512,5 @@ def render_report_html_from_context(
         findings_by_severity=context.get("findings_by_severity") or [],
         artifacts=context.get("artifacts") or [],
         artifact_warnings=context.get("artifact_warnings") or [],
+        cve_risk_snapshot=context.get("cve_risk_snapshot") or {},
     )

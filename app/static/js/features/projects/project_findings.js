@@ -7,11 +7,16 @@ import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from '../team_scope.js';
+import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
 
 let exportedDarklabProjectFindings = null;
 
 (function projectFindingsModule(global) {
   'use strict';
+
+  const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
+    ? importedFindingRiskSummary
+    : () => '';
 
   function createProjectFindingsController(context) {
     const ctx = context || {};
@@ -230,6 +235,7 @@ let exportedDarklabProjectFindings = null;
         finding.run_command || finding.run_id,
         finding.scope || 'finding',
         ctx.projectFindingTargetText(summary, finding) || ctx.projectTargetLabel(summary, finding.target_id),
+        summarizeFindingRisk(finding),
         `line ${finding.line_number || 0}`,
       ].filter(Boolean);
       const row = ctx.projectItemRow({

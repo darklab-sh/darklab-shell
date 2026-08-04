@@ -9,11 +9,16 @@ import {
   closeActionSheet as importedCloseActionSheet,
   openActionSheet as importedOpenActionSheet,
 } from '../../ui/ui_action_sheet.js';
+import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
 
 let exportedDarklabProjectMobileDetail = null;
 
 (function projectMobileDetailModule(global) {
   'use strict';
+
+  const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
+    ? importedFindingRiskSummary
+    : () => '';
 
   function createProjectMobileDetailController(context) {
     const ctx = context || {};
@@ -486,6 +491,7 @@ let exportedDarklabProjectMobileDetail = null;
           finding.run_command || finding.run_id,
           finding.scope || 'finding',
           ctx.projectFindingTargetText(summary, finding) || ctx.projectTargetLabel(summary, finding.target_id),
+          summarizeFindingRisk(finding),
           `line ${finding.line_number || 0}`,
         ].filter(Boolean);
         fragment.appendChild(contentRow({

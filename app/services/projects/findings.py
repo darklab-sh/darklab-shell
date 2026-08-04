@@ -49,6 +49,7 @@ from services.projects.utils import (
 )
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
 from services.runs.comparison_findings import severity_neutral_signal_key
+from services.cve_risk.ranking import attach_risk_to_findings, cve_risk_order_sql
 
 
 def row_to_finding(row):
@@ -297,6 +298,7 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             finding["target_ids"] = [row["entity_id"]] if row["entity_id"] else []
             finding["run_occurrence_count"] = int(row["run_occurrence_count"] or 0)
             findings.append(finding)
+    attach_risk_to_findings(findings)
     if paginated:
         return _run_finding_page_payload(findings, total, safe_limit, safe_offset, occurrence_total)
     return findings
@@ -687,7 +689,10 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             "LEFT JOIN runs r ON r.id = "
             + page_source_run_expr
             + " AND r.session_id = f.session_id "
-            "ORDER BY pf.sort_seen DESC, f.id DESC"
+            "ORDER BY "
+            + cve_risk_order_sql(
+                "f", age_expression="COALESCE(NULLIF(f.first_seen_at, ''), f.created)"
+            )
             + page_sql,
             query_params,
         ).fetchall()
@@ -772,6 +777,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             item["labels"] = finding_labels.get(finding_id, [])
             item["note"] = finding_notes.get(finding_id)
         attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
+        attach_risk_to_findings(findings, conn=conn)
 
     if paginated:
         return _project_finding_page_payload(

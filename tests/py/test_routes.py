@@ -6721,6 +6721,97 @@ class TestProjectRoutes:
         assert debug_log.call_args.args == ("PROJECT_MONITORING_FIRE_ACK_MISS",)
         assert debug_log.call_args.kwargs["extra"]["fire_id"] == "missing-fire"
 
+    def test_project_monitoring_risk_ack_route_updates_event_and_audits_metadata(self):
+        from core.helpers import get_log_session_id
+
+        client = get_client()
+        session_id = "tok_project_risk_ack_" + uuid.uuid4().hex[:8]
+        self._register_session_token(session_id)
+        project = self._create_project(client, session_id, name="Risk Triage")
+        other_project = self._create_project(client, session_id, name="Other Risk Triage")
+        escalation_id = "rsk_route_" + uuid.uuid4().hex[:8]
+        now = "2026-08-04T12:00:00+00:00"
+
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO risk_escalations ("
+                "id, owner_session_id, remediation_id, cve_id, source, transition_kind, "
+                "feed_version, observation_count, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, 'kev', 'kev_added', '2026.08.04', 2, ?, ?)",
+                (
+                    escalation_id,
+                    session_id,
+                    "CVE-2026-12345:target-one",
+                    "CVE-2026-12345",
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO risk_escalation_projects (escalation_id, project_id) VALUES (?, ?)",
+                (escalation_id, project["id"]),
+            )
+            conn.commit()
+
+        note = "Prioritize during the maintenance window"
+        with mock.patch.object(project_routes.log, "info") as info_log:
+            resp = client.patch(
+                f"/projects/{project['id']}/monitoring/risk-events/{escalation_id}",
+                headers={"X-Session-ID": session_id},
+                json={"ack_state": "needs_action", "ack_note": note},
+            )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["risk_event"]["ack_state"] == "needs_action"
+        assert payload["risk_event"]["ack_note"] == note
+        assert payload["risk_event"]["ack_by"] == session_id
+        assert payload["risk_event"]["ack_at"]
+        audit_rows = _audit_event_rows(
+            target_id=escalation_id,
+            event_type="risk_escalation.ack",
+        )
+        assert len(audit_rows) == 1
+        assert audit_rows[0]["project_id"] == project["id"]
+        assert audit_rows[0]["details"] == {
+            "from_state": "new",
+            "note_chars": len(note),
+            "observation_count": 2,
+            "source": "kev",
+            "to_state": "needs_action",
+            "transition_kind": "kev_added",
+        }
+        assert note not in json.dumps(audit_rows[0]["details"])
+        updated_log = next(
+            call
+            for call in info_log.call_args_list
+            if call.args == ("PROJECT_RISK_ESCALATION_ACK_UPDATED",)
+        )
+        assert updated_log.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "escalation_id": escalation_id,
+            "ack_state": "needs_action",
+            "note_chars": len(note),
+        }
+
+        rejected = client.patch(
+            f"/projects/{project['id']}/monitoring/risk-events/{escalation_id}",
+            headers={"X-Session-ID": session_id},
+            json={"ack_state": "invalid"},
+        )
+        assert rejected.status_code == 400
+        assert rejected.get_json()["error"] == "invalid_risk_escalation_update"
+
+        wrong_project = client.patch(
+            f"/projects/{other_project['id']}/monitoring/risk-events/{escalation_id}",
+            headers={"X-Session-ID": session_id},
+            json={"ack_state": "resolved"},
+        )
+        assert wrong_project.status_code == 404
+
     def test_project_monitoring_team_routes_enforce_view_and_triage_capabilities(self):
         from services.watchers import service as watcher_service
 

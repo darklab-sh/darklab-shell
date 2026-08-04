@@ -40,6 +40,11 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Port Entity Identity and Evidence](#port-entity-identity-and-evidence)
   - [URL Entity Host Links](#url-entity-host-links)
   - [Quick Lookup Reuses the Atlas Surface](#quick-lookup-reuses-the-atlas-surface)
+- [Assessment Decisions](#assessment-decisions)
+  - [Assessment Delivery and Runtime Ownership](#assessment-delivery-and-runtime-ownership)
+  - [Shared CVE Risk Data and Ranking](#shared-cve-risk-data-and-ranking)
+  - [Assessment History, Evidence, and Finding Identity](#assessment-history-evidence-and-finding-identity)
+  - [Assessment Execution, Secrets, and Packaging](#assessment-execution-secrets-and-packaging)
 - [Backend Architecture Decisions](#backend-architecture-decisions)
   - [Blueprint Parent Modules and Size Ratchets](#blueprint-parent-modules-and-size-ratchets)
   - [Mutable Runtime State Uses Source-Owner Accessors](#mutable-runtime-state-uses-source-owner-accessors)
@@ -192,6 +197,52 @@ URL entities belong to a host in the same way port entities do, so they use the 
 Quick Lookup has its own input and result root because finding one exact saved value is different from browsing a filtered Atlas list. Once it finds an entity, however, the user needs the same Overview, Evidence, Findings, Intel, relationship navigation, paging, and return behavior as an ordinary focused Atlas profile. Keeping those paths in one overlay and renderer prevents profile content and actions from drifting.
 
 A second modal would also duplicate the scrim, focus trap, mobile sheet, close behavior, and related-entity stack. The browser therefore enters `data-atlas-mode="lookup"` on the existing Atlas surface and transitions into normal Atlas browsing only through **Open in Atlas**. The exact read route remains separate so it can validate and scope the submitted value without loading Atlas lists or placing URL paths and queries in browser history.
+
+---
+
+## Assessment Decisions
+
+### Assessment Delivery and Runtime Ownership
+
+**CVE risk intelligence ships first, followed by a thin, complete assessment workspace slice.**
+
+The public EPSS and CISA KEV data path is useful without the assessment workspace, so it lands independently before assessment schema and routes depend on it. The first workspace release then carries the Network and Web profiles through cycle creation, evidence matching, API, desktop, and mobile. Network, Web, API, TLS, and Combined profiles share one schema from the start, but the remaining profiles and scanner integrations do not block validation of that first end-to-end slice.
+
+The scheduler owns database-backed feed refresh jobs, leases, and resumable risk-escalation work. Notification workers deliver queued notifications but do not own durable refresh or escalation state, and Redis is not required to preserve either workflow. Optional ZAP, private OAST, and Greenbone connectors remain follow-on work until cycles, evidence, imports, findings, and reporting are stable.
+
+### Shared CVE Risk Data and Ranking
+
+**A fresh install gets dated, bundled EPSS and KEV data; live network refresh remains an operator choice.**
+
+Each release may carry checked, release-pinned EPSS and CISA KEV snapshots after their redistribution terms, attribution, checksum, and image impact are reviewed. Importing that bundle establishes a silent baseline: it can rank existing CVEs, but it cannot create historical escalation events. The product clearly labels the bundle's age and explains how to enable inventory-neutral live feed updates. Outbound refresh is disabled until the operator enables it. OSV and NVD package or applicability correlation has a separate opt-in and uses either an operator-supplied local dataset or bounded, disclosed lookups; the app never uploads a discovered product inventory automatically.
+
+FIRST and CISA source URLs, publication and retrieval dates, model or catalog versions, checksums, notices, and stable attribution text stay with bundled assets and generated reports. Attribution never implies provider endorsement.
+
+The shared fix-first order is explainable: KEV-listed remediation groups first, then EPSS probability and percentile, then CVSS, with finding age as the final stable tie-breaker. Owner-scoped Vulners references remain context and do not change that shared order. A public-exploit signal may become a shared tie-breaker only if an Exploit-DB/SearchSploit dataset is approved and deployed consistently.
+
+Risk escalation always records a new KEV listing for an open remediation group. EPSS escalation activates when probability crosses upward through `0.10`, stays active while the score moves near that boundary, and rearms only after it falls below `0.08`; operators may change both values, but reset must remain below activation. Model-version crossings are labeled, delisting and material downgrade history are retained, and Project digest delivery is opt-in.
+
+### Assessment History, Evidence, and Finding Identity
+
+**Assessment definitions and completed evidence remain reproducible.**
+
+Shipped assessment profiles are immutable, versioned definitions. Local configuration may add a profile or replace a complete profile version by stable key, but it cannot partially merge individual checks. Cycles use `active`, `completed`, and `archived`: completion freezes profile, scope, checks, manual exclusions, and evidence links; archiving changes visibility only; restarting creates a new cycle. Only archived cycles may be hard-deleted, after a dependency preview, and deleting a cycle never deletes its source runs, findings, entities, or artifacts.
+
+Targets retain owner scope, their Project target or entity reference, canonical type and value hash, plus a bounded display snapshot already visible in that Project. They never copy credentials, protected HTTP context, workflow variables, or unrelated discoveries. Every profile check declares accepted evidence kinds, action families, target matching, completion requirements, compatible versions, and whether negative evidence is meaningful. Evidence links store the rule and version that matched; generic Project links and command prefixes do not prove coverage.
+
+Finding observations use owner, affected subject, stable rule, normalized vulnerability, and validation method in their fingerprints. Active confirmation, version inference, imported assertion, and manual assessment stay as separate observations. A remediation identity excludes validation method, so fix-first worklists and headline rollups count one normalized vulnerability against one affected subject once and expand its individual methods only in detail views. Mismatched subjects or vulnerability identities require an explicit human merge.
+
+### Assessment Execution, Secrets, and Packaging
+
+**Policy labels have the same behavior on every launch surface.**
+
+Safe actions use the normal launch confirmation. Standard actions disclose target, fan-out, request, time, and credential bounds. Intrusive actions require operator enablement and per-launch confirmation. Destructive actions are unavailable from assessment recommendations, workflows, API, and CLI.
+
+Protected HTTP context uses a reviewed per-tool adapter. It prefers stdin or a tool-native credential channel, then private per-run files in a `0700` directory with `0600` permissions, and uses environment injection only when no safer supported option exists. Secret values never enter argument lists, persisted commands, workflow state, or reusable scanner configuration.
+
+Quota and retention defaults come from measured small, medium, and large Projects. Reaching a hard limit rejects new work clearly instead of evicting assessment history. Completed cycles stay until explicit deletion; rebuildable feed caches, acknowledged escalation events, temporary HTTP material, and connector callbacks follow documented retention policies.
+
+The primary image has an approved compressed-size and cold-start budget. Small, pinned, multi-architecture tools required by maintained profiles may ship in it; protocol client packs and service stacks remain optional and operator-managed. A tool that exceeds the budget requires a separate packaging decision.
 
 ---
 

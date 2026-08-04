@@ -410,6 +410,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0043",
         "0044",
         "0045",
+        "0046",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -458,6 +459,13 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'attempts',
                 'status'
             ))
+            OR (table_name = 'project_digest_settings' AND column_name = 'risk_escalations_enabled')
+            OR (table_name = 'cve_risk_records' AND column_name = 'kev_listed')
+            OR (table_name = 'risk_escalation_states' AND column_name IN (
+                'kev_listed',
+                'epss_active'
+            ))
+            OR (table_name = 'risk_escalations' AND column_name = 'model_changed')
         )
         """,
         (postgres_schema.schema,),
@@ -473,6 +481,17 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "atlas_entity_import_links",
         "atlas_finding_import_occurrences",
         "run_output_summary_status",
+        "cve_risk_sources",
+        "cve_risk_records",
+        "cve_risk_refresh_leases",
+        "cve_risk_work_items",
+        "package_advisories",
+        "package_advisory_ranges",
+        "finding_cve_links",
+        "risk_escalation_states",
+        "risk_escalations",
+        "risk_escalation_observations",
+        "risk_escalation_projects",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
     assert {
@@ -499,6 +518,11 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("atlas_finding_import_occurrences", "source_detail_json", "jsonb"),
         ("run_output_summary_status", "attempts", "integer"),
         ("run_output_summary_status", "status", "text"),
+        ("project_digest_settings", "risk_escalations_enabled", "boolean"),
+        ("cve_risk_records", "kev_listed", "boolean"),
+        ("risk_escalation_states", "kev_listed", "boolean"),
+        ("risk_escalation_states", "epss_active", "boolean"),
+        ("risk_escalations", "model_changed", "boolean"),
     }
     runs_index_rows = conn.execute(
         """
@@ -543,6 +567,31 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_project_auto_promote_rules_project_updated",
         "idx_project_auto_promote_rules_run_scan",
     }.issubset({row["indexname"] for row in auto_promote_index_rows})
+    risk_index_rows = conn.execute(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename IN (
+            'cve_risk_records',
+            'cve_risk_work_items',
+            'finding_cve_links',
+            'risk_escalation_states',
+            'risk_escalations',
+            'risk_escalation_projects'
+        )
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_cve_risk_records_kev_epss",
+        "idx_cve_risk_work_items_due",
+        "idx_finding_cve_links_cve",
+        "idx_risk_escalation_states_cve",
+        "idx_risk_escalations_owner_created",
+        "idx_risk_escalations_cve_created",
+        "idx_risk_escalation_projects_project",
+    }.issubset({row["indexname"] for row in risk_index_rows})
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname
@@ -566,6 +615,67 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_atlas_finding_import_occurrences_batch",
         "idx_atlas_finding_import_occurrences_finding_seen",
     }.issubset({row["indexname"] for row in import_index_rows})
+
+
+@pytest.mark.postgres
+def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.cve_risk.parsers import ParsedFeed
+    from services.cve_risk.store import accept_feed, get_cve_risk
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    accept_feed(
+        conn,
+        ParsedFeed(
+            source="epss",
+            version="v-test:2026-08-04",
+            model_version="v-test",
+            published_at="2026-08-04T00:00:00Z",
+            records=({
+                "cve_id": "CVE-2026-12345",
+                "epss_probability": 0.18,
+                "epss_percentile": 0.94,
+            },),
+        ),
+        origin="bundled",
+        payload_sha256="epss-postgres-sha",
+        enqueue_changes=False,
+    )
+    accept_feed(
+        conn,
+        ParsedFeed(
+            source="kev",
+            version="2026.08.04",
+            model_version="",
+            published_at="2026-08-04T01:00:00Z",
+            records=({
+                "cve_id": "CVE-2026-12345",
+                "kev_date_added": "2026-08-01",
+                "kev_due_date": "2026-08-22",
+                "kev_required_action": "Apply mitigations.",
+                "kev_known_ransomware_campaign_use": "Known",
+                "kev_vendor_project": "Example",
+                "kev_product": "Server",
+                "kev_vulnerability_name": "Example issue",
+            },),
+        ),
+        origin="bundled",
+        payload_sha256="kev-postgres-sha",
+        enqueue_changes=False,
+    )
+    raw_conn.commit()
+
+    risk = get_cve_risk("cve-2026-12345", conn=conn)
+
+    assert risk is not None
+    assert risk["epss_probability"] == 0.18
+    assert risk["epss_percentile"] == 0.94
+    assert risk["kev_listed"] is True
+    assert risk["kev_due_date"] == "2026-08-22"
+    assert {source["source"] for source in risk["sources"]} == {"epss", "kev"}
 
 
 @pytest.mark.postgres

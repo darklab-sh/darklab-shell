@@ -7,6 +7,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Build a project assessment workspace for recon and vulnerability validation](#build-a-project-assessment-workspace-for-recon-and-vulnerability-validation)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
@@ -28,6 +29,365 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ---
 
 ## Open TODOs
+
+### Build a project assessment workspace for recon and vulnerability validation
+
+Turn the existing Projects, Atlas, Findings, Workflows, Files, and reporting features into a methodical vulnerability-assessment flow. Keep the terminal as the execution surface and the Project workspace as the engagement surface, but make it clear what was tested, which evidence supports that coverage, what still needs work, and which findings need validation or retesting. Add focused tools where they close a real assessment gap instead of growing the image with overlapping scanners.
+
+#### Scope and product boundaries
+
+- [ ] Freeze the product contract before adding schema or routes:
+  - Add an **Assessment** tab to the existing Project workspace rather than introducing another top-level overlay, modal, or independent case-management model.
+  - Allow a Project to hold multiple dated assessment cycles, with one active cycle and completed cycles kept as read-only historical context. Starting a new cycle must not rewrite the evidence or coverage state of an earlier cycle.
+  - Ship maintained Network, Web, API, TLS, and Combined assessment profiles. Each profile must snapshot its version and checks into an assessment cycle so a later catalog update does not silently change an assessment already in progress.
+  - Reuse Project targets, Atlas entities and relationships, saved runs, findings, artifacts, workflow executions, evidence packages, and reports as the source records. Assessment records add planning and provenance; they do not copy transcripts, Intel responses, or finding bodies.
+  - Keep assessment states factual. A completed command can prove that a check ran, but an empty result must be labeled **covered with no app-captured findings**, never **secure**, **passed**, or another claim the app cannot prove.
+  - Use `not_started`, `running`, `covered`, `needs_review`, `blocked`, `failed`, `skipped`, and `not_applicable` as the check states. Store the reason and actor for manual `blocked`, `skipped`, and `not_applicable` decisions.
+  - Treat safe, standard, intrusive, and destructive as explicit execution-policy levels. Shipped profiles may recommend safe or standard checks; intrusive checks require a separate confirmation and operator opt-in; destructive checks are never launched by an assessment action.
+  - Viewing an assessment, target, entity, finding, or recommendation must remain read-only. It must not run a command, refresh Intel, contact a provider, create an entity, or change coverage until the user explicitly acts.
+  - Preserve the current owner boundary: personal assessments stay personal, team assessments stay in their team, archived teams remain readable but cannot be changed, and moving between scopes never exposes another owner's targets, evidence, HTTP context, or assessment status.
+  - Reuse `MUTATE_PROJECTS` for assessment-cycle and check mutations, `RUN_COMMANDS` for launches, `TRIAGE_FINDINGS` for manual finding and verification changes, `MANAGE_SECRETS` for protected HTTP context, and `VIEW_TEAM` for team reads. Do not create a parallel permission system unless these capabilities prove unable to express a concrete action.
+  - Keep Metasploit, general exploitation, password spraying, credential brute force, denial-of-service checks, and automatic database/file takeover outside this work. Do not bundle ZAP, Greenbone, or an OAST server into the primary application image.
+  - Do not add WhatWeb or Arjun in this item while HTTPx technology detection and the planned parameter-testing flow cover the same jobs. Reconsider another scanner only after a measured gap shows what the current tools miss.
+
+#### Open decisions before implementation
+
+Resolve these choices and record the accepted contracts in `DECISIONS.md` before the first schema migration or production route lands. Once decided, update the relevant phase below so the implementation plan describes one contract rather than carrying alternatives into code review.
+
+- [ ] **Choose the delivery order and first shippable assessment slice.**
+  - **Recommended decision:** Ship Phase 0 as an independent CVE-intelligence improvement, then build Phases 1–3 as one thin end-to-end slice using the Network and Web profiles. Define the shared profile schema for Network, Web, API, TLS, and Combined up front, but prove the cycle, coverage, evidence, API, desktop, and mobile contracts before adding the remaining profiles and tools.
+  - **Why:** This produces useful improvements early and validates the highest-risk data and UI contracts without making the first review depend on every scanner, connector, and report format.
+- [ ] **Choose which runtime owns feed refreshes and risk-escalation work.**
+  - **Recommended decision:** Let the existing scheduler claim database-backed refresh jobs and leases, and store escalation work in a durable database queue with resumable cursors. Keep notification workers responsible only for delivery, and do not make Redis availability a requirement for preserving refresh or escalation state.
+  - **Why:** Database ownership works with both supported backends, survives process restarts, and avoids losing or duplicating owner-scoped work when web, scheduler, or notification processes scale independently.
+- [ ] **Choose the default advisory-data acquisition policy.**
+  - **Recommended decision:** Bundle release-pinned EPSS and KEV bootstrap snapshots after their redistribution terms, attribution, checksum, and image-size impact are approved. Keep all outbound refreshes disabled until the operator explicitly enables them during setup, but show a prominent operator-facing notice when the app is using bundled data and explain that EPSS/KEV updates are inventory-neutral. Once enabled, refresh those feeds daily; keep OSV/NVD external correlation disabled separately unless the operator enables bounded lookups, and support local datasets for disconnected installations. Import bootstrap data as a silent baseline that can rank existing findings but cannot create escalation events until a newer accepted feed changes a signal.
+  - **Why:** A disconnected or not-yet-configured installation still gets clearly dated prioritization instead of an empty flagship feature, while live outbound behavior remains an explicit operator choice and initial installation or upgrade cannot flood Monitoring with historical transitions.
+- [ ] **Choose the source attribution and redistribution contract for bundled and refreshed advisory data.**
+  - **Recommended decision:** Verify the current FIRST EPSS and CISA KEV usage terms before every bundled-snapshot release, preserve required notices, and pin a product/report attribution string for each source. Record source URL, retrieval and publication dates, model/catalog version, checksum, and applicable terms with every bundled asset and generated evidence snapshot; include the attribution in customer-facing reports/exports and the repository's third-party notice material without implying provider endorsement.
+  - **Why:** EPSS requests attribution when its data appears in products or publications, and both release artifacts and customer reports must remain traceable to the exact external data they redistribute or summarize.
+- [ ] **Choose which exploit-availability signals may affect the shared default ranking.**
+  - **Recommended decision:** Rank by shared KEV, EPSS, and CVSS data first, with finding age as the final stable tie-breaker. Show owner-scoped Vulners exploit references as context but do not let them change the default order; add a shared public-exploit tie-breaker only if the Exploit-DB/SearchSploit catalog is later approved and deployed consistently.
+  - **Why:** The same finding should not move in the fix-first list merely because one owner queried a private provider and another did not.
+- [ ] **Choose the initial risk-escalation trigger and notification defaults.**
+  - **Recommended decision:** Always create an in-app event when an open finding becomes KEV-listed. For EPSS, activate escalation when probability crosses upward through `0.10`, do not repeat it while active, and rearm only after probability falls below `0.08`; make both thresholds operator-configurable and require the reset threshold to remain lower than the activation threshold. Show percentile and model changes as context, annotate a crossing caused by a model-version change, preserve material downgrade/de-list history, and keep digest delivery opt-in per Project.
+  - **Why:** A probability threshold is easier to explain and less sensitive to daily rank movement than percentile-only alerting, while a separate reset threshold prevents scores hovering near `0.10` from training operators to ignore repeated alerts. KEV additions still warrant an immediate event regardless of EPSS.
+- [ ] **Choose assessment-profile customization and versioning semantics.**
+  - **Recommended decision:** Treat shipped profiles as immutable versioned definitions. Let local configuration add a new profile or replace an entire profile version by stable key, but do not partially merge individual checks. Require an explicit version change whenever applicability, evidence rules, policy, or recommended actions change.
+  - **Why:** Full versioned replacements are easier to validate and reproduce than field-by-field overlays, and cycle snapshots remain meaningful when operators customize the catalog.
+- [ ] **Choose the assessment-cycle lifecycle and deletion contract.**
+  - **Recommended decision:** Use `active`, `completed`, and `archived` cycle states. Creation makes a cycle active; completion freezes its profile, scope, checks, manual exclusions, and evidence links; archiving changes visibility only; and restart always creates a new cycle. Allow hard deletion only for archived cycles after a dependency preview, without deleting linked source runs, findings, entities, or artifacts.
+  - **Why:** A small lifecycle prevents ambiguous draft/reopened behavior and keeps historical evidence stable while still allowing deliberate cleanup.
+- [ ] **Choose how target identity and historical target values are snapshotted.**
+  - **Recommended decision:** Identify each assessment target with its owner scope, Project target/entity reference, canonical type, canonical-value hash, and a bounded display-value snapshot already visible in that Project. Preserve that snapshot in completed cycles, but never copy HTTP credentials, secret-backed headers, cookies, workflow variables, or unrelated discovered values into the assessment record.
+  - **Why:** Historical reports need to say what was tested even if the live Project target later changes, but assessment snapshots must not become a second secret or discovery-data store.
+- [ ] **Choose the evidence-compatibility and negative-evidence contract before fixing the schema.**
+  - **Recommended decision:** Require every profile check to declare accepted evidence kinds, scanner/action families, target matching, completion requirements, compatible tool/profile versions, and whether it has a defined negative-evidence rule. Store the matched rule/version on each assessment evidence link; do not infer coverage or absence from a generic Project link or command prefix.
+  - **Why:** These fields determine whether coverage, cross-cycle comparison, and `not_observed` are trustworthy and therefore need to be part of the first durable contract.
+- [ ] **Choose the stable finding identity used for deduplication and cycle reconciliation.**
+  - **Recommended decision:** Give every observation a fingerprint built from owner scope, canonical affected component/service/endpoint, stable check/rule identity, normalized vulnerability identity, and validation method. Link active confirmation, version inference, import assertion, and manual assessment as related observations rather than collapsing their provenance. Separately derive a remediation identity from the same owner, affected subject, and normalized vulnerability or rule identity while excluding validation method. Keep review/remediation disposition on the remediation group and method/confidence/verification on each observation. Count each remediation identity once in fix-first worklists and headline rollups, expose its observation/evidence count, and expand the individual methods only in detail views. Require an explicit human merge when affected subjects or vulnerability identities do not match exactly.
+  - **Why:** Observation-level identity preserves the difference between inferred and demonstrated vulnerabilities, while remediation-level counting prevents one real issue from inflating the ranked list merely because several tools or methods observed it.
+- [ ] **Choose the exact execution-policy behavior for safe, standard, intrusive, and destructive actions.**
+  - **Recommended decision:** Let safe actions use the normal launch confirmation; require standard actions to show target, fan-out, request, time, and credential bounds; require intrusive actions to be enabled by the operator and confirmed for every launch; and keep destructive actions unavailable from assessment recommendations, workflows, API, and CLI.
+  - **Why:** Policy labels need observable behavior across every launch surface, not just descriptive metadata in a profile.
+- [ ] **Choose the protected HTTP-context injection order.**
+  - **Recommended decision:** Give each tool a reviewed adapter that prefers stdin or a tool-native credential channel, then a private `0700` per-run directory with `0600` short-lived files, and uses environment injection only when the tool offers no safer supported mechanism. Never render secret material into an argument list, persisted command, workflow state, or reusable scanner config.
+  - **Why:** One explicit adapter contract prevents individual integrations from choosing convenient but inspectable credential handling.
+- [ ] **Choose quota, retention, and cleanup defaults from measured workloads.**
+  - **Recommended decision:** Set configurable hard limits for cycles, checks, evidence links, screenshots, imports, callbacks, and fan-out work after benchmarking the maintained profiles on small, medium, and large Projects. Reject new work clearly at the limit instead of evicting assessment history; retain completed cycles until explicit deletion, while expiring rebuildable feed caches, acknowledged escalation events, temporary HTTP material, and connector callbacks under documented policies.
+  - **Why:** Arbitrary limits risk making real assessments unusable, while automatic history eviction would undermine evidence and reporting guarantees.
+- [ ] **Choose the primary-image tool budget and optional-pack boundary.**
+  - **Recommended decision:** Measure and approve a compressed-image and cold-start budget before adding tools. Keep small, pinned, multi-architecture discovery/validation tools needed by maintained profiles in the primary image; keep protocol client packs and ZAP, Greenbone, OAST, or other service stacks optional and operator-managed. Do not add a tool that exceeds the budget without a separate packaging decision.
+  - **Why:** The feature should close assessment gaps without making every installation carry large or overlapping scanners it does not use.
+- [ ] **Choose when optional connectors become release blockers.**
+  - **Recommended decision:** Treat ZAP, private OAST, and Greenbone integration as follow-on deliverables after assessment cycles, evidence matching, manual findings, imports, and reporting are stable. Keep their contracts in this plan, but do not block the core assessment workspace on an external service deployment.
+  - **Why:** The core workflow is useful with local tools and imports, while connector lifecycle, privacy, and failure handling can be qualified independently.
+
+#### Phase 0 — Add shared CVE risk intelligence and ranking contracts
+
+- [ ] Ship the public risk feeds independently so they improve the existing `intel cve` flow before the assessment workspace depends on them:
+  - Add the daily FIRST EPSS feed with score, percentile, model version, and publication date, and the CISA Known Exploited Vulnerabilities catalog with membership, date added, CISA/BOD 22-01 due date, required action, and ransomware-use flag. Present the CISA date as federal directive context, not as the Project's or operator's remediation SLA.
+  - Add the next available shared SQLite/Postgres migration for feed state, current CVE risk rows, package advisory identities/ranges, source/version timestamps, bootstrap/live origin, and source-attribution/provenance metadata. Keep these tables rebuildable from their public sources while still covering schema parity, cleanup, and backup/restore validation.
+  - Produce release-pinned EPSS and KEV bootstrap snapshots only after reviewing their redistribution terms and attribution, validating schema and size, recording source URL/publication/retrieval dates/model or catalog version/checksum, and accepting their compressed-image impact. Load them only when no newer valid snapshot exists, label them as bundled and potentially stale, and establish them as a non-alerting baseline so install or upgrade cannot replay historical changes as risk escalations.
+  - Store the public EPSS and KEV feeds in shared app data rather than owner-scoped Atlas Intel snapshots. Keep outbound refresh disabled until the operator explicitly enables it, surface bundled-data age and exact enablement guidance prominently in the existing provider/Intel status and assessment degraded states, and then refresh daily through an explicit operator or scheduled background action. Use conditional requests where supported, validate size/schema/checksum before an atomic replacement, retain the last valid snapshot after a failed refresh, and use a single-flight/distributed lease so concurrent workers cannot publish the same feed version twice.
+  - Define separate operator-selectable acquisition modes for OSV package advisories and NVD CPE/CVE applicability: a local operator-synced dataset, or bounded external lookups that are disabled by default and run only through a disclosed enrichment action. Do not mirror all OSV/NVD data by default, and never upload a scan-derived product inventory or imported SBOM automatically.
+  - For enabled external advisory lookups, require the same `TRIAGE_FINDINGS` capability as the existing explicit Intel refresh, show which service receives which identifier classes, enforce outbound allowlist/proxy/timeouts and batch limits, audit the action without recording package/target values, and cache both positive and negative results with bounded TTLs, source versions, and fetched/expiry times. Use NVD applicability only for defensible CPE matches and OSV only for exact package ecosystem/PURL version matches.
+  - Enrich `intel cve` and CVE-bearing finding reads from the stored snapshots, including source, publication/fetch time, and stale/unavailable state. Viewing a finding, report, Atlas entity, or assessment must never contact FIRST, CISA, OSV, NVD, Vulners, or another provider.
+  - Reuse Vulners exploit references only from a stored Intel result visible to the current owner; never expose another owner's provider activity through the provider cache. Treat an optional operator-managed Exploit-DB/SearchSploit catalog as a separate follow-up inside this phase: first settle license, update trust, multi-arch packaging, image/storage cost, and retention; never bundle or expose executable proof-of-concept bodies merely to show public-exploit availability.
+  - Preserve the approved FIRST EPSS and CISA KEV attribution/usage notices with bundled assets and expose stable source attribution, data dates, model/catalog versions, and non-endorsement language in customer-facing reports, exports, and data-source details.
+  - Add bounded refresh timeouts/retries, outbound allowlist/proxy behavior, audit events, low-cardinality success/failure/age metrics, and logs that name the source and counts but never enumerate requested CVEs or provider payloads.
+- [ ] Add a normalized, explainable CVE-enrichment contract:
+  - Store source records and current CVE/package mappings once, then link findings to CVE ids; do not copy mutable EPSS or KEV values into every finding row. Snapshot the values and source dates used when an evidence package or report is generated so an old export remains reproducible.
+  - Expose KEV membership, EPSS probability and percentile, CVSS vector/score, public-exploit references, data freshness, finding confidence, target exposure, and asset context as separate signals. EPSS estimates exploitation probability and must not be labeled or presented as a complete risk score.
+  - Define one deterministic default order used by Assessment, Overview, Findings, API v1, evidence packages, and reports: KEV-listed remediation groups first, then EPSS probability/percentile, then CVSS, with finding age as the final stable tie-breaker. Let users sort by individual signals and always explain why an item ranks where it does; do not invent an opaque composite number. Show owner-scoped Vulners exploit references as context without changing the shared default order. Add public-exploit availability as a shared tie-breaker only if the optional Exploit-DB/SearchSploit catalog is approved and deployed consistently.
+  - Keep observation identity separate from remediation identity. Preserve inferred, actively confirmed, imported, and manual observations and their evidence methods, but count the same normalized vulnerability against the same canonical affected component/service/endpoint once in ranked worklists and headline rollups. Expose observation and evidence counts and expand the separate methods in detail views.
+  - Keep missing, stale, withdrawn, disputed, and conflicting source data explicit. A missing EPSS score, KEV entry, CVSS score, or exploit reference means **unknown/not listed by that source**, not low risk or no exploit.
+- [ ] Surface feed-driven risk escalation without rescanning:
+  - When a scheduled or operator refresh newly lists an open remediation group's CVE in KEV, or raises its EPSS probability across the configured activation threshold, raise a bounded risk-escalation signal for the owners who already hold that group. A bundled or newly imported baseline must never raise events for its initial state. Reuse the existing Project Monitoring and notification-digest surfaces, but extend their read model with typed risk events instead of creating synthetic watchers or watcher fires.
+  - Store one canonical escalation per owner/remediation identity/source/feed transition, with the contributing observation ids, independent acknowledgement, and history. Project Monitoring may project it into every linked Project, but the Project digest must deduplicate it within that Project; acknowledging the canonical event updates every projection. A remediation group with no Project remains visible in Findings/Atlas and must not invent a Project digest destination.
+  - Keep acknowledgement behind `TRIAGE_FINDINGS`, reject writes in archived team scope, and audit the actor, old/new acknowledgement state, bounded note length, remediation id, bounded observation count, source, and feed transition without copying target values or provider payloads.
+  - Extend the existing Project digest settings with an explicit risk-escalation preference rather than silently changing established watcher-digest behavior. Include typed risk counts/top changes in the shared monitoring summary and change-detection contract while preserving watcher counts and acknowledgements.
+  - Scope every escalation to remediation groups and observations the current owner or team can already see. A feed refresh must never reveal another owner's targets, findings, or provider activity, and must not create a finding, contact a provider at view time, or change a coverage state.
+  - Evaluate only CVEs changed by the accepted feed version through an indexed CVE-to-open-remediation lookup. Process owners fairly through a durable cursor or resumable work queue, cap each batch, and transactionally deduplicate by owner, remediation identity, source, and feed transition so an interrupted refresh resumes without starving later owners or replaying completed work.
+  - Track EPSS escalation as an armed/active state with separate configurable activation and reset probabilities; require reset to remain lower than activation, do not repeat while active, and rearm only after a later accepted snapshot falls below reset. Use `0.10` activation and `0.08` reset as the initial defaults, keep percentile informational by default, and identify a model-version change when it causes a crossing.
+  - Record the previous and new signal values with their source/model dates and let a quiet no-change refresh stay silent. Preserve reset and material downgrade history without turning routine EPSS movement into repeated digest notifications.
+  - Treat a withdrawn, disputed, downgraded, or de-listed record as its own explicit signal rather than silently dropping an earlier escalation, and keep escalation history traceable to the feed version that caused it.
+
+#### Phase 1 — Define the assessment and evidence data contracts
+
+- [ ] Add the next available shared SQLite/Postgres migration after the Phase 0 risk-intelligence migration and register it in `app/core/migrations/__init__.py`:
+  - Add `project_assessments` for cycle identity, owner scope, Project, title, profile key/version, status, start/completion timestamps, created/updated actor context, and a bounded immutable profile snapshot.
+  - Add `project_assessment_checks` for category, stable check key, target/entity reference, target type/value snapshot, applicability, policy level, state, state reason, recommended workflow/action key, and first/last evidence timestamps.
+  - Add `project_assessment_evidence` as a typed link from a check to a run, workflow execution, finding, Atlas entity, run artifact, workspace artifact, or stored screenshot. Reject unsupported types and duplicate links instead of storing unvalidated free-form references.
+  - Keep source records authoritative. A deleted or cleaned run may make evidence unavailable, but the check must retain a bounded tombstone with the original evidence type/id, observed time, and unavailable reason so historical coverage does not disappear without explanation.
+  - Add owner/project/status/check/evidence indexes required for bounded list and rollup queries on both backends. Extend schema-manifest and migration parity coverage so a missing table or index is reported as drift.
+  - Add configurable per-owner/per-project quotas for assessment cycles, checks, and evidence links. Enforce quotas inside the same transaction as inserts and return the existing Project quota error shape.
+  - Include assessment records in session-token migration, Project deletion, team archive/read-only behavior, retention cleanup, backup/restore validation, and unified-baseline reconciliation. Do not migrate active team-owned assessments into a personal owner.
+- [ ] Add a maintained assessment-profile catalog through the existing shipped/local configuration resolver:
+  - Store built-in profile definitions in a focused catalog such as `app/conf/assessment_profiles.yaml`; allow an operator-owned replacement or overlay through the same safe local-config rules used by other catalogs.
+  - Give every profile and check a stable lowercase key, version, user-facing label, purpose, applicable target/entity types, evidence match rules, policy level, recommended action, and plain-language completion guidance.
+  - Validate duplicate keys, unknown target types, unknown evidence types, unsupported policy levels, invalid workflow/action references, excessive checks, and oversized text before exposing any catalog entry.
+  - Keep profile loading read-only and hot-reload behavior consistent with the workflow/command catalogs. A bad local catalog must fail that catalog clearly without partially replacing the last valid assessment contract.
+- [ ] Implement the domain package under `app/services/assessments/` rather than adding persistence to API helpers or growing `services/projects/overview.py`:
+  - Separate profile loading/validation, storage, coverage derivation, evidence matching, recommendations, serialization, cleanup, and permission-neutral contracts into focused modules.
+  - Build one scope-aware read model used by the Project browser routes, API v1, evidence packages, and reports. Do not maintain separate browser and API coverage calculations.
+  - Derive automatic coverage only from explicit compatible evidence rules such as scanner family, command root, structured output kind, target match, workflow action, and run completion state. A linked run alone is not enough to satisfy an unrelated check.
+  - Keep manual state changes separate from derived evidence. New evidence may move `not_started`, `running`, or `failed` into `covered`/`needs_review`, but must not overwrite a deliberate `blocked`, `skipped`, or `not_applicable` decision without confirmation.
+  - Recalculate affected checks incrementally when a run finalizes, a workflow step completes, an import is applied, a finding changes, or evidence is deleted. Avoid rescanning every run in an owner or Project on normal reads.
+  - Give every rollup both counts and denominators: applicable checks, covered checks, checks awaiting review, untested checks, excluded checks, and unavailable evidence. Never mix `not_applicable` into the completion denominator.
+
+#### Phase 2 — Add assessment routes, API contracts, audit, and observability
+
+- [ ] Add Project-owned browser routes in a decomposed blueprint such as `app/blueprints/projects_assessments.py`:
+  - List Project assessment cycles and return one cycle's summary, category rollups, target rollups, bounded checks, evidence previews, and recommended next actions.
+  - Create a cycle from a validated profile snapshot; update its title/status; complete or archive it; and reject a second active cycle unless the caller explicitly completes or archives the current one.
+  - Page and filter checks by category, state, target, policy level, and evidence availability. Return `total`, `limit`, `offset`, and `has_more` together for every bounded collection.
+  - Update manual check state/reason and link or unlink validated evidence without allowing the caller to forge owner, team, Project, target, or source-record scope.
+  - Return preview data for assessment deletion or restart and use the shared confirmation dialog for destructive actions.
+- [ ] Add matching token-authenticated `/api/v1/projects/<project_id>/assessments...` routes and OpenAPI components:
+  - Keep browser and API serializers aligned on state names, rollups, pagination, actor context, and errors.
+  - Do not return profile implementation paths, secret references, raw HTTP context, private workspace paths, session tokens, or stored command variables.
+  - Add generated OpenAPI JSON checks and CLI commands only after the service and API contracts are stable; the CLI should list/show cycles, list checks, set an allowed manual state, and start a recommended action through the same permission checks as the browser.
+- [ ] Add assessment-specific audit events and safe logs:
+  - Audit cycle create/update/complete/archive/delete, manual state changes, evidence link/unlink, recommended-action launch, HTTP-profile use, manual finding creation, and retest disposition.
+  - Log ids, owner kind, Project id, profile/check keys, policy level, state transitions, counts, durations, and error classes. Never log credentials, authorization headers, cookies, client-certificate contents, raw request bodies, provider payloads, finding evidence bodies, or complete target lists.
+  - Add low-cardinality metrics for active cycles, check-state transitions, derived-evidence matches, action launches/failures, parser results, and connector job outcomes. Do not use target values, Project ids, commands, CVEs, or workflow ids as metric labels.
+  - Apply existing request/rate-limit conventions to mutation and launch routes. Bound recalculation work and emit a clear warning when a safety or quota limit rejects work.
+- [ ] Update architecture guards as routes and modules land:
+  - Classify every new decomposed `projects*` or `api_v1*` blueprint and any new required module-family member in the module-size ratchet.
+  - Intentionally update the decomposed route count/digest after reviewing method/path ownership.
+  - Keep `services/api_v1` limited to auth, serialization, and OpenAPI helpers; assessment persistence stays in its domain service.
+
+#### Phase 3 — Add the Project Assessment tab on desktop and mobile
+
+- [ ] Extend the existing Projects workspace instead of creating separate chrome:
+  - Add **Assessment** to the shared Project desktop/mobile tab model and preserve the selected Project, cycle, filters, scroll position, and return context when opening Atlas, Run Details, Findings, Files, Workflows, or a confirmation.
+  - Put cycle status and truthful coverage rollups first, followed by a risk-prioritized finding worklist, category progress, a target worklist, outstanding checks, and recent evidence. Keep long run/evidence collections behind paging or focused drill-in views.
+  - Count remediation groups rather than evidence observations in the fix-first worklist and headline finding rollups. Show the number and strongest validation state of related observations on each row, then expand inferred, confirmed, imported, and manual evidence in the finding detail.
+  - Keep coverage and risk as neighboring but separate questions. Show why a finding is prioritized with KEV, EPSS, CVSS, exploit-reference, confidence, exposure, age, and freshness labels; do not let a high-risk count imply that an untested check was covered.
+  - Show the difference between untested, ran with no app-captured findings, findings awaiting review, blocked, intentionally skipped, and unavailable evidence. Use text and badges as well as color.
+  - Let target rows expand in place for their checks and use drill-in actions only when moving to another Project/Atlas/Run/Workflow view. Follow the disclosure-glyph mapping in `ARCHITECTURE.md`.
+  - Render recommended actions as normal `.btn` controls, state filters as `.chip` controls, passive states as `.badge` elements, list items with the shared row primitives, forms with shared controls, and scroll regions with `.nice-scroll`.
+  - Use the app-native select sync helper after programmatic state changes, the shared focus/pressable/disclosure/dismissal helpers, `showConfirm()` for confirmations, and `openActionSheet()` for mobile row actions. Do not add local Escape, backdrop, focus-trap, or sticky-hover implementations.
+  - Keep desktop information-dense but give mobile a list/detail flow with native Back behavior, touch-sized controls, a sticky action footer where needed, and the same data and permissions as desktop.
+  - Load Assessment JavaScript, CSS, and any large fragment lazily through `core/lazy_assets.js`; keep state/controller/rendering modules focused instead of growing `project_overview.js` or the Projects composition root indefinitely.
+- [ ] Connect the current Overview without duplicating it:
+  - Keep Overview's existing scan gaps, finding progress, verification progress, and deliverables summary as the high-level Project view.
+  - When an active assessment exists, let Overview show a compact assessment status/coverage card and a compact fix-first summary that link into the exact Assessment filters. The detailed methodology matrix and ranked worklist remain owned by the Assessment tab.
+  - Use the shared assessment and risk-ranking services so Overview, Assessment, Findings, API v1, packages, and reports cannot disagree about covered/outstanding counts or the default fix-first order.
+
+#### Phase 4 — Add first-class manual findings and retest provenance
+
+- [ ] Extend the finding model so assessors can record issues that no parser or import knows about:
+  - Add an explicit `manual` finding origin while retaining `run` and `import` provenance for existing rows. Backfill or derive existing origins without changing finding signatures or deduplication.
+  - Extend finding details with summary, impact, reproduction steps, confidence, validation method, bounded CVE/CWE ids, optional CVSS vector/score, and bounded references. Distinguish active confirmation, version/package inference, imported assertion, and manual assessment without confusing that evidence class with the finding's `run`, `import`, or `manual` origin.
+  - Add a stable observation identity based on owner scope, canonical affected component/service/endpoint, normalized vulnerability or rule identity, and validation method. Add a separate remediation identity that excludes validation method so related observations can share review/remediation disposition and counting without losing provenance; keep confidence, verification, source, and evidence method on each observation, and do not collapse different affected subjects merely because they share a host or CVE.
+  - Link CVE-bearing findings to the shared Phase 0 enrichment records and serialize current EPSS, KEV, CVSS, and public-exploit signals with their source/freshness. Do not rewrite the finding or its occurrence history when a feed changes.
+  - Add typed evidence links for source runs/lines, run artifacts, workspace files, screenshots, Atlas entities, Project targets, assessment checks, and retest runs. Validate every reference in the active owner/Project scope.
+  - Preserve current `findings_occurrences` behavior for selected transcript lines. Manual evidence attached to a run must keep a line number and bounded snippet without copying an entire transcript.
+  - Define stable manual-finding deduplication and edit semantics. Editing title, severity, or detail must not quietly merge two user-authored findings; duplicate detection should warn and let the user choose.
+- [ ] Add one shared finding editor used from Project Findings, Atlas Findings, Assessment, and Run Details:
+  - Support **Create finding**, **Create finding from selected lines**, and **Add evidence to finding** without opening a second findings board or assessment overlay.
+  - Pre-fill target/entity/run context from the launch surface, but require the user to review affected targets, severity, evidence, and title before saving.
+  - Keep team creation/editing behind `TRIAGE_FINDINGS`, show read-only fields to viewers, and record creator/editor actor context without exposing session tokens.
+  - Keep all text length limits, URL/reference validation, markdown rendering, share/export redaction, and JavaScript-URL rejection consistent with current finding triage and report rendering.
+- [ ] Make verification a traceable action rather than a status-only edit:
+  - Let a finding link to its originating assessment check/action, one or more verification runs, comparison results, verification notes, and the actor who made the final disposition.
+  - **Run verification** must show the exact command/workflow, target, HTTP profile name, policy level, and scope before launch. It must never reuse an expired secret value or silently run an intrusive action.
+  - Completing a verification run may suggest `verified` or `needs_retest`, but only an authorized person can save the final verification state.
+  - Surface unavailable original evidence, changed targets, and tool/profile-version drift before presenting a new run as comparable.
+- [ ] Reconcile finding observations across compatible assessment cycles:
+  - Reconcile the same remediation identity across cycles while comparing its individual observation methods, check keys, and compatible tool/profile versions to classify it as `new`, `persistent`, `not_observed`, or `regressed`. Store remediation- and observation-level links and reasons without rewriting either cycle's finding occurrences.
+  - Calculate `not_observed` only when the newer cycle completed the same compatible check with available evidence and that check has a defined negative-evidence contract. A missing linked run, failed/partial scan, changed scope, parser failure, or unavailable artifact can never prove absence.
+  - Reserve `fixed` for an authorized human disposition backed by compatible verification evidence. Mark `regressed` only when a finding that was previously dispositioned as fixed is observed again; do not turn a one-cycle absence into a permanent claim.
+  - Surface cycle deltas in Assessment, Overview, Findings, packages, and reports with direct links to both evidence sets and an explicit unknown/incomparable state when the evidence cannot support a delta.
+
+#### Phase 5 — Add reusable, secret-backed HTTP assessment profiles
+
+- [ ] Add Project-scoped HTTP profiles for authenticated and role-aware testing:
+  - Store a display name, base URL/scope roots, allowed hosts, headers by name, cookie/bearer/basic-auth secret references, client-certificate/key references, proxy settings, login/refresh workflow reference, CSRF/token capture rules, include/exclude paths, rate/concurrency limits, and enabled state.
+  - Store only references to app-managed Secrets and validated Files paths; never copy secret values into the HTTP-profile table, Project export, assessment snapshot, workflow input map, browser storage, logs, notifications, audit details, or API responses.
+  - Support multiple roles such as anonymous, user, and administrator so an assessment can compare authorization behavior without overwriting one shared cookie jar.
+  - Revalidate target scope, team membership, capability, secret availability, Files ownership, and profile enabled state immediately before every run.
+- [ ] Add a protected execution adapter rather than rendering raw credentials into visible commands:
+  - Generate short-lived scanner-readable config/request material inside a private run directory or use safe environment injection where the tool supports it; delete temporary material after launch/finalization and recovery cleanup.
+  - Show a redacted display command in the terminal, History, Run Details, workflow execution state, audit, metrics, notifications, and errors. Apply the existing secret masking pass to tool output as a second line of defense.
+  - Add adapters for Curl/HTTPx, Katana, Nuclei, Dalfox, SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported profile features instead of dropping authentication or scope controls silently.
+  - Never allow a profile to broaden a Project target into an unrelated hostname through redirects, schema servers, callback URLs, or proxy behavior without a visible allowlist decision.
+- [ ] Add the HTTP-profile editor inside the Project Assessment surface:
+  - Reuse Options → Secrets for creating/replacing secret values and show only secret names/availability in the Project editor.
+  - Make credential-sensitive actions explicit, show which role a run will use, and prevent viewers or users lacking `MANAGE_SECRETS` from learning whether an unreferenced secret exists.
+  - Handle missing, replaced, expired, disabled, and permission-denied credentials as recoverable profile states rather than generic command failures.
+
+#### Phase 6 — Close the web and API discovery/validation gaps
+
+- [ ] Add `gau` as the historical/passive URL source:
+  - Pin a reviewed release and checksum for AMD64/ARM64, include its license/SBOM/provenance, add it to the command registry, and route Files input/output through declared workspace flags.
+  - Capture discovered URLs as Atlas URL entities with provider/source provenance but do not create vulnerability findings merely because a historical URL exists.
+  - Add a built-in workflow that combines `gau`, current HTTPx probing, Katana crawling, normalization, deduplication, and bounded output files without sending archived URLs to active scanners until live/scope checks pass.
+- [ ] Add passive product/package-version correlation without presenting inference as confirmation:
+  - Normalize exact product identifiers and versions from Nmap CPE/service evidence, reviewed HTTPx technology mappings that include an exact version, other structured scanner output, and CycloneDX components. Preserve the original banner/technology/component observation, source run/import, target, parser/tool version, and observed time.
+  - Use NVD applicability ranges only for defensible CPE matches and cached OSV affected-version ranges for exact package ecosystem/PURL matches. HTTPx technology names, unversioned banners, fuzzy product text, or an ambiguous CPE guess may suggest a follow-up check but must not create a CVE finding.
+  - Materialize a `version_cve_correlation` finding only when a versioned observation satisfies a recorded matching rule. Store the advisory/data version, match basis, affected range, confidence, and source observation so review can reproduce the inference.
+  - Keep inferred version/package findings distinct from Nuclei or another active probe that confirmed vulnerable behavior. Link or deduplicate related observations without discarding their different evidence methods or allowing an inference to upgrade itself to confirmed.
+- [ ] Extend the Atlas import parser with SARIF and CycloneDX:
+  - Parse bounded SARIF 2.1 results through the normal preview/apply flow, preserving tool/driver version, rule id, level, message, locations, fingerprints, help/reference links, automation details, and original artifact provenance. Reject unsafe paths/URIs and never fetch referenced source files while viewing or importing.
+  - Import CycloneDX components, dependencies, PURL/CPE identifiers, included vulnerability records, and VEX analysis as typed inventory/evidence. An SBOM component alone is not a vulnerability finding; correlate only exact identifiers and versions through the cached OSV/NVD rules above.
+  - Respect CycloneDX affected/not-affected/resolved/under-investigation assertions without letting an untrusted import silently close an existing app finding. Keep component-to-advisory-to-finding provenance and require normal review before applying imported triage or verification state.
+  - Add format/version detection, quotas, archive/compression limits, duplicate handling, target/Project mapping, redacted previews, parser warnings, and small fixtures consistent with the existing Nuclei, Nessus, ZAP, Burp, CSV, and JSONL import contracts.
+- [ ] Add scoped dangling-record and subdomain-takeover detection:
+  - Build on normalized subfinder/dnsx/CDN evidence to retain the full DNS/CNAME chain, provider fingerprint, wildcard/negative-DNS result, scope decision, and observed time. An unresolved or dangling-looking CNAME is a `needs_review` signal, not by itself a confirmed vulnerability.
+  - Use only reviewed, version-pinned Nuclei takeover templates or another bounded non-destructive provider fingerprint to confirm a finding, and keep potential and confirmed states visibly distinct.
+  - Never register an account, claim a hostname/resource, upload proof content, follow an out-of-scope tenant, or perform another takeover action. Treat CDN/front-door/custom-domain edge cases and transient DNS failures as explicit sources of uncertainty.
+- [ ] Turn existing HTTPx screenshot support into a Project Web Surface gallery instead of adding a second screenshot scanner:
+  - Parse the HTTPx screenshot metadata and stored image artifacts, link captures to URL/host entities and source runs, and keep binary files behind authenticated Files/artifact download routes.
+  - Show screenshot, URL, status, title, technologies, captured time, source run, HTTP role/profile, and stale/unavailable state. Do not render captured HTML or script in the app origin.
+  - Group/filter by target, status, technology, authentication role, visual hash, and changed-since-previous capture. A visual difference is evidence, not automatically a finding.
+  - Add bounded gallery paging, thumbnails, full-image viewing, keyboard/touch navigation, package/report selection, redaction behavior, cleanup, and storage quotas.
+- [ ] Add focused parameter and application testing tools:
+  - Add Dalfox for reflected/DOM XSS and parameter mining with structured, confidence-aware findings and proof/evidence fields.
+  - Add SQLmap behind a detection-only default policy. Deny data dumping, filesystem access, OS command execution, registry access, database takeover, destructive statements, and other takeover options in normal and intrusive profiles.
+  - Add Schemathesis for OpenAPI/GraphQL operation coverage, bounded negative testing, minimized failure examples, and per-operation evidence. Schema fetches and `$ref` resolution must obey the same scope and private-network rules as the target.
+  - Prefer version-pinned multi-arch binaries or isolated Python environments that keep the runtime dependency graph reproducible. Update licenses, hashes, SBOM/provenance, image-size budgets, and container smoke checks for every addition.
+  - Add structured parsers/adapters under focused modules rather than more broad regexes in `output_signals.py`. Preserve raw output, normalize stable findings/entities, carry tool/profile versions, and make parser failure visible without failing the underlying run.
+- [ ] Improve Nuclei usage before adding overlapping scanners:
+  - Add maintained safe/standard/intrusive template profiles for exposure, misconfiguration, known CVEs, technology-specific checks, network services, TLS, API, and headless/DAST checks.
+  - Preserve template source/version provenance, show excluded intrusive/code templates, and require explicit action before updating templates or running a higher-risk profile.
+  - Use detected technologies, inferred CVE candidates, dangling-record signals, and service evidence to recommend a bounded profile; never start Nuclei automatically from HTTPx, an import, a correlation job, or an Atlas/Assessment read.
+
+#### Phase 7 — Add service-aware enumeration and safe next actions
+
+- [ ] Add a central service-to-action registry under the assessment domain:
+  - Map normalized port/service evidence to applicable checks and maintained workflows for HTTP(S), SMB, SNMP, LDAP, NFS/RPC, SSH, SMTP/IMAP/POP3, FTP, DNS, and common databases.
+  - Give each action a label, rationale, accepted entity/target types, policy level, command/workflow key, required features, expected evidence, and unsupported conditions.
+  - Resolve ambiguous service detection conservatively and show why an action is suggested. Do not treat a port number alone as proof of a service when a scanner reported a conflicting service.
+  - Register passive `version_cve_correlation` as an evidence/check family with its identifier requirements, supported advisory sources, confidence rules, and active-verification recommendations. It must not be represented as a command that can silently launch from a read surface.
+  - Reuse this registry in Assessment target rows, Atlas entity profiles, Project Overview hints, and Quick Lookup while keeping actual launch state in the Assessment/Workflow/Run surfaces.
+- [ ] Build curated Nmap NSE workflows first:
+  - Separate `safe`, `default`, `version`, `discovery`, and reviewed `vuln` scripts from `auth`, `brute`, `dos`, `exploit`, `external`, `fuzzer`, and `intrusive` categories.
+  - Pin allowed script names/categories in app-owned profiles, validate `--script-args` and Files-backed argument files, and keep third-party scripts unavailable unless an operator deliberately installs and allowlists them.
+  - Parse useful structured service evidence such as SMB signing/dialect, anonymous access, SSH algorithms/keys, RPC/NFS exports, TLS state, and mail capabilities without classifying every informational row as a vulnerability.
+- [ ] Add small protocol-specific tools only where NSE and current commands leave a proven gap:
+  - Evaluate `smbclient`/`enum4linux-ng`, Net-SNMP tools, and LDAP client tools as an optional service-enumeration pack with pinned versions, safe command policies, structured adapters, and multi-arch container validation.
+  - Keep credential attacks, spraying, unrestricted share downloads, and invasive directory modification disabled. Any future intrusive extension must be a separate operator opt-in and is not part of this item.
+
+#### Phase 8 — Add bounded collection fan-out to durable workflows
+
+- [ ] Introduce an explicit workflow version for collection semantics while leaving legacy and v2 scalar workflows unchanged:
+  - Add bounded list captures for lines, entities, and JSON Pointer arrays with type, item limit, byte limit, deduplication, normalization, and required/empty behavior.
+  - Add a `for_each`/fan-out step that renders one command per captured item, validates every rendered command and target through normal policy/scope checks, and records each child run against the parent step.
+  - Add global execution limits for captured items, generated child runs, parallel children, total requests where known, total runtime, stored output, retries, and failure count.
+  - Support fail-fast, continue-and-summarize, and bounded retry policies without letting one failed target erase successful child evidence.
+  - Checkpoint pending/completed item state so restart recovery resumes unlaunched work without duplicating completed runs. Cancellation must stop active children and leave a truthful partial summary.
+  - Keep collection values out of public execution serializers, logs, metrics, and notifications; expose counts and bounded redacted samples only where the current role may see them.
+- [ ] Extend the workflow editor/execution UI and built-in playbooks:
+  - Let authors choose scalar or collection captures, configure limits, select a fan-out source, preview command templates with placeholders, and see validation beside the affected field.
+  - Show parent-step progress, succeeded/failed/skipped counts, active child runs, and a bounded failure sample on desktop and mobile.
+  - Add maintained assessment playbooks such as subdomain → resolve → probe → crawl → scan, live URL → screenshot → parameter inventory, API schema → operations → bounded tests, and port → service-specific enumeration.
+  - Require Files only where a tool genuinely needs an intermediate file; use structured captures for orchestration and Files artifacts for user-visible durable output.
+
+#### Phase 9 — Add optional external scanner and OAST connectors
+
+- [ ] Integrate OWASP ZAP as an operator-configured worker/sidecar, not as part of the main image:
+  - Add configuration for base URL, authentication secret, TLS verification, allowed network ranges, concurrency, job timeout, and maximum report size.
+  - Generate a bounded ZAP Automation Framework plan from selected Project targets, HTTP profile, authentication role, scope exclusions, and safe/intrusive policy; show the plan summary before submission.
+  - Track remote job id/status/progress, cancellation, expiry, and errors without proxying unbounded ZAP logs into the app database.
+  - Download completed output into the active Files/Project evidence boundary and pass it through the existing ZAP import preview/apply path. Do not silently apply remote findings before the operator reviews the import summary and warnings.
+- [ ] Add private OAST support through an operator-configured Interactsh-compatible service:
+  - Do not default to a public callback service. Require an explicit server URL, token/secret, allowed domain, TLS policy, retention, and privacy acknowledgement.
+  - Issue per-run/per-check correlation ids, keep callback credentials private, and attach bounded DNS/HTTP/SMTP/LDAP interaction evidence to the originating run, assessment check, entity, and finding.
+  - Deduplicate callbacks, reject callbacks outside the active correlation window, redact sensitive request fields, and make retention/cleanup behavior visible.
+  - Keep OAST use explicit and policy-gated; viewing a recommendation or running unrelated Nuclei checks must not allocate a callback domain.
+- [ ] Treat Greenbone/OpenVAS and similar full vulnerability managers as external systems:
+  - Add a Greenbone result importer or connector only after its source format, ownership, duplicate handling, and Project/Atlas mapping are defined.
+  - Prefer submit/status/result integration with an operator-managed deployment; do not embed its services, feeds, database, or scheduler into darklab_shell.
+  - Reuse Atlas import preview/apply, finding provenance, assessment evidence links, and Project reporting rather than building a second external-findings store.
+
+#### Phase 10 — Complete reporting, evidence packages, and retest workflows
+
+- [ ] Add assessment context to Project evidence packages and reports:
+  - Include assessment identity, profile/version snapshot, scope/target snapshot, check-state rollups, applicable denominator, manual exclusions with reasons, evidence references, tool/profile versions, tested timestamps, and unavailable-evidence warnings.
+  - Add an assessment methodology/coverage section to the existing report composer. Keep untested, blocked, skipped, not-applicable, and no-app-captured-finding states distinct in HTML, Markdown, JSON, print/PDF, and redacted exports.
+  - Add a fix-first section using the shared deterministic ranking, with one row per remediation identity and the KEV, EPSS, CVSS, exploit-reference, confidence, exposure, age, source-freshness, and related-observation signals that explain each item's placement. Expand the separate evidence methods without counting them as additional vulnerabilities, and do not collapse the ranking inputs into an unexplained risk score.
+  - Add a cross-cycle delta section for new, persistent, not-observed, human-dispositioned fixed, regressed, and incomparable findings. Include the comparison basis and evidence references so absence is never presented as remediation without compatible completed coverage.
+  - Let users include selected screenshot evidence while preserving package size estimates, binary checksums, redaction rules, source-run ownership, and missing-artifact warnings.
+  - Keep secret names, HTTP headers/cookies, connector credentials, workflow variables, private callback tokens, internal workspace paths, and private verification notes subject to the existing private-note/redaction boundaries.
+  - Record the assessment cycle and check ids in package/report manifests so a later reviewer can trace coverage back to the saved Project without treating the export as live state. Include the approved FIRST EPSS and CISA KEV attribution, data dates, model/catalog versions, checksums, and non-endorsement language wherever their signals appear.
+- [ ] Add a finding-centered retest queue:
+  - Group findings that are ready to verify or need retest by Project target, assessment check, action, and HTTP role/profile.
+  - Offer a bounded batch launch only when every item shares a safe compatible action and scope; otherwise keep launches individual and explain the mismatch.
+  - Compare the original and verification evidence using existing run comparison where compatible, attach the comparison to the finding, and require a human disposition.
+  - Update assessment rollups when verification changes, but preserve the original finding occurrence and earlier assessment-cycle history.
+
+#### Phase 11 — Test, document, and qualify the complete feature
+
+- [ ] Add backend coverage in the existing Python suites:
+  - SQLite/Postgres migration parity, schema drift, indexes, foreign/reference cleanup, backup/restore, session migration, Project deletion, team archive/reactivation, quotas, and query plans.
+  - EPSS/KEV/OSV feed parsing, bundled bootstrap provenance and attribution, silent baseline installation/upgrade, local/external advisory acquisition modes, outbound lookup opt-in, positive/negative cache expiry, conditional/atomic refresh, refresh leases, size/schema rejection, last-good fallback, staleness, conflicting/withdrawn records, finding-CVE links, snapshot reproducibility, and deterministic risk ordering with missing signals.
+  - Risk-escalation activation/reset hysteresis, no-repeat active state, KEV and model-version crossings, changed-CVE-to-remediation lookup plans, observation-to-remediation event deduplication, durable batch resume, per-owner fairness, transactional deduplication, personal/team isolation, archived scopes, multi-Project projection, no-Project behavior, independent acknowledgement, digest opt-in, quiet refreshes, and downgrade/withdrawal/de-list events.
+  - Profile validation/snapshot stability, owner/team isolation, role capabilities, archived-team reads, check-state transitions, evidence matching, unavailable evidence, rollup denominators, manual overrides, and incremental recalculation.
+  - Browser/API route parity, pagination, malformed payloads, missing/out-of-scope references, forged owner fields, audit contents, log redaction, metrics cardinality, and rate/concurrency limits.
+  - Manual finding creation/edit/dedup/evidence, observation-versus-remediation identity, distinct rollup/worklist counts, transcript-line selection, CVE/CVSS/CWE/reference validation, shared risk enrichment, verification-run linkage, compatible/incompatible cross-cycle reconciliation, report/package attribution/rendering, redaction, and cleanup.
+  - HTTP-profile secret isolation, temporary-file lifecycle, redirect/schema/callback scope enforcement, display-command masking, recovery cleanup, and permission changes between preview and launch.
+  - Structured adapters and parsers for every added tool using small checked-in fixtures for success, empty output, malformed output, tool errors, multiple targets, duplicate results, and version drift. Cover CPE and PURL affected-range boundaries, ambiguous/unversioned product evidence, inferred-versus-confirmed CVEs, SARIF paths/fingerprints, CycloneDX components/VEX states, and potential-versus-confirmed dangling records.
+  - Workflow collection compilation, rendering, item/byte/run limits, checkpoint recovery, cancellation, retry, partial failure, redaction, and cross-scope rejection.
+  - ZAP/OAST/Greenbone connector tests with local fakes only; normal tests must never contact real targets, providers, callback servers, or scanner services.
+- [ ] Add frontend unit and interaction coverage:
+  - Assessment tab loading, cycle switching, filters, remediation-group coverage/risk rollups, observation expansion, explained fix-first ordering, bundled/stale feed status and operator guidance, cross-cycle deltas, target expansion, recommendations, manual states, permission/read-only behavior, stale requests, empty/error/degraded states, and preserved return/scroll context.
+  - Project Monitoring typed risk events, independent acknowledgement, multi-Project projection, no-Project fallback links, digest risk opt-in, watcher/risk rollup separation, and accessible desktop/mobile event rendering.
+  - Manual finding/evidence editor validation, run-line selection, HTTP-profile secret references, screenshot gallery paging/viewing, retest queue, and workflow collection editor/progress.
+  - Shared pressable, disclosure, select, focus, dismissal, action-sheet, confirmation, chip/badge, semantic-color, and mobile Back contracts. Do not replace shared helper coverage with implementation-specific event tests.
+  - Keep large Atlas/Project Vitest cases deterministic and below the CI timeout by waiting for explicit render state instead of polling broad DOM conditions.
+- [ ] Add focused Playwright journeys through the approved helper:
+  - Create a Project assessment, review truthful empty coverage, launch a safe recommended workflow, observe derived evidence, create a manual finding from run lines, attach a verification run, and export assessment context.
+  - Exercise desktop and mobile Project flows, viewer/operator permissions, personal/team scope changes, archived-team read-only behavior, HTTP-profile missing-secret recovery, and destructive confirmations.
+  - Run applicable journeys in bundle and source modes with `bash scripts/run_playwright.sh --asset-bundle-mode bundle ...` and `bash scripts/run_playwright.sh --asset-bundle-mode source ...`.
+- [ ] Qualify the runtime and supply chain:
+  - Build AMD64 and ARM64 images; verify tool and bundled-data versions/checksums/licenses/attribution, SBOM and vulnerability reports, runtime user, read-only root filesystem, Files behavior, raw-scan readiness, and image-size impact.
+  - Run command-policy tests proving disallowed SQLmap/NSE/destructive flags remain blocked and connectors cannot escape configured target/network scope.
+  - Run `npm run assets:sync` and `npm run assets:check` for frontend source changes and keep committed hashed assets/compression siblings current.
+- [ ] Update current-state documentation as each phase ships:
+  - Keep `README.md` and `FEATURES.md` user-focused; document durable contracts and route/data ownership in `ARCHITECTURE.md`; document operator settings and sidecars in `CONFIGURATION.md`; update `docs/tools.md`, `docs/workflows.md`, API/OpenAPI docs, CLI help, `THEME.md` if a semantic token contract changes, and `tests/README.md`/`CONTRIBUTING.md` when test counts or commands change.
+  - Add every shipped change to `CHANGELOG.md`, update relevant release/MR drafts under `docs/release-drafts/` when present, and keep those drafts out of official documentation.
+  - Remove this TODO only after the final acceptance criteria pass and all shipped behavior is documented as current state.
+
+#### Acceptance criteria
+
+- [ ] A fresh or disconnected install can rank CVE findings from release-pinned, attributed EPSS and CISA KEV bootstrap snapshots, clearly labels their source/date/model/freshness, and never turns baseline import into escalation events. Live EPSS/KEV refresh remains an explicit operator choice; OSV/NVD advisory correlation uses an operator-selected local dataset or explicitly enabled bounded lookups; no source makes a network request from an assessment, finding, Atlas, report, or other read surface.
+- [ ] A later feed change can raise one owner-scoped, traceable risk-escalation event without rescanning or leaking inventory; EPSS activation/reset hysteresis prevents threshold flapping, and Project Monitoring and opted-in digests surface the event without synthetic watcher fires, duplicate replay, starvation, or losing downgrade/de-list history.
+- [ ] A Project can create, complete, archive, and revisit versioned assessment cycles without changing historical evidence or earlier coverage.
+- [ ] Every applicable check clearly distinguishes untested, running, covered with no app-captured findings, findings awaiting review, blocked, failed, skipped, not applicable, and unavailable evidence.
+- [ ] Coverage is derived from compatible scoped evidence, not merely from any linked run, and every rollup has an honest denominator.
+- [ ] Manual findings can be created from scratch or selected run evidence, carry structured assessment details, link targets/evidence/retests, and flow through existing Atlas, Project, package, report, team, audit, and redaction contracts.
+- [ ] CVE-bearing findings keep active confirmation, version/package inference, imported assertion, and manual assessment as distinct observations; related observations share one remediation identity and count once in headline rollups and fix-first worklists. Assessment, Overview, Findings, packages, and reports use the same explainable KEV/EPSS/CVSS-based default priority order and source attribution.
+- [ ] Compatible assessment cycles derive new, persistent, not-observed, and incomparable observations from scoped evidence; `fixed` stays a human disposition backed by compatible verification, and `regressed` applies only when a previously-fixed finding is observed again. No missing, failed, or partial check and no one-cycle absence is ever treated as proof of remediation.
+- [ ] Authenticated HTTP checks use named secret-backed profiles without exposing credentials in stored commands, browser state, APIs, logs, metrics, audit rows, notifications, exports, or temporary files left after completion/recovery.
+- [ ] Historical URL discovery, current crawling/probing, screenshots, parameter testing, API schema testing, Nuclei profiles, service-specific enumeration, passive product/package correlation, SARIF/CycloneDX imports, and dangling-record checks produce structured, provenance-rich evidence through normal command policy and Files boundaries.
+- [ ] Safe/standard/intrusive/destructive policy is visible and enforced; no read action runs a scan, and no normal assessment action enables brute-force, denial-of-service, exploitation, data dumping, filesystem writes, resource claiming, or takeover behavior.
+- [ ] Collection workflows remain bounded, resumable, cancelable, scope-safe, and truthful about partial success/failure across child runs.
+- [ ] Optional ZAP, OAST, and Greenbone integrations fail closed, respect owner/team/target boundaries, and reuse existing import/evidence/reporting surfaces without putting those systems in the primary image.
+- [ ] Desktop, mobile, browser, API v1, CLI, Project Overview, Assessment, Atlas, Findings, evidence packages, and reports agree on assessment identity, coverage counts, finding state, risk ordering, cycle deltas, and evidence availability.
+- [ ] SQLite and Postgres, AMD64 and ARM64, personal and team scopes, archived teams, bundle/source assets, backup/restore, session migration, redaction, audit/logging, and CI performance all pass their targeted and full-suite gates.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 

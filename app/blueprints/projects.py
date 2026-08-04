@@ -534,6 +534,7 @@ from blueprints.projects_monitoring import (  # noqa: E402,F401
     projects_monitoring_fire_update,
     projects_monitoring_summary,
 )
+from blueprints.projects_monitoring_risk import projects_monitoring_risk_event_update  # noqa: E402,F401
 from blueprints.projects_report import (  # noqa: E402,F401
     projects_report_export_job_create,
     projects_report_export_job_file,

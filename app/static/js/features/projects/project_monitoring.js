@@ -65,6 +65,13 @@ let exportedDarklabProjectMonitoring = null;
     resolved: 'Resolved',
   };
 
+  const riskTransitionLabels = {
+    kev_added: 'Added to CISA KEV',
+    kev_removed: 'Removed from CISA KEV',
+    epss_activated: 'EPSS threshold crossed',
+    epss_reset: 'EPSS threshold reset',
+  };
+
   function createProjectMonitoringController(context) {
     const ctx = context || {};
     const states = new Map();
@@ -83,6 +90,7 @@ let exportedDarklabProjectMonitoring = null;
         monitors: [],
         project: null,
         quietNoChangeThreshold: 3,
+        riskEvents: [],
         timeline: [],
       };
     }
@@ -136,6 +144,7 @@ let exportedDarklabProjectMonitoring = null;
         st.monitors = Array.isArray(payload.monitors) ? payload.monitors : [];
         st.project = payload && typeof payload.project === 'object' ? payload.project : null;
         st.quietNoChangeThreshold = Math.max(1, Number(payload.quiet_no_change_threshold || 3) || 3);
+        st.riskEvents = Array.isArray(payload.risk_events) ? payload.risk_events : [];
         st.timeline = Array.isArray(payload.timeline) ? payload.timeline : [];
         st.loaded = true;
       } catch (err) {
@@ -326,6 +335,7 @@ let exportedDarklabProjectMonitoring = null;
         cadence_preset: String(settings.cadence_preset || 'daily'),
         channel_ids: Array.isArray(settings.channel_ids) ? settings.channel_ids.map(item => String(item || '')) : [],
         quiet_no_change: settings.quiet_no_change === true,
+        risk_escalations_enabled: settings.risk_escalations_enabled === true,
         last_evaluated_at: String(settings.last_evaluated_at || ''),
         last_sent_at: String(settings.last_sent_at || ''),
         next_due_at: String(settings.next_due_at || ''),
@@ -420,7 +430,18 @@ let exportedDarklabProjectMonitoring = null;
       const quietText = document.createElement('span');
       quietText.textContent = 'Send quiet digests';
       quietLabel.append(quiet, quietText);
-      controls.append(enabledLabel, cadenceLabelWrap, quietLabel);
+
+      const riskLabel = document.createElement('label');
+      riskLabel.className = 'form-check project-monitoring-digest-toggle';
+      const risk = document.createElement('input');
+      risk.type = 'checkbox';
+      risk.checked = settings.risk_escalations_enabled;
+      risk.disabled = !canManage;
+      risk.dataset.projectDigestField = 'risk_escalations_enabled';
+      const riskText = document.createElement('span');
+      riskText.textContent = 'Include CVE risk changes';
+      riskLabel.append(risk, riskText);
+      controls.append(enabledLabel, cadenceLabelWrap, quietLabel, riskLabel);
 
       const channelWrap = document.createElement('div');
       channelWrap.className = 'project-monitoring-digest-channels nice-scroll';
@@ -803,12 +824,105 @@ let exportedDarklabProjectMonitoring = null;
       return section;
     }
 
+    function riskTransitionLabel(kind) {
+      const normalized = String(kind || '');
+      return riskTransitionLabels[normalized] || 'CVE risk changed';
+    }
+
+    function riskTransitionTone(kind) {
+      const normalized = String(kind || '');
+      if (normalized === 'kev_added') return 'badge-tone-red';
+      if (normalized === 'epss_activated') return 'badge-tone-amber';
+      return 'badge-tone-muted';
+    }
+
+    function riskValueLabel(event) {
+      if (!String(event?.transition_kind || '').startsWith('epss_')) return '';
+      const parsed = Number(event?.new_value);
+      return Number.isFinite(parsed) ? `EPSS ${(parsed * 100).toFixed(1)}%` : '';
+    }
+
+    function renderRiskAckControls(projectId, riskEvent) {
+      const wrap = document.createElement('div');
+      wrap.className = 'project-monitoring-triage';
+      const note = document.createElement('textarea');
+      note.className = 'project-monitoring-note';
+      note.rows = 2;
+      note.value = String(riskEvent.ack_note || '');
+      note.placeholder = 'Note';
+      note.dataset.projectMonitoringRiskNote = String(riskEvent.id || '');
+      const buttons = document.createElement('div');
+      buttons.className = 'project-monitoring-triage-actions';
+      [
+        ['Acknowledge', 'acknowledged'],
+        ['Needs action', 'needs_action'],
+        ['Expected', 'expected'],
+        ['Resolved', 'resolved'],
+      ].forEach(([label, state]) => {
+        const button = makeActionButton(label, projectId, 'secondary');
+        button.dataset.projectMonitoringAction = 'ack-risk';
+        button.dataset.projectId = String(projectId || '');
+        button.dataset.riskId = String(riskEvent.id || '');
+        button.dataset.ackState = state;
+        button.disabled = !String(riskEvent.id || '');
+        buttons.appendChild(button);
+      });
+      wrap.append(note, buttons);
+      return wrap;
+    }
+
+    function renderRiskEvents(projectId, st, { mobile = false } = {}) {
+      const section = document.createElement('section');
+      section.className = 'project-monitoring-section project-monitoring-risk';
+      const heading = document.createElement('h3');
+      heading.className = mobile ? 'project-mobile-section-heading' : 'project-explorer-section-heading';
+      heading.textContent = 'CVE Risk Changes';
+      const list = document.createElement('div');
+      list.className = mobile ? 'project-monitoring-timeline nice-scroll is-mobile' : 'project-monitoring-timeline nice-scroll';
+      if (!st.riskEvents.length) {
+        const empty = document.createElement('div');
+        empty.className = 'project-monitoring-empty-line';
+        empty.textContent = 'No feed-driven CVE risk changes yet.';
+        list.appendChild(empty);
+      } else {
+        st.riskEvents.forEach((riskEvent) => {
+          const row = document.createElement('div');
+          row.className = mobile ? 'project-monitoring-timeline-row is-mobile' : 'project-monitoring-timeline-row';
+          row.dataset.projectMonitoringRiskId = String(riskEvent.id || '');
+          const main = document.createElement('div');
+          main.className = 'project-monitoring-timeline-main';
+          const title = document.createElement('div');
+          title.className = 'project-monitoring-timeline-heading';
+          const kind = document.createElement('span');
+          kind.className = `badge ${riskTransitionTone(riskEvent.transition_kind)} project-monitoring-fire-kind`;
+          kind.textContent = riskTransitionLabel(riskEvent.transition_kind);
+          const cve = document.createElement('strong');
+          cve.textContent = String(riskEvent.cve_id || 'CVE');
+          title.append(kind, cve, ackPill(riskEvent.ack_state));
+          appendMeta(main, [
+            ctx.formatDate ? ctx.formatDate(riskEvent.created) : riskEvent.created,
+            riskValueLabel(riskEvent),
+            riskEvent.feed_version ? `${String(riskEvent.source || '').toUpperCase()} ${riskEvent.feed_version}` : '',
+            `${Number(riskEvent.observation_count || 0)} observation${Number(riskEvent.observation_count || 0) === 1 ? '' : 's'}`,
+            riskEvent.model_changed ? 'model version changed' : '',
+          ]);
+          main.prepend(title);
+          main.appendChild(renderRiskAckControls(projectId, riskEvent));
+          row.appendChild(main);
+          list.appendChild(row);
+        });
+      }
+      section.append(heading, list);
+      return section;
+    }
+
     function renderLoaded(projectId, st, { mobile = false } = {}) {
       const root = document.createElement('div');
       root.className = mobile ? 'project-monitoring-root is-mobile' : 'project-monitoring-root';
       root.dataset.projectMonitoringRoot = String(projectId || '');
       root.appendChild(renderCounts(st));
       root.appendChild(renderFilters(projectId, st));
+      root.appendChild(renderRiskEvents(projectId, st, { mobile }));
       root.appendChild(renderDigestSettings(projectId, st, { mobile }));
       const monitors = document.createElement('section');
       monitors.className = 'project-monitoring-section';
@@ -1020,6 +1134,20 @@ let exportedDarklabProjectMonitoring = null;
       await reloadAfterAction(projectId, 'Monitoring event updated.');
     }
 
+    async function updateRiskAck(projectId, riskId, ackState, note) {
+      await monitoringRequest(
+        `/projects/${encodeURIComponent(projectId)}/monitoring/risk-events/${encodeURIComponent(riskId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            ack_state: String(ackState || 'new'),
+            ack_note: String(note || ''),
+          }),
+        },
+      );
+      await reloadAfterAction(projectId, 'CVE risk change updated.');
+    }
+
     function digestPayloadFromRoot(root) {
       const selectedChannels = [...(root?.querySelectorAll?.('[data-project-digest-field="channel"]:checked') || [])]
         .map(item => String(item.value || ''))
@@ -1029,6 +1157,7 @@ let exportedDarklabProjectMonitoring = null;
         cadence_preset: String(root?.querySelector?.('[data-project-digest-field="cadence_preset"]')?.value || 'daily'),
         channel_ids: selectedChannels,
         quiet_no_change: !!root?.querySelector?.('[data-project-digest-field="quiet_no_change"]')?.checked,
+        risk_escalations_enabled: !!root?.querySelector?.('[data-project-digest-field="risk_escalations_enabled"]')?.checked,
       };
     }
 
@@ -1118,16 +1247,25 @@ let exportedDarklabProjectMonitoring = null;
           await updateAck(projectId, action.dataset.fireId, action.dataset.ackState, note);
           return true;
         }
+        if (name === 'ack-risk') {
+          const row = action.closest('[data-project-monitoring-risk-id]');
+          const note = row?.querySelector?.('[data-project-monitoring-risk-note]')?.value || '';
+          await updateRiskAck(projectId, action.dataset.riskId, action.dataset.ackState, note);
+          return true;
+        }
       } catch (err) {
         logClientEvent('PROJECT_MONITORING_CLIENT_ACTION_FAILED', err, {
           phase: name || 'unknown',
           selection_key: `project:${projectId}`,
           watcher_id: String(action.dataset.watcherId || ''),
           fire_id: String(action.dataset.fireId || ''),
+          risk_event_id: String(action.dataset.riskId || ''),
           ack_state: String(action.dataset.ackState || ''),
           note_chars: name === 'ack'
             ? (action.closest('[data-project-monitoring-fire-id]')?.querySelector('[data-project-monitoring-note]')?.value || '').length
-            : 0,
+            : (name === 'ack-risk'
+              ? (action.closest('[data-project-monitoring-risk-id]')?.querySelector('[data-project-monitoring-risk-note]')?.value || '').length
+              : 0),
         });
         ctx.setProjectWorkspaceMessage?.(err && err.message ? err.message : 'Monitoring action failed.', { error: true });
         return true;

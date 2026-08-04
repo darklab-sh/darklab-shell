@@ -81,6 +81,8 @@ intel cve CVE-2025-0001
 
 Shodan InternetDB, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without a saved key. Other providers use the encrypted secret named in Provider Status. IPinfo can return public basics without a token and adds account-backed data when `IPINFO_TOKEN` is saved.
 
+`intel cve` also shows the app's stored FIRST EPSS probability and CISA KEV context. Fresh installs have dated offline snapshots, so this prioritization works without a live request. `providers` shows the snapshot date, whether it may be stale, and how an operator can enable daily refreshes. Viewing a CVE or finding never refreshes these feeds. EPSS is an exploitation-probability estimate rather than a complete risk score, and the CISA due date is federal BOD 22-01 context rather than your remediation deadline.
+
 FOFA needs `FOFA_EMAIL` plus a key saved as `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and its search calls need an F-point balance. ZoomEye uses `ZOOMEYE_API_KEY` with the regional `api.zoomeye.ai` service and needs available resource credits. SecurityTrails currently requires a paid account. Provider terms, quotas, and account limits still apply.
 
 Use the external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan-cli`, and `chaos` commands when you need provider-native output. See [External Intel](../FEATURES.md#external-intel) for the provider coverage and result fields for each entity type.

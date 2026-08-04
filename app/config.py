@@ -15,7 +15,18 @@ from copy import deepcopy
 from collections.abc import Iterator, Mapping, MutableMapping
 from typing import Any, cast
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, ValidationError, create_model
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    create_model,
+    model_validator,
+)
 import config_paths
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 from core.startup_logging import configure_config_log_fallback, install_config_log_buffer
@@ -463,6 +474,49 @@ class ProjectDigestsConfig(_ConfigModel):
     first_send_lookback_hours: StrictInt = 24
 
 
+class CveRiskConfig(_ConfigModel):
+    bootstrap_enabled: StrictBool = True
+    refresh_enabled: StrictBool = False
+    refresh_interval_seconds: StrictInt = Field(default=86400, ge=300, le=604800)
+    stale_after_hours: StrictInt = Field(default=48, ge=1, le=8760)
+    http_timeout_seconds: StrictInt = Field(default=30, ge=3, le=120)
+    max_download_bytes: StrictInt = Field(default=67108864, ge=1024, le=268435456)
+    max_attempts: StrictInt = Field(default=3, ge=1, le=5)
+    lease_seconds: StrictInt = Field(default=300, ge=30, le=3600)
+    work_batch_size: StrictInt = Field(default=100, ge=1, le=1000)
+    owner_batch_size: StrictInt = Field(default=100, ge=1, le=1000)
+    work_max_attempts: StrictInt = Field(default=5, ge=1, le=20)
+    epss_activation_probability: StrictFloat = Field(default=0.10, ge=0, le=1)
+    epss_reset_probability: StrictFloat = Field(default=0.08, ge=0, le=1)
+    allowed_hosts: list[StrictStr] = Field(default_factory=lambda: [
+        "epss.cyentia.com",
+        "www.cisa.gov",
+    ])
+    @model_validator(mode="after")
+    def validate_contract(self):
+        if not 0 <= self.epss_reset_probability < self.epss_activation_probability <= 1:
+            raise ValueError(
+                "epss_reset_probability must be lower than epss_activation_probability"
+            )
+        normalized_hosts: list[str] = []
+        for value in self.allowed_hosts:
+            host = value.strip().lower()
+            if (
+                not host
+                or "://" in host
+                or "/" in host
+                or "@" in host
+                or host.startswith(".")
+                or host.endswith(".")
+            ):
+                raise ValueError("cve_risk.allowed_hosts entries must be hostnames")
+            normalized_hosts.append(host)
+        if not normalized_hosts:
+            raise ValueError("cve_risk.allowed_hosts must include at least one hostname")
+        self.allowed_hosts = list(dict.fromkeys(normalized_hosts))
+        return self
+
+
 _FORGIVING_BOOL_KEYS = {
     "workspace_enabled",
     "interactive_pty_enabled",
@@ -542,6 +596,7 @@ _NESTED_CONFIG_MODELS = {
     "scheduler": SchedulerConfig,
     "watchers": WatchersConfig,
     "project_digests": ProjectDigestsConfig,
+    "cve_risk": CveRiskConfig,
 }
 
 
@@ -1197,6 +1252,22 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "project_digests": {
             "default_cadence_preset": "daily",
             "first_send_lookback_hours": 24,
+        },
+        "cve_risk": {
+            "bootstrap_enabled": True,
+            "refresh_enabled": False,
+            "refresh_interval_seconds": 86400,
+            "stale_after_hours": 48,
+            "http_timeout_seconds": 30,
+            "max_download_bytes": 67108864,
+            "max_attempts": 3,
+            "lease_seconds": 300,
+            "work_batch_size": 100,
+            "owner_batch_size": 100,
+            "work_max_attempts": 5,
+            "epss_activation_probability": 0.10,
+            "epss_reset_probability": 0.08,
+            "allowed_hosts": ["epss.cyentia.com", "www.cisa.gov"],
         },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,

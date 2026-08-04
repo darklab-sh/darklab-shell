@@ -15,6 +15,7 @@ import config as _config
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from core.redaction import apply_redaction_rules
+from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.projects.package_presets import known_package_preset_ids
 from services.projects.provenance import attach_finding_target_references
 from services.projects.contracts import (
@@ -812,6 +813,7 @@ def evidence_manifest_from_summary(summary, payload, findings=None):
         "artifact_warnings": artifact_warnings,
         "redaction_mode": payload["redaction_mode"],
         "include_artifacts": payload["include_artifacts"],
+        "cve_risk_snapshot": build_cve_risk_snapshot(selected_findings),
         "provenance": _evidence_package_provenance(
             payload,
             project_payload,

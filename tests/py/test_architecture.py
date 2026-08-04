@@ -25,6 +25,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "auth.py",
     "openapi.py",
     "openapi_atlas_profile.py",
+    "openapi_cve_risk.py",
     "serialization.py",
 }
 
@@ -152,14 +153,15 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/run_kill.py", 123, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_pty.py", 259, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_support.py", 119, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/projects.py", 575, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/projects.py", 576, "split-target-phase3"),
     ModuleSizeBudget("app/blueprints/projects_artifacts.py", 155, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_auto_promote.py", 204, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_core.py", 412, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_findings.py", 272, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_links.py", 242, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_metadata.py", 158, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/projects_monitoring.py", 238, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_monitoring.py", 239, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_monitoring_risk.py", 65, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_packages.py", 386, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_report.py", 301, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_targets.py", 111, "split-package-ratchet"),
@@ -178,9 +180,10 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/atlas_mutations.py", 680, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas_profile_read.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas_read.py", 160, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/database.py", 1005, "already-resolved-ratchet"),
+    ModuleSizeBudget("app/core/database.py", 1007, "already-resolved-ratchet"),
     ModuleSizeBudget("app/blueprints/history.py", 1417, "already-resolved-ratchet"),
-    ModuleSizeBudget("app/services/api_v1/openapi.py", 2611, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi.py", 2615, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_cve_risk.py", 97, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_port_entities.py", 207, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_shodan.py", 74, "split-package-ratchet"),
@@ -244,7 +247,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/scope.py", 188, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/schema_manifest.py", 899, "cohesive-ratchet"),
+    ModuleSizeBudget("app/core/schema_manifest.py", 905, "cohesive-ratchet"),
     ModuleSizeBudget("app/core/database_backend.py", 845, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/commands/builtins_runtime.py", 824, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/builtins_runtime_specs.py", 169, "split-package-ratchet"),
@@ -303,8 +306,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 191
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "17e86fe2b9b458c17476c3676057b6fbed5be0f1cabfdbf1c48cdd701857f8de"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 192
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "b273d23d8b150634df9fda955854453101cc67b621cbead601389df5fcc5e491"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

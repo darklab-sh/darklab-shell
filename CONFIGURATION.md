@@ -23,7 +23,7 @@ The loader validates the final config at startup. Malformed YAML, a non-mapping 
 
 Config events are captured while the files and environment are being resolved, then written once after the effective `log_level` and `log_format` are ready. `CONFIG_VALIDATED` and `CONFIG_LOADED` report a `warning_count` that includes ignored, dropped, defaulted, clamped, and truncated values. If loading can't finish, the app writes one safe `CONFIG_LOAD_FAILED` record using the most recent usable text or GELF format. It includes bounded phase, source, key, and error-type fields, but not raw parser output, file contents, configuration values, or a traceback.
 
-Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, and `project_digests` merge by field. A local file can override one nested value without restating the whole section.
+Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, and `cve_risk` merge by field. A local file can override one nested value without restating the whole section.
 
 The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow).
 
@@ -36,7 +36,7 @@ The schema contract is:
 | Field group | Validation posture |
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
-| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, and `project_digests` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
+| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, and `cve_risk` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
 | Forgiving booleans | Boolean environment settings plus YAML settings such as `database_postgres_jit`, `audit_log_enabled`, `ai_allow_full_output`, and `ai_require_private_base_url` accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
@@ -353,6 +353,21 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `project_digests` | see nested defaults | Server-side only. Defaults used when a project opts into attack-surface digest notifications |
 | `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
 | `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
+| `cve_risk` | see nested defaults | Server-side public CVE risk data. Release-pinned FIRST EPSS and CISA KEV snapshots work offline; live bulk-feed refresh remains an operator opt-in |
+| `cve_risk.bootstrap_enabled` | `true` | Loads the release-pinned EPSS and KEV snapshots when the database has no newer accepted data. Bootstrap import is a silent ranking baseline and does not create risk-escalation events |
+| `cve_risk.refresh_enabled` | `false` | Lets the scheduler refresh the public EPSS and KEV bulk feeds. Refreshes send no Project, target, finding, package, or CVE inventory values to either source |
+| `cve_risk.refresh_interval_seconds` | `86400` | Minimum interval between refresh attempts for each source, from 300 to 604800 seconds |
+| `cve_risk.stale_after_hours` | `48` | Age after which accepted feed data is labeled stale, from 1 to 8760 hours |
+| `cve_risk.http_timeout_seconds` | `30` | Per-request timeout for an enabled bulk-feed refresh, from 3 to 120 seconds |
+| `cve_risk.max_download_bytes` | `67108864` | Maximum compressed response accepted from one feed refresh, from 1024 to 268435456 bytes |
+| `cve_risk.max_attempts` | `3` | Maximum refresh attempts after network or validation failures, from 1 to 5 |
+| `cve_risk.lease_seconds` | `300` | Database-backed single-flight lease for one source refresh, from 30 to 3600 seconds |
+| `cve_risk.work_batch_size` | `100` | Maximum changed-feed work items claimed in one escalation pass, from 1 to 1000 |
+| `cve_risk.owner_batch_size` | `100` | Maximum owner groups processed for one changed CVE before its durable cursor yields, from 1 to 1000 |
+| `cve_risk.work_max_attempts` | `5` | Maximum isolated attempts for one failed escalation work item, from 1 to 20 |
+| `cve_risk.epss_activation_probability` | `0.10` | EPSS probability that activates one owner-scoped risk event after an upward crossing |
+| `cve_risk.epss_reset_probability` | `0.08` | Lower EPSS probability that rearms a later upward event. It must remain below the activation probability |
+| `cve_risk.allowed_hosts` | `[epss.cyentia.com, www.cisa.gov]` | Exact HTTPS hostnames allowed for the fixed bulk-feed URLs and redirects. Entries must be hostnames, not URLs |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `workflow_active_execution_limit` | `3` | Maximum active workflow executions for one personal session or team owner |
 | `workflow_execution_max_runtime_seconds` | `14400` | Maximum total lifetime of one workflow execution. The engine checks this before launching or advancing each step |
@@ -390,6 +405,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `tour_enabled` | `true` | Enables the app tour entry points. When disabled, the welcome tour prompt, visual tour links, and `tour` built-in command are hidden |
 | `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG` |
 | `log_format` | `text` | Log output format. Options: `text` for human-readable logs or `gelf` for GELF 1.1 JSON |
+
+Release images include dated FIRST EPSS and CISA KEV snapshots, so saved CVE findings can be ranked without network access. Run `providers` to see each snapshot's source, version, age, and whether live refresh is enabled. When `cve_risk.refresh_enabled` is `true`, the scheduler downloads only the fixed public bulk feeds over allowlisted HTTPS; Python's standard `HTTPS_PROXY` and `NO_PROXY` settings still apply. A rejected, oversized, malformed, or failed download leaves the last accepted snapshot in place.
 
 See [Logging Reference](docs/logging.md) for level semantics, event names, fields, redaction rules, formats, and troubleshooting.
 

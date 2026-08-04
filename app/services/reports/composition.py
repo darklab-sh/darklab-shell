@@ -12,6 +12,7 @@ from typing import Any
 
 import config as _config
 from core.database_access import get_db_connect
+from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.projects.artifacts import artifact_owner_context
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import list_project_findings
@@ -516,6 +517,7 @@ def compose_report_context(
         "artifacts": selected["artifacts"],
         "artifact_warnings": artifact_warnings,
         "export": normalized_draft.get("export") or {},
+        "cve_risk_snapshot": build_cve_risk_snapshot(selected["findings"]),
     }
     if not bool(context["export"].get("include_private_notes")):
         context = _strip_notes(context)

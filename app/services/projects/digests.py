@@ -303,6 +303,7 @@ def _row_to_settings(
             "cadence_preset": _configured_default_cadence(),
             "channel_ids": [],
             "quiet_no_change": False,
+            "risk_escalations_enabled": False,
             "last_evaluated_at": "",
             "last_sent_at": "",
             "created": "",
@@ -316,6 +317,7 @@ def _row_to_settings(
         "cadence_preset": str(row["cadence_preset"] or DEFAULT_DIGEST_CADENCE),
         "channel_ids": _loads_json_list(row["channel_ids_json"]),
         "quiet_no_change": bool(row["quiet_no_change"]),
+        "risk_escalations_enabled": bool(row["risk_escalations_enabled"]),
         "last_evaluated_at": str(row["last_evaluated_at"] or ""),
         "last_sent_at": str(row["last_sent_at"] or ""),
         "created": str(row["created"]),
@@ -387,7 +389,7 @@ def get_digest_settings(session_id: str, project_id: str, *, team_id: str = "", 
     settings_session_id = _settings_session_id(project, session_id, team_id)
     row = conn.execute(
         "SELECT project_id, session_id, team_id, enabled, cadence_preset, channel_ids_json, "
-        "quiet_no_change, last_evaluated_at, last_sent_at, created, updated "
+        "quiet_no_change, risk_escalations_enabled, last_evaluated_at, last_sent_at, created, updated "
         "FROM project_digest_settings WHERE project_id = ? AND session_id = ? AND team_id = ?",
         (project_id, settings_session_id, team_id),
     ).fetchone()
@@ -430,15 +432,19 @@ def save_digest_settings(
         raise ProjectWorkspaceError("choose at least one digest notification channel")
     _validate_channel_ids(conn, session_id, team_id, channel_ids)
     quiet_no_change = _bool_flag(payload.get("quiet_no_change"), default=False)
+    risk_escalations_enabled = _bool_flag(
+        payload.get("risk_escalations_enabled"), default=False
+    )
     now = _now()
     conn.execute(
         "INSERT INTO project_digest_settings "
-        "(project_id, session_id, team_id, enabled, cadence_preset, channel_ids_json, quiet_no_change, "
+        "(project_id, session_id, team_id, enabled, cadence_preset, channel_ids_json, quiet_no_change, risk_escalations_enabled, "
         "last_evaluated_at, last_sent_at, created, updated) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, ?) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?) "
         "ON CONFLICT(project_id, session_id, team_id) DO UPDATE SET "
         "enabled = excluded.enabled, cadence_preset = excluded.cadence_preset, "
         "channel_ids_json = excluded.channel_ids_json, quiet_no_change = excluded.quiet_no_change, "
+        "risk_escalations_enabled = excluded.risk_escalations_enabled, "
         "updated = excluded.updated",
         (
             project_id,
@@ -448,6 +454,7 @@ def save_digest_settings(
             cadence,
             _json_param(list(channel_ids)),
             int(quiet_no_change),
+            int(risk_escalations_enabled),
             now,
             now,
         ),
@@ -514,10 +521,12 @@ def _window_start(settings: dict[str, Any], fired_at: str) -> str:
 
 
 def _summary_has_changes(summary: dict[str, Any]) -> bool:
-    return any(
+    watcher_changes = any(
         int(summary.get(key) or 0) > 0
         for key in ("changed_monitor_count", "recovered_monitor_count", "failed_monitor_count")
     )
+    risk = summary.get("risk") if isinstance(summary.get("risk"), dict) else {}
+    return watcher_changes or int(risk.get("actionable_count") or 0) > 0
 
 
 def evaluate_due_digest(
@@ -648,6 +657,10 @@ def evaluate_due_digest(
     window_summary = summary_payload.get("window_summary") or {}
     if not isinstance(window_summary, dict):
         window_summary = {}
+    if not bool(settings.get("risk_escalations_enabled")):
+        window_summary = dict(window_summary)
+        window_summary.pop("risk", None)
+        window_summary["risk_escalation_count"] = 0
     has_changes = _summary_has_changes(window_summary)
     quiet = bool(settings.get("quiet_no_change"))
     if not has_changes and not quiet:

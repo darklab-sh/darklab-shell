@@ -15,6 +15,14 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Findings now include offline EPSS and CISA KEV context, with feed-driven Project Monitoring alerts.**
+  - **Why:** Assessors can put known-exploited and higher-probability CVEs first without sending saved targets or findings to another provider when they open a result.
+  - **What:**
+    - Release-pinned, attributed FIRST EPSS and CISA KEV snapshots provide a dated offline baseline. Operators can opt into daily allowlisted refreshes with conditional requests, database leases, strict validation, bounded retries, and last-good fallback; `providers` shows the current source and freshness state.
+    - `intel cve`, Atlas, Project Findings, reports, evidence packages, API responses, and desktop/mobile finding rows use the same stored public-risk signals. KEV and EPSS are kept separate, missing or stale data stays explicit, and CISA dates are labeled as federal context rather than an operator SLA.
+    - Findings are ordered by KEV, EPSS probability and percentile, then age until normalized CVSS storage lands. Reports and evidence packages pin the exact source versions and values used so an older export stays explainable.
+    - Accepted feed changes can raise owner-scoped KEV and EPSS threshold events without rescanning. Durable work cursors, EPSS hysteresis, canonical acknowledgements, Project projections, and an opt-in digest setting prevent replay, flapping, duplicate Project alerts, and cross-owner disclosure.
+  - **Tests:** Focused backend coverage exercises bundle validation, refresh safety, stale and unavailable states, ranking, queue fairness and retries, escalation hysteresis, acknowledgement scope, report provenance, configuration bounds, and privacy-safe errors. Browser unit coverage pins compact KEV/EPSS labels and Project Monitoring acknowledgement and digest behavior; migration, architecture, OpenAPI, asset, and documentation checks cover the shared schema and public contracts.
 - **Atlas now has an exact, read-only lookup workflow for saved hostnames, IP addresses, and HTTP(S) URLs.**
   - **Why:** Quick Lookup opens saved evidence directly, including suppressed and source-less records, without searching or paging through the Atlas list.
   - **What:**

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { formatPortEntityMetadata as importedFormatPortEntityMetadata } from './atlas_entity_row.js';
+import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
 import { verificationStatusLabel as importedVerificationStatusLabel } from '../findings/finding_triage_bridge.js';
 import { setAtlasDetailHandlers as importedSetAtlasDetailHandlers } from './atlas_bridge.js';
 
@@ -9,6 +10,9 @@ import { setAtlasDetailHandlers as importedSetAtlasDetailHandlers } from './atla
 
 const _darklabGlobal = window;
 const QUICK_DETAIL_PREVIEW_LIMIT = 3;
+const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
+  ? importedFindingRiskSummary
+  : () => '';
 
   function text(value, fallback = '') {
     return String(value ?? '').trim() || fallback;
@@ -727,7 +731,12 @@ const QUICK_DETAIL_PREVIEW_LIMIT = 3;
       const meta = node(
         'div',
         'atlas-muted',
-        [text(finding.status), text(finding.severity), text(finding.tool_root)].filter(Boolean).join(' · '),
+        [
+          text(finding.status),
+          text(finding.severity),
+          text(finding.tool_root),
+          summarizeFindingRisk(finding),
+        ].filter(Boolean).join(' · '),
       );
       row.append(title, meta);
       if (typeof onOpenFinding === 'function') row.addEventListener('click', () => onOpenFinding(finding));
@@ -998,6 +1007,7 @@ const QUICK_DETAIL_PREVIEW_LIMIT = 3;
       node('div', 'atlas-detail-value', text(finding.title || finding.raw_line, finding.id)),
     );
     const meta = node('div', 'atlas-detail-meta');
+    const riskSummary = summarizeFindingRisk(finding);
     meta.append(
       metaRow('Status', text(finding.review_state || finding.status, 'new')),
       metaRow('Suppression', finding.suppressed ? text(finding.suppressed_reason, 'suppressed') : 'visible'),
@@ -1007,6 +1017,7 @@ const QUICK_DETAIL_PREVIEW_LIMIT = 3;
       metaRow('Occurrences', Number(finding.occurrence_count || 0).toLocaleString()),
       metaRow('Last seen', formatDate(finding.last_seen_at)),
     );
+    if (riskSummary) meta.appendChild(metaRow('CVE priority', riskSummary));
     const raw = node('code', 'atlas-finding-raw', text(finding.raw_line, finding.title || finding.id));
     container.append(header);
     if (!handlers.hideInlineActions) {

@@ -68,6 +68,7 @@ from services.atlas.records import (
     entity_row_to_dict as _row_to_entity,
     finding_row_to_dict as _row_to_finding,
 )
+from services.cve_risk.ranking import attach_risk_to_findings, cve_risk_order_sql
 from services.atlas.schema import ATLAS_ENTITY_TYPES
 from services.atlas.scope import (
     entity_exists_in_scope as entity_exists_in_scope,
@@ -515,10 +516,9 @@ def list_findings(
         verification_status_clause,
         _suppression_clause("f"),
         _orphan_finding_clause("f", team_id),
-        "ORDER BY CASE f.status ",
-        "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 ",
-        "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, ",
-        "f.last_seen_at DESC, f.created DESC LIMIT ? OFFSET ?",
+        "ORDER BY ",
+        cve_risk_order_sql("f", age_expression="COALESCE(NULLIF(f.first_seen_at, ''), f.created)"),
+        " LIMIT ? OFFSET ?",
     ))
     rows = conn.execute(
         rows_sql,
@@ -558,6 +558,7 @@ def list_findings(
     for finding in findings:
         finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
     attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
+    attach_risk_to_findings(findings, conn=conn)
     for row in count_rows:
         status = str(row["status"] or "new")
         counts[status] = int(row["count"] or 0)
@@ -607,11 +608,13 @@ def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "")
         "ORDER BY fo.seen_at DESC, fo.run_id DESC, fo.line_number DESC LIMIT ?",
         [finding_id, *occurrence_scope_params, ENTITY_DETAIL_RUN_LIMIT],
     ).fetchall()
+    finding_payload = {
+        **_row_to_finding(row),
+        "import_sources": _finding_import_sources(conn, session_id, finding_id, team_id=team_id),
+    }
+    attach_risk_to_findings([finding_payload], conn=conn)
     return {
-        "finding": {
-            **_row_to_finding(row),
-            "import_sources": _finding_import_sources(conn, session_id, finding_id, team_id=team_id),
-        },
+        "finding": finding_payload,
         "occurrences": [
             {
                 "run_id": occurrence["run_id"],

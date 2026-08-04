@@ -6589,6 +6589,17 @@ class TestPostgresMigrations:
         "finding_triage_details",
         "evidence_packages",
         "project_reports",
+        "cve_risk_sources",
+        "cve_risk_records",
+        "cve_risk_refresh_leases",
+        "cve_risk_work_items",
+        "package_advisories",
+        "package_advisory_ranges",
+        "finding_cve_links",
+        "risk_escalation_states",
+        "risk_escalations",
+        "risk_escalation_observations",
+        "risk_escalation_projects",
     )
 
     @staticmethod
@@ -6689,6 +6700,7 @@ class TestPostgresMigrations:
             "0043",
             "0044",
             "0045",
+            "0046",
         ]
         for table_name in (
             "runs",
@@ -7530,7 +7542,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0045"
+        assert rows[-1]["version"] == "0046"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7919,7 +7931,7 @@ class TestPostgresMigrations:
         applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
         applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
-        assert applied == ["0039", "0040", "0041", "0042", "0043", "0044", "0045"]
+        assert applied == ["0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046"]
         assert applied_again == []
         assert "0039" in conn.applied_versions
         assert "0040" in conn.applied_versions
@@ -7928,7 +7940,8 @@ class TestPostgresMigrations:
         assert "0043" in conn.applied_versions
         assert "0044" in conn.applied_versions
         assert "0045" in conn.applied_versions
-        assert conn.commit_count == 7
+        assert "0046" in conn.applied_versions
+        assert conn.commit_count == 8
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8081,7 +8094,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0045",
+            "0047",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8106,9 +8119,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0045"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0047"]
         assert table_exists is not None
-        assert "0045" in versions
+        assert "0047" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -8231,6 +8244,7 @@ class TestPostgresMigrations:
 
     def test_post_schema_maintenance_logs_lifecycle_and_steps(self, monkeypatch):
         import services.audit.retention as audit_retention
+        import services.cve_risk.maintenance as cve_risk_maintenance
 
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         monkeypatch.setattr(database, "_populate_output_search_text", mock.Mock(return_value=0))
@@ -8242,6 +8256,7 @@ class TestPostgresMigrations:
         monkeypatch.setattr(audit_retention, "prune_events", mock.Mock())
         monkeypatch.setattr(database, "_audit_project_target_host_type_collapse", mock.Mock())
         monkeypatch.setattr(database, "_backfill_url_host_entity_links", mock.Mock())
+        monkeypatch.setattr(cve_risk_maintenance, "sync_finding_cve_links", mock.Mock())
 
         with mock.patch.object(database.log, "info") as log_info, \
              mock.patch.object(database.log, "debug") as log_debug:
@@ -8263,6 +8278,7 @@ class TestPostgresMigrations:
             "audit_retention_prune",
             "project_target_audit",
             "url_host_entity_link_backfill",
+            "finding_cve_link_backfill",
         ]
         assert log_info.call_args_list[-1].kwargs["extra"]["steps"] == ",".join(step_events)
 
@@ -9534,6 +9550,7 @@ class TestWatchersFoundation:
             "cadence_preset": "daily",
             "channel_ids": [],
             "quiet_no_change": False,
+            "risk_escalations_enabled": False,
             "last_evaluated_at": "",
             "last_sent_at": "",
             "next_due_at": "",
@@ -10422,6 +10439,8 @@ class TestWatchersFoundation:
             "failed": 0,
             "quiet": 1,
             "paused": 0,
+            "risk_escalations": 0,
+            "unacknowledged_risk_escalations": 0,
         }
         assert [monitor["dashboard_state"] for monitor in payload["monitors"]] == ["quiet", "changed"]
         changed_monitor = next(item for item in payload["monitors"] if item["id"] == changed.id)

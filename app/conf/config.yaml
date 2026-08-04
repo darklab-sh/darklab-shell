@@ -376,6 +376,35 @@
 #   default_cadence_preset: daily
 #   first_send_lookback_hours: 24
 
+# ── Public CVE Risk Data ────────────────────────────────────────────────────
+#
+# Release-pinned FIRST EPSS and CISA KEV snapshots give CVE findings a dated,
+# offline prioritization baseline. Live refresh is off until an operator opts
+# in. Refreshes download only the public bulk feeds; they don't send Project,
+# target, finding, or package values to either source.
+#
+# The `providers` built-in shows each feed's version, age, origin, and current
+# refresh setting. HTTPS_PROXY/NO_PROXY are honored by Python's standard HTTP
+# client when a live refresh is enabled.
+# Server default if unset:
+# cve_risk:
+#   bootstrap_enabled: true
+#   refresh_enabled: false
+#   refresh_interval_seconds: 86400
+#   stale_after_hours: 48
+#   http_timeout_seconds: 30
+#   max_download_bytes: 67108864
+#   max_attempts: 3
+#   lease_seconds: 300
+#   work_batch_size: 100
+#   owner_batch_size: 100
+#   work_max_attempts: 5
+#   epss_activation_probability: 0.10
+#   epss_reset_probability: 0.08
+#   allowed_hosts:
+#     - epss.cyentia.com
+#     - www.cisa.gov
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 # Log verbosity level . Options: ERROR, WARN, INFO, DEBUG

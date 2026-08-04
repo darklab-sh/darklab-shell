@@ -12,6 +12,8 @@ Structured events use the `session` field for request correlation. Anonymous ses
 
 Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Atlas Quick Lookup reports accept only bounded modes, result states, scope kinds, request sequence numbers, counts, booleans, failure stages, and timings. Submitted drafts, normalized values, canonical values, URL paths or queries, and request bodies aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
 
+Public CVE risk events log source names, feed versions, outcomes, counts, timings, and error classes. They don't enumerate CVEs, package identities, targets, Projects, provider payloads, or finding evidence. Project acknowledgement logs keep only the escalation id, acknowledgement state, and bounded note length; the note itself stays in the database and out of logs.
+
 ## Level Semantics
 
 | Level | Use |
@@ -134,6 +136,10 @@ The current event inventory is:
 | INFO | `REDIS_FALLBACK_IN_PROCESS` | process tracking startup | redis_configured, workers, fallback |
 | INFO | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP` | active-run startup cleanup | metadata_removed, session_members_removed, team_members_removed, pid, cleanup_owner, lock_type |
 | INFO | `MIGRATION_APPLIED` | Schema migration runner | migration_version, migration_name |
+| INFO | `CVE_RISK_BOOTSTRAP_LOADED` | bundled public-risk bootstrap | source, source_version, record_count, origin |
+| INFO | `CVE_RISK_REFRESH_COMPLETED` | public-risk feed refresh | source, source_version, record_count, outcome, attempt |
+| INFO | `RISK_ESCALATION_CREATED` | changed-CVE work processor | source, transition_kind, feed_version, owner_kind, observation_count, project_count, model_changed |
+| INFO | `PROJECT_RISK_ESCALATION_ACK_UPDATED` | Project Monitoring risk-event route | ip, session, team_id, project_id, escalation_id, ack_state, note_chars |
 | INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
 | INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |
@@ -324,6 +330,9 @@ The current event inventory is:
 | WARN | `SCHEDULER_LOCK_RELEASE_SKIPPED` | scheduler worker | phase, error_type, sqlstate |
 | WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
+| WARN | `CVE_RISK_BOOTSTRAP_UNAVAILABLE` | bundled public-risk bootstrap | reason |
+| WARN | `CVE_RISK_REFRESH_RETRY` | public-risk feed refresh | source, attempt, max_attempts, error_type |
+| WARN | `PROJECT_RISK_ESCALATION_ACK_REJECTED` | Project Monitoring risk-event route | ip, session, team_id, project_id, escalation_id, http_status, reason |
 | WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
 | WARN | `PACKAGE_PRESETS_OVERRIDE_INVALID` | evidence package preset catalog loader | path, fallback_path, error |
 | WARN | `PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED` / `CREATE_REJECTED` / `UPDATE_REJECTED` / `APPLY_REJECTED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, http_status, reason |
@@ -426,6 +435,10 @@ The current event inventory is:
 | ERROR | `RUNTIME_BOOTSTRAP_FAILED` | runtime bootstrap | phase, runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs (+ traceback) |
 | ERROR | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR` | active-run startup cleanup | (+ traceback) |
 | ERROR | `DB_INIT_FAILED` | database startup | backend, phase, schema_action (+ traceback) |
+| ERROR | `CVE_RISK_BOOTSTRAP_MANIFEST_INVALID` | bundled public-risk bootstrap | reason when available (+ traceback for unreadable or invalid JSON) |
+| ERROR | `CVE_RISK_BOOTSTRAP_FAILED` | bundled public-risk bootstrap | source (+ traceback) |
+| ERROR | `CVE_RISK_REFRESH_FAILED` | public-risk feed refresh | source, attempts, error_type (+ traceback) |
+| ERROR | `CVE_RISK_WORK_ITEM_FAILED` | changed-CVE work processor | source, attempt, max_attempts, error_type (+ traceback) |
 | ERROR | `METRICS_ENVIRONMENT_SETUP_FAILED` | metrics startup | prometheus_multiproc_dir, source (+ traceback) |
 | ERROR | `GUNICORN_WORKER_CLEANUP_FAILED` | Gunicorn worker hook | hook, pid (+ traceback) |
 | ERROR | `PROJECT_AUTO_PROMOTE_RUN_ERROR` | run finalization | run_id, session, team_id, cmd (+ traceback); per-rule context is logged by `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` |

@@ -35,6 +35,7 @@ from services.atlas.scope import (
 )
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.entity_monitoring import entity_project_monitoring_context
+from services.cve_risk.ranking import attach_risk_to_findings, cve_risk_order_sql
 
 
 RELATED_ENTITY_LIMIT = 25
@@ -552,12 +553,12 @@ def _finding_rollup(
     samples = conn.execute(
         cte_sql  # nosec
         + "SELECT * FROM profile_findings WHERE COALESCE(suppressed, FALSE) = FALSE "
-        "ORDER BY CASE LOWER(COALESCE(severity, '')) "
-        "WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 "
-        "WHEN 'info' THEN 4 ELSE 5 END, "
-        "CASE status WHEN 'important' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'new' THEN 2 "
-        "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 5 END, "
-        "last_seen_at DESC, created DESC LIMIT ?",
+        "ORDER BY "
+        + cve_risk_order_sql(
+            "profile_findings",
+            age_expression="COALESCE(NULLIF(profile_findings.first_seen_at, ''), profile_findings.created)",
+        )
+        + " LIMIT ?",
         [*params, FINDING_SAMPLE_LIMIT],
     ).fetchall()
     rollup["sample"] = [
@@ -641,7 +642,12 @@ def load_profile_finding_page(
     rows = conn.execute(
         cte_sql  # nosec
         + "SELECT * FROM profile_findings WHERE COALESCE(suppressed, FALSE) = FALSE "
-        "ORDER BY last_seen_at DESC, created DESC LIMIT ? OFFSET ?",
+        "ORDER BY "
+        + cve_risk_order_sql(
+            "profile_findings",
+            age_expression="COALESCE(NULLIF(profile_findings.first_seen_at, ''), profile_findings.created)",
+        )
+        + " LIMIT ? OFFSET ?",
         [*params, FINDING_PAGE_LIMIT, safe_offset],
     ).fetchall()
     findings = [
@@ -651,6 +657,7 @@ def load_profile_finding_page(
         }
         for row in rows
     ]
+    attach_risk_to_findings(findings, conn=conn)
     return findings, {
         "bucket": normalized_bucket,
         "limit": FINDING_PAGE_LIMIT,

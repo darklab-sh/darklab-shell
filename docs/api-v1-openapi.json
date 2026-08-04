@@ -935,6 +935,18 @@
             "nullable": true,
             "type": "string"
           },
+          "cve_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "cve_risk": {
+            "items": {
+              "$ref": "#/components/schemas/CveRiskSignal"
+            },
+            "type": "array"
+          },
           "entity_id": {
             "type": "string"
           },
@@ -974,8 +986,14 @@
           "raw_line": {
             "type": "string"
           },
+          "remediation_id": {
+            "type": "string"
+          },
           "review_state": {
             "type": "string"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/CveRiskSignal"
           },
           "run_command": {
             "type": "string"
@@ -1431,6 +1449,123 @@
           "total",
           "counts",
           "findings"
+        ],
+        "type": "object"
+      },
+      "CveRiskEpssSignal": {
+        "properties": {
+          "freshness": {
+            "enum": [
+              "unavailable",
+              "current",
+              "stale",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "model_version": {
+            "type": "string"
+          },
+          "percentile": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "probability": {
+            "description": "FIRST EPSS exploitation probability. This is not a complete risk score.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "score_date": {
+            "type": "string"
+          },
+          "source_published_at": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "probability",
+          "percentile",
+          "freshness"
+        ],
+        "type": "object"
+      },
+      "CveRiskKevSignal": {
+        "properties": {
+          "date_added": {
+            "type": "string"
+          },
+          "due_date": {
+            "description": "CISA BOD 22-01 federal directive context; this is not the Project's or operator's remediation SLA.",
+            "type": "string"
+          },
+          "freshness": {
+            "enum": [
+              "unavailable",
+              "current",
+              "stale",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "known_ransomware_campaign_use": {
+            "type": "string"
+          },
+          "listed": {
+            "type": "boolean"
+          },
+          "required_action": {
+            "type": "string"
+          },
+          "source_published_at": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "listed",
+          "freshness"
+        ],
+        "type": "object"
+      },
+      "CveRiskSignal": {
+        "properties": {
+          "cve_id": {
+            "type": "string"
+          },
+          "epss": {
+            "$ref": "#/components/schemas/CveRiskEpssSignal"
+          },
+          "kev": {
+            "$ref": "#/components/schemas/CveRiskKevSignal"
+          },
+          "priority_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "public_exploit_available": {
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cve_id",
+          "kev",
+          "epss",
+          "public_exploit_available",
+          "priority_reasons"
         ],
         "type": "object"
       },
@@ -2414,6 +2549,18 @@
             "nullable": true,
             "type": "string"
           },
+          "cve_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "cve_risk": {
+            "items": {
+              "$ref": "#/components/schemas/CveRiskSignal"
+            },
+            "type": "array"
+          },
           "entity_id": {
             "type": "string"
           },
@@ -2447,8 +2594,14 @@
           "raw_line": {
             "type": "string"
           },
+          "remediation_id": {
+            "type": "string"
+          },
           "review_state": {
             "type": "string"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/CveRiskSignal"
           },
           "run_command": {
             "type": "string"

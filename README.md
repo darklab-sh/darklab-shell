@@ -78,7 +78,7 @@ After changing one of these settings, run `docker compose up -d --force-recreate
 | [Projects](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, monitoring, and handoff packages. |
 | [Atlas and Quick Lookup](FEATURES.md#session-entity-atlas) | Browse captured entities and open everything saved for one hostname, IP address, or URL without paging through results. |
 | [Workflows and automation](FEATURES.md#guided-workflows) | Guided playbooks, schedules, watchers, and outbound notifications. |
-| [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context from supported providers. |
+| [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context, including dated offline EPSS and CISA KEV signals. |
 | [Files, variables, and secrets](FEATURES.md#session-files) | A searchable personal or team file browser, terminal capture/copy helpers, reusable values, and encrypted tool credentials. |
 | [Teams](FEATURES.md#team-mode) | Shared runs, projects, files, automation, and secrets with role controls. |
 | [Interactive tools](FEATURES.md#interactive-pty-mode) | Guarded PTY sessions for approved tools that need a real terminal. |
@@ -92,6 +92,8 @@ See [FEATURES.md](FEATURES.md) for the full feature reference.
 Open **Quick Lookup** beside Atlas on the desktop rail or mobile menu, or press `Alt+Q` / `Option+Q`. Enter one hostname, IP address, or absolute `http://` or `https://` URL and darklab_shell opens the matching saved Atlas profile in your current personal or team scope. **Auto** detects the input type, while the other choices let you require a hostname, IP address, or URL.
 
 Quick Lookup reads evidence and Intel snapshots the app has already saved. It doesn't run a command, create an Atlas record, or contact an Intel provider. If there isn't an exact record, the result explains what was missing and can take you to normal Atlas search; an unmatched URL can also offer its known parent host. Use **Refresh intel** from a saved profile only when you want a live provider refresh.
+
+Saved CVEs also use release-pinned FIRST EPSS and CISA KEV data to explain which findings deserve attention first. The `providers` command shows the data version and age. Live bulk-feed refresh is off by default, so a fresh or disconnected install still has a dated baseline without making an outbound request.
 
 ---
 
@@ -328,6 +330,7 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
 - [TODO.md](TODO.md) - Backlog items, research notes, and known issues
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [app/resources/cve_risk/NOTICE.md](app/resources/cve_risk/NOTICE.md) - Attribution and interpretation notes for the bundled EPSS and CISA KEV data
 - [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
 - [docs/changelog/1.x.md](docs/changelog/1.x.md) - Published 1.x release history

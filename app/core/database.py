@@ -366,6 +366,8 @@ def _run_post_schema_maintenance(conn):
     run_step("audit_retention_prune", audit_retention)
     run_step("project_target_audit", lambda: _audit_project_target_host_type_collapse(conn))
     run_step("url_host_entity_link_backfill", lambda: _backfill_url_host_entity_links(conn))
+    from services.cve_risk.maintenance import run_cve_risk_maintenance  # noqa: PLC0415
+    run_cve_risk_maintenance(conn, run_step, CFG)
     log.info("POST_SCHEMA_MAINTENANCE_COMPLETED", extra={
         "backend": DB_BACKEND.value,
         "steps": ",".join(completed_steps),

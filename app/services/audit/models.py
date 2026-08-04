@@ -40,6 +40,8 @@ class AuditTargetType(str, Enum):
     IMPORT = "import"
     WORKFLOW = "workflow"
     WORKFLOW_EXECUTION = "workflow_execution"
+    CVE_RISK_SOURCE = "cve_risk_source"
+    RISK_ESCALATION = "risk_escalation"
 
 
 class AuditEventType(str, Enum):
@@ -107,6 +109,8 @@ class AuditEventType(str, Enum):
     WORKFLOW_DELETE = "workflow.delete"
     WORKFLOW_EXECUTION_START = "workflow_execution.start"
     WORKFLOW_EXECUTION_CANCEL = "workflow_execution.cancel"
+    CVE_RISK_REFRESH = "cve_risk.refresh"
+    RISK_ESCALATION_ACK = "risk_escalation.ack"
 
 
 COMMON_DETAIL_KEYS = frozenset({
@@ -208,6 +212,12 @@ COMMON_DETAIL_KEYS = frozenset({
     "source_session_hash",
     "source_session_label",
     "triggers",
+    "origin",
+    "outcome",
+    "record_count",
+    "source_version",
+    "transition_kind",
+    "observation_count",
 })
 
 HISTORY_DELETE_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
@@ -252,6 +262,16 @@ def _spec(
 
 
 EVENT_SPECS: dict[str, EventSpec] = {
+    AuditEventType.CVE_RISK_REFRESH.value: _spec(
+        AuditEventType.CVE_RISK_REFRESH,
+        AuditTargetType.CVE_RISK_SOURCE,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.RISK_ESCALATION_ACK.value: _spec(
+        AuditEventType.RISK_ESCALATION_ACK,
+        AuditTargetType.RISK_ESCALATION,
+        RecordingMode.BEST_EFFORT,
+    ),
     AuditEventType.HISTORY_DELETE.value: _spec(
         AuditEventType.HISTORY_DELETE,
         AuditTargetType.RUN,

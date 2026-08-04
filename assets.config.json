@@ -80,6 +80,7 @@
     "/static/js/features/atlas/atlas_mobile.js",
     "/static/js/features/findings/findings_board_bridge.js",
     "/static/js/features/findings/findings_board_modal.js",
+    "/static/js/features/findings/finding_risk.js",
     "/static/js/features/findings/finding_triage_editor.js",
     "/static/js/features/projects/project_activity.js",
     "/static/js/features/projects/project_overview.js",

@@ -139,6 +139,9 @@ def _report_manifest_provenance(
             "private_notes_included": bool(export_prefs.get("include_private_notes")),
         },
     }
+    risk_snapshot = (context or {}).get("cve_risk_snapshot")
+    if isinstance(risk_snapshot, dict) and risk_snapshot:
+        provenance["sources"]["cve_risk"] = risk_snapshot
     if audit_handoff:
         provenance["audit"] = {
             key: str(value)

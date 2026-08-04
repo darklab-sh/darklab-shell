@@ -34,6 +34,7 @@ import { apiFetch as importedApiFetch, logClientError as importedLogClientError 
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_bridge.js';
 import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_modal_state_bridge.js';
 import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
+import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
 import {
   DarklabTeamScope as importedTeamScope,
   activeTeamScopeCan as importedActiveTeamScopeCan,
@@ -85,6 +86,9 @@ let exportedCycleAtlasTab = null;
   const entityRowApi = (typeof importedAtlasEntityRow !== 'undefined' && importedAtlasEntityRow) || {};
   const findingTriageEditor = (typeof importedFindingTriageEditor !== 'undefined' && importedFindingTriageEditor) || null;
   const metadataApi = (typeof importedEntityMetadata !== 'undefined' && importedEntityMetadata) || {};
+  const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
+    ? importedFindingRiskSummary
+    : () => '';
   const teamScope = (typeof importedTeamScope !== 'undefined' && importedTeamScope)
     || {
       activeTeamScopeCan: (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
@@ -2044,6 +2048,7 @@ let exportedCycleAtlasTab = null;
       text(finding.severity),
       text(finding.tool_root),
       text(finding.entity_value || finding.subject_key),
+      summarizeFindingRisk(finding),
     ].filter(Boolean).join(' · ');
     main.append(title, meta);
 

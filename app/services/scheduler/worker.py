@@ -156,6 +156,13 @@ def run_once(*, limit: int = 50) -> int:
     now = datetime.now(timezone.utc).isoformat()
     with database.db_connect() as conn:
         maybe_run_retention(conn, now=now)
+        from services.cve_risk.refresh import refresh_due_feeds  # noqa: PLC0415
+        from services.cve_risk.escalation import process_risk_work  # noqa: PLC0415
+        from services.cve_risk.links import sync_finding_cve_links  # noqa: PLC0415
+
+        sync_finding_cve_links(conn)
+        refresh_due_feeds(conn, now=datetime.fromisoformat(now))
+        process_risk_work(conn)
         schedules = due_schedules(conn, now=now, limit=limit)
         log.debug("SCHEDULER_TICK", extra={"now": now, "limit": limit, "due_count": len(schedules)})
         for schedule in schedules:

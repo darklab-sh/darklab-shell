@@ -9,6 +9,7 @@ from copy import deepcopy
 
 from config import APP_VERSION
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
+from services.api_v1.openapi_cve_risk import cve_risk_finding_properties, cve_risk_schemas
 from services.scheduler.models import CADENCE_PRESETS
 from services.watchers.models import (
     DIFF_KINDS,
@@ -562,6 +563,7 @@ OPENAPI_SPEC: dict = {
                     "total_exact": {"type": "boolean"},
                 },
             },
+            **cve_risk_schemas(),
             "AtlasFinding": {
                 "type": "object",
                 "required": ["id", "entity_id", "status", "title", "raw_line", "occurrence_count"],
@@ -590,6 +592,7 @@ OPENAPI_SPEC: dict = {
                     "raw_line": {"type": "string"},
                     "line_number": {"type": "integer", "nullable": True},
                     "created": {"type": "string", "nullable": True},
+                    **cve_risk_finding_properties(),
                 },
             },
             "AtlasFindingPage": {
@@ -777,6 +780,7 @@ OPENAPI_SPEC: dict = {
                     "command_root": {"type": "string"},
                     "source_run_exists": {"type": "boolean"},
                     "orphan_source": {"type": "boolean"},
+                    **cve_risk_finding_properties(),
                 },
             },
             "ProjectRun": {
