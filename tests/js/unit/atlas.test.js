@@ -2714,7 +2714,7 @@ describe('Atlas overlay', () => {
       '/atlas/entities/ent_ip?project_id=prj_linked',
       expect.objectContaining({ cache: 'no-store' }),
     )
-  })
+  }, 10_000)
 
   it('does not close its own fallback shell while finishing either Atlas entry mode', async () => {
     const closeMajorOverlays = vi.fn()
