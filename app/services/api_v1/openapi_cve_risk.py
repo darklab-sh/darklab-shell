@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.api_v1.openapi_cve_advisory import cve_advisory_schemas
+from services.api_v1.openapi_finding_priority import finding_priority_schemas
 
 
 def _ref(name: str) -> dict[str, str]:
@@ -21,6 +22,7 @@ def cve_risk_schemas() -> dict[str, Any]:
     }
     return {
         **cve_advisory_schemas(freshness),
+        **finding_priority_schemas(),
         "CveRiskKevSignal": {
             "type": "object",
             "required": ["listed", "freshness"],
@@ -79,4 +81,9 @@ def cve_risk_finding_properties() -> dict[str, Any]:
         "cve_risk": {"type": "array", "items": _ref("CveRiskSignal")},
         "risk": _ref("CveRiskSignal"),
         "remediation_id": {"type": "string"},
+        "remediation_groups": {
+            "type": "array",
+            "items": _ref("FindingRemediationReference"),
+        },
+        "priority_context": _ref("FindingPriorityContext"),
     }

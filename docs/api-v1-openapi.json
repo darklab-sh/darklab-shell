@@ -983,8 +983,17 @@
           "occurrence_count": {
             "type": "integer"
           },
+          "priority_context": {
+            "$ref": "#/components/schemas/FindingPriorityContext"
+          },
           "raw_line": {
             "type": "string"
+          },
+          "remediation_groups": {
+            "items": {
+              "$ref": "#/components/schemas/FindingRemediationReference"
+            },
+            "type": "array"
           },
           "remediation_id": {
             "type": "string"
@@ -1726,6 +1735,70 @@
           "status",
           "created",
           "updated"
+        ],
+        "type": "object"
+      },
+      "FindingPriorityContext": {
+        "properties": {
+          "asset": {
+            "additionalProperties": false,
+            "properties": {
+              "criticality": {
+                "type": "string"
+              },
+              "environment": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/FindingPriorityContextValue"
+          },
+          "exposure": {
+            "$ref": "#/components/schemas/FindingPriorityContextValue"
+          }
+        },
+        "required": [
+          "confidence",
+          "exposure",
+          "asset"
+        ],
+        "type": "object"
+      },
+      "FindingPriorityContextValue": {
+        "nullable": true,
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "FindingRemediationReference": {
+        "properties": {
+          "affected_subject": {
+            "type": "string"
+          },
+          "remediation_id": {
+            "type": "string"
+          },
+          "vulnerability_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "remediation_id",
+          "vulnerability_id",
+          "affected_subject"
         ],
         "type": "object"
       },
@@ -2672,8 +2745,17 @@
           "orphan_source": {
             "type": "boolean"
           },
+          "priority_context": {
+            "$ref": "#/components/schemas/FindingPriorityContext"
+          },
           "raw_line": {
             "type": "string"
+          },
+          "remediation_groups": {
+            "items": {
+              "$ref": "#/components/schemas/FindingRemediationReference"
+            },
+            "type": "array"
           },
           "remediation_id": {
             "type": "string"

@@ -9,10 +9,18 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import re
-from typing import Any
+from typing import Any, Mapping
 
 from core.database_access import get_db_connect
-from .links import finding_cves, remediation_identity
+from .links import (
+    canonical_affected_subject,
+    finding_cves,
+    finding_evidence_keys,
+    finding_priority_context,
+    finding_validation_method,
+    owner_scope_key,
+    remediation_identity,
+)
 from .nvd_advisory import get_advisory_source_status
 from .store import get_configured_feed_status
 
@@ -58,6 +66,10 @@ def _number(value: Any) -> float | None:
         return float(value) if value is not None and value != "" else None
     except (TypeError, ValueError):
         return None
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _nvd_freshness(row: dict[str, Any], advisory_source: dict[str, Any]) -> str:
@@ -139,8 +151,8 @@ def _risk_payload(
 
 def explain_cve_priority(risk: dict[str, Any], *, cvss_score: Any = None) -> list[str]:
     reasons: list[str] = []
-    kev = risk.get("kev") if isinstance(risk.get("kev"), dict) else {}
-    epss = risk.get("epss") if isinstance(risk.get("epss"), dict) else {}
+    kev = _dict_value(risk.get("kev"))
+    epss = _dict_value(risk.get("epss"))
     if bool(kev.get("listed")):
         reasons.append("Listed in CISA KEV")
     probability = _number(epss.get("probability"))
@@ -151,7 +163,7 @@ def explain_cve_priority(risk: dict[str, Any], *, cvss_score: Any = None) -> lis
         reasons.append("EPSS unavailable")
     if percentile is not None:
         reasons.append(f"EPSS {percentile * 100:.1f}th percentile")
-    stored_cvss = risk.get("cvss") if isinstance(risk.get("cvss"), dict) else {}
+    stored_cvss = _dict_value(risk.get("cvss"))
     cvss = _number(cvss_score)
     if cvss is None:
         cvss = _number(stored_cvss.get("score"))
@@ -164,12 +176,12 @@ def explain_cve_priority(risk: dict[str, Any], *, cvss_score: Any = None) -> lis
 
 
 def cve_risk_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
-    risk = item.get("risk") if isinstance(item.get("risk"), dict) else item
-    kev = risk.get("kev") if isinstance(risk.get("kev"), dict) else {}
-    epss = risk.get("epss") if isinstance(risk.get("epss"), dict) else {}
+    risk = _dict_value(item.get("risk")) or item
+    kev = _dict_value(risk.get("kev"))
+    epss = _dict_value(risk.get("epss"))
     probability = _number(epss.get("probability"))
     percentile = _number(epss.get("percentile"))
-    cvss_signal = risk.get("cvss") if isinstance(risk.get("cvss"), dict) else {}
+    cvss_signal = _dict_value(risk.get("cvss"))
     cvss = _number(item.get("cvss_score"))
     if cvss is None:
         cvss = _number(cvss_signal.get("score"))
@@ -181,9 +193,22 @@ def cve_risk_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
         -(percentile or 0.0),
         1 if cvss is None else 0,
         -(cvss or 0.0),
-        str(item.get("first_seen_at") or item.get("created") or ""),
-        str(item.get("remediation_id") or item.get("id") or ""),
     )
+
+
+def _sort_by_cve_risk(items: list[dict[str, Any]]) -> None:
+    """Apply public-risk ordering with newest and id descending as tie-breakers."""
+    items.sort(key=lambda item: (
+        str(item.get("first_seen_at") or item.get("created") or ""),
+        str(
+            item.get("remediation_id")
+            or item.get("id")
+            or _dict_value(item.get("risk")).get("cve_id")
+            or item.get("cve_id")
+            or ""
+        ),
+    ), reverse=True)
+    items.sort(key=cve_risk_sort_key)
 
 
 def cve_risk_order_sql(alias: str, *, age_expression: str) -> str:
@@ -210,9 +235,24 @@ def cve_risk_order_sql(alias: str, *, age_expression: str) -> str:
     )
 
 
+def _finding_with_owner(
+    finding: dict[str, Any],
+    *,
+    owner_by_finding_id: Mapping[str, tuple[str, str]] | None,
+) -> dict[str, Any]:
+    if not owner_by_finding_id:
+        return finding
+    owner = owner_by_finding_id.get(str(finding.get("id") or ""))
+    if owner is None:
+        return finding
+    return {**finding, "session_id": owner[0], "team_id": owner[1]}
+
+
 def attach_risk_to_findings(
     findings: list[dict[str, Any]],
     conn: Any | None = None,
+    *,
+    owner_by_finding_id: Mapping[str, tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     if not findings:
         return findings
@@ -249,6 +289,10 @@ def attach_risk_to_findings(
         }
         for finding in findings:
             finding_id = str(finding.get("id") or "")
+            identity_finding = _finding_with_owner(
+                finding,
+                owner_by_finding_id=owner_by_finding_id,
+            )
             cves = cves_by_finding.get(finding_id, ())
             if not cves:
                 continue
@@ -276,12 +320,132 @@ def attach_risk_to_findings(
                     risk, cvss_score=finding.get("cvss_score")
                 )
                 enriched.append(risk)
-            enriched.sort(key=cve_risk_sort_key)
+            _sort_by_cve_risk(enriched)
+            remediation_groups = [{
+                "remediation_id": remediation_identity(identity_finding, cve_id),
+                "vulnerability_id": cve_id,
+                "affected_subject": canonical_affected_subject(identity_finding),
+            } for cve_id in cves]
             finding["cve_ids"] = list(cves)
             finding["cve_risk"] = enriched
             finding["risk"] = enriched[0]
-            finding["remediation_id"] = remediation_identity(finding, enriched[0]["cve_id"])
+            finding["remediation_groups"] = remediation_groups
+            primary_cve_id = str(enriched[0].get("cve_id") or "")
+            finding["remediation_id"] = next(
+                reference["remediation_id"]
+                for reference in remediation_groups
+                if reference["vulnerability_id"] == primary_cve_id
+            )
+            finding["priority_context"] = finding_priority_context(finding)
         return findings
     finally:
         if owns_connection:
             active.close()
+
+
+def _aggregate_priority_context(observations: list[dict[str, Any]]) -> dict[str, Any]:
+    confidence: list[Any] = []
+    exposures: list[Any] = []
+    assets: list[dict[str, str]] = []
+    asset_keys: set[str] = set()
+    for observation in observations:
+        context = finding_priority_context(observation)
+        confidence_value = context.get("confidence")
+        if confidence_value is not None and confidence_value not in confidence:
+            confidence.append(confidence_value)
+        exposure_value = context.get("exposure")
+        if exposure_value is not None and exposure_value not in exposures:
+            exposures.append(exposure_value)
+        asset = context.get("asset") if isinstance(context.get("asset"), dict) else {}
+        if asset:
+            asset_key = json.dumps(asset, sort_keys=True, separators=(",", ":"))
+            if asset_key not in asset_keys:
+                asset_keys.add(asset_key)
+                assets.append(asset)
+    confidence_order = {"confirmed": 0, "high": 1, "medium": 2, "low": 3, "unknown": 4}
+    confidence.sort(key=lambda value: (
+        confidence_order.get(str(value).strip().lower(), 5),
+        str(value).lower(),
+    ))
+    exposures.sort(key=lambda value: str(value).lower())
+    assets.sort(key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")))
+    return {"confidence": confidence, "exposure": exposures, "assets": assets}
+
+
+def build_remediation_worklist(
+    findings: list[dict[str, Any]],
+    conn: Any | None = None,
+    *,
+    owner_by_finding_id: Mapping[str, tuple[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Collapse scoped observations into one deterministic fix-first row."""
+    attach_risk_to_findings(
+        findings,
+        conn=conn,
+        owner_by_finding_id=owner_by_finding_id,
+    )
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for finding in findings:
+        if bool(finding.get("suppressed")):
+            continue
+        review_state = str(
+            finding.get("review_state") or finding.get("status") or "new"
+        ).strip().lower()
+        if review_state in {"false_positive", "resolved"}:
+            continue
+        identity_finding = _finding_with_owner(
+            finding,
+            owner_by_finding_id=owner_by_finding_id,
+        )
+        session_id, team_id = owner_scope_key(identity_finding)
+        risk_by_cve = {
+            str(item.get("cve_id") or ""): item
+            for item in finding.get("cve_risk", [])
+            if isinstance(item, dict)
+        }
+        for reference in finding.get("remediation_groups", []):
+            if not isinstance(reference, dict):
+                continue
+            remediation_id = str(reference.get("remediation_id") or "")
+            vulnerability_id = str(reference.get("vulnerability_id") or "")
+            if not remediation_id or not vulnerability_id:
+                continue
+            key = (session_id, team_id, remediation_id)
+            group = grouped.setdefault(key, {
+                "remediation_id": remediation_id,
+                "vulnerability_id": vulnerability_id,
+                "affected_subject": str(reference.get("affected_subject") or ""),
+                "observations": [],
+                "evidence_keys": set(),
+                "validation_methods": set(),
+            })
+            observation = dict(finding)
+            observation["risk"] = risk_by_cve.get(vulnerability_id, finding.get("risk"))
+            group["observations"].append(observation)
+            group["evidence_keys"].update(finding_evidence_keys(finding))
+            group["validation_methods"].add(finding_validation_method(finding))
+
+    worklist: list[dict[str, Any]] = []
+    for group in grouped.values():
+        observations = group.pop("observations")
+        evidence_keys = group.pop("evidence_keys")
+        validation_methods = group.pop("validation_methods")
+        _sort_by_cve_risk(observations)
+        representative = observations[0]
+        observed_times = [
+            str(item.get("first_seen_at") or item.get("created") or "")
+            for item in observations
+            if str(item.get("first_seen_at") or item.get("created") or "")
+        ]
+        worklist.append({
+            **group,
+            "representative_finding_id": str(representative.get("id") or ""),
+            "observation_count": len(observations),
+            "evidence_count": len(evidence_keys),
+            "validation_methods": sorted(validation_methods),
+            "priority_context": _aggregate_priority_context(observations),
+            "risk": representative.get("risk"),
+            "first_seen_at": min(observed_times) if observed_times else "",
+        })
+    _sort_by_cve_risk(worklist)
+    return worklist

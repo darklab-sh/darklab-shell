@@ -27,6 +27,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_atlas_profile.py",
     "openapi_cve_advisory.py",
     "openapi_cve_risk.py",
+    "openapi_finding_priority.py",
     "serialization.py",
 }
 
@@ -187,6 +188,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/api_v1/openapi.py", 2615, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_advisory.py", 66, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_risk.py", 97, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_finding_priority.py", 53, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_port_entities.py", 207, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_shodan.py", 74, "split-package-ratchet"),

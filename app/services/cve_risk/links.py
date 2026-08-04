@@ -12,6 +12,7 @@ from typing import Any, Iterable
 
 
 _CVE_IN_TEXT_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
+_CONTEXT_KEYS = ("criticality", "environment", "role")
 
 
 def extract_cve_ids(*values: Any) -> tuple[str, ...]:
@@ -21,19 +22,120 @@ def extract_cve_ids(*values: Any) -> tuple[str, ...]:
     return tuple(sorted(found))
 
 
-def remediation_identity(finding: dict[str, Any], cve_id: str) -> str:
+def owner_scope_key(finding: dict[str, Any]) -> tuple[str, str]:
     team_id = str(finding.get("team_id") or "")
     session_id = "" if team_id else str(finding.get("session_id") or "")
-    subject = str(
+    return session_id, team_id
+
+
+def canonical_affected_subject(finding: dict[str, Any]) -> str:
+    """Return the exact affected-subject key used for remediation grouping.
+
+    Atlas entity ids already include owner, type, and canonical value. A stored
+    subject signature is the next-best exact identity. The final observation
+    fallback deliberately prevents two unresolved subjects from being merged.
+    """
+    entity_id = str(finding.get("entity_id") or finding.get("target_id") or "").strip()
+    if entity_id:
+        return f"entity:{entity_id}"
+    subject_key = str(finding.get("subject_key") or "").strip()
+    if subject_key:
+        return f"subject:{subject_key}"
+    explicit = finding.get("affected_subject")
+    if isinstance(explicit, dict):
+        explicit_type = str(explicit.get("type") or "").strip().lower()
+        explicit_value = str(
+            explicit.get("canonical_value") or explicit.get("value") or ""
+        ).strip()
+        if explicit_type and explicit_value:
+            return f"subject:{explicit_type}\x1f{explicit_value}"
+    elif str(explicit or "").strip():
+        return f"subject:{str(explicit).strip()}"
+    observation_id = str(finding.get("id") or "").strip()
+    return f"observation:{observation_id}"
+
+
+def remediation_identity(finding: dict[str, Any], vulnerability_id: str) -> str:
+    session_id, team_id = owner_scope_key(finding)
+    # Keep the original material for stored entity/subject-backed identities so
+    # feed refreshes do not duplicate existing escalation history after upgrade.
+    legacy_subject = str(
         finding.get("entity_id")
         or finding.get("target_id")
         or finding.get("subject_key")
         or finding.get("fingerprint")
-        or finding.get("id")
         or ""
     )
-    material = "\x1f".join((team_id, session_id, subject, str(cve_id).upper()))
+    subject = legacy_subject
+    if not subject:
+        subject = (
+            canonical_affected_subject(finding)
+            if finding.get("affected_subject")
+            else str(finding.get("id") or "")
+        )
+    normalized_vulnerability = str(vulnerability_id or "").strip().upper()
+    material = "\x1f".join((team_id, session_id, subject, normalized_vulnerability))
     return "rmd_" + hashlib.sha256(material.encode("utf-8", errors="replace")).hexdigest()[:32]
+
+
+def finding_priority_context(finding: dict[str, Any]) -> dict[str, Any]:
+    """Keep contextual assessment signals separate from public CVE ordering."""
+    confidence = finding.get("confidence")
+    if confidence is None or confidence == "":
+        confidence = None
+    exposure = finding.get("target_exposure", finding.get("exposure"))
+    if exposure is None or exposure == "":
+        exposure = None
+    raw_asset = finding.get("asset_context")
+    asset = {
+        key: str(raw_asset.get(key) or "").strip()
+        for key in _CONTEXT_KEYS
+        if isinstance(raw_asset, dict) and str(raw_asset.get(key) or "").strip()
+    }
+    return {
+        "confidence": confidence,
+        "exposure": exposure,
+        "asset": asset,
+    }
+
+
+def finding_validation_method(finding: dict[str, Any]) -> str:
+    explicit = str(finding.get("validation_method") or "").strip().lower()
+    if explicit:
+        return explicit[:64]
+    origin = str(finding.get("origin") or "").strip().lower()
+    if origin == "manual":
+        return "manual_assessment"
+    if origin == "import" or finding.get("import_sources"):
+        return "imported_assertion"
+    return "captured_observation"
+
+
+def finding_evidence_keys(finding: dict[str, Any]) -> set[str]:
+    """Return typed evidence identities visible in one serialized observation."""
+    keys: set[str] = set()
+    for field in ("run_id", "first_run_id", "last_run_id"):
+        value = str(finding.get(field) or "").strip()
+        if value:
+            keys.add(f"run:{value}")
+    import_sources = finding.get("import_sources")
+    if isinstance(import_sources, list):
+        for source in import_sources:
+            if not isinstance(source, dict):
+                continue
+            batch_id = str(source.get("batch_id") or "").strip()
+            if batch_id:
+                keys.add(f"import:{batch_id}")
+    evidence = finding.get("evidence")
+    if isinstance(evidence, list):
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            evidence_type = str(item.get("type") or "").strip().lower()
+            evidence_id = str(item.get("id") or "").strip()
+            if evidence_type and evidence_id:
+                keys.add(f"{evidence_type}:{evidence_id}")
+    return keys
 
 
 def finding_cves(finding: dict[str, Any]) -> tuple[str, ...]:

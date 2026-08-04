@@ -657,7 +657,14 @@ def load_profile_finding_page(
         }
         for row in rows
     ]
-    attach_risk_to_findings(findings, conn=conn)
+    attach_risk_to_findings(
+        findings,
+        conn=conn,
+        owner_by_finding_id={
+            str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+            for row in rows
+        },
+    )
     return findings, {
         "bucket": normalized_bucket,
         "limit": FINDING_PAGE_LIMIT,

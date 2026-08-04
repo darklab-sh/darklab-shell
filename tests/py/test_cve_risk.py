@@ -25,6 +25,7 @@ from services.cve_risk.escalation import (
     list_project_risk_escalations,
     process_risk_work,
 )
+from services.cve_risk.links import remediation_identity
 from services.cve_risk.nvd_advisory import (
     ParsedNvdDataset,
     accept_local_nvd_dataset,
@@ -34,7 +35,11 @@ from services.cve_risk.nvd_advisory import (
     persist_external_nvd_lookup,
 )
 from services.cve_risk.parsers import FeedValidationError, ParsedFeed, parse_epss, parse_kev
-from services.cve_risk.ranking import attach_risk_to_findings, cve_risk_order_sql
+from services.cve_risk.ranking import (
+    attach_risk_to_findings,
+    build_remediation_worklist,
+    cve_risk_order_sql,
+)
 from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
 from services.reports.rendering import (
@@ -348,6 +353,231 @@ def test_risk_enrichment_and_sql_order_share_kev_epss_age_contract(risk_db):
         + cve_risk_order_sql("f", age_expression="f.created")
     ).fetchall()
     assert [row["id"] for row in rows] == ["finding-new", "finding-old"]
+
+
+def test_risk_order_uses_newer_finding_as_final_shared_tie_breaker(risk_db):
+    risk_db.execute(
+        "INSERT INTO cve_risk_records (cve_id, epss_probability, cvss_score) "
+        "VALUES ('CVE-2026-12345', 0.4, 7.5)"
+    )
+    for finding_id, target_id, created in (
+        ("finding-older", "ent_older", "2026-01-01"),
+        ("finding-newer", "ent_newer", "2026-02-01"),
+    ):
+        risk_db.execute(
+            "INSERT INTO findings (id, session_id, target_id, title, created) "
+            "VALUES (?, 'session-one', ?, 'CVE-2026-12345', ?)",
+            (finding_id, target_id, created),
+        )
+        risk_db.execute(
+            "INSERT INTO finding_cve_links (finding_id, cve_id, created_at) "
+            "VALUES (?, 'CVE-2026-12345', '2026-08-04')",
+            (finding_id,),
+        )
+
+    sql_rows = risk_db.execute(
+        "SELECT f.id FROM findings f ORDER BY "
+        + cve_risk_order_sql("f", age_expression="f.created")
+    ).fetchall()
+    worklist = build_remediation_worklist([{
+        "id": "finding-newer",
+        "session_id": "session-one",
+        "entity_id": "ent_newer",
+        "title": "CVE-2026-12345",
+        "created": "2026-02-01",
+    }, {
+        "id": "finding-older",
+        "session_id": "session-one",
+        "entity_id": "ent_older",
+        "title": "CVE-2026-12345",
+        "created": "2026-01-01",
+    }], conn=risk_db)
+
+    assert [row["id"] for row in sql_rows] == ["finding-newer", "finding-older"]
+    assert [row["representative_finding_id"] for row in worklist] == [
+        "finding-newer",
+        "finding-older",
+    ]
+
+
+def test_remediation_worklist_collapses_observations_without_losing_context(risk_db):
+    risk_db.executemany(
+        "INSERT INTO cve_risk_records "
+        "(cve_id, kev_listed, epss_probability, epss_percentile, cvss_score) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            ("CVE-2026-12345", True, 0.12, 0.91, 8.8),
+            ("CVE-2026-23456", False, 0.82, 0.99, 9.8),
+        ),
+    )
+    findings = [{
+        "id": "finding-confirmed",
+        "session_id": "session-one",
+        "entity_id": "ent_shared",
+        "title": "CVE-2026-12345 confirmed",
+        "first_seen_at": "2026-08-02",
+        "run_id": "run-confirmed",
+        "validation_method": "active_confirmation",
+        "confidence": "high",
+        "target_exposure": "internet",
+        "asset_context": {"criticality": "high", "environment": "production"},
+    }, {
+        "id": "finding-inferred",
+        "session_id": "session-one",
+        "entity_id": "ent_shared",
+        "title": "CVE-2026-12345 inferred",
+        "first_seen_at": "2026-08-01",
+        "run_id": "run-inferred",
+        "validation_method": "version_inference",
+        "confidence": "medium",
+        "target_exposure": "internet",
+        "asset_context": {"criticality": "high", "environment": "production"},
+    }, {
+        "id": "finding-other-target",
+        "session_id": "session-one",
+        "entity_id": "ent_other",
+        "title": "CVE-2026-12345 on another target",
+        "first_seen_at": "2026-08-03",
+        "run_id": "run-other",
+    }, {
+        "id": "finding-high-epss",
+        "session_id": "session-one",
+        "entity_id": "ent_shared",
+        "title": "CVE-2026-23456",
+        "first_seen_at": "2026-08-04",
+        "run_id": "run-high-epss",
+    }, {
+        "id": "finding-false-positive",
+        "session_id": "session-one",
+        "entity_id": "ent_shared",
+        "title": "CVE-2026-23456",
+        "review_state": "false_positive",
+        "run_id": "run-false-positive",
+    }]
+
+    worklist = build_remediation_worklist(findings, conn=risk_db)
+
+    assert len(worklist) == 3
+    assert [item["vulnerability_id"] for item in worklist] == [
+        "CVE-2026-12345",
+        "CVE-2026-12345",
+        "CVE-2026-23456",
+    ]
+    shared = next(
+        item for item in worklist
+        if item["affected_subject"] == "entity:ent_shared"
+        and item["vulnerability_id"] == "CVE-2026-12345"
+    )
+    assert shared["observation_count"] == 2
+    assert shared["evidence_count"] == 2
+    assert shared["validation_methods"] == ["active_confirmation", "version_inference"]
+    assert shared["priority_context"] == {
+        "confidence": ["high", "medium"],
+        "exposure": ["internet"],
+        "assets": [{"criticality": "high", "environment": "production"}],
+    }
+    assert shared["risk"]["kev"]["listed"] is True
+
+
+def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
+    findings = [{
+        "id": "personal-one",
+        "session_id": "session-one",
+        "subject_key": "domain\x1fexample.test",
+        "title": "CVE-2026-12345",
+    }, {
+        "id": "personal-two",
+        "session_id": "session-two",
+        "subject_key": "domain\x1fexample.test",
+        "title": "CVE-2026-12345",
+    }, {
+        "id": "unresolved-one",
+        "session_id": "session-one",
+        "title": "CVE-2026-12345",
+    }, {
+        "id": "unresolved-two",
+        "session_id": "session-one",
+        "title": "CVE-2026-12345",
+    }]
+
+    worklist = build_remediation_worklist(findings, conn=risk_db)
+
+    assert len(worklist) == 4
+    assert len({item["remediation_id"] for item in worklist}) == 4
+    assert {
+        item["affected_subject"] for item in worklist
+        if item["affected_subject"].startswith("observation:")
+    } == {"observation:unresolved-one", "observation:unresolved-two"}
+
+    team_findings = [{
+        "id": "team-one",
+        "session_id": "member-one",
+        "team_id": "team-shared",
+        "entity_id": "ent_team",
+        "title": "CVE-2026-12345",
+    }, {
+        "id": "team-two",
+        "session_id": "member-two",
+        "team_id": "team-shared",
+        "entity_id": "ent_team",
+        "title": "CVE-2026-12345",
+    }]
+    team_worklist = build_remediation_worklist(team_findings, conn=risk_db)
+    assert len(team_worklist) == 1
+    assert team_worklist[0]["observation_count"] == 2
+
+
+def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
+    risk_db.executemany(
+        "INSERT INTO cve_risk_records (cve_id, kev_listed, epss_probability) VALUES (?, ?, ?)",
+        (
+            ("CVE-2026-12345", False, 0.9),
+            ("CVE-2026-23456", True, 0.1),
+        ),
+    )
+    findings = [{
+        "id": "finding-multiple-cves",
+        "session_id": "session-one",
+        "entity_id": "ent_shared",
+        "title": "CVE-2026-12345 and CVE-2026-23456",
+    }]
+
+    attach_risk_to_findings(findings, conn=risk_db)
+
+    finding = findings[0]
+    assert finding["risk"]["cve_id"] == "CVE-2026-23456"
+    assert finding["remediation_id"] == next(
+        item["remediation_id"] for item in finding["remediation_groups"]
+        if item["vulnerability_id"] == "CVE-2026-23456"
+    )
+    legacy_material = "\x1f".join(("", "session-one", "ent_shared", "CVE-2026-23456"))
+    assert finding["remediation_id"] == (
+        "rmd_" + hashlib.sha256(legacy_material.encode()).hexdigest()[:32]
+    )
+
+
+def test_enrichment_accepts_private_owner_context_without_exposing_it(risk_db):
+    finding = {
+        "id": "finding-private-owner",
+        "entity_id": "ent_private_owner",
+        "title": "CVE-2026-12345",
+    }
+
+    attach_risk_to_findings(
+        [finding],
+        conn=risk_db,
+        owner_by_finding_id={
+            "finding-private-owner": ("member-session", "team-private-owner"),
+        },
+    )
+
+    assert finding["remediation_id"] == remediation_identity({
+        **finding,
+        "session_id": "member-session",
+        "team_id": "team-private-owner",
+    }, "CVE-2026-12345")
+    assert "session_id" not in finding
+    assert "team_id" not in finding
 
 
 def test_risk_order_sql_rejects_untrusted_identifier_fragments():

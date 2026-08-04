@@ -484,7 +484,8 @@ def list_findings(
     total = int(conn.execute(total_sql, params).fetchone()["count"] or 0) if include_total else 0
     fetch_limit = page_limit if include_total else page_limit + 1
     rows_sql = _sql_join((
-        "SELECT f.id, f.entity_id, e.type AS entity_type, e.canonical_value AS entity_value, ",
+        "SELECT f.id, f.session_id, f.team_id, f.entity_id, "
+        "e.type AS entity_type, e.canonical_value AS entity_value, ",
         "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, ",
         "r.command AS run_command, r.run_kind AS run_kind, ",
         "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, ",
@@ -554,11 +555,19 @@ def list_findings(
             ],
         ).fetchall()
     findings = [_row_to_finding(row) for row in rows]
+    owner_by_finding_id = {
+        str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+        for row in rows
+    }
     sources_by_finding = _finding_import_sources_by_id(conn, session_id, [finding["id"] for finding in findings], team_id=team_id)
     for finding in findings:
         finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
     attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
-    attach_risk_to_findings(findings, conn=conn)
+    attach_risk_to_findings(
+        findings,
+        conn=conn,
+        owner_by_finding_id=owner_by_finding_id,
+    )
     for row in count_rows:
         status = str(row["status"] or "new")
         counts[status] = int(row["count"] or 0)
@@ -582,7 +591,8 @@ def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "")
     occurrence_scope_sql = _run_scope_sql("r", team_id)
     occurrence_scope_params = _run_scope_params(session_id, team_id)
     row = conn.execute(
-        "SELECT f.id, f.entity_id, e.type AS entity_type, e.canonical_value AS entity_value, "
+        "SELECT f.id, f.session_id, f.team_id, f.entity_id, "
+        "e.type AS entity_type, e.canonical_value AS entity_value, "
         "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, "
         "r.command AS run_command, r.run_kind AS run_kind, "
         "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, "
@@ -612,7 +622,13 @@ def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "")
         **_row_to_finding(row),
         "import_sources": _finding_import_sources(conn, session_id, finding_id, team_id=team_id),
     }
-    attach_risk_to_findings([finding_payload], conn=conn)
+    attach_risk_to_findings(
+        [finding_payload],
+        conn=conn,
+        owner_by_finding_id={
+            str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or "")),
+        },
+    )
     return {
         "finding": finding_payload,
         "occurrences": [

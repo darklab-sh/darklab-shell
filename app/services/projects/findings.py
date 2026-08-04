@@ -282,7 +282,8 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             query_params.extend([safe_limit, safe_offset])
         rows = conn.execute(
             base_sql
-            + "SELECT f.id, f.session_id, f.entity_id, f.subject_key, f.signature_hash, f.severity, "  # nosec
+            + "SELECT f.id, f.session_id, f.team_id, f.entity_id, "  # nosec
+            "f.subject_key, f.signature_hash, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
             "d.run_id, d.line_number, d.snippet, d.run_occurrence_count "
@@ -670,7 +671,8 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             query_params.extend([fetch_limit, safe_offset])
         rows = conn.execute(  # nosec
             base_sql  # nosec
-            + "SELECT f.id, f.session_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
+            + "SELECT f.id, f.session_id, f.team_id, "
+            "COALESCE(f.entity_id, f.target_id) AS entity_id, "
             "f.subject_key, f.signature_hash, f.severity, f.kind, f.tool_root, "
             "f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
