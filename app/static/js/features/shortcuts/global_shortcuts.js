@@ -31,8 +31,8 @@ import {
   cycleAtlasTab as importedCycleAtlasTab,
   isAtlasOverlayOpen as importedIsAtlasOverlayOpen,
   openAtlas as importedOpenAtlas,
-  openAtlasQuickLookup as importedOpenAtlasQuickLookup,
 } from '../atlas/atlas_bridge.js';
+import { openAtlasQuickLookupFromSurface as importedOpenAtlasQuickLookupFromSurface } from '../atlas/atlas_quick_lookup_launch.js';
 import {
   closeProjectWorkspace as importedCloseProjectWorkspace,
   cycleProjectWorkspaceTab as importedCycleProjectWorkspaceTab,
@@ -100,7 +100,7 @@ const SHORTCUT_STABLE_FUNCTION_NAMES = [
   'isAtlasOverlayOpen',
   'cycleAtlasTab',
   'openAtlas',
-  'openAtlasQuickLookup',
+  'openAtlasQuickLookupFromSurface',
   'closeAtlas',
   'isCommandRegistryOverlayOpen',
   'openCommandRegistry',
@@ -138,7 +138,7 @@ const SHORTCUT_IMPORTED_FUNCTIONS = {
   isStatusMonitorShortcutOpen: importedIsStatusMonitorShortcutOpen,
   openCommandRegistry: importedOpenCommandRegistry,
   openAtlas: importedOpenAtlas,
-  openAtlasQuickLookup: importedOpenAtlasQuickLookup,
+  openAtlasQuickLookupFromSurface: importedOpenAtlasQuickLookupFromSurface,
   openOptions: importedOpenOptions,
   openProjectWorkspace: importedOpenProjectWorkspace,
   openThemeSelector: importedOpenThemeSelector,
@@ -422,7 +422,7 @@ function handleChromeShortcut(e) {
     return true;
   }
   if (eventMatchesLetter(e, 'q')) {
-    void shortcutCall('openAtlasQuickLookup', { source: 'shortcut' });
+    void shortcutCall('openAtlasQuickLookupFromSurface', 'shortcut');
     markShortcutHandled(e);
     e.preventDefault();
     return true;

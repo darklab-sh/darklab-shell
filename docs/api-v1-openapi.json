@@ -709,6 +709,7 @@
         "properties": {
           "mode": {
             "default": "auto",
+            "description": "Input type. Hostname resolves the stored Atlas domain type; URL requires an explicit http:// or https:// scheme.",
             "enum": [
               "auto",
               "hostname",
@@ -718,9 +719,12 @@
             "type": "string"
           },
           "project_id": {
+            "description": "Optional visible Project scope for the exact lookup.",
             "type": "string"
           },
           "value": {
+            "description": "One hostname, IP address, or absolute HTTP(S) URL. Canonical values may not exceed 2,048 UTF-8 bytes.",
+            "minLength": 1,
             "type": "string"
           }
         },

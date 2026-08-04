@@ -719,7 +719,10 @@ const QUICK_DETAIL_PREVIEW_LIMIT = 3;
         typeof onOpenFinding === 'function' ? 'button' : 'div',
         `panel-row${typeof onOpenFinding === 'function' ? ' panel-row-clickable' : ''} selection-row atlas-finding-row`,
       );
-      if (row.tagName === 'BUTTON') row.type = 'button';
+      if (row.tagName === 'BUTTON') {
+        row.type = 'button';
+        row.dataset.findingId = text(finding.id);
+      }
       const title = node('div', 'atlas-finding-title', text(finding.title || finding.raw_line, finding.id));
       const meta = node(
         'div',

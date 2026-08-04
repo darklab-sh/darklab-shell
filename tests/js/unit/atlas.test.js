@@ -189,7 +189,7 @@ function setupAtlasDom() {
             <div id="atlas-lookup-outcome-context" class="u-hidden"></div>
             <div id="atlas-lookup-outcome-candidates" class="u-hidden"></div>
             <div id="atlas-lookup-outcome-actions">
-              <button id="atlas-lookup-outcome-new" type="button">new lookup</button>
+              <button id="atlas-lookup-outcome-new" class="btn btn-primary btn-compact" type="button">new lookup</button>
             </div>
           </div>
           <div id="atlas-lookup-profile-view" class="u-hidden">
@@ -982,7 +982,7 @@ describe('Atlas overlay', () => {
 
   it('opens Quick Lookup as an Atlas-owned mode without loading list data', async () => {
     const detail = lookupDetail()
-    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+    const { openAtlasQuickLookup, apiFetch, logClientError } = loadAtlas({
       apiFetchInterceptor: (url, options = {}) => {
         if (String(url) !== '/atlas/lookup') return null
         expect(options.method).toBe('POST')
@@ -1024,12 +1024,64 @@ describe('Atlas overlay', () => {
     expect(apiFetch.mock.calls.some(([url]) => String(url) === '/atlas/views')).toBe(false)
     expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/atlas/runs?'))).toBe(false)
     expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/projects?'))).toBe(false)
+    const lifecycleEvents = logClientError.mock.calls
+      .filter(([, , details]) => details?.level === 'debug')
+    expect(lifecycleEvents.map(([, , details]) => details.event)).toEqual([
+      'ATLAS_QUICK_LOOKUP_REQUEST_STARTED',
+      'ATLAS_QUICK_LOOKUP_REQUEST_SETTLED',
+    ])
+    expect(lifecycleEvents[0][2]).toEqual(expect.objectContaining({
+      lookup_mode: 'auto',
+      scope_kind: 'personal',
+      project_scoped: false,
+      request_seq: expect.any(Number),
+    }))
+    expect(lifecycleEvents[1][2]).toEqual(expect.objectContaining({
+      detected_type: 'ip',
+      match_state: 'found',
+      candidate_count: 0,
+      parent_candidate: false,
+      duration_ms: expect.any(Number),
+    }))
+    expect(JSON.stringify(lifecycleEvents)).not.toContain(ENTITY.canonical_value)
 
     document.getElementById('atlas-lookup-profile-new')?.click()
     expect(document.getElementById('atlas-lookup-form-view')?.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('atlas-lookup-resume')?.classList.contains('u-hidden')).toBe(false)
     document.getElementById('atlas-lookup-resume')?.click()
     expect(document.getElementById('atlas-lookup-profile-view')?.classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('closes Quick Lookup when a shell entry point triggers the active surface again', async () => {
+    const detail = lookupDetail()
+    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        return Promise.resolve(jsonResponse({
+          requested_type: 'ip',
+          detected_type: 'ip',
+          canonical_value: ENTITY.canonical_value,
+          project_id: '',
+          match_state: 'found',
+          detail,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'ip', submit: true })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-profile')?.textContent)
+        .toContain(ENTITY.canonical_value)
+    })
+
+    const result = await openAtlasQuickLookup({ source: 'shortcut', toggle: true })
+
+    expect(result).toBe(false)
+    expect(document.getElementById('atlas-overlay')?.classList.contains('open')).toBe(false)
+    expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/lookup')).toHaveLength(1)
   })
 
   it('validates lookup input locally and lets a corrected request retry in place', async () => {
@@ -1082,7 +1134,7 @@ describe('Atlas overlay', () => {
       expect(document.getElementById('atlas-lookup-status')?.textContent)
         .toContain('Enter a valid hostname without a URL path')
     })
-    expect(logClientError).not.toHaveBeenCalled()
+    expect(logClientError.mock.calls.some(([, , details]) => details?.level !== 'debug')).toBe(false)
 
     input.value = 'corrected.example'
     input.dispatchEvent(new Event('input', { bubbles: true }))
@@ -1096,12 +1148,94 @@ describe('Atlas overlay', () => {
     expect(lookupCalls).toBe(2)
   })
 
+  it('resumes the previous profile after replacement failure and ignores stale failures', async () => {
+    const replacementFailure = deferred()
+    const staleFailure = deferred()
+    const detailFor = (canonicalValue, id) => lookupDetail({
+      ...ENTITY,
+      id,
+      type: 'domain',
+      canonical_value: canonicalValue,
+    })
+    const { openAtlasQuickLookup } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) !== '/atlas/lookup') return null
+        const value = String(JSON.parse(options.body || '{}').value || '')
+        if (value === 'replacement-failure.example') return replacementFailure.promise
+        if (value === 'stale-failure.example') return staleFailure.promise
+        return Promise.resolve(jsonResponse({
+          requested_type: 'hostname',
+          detected_type: 'domain',
+          canonical_value: value,
+          project_id: '',
+          match_state: 'found',
+          detail: detailFor(value, `ent_${value.split('.')[0]}`),
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({
+      value: 'original-profile.example',
+      mode: 'hostname',
+      submit: true,
+    })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-profile')?.textContent)
+        .toContain('original-profile.example')
+    })
+
+    document.getElementById('atlas-lookup-profile-new')?.click()
+    const input = document.getElementById('atlas-lookup-input')
+    input.value = 'replacement-failure.example'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('atlas-lookup-mode').value = 'hostname'
+    document.getElementById('atlas-lookup-form')?.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    )
+    replacementFailure.reject(new Error('temporary replacement failure'))
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-status')?.textContent)
+        .toContain('temporary replacement failure')
+      expect(document.getElementById('atlas-lookup-resume')?.classList.contains('u-hidden'))
+        .toBe(false)
+    })
+    document.getElementById('atlas-lookup-resume')?.click()
+    expect(document.getElementById('atlas-lookup-profile')?.textContent)
+      .toContain('original-profile.example')
+
+    document.getElementById('atlas-lookup-profile-new')?.click()
+    const staleSubmission = openAtlasQuickLookup({
+      value: 'stale-failure.example',
+      mode: 'hostname',
+      submit: true,
+    })
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-status')?.textContent)
+        .toContain('Looking for stale-failure.example')
+    })
+    await openAtlasQuickLookup({
+      value: 'newer-success.example',
+      mode: 'hostname',
+      submit: true,
+    })
+    staleFailure.reject(new Error('late stale failure'))
+    await staleSubmission
+
+    expect(document.getElementById('atlas-lookup-profile')?.textContent)
+      .toContain('newer-success.example')
+    expect(document.getElementById('atlas-lookup-status')?.textContent)
+      .not.toContain('late stale failure')
+  })
+
   it('cancels an owner-scoped lookup and reruns it when the active scope changes', async () => {
     const firstLookup = deferred()
     let firstSignal = null
     let lookupCalls = 0
     const detail = lookupDetail()
-    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+    const { openAtlasQuickLookup, apiFetch, logClientError } = loadAtlas({
       apiFetchInterceptor: (url, options = {}) => {
         if (String(url) !== '/atlas/lookup') return null
         lookupCalls += 1
@@ -1137,6 +1271,10 @@ describe('Atlas overlay', () => {
     expect(firstSignal?.aborted).toBe(true)
     expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/lookup')).toHaveLength(2)
     expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/atlas?'))).toBe(false)
+    expect(logClientError.mock.calls.some(([, , details]) => (
+      details?.event === 'ATLAS_QUICK_LOOKUP_REQUEST_DISCARDED'
+      && details?.reason === 'scope_changed'
+    ))).toBe(true)
 
     firstLookup.resolve(jsonResponse({
       requested_type: 'ip',
@@ -1152,6 +1290,104 @@ describe('Atlas overlay', () => {
     await opening
     expect(document.getElementById('atlas-lookup-profile')?.textContent)
       .toContain(ENTITY.canonical_value)
+  })
+
+  it('reruns the submitted lookup instead of an unsent draft when scope changes', async () => {
+    const lookupBodies = []
+    const detail = lookupDetail()
+    const { openAtlasQuickLookup } = loadAtlas({
+      apiFetchInterceptor: (url, options = {}) => {
+        if (String(url) !== '/atlas/lookup') return null
+        lookupBodies.push(JSON.parse(String(options.body || '{}')))
+        return Promise.resolve(jsonResponse({
+          requested_type: 'ip',
+          detected_type: 'ip',
+          canonical_value: ENTITY.canonical_value,
+          project_id: '',
+          match_state: 'found',
+          detail,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'ip', submit: true })
+    document.getElementById('atlas-lookup-profile-new')?.click()
+
+    const input = document.getElementById('atlas-lookup-input')
+    input.value = 'https://draft.example/path'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    const modeSelect = document.getElementById('atlas-lookup-mode')
+    modeSelect.value = 'url'
+    modeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+
+    document.dispatchEvent(new CustomEvent('app:scope-changed', {
+      detail: { team_id: 'team_next', label: 'Next team' },
+    }))
+
+    await vi.waitFor(() => expect(lookupBodies).toHaveLength(2))
+    expect(lookupBodies).toEqual([
+      { mode: 'ip', value: ENTITY.canonical_value },
+      { mode: 'ip', value: ENTITY.canonical_value },
+    ])
+    expect(input.value).toBe(ENTITY.canonical_value)
+    expect(modeSelect.value).toBe('ip')
+  })
+
+  it('invalidates the previous profile before a scope rerun and cannot resume it after failure', async () => {
+    const scopeLookup = deferred()
+    let lookupCalls = 0
+    const detail = lookupDetail()
+    const { openAtlasQuickLookup } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        lookupCalls += 1
+        if (lookupCalls === 2) return scopeLookup.promise
+        return Promise.resolve(jsonResponse({
+          requested_type: 'ip',
+          detected_type: 'ip',
+          canonical_value: ENTITY.canonical_value,
+          project_id: '',
+          match_state: 'found',
+          detail,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'ip', submit: true })
+    const profileHost = document.getElementById('atlas-lookup-profile')
+    const profileView = document.getElementById('atlas-lookup-profile-view')
+    const formView = document.getElementById('atlas-lookup-form-view')
+    const resumeButton = document.getElementById('atlas-lookup-resume')
+    expect(profileHost.textContent).toContain(ENTITY.canonical_value)
+
+    document.dispatchEvent(new CustomEvent('app:scope-changed', {
+      detail: { team_id: 'team_next', label: 'Next team' },
+    }))
+
+    await vi.waitFor(() => expect(lookupCalls).toBe(2))
+    expect(profileView.classList.contains('u-hidden')).toBe(true)
+    expect(formView.classList.contains('u-hidden')).toBe(false)
+    expect(profileHost.textContent).toBe('')
+    expect(document.getElementById('atlas-lookup-status')?.textContent)
+      .toContain(`Looking for ${ENTITY.canonical_value}`)
+    expect(resumeButton.classList.contains('u-hidden')).toBe(true)
+    expect(resumeButton.disabled).toBe(true)
+
+    scopeLookup.resolve(errorResponse(503, { message: 'The new scope could not be searched.' }))
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-lookup-status')?.textContent)
+        .toContain('The new scope could not be searched.')
+    })
+    expect(profileHost.textContent).toBe('')
+    expect(profileView.classList.contains('u-hidden')).toBe(true)
+    expect(resumeButton.classList.contains('u-hidden')).toBe(true)
+    expect(resumeButton.disabled).toBe(true)
   })
 
   it('carries a project-scoped Quick Lookup result into ordinary Atlas profile mode', async () => {
@@ -1223,17 +1459,46 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-lookup-outcome-title')?.textContent).toBe('No saved Atlas entity')
     expect(document.getElementById('atlas-lookup-outcome-body')?.textContent).toContain('does not mean the value itself is invalid')
     expect(document.getElementById('atlas-lookup-outcome-context')?.textContent).toContain('missing.example')
-    expect(document.getElementById('atlas-lookup-outcome-actions')?.textContent).toContain('Open in Atlas')
+    expect(document.getElementById('atlas-lookup-outcome-actions')?.textContent).toContain('Search Atlas')
     expect(document.getElementById('atlas-lookup-outcome-actions')?.textContent).toContain('Switch scope')
     expect(document.getElementById('atlas-lookup-outcome-actions')?.textContent).toContain('Prefill nmap scan')
     expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/runs'))).toBe(false)
+    expect(Array.from(document.querySelectorAll('#atlas-lookup-outcome-actions button')).every(button => (
+      button.classList.contains('btn') && button.classList.contains('btn-compact')
+    ))).toBe(true)
 
     Array.from(document.querySelectorAll('#atlas-lookup-outcome-actions button'))
       .find(button => button.textContent === 'Prefill nmap scan')
       ?.click()
-    expect(document.getElementById('cmd')?.value).toBe("nmap -sV 'missing.example'")
+    expect(document.getElementById('cmd')?.value).toBe("nmap -sV -- 'missing.example'")
     expect(document.getElementById('atlas-overlay')?.classList.contains('u-hidden')).toBe(true)
     expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/runs'))).toBe(false)
+  })
+
+  it('keeps option-shaped lookup values behind the nmap end-of-options marker', async () => {
+    const { openAtlasQuickLookup } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        if (String(url) !== '/atlas/lookup') return null
+        return Promise.resolve(jsonResponse({
+          requested_type: 'hostname',
+          detected_type: 'domain',
+          canonical_value: '--script',
+          project_id: '',
+          match_state: 'not_found',
+          detail: null,
+          candidates: [],
+          candidates_truncated: false,
+          parent_host_candidate: null,
+        }))
+      },
+    })
+
+    await openAtlasQuickLookup({ value: '--script', mode: 'hostname', submit: true })
+
+    Array.from(document.querySelectorAll('#atlas-lookup-outcome-actions button'))
+      .find(button => button.textContent === 'Prefill nmap scan')
+      ?.click()
+    expect(document.getElementById('cmd')?.value).toBe("nmap -sV -- '--script'")
   })
 
   it('requires an explicit bounded choice for an ambiguous saved entity', async () => {
@@ -1278,6 +1543,9 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-lookup-outcome-candidates')?.textContent)
       .toContain('Only the first bounded set of matches is shown')
     expect(document.getElementById('atlas-lookup-profile-view')?.classList.contains('u-hidden')).toBe(true)
+    expect(Array.from(document.querySelectorAll('#atlas-lookup-outcome-candidates button')).every(button => (
+      button.classList.contains('btn') && button.classList.contains('panel-row')
+    ))).toBe(true)
 
     document.querySelector('#atlas-lookup-outcome-candidates .atlas-lookup-candidate')?.click()
     await vi.waitFor(() => {
@@ -1308,6 +1576,135 @@ describe('Atlas overlay', () => {
           && options?.method === 'POST'
       ))).toBe(true)
     })
+  })
+
+  it('preserves the chosen ambiguous entity ID when opening ordinary Atlas', async () => {
+    const firstEntity = { ...ENTITY, id: 'ent_ip_first' }
+    const chosenEntity = { ...ENTITY, id: 'ent_ip_chosen' }
+    const chosenDetail = lookupDetail(chosenEntity)
+    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        const target = String(url)
+        if (target === '/atlas/lookup') {
+          return Promise.resolve(jsonResponse({
+            requested_type: 'ip',
+            detected_type: 'ip',
+            canonical_value: ENTITY.canonical_value,
+            project_id: '',
+            match_state: 'ambiguous',
+            detail: null,
+            candidates: [firstEntity, chosenEntity].map((entity, index) => ({
+              entity_id: entity.id,
+              type: entity.type,
+              canonical_value: entity.canonical_value,
+              provenance: index === 0 ? 'personal' : 'compatibility_visible',
+            })),
+            candidates_truncated: false,
+            parent_host_candidate: null,
+          }))
+        }
+        if (target === `/atlas/entities/${chosenEntity.id}`) {
+          return Promise.resolve(jsonResponse(chosenDetail))
+        }
+        if (target.startsWith('/atlas/entities?')) {
+          return Promise.resolve(jsonResponse({
+            entities: [firstEntity, chosenEntity],
+            total: 2,
+            limit: 50,
+            offset: 0,
+          }))
+        }
+        return null
+      },
+    })
+
+    await openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'ip', submit: true })
+    const candidates = document.querySelectorAll(
+      '#atlas-lookup-outcome-candidates .atlas-lookup-candidate',
+    )
+    candidates[1]?.click()
+    await vi.waitFor(() => {
+      expect(window.DarklabAtlasOverlay.state.detail?.entity?.id).toBe(chosenEntity.id)
+    })
+
+    document.getElementById('atlas-lookup-open-atlas')?.click()
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-surface')?.classList.contains('is-atlas-lookup')).toBe(false)
+      expect(window.DarklabAtlasOverlay.state.detail?.entity?.id).toBe(chosenEntity.id)
+    })
+
+    expect(window.DarklabAtlasOverlay.state.selectedId).toBe(chosenEntity.id)
+    expect(window.DarklabAtlasOverlay.state.entityProfileMode).toBe(true)
+    expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('profile')
+    expect(apiFetch.mock.calls.filter(([url]) => (
+      String(url) === `/atlas/entities/${chosenEntity.id}`
+    ))).toHaveLength(2)
+  })
+
+  it('keeps a suppressed orphan-source result selected when opening ordinary Atlas', async () => {
+    const orphanEntity = {
+      ...ENTITY,
+      id: 'ent_ip_orphan',
+      run_count: 0,
+      suppressed: true,
+      suppressed_reason: 'operator cleanup',
+    }
+    const orphanDetail = {
+      ...lookupDetail(orphanEntity),
+      runs: [],
+      detail_limits: {
+        ...lookupDetail(orphanEntity).detail_limits,
+        runs: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
+      },
+    }
+    const { openAtlasQuickLookup, apiFetch } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        const target = String(url)
+        if (target === '/atlas/lookup') {
+          return Promise.resolve(jsonResponse({
+            requested_type: 'ip',
+            detected_type: 'ip',
+            canonical_value: orphanEntity.canonical_value,
+            project_id: '',
+            match_state: 'found',
+            detail: orphanDetail,
+            candidates: [],
+            candidates_truncated: false,
+            parent_host_candidate: null,
+          }))
+        }
+        if (target === `/atlas/entities/${orphanEntity.id}`) {
+          return Promise.resolve(jsonResponse(orphanDetail))
+        }
+        if (target.startsWith('/atlas/entities?')) {
+          const includesHidden = target.includes('orphan_filter=all')
+            && target.includes('suppression_filter=all')
+          return Promise.resolve(jsonResponse({
+            entities: includesHidden ? [orphanEntity] : [],
+            total: includesHidden ? 1 : 0,
+            limit: 50,
+            offset: 0,
+          }))
+        }
+        return null
+      },
+    })
+
+    await openAtlasQuickLookup({ value: orphanEntity.canonical_value, mode: 'ip', submit: true })
+    document.getElementById('atlas-lookup-open-atlas')?.click()
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-surface')?.classList.contains('is-atlas-lookup')).toBe(false)
+      expect(window.DarklabAtlasOverlay.state.detail?.entity?.id).toBe(orphanEntity.id)
+    })
+
+    expect(window.DarklabAtlasOverlay.state.selectedId).toBe(orphanEntity.id)
+    expect(window.DarklabAtlasOverlay.state.entityProfileMode).toBe(true)
+    expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('profile')
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).startsWith('/atlas/entities?')
+        && String(url).includes('orphan_filter=all')
+        && String(url).includes('suppression_filter=all')
+    ))).toBe(true)
   })
 
   it('keeps New lookup at the form when an ambiguous candidate load becomes stale', async () => {
@@ -1405,6 +1802,415 @@ describe('Atlas overlay', () => {
       .toBe(`Known parent for ${requestedUrl} · Personal`)
   })
 
+  it('returns from a linked Project to the exact Quick Lookup profile and stack', async () => {
+    const requestedUrl = 'https://107.178.109.44/not-saved?next=%2F'
+    const urlDetail = {
+      ...lookupDetail(URL_ENTITY),
+      entity: {
+        ...URL_ENTITY,
+        project_link_count: 1,
+        project_links: [{ project_id: 'prj_linked', project_name: 'Linked Case' }],
+      },
+      parent_host: ENTITY,
+    }
+    const {
+      openAtlas,
+      openAtlasQuickLookup,
+      apiFetch,
+      openProjectWorkspaceById,
+    } = loadAtlas({
+      apiFetchInterceptor: (url) => {
+        const target = String(url)
+        if (target === '/atlas/lookup') {
+          return Promise.resolve(jsonResponse({
+            requested_type: 'url',
+            detected_type: 'url',
+            canonical_value: requestedUrl,
+            project_id: '',
+            match_state: 'not_found',
+            detail: null,
+            candidates: [],
+            candidates_truncated: false,
+            parent_host_candidate: {
+              detected_type: 'ip',
+              canonical_value: ENTITY.canonical_value,
+              match_state: 'found',
+              entity: {
+                entity_id: ENTITY.id,
+                type: ENTITY.type,
+                canonical_value: ENTITY.canonical_value,
+                provenance: 'personal',
+              },
+              candidates: [],
+              candidates_truncated: false,
+            },
+          }))
+        }
+        if (target === `/atlas/entities/${URL_ENTITY.id}`) {
+          return Promise.resolve(jsonResponse(urlDetail))
+        }
+        return null
+      },
+    })
+
+    await openAtlasQuickLookup({ value: requestedUrl, mode: 'url', submit: true })
+    document.querySelector('#atlas-lookup-outcome-candidates .atlas-lookup-candidate')?.click()
+    await vi.waitFor(() => {
+      expect(document.querySelector('#atlas-lookup-profile .atlas-related-url-open')).not.toBeNull()
+    })
+    document.querySelector('#atlas-lookup-profile .atlas-related-url-open')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(document.querySelector(
+        '#atlas-lookup-profile .atlas-project-link-actions button',
+      )).not.toBeNull()
+    })
+
+    const openProject = [...document.querySelectorAll(
+      '#atlas-lookup-profile .atlas-project-link-actions button',
+    )].find(button => button.textContent === 'Open Project')
+    openProject?.click()
+    await flushPromises()
+
+    expect(openProjectWorkspaceById).toHaveBeenCalledTimes(1)
+    const returnToAtlas = openProjectWorkspaceById.mock.calls[0][1].returnToAtlas
+    expect(returnToAtlas).toEqual(expect.objectContaining({
+      source: 'project-return',
+      launchMode: 'lookup',
+      lookupReturnState: expect.objectContaining({
+        lookup: expect.objectContaining({
+          root: 'profile',
+          submittedRawValue: requestedUrl,
+          launchScope: expect.objectContaining({ kind: 'personal', label: 'Personal' }),
+          result: expect.objectContaining({
+            lookup_origin: {
+              kind: 'url_parent',
+              detected_type: 'url',
+              canonical_value: requestedUrl,
+            },
+          }),
+        }),
+        atlas: expect.objectContaining({
+          selectedId: URL_ENTITY.id,
+          entityProfileView: 'overview',
+          entityProfileFindingBucket: 'direct',
+        }),
+      }),
+    }))
+    expect(returnToAtlas.lookupReturnState.atlas.entityProfileStack).toHaveLength(1)
+
+    const lookupRequestsBeforeReturn = apiFetch.mock.calls
+      .filter(([url]) => String(url) === '/atlas/lookup')
+      .length
+    const urlDetailRequestsBeforeReturn = apiFetch.mock.calls
+      .filter(([url]) => String(url) === `/atlas/entities/${URL_ENTITY.id}`)
+      .length
+    await openAtlas(returnToAtlas)
+
+    expect(document.getElementById('atlas-surface')?.classList.contains('is-atlas-lookup')).toBe(true)
+    expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('lookup')
+    expect(window.DarklabAtlasOverlay.state.selectedId).toBe(URL_ENTITY.id)
+    expect(window.DarklabAtlasOverlay.state.entityProfileView).toBe('overview')
+    expect(window.DarklabAtlasOverlay.state.entityProfileFindingBucket).toBe('direct')
+    expect(window.DarklabAtlasOverlay.state.entityProfileStack).toHaveLength(1)
+    expect(document.getElementById('atlas-lookup-profile-scope')?.textContent)
+      .toBe(`Known parent for ${requestedUrl} · Personal`)
+    expect(document.querySelector('#atlas-lookup-profile .atlas-profile-back')?.textContent)
+      .toContain('Back to previous entity')
+    expect(document.querySelector(
+      '#atlas-lookup-profile [data-atlas-profile-view="overview"]',
+    )?.getAttribute('aria-selected')).toBe('true')
+    expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/lookup'))
+      .toHaveLength(lookupRequestsBeforeReturn)
+    expect(apiFetch.mock.calls.filter(([url]) => String(url) === `/atlas/entities/${URL_ENTITY.id}`))
+      .toHaveLength(urlDetailRequestsBeforeReturn)
+  })
+
+  it('pages every Quick Lookup profile collection and restores Back navigation on desktop and mobile', async () => {
+    for (const mobile of [false, true]) {
+      setupAtlasDom()
+      document.body.classList.toggle('mobile-terminal-mode', mobile)
+      const relatedPortFinding = {
+        ...FINDING,
+        id: 'fnd_port_1',
+        title: 'Related port exposes a service issue',
+        entity_id: PORT_ENTITY.id,
+        entity_type: PORT_ENTITY.type,
+        entity_value: PORT_ENTITY.canonical_value,
+      }
+      const detailRequests = []
+      const pagedDetail = (params = new URLSearchParams()) => {
+        const runsOffset = Number(params.get('runs_offset') || 0)
+        const findingsOffset = Number(params.get('findings_offset') || 0)
+        const relatedUrlsOffset = Number(params.get('related_urls_offset') || 0)
+        const relatedPortsOffset = Number(params.get('related_ports_offset') || 0)
+        const findingBucket = String(params.get('finding_bucket') || 'direct')
+        const bucketFindings = {
+          direct: [FINDING],
+          related_urls: [RELATED_URL_FINDING],
+          related_ports: [relatedPortFinding],
+          combined: [FINDING],
+        }[findingBucket]
+        return {
+          ...lookupDetail(),
+          runs: [{
+            run_id: `run-page-${runsOffset}`,
+            command: `nmap page ${runsOffset + 1}`,
+            occurrence_count: 1,
+          }],
+          related_urls: [{
+            ...URL_ENTITY,
+            canonical_value: `${URL_ENTITY.canonical_value}?page=${relatedUrlsOffset + 1}`,
+          }],
+          related_ports: [{
+            ...PORT_ENTITY,
+            canonical_value: `example.com:${443 + relatedPortsOffset}/tcp`,
+            host_entity_id: ENTITY.id,
+          }],
+          findings: bucketFindings.map(finding => ({
+            ...finding,
+            title: `${finding.title} · page ${findingsOffset + 1}`,
+          })),
+          finding_summary: {
+            direct: findingRollup({ total: 2, all_total: 2, sample: [FINDING] }),
+            related_urls: findingRollup({
+              total: 2,
+              all_total: 2,
+              sample: [RELATED_URL_FINDING],
+            }),
+            related_ports: findingRollup({
+              total: 2,
+              all_total: 2,
+              sample: [relatedPortFinding],
+            }),
+            combined: findingRollup({
+              total: 6,
+              all_total: 6,
+              sample: [FINDING, RELATED_URL_FINDING, relatedPortFinding],
+            }),
+          },
+          detail_limits: {
+            runs: {
+              limit: 1,
+              offset: runsOffset,
+              shown: 1,
+              total: 2,
+              has_more: runsOffset === 0,
+            },
+            findings: {
+              bucket: findingBucket,
+              limit: 1,
+              offset: findingsOffset,
+              shown: 1,
+              total: 2,
+              has_more: findingsOffset === 0,
+            },
+            related_urls: {
+              limit: 1,
+              offset: relatedUrlsOffset,
+              shown: 1,
+              total: 2,
+              has_more: relatedUrlsOffset === 0,
+            },
+            related_ports: {
+              limit: 1,
+              offset: relatedPortsOffset,
+              shown: 1,
+              total: 2,
+              has_more: relatedPortsOffset === 0,
+            },
+          },
+        }
+      }
+      const initialDetail = pagedDetail()
+      const { openAtlasQuickLookup } = loadAtlas({
+        apiFetchInterceptor: (url) => {
+          const target = String(url)
+          if (target === '/atlas/lookup') {
+            return Promise.resolve(jsonResponse({
+              requested_type: 'ip',
+              detected_type: 'ip',
+              canonical_value: ENTITY.canonical_value,
+              project_id: '',
+              match_state: 'found',
+              detail: initialDetail,
+              candidates: [],
+              candidates_truncated: false,
+              parent_host_candidate: null,
+            }))
+          }
+          if (target === `/atlas/entities/${ENTITY.id}` || target.startsWith(`/atlas/entities/${ENTITY.id}?`)) {
+            detailRequests.push(target)
+            return Promise.resolve(jsonResponse(
+              pagedDetail(new URL(target, 'https://example.test').searchParams),
+            ))
+          }
+          return null
+        },
+      })
+
+      await openAtlasQuickLookup({ value: ENTITY.canonical_value, mode: 'ip', submit: true })
+      const profileHost = document.getElementById('atlas-lookup-profile')
+      await vi.waitFor(() => {
+        expect(profileHost?.querySelector('.atlas-related-url-open')).not.toBeNull()
+      })
+      const replaceProfileChildren = profileHost.replaceChildren.bind(profileHost)
+      profileHost.replaceChildren = (...children) => {
+        profileHost.scrollTop = 0
+        return replaceProfileChildren(...children)
+      }
+
+      if (!mobile) {
+        for (const bucket of ['direct', 'related_urls', 'related_ports', 'combined']) {
+          const requestCount = detailRequests.length
+          let bucketButton = null
+          await vi.waitFor(() => {
+            bucketButton = profileHost.querySelector(`[data-atlas-finding-bucket="${bucket}"]`)
+            expect(bucketButton).not.toBeNull()
+          })
+          bucketButton.click()
+          await vi.waitFor(() => {
+            expect(detailRequests.length).toBe(requestCount + 1)
+            const params = new URL(detailRequests.at(-1), 'https://example.test').searchParams
+            expect(params.get('finding_bucket')).toBe(bucket === 'direct' ? null : bucket)
+            expect(window.DarklabAtlasOverlay.state.entityProfileFindingBucket).toBe(bucket)
+            const bucketTitles = {
+              direct: FINDING.title,
+              related_urls: RELATED_URL_FINDING.title,
+              related_ports: relatedPortFinding.title,
+              combined: FINDING.title,
+            }
+            expect(profileHost.textContent).toContain(`${bucketTitles[bucket]} · page 1`)
+          })
+          if (bucket !== 'combined') {
+            profileHost.querySelector('[data-atlas-profile-view="overview"]')?.click()
+          }
+        }
+
+        const findingsRequestCount = detailRequests.length
+        let nextFindingPage = null
+        await vi.waitFor(() => {
+          nextFindingPage = [...profileHost.querySelectorAll(
+            '.atlas-finding-list .atlas-detail-pager button',
+          )].find(button => button.textContent === 'Next')
+          expect(nextFindingPage).toBeTruthy()
+        })
+        nextFindingPage.click()
+        await vi.waitFor(() => {
+          expect(detailRequests.length).toBe(findingsRequestCount + 1)
+          const params = new URL(detailRequests.at(-1), 'https://example.test').searchParams
+          expect(params.get('finding_bucket')).toBe('combined')
+          expect(params.get('findings_offset')).toBe('1')
+          expect(profileHost.textContent).toContain(`${FINDING.title} · page 2`)
+        })
+
+        let evidenceTab = null
+        await vi.waitFor(() => {
+          evidenceTab = profileHost.querySelector('[data-atlas-profile-view="evidence"]')
+          expect(evidenceTab).toBeTruthy()
+        })
+        evidenceTab.click()
+        const runsRequestCount = detailRequests.length
+        let nextRunsPage = null
+        await vi.waitFor(() => {
+          nextRunsPage = [...profileHost.querySelectorAll(
+            '.atlas-source-list .atlas-detail-pager button',
+          )].find(button => button.textContent === 'Next')
+          expect(nextRunsPage).toBeTruthy()
+        })
+        nextRunsPage.click()
+        await vi.waitFor(() => {
+          expect(detailRequests.length).toBe(runsRequestCount + 1)
+          const params = new URL(detailRequests.at(-1), 'https://example.test').searchParams
+          expect(params.get('runs_offset')).toBe('1')
+          expect(profileHost.textContent).toContain('nmap page 2')
+        })
+        let overviewTab = null
+        await vi.waitFor(() => {
+          overviewTab = profileHost.querySelector('[data-atlas-profile-view="overview"]')
+          expect(overviewTab).toBeTruthy()
+        })
+        overviewTab.click()
+      }
+
+      profileHost.scrollTop = 143
+      const relatedUrlRequestCount = detailRequests.length
+      let nextRelatedUrlPage = null
+      await vi.waitFor(() => {
+        nextRelatedUrlPage = [...profileHost.querySelectorAll(
+          '.atlas-related-url-list .atlas-detail-pager button',
+        )].find(button => button.textContent === 'Next')
+        expect(nextRelatedUrlPage).toBeTruthy()
+      })
+      nextRelatedUrlPage.click()
+      await vi.waitFor(() => {
+        expect(detailRequests.length).toBe(relatedUrlRequestCount + 1)
+        const params = new URL(detailRequests.at(-1), 'https://example.test').searchParams
+        expect(params.get('related_urls_offset')).toBe('1')
+        expect(profileHost.textContent).toContain(`${URL_ENTITY.canonical_value}?page=2`)
+        expect(profileHost.scrollTop).toBe(143)
+      })
+
+      if (!mobile) {
+        const relatedPortRequestCount = detailRequests.length
+        let nextRelatedPortPage = null
+        await vi.waitFor(() => {
+          nextRelatedPortPage = [...profileHost.querySelectorAll(
+            '.atlas-related-port-list .atlas-detail-pager button',
+          )].find(button => button.textContent === 'Next')
+          expect(nextRelatedPortPage).toBeTruthy()
+        })
+        nextRelatedPortPage.click()
+        await vi.waitFor(() => {
+          expect(detailRequests.length).toBe(relatedPortRequestCount + 1)
+          const params = new URL(detailRequests.at(-1), 'https://example.test').searchParams
+          expect(params.get('related_ports_offset')).toBe('1')
+          expect(profileHost.textContent).toContain('example.com:444/tcp')
+        })
+      }
+
+      let relatedUrlButton = null
+      await vi.waitFor(() => {
+        relatedUrlButton = profileHost.querySelector('.atlas-related-url-open')
+        expect(relatedUrlButton).toBeTruthy()
+      })
+      profileHost.scrollTop = 211
+      relatedUrlButton.click()
+      await vi.waitFor(() => {
+        expect(window.DarklabAtlasOverlay.state.selectedId).toBe(URL_ENTITY.id)
+        expect(profileHost.textContent).toContain(URL_ENTITY.canonical_value)
+        expect(profileHost.querySelector('.atlas-profile-back')).not.toBeNull()
+      })
+      profileHost.querySelector('.atlas-profile-back')?.click()
+      await vi.waitFor(() => {
+        expect(window.DarklabAtlasOverlay.state.selectedId).toBe(ENTITY.id)
+        expect(profileHost.scrollTop).toBe(211)
+        expect(document.activeElement).toBe(profileHost.querySelector('.atlas-profile-back'))
+      })
+
+      profileHost.querySelector('[data-atlas-profile-view="findings"]')?.click()
+      const findingRow = profileHost.querySelector('button.atlas-finding-row')
+      expect(findingRow).not.toBeNull()
+      profileHost.scrollTop = 249
+      findingRow.click()
+      expect(profileHost.scrollTop).toBe(0)
+      profileHost.querySelector('.atlas-detail-back')?.click()
+      await vi.waitFor(() => {
+        const restoredFinding = profileHost.querySelector('[data-finding-id="fnd_1"]')
+        expect(profileHost.scrollTop).toBe(249)
+        expect(document.activeElement).toBe(restoredFinding)
+      })
+
+      profileHost.querySelector('.atlas-profile-back')?.click()
+      await vi.waitFor(() => {
+        expect(document.getElementById('atlas-lookup-form-view')?.classList.contains('u-hidden'))
+          .toBe(false)
+        expect(document.activeElement).toBe(document.getElementById('atlas-lookup-input'))
+      })
+    }
+    document.body.classList.remove('mobile-terminal-mode')
+  })
+
   it('opens an explicit ordinary Atlas search from a no-record state', async () => {
     const { openAtlasQuickLookup, apiFetch } = loadAtlas({
       apiFetchInterceptor: (url) => {
@@ -1425,7 +2231,7 @@ describe('Atlas overlay', () => {
 
     await openAtlasQuickLookup({ value: 'missing.example', mode: 'hostname', submit: true })
     Array.from(document.querySelectorAll('#atlas-lookup-outcome-actions button'))
-      .find(button => button.textContent === 'Open in Atlas')
+      .find(button => button.textContent === 'Search Atlas')
       ?.click()
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-surface')?.classList.contains('is-atlas-lookup')).toBe(false)

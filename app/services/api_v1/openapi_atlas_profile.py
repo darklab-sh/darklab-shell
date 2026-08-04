@@ -301,13 +301,27 @@ def atlas_profile_schemas() -> dict[str, Any]:
             "required": ["value"],
             "additionalProperties": False,
             "properties": {
-                "value": {"type": "string"},
+                "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": (
+                        "One hostname, IP address, or absolute HTTP(S) URL. "
+                        "Canonical values may not exceed 2,048 UTF-8 bytes."
+                    ),
+                },
                 "mode": {
                     "type": "string",
                     "enum": ["auto", "hostname", "ip", "url"],
                     "default": "auto",
+                    "description": (
+                        "Input type. Hostname resolves the stored Atlas domain type; "
+                        "URL requires an explicit http:// or https:// scheme."
+                    ),
                 },
-                "project_id": {"type": "string"},
+                "project_id": {
+                    "type": "string",
+                    "description": "Optional visible Project scope for the exact lookup.",
+                },
             },
         },
         "AtlasEntityLookupCandidate": {

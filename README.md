@@ -75,7 +75,8 @@ After changing one of these settings, run `docker compose up -d --force-recreate
 | --- | --- |
 | [Browser shell](FEATURES.md#output-streaming-and-display) | Live, searchable output across desktop and mobile tabs. |
 | [History and sharing](FEATURES.md#tabs--run-history) | Saved runs, comparisons, exports, permalinks, and redaction. |
-| [Projects, Atlas, and Quick Lookup](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, and a fast view of everything saved for one hostname, IP address, or URL. |
+| [Projects](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, monitoring, and handoff packages. |
+| [Atlas and Quick Lookup](FEATURES.md#session-entity-atlas) | Browse captured entities and open everything saved for one hostname, IP address, or URL without paging through results. |
 | [Workflows and automation](FEATURES.md#guided-workflows) | Guided playbooks, schedules, watchers, and outbound notifications. |
 | [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context from supported providers. |
 | [Files, variables, and secrets](FEATURES.md#session-files) | A searchable personal or team file browser, terminal capture/copy helpers, reusable values, and encrypted tool credentials. |
@@ -85,6 +86,12 @@ After changing one of these settings, run `docker compose up -d --force-recreate
 | [Themes and onboarding](FEATURES.md#theme-selector) | Customizable appearance, welcome guidance, shortcuts, and a guided tour. |
 
 See [FEATURES.md](FEATURES.md) for the full feature reference.
+
+### Find saved entity evidence quickly
+
+Open **Quick Lookup** beside Atlas on the desktop rail or mobile menu, or press `Alt+Q` / `Option+Q`. Enter one hostname, IP address, or absolute `http://` or `https://` URL and darklab_shell opens the matching saved Atlas profile in your current personal or team scope. **Auto** detects the input type, while the other choices let you require a hostname, IP address, or URL.
+
+Quick Lookup reads evidence and Intel snapshots the app has already saved. It doesn't run a command, create an Atlas record, or contact an Intel provider. If there isn't an exact record, the result explains what was missing and can take you to normal Atlas search; an unmatched URL can also offer its known parent host. Use **Refresh intel** from a saved profile only when you want a live provider refresh.
 
 ---
 

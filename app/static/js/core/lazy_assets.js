@@ -1392,7 +1392,11 @@ let exportedLoadWatchersModal = null;
       if (shellFallback && typeof shellFallback.dispose === 'function') shellFallback.dispose();
       shellFallback = null;
       const open = atlas?.openAtlasQuickLookup;
-      if (typeof open !== 'function' || open === lazyOpenAtlasQuickLookup) return false;
+      if (typeof open !== 'function' || open === lazyOpenAtlasQuickLookup) {
+        const error = new Error('Quick Lookup controller is unavailable');
+        error.quickLookupStage = 'controller';
+        throw error;
+      }
       return open(options);
     } catch (err) {
       if (shellFallback && typeof shellFallback.dispose === 'function') shellFallback.dispose();

@@ -25299,11 +25299,23 @@ class TestDatabaseInit:
 
         assert exc_info.value.code == code
         assert message in exc_info.value.message
+        if mode == "auto" and value == "example.com/path":
+            for network_range in ("10.0.0.0/8", "2001:db8::/32"):
+                with pytest.raises(AtlasLookupError) as network_exc:
+                    normalize_lookup_identity("auto", network_range)
+                assert network_exc.value.code == "invalid_lookup_value"
+                assert "single hosts, not network ranges" in network_exc.value.message
+        if mode == "ip" and value == "example.com":
+            with pytest.raises(AtlasLookupError) as network_exc:
+                normalize_lookup_identity("ip", "192.0.2.0/24")
+            assert network_exc.value.code == "invalid_lookup_value"
+            assert "single hosts, not network ranges" in network_exc.value.message
 
     def test_atlas_exact_lookup_returns_normal_profile_and_url_parent_without_mutation(self):
         from services.atlas.lookup import entity_detail
         from services.atlas.lookup_resolve import exact_lookup_candidate_query, resolve_entity_lookup
         from services.atlas.materializer import upsert_entity
+        from services.intel import cache as intel_cache
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -25323,6 +25335,14 @@ class TestDatabaseInit:
                     "UPDATE entities SET suppressed = 1, suppressed_reason = 'test' WHERE id = ?",
                     (entity_id,),
                 )
+                unreadable_url = "https://known.example.com/private"
+                unreadable_url_id = upsert_entity(
+                    conn,
+                    "lookup-session",
+                    "url",
+                    unreadable_url,
+                    seen_at="2026-08-02T00:00:01+00:00",
+                )
                 conn.commit()
                 protected_tables = (
                     "entities",
@@ -25337,13 +25357,41 @@ class TestDatabaseInit:
                 }
 
                 raw_url = "https://known.example.com/unseen?token=private#fragment"
-                with mock.patch(
-                    "services.intel.lookup.lookup_entity",
-                    side_effect=AssertionError("exact Atlas lookup must not call Intel providers"),
-                ) as provider_lookup:
+                with (
+                    mock.patch(
+                        "services.intel.lookup.lookup_entity",
+                        side_effect=AssertionError("exact Atlas lookup must not call Intel providers"),
+                    ) as provider_lookup,
+                    mock.patch.object(
+                        intel_cache,
+                        "get_cached_response",
+                        side_effect=AssertionError("exact Atlas lookup must not read cached Intel responses"),
+                    ) as cached_response,
+                    mock.patch.object(
+                        intel_cache,
+                        "get_quota_exhausted",
+                        side_effect=AssertionError("exact Atlas lookup must not read cached Intel quota state"),
+                    ) as cached_quota,
+                ):
                     found = resolve_entity_lookup(conn, "lookup-session", "KNOWN.Example.COM.")
                     cross_session = resolve_entity_lookup(conn, "other-session", "known.example.com")
                     parent = resolve_entity_lookup(conn, "lookup-session", raw_url)
+                    with (
+                        mock.patch(
+                            "services.atlas.lookup_resolve.entity_detail",
+                            side_effect=lambda detail_conn, detail_session, detail_entity_id, **kwargs: (
+                                None
+                                if str(detail_entity_id) == unreadable_url_id
+                                else entity_detail(detail_conn, detail_session, detail_entity_id, **kwargs)
+                            ),
+                        ),
+                        mock.patch("services.atlas.lookup_resolve.log.warning") as lookup_warning,
+                    ):
+                        unreadable_parent = resolve_entity_lookup(
+                            conn,
+                            "lookup-session",
+                            unreadable_url,
+                        )
                 after_counts = {
                     table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
                     for table in protected_tables
@@ -25379,10 +25427,23 @@ class TestDatabaseInit:
         assert parent["canonical_value"] == "https://known.example.com/unseen?token=private"
         assert parent["parent_host_candidate"]["match_state"] == "found"
         assert parent["parent_host_candidate"]["entity"]["entity_id"] == entity_id
+        assert unreadable_parent["match_state"] == "not_found"
+        assert unreadable_parent["detail"] is None
+        assert unreadable_parent["parent_host_candidate"]["match_state"] == "found"
+        assert unreadable_parent["parent_host_candidate"]["entity"]["entity_id"] == entity_id
+        profile_warning = next(
+            call for call in lookup_warning.call_args_list
+            if call.args == ("ATLAS_LOOKUP_PROFILE_UNAVAILABLE",)
+        )
+        assert profile_warning.kwargs["extra"]["entity_id"] == unreadable_url_id
+        assert profile_warning.kwargs["extra"]["reason"] == "selected_entity_not_visible_to_profile"
+        assert unreadable_url not in repr(lookup_warning.call_args_list)
         assert before_counts == after_counts
-        assert before_counts["entities"] == 1
+        assert before_counts["entities"] == 2
         assert raw_url_audit_rows == 0
         provider_lookup.assert_not_called()
+        cached_response.assert_not_called()
+        cached_quota.assert_not_called()
         assert "idx_entities_type_signature" in index_names
         assert "idx_entities_type_signature" in lookup_plan
 
@@ -25428,12 +25489,16 @@ class TestDatabaseInit:
                     personal_ids.append(entity_id)
                 conn.commit()
 
-                ambiguous = resolve_entity_lookup(
-                    conn,
-                    "member-one",
-                    canonical_value,
-                    team_id=team_id,
-                )
+                with (
+                    mock.patch("services.atlas.lookup_resolve.log.debug") as lookup_debug,
+                    mock.patch("services.atlas.lookup_resolve.log.warning") as lookup_warning,
+                ):
+                    ambiguous = resolve_entity_lookup(
+                        conn,
+                        "member-one",
+                        canonical_value,
+                        team_id=team_id,
+                    )
                 direct_id = upsert_entity(
                     conn,
                     "member-one",
@@ -25457,6 +25522,19 @@ class TestDatabaseInit:
         assert set(candidate["entity_id"] for candidate in ambiguous["candidates"]).issubset(personal_ids)
         assert ambiguous["candidates_truncated"] is True
         assert {candidate["provenance"] for candidate in ambiguous["candidates"]} == {"compatibility_visible"}
+        candidate_log = next(
+            call for call in lookup_debug.call_args_list
+            if call.args == ("ATLAS_LOOKUP_CANDIDATES_RESOLVED",)
+        )
+        assert candidate_log.kwargs["extra"]["lookup_role"] == "requested"
+        assert candidate_log.kwargs["extra"]["match_state"] == "ambiguous"
+        assert candidate_log.kwargs["extra"]["row_count"] == 11
+        ambiguity_log = next(
+            call for call in lookup_warning.call_args_list
+            if call.args == ("ATLAS_LOOKUP_AMBIGUOUS",)
+        )
+        assert ambiguity_log.kwargs["extra"]["candidates_truncated"] is True
+        assert canonical_value not in repr(lookup_warning.call_args_list)
         assert direct["match_state"] == "found"
         assert direct["detail"]["entity"]["id"] == direct_id
         assert direct["candidates"] == []

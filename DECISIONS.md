@@ -39,6 +39,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
 - [Atlas Decisions](#atlas-decisions)
   - [Port Entity Identity and Evidence](#port-entity-identity-and-evidence)
   - [URL Entity Host Links](#url-entity-host-links)
+  - [Quick Lookup Reuses the Atlas Surface](#quick-lookup-reuses-the-atlas-surface)
 - [Backend Architecture Decisions](#backend-architecture-decisions)
   - [Blueprint Parent Modules and Size Ratchets](#blueprint-parent-modules-and-size-ratchets)
   - [Mutable Runtime State Uses Source-Owner Accessors](#mutable-runtime-state-uses-source-owner-accessors)
@@ -183,6 +184,14 @@ Ports do not offer provider intel refresh. They are app-captured scan evidence f
 **URL entities reuse the host relationship instead of introducing a URL-only link.**
 
 URL entities belong to a host in the same way port entities do, so they use the existing `host_entity_id` field. The relationship points at the scoped `domain` or `ip` entity derived from the canonical URL host. That keeps the URL canonical value stable and readable while letting Atlas and Project Overview roll URL evidence up through the host.
+
+### Quick Lookup Reuses the Atlas Surface
+
+**Quick Lookup is an Atlas mode, not a separate modal.**
+
+Quick Lookup has its own input and result root because finding one exact saved value is different from browsing a filtered Atlas list. Once it finds an entity, however, the user needs the same Overview, Evidence, Findings, Intel, relationship navigation, paging, and return behavior as an ordinary focused Atlas profile. Keeping those paths in one overlay and renderer prevents profile content and actions from drifting.
+
+A second modal would also duplicate the scrim, focus trap, mobile sheet, close behavior, and related-entity stack. The browser therefore enters `data-atlas-mode="lookup"` on the existing Atlas surface and transitions into normal Atlas browsing only through **Open in Atlas**. The exact read route remains separate so it can validate and scope the submitted value without loading Atlas lists or placing URL paths and queries in browser history.
 
 ---
 

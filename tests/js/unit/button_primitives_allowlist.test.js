@@ -9,18 +9,22 @@ import { JSDOM } from 'jsdom'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const TEMPLATE_DIR = join(REPO_ROOT, 'app/templates')
+const HTML_DIRS = [
+  join(REPO_ROOT, 'app/templates'),
+  join(REPO_ROOT, 'app/static/fragments'),
+]
 const FIXTURE_PATH = join(REPO_ROOT, 'tests/js/fixtures/button_primitive_allowlist.json')
 
 // Positive counterpart to button_primitives.test.js. That suite blocks a
 // hand-maintained list of retired class names; this one asserts the
-// *opposite* contract: every button-like element in the HTML templates must
+// *opposite* contract: every button-like element in the HTML templates and
+// static fragments must
 // either carry one of the allowed primitive classes OR match a selector in
 // the allowlist fixture. The fixture should normally have no exceptions; any
 // selector listed there documents a deliberate primitive opt-out.
 //
 // Scope is deliberately HTML-only plus `<a role="button">`:
-//  - <button> elements in app/templates/**.html
+//  - <button> elements in app/templates/**.html and app/static/fragments/**.html
 //  - any element carrying role="button" (including <a role="button">)
 // Buttons injected by JS at runtime (e.g. tab close buttons) are not
 // scanned here; their class names are covered by the negative blocklist in
@@ -76,7 +80,7 @@ function matchesAnyException(el) {
 }
 
 describe('button primitive allowlist contract', () => {
-  const files = walkHtml(TEMPLATE_DIR)
+  const files = HTML_DIRS.flatMap(walkHtml)
 
   for (const file of files) {
     const rel = file.replace(REPO_ROOT + '/', '')

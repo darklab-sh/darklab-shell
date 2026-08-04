@@ -190,6 +190,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/intel_profile.py", 93, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_evidence.py", 335, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_summary.py", 370, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/lookup_query.py", 68, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/lookup_resolve.py", 347, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/lookup.py", 973, "split-target-phase4"),
     ModuleSizeBudget("app/services/atlas/lookup_export.py", 277, "split-package-ratchet"),

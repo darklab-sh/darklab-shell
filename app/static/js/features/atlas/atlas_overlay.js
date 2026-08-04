@@ -261,7 +261,7 @@ let exportedCycleAtlasTab = null;
     addActiveProjectOnSelect: false,
     detail: null,
     detailFinding: null,
-    detailFindingReturnScroll: { desktop: 0, mobile: 0 },
+    detailFindingReturnScroll: { profile: 0, findingId: '' },
     entityProfileMode: false,
     entityProfileView: 'overview',
     entityProfileFindingBucket: 'direct',
@@ -372,6 +372,29 @@ let exportedCycleAtlasTab = null;
     return !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
   }
 
+  function activeEntityDetailHost() {
+    if (state.lookupMode && quickLookupController?.profileHost) {
+      return quickLookupController.profileHost;
+    }
+    if (isAtlasMobileMode()) {
+      return document.getElementById('atlas-mobile-entity-body');
+    }
+    return detailHost;
+  }
+
+  function activeEntityProfileBackControl() {
+    if (!state.lookupMode && isAtlasMobileMode()) {
+      return document.querySelector?.('#atlas-mobile-entity-topbar .atlas-mobile-back-btn') || null;
+    }
+    return activeEntityDetailHost()?.querySelector?.('.atlas-profile-back') || null;
+  }
+
+  function focusActiveEntityProfileBackControl() {
+    window.setTimeout(() => {
+      activeEntityProfileBackControl()?.focus?.({ preventScroll: true });
+    }, 0);
+  }
+
   function ensureMobileAtlasIfNeeded() {
     if (state.lookupMode || !isOpen() || !isAtlasMobileMode() || typeof importedLoadAtlasMobile !== 'function') return;
     if (!mobileApiPromise) {
@@ -442,9 +465,11 @@ let exportedCycleAtlasTab = null;
     return err;
   }
 
-  function logImportClientError(message, err) {
+  function logImportClientError(message, err, details) {
     if (err && err.atlasHandledClientHttpError) return;
-    if (typeof importedLogClientError === 'function') importedLogClientError(message, err);
+    if (typeof importedLogClientError !== 'function') return;
+    if (details === undefined) importedLogClientError(message, err);
+    else importedLogClientError(message, err, details);
   }
 
   let intelRefreshOverlay = null;
@@ -586,6 +611,88 @@ let exportedCycleAtlasTab = null;
       || { kind: 'personal', id: '', projectId: '', label: 'Personal' };
   }
 
+  function cloneEntityProfileSnapshot(snapshot = {}) {
+    return {
+      ...snapshot,
+      selectedFindingIds: new Set(snapshot.selectedFindingIds || []),
+      selectedEntityIds: new Set(snapshot.selectedEntityIds || []),
+      detailOffsets: { ...(snapshot.detailOffsets || {}) },
+      entityProfileReturnScroll: { ...(snapshot.entityProfileReturnScroll || {}) },
+      scroll: { ...(snapshot.scroll || {}) },
+    };
+  }
+
+  function captureQuickLookupReturnState() {
+    const lookupState = quickLookupController?.state || {};
+    return {
+      lookup: {
+        root: String(lookupState.root || 'form'),
+        rawDraft: String(lookupState.rawDraft || ''),
+        selectedMode: String(lookupState.selectedMode || 'auto'),
+        submittedRawValue: String(lookupState.submittedRawValue || ''),
+        submittedMode: String(lookupState.submittedMode || 'auto'),
+        submittedCanonicalValue: String(lookupState.submittedCanonicalValue || ''),
+        result: lookupState.result || null,
+        launchScope: { ...(lookupState.launchScope || {}) },
+      },
+      atlas: {
+        activeTab: state.activeTab,
+        projectId: state.projectId,
+        projectName: state.projectName,
+        selectedId: state.selectedId,
+        selectedFindingId: state.selectedFindingId,
+        detail: state.detail,
+        detailFinding: state.detailFinding,
+        detailFindingReturnScroll: { ...(state.detailFindingReturnScroll || {}) },
+        detailOffsets: { ...(state.detailOffsets || {}) },
+        entityProfileView: state.entityProfileView,
+        entityProfileFindingBucket: state.entityProfileFindingBucket,
+        entityProfileReturnScroll: { ...(state.entityProfileReturnScroll || {}) },
+        entityProfileStack: state.entityProfileStack.map(cloneEntityProfileSnapshot),
+      },
+    };
+  }
+
+  async function restoreQuickLookupReturnState(snapshot = {}) {
+    const lookupSnapshot = snapshot.lookup && typeof snapshot.lookup === 'object'
+      ? snapshot.lookup
+      : null;
+    const atlasSnapshot = snapshot.atlas && typeof snapshot.atlas === 'object'
+      ? snapshot.atlas
+      : null;
+    if (!lookupSnapshot || !atlasSnapshot || typeof quickLookupController?.restore !== 'function') return false;
+    quickLookupController.restore(lookupSnapshot);
+    const detail = atlasSnapshot.detail || lookupSnapshot.result?.detail || null;
+    state.activeTab = String(atlasSnapshot.activeTab || detail?.entity?.type || state.activeTab);
+    state.projectId = String(atlasSnapshot.projectId || '');
+    state.projectName = String(atlasSnapshot.projectName || '').trim();
+    state.launchProjectId = state.projectId;
+    state.launchProjectName = state.projectName;
+    state.selectedId = String(atlasSnapshot.selectedId || detail?.entity?.id || '');
+    state.selectedFindingId = String(atlasSnapshot.selectedFindingId || '');
+    state.detail = detail;
+    state.detailFinding = atlasSnapshot.detailFinding || null;
+    state.detailFindingReturnScroll = { ...(atlasSnapshot.detailFindingReturnScroll || {}) };
+    state.detailOffsets = { ...(atlasSnapshot.detailOffsets || state.detailOffsets) };
+    state.entityProfileMode = String(lookupSnapshot.root || '') === 'profile' && !!detail;
+    state.entityProfileView = ['overview', 'evidence', 'findings', 'intel']
+      .includes(String(atlasSnapshot.entityProfileView || ''))
+      ? String(atlasSnapshot.entityProfileView)
+      : 'overview';
+    state.entityProfileFindingBucket = ['direct', 'related_urls', 'related_ports', 'combined']
+      .includes(String(atlasSnapshot.entityProfileFindingBucket || ''))
+      ? String(atlasSnapshot.entityProfileFindingBucket)
+      : 'direct';
+    state.entityProfileReturnScroll = { ...(atlasSnapshot.entityProfileReturnScroll || {}) };
+    state.entityProfileStack = Array.isArray(atlasSnapshot.entityProfileStack)
+      ? atlasSnapshot.entityProfileStack.map(cloneEntityProfileSnapshot)
+      : [];
+    if (detail) quickLookupController.syncProfileDetail?.(detail);
+    await ensureDetailApi({ renderOnReady: false }).catch(() => null);
+    render();
+    return true;
+  }
+
   function resetAtlasDetailState() {
     state.selectedId = '';
     state.selectedFindingId = '';
@@ -599,6 +706,10 @@ let exportedCycleAtlasTab = null;
 
   async function openAtlasQuickLookup(options = {}) {
     if (!quickLookupController) return false;
+    if (options.toggle && state.lookupMode && isOpen()) {
+      closeAtlas();
+      return false;
+    }
     if (typeof importedCloseMajorOverlays === 'function') importedCloseMajorOverlays({ skipAtlas: true });
     if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     abortReadRequests();
@@ -626,6 +737,9 @@ let exportedCycleAtlasTab = null;
       markInteractionSurfaceReady('atlas', overlay, surface);
     }
     render();
+    if (options.lookupReturnState && typeof options.lookupReturnState === 'object') {
+      return restoreQuickLookupReturnState(options.lookupReturnState);
+    }
     return quickLookupController.activate({
       value: String(options.value || options.entityValue || ''),
       mode: String(options.mode || 'auto'),
@@ -681,7 +795,7 @@ let exportedCycleAtlasTab = null;
       state.query = '';
       if (searchInput) searchInput.value = '';
     }
-    state.selectedId = '';
+    state.selectedId = String(options && options.entityId || '').trim();
     state.selectedFindingId = '';
     state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     resetSelection({ selectMode: false, render: false });
@@ -753,6 +867,7 @@ let exportedCycleAtlasTab = null;
 
   function captureEntityProfileSnapshot() {
     const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
+    const activeDetailHost = activeEntityDetailHost();
     return {
       activeTab: state.activeTab,
       summary: state.summary,
@@ -779,6 +894,7 @@ let exportedCycleAtlasTab = null;
       entityProfileReturnScroll: { ...state.entityProfileReturnScroll },
       scroll: {
         list: Number(listHost?.scrollTop || 0),
+        profile: Number(activeDetailHost?.scrollTop || 0),
         detail: Number(detailHost?.scrollTop || 0),
         mobile: Number(mobileDetailHost?.scrollTop || 0),
       },
@@ -798,14 +914,15 @@ let exportedCycleAtlasTab = null;
     state.selectedEntityIds = new Set(snapshot.selectedEntityIds || []);
     if (searchInput) searchInput.value = state.query;
     render();
-    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
     if (listHost) listHost.scrollTop = Math.max(0, Number(snapshot.scroll?.list || 0));
-    if (detailHost) detailHost.scrollTop = Math.max(0, Number(snapshot.scroll?.detail || 0));
-    if (mobileDetailHost) mobileDetailHost.scrollTop = Math.max(0, Number(snapshot.scroll?.mobile || 0));
-    window.setTimeout(() => {
-      const profileHost = isAtlasMobileMode() ? mobileDetailHost : detailHost;
-      profileHost?.querySelector?.('.atlas-profile-back, .atlas-mobile-back-btn')?.focus?.({ preventScroll: true });
-    }, 0);
+    const activeDetailHost = activeEntityDetailHost();
+    const fallbackScroll = isAtlasMobileMode()
+      ? snapshot.scroll?.mobile
+      : snapshot.scroll?.detail;
+    if (activeDetailHost) {
+      activeDetailHost.scrollTop = Math.max(0, Number(snapshot.scroll?.profile ?? fallbackScroll ?? 0));
+    }
+    focusActiveEntityProfileBackControl();
     return true;
   }
 
@@ -2200,16 +2317,9 @@ let exportedCycleAtlasTab = null;
       : 'overview';
     state.detailFinding = null;
     render();
-    if (detailHost) detailHost.scrollTop = 0;
-    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
-    if (mobileDetailHost) mobileDetailHost.scrollTop = 0;
-    if (isAtlasMobileMode()) {
-      document
-        .querySelector?.('#atlas-mobile-entity-topbar .atlas-mobile-back-btn')
-        ?.focus?.({ preventScroll: true });
-    } else {
-      detailHost?.querySelector?.('.atlas-profile-back')?.focus?.({ preventScroll: true });
-    }
+    const activeDetailHost = activeEntityDetailHost();
+    if (activeDetailHost) activeDetailHost.scrollTop = 0;
+    activeEntityProfileBackControl()?.focus?.({ preventScroll: true });
     return true;
   }
 
@@ -2254,13 +2364,9 @@ let exportedCycleAtlasTab = null;
         }
       }
     }
-    const lookupProfileHost = state.lookupMode ? quickLookupController?.profileHost : null;
-    if (lookupProfileHost) lookupProfileHost.scrollTop = 0;
-    else if (detailHost) detailHost.scrollTop = 0;
-    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
-    if (!state.lookupMode && mobileDetailHost) mobileDetailHost.scrollTop = 0;
+    const profileHost = activeEntityDetailHost();
+    if (profileHost) profileHost.scrollTop = 0;
     if (focus) {
-      const profileHost = lookupProfileHost || (isAtlasMobileMode() ? mobileDetailHost : detailHost);
       profileHost
         ?.querySelector?.(`[data-atlas-profile-view="${selectorValue(next)}"]`)
         ?.focus?.({ preventScroll: true });
@@ -2745,9 +2851,7 @@ let exportedCycleAtlasTab = null;
     if (!state.selectedId || !['runs', 'findings', 'related_urls', 'related_ports'].includes(String(kind || ''))) {
       return;
     }
-    const desktopScrollTop = Number(detailHost?.scrollTop || 0);
-    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
-    const mobileScrollTop = Number(mobileDetailHost?.scrollTop || 0);
+    const returnScrollTop = Number(activeEntityDetailHost()?.scrollTop || 0);
     state.detailOffsets = {
       runs: Math.max(0, Number(state.detailOffsets?.runs || 0)),
       findings: Math.max(0, Number(state.detailOffsets?.findings || 0)),
@@ -2756,31 +2860,35 @@ let exportedCycleAtlasTab = null;
       [kind]: Math.max(0, Number(offset || 0)),
     };
     await loadDetail(state.selectedId);
-    if (detailHost) detailHost.scrollTop = desktopScrollTop;
-    if (mobileDetailHost) mobileDetailHost.scrollTop = mobileScrollTop;
+    const activeDetailHost = activeEntityDetailHost();
+    if (activeDetailHost) activeDetailHost.scrollTop = returnScrollTop;
   }
 
   function openEntityFindingDetail(finding) {
     if (!finding || !finding.id || !state.selectedId) return;
-    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
     state.detailFindingReturnScroll = {
-      desktop: Number(detailHost?.scrollTop || 0),
-      mobile: Number(mobileDetailHost?.scrollTop || 0),
+      profile: Number(activeEntityDetailHost()?.scrollTop || 0),
+      findingId: String(finding.id),
     };
     state.detailFinding = finding;
     render();
-    if (detailHost) detailHost.scrollTop = 0;
-    if (mobileDetailHost) mobileDetailHost.scrollTop = 0;
+    const activeDetailHost = activeEntityDetailHost();
+    if (activeDetailHost) activeDetailHost.scrollTop = 0;
   }
 
   function closeEntityFindingDetail() {
     if (!state.detailFinding) return;
     const returnScroll = state.detailFindingReturnScroll || {};
+    const findingId = String(returnScroll.findingId || state.detailFinding.id || '');
     state.detailFinding = null;
     render();
-    const mobileDetailHost = document.getElementById('atlas-mobile-entity-body');
-    if (detailHost) detailHost.scrollTop = Math.max(0, Number(returnScroll.desktop || 0));
-    if (mobileDetailHost) mobileDetailHost.scrollTop = Math.max(0, Number(returnScroll.mobile || 0));
+    const activeDetailHost = activeEntityDetailHost();
+    if (activeDetailHost) activeDetailHost.scrollTop = Math.max(0, Number(returnScroll.profile || 0));
+    window.setTimeout(() => {
+      activeDetailHost
+        ?.querySelector?.(`[data-finding-id="${selectorValue(findingId)}"]`)
+        ?.focus?.({ preventScroll: true });
+    }, 0);
   }
 
   async function openLinkedProject(link) {
@@ -2788,7 +2896,11 @@ let exportedCycleAtlasTab = null;
     if (!projectId || typeof importedOpenProjectWorkspaceById !== 'function') return;
     try {
       await importedOpenProjectWorkspaceById(projectId, {
-        returnToAtlas: {
+        returnToAtlas: state.lookupMode ? {
+          source: 'project-return',
+          launchMode: 'lookup',
+          lookupReturnState: captureQuickLookupReturnState(),
+        } : {
           source: 'project-return',
           tab: state.activeTab,
           projectId: state.projectId,
@@ -3658,11 +3770,12 @@ let exportedCycleAtlasTab = null;
       tab: String(entity.type),
       projectId: state.projectId,
       projectName: state.projectName,
+      entityId: String(entity.id),
       entityValue: String(entity.canonical_value || result.canonical_value || ''),
       forceView: 'profile',
       profileView: state.entityProfileView,
       findingBucket: state.entityProfileFindingBucket,
-      orphanFilter: Array.isArray(entity.run_links) && entity.run_links.length === 0 ? 'all' : 'hide',
+      orphanFilter: Number(detail.detail_limits?.runs?.total) === 0 ? 'all' : 'hide',
       suppressionFilter: entity.suppressed ? 'all' : 'hide',
     });
   }
@@ -3936,6 +4049,11 @@ let exportedCycleAtlasTab = null;
           if (subtitle) subtitle.textContent = `Quick lookup · ${scopeText}`;
         }
       },
+      onLogEvent: (event, details) => logImportClientError(event, null, {
+        event,
+        level: 'debug',
+        ...details,
+      }),
       onError: (err) => logImportClientError('failed to run Atlas Quick Lookup', err),
     });
   }

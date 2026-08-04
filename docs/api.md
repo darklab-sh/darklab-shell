@@ -314,12 +314,35 @@ Entity and finding list routes use the same `limit`, `offset`, and filter names 
 
 Exact lookup accepts a JSON body with `mode` (`auto`, `hostname`, `ip`, or `url`), `value`, and an optional `project_id`. It returns `found`, `not_found`, or `ambiguous` without creating an entity or refreshing external Intel. A found result contains the same entity-detail payload as `GET /api/v1/atlas/entities/<entity_id>`. When the exact URL hasn't been saved but its hostname or IP has, `parent_host_candidate` identifies that record without presenting it as an exact URL match. Suppressed entities and entities whose source runs were removed remain available when they are visible in the requested scope.
 
+The request accepts only those three fields. `value` must be a non-empty hostname, single IP address, or absolute HTTP(S) URL; URLs require an explicit `http://` or `https://` scheme. Canonical values are limited to 2,048 UTF-8 bytes. `mode: "hostname"` resolves the stored Atlas `domain` type, so successful responses use `detected_type: "domain"`. When `project_id` is present, it must name a Project visible in the authenticated personal or team scope.
+
 ```bash
 curl -sS -X POST "$DARKLAB_API_URL/api/v1/atlas/lookup" \
   -H "Authorization: Bearer $DARKLAB_TOKEN" \
   -H 'Content-Type: application/json' \
   --data '{"mode":"hostname","value":"example.com"}'
 ```
+
+Validation failures return HTTP `400` with the normal API error envelope:
+
+```json
+{
+  "error": {
+    "code": "invalid_lookup_value",
+    "message": "Enter an absolute HTTP(S) URL, including http:// or https://."
+  }
+}
+```
+
+| Error code | Meaning |
+| --- | --- |
+| `invalid_body` | The request body isn't a JSON object. |
+| `invalid_request` | The body contains fields other than `mode`, `value`, and `project_id`. |
+| `missing_lookup_value` | `value` is missing, blank, or not a string. |
+| `invalid_lookup_type` | `mode` isn't `auto`, `hostname`, `ip`, or `url`. |
+| `invalid_lookup_value` | The value is malformed, uses an unsupported URL scheme, omits the URL scheme, or represents a network range instead of one host. |
+| `lookup_value_too_long` | The canonical value exceeds 2,048 UTF-8 bytes. |
+| `invalid_project` | `project_id` isn't visible in the authenticated scope. |
 
 Atlas entity rows include `host_entity_id` for host-owned rows such as ports and URLs. Port rows point back to the scanned host entity; URL rows point to the scoped domain or IP entity derived from the canonical URL host. Rows can also include an `attributes` object for lightweight app-captured details such as protocol, service, version, or banner text. Ports are scan evidence, so they do not expose provider-refresh data the way provider-backed domains, IPs, URLs, hashes, and CVEs can.
 

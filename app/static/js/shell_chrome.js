@@ -26,8 +26,8 @@ import {
 } from './core/lazy_assets.js';
 import {
   openAtlas as importedOpenAtlas,
-  openAtlasQuickLookup as importedOpenAtlasQuickLookup,
 } from './features/atlas/atlas_bridge.js';
+import { openAtlasQuickLookupFromSurface as importedOpenAtlasQuickLookupFromSurface } from './features/atlas/atlas_quick_lookup_launch.js';
 import { openCommandRegistry as importedOpenCommandRegistry } from './features/command-registry/command_registry_bridge.js';
 import { resetCmdHistoryNav as importedResetCmdHistoryNav } from './features/history/history_recall.js';
 import { openHistoryRunDetails as importedOpenHistoryRunDetails } from './features/history/history_run_modal_state_bridge.js';
@@ -185,15 +185,10 @@ let importedProjectWorkspaceShell;
     return typeof open === 'function' ? open(...args) : undefined;
   }
 
-  async function _shellOpenAtlasQuickLookup(...args) {
-    const open = _shellFn('openAtlasQuickLookup', importedOpenAtlasQuickLookup);
-    return typeof open === 'function' ? open(...args) : undefined;
-  }
-
   function _reportSurfaceOpenFailure(surface, err, { source = '' } = {}) {
     const normalized = String(surface || '').toLowerCase();
-    const isAtlasSurface = normalized === 'atlas' || normalized === 'atlas-lookup';
-    const label = normalized === 'atlas-lookup' ? 'Quick Lookup' : (isAtlasSurface ? 'Atlas' : 'Projects');
+    const isAtlasSurface = normalized === 'atlas';
+    const label = isAtlasSurface ? 'Atlas' : 'Projects';
     const event = isAtlasSurface ? 'ATLAS_OPEN_FAILED' : 'PROJECT_WORKSPACE_OPEN_FAILED';
     _shellLogClientError(`failed to open ${label}`, err, {
       event,
@@ -209,8 +204,11 @@ let importedProjectWorkspaceShell;
   }
 
   function _openAtlasQuickLookupFromSurface(source = '') {
-    void _shellOpenAtlasQuickLookup({ source })
-      .catch((err) => _reportSurfaceOpenFailure('atlas-lookup', err, { source }));
+    const open = _shellFn('openAtlasQuickLookupFromSurface', importedOpenAtlasQuickLookupFromSurface);
+    if (typeof open !== 'function') return;
+    void open(source, {
+      onFailure: () => _shellShowToast('Failed to open Quick Lookup. Please try again.', 'error'),
+    });
   }
 
   function _openProjectWorkspaceFromSurface(source = '') {

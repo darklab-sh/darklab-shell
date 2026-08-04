@@ -1955,7 +1955,7 @@ describe('app helpers', () => {
 
     sheet.classList.remove('u-hidden')
     document.querySelector('#mobile-menu-sheet [data-menu-action="quick-lookup"]').click()
-    expect(openAtlasQuickLookup).toHaveBeenCalledWith({ source: 'mobile-menu' })
+    expect(openAtlasQuickLookup).toHaveBeenCalledWith({ source: 'mobile-menu', toggle: true })
 
     sheet.classList.remove('u-hidden')
     document.querySelector('#mobile-menu-sheet [data-menu-action="status-monitor"]').click()
@@ -5959,8 +5959,8 @@ describe('app helpers', () => {
 
     expect(optionGlyphEvent.defaultPrevented).toBe(true)
     expect(openAtlasQuickLookup).toHaveBeenCalledTimes(2)
-    expect(openAtlasQuickLookup).toHaveBeenNthCalledWith(1, { source: 'shortcut' })
-    expect(openAtlasQuickLookup).toHaveBeenNthCalledWith(2, { source: 'shortcut' })
+    expect(openAtlasQuickLookup).toHaveBeenNthCalledWith(1, { source: 'shortcut', toggle: true })
+    expect(openAtlasQuickLookup).toHaveBeenNthCalledWith(2, { source: 'shortcut', toggle: true })
     expect(cmdInput.value).toBe('')
   })
 

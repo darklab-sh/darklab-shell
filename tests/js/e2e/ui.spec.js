@@ -434,6 +434,19 @@ test.describe('Atlas Quick Lookup', () => {
       type: 'domain',
       canonicalValue: hostname,
     })
+    hostDetail.runs = [{
+      run_id: 'run_lookup_page_1',
+      command: `nmap ${hostname} page 1`,
+      occurrence_count: 1,
+      last_seen_at: '2026-08-03T00:00:00Z',
+    }]
+    hostDetail.detail_limits.runs = {
+      limit: 1,
+      offset: 0,
+      shown: 1,
+      total: 2,
+      has_more: true,
+    }
     const ipDetail = atlasQuickLookupDetail({
       id: 'ent_lookup_ip',
       type: 'ip',
@@ -452,6 +465,7 @@ test.describe('Atlas Quick Lookup', () => {
       intel: true,
     })
     const lookupRequests = []
+    const hostDetailRequests = []
 
     await page.route(/https?:\/\/[^/]+\/atlas(?:\?|\/|$)/, async (route) => {
       const request = route.request()
@@ -509,7 +523,30 @@ test.describe('Atlas Quick Lookup', () => {
         return
       }
       if (url.pathname === '/atlas/entities/ent_lookup_host') {
-        await route.fulfill({ contentType: 'application/json', body: JSON.stringify(hostDetail) })
+        const runsOffset = Number(url.searchParams.get('runs_offset') || 0)
+        hostDetailRequests.push(url.pathname + url.search)
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ...hostDetail,
+            runs: [{
+              run_id: `run_lookup_page_${runsOffset + 1}`,
+              command: `nmap ${hostname} page ${runsOffset + 1}`,
+              occurrence_count: 1,
+              last_seen_at: '2026-08-03T00:00:00Z',
+            }],
+            detail_limits: {
+              ...hostDetail.detail_limits,
+              runs: {
+                limit: 1,
+                offset: runsOffset,
+                shown: 1,
+                total: 2,
+                has_more: runsOffset === 0,
+              },
+            },
+          }),
+        })
         return
       }
       if (url.pathname === '/atlas/entities/ent_lookup_ip') {
@@ -556,6 +593,15 @@ test.describe('Atlas Quick Lookup', () => {
 
     await page.goto('/')
     await ensurePromptReady(page)
+    await page.keyboard.press('Alt+q')
+    await expect(page.locator('#atlas-overlay')).toHaveCount(1)
+    await expect(page.locator('.mobile-sheet-overlay.open')).toHaveCount(1)
+    await expect(page.locator('#atlas-lookup-input')).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toBeFocused()
+    expect(await page.locator('#cmd').inputValue()).not.toContain('œ')
+
     await openRailAction(page, 'quick-lookup')
     await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#atlas-lookup-input')).toBeFocused()
@@ -566,6 +612,11 @@ test.describe('Atlas Quick Lookup', () => {
     await expect(page.locator('#atlas-lookup-profile')).toContainText(hostname)
     await page.locator('#atlas-lookup-profile [data-atlas-profile-view="evidence"]').click()
     await expect(page.locator('#atlas-lookup-profile')).toContainText('Source runs')
+    const sourceRuns = page.locator('#atlas-lookup-profile .atlas-detail-section')
+      .filter({ hasText: 'Source runs' })
+    await sourceRuns.locator('.atlas-detail-pager button', { hasText: 'Next' }).click()
+    await expect(page.locator('#atlas-lookup-profile')).toContainText(`nmap ${hostname} page 2`)
+    expect(hostDetailRequests.some(path => path.includes('runs_offset=1'))).toBe(true)
 
     await page.locator('#atlas-lookup-profile-new').click()
     await page.locator('#atlas-lookup-mode').selectOption('url')
@@ -586,11 +637,23 @@ test.describe('Atlas Quick Lookup', () => {
     await expect(page.locator('#atlas-lookup-profile')).toContainText('Shodan')
     await expect(page.locator('#atlas-lookup-profile')).toContainText('Example Network')
 
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toBeFocused()
+    expect(await page.locator('#cmd').inputValue()).not.toContain('œ')
+    await page.keyboard.press('Alt+q')
+    await expect(page.locator('.mobile-sheet-overlay.open')).toHaveCount(1)
+    await expect(page.locator('#atlas-lookup-input')).toBeFocused()
+    await page.locator('#atlas-lookup-mode').selectOption('ip')
+    await page.locator('#atlas-lookup-input').fill(ipValue)
+    await page.locator('#atlas-lookup-form').evaluate(form => form.requestSubmit())
+    await expect(page.locator('#atlas-lookup-profile')).toContainText(ipValue)
+
     await page.locator('#atlas-lookup-open-atlas').click()
     await expect(page.locator('#atlas-surface')).not.toHaveClass(/\bis-atlas-lookup\b/)
     await expect(page.locator('.atlas-shell')).toHaveAttribute('data-atlas-mode', 'profile')
     await expect(page.locator('#atlas-detail')).toContainText(ipValue)
-    expect(lookupRequests.map(request => request.mode)).toEqual(['hostname', 'url', 'ip'])
+    expect(lookupRequests.map(request => request.mode)).toEqual(['hostname', 'url', 'ip', 'ip'])
 
     await page.keyboard.press('Escape')
     await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)

@@ -81,9 +81,9 @@ describe('frontend browser global boundary inventory', () => {
       dynamic_or_non_literal: 27,
       fallback_imported_binding: 375,
       fallback_local_binding: 11,
-      global_publish: 78,
+      global_publish: 77,
       guarded_compatibility_fallback: 506,
-      same_file_import_source: 86,
+      same_file_import_source: 87,
       unresolved_report_only: 0,
     }),
     bridge_dispatch: Object.freeze({

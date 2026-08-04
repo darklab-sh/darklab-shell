@@ -6,11 +6,10 @@
 from flask import jsonify, request
 
 from blueprints import atlas as atlas_routes
-from services.atlas.lookup_resolve import AtlasLookupError, resolve_entity_lookup
-from services.projects.contracts import ProjectWorkspaceError
+from services.atlas import route_observability as lookup
 
 
-@atlas_routes.atlas_bp.route("/atlas/lookup", methods=["POST"])
+@lookup.route(atlas_routes.atlas_bp, event="ATLAS_LOOKUP_COMPLETED", surface="browser")
 def atlas_entity_lookup():
     session_id = atlas_routes.get_session_id()
     owner_scope, scope_response = atlas_routes._atlas_request_scope_response(session_id)
@@ -21,7 +20,7 @@ def atlas_entity_lookup():
     if not isinstance(payload, dict):
         return jsonify({"error": "invalid_body", "message": "Request body must be a JSON object."}), 400
     try:
-        result = atlas_routes.run_atlas_read(lambda conn: resolve_entity_lookup(
+        result = atlas_routes.run_atlas_read(lambda conn: lookup.resolve_entity_lookup(
             conn,
             session_id,
             payload.get("value"),
@@ -29,8 +28,8 @@ def atlas_entity_lookup():
             team_id=owner_scope.team_id,
             project_id=payload.get("project_id") or "",
         ))
-    except AtlasLookupError as exc:
+    except lookup.AtlasLookupError as exc:
         return jsonify({"error": exc.code, "message": exc.message}), 400
-    except ProjectWorkspaceError as exc:
+    except lookup.ProjectWorkspaceError as exc:
         return jsonify({"error": "invalid_project", "message": str(exc)}), 400
     return jsonify(result)

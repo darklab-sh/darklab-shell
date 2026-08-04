@@ -111,6 +111,9 @@ function loadShellChrome({
   fetchAndRenderHistoryComparison = vi.fn(),
   openAtlas = vi.fn(() => Promise.resolve()),
   openAtlasQuickLookup = vi.fn(() => Promise.resolve()),
+  openAtlasQuickLookupFromSurface = vi.fn(
+    source => openAtlasQuickLookup({ source, toggle: true }),
+  ),
   bindDismissible = null,
   bindMobileSheet = null,
   bindOutsideClickClose = () => {},
@@ -309,6 +312,7 @@ function loadShellChrome({
     openStatusMonitor,
     openAtlas,
     openAtlasQuickLookup,
+    openAtlasQuickLookupFromSurface,
     openHistoryRunDetails,
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
@@ -639,7 +643,7 @@ describe('shell chrome rail sections', () => {
       "loadSchedulesModal as importedLoadSchedulesModal",
       "loadWatchersModal as importedLoadWatchersModal",
       "openAtlas as importedOpenAtlas",
-      "openAtlasQuickLookup as importedOpenAtlasQuickLookup",
+      "openAtlasQuickLookupFromSurface as importedOpenAtlasQuickLookupFromSurface",
       "import { openCommandRegistry as importedOpenCommandRegistry } from './features/command-registry/command_registry_bridge.js'",
     ].forEach((snippet) => {
       expect(SHELL_CHROME_RAW_SRC).toContain(snippet)
@@ -732,7 +736,7 @@ describe('shell chrome rail sections', () => {
     nav.querySelector('[data-action="atlas"]').click()
     nav.querySelector('[data-action="quick-lookup"]').click()
     expect(openAtlas).toHaveBeenCalledWith({ source: 'rail' })
-    expect(openAtlasQuickLookup).toHaveBeenCalledWith({ source: 'rail' })
+    expect(openAtlasQuickLookup).toHaveBeenCalledWith({ source: 'rail', toggle: true })
 
     trigger.click()
     nav.querySelector('[data-action="findings-board"]').click()

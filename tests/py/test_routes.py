@@ -12447,6 +12447,14 @@ class TestClientLogRoute:
                     "left_run_id": "run-left-123",
                     "right_run_id": "run-right-456",
                     "status": 404,
+                    "lookup_mode": "auto",
+                    "scope_kind": "project",
+                    "detected_type": "url",
+                    "match_state": "not_found",
+                    "request_seq": 7,
+                    "candidate_count": 2,
+                    "project_scoped": True,
+                    "parent_candidate": True,
                     "compare_request_error": True,
                     "expected_global": True,
                     "url_path": "/history/compare?q=sensitive-search",
@@ -12477,6 +12485,14 @@ class TestClientLogRoute:
             "right_run_id": "run-right-456",
             "src": "/static/build/shell-bootstrap.123456789abc.js?v=abc123",
             "status": 404,
+            "lookup_mode": "auto",
+            "scope_kind": "project",
+            "detected_type": "url",
+            "match_state": "not_found",
+            "request_seq": 7,
+            "candidate_count": 2,
+            "project_scoped": True,
+            "parent_candidate": True,
             "compare_request_error": True,
             "expected_global": True,
         }
@@ -15189,6 +15205,10 @@ class TestAtlasRoutes:
         return run_id, recorded
 
     def test_exact_lookup_route_returns_scoped_profiles_and_explicit_result_states(self):
+        import blueprints.atlas as atlas_blueprint
+        from services.intel import cache as intel_cache
+        from services.intel import lookup as intel_lookup
+
         client = get_client()
         session_id = self._session_id()
         other_session_id = self._session_id()
@@ -15234,31 +15254,72 @@ class TestAtlasRoutes:
             headers=headers,
             json={"value": "darklab.sh", "project_id": empty_project["id"]},
         )
-        foreign_project_response = client.post(
-            "/atlas/lookup",
-            headers=headers,
-            json={"value": "darklab.sh", "project_id": foreign_project["id"]},
-        )
+        with mock.patch.object(atlas_blueprint.log, "warning") as lookup_warning:
+            foreign_project_response = client.post(
+                "/atlas/lookup",
+                headers=headers,
+                json={"value": "darklab.sh", "project_id": foreign_project["id"]},
+            )
         cross_session_response = client.post(
             "/atlas/lookup",
             headers=other_headers,
             json={"value": "darklab.sh"},
         )
-        parent_response = client.post(
-            "/atlas/lookup",
-            headers=headers,
-            json={"value": "https://darklab.sh/not-recorded?private=value#fragment"},
+        private_lookup_value = "https://darklab.sh/not-recorded?private=value#fragment"
+        protected_tables = (
+            "entities",
+            "project_links",
+            "runs",
+            "entity_intel_snapshots",
+            "audit_events",
         )
-        invalid_response = client.post(
-            "/atlas/lookup",
-            headers=headers,
-            json={"value": "darklab.sh/path"},
-        )
-        invalid_body_response = client.post(
-            "/atlas/lookup",
-            headers=headers,
-            json=["darklab.sh"],
-        )
+        with db_connect() as conn:
+            before_private_lookup = {
+                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                for table in protected_tables
+            }
+        with (
+            mock.patch.object(atlas_blueprint.log, "debug") as private_lookup_debug,
+            mock.patch.object(atlas_blueprint.log, "info") as lookup_info,
+            mock.patch.object(atlas_blueprint.log, "warning") as private_lookup_warning,
+            mock.patch.object(atlas_blueprint.log, "error") as private_lookup_error,
+            mock.patch.object(
+                intel_cache,
+                "get_cached_response",
+                side_effect=AssertionError("Quick Lookup must not read the process or Redis Intel cache"),
+            ) as cached_response,
+            mock.patch.object(
+                intel_cache,
+                "get_quota_exhausted",
+                side_effect=AssertionError("Quick Lookup must not read cached Intel quota state"),
+            ) as cached_quota,
+            mock.patch.object(
+                intel_lookup,
+                "lookup_entity",
+                side_effect=AssertionError("Quick Lookup must not contact Intel providers"),
+            ) as provider_lookup,
+        ):
+            parent_response = client.post(
+                "/atlas/lookup",
+                headers=headers,
+                json={"value": private_lookup_value},
+            )
+        with db_connect() as conn:
+            after_private_lookup = {
+                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                for table in protected_tables
+            }
+        with mock.patch.object(atlas_blueprint.log, "debug") as lookup_debug:
+            invalid_response = client.post(
+                "/atlas/lookup",
+                headers=headers,
+                json={"value": "darklab.sh/path"},
+            )
+            invalid_body_response = client.post(
+                "/atlas/lookup",
+                headers=headers,
+                json=["darklab.sh"],
+            )
 
         assert link_response.status_code == 201
         assert found_response.status_code == 200
@@ -15280,10 +15341,52 @@ class TestAtlasRoutes:
         parent = json.loads(parent_response.data)
         assert parent["match_state"] == "not_found"
         assert parent["parent_host_candidate"]["entity"]["entity_id"] == domain_id
+        lookup_completed = next(
+            call for call in lookup_info.call_args_list
+            if call.args == ("ATLAS_LOOKUP_COMPLETED",)
+        )
+        lookup_fields = lookup_completed.kwargs["extra"]
+        assert lookup_fields["surface"] == "browser"
+        assert lookup_fields["requested_type"] == "auto"
+        assert lookup_fields["detected_type"] == "url"
+        assert lookup_fields["match_state"] == "not_found"
+        assert lookup_fields["scope_kind"] == "personal"
+        assert lookup_fields["project_scoped"] is False
+        assert lookup_fields["candidate_count"] == 0
+        assert lookup_fields["candidates_truncated"] is False
+        assert lookup_fields["parent_candidate"] is True
+        assert lookup_fields["detail_loaded"] is False
+        assert lookup_fields["request_id"]
+        assert isinstance(lookup_fields["duration_ms"], int)
+        private_lookup_logs = repr({
+            "debug": private_lookup_debug.call_args_list,
+            "info": lookup_info.call_args_list,
+            "warning": private_lookup_warning.call_args_list,
+            "error": private_lookup_error.call_args_list,
+        })
+        assert private_lookup_value not in private_lookup_logs
+        assert "canonical_value" not in lookup_fields
+        assert before_private_lookup == after_private_lookup
+        cached_response.assert_not_called()
+        cached_quota.assert_not_called()
+        provider_lookup.assert_not_called()
         assert invalid_response.status_code == 400
         assert json.loads(invalid_response.data)["error"] == "invalid_lookup_value"
         assert invalid_body_response.status_code == 400
         assert json.loads(invalid_body_response.data)["error"] == "invalid_body"
+        rejected_warning = next(
+            call for call in lookup_warning.call_args_list
+            if call.args == ("ATLAS_LOOKUP_REJECTED",)
+        )
+        assert rejected_warning.kwargs["extra"]["reason"] == "invalid_project"
+        assert rejected_warning.kwargs["extra"]["project_id"] == foreign_project["id"]
+        assert private_lookup_value not in repr(lookup_warning.call_args_list)
+        rejected_reasons = {
+            call.kwargs["extra"]["reason"]
+            for call in lookup_debug.call_args_list
+            if call.args == ("ATLAS_LOOKUP_REJECTED",)
+        }
+        assert rejected_reasons == {"invalid_lookup_value", "invalid_body"}
 
     def test_lists_session_entities_and_detail(self):
         from services.atlas.lookup import entity_detail
