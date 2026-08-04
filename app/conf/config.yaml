@@ -401,6 +401,12 @@
 #   work_max_attempts: 5
 #   epss_activation_probability: 0.10
 #   epss_reset_probability: 0.08
+#   advisory_mode: disabled
+#   nvd_local_path: ""
+#   advisory_positive_ttl_seconds: 604800
+#   advisory_negative_ttl_seconds: 86400
+#   advisory_max_local_bytes: 268435456
+#   advisory_max_records: 500000
 #   allowed_hosts:
 #     - epss.cyentia.com
 #     - www.cisa.gov

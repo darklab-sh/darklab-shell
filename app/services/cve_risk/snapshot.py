@@ -10,13 +10,17 @@ from typing import Any, Iterable
 
 from core.database_access import get_db_connect
 from .links import finding_cves
+from .nvd_advisory import get_advisory_source_status
 from .store import get_configured_feed_status
 
 
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
 NON_ENDORSEMENT = (
-    "FIRST and CISA provide the source data and do not endorse darklab_shell "
+    "FIRST, CISA, and NIST provide the source data and do not endorse darklab_shell "
     "or this assessment."
+)
+_CVE_RISK_SNAPSHOT_ROWS_SQL = (
+    "SELECT * FROM cve_risk_records WHERE cve_id IN ({placeholders}) ORDER BY cve_id"
 )
 
 
@@ -41,8 +45,7 @@ def build_cve_risk_snapshot(
             chunk = cve_ids[offset:offset + 500]
             placeholders = ",".join("?" for _ in chunk)
             rows = active.execute(
-                f"SELECT * FROM cve_risk_records WHERE cve_id IN ({placeholders}) "  # nosec B608
-                "ORDER BY cve_id",
+                _CVE_RISK_SNAPSHOT_ROWS_SQL.format(placeholders=placeholders),
                 tuple(chunk),
             ).fetchall()
             for row in rows:
@@ -62,6 +65,9 @@ def build_cve_risk_snapshot(
                 persisted.get(str(item.get("source") or ""), {}).get("checksum_sha256") or ""
             )
             sources.append(item)
+        nvd_source = get_advisory_source_status(active, cfg=cfg)
+        if nvd_source.get("status") != "unavailable" or nvd_source.get("acquisition_mode") != "disabled":
+            sources.append(nvd_source)
         return {
             "schema_version": SNAPSHOT_SCHEMA_VERSION,
             "generated_at": datetime.now(timezone.utc).isoformat(),

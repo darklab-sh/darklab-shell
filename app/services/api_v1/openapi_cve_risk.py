@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1.openapi_cve_advisory import cve_advisory_schemas
+
 
 def _ref(name: str) -> dict[str, str]:
     return {"$ref": f"#/components/schemas/{name}"}
@@ -18,6 +20,7 @@ def cve_risk_schemas() -> dict[str, Any]:
         "enum": ["unavailable", "current", "stale", "failed"],
     }
     return {
+        **cve_advisory_schemas(freshness),
         "CveRiskKevSignal": {
             "type": "object",
             "required": ["listed", "freshness"],
@@ -65,23 +68,6 @@ def cve_risk_schemas() -> dict[str, Any]:
                 "source_version": {"type": "string"},
                 "source_published_at": {"type": "string"},
                 "freshness": freshness,
-            },
-        },
-        "CveRiskSignal": {
-            "type": "object",
-            "required": [
-                "cve_id",
-                "kev",
-                "epss",
-                "public_exploit_available",
-                "priority_reasons",
-            ],
-            "properties": {
-                "cve_id": {"type": "string"},
-                "kev": _ref("CveRiskKevSignal"),
-                "epss": _ref("CveRiskEpssSignal"),
-                "public_exploit_available": {"type": "boolean", "nullable": True},
-                "priority_reasons": {"type": "array", "items": {"type": "string"}},
             },
         },
     }

@@ -25,6 +25,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "auth.py",
     "openapi.py",
     "openapi_atlas_profile.py",
+    "openapi_cve_advisory.py",
     "openapi_cve_risk.py",
     "serialization.py",
 }
@@ -176,6 +177,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_teams.py", 354, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_watchers.py", 240, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas.py", 685, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/atlas_intel_refresh.py", 54, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas_lookup_read.py", 33, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas_mutations.py", 680, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas_profile_read.py", 38, "split-package-ratchet"),
@@ -183,6 +185,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/database.py", 1007, "already-resolved-ratchet"),
     ModuleSizeBudget("app/blueprints/history.py", 1417, "already-resolved-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi.py", 2615, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_cve_advisory.py", 66, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_risk.py", 97, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_port_entities.py", 207, "split-package-ratchet"),

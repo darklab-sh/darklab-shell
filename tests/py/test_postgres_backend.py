@@ -411,6 +411,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0044",
         "0045",
         "0046",
+        "0047",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -461,6 +462,16 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             ))
             OR (table_name = 'project_digest_settings' AND column_name = 'risk_escalations_enabled')
             OR (table_name = 'cve_risk_records' AND column_name = 'kev_listed')
+            OR (table_name = 'cve_risk_records' AND column_name IN (
+                'advisory_status',
+                'cvss_score',
+                'cwe_ids_json',
+                'nvd_origin'
+            ))
+            OR (table_name = 'cve_advisory_sources' AND column_name IN (
+                'acquisition_mode',
+                'record_count'
+            ))
             OR (table_name = 'risk_escalation_states' AND column_name IN (
                 'kev_listed',
                 'epss_active'
@@ -485,6 +496,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "cve_risk_records",
         "cve_risk_refresh_leases",
         "cve_risk_work_items",
+        "cve_advisory_sources",
+        "cve_advisory_lookup_cache",
         "package_advisories",
         "package_advisory_ranges",
         "finding_cve_links",
@@ -520,6 +533,12 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("run_output_summary_status", "status", "text"),
         ("project_digest_settings", "risk_escalations_enabled", "boolean"),
         ("cve_risk_records", "kev_listed", "boolean"),
+        ("cve_risk_records", "advisory_status", "text"),
+        ("cve_risk_records", "cvss_score", "real"),
+        ("cve_risk_records", "cwe_ids_json", "text"),
+        ("cve_risk_records", "nvd_origin", "text"),
+        ("cve_advisory_sources", "acquisition_mode", "text"),
+        ("cve_advisory_sources", "record_count", "integer"),
         ("risk_escalation_states", "kev_listed", "boolean"),
         ("risk_escalation_states", "epss_active", "boolean"),
         ("risk_escalations", "model_changed", "boolean"),
@@ -575,6 +594,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         AND tablename IN (
             'cve_risk_records',
             'cve_risk_work_items',
+            'cve_advisory_lookup_cache',
             'finding_cve_links',
             'risk_escalation_states',
             'risk_escalations',
@@ -585,6 +605,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     ).fetchall()
     assert {
         "idx_cve_risk_records_kev_epss",
+        "idx_cve_risk_records_cvss",
+        "idx_cve_advisory_lookup_cache_expiry",
         "idx_cve_risk_work_items_due",
         "idx_finding_cve_links_cve",
         "idx_risk_escalation_states_cve",
@@ -621,6 +643,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
 def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.cve_risk.nvd_advisory import persist_external_nvd_lookup
     from services.cve_risk.parsers import ParsedFeed
     from services.cve_risk.store import accept_feed, get_cve_risk
 
@@ -666,6 +689,21 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schem
         payload_sha256="kev-postgres-sha",
         enqueue_changes=False,
     )
+    persist_external_nvd_lookup(
+        conn,
+        "CVE-2026-12345",
+        {
+            "status": "active",
+            "published": "2026-08-01T00:00:00Z",
+            "last_modified": "2026-08-04T02:00:00Z",
+            "severity": "HIGH",
+            "score": 8.8,
+            "cvss_version": "3.1",
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "cwes": ["CWE-79"],
+        },
+        cfg={"cve_risk": {"advisory_mode": "external"}},
+    )
     raw_conn.commit()
 
     risk = get_cve_risk("cve-2026-12345", conn=conn)
@@ -675,7 +713,9 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schem
     assert risk["epss_percentile"] == 0.94
     assert risk["kev_listed"] is True
     assert risk["kev_due_date"] == "2026-08-22"
-    assert {source["source"] for source in risk["sources"]} == {"epss", "kev"}
+    assert risk["cvss_score"] == 8.8
+    assert risk["advisory_status"] == "active"
+    assert {source["source"] for source in risk["sources"]} == {"epss", "kev", "nvd"}
 
 
 @pytest.mark.postgres

@@ -31,3 +31,8 @@ RISK_ESCALATIONS_CREATED = Counter(
     "Owner-scoped risk escalation events",
     ("source", "transition"),
 )
+CVE_ADVISORY_ACQUISITIONS = Counter(
+    "darklab_cve_advisory_acquisitions_total",
+    "Normalized CVE advisory acquisition outcomes",
+    ("source", "mode", "outcome"),
+)

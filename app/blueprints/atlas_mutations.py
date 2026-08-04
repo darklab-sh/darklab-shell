@@ -18,7 +18,6 @@ from services.atlas.cleanup import (
     detach_atlas_run_sources,
     public_cleanup_preview,
 )
-from services.atlas.intel_bridge import refresh_entity_intel
 from services.atlas.lookup import (
     entity_exists_in_scope,
     entity_ids_in_session,
@@ -594,29 +593,6 @@ def atlas_finding_delete(finding_id):
         "deleted": {"findings": deleted_findings},
         "sibling_cleanup": cleanup,
     })
-
-
-@atlas_routes.atlas_bp.route("/atlas/entities/<entity_id>/refresh_intel", methods=["POST"])
-@atlas_routes.limiter.limit(atlas_routes._atlas_write_limit)
-def atlas_entity_intel_refresh(entity_id):
-    session_id = atlas_routes.get_session_id()
-    owner_scope, scope_response = atlas_routes._atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
-    if scope_response:
-        return scope_response
-    assert owner_scope is not None
-    try:
-        result = refresh_entity_intel(session_id, entity_id, team_id=owner_scope.team_id)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    if result is None:
-        return jsonify({"error": "entity not found"}), 404
-    atlas_routes.log.info("ATLAS_INTEL_REFRESH", extra={
-        "ip": atlas_routes.get_client_ip(),
-        "session": atlas_routes.get_log_session_id(session_id),
-        "entity_id": entity_id,
-        "success_count": result["success_count"],
-    })
-    return jsonify({"ok": True, "refresh": result})
 
 
 @atlas_routes.atlas_bp.route("/atlas/entities/<entity_id>/project_links", methods=["POST"])

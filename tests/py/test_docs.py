@@ -35,7 +35,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "25ac1e32be8d6df70468af50dcccee744de1b305fea4a44c9d166d1a2447ccd1"
+_LOG_EVENT_INVENTORY_HASH = "8cddaefff3d2f5fecb71f861aa6e4dcdd3d8a28171e2465133e067e06022e842"
 _CHANGELOG_ARCHIVES = (
     _REPO_ROOT / "docs" / "changelog" / "2.x.md",
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",
@@ -481,6 +481,13 @@ class TestProjectStructureCoverage:
     """Protect stable asset contracts and the compact repository layout."""
 
     def test_asset_manifest_source_hashes_match_current_sources(self):
+        gitignore = (_REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+        parent_rule = gitignore.index("!app/static/build/")
+        child_rule = gitignore.index("app/static/build/*")
+        assert parent_rule < child_rule, (
+            "The build directory must be re-included before its child rules so "
+            "a user-level `build/` ignore cannot hide new content-hashed assets"
+        )
         manifest = json.loads(_ASSET_MANIFEST.read_text(encoding="utf-8"))
         stale = []
         for bundle_name, bundle in sorted((manifest.get("bundles") or {}).items()):
@@ -766,7 +773,7 @@ class TestLoggingReference:
     def test_event_inventory_was_moved_without_dropping_contracts(self):
         body = _log_event_inventory_body()
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
-        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 255
+        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 258
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()

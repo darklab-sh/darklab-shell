@@ -668,12 +668,12 @@ from blueprints.atlas_read import (  # noqa: E402,F401
 )
 from blueprints.atlas_profile_read import atlas_entity_detail  # noqa: E402,F401
 from blueprints.atlas_lookup_read import atlas_entity_lookup  # noqa: E402,F401
+from blueprints.atlas_intel_refresh import atlas_entity_intel_refresh  # noqa: E402,F401
 from blueprints.atlas_mutations import (  # noqa: E402,F401
     atlas_entities_bulk_delete,
     atlas_entities_bulk_suppression_update,
     atlas_entity_delete,
     atlas_entity_delete_preview_route,
-    atlas_entity_intel_refresh,
     atlas_entity_project_link_create,
     atlas_entity_project_link_delete,
     atlas_entity_suppression_update,

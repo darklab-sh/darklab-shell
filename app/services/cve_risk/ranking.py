@@ -6,15 +6,51 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
+import json
 import re
 from typing import Any
 
 from core.database_access import get_db_connect
 from .links import finding_cves, remediation_identity
+from .nvd_advisory import get_advisory_source_status
 from .store import get_configured_feed_status
 
 
 _SQL_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_EPSS_MAX_SQL = (
+    "(SELECT MAX(risk_order_record.epss_probability) "
+    "FROM finding_cve_links risk_order_link "
+    "JOIN cve_risk_records risk_order_record "
+    "ON risk_order_record.cve_id = risk_order_link.cve_id "
+    "WHERE risk_order_link.finding_id = {finding_id})"
+)
+_PERCENTILE_MAX_SQL = (
+    "(SELECT MAX(risk_order_record.epss_percentile) "
+    "FROM finding_cve_links risk_order_link "
+    "JOIN cve_risk_records risk_order_record "
+    "ON risk_order_record.cve_id = risk_order_link.cve_id "
+    "WHERE risk_order_link.finding_id = {finding_id})"
+)
+_CVSS_MAX_SQL = (
+    "(SELECT MAX(risk_order_record.cvss_score) "
+    "FROM finding_cve_links risk_order_link "
+    "JOIN cve_risk_records risk_order_record "
+    "ON risk_order_record.cve_id = risk_order_link.cve_id "
+    "WHERE risk_order_link.finding_id = {finding_id})"
+)
+_RISK_ORDER_SQL = (
+    "CASE WHEN EXISTS (SELECT 1 FROM finding_cve_links risk_order_link "
+    "JOIN cve_risk_records risk_order_record "
+    "ON risk_order_record.cve_id = risk_order_link.cve_id "
+    "WHERE risk_order_link.finding_id = {finding_id} "
+    "AND risk_order_record.kev_listed = TRUE) THEN 0 ELSE 1 END, "
+    "CASE WHEN {epss_max} IS NULL THEN 1 ELSE 0 END, {epss_max} DESC, "
+    "CASE WHEN {percentile_max} IS NULL THEN 1 ELSE 0 END, {percentile_max} DESC, "
+    "CASE WHEN {cvss_max} IS NULL THEN 1 ELSE 0 END, {cvss_max} DESC, "
+    "{age_expression} DESC, {finding_id} DESC"
+)
+_CVE_RISK_ROWS_SQL = "SELECT * FROM cve_risk_records WHERE cve_id IN ({placeholders})"
 
 
 def _number(value: Any) -> float | None:
@@ -24,9 +60,39 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def _risk_payload(row: dict[str, Any], *, feed_status: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _nvd_freshness(row: dict[str, Any], advisory_source: dict[str, Any]) -> str:
+    source_status = str(advisory_source.get("status") or "unavailable")
+    if source_status in {"failed", "unavailable"}:
+        return source_status
+    if str(row.get("nvd_origin") or "unavailable") == "unavailable":
+        return "unavailable"
+    expires_at = str(row.get("nvd_expires_at") or "")
+    if expires_at:
+        try:
+            parsed = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if parsed.astimezone(timezone.utc) <= datetime.now(timezone.utc):
+                return "stale"
+        except ValueError:
+            return "stale"
+    return source_status
+
+
+def _risk_payload(
+    row: dict[str, Any],
+    *,
+    feed_status: dict[str, dict[str, Any]],
+    advisory_source: dict[str, Any],
+) -> dict[str, Any]:
     epss = feed_status.get("epss", {})
     kev = feed_status.get("kev", {})
+    raw_cwes = row.get("cwe_ids_json")
+    try:
+        cwes = json.loads(str(raw_cwes or "[]"))
+    except json.JSONDecodeError:
+        cwes = []
+    nvd_freshness = _nvd_freshness(row, advisory_source)
     return {
         "cve_id": str(row.get("cve_id") or ""),
         "kev": {
@@ -50,6 +116,22 @@ def _risk_payload(row: dict[str, Any], *, feed_status: dict[str, dict[str, Any]]
             "source_published_at": str(epss.get("published_at") or ""),
             "freshness": str(epss.get("status") or "unavailable"),
         },
+        "advisory_status": str(row.get("advisory_status") or "unknown"),
+        "cvss": {
+            "version": str(row.get("cvss_version") or ""),
+            "vector": str(row.get("cvss_vector") or ""),
+            "score": _number(row.get("cvss_score")),
+            "severity": str(row.get("cvss_severity") or ""),
+            "cwes": cwes if isinstance(cwes, list) else [],
+            "source": "nvd",
+            "source_version": str(row.get("nvd_source_version") or ""),
+            "published_at": str(row.get("nvd_published_at") or ""),
+            "modified_at": str(row.get("nvd_modified_at") or ""),
+            "fetched_at": str(row.get("nvd_fetched_at") or ""),
+            "expires_at": str(row.get("nvd_expires_at") or ""),
+            "origin": str(row.get("nvd_origin") or "unavailable"),
+            "freshness": nvd_freshness,
+        },
         "public_exploit_available": None,
         "priority_reasons": [],
     }
@@ -69,9 +151,15 @@ def explain_cve_priority(risk: dict[str, Any], *, cvss_score: Any = None) -> lis
         reasons.append("EPSS unavailable")
     if percentile is not None:
         reasons.append(f"EPSS {percentile * 100:.1f}th percentile")
+    stored_cvss = risk.get("cvss") if isinstance(risk.get("cvss"), dict) else {}
     cvss = _number(cvss_score)
+    if cvss is None:
+        cvss = _number(stored_cvss.get("score"))
     if cvss is not None:
         reasons.append(f"CVSS {cvss:.1f}")
+    status = str(risk.get("advisory_status") or "unknown")
+    if status in {"disputed", "rejected", "withdrawn"}:
+        reasons.append(f"NVD status: {status}")
     return reasons
 
 
@@ -81,7 +169,10 @@ def cve_risk_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     epss = risk.get("epss") if isinstance(risk.get("epss"), dict) else {}
     probability = _number(epss.get("probability"))
     percentile = _number(epss.get("percentile"))
-    cvss = _number(item.get("cvss_score") or risk.get("cvss_score"))
+    cvss_signal = risk.get("cvss") if isinstance(risk.get("cvss"), dict) else {}
+    cvss = _number(item.get("cvss_score"))
+    if cvss is None:
+        cvss = _number(cvss_signal.get("score"))
     return (
         0 if bool(kev.get("listed")) else 1,
         1 if probability is None else 0,
@@ -105,30 +196,17 @@ def cve_risk_order_sql(alias: str, *, age_expression: str) -> str:
     }
     if age_expression not in supported_age_expressions:
         raise ValueError("unsupported CVE risk ordering age expression")
+    # The identifier and age expression are restricted to the allowlist above.
     finding_id = f"{alias}.id"
-    epss_max = (
-        "(SELECT MAX(risk_order_record.epss_probability) "  # nosec B608 -- identifiers validated above
-        "FROM finding_cve_links risk_order_link "
-        "JOIN cve_risk_records risk_order_record "
-        "ON risk_order_record.cve_id = risk_order_link.cve_id "
-        f"WHERE risk_order_link.finding_id = {finding_id})"
-    )
-    percentile_max = (
-        "(SELECT MAX(risk_order_record.epss_percentile) "  # nosec B608 -- identifiers validated above
-        "FROM finding_cve_links risk_order_link "
-        "JOIN cve_risk_records risk_order_record "
-        "ON risk_order_record.cve_id = risk_order_link.cve_id "
-        f"WHERE risk_order_link.finding_id = {finding_id})"
-    )
-    return (
-        "CASE WHEN EXISTS (SELECT 1 FROM finding_cve_links risk_order_link "  # nosec B608 -- identifiers validated above
-        "JOIN cve_risk_records risk_order_record "
-        "ON risk_order_record.cve_id = risk_order_link.cve_id "
-        f"WHERE risk_order_link.finding_id = {finding_id} "
-        "AND risk_order_record.kev_listed = TRUE) THEN 0 ELSE 1 END, "
-        f"CASE WHEN {epss_max} IS NULL THEN 1 ELSE 0 END, {epss_max} DESC, "
-        f"CASE WHEN {percentile_max} IS NULL THEN 1 ELSE 0 END, {percentile_max} DESC, "
-        f"{age_expression} DESC, {finding_id} DESC"
+    epss_max = _EPSS_MAX_SQL.format(finding_id=finding_id)
+    percentile_max = _PERCENTILE_MAX_SQL.format(finding_id=finding_id)
+    cvss_max = _CVSS_MAX_SQL.format(finding_id=finding_id)
+    return _RISK_ORDER_SQL.format(
+        finding_id=finding_id,
+        epss_max=epss_max,
+        percentile_max=percentile_max,
+        cvss_max=cvss_max,
+        age_expression=age_expression,
     )
 
 
@@ -156,12 +234,17 @@ def attach_risk_to_findings(
             chunk = ordered[offset:offset + 500]
             placeholders = ",".join("?" for _ in chunk)
             rows.extend(active.execute(
-                f"SELECT * FROM cve_risk_records WHERE cve_id IN ({placeholders})",  # nosec B608
+                _CVE_RISK_ROWS_SQL.format(placeholders=placeholders),
                 tuple(chunk),
             ).fetchall())
         feed_status = {item["source"]: item for item in get_configured_feed_status(active)}
+        advisory_source = get_advisory_source_status(active)
         risk_by_cve = {
-            str(row["cve_id"]): _risk_payload(dict(row), feed_status=feed_status)
+            str(row["cve_id"]): _risk_payload(
+                dict(row),
+                feed_status=feed_status,
+                advisory_source=advisory_source,
+            )
             for row in rows
         }
         for finding in findings:
@@ -177,6 +260,13 @@ def attach_risk_to_findings(
                     "epss": {
                         "probability": None,
                         "percentile": None,
+                        "freshness": "unavailable",
+                    },
+                    "advisory_status": "unknown",
+                    "cvss": {
+                        "score": None,
+                        "severity": "",
+                        "cwes": [],
                         "freshness": "unavailable",
                     },
                     "public_exploit_available": None,

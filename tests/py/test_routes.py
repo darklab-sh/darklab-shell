@@ -17283,6 +17283,79 @@ class TestAtlasRoutes:
             ("Names", "darklab.sh, www.darklab.sh", "crtsh"),
         }
 
+    def test_cve_refresh_persists_shared_nvd_advisory_only_when_enabled(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        cve_entity_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        nvd_payload = {
+            "status": "active",
+            "published": "2026-08-01T00:00:00Z",
+            "last_modified": "2026-08-04T00:00:00Z",
+            "severity": "HIGH",
+            "score": 8.8,
+            "cvss_version": "3.1",
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "cwes": ["CWE-79"],
+        }
+        provider_result = mock.Mock(
+            provider="nvd",
+            status="ok",
+            message="",
+            result=mock.Mock(
+                provider="nvd",
+                payload={
+                    "providers": {"nvd": nvd_payload},
+                    "summary": {"has_intel": True, "providers_with_data": ["nvd"]},
+                },
+            ),
+        )
+        lookup_result = mock.Mock(
+            entity_type="cve",
+            canonical_value="CVE-2025-49113",
+            providers=[provider_result],
+            success_count=1,
+            configured_count=1,
+        )
+
+        with mock.patch.dict(
+            "config.CFG",
+            {"cve_risk": {"advisory_mode": "external"}},
+        ), mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result):
+            response = client.post(
+                f"/atlas/entities/{cve_entity_id}/refresh_intel",
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert response.status_code == 200
+        refresh_data = json.loads(response.data)["refresh"]
+        assert refresh_data["shared_advisory"] == {
+            "source": "nvd",
+            "outcome": "stored",
+            "record_count": 1,
+        }
+        with db_connect() as conn:
+            risk = conn.execute(
+                "SELECT advisory_status, cvss_score, cvss_vector, cwe_ids_json, nvd_origin "
+                "FROM cve_risk_records WHERE cve_id = 'CVE-2025-49113'"
+            ).fetchone()
+        assert dict(risk) == {
+            "advisory_status": "active",
+            "cvss_score": 8.8,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "cwe_ids_json": '["CWE-79"]',
+            "nvd_origin": "external",
+        }
+        audit = _audit_event_rows(event_type="cve_advisory.refresh")[-1]
+        assert audit["target_id"] == "nvd"
+        assert audit["details"] == {
+            "origin": "external",
+            "outcome": "stored",
+            "record_count": 1,
+            "source": "nvd",
+        }
+        assert "CVE-2025-49113" not in json.dumps(audit)
+
     def test_refresh_intel_can_offload_provider_payload_and_restore_detail(self):
         from services.storage import body_store
 

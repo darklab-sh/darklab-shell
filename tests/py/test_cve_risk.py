@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 import sqlite3
 
@@ -20,6 +21,13 @@ from core.migrations.runner import run_migrations
 from services.cve_risk import bootstrap, refresh
 from services.cve_risk import escalation
 from services.cve_risk.escalation import acknowledge_escalation, process_risk_work
+from services.cve_risk.nvd_advisory import (
+    accept_local_nvd_dataset,
+    get_advisory_source_status,
+    load_configured_local_nvd,
+    parse_nvd_dataset,
+    persist_external_nvd_lookup,
+)
 from services.cve_risk.parsers import FeedValidationError, ParsedFeed, parse_epss, parse_kev
 from services.cve_risk.ranking import attach_risk_to_findings, cve_risk_order_sql
 from services.cve_risk.snapshot import build_cve_risk_snapshot
@@ -122,6 +130,10 @@ def test_cve_risk_config_bounds_network_and_hysteresis_contracts():
         )
     with pytest.raises(ValidationError, match="must be hostnames"):
         CveRiskConfig(allowed_hosts=["https://www.cisa.gov/feed"])
+    with pytest.raises(ValidationError, match="advisory_mode"):
+        CveRiskConfig(advisory_mode="automatic")
+    with pytest.raises(ValidationError, match="nvd_local_path"):
+        CveRiskConfig(advisory_mode="local")
 
 
 def test_kev_parser_requires_catalog_provenance_and_complete_rows():
@@ -314,6 +326,211 @@ def test_risk_order_sql_rejects_untrusted_identifier_fragments():
         cve_risk_order_sql("f", age_expression="f.created DESC; DROP TABLE findings")
 
 
+def test_nvd_dataset_normalizes_cvss_cwe_and_disputed_status():
+    parsed = parse_nvd_dataset(json.dumps({
+        "formatVersion": "NVD_CVE",
+        "timestamp": "2026-08-04T12:00:00Z",
+        "vulnerabilities": [{
+            "cve": {
+                "id": "CVE-2026-12345",
+                "vulnStatus": "Analyzed",
+                "cveTags": [{"tags": ["disputed"]}],
+                "published": "2026-08-01T00:00:00Z",
+                "lastModified": "2026-08-04T00:00:00Z",
+                "metrics": {"cvssMetricV31": [{
+                    "baseSeverity": "HIGH",
+                    "cvssData": {
+                        "version": "3.1",
+                        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                        "baseScore": 9.8,
+                    },
+                }]},
+                "weaknesses": [{"description": [
+                    {"lang": "en", "value": "CWE-787"},
+                    {"lang": "en", "value": "NVD-CWE-noinfo"},
+                ]}],
+            },
+        }],
+    }).encode())
+
+    assert parsed.version == "2026-08-04T12:00:00Z"
+    cve_id, payload = parsed.records[0]
+    assert cve_id == "CVE-2026-12345"
+    assert payload["status"] == "disputed"
+    assert payload["score"] == 9.8
+    assert payload["cvss_version"] == "3.1"
+    assert payload["cwes"] == ["CWE-787"]
+
+
+def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identifiers_in_logs(
+    risk_db,
+    caplog,
+):
+    cfg = {"cve_risk": {
+        "advisory_mode": "external",
+        "advisory_positive_ttl_seconds": 7200,
+        "advisory_negative_ttl_seconds": 600,
+    }}
+    with caplog.at_level("INFO"):
+        result = persist_external_nvd_lookup(
+            risk_db,
+            "CVE-2026-12345",
+            {
+                "status": "active",
+                "published": "2026-08-01T00:00:00Z",
+                "last_modified": "2026-08-04T00:00:00Z",
+                "severity": "HIGH",
+                "score": 8.8,
+                "cvss_version": "3.1",
+                "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+                "cwes": ["CWE-79"],
+            },
+            cfg=cfg,
+            now=datetime.fromisoformat("2026-08-04T12:00:00+00:00"),
+        )
+        negative = persist_external_nvd_lookup(
+            risk_db,
+            "CVE-2026-99999",
+            {"status": "unknown", "score": None, "cwes": [], "references": []},
+            cfg=cfg,
+            now=datetime.fromisoformat("2026-08-04T12:00:00+00:00"),
+        )
+
+    assert result == {"source": "nvd", "outcome": "stored", "record_count": 1}
+    assert negative == {"source": "nvd", "outcome": "negative_cached", "record_count": 0}
+    row = risk_db.execute(
+        "SELECT advisory_status, cvss_score, cvss_vector, cwe_ids_json, nvd_origin "
+        "FROM cve_risk_records WHERE cve_id = 'CVE-2026-12345'"
+    ).fetchone()
+    assert dict(row) == {
+        "advisory_status": "active",
+        "cvss_score": 8.8,
+        "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+        "cwe_ids_json": '["CWE-79"]',
+        "nvd_origin": "external",
+    }
+    cache_rows = risk_db.execute(
+        "SELECT result_state, record_count FROM cve_advisory_lookup_cache ORDER BY result_state"
+    ).fetchall()
+    assert [dict(item) for item in cache_rows] == [
+        {"result_state": "negative", "record_count": 0},
+        {"result_state": "positive", "record_count": 1},
+    ]
+    assert "CVE-2026-12345" not in caplog.text
+    assert "CVE-2026-99999" not in caplog.text
+
+
+def test_local_nvd_dataset_replaces_prior_local_snapshot_and_enriches_ranking(risk_db):
+    first = parse_nvd_dataset(json.dumps({
+        "timestamp": "2026-08-03T00:00:00Z",
+        "vulnerabilities": [{"cve": {
+            "id": "CVE-2026-12345",
+            "vulnStatus": "Analyzed",
+            "published": "2026-08-01",
+            "lastModified": "2026-08-03",
+            "metrics": {"cvssMetricV31": [{
+                "baseSeverity": "HIGH",
+                "cvssData": {"version": "3.1", "vectorString": "CVSS:3.1/AV:N", "baseScore": 8.1},
+            }]},
+        }}],
+    }).encode())
+    accept_local_nvd_dataset(
+        risk_db,
+        first,
+        checksum="local-one",
+        cfg={"cve_risk": {"advisory_mode": "local"}},
+        now=datetime.fromisoformat("2026-08-04T00:00:00+00:00"),
+    )
+    risk_db.execute(
+        "INSERT INTO findings (id, session_id, title, created) "
+        "VALUES ('finding-cvss', 'session-one', 'CVE-2026-12345', '2026-08-04')"
+    )
+    findings = [{"id": "finding-cvss", "title": "CVE-2026-12345"}]
+    attach_risk_to_findings(findings, conn=risk_db)
+
+    assert findings[0]["risk"]["cvss"]["score"] == 8.1
+    assert findings[0]["risk"]["cvss"]["vector"] == "CVSS:3.1/AV:N"
+    assert "CVSS 8.1" in findings[0]["risk"]["priority_reasons"]
+    source = get_advisory_source_status(
+        risk_db,
+        cfg={"cve_risk": {"advisory_mode": "local"}},
+    )
+    assert source["origin"] == "local"
+    assert source["record_count"] == 1
+
+
+def test_failed_local_nvd_reload_preserves_last_known_good_dataset(risk_db, tmp_path):
+    valid_payload = json.dumps({
+        "timestamp": "2026-08-03T00:00:00Z",
+        "vulnerabilities": [{"cve": {
+            "id": "CVE-2026-12345",
+            "vulnStatus": "Analyzed",
+            "published": "2026-08-01",
+            "lastModified": "2026-08-03",
+            "metrics": {"cvssMetricV31": [{
+                "baseSeverity": "HIGH",
+                "cvssData": {"version": "3.1", "vectorString": "CVSS:3.1/AV:N", "baseScore": 8.1},
+            }]},
+        }}],
+    }).encode()
+    parsed = parse_nvd_dataset(valid_payload)
+    valid_checksum = hashlib.sha256(valid_payload).hexdigest()
+    accept_local_nvd_dataset(
+        risk_db,
+        parsed,
+        checksum=valid_checksum,
+        cfg={"cve_risk": {"advisory_mode": "local"}},
+        now=datetime.fromisoformat("2026-08-04T00:00:00+00:00"),
+    )
+    invalid_path = tmp_path / "nvd.json"
+    invalid_path.write_text("not json", encoding="utf-8")
+
+    result = load_configured_local_nvd(
+        risk_db,
+        cfg={"cve_risk": {
+            "advisory_mode": "local",
+            "nvd_local_path": str(invalid_path),
+        }},
+    )
+
+    assert result["outcome"] == "failed"
+    source = risk_db.execute(
+        "SELECT status, source_version, checksum_sha256, record_count, last_error "
+        "FROM cve_advisory_sources WHERE source = 'nvd'"
+    ).fetchone()
+    assert dict(source) == {
+        "status": "failed",
+        "source_version": "2026-08-03T00:00:00Z",
+        "checksum_sha256": valid_checksum,
+        "record_count": 1,
+        "last_error": "NvdAdvisoryError",
+    }
+    record = risk_db.execute(
+        "SELECT cvss_score, nvd_origin FROM cve_risk_records WHERE cve_id = 'CVE-2026-12345'"
+    ).fetchone()
+    assert dict(record) == {"cvss_score": 8.1, "nvd_origin": "local"}
+
+    invalid_path.write_bytes(valid_payload)
+    restored = load_configured_local_nvd(
+        risk_db,
+        cfg={"cve_risk": {
+            "advisory_mode": "local",
+            "nvd_local_path": str(invalid_path),
+        }},
+    )
+    restored_source = risk_db.execute(
+        "SELECT status, accepted_at, checksum_sha256, record_count, last_error "
+        "FROM cve_advisory_sources WHERE source = 'nvd'"
+    ).fetchone()
+
+    assert restored["outcome"] == "unchanged"
+    assert restored_source["status"] == "current"
+    assert restored_source["accepted_at"] == "2026-08-04T00:00:00+00:00"
+    assert restored_source["checksum_sha256"] == valid_checksum
+    assert restored_source["record_count"] == 1
+    assert restored_source["last_error"] == ""
+
+
 def test_feed_crossings_use_hysteresis_deduplicate_and_project_once(risk_db):
     _insert_project_finding(risk_db, finding_id="finding-one", project_id="project-one")
     risk_db.execute(
@@ -487,6 +704,7 @@ def test_report_snapshot_captures_selected_records_and_source_provenance(risk_db
     snapshot = build_cve_risk_snapshot(
         [{"id": "finding-one", "title": "CVE-2026-12345"}], conn=risk_db
     )
+    assert snapshot["schema_version"] == 2
     assert snapshot["cve_ids"] == ["CVE-2026-12345"]
     assert snapshot["records"][0]["epss_probability"] == 0.2
     assert isinstance(snapshot["records"][0]["kev_listed"], bool)

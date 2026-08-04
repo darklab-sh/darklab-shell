@@ -28,6 +28,9 @@ app/static/js/vendor/*
 
 # Built app bundles are committed so read-only Compose mounts can serve them.
 # Regenerate with npm run assets:sync; drift is checked by npm run assets:check.
+# Re-include the directory itself so a user-level `build/` ignore rule can't
+# hide newly generated content-hashed bundles from Git.
+!app/static/build/
 app/static/build/*
 !app/static/build/*.css
 !app/static/build/*.br

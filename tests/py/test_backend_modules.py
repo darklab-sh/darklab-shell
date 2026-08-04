@@ -6593,6 +6593,8 @@ class TestPostgresMigrations:
         "cve_risk_records",
         "cve_risk_refresh_leases",
         "cve_risk_work_items",
+        "cve_advisory_sources",
+        "cve_advisory_lookup_cache",
         "package_advisories",
         "package_advisory_ranges",
         "finding_cve_links",
@@ -6701,6 +6703,7 @@ class TestPostgresMigrations:
             "0044",
             "0045",
             "0046",
+            "0047",
         ]
         for table_name in (
             "runs",
@@ -7490,7 +7493,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0046",
+            "0048",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7542,7 +7545,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0046"
+        assert rows[-1]["version"] == "0047"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7931,7 +7934,9 @@ class TestPostgresMigrations:
         applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
         applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
-        assert applied == ["0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046"]
+        assert applied == [
+            "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047",
+        ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
         assert "0040" in conn.applied_versions
@@ -7941,7 +7946,8 @@ class TestPostgresMigrations:
         assert "0044" in conn.applied_versions
         assert "0045" in conn.applied_versions
         assert "0046" in conn.applied_versions
-        assert conn.commit_count == 8
+        assert "0047" in conn.applied_versions
+        assert conn.commit_count == 9
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -13666,15 +13672,23 @@ class TestIntelServices:
                 return {
                     "vulnerabilities": [{
                         "cve": {
+                            "vulnStatus": "Analyzed",
                             "published": "2026-01-01T00:00:00.000",
                             "lastModified": "2026-01-02T00:00:00.000",
                             "descriptions": [{"lang": "en", "value": "Example vulnerability."}],
                             "metrics": {
                                 "cvssMetricV31": [{
                                     "baseSeverity": "HIGH",
-                                    "cvssData": {"baseScore": 8.8},
+                                    "cvssData": {
+                                        "version": "3.1",
+                                        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+                                        "baseScore": 8.8,
+                                    },
                                 }],
                             },
+                            "weaknesses": [{
+                                "description": [{"lang": "en", "value": "CWE-79"}],
+                            }],
                             "references": [{"url": "https://example.test/advisory"}],
                         },
                     }],
@@ -13907,6 +13921,9 @@ class TestIntelServices:
         assert hibp_result.payload["providers"]["hibp"]["pwned"] is True
         assert hibp_result.payload["providers"]["hibp"]["count"] == 7
         assert nvd_result.payload["providers"]["nvd"]["severity"] == "HIGH"
+        assert nvd_result.payload["providers"]["nvd"]["status"] == "active"
+        assert nvd_result.payload["providers"]["nvd"]["cvss_version"] == "3.1"
+        assert nvd_result.payload["providers"]["nvd"]["cwes"] == ["CWE-79"]
         assert greynoise_result.payload["providers"]["greynoise"]["classification"] == "benign"
         assert greynoise_empty.payload["providers"]["greynoise"]["message"] == (
             "IP not observed scanning the internet or contained in RIOT data set."

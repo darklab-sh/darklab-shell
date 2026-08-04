@@ -1452,6 +1452,72 @@
         ],
         "type": "object"
       },
+      "CveRiskCvssSignal": {
+        "properties": {
+          "cwes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string"
+          },
+          "freshness": {
+            "enum": [
+              "unavailable",
+              "current",
+              "stale",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "modified_at": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "score": {
+            "format": "double",
+            "maximum": 10,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "nvd"
+            ],
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "vector": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "score",
+          "severity",
+          "cwes",
+          "freshness"
+        ],
+        "type": "object"
+      },
       "CveRiskEpssSignal": {
         "properties": {
           "freshness": {
@@ -1540,8 +1606,21 @@
       },
       "CveRiskSignal": {
         "properties": {
+          "advisory_status": {
+            "enum": [
+              "active",
+              "disputed",
+              "rejected",
+              "withdrawn",
+              "unknown"
+            ],
+            "type": "string"
+          },
           "cve_id": {
             "type": "string"
+          },
+          "cvss": {
+            "$ref": "#/components/schemas/CveRiskCvssSignal"
           },
           "epss": {
             "$ref": "#/components/schemas/CveRiskEpssSignal"
@@ -1564,6 +1643,8 @@
           "cve_id",
           "kev",
           "epss",
+          "advisory_status",
+          "cvss",
           "public_exploit_available",
           "priority_reasons"
         ],

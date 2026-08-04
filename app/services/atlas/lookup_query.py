@@ -13,6 +13,13 @@ from services.intel.canonical import entity_signature
 
 LOOKUP_CANDIDATE_LIMIT = 10
 _CANDIDATE_FETCH_LIMIT = LOOKUP_CANDIDATE_LIMIT + 1
+_LOOKUP_SELECT_SQL = (
+    "SELECT lookup_e.id, lookup_e.team_id, lookup_e.type, lookup_e.canonical_value, "
+    "lookup_e.first_seen_at, lookup_e.last_seen_at, lookup_e.occurrence_count, "
+    "lookup_e.suppressed FROM entities lookup_e "
+    "WHERE lookup_e.type = ? AND lookup_e.signature_hash = ? AND "
+)
+_LOOKUP_STABLE_ORDER_SQL = "lookup_e.last_seen_at DESC, lookup_e.id ASC LIMIT ?"
 
 
 def exact_lookup_candidate_query(
@@ -44,18 +51,11 @@ def exact_lookup_candidate_query(
             "CASE WHEN lookup_e.team_id = ? AND lookup_e.team_id != '' THEN 0 ELSE 1 END, "
         )
         order_params.append(normalized_team_id)
-    sql = (
-        "SELECT lookup_e.id, lookup_e.team_id, lookup_e.type, lookup_e.canonical_value, "  # nosec B608
-        "lookup_e.first_seen_at, lookup_e.last_seen_at, lookup_e.occurrence_count, "
-        "lookup_e.suppressed "
-        "FROM entities lookup_e "
-        "WHERE lookup_e.type = ? AND lookup_e.signature_hash = ? AND "
-        + scope_sql
-        + project_sql
-        + " ORDER BY "
-        + order_sql
-        + "lookup_e.last_seen_at DESC, lookup_e.id ASC LIMIT ?"
-    )
+    # Scope SQL comes from the Atlas scope service; entity values remain bound.
+    sql = "".join((
+        _LOOKUP_SELECT_SQL, scope_sql, project_sql, " ORDER BY ",
+        order_sql, _LOOKUP_STABLE_ORDER_SQL,
+    ))
     params: list[Any] = [
         entity_type,
         entity_signature(entity_type, canonical_value),

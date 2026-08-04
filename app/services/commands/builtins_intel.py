@@ -162,8 +162,21 @@ def _format_cve_risk(risk: dict[str, Any] | None) -> list[dict[str, object]]:
     if risk.get("kev_due_date"):
         lines.append(output_line(format_native_record("BOD 22-01 date", str(risk["kev_due_date"]), 14), "builtin-kv"))
         lines.append(output_line("The BOD date is federal directive context, not your remediation SLA.", "builtin-note"))
+    if risk.get("cvss_score") is not None:
+        cvss_label = f"{float(risk['cvss_score']):.1f}"
+        if risk.get("cvss_severity"):
+            cvss_label += f" · {risk['cvss_severity']}"
+        lines.append(output_line(format_native_record("NVD CVSS", cvss_label, 14), "builtin-kv"))
+    if risk.get("cvss_vector"):
+        lines.append(output_line(format_native_record("CVSS vector", str(risk["cvss_vector"]), 14), "builtin-kv"))
+    if str(risk.get("advisory_status") or "unknown") != "unknown":
+        lines.append(output_line(format_native_record("NVD status", str(risk["advisory_status"]), 14), "builtin-kv"))
     for source in risk.get("sources") or []:
-        label = "FIRST EPSS" if source.get("source") == "epss" else "CISA KEV"
+        label = {
+            "epss": "FIRST EPSS",
+            "kev": "CISA KEV",
+            "nvd": "NIST NVD",
+        }.get(str(source.get("source") or ""), str(source.get("source") or "").upper())
         detail = " · ".join(filter(None, (
             str(source.get("status") or "unavailable"),
             str(source.get("origin") or ""),
@@ -518,11 +531,17 @@ def _format_hibp(payload: dict[str, Any]) -> list[dict[str, object]]:
 
 def _format_nvd(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
+        output_line(format_native_record("status", str(payload.get("status") or "unknown"), 14), "builtin-kv"),
         output_line(format_native_record("severity", str(payload.get("severity") or "unknown"), 14), "builtin-kv"),
         output_line(format_native_record("score", str(payload.get("score") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("published", str(payload.get("published") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("modified", str(payload.get("last_modified") or "-"), 14), "builtin-kv"),
     ]
+    if payload.get("cvss_vector"):
+        lines.append(output_line(format_native_record("CVSS vector", str(payload["cvss_vector"]), 14), "builtin-kv"))
+    cwes = payload.get("cwes")
+    if isinstance(cwes, list) and cwes:
+        lines.append(output_line(format_native_record("CWEs", _join_values(cwes), 14), "builtin-kv"))
     description = str(payload.get("description") or "").strip().replace("\n", " ")
     if description:
         lines.append(output_line(format_native_record("summary", _truncate(description, 110), 14), "builtin-kv"))

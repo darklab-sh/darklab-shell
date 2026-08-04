@@ -488,6 +488,12 @@ class CveRiskConfig(_ConfigModel):
     work_max_attempts: StrictInt = Field(default=5, ge=1, le=20)
     epss_activation_probability: StrictFloat = Field(default=0.10, ge=0, le=1)
     epss_reset_probability: StrictFloat = Field(default=0.08, ge=0, le=1)
+    advisory_mode: StrictStr = "disabled"
+    nvd_local_path: StrictStr = ""
+    advisory_positive_ttl_seconds: StrictInt = Field(default=604800, ge=3600, le=2592000)
+    advisory_negative_ttl_seconds: StrictInt = Field(default=86400, ge=300, le=604800)
+    advisory_max_local_bytes: StrictInt = Field(default=268435456, ge=1024, le=1073741824)
+    advisory_max_records: StrictInt = Field(default=500000, ge=1, le=1000000)
     allowed_hosts: list[StrictStr] = Field(default_factory=lambda: [
         "epss.cyentia.com",
         "www.cisa.gov",
@@ -498,6 +504,12 @@ class CveRiskConfig(_ConfigModel):
             raise ValueError(
                 "epss_reset_probability must be lower than epss_activation_probability"
             )
+        self.advisory_mode = self.advisory_mode.strip().lower()
+        if self.advisory_mode not in {"disabled", "local", "external"}:
+            raise ValueError("cve_risk.advisory_mode must be disabled, local, or external")
+        self.nvd_local_path = self.nvd_local_path.strip()
+        if self.advisory_mode == "local" and not self.nvd_local_path:
+            raise ValueError("cve_risk.nvd_local_path is required when advisory_mode is local")
         normalized_hosts: list[str] = []
         for value in self.allowed_hosts:
             host = value.strip().lower()

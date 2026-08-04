@@ -11,6 +11,7 @@ from typing import Any, Iterable
 import uuid
 
 from core.database_access import get_db_connect
+from core.database_backend import DatabaseBackend
 from .constants import SOURCE_ATTRIBUTION, SOURCE_TERMS_URL, SOURCE_URL
 from .links import linked_cve_ids
 from .parsers import ParsedFeed
@@ -49,6 +50,90 @@ ON CONFLICT(cve_id) DO UPDATE SET
     updated_at = excluded.updated_at
 """
 
+_POSTGRES_EPSS_STAGE = """
+CREATE TEMP TABLE cve_risk_epss_stage (
+    cve_id TEXT NOT NULL,
+    epss_probability DOUBLE PRECISION,
+    epss_percentile DOUBLE PRECISION,
+    epss_model_version TEXT NOT NULL,
+    epss_published_at TEXT NOT NULL,
+    epss_source_version TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+) ON COMMIT DROP
+"""
+
+_POSTGRES_EPSS_COPY = """
+COPY cve_risk_epss_stage (
+    cve_id, epss_probability, epss_percentile, epss_model_version,
+    epss_published_at, epss_source_version, updated_at
+) FROM STDIN
+"""
+
+_POSTGRES_EPSS_MERGE = """
+INSERT INTO cve_risk_records (
+    cve_id, epss_probability, epss_percentile, epss_model_version,
+    epss_published_at, epss_source_version, updated_at
+)
+SELECT cve_id, epss_probability, epss_percentile, epss_model_version,
+       epss_published_at, epss_source_version, updated_at
+FROM cve_risk_epss_stage
+ON CONFLICT(cve_id) DO UPDATE SET
+    epss_probability = excluded.epss_probability,
+    epss_percentile = excluded.epss_percentile,
+    epss_model_version = excluded.epss_model_version,
+    epss_published_at = excluded.epss_published_at,
+    epss_source_version = excluded.epss_source_version,
+    updated_at = excluded.updated_at
+"""
+_POSTGRES_EPSS_DROP = "DROP TABLE cve_risk_epss_stage"
+
+_POSTGRES_KEV_STAGE = """
+CREATE TEMP TABLE cve_risk_kev_stage (
+    cve_id TEXT NOT NULL,
+    kev_date_added TEXT NOT NULL,
+    kev_due_date TEXT NOT NULL,
+    kev_required_action TEXT NOT NULL,
+    kev_known_ransomware_campaign_use TEXT NOT NULL,
+    kev_vendor_project TEXT NOT NULL,
+    kev_product TEXT NOT NULL,
+    kev_vulnerability_name TEXT NOT NULL,
+    kev_source_version TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+) ON COMMIT DROP
+"""
+
+_POSTGRES_KEV_COPY = """
+COPY cve_risk_kev_stage (
+    cve_id, kev_date_added, kev_due_date, kev_required_action,
+    kev_known_ransomware_campaign_use, kev_vendor_project, kev_product,
+    kev_vulnerability_name, kev_source_version, updated_at
+) FROM STDIN
+"""
+
+_POSTGRES_KEV_MERGE = """
+INSERT INTO cve_risk_records (
+    cve_id, kev_listed, kev_date_added, kev_due_date, kev_required_action,
+    kev_known_ransomware_campaign_use, kev_vendor_project, kev_product,
+    kev_vulnerability_name, kev_source_version, updated_at
+)
+SELECT cve_id, TRUE, kev_date_added, kev_due_date, kev_required_action,
+       kev_known_ransomware_campaign_use, kev_vendor_project, kev_product,
+       kev_vulnerability_name, kev_source_version, updated_at
+FROM cve_risk_kev_stage
+ON CONFLICT(cve_id) DO UPDATE SET
+    kev_listed = TRUE,
+    kev_date_added = excluded.kev_date_added,
+    kev_due_date = excluded.kev_due_date,
+    kev_required_action = excluded.kev_required_action,
+    kev_known_ransomware_campaign_use = excluded.kev_known_ransomware_campaign_use,
+    kev_vendor_project = excluded.kev_vendor_project,
+    kev_product = excluded.kev_product,
+    kev_vulnerability_name = excluded.kev_vulnerability_name,
+    kev_source_version = excluded.kev_source_version,
+    updated_at = excluded.updated_at
+"""
+_POSTGRES_KEV_DROP = "DROP TABLE cve_risk_kev_stage"
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -63,6 +148,29 @@ def _chunked(items: Iterable[tuple[Any, ...]], size: int = 1000) -> Iterable[lis
             chunk = []
     if chunk:
         yield chunk
+
+
+def _write_feed_rows(
+    conn: Any,
+    rows: Iterable[tuple[Any, ...]],
+    *,
+    upsert_sql: str,
+    postgres_stage_sql: str,
+    postgres_copy_sql: str,
+    postgres_merge_sql: str,
+    postgres_drop_sql: str,
+) -> None:
+    if getattr(conn, "database_backend", None) != DatabaseBackend.POSTGRES:
+        for chunk in _chunked(rows):
+            conn.executemany(upsert_sql, chunk)
+        return
+    with conn.cursor() as cursor:
+        cursor.execute(postgres_stage_sql)
+        with cursor.copy(postgres_copy_sql) as copy:
+            for row in rows:
+                copy.write_row(row)
+        cursor.execute(postgres_merge_sql)
+        cursor.execute(postgres_drop_sql)
 
 
 def _relevant_current(conn: Any, source: str) -> dict[str, tuple[Any, ...]]:
@@ -161,8 +269,15 @@ def accept_feed(
             )
             for record in parsed.records
         )
-        for chunk in _chunked(params):
-            conn.executemany(_UPSERT_EPSS, chunk)
+        _write_feed_rows(
+            conn,
+            params,
+            upsert_sql=_UPSERT_EPSS,
+            postgres_stage_sql=_POSTGRES_EPSS_STAGE,
+            postgres_copy_sql=_POSTGRES_EPSS_COPY,
+            postgres_merge_sql=_POSTGRES_EPSS_MERGE,
+            postgres_drop_sql=_POSTGRES_EPSS_DROP,
+        )
         conn.execute(
             "UPDATE cve_risk_records SET epss_probability = NULL, epss_percentile = NULL, "
             "epss_model_version = '', epss_published_at = '', epss_source_version = ?, updated_at = ? "
@@ -213,8 +328,15 @@ def accept_feed(
             )
             for record in parsed.records
         )
-        for chunk in _chunked(params):
-            conn.executemany(_UPSERT_KEV, chunk)
+        _write_feed_rows(
+            conn,
+            params,
+            upsert_sql=_UPSERT_KEV,
+            postgres_stage_sql=_POSTGRES_KEV_STAGE,
+            postgres_copy_sql=_POSTGRES_KEV_COPY,
+            postgres_merge_sql=_POSTGRES_KEV_MERGE,
+            postgres_drop_sql=_POSTGRES_KEV_DROP,
+        )
         if enqueue_changes:
             incoming_ids = set(incoming_relevant)
             for cve_id in sorted(relevant):
@@ -371,7 +493,12 @@ def get_cve_risk(cve_id: str, conn: Any | None = None) -> dict[str, Any] | None:
             return None
         payload = dict(row)
         payload["kev_listed"] = bool(payload.get("kev_listed"))
-        payload["sources"] = get_configured_feed_status(active)
+        from .nvd_advisory import get_advisory_source_status  # noqa: PLC0415
+
+        payload["sources"] = [
+            *get_configured_feed_status(active),
+            get_advisory_source_status(active),
+        ]
         return payload
     finally:
         if owns_connection:

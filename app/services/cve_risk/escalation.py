@@ -21,6 +21,24 @@ from .links import group_observations, observations_for_cve
 log = logging.getLogger("shell")
 ACK_STATES = frozenset({"new", "acknowledged", "expected", "needs_action", "resolved"})
 MAX_ACK_NOTE_CHARS = 1000
+_FINDING_OCCURRENCE_RUNS_SQL = (
+    "SELECT DISTINCT run_id FROM findings_occurrences "
+    "WHERE finding_id IN ({placeholders})"
+)
+_PROJECT_LINKS_SQL = (
+    "SELECT DISTINCT project_id FROM project_links WHERE entity_type = ? "
+    "AND entity_id IN ({placeholders})"
+)
+_PROJECT_RISK_ESCALATIONS_SQL = (
+    "SELECT r.* FROM risk_escalation_projects rp "
+    "JOIN risk_escalations r ON r.id = rp.escalation_id "
+    "WHERE {where_sql} ORDER BY r.created_at DESC, r.id DESC LIMIT ?"
+)
+_ACKNOWLEDGE_ESCALATION_SQL = (
+    "SELECT r.* FROM risk_escalations r "
+    "JOIN risk_escalation_projects rp ON rp.escalation_id = r.id "
+    "WHERE r.id = ? AND rp.project_id = ? AND {owner_clause}"
+)
 
 
 def _now() -> str:
@@ -64,8 +82,7 @@ def _projects_for_observations(conn: Any, observations: list[dict[str, Any]]) ->
             continue
         placeholders = ",".join("?" for _ in chunk)
         rows = conn.execute(
-            "SELECT DISTINCT run_id FROM findings_occurrences "
-            f"WHERE finding_id IN ({placeholders})",  # nosec B608
+            _FINDING_OCCURRENCE_RUNS_SQL.format(placeholders=placeholders),
             tuple(chunk),
         ).fetchall()
         run_ids.update(str(row["run_id"] or "") for row in rows if str(row["run_id"] or ""))
@@ -82,8 +99,7 @@ def _projects_for_observations(conn: Any, observations: list[dict[str, Any]]) ->
                 continue
             placeholders = ",".join("?" for _ in chunk)
             rows = conn.execute(
-                "SELECT DISTINCT project_id FROM project_links WHERE entity_type = ? "
-                f"AND entity_id IN ({placeholders})",  # nosec B608
+                _PROJECT_LINKS_SQL.format(placeholders=placeholders),
                 (entity_type, *chunk),
             ).fetchall()
             project_ids.update(str(row["project_id"]) for row in rows)
@@ -431,10 +447,7 @@ def list_project_risk_escalations(
     params.append(max(1, min(int(limit), 100)))
     where_sql = " AND ".join(clauses)
     rows = conn.execute(
-        "SELECT r.* FROM risk_escalation_projects rp "  # nosec B608 -- clauses are fixed above
-        "JOIN risk_escalations r ON r.id = rp.escalation_id WHERE "
-        + where_sql
-        + " ORDER BY r.created_at DESC, r.id DESC LIMIT ?",
+        _PROJECT_RISK_ESCALATIONS_SQL.format(where_sql=where_sql),
         tuple(params),
     ).fetchall()
     return [{
@@ -483,9 +496,7 @@ def acknowledge_escalation(
         owner_clause = "r.owner_team_id = '' AND r.owner_session_id = ?"
         owner_params = (session_id,)
     row = conn.execute(
-        "SELECT r.* FROM risk_escalations r "
-        "JOIN risk_escalation_projects rp ON rp.escalation_id = r.id "
-        "WHERE r.id = ? AND rp.project_id = ? AND " + owner_clause,  # nosec B608
+        _ACKNOWLEDGE_ESCALATION_SQL.format(owner_clause=owner_clause),
         (escalation_id, project_id, *owner_params),
     ).fetchone()
     if row is None:

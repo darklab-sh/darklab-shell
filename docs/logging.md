@@ -12,7 +12,7 @@ Structured events use the `session` field for request correlation. Anonymous ses
 
 Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Atlas Quick Lookup reports accept only bounded modes, result states, scope kinds, request sequence numbers, counts, booleans, failure stages, and timings. Submitted drafts, normalized values, canonical values, URL paths or queries, and request bodies aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
 
-Public CVE risk events log source names, feed versions, outcomes, counts, timings, and error classes. They don't enumerate CVEs, package identities, targets, Projects, provider payloads, or finding evidence. Project acknowledgement logs keep only the escalation id, acknowledgement state, and bounded note length; the note itself stays in the database and out of logs.
+Public CVE risk and advisory events log source names, feed versions, acquisition modes, outcomes, counts, timings, and error classes. Positive and negative NVD persistence events use counts only. They don't enumerate CVEs, package identities, targets, Projects, provider payloads, or finding evidence. Project acknowledgement logs keep only the escalation id, acknowledgement state, and bounded note length; the note itself stays in the database and out of logs.
 
 ## Level Semantics
 
@@ -138,6 +138,8 @@ The current event inventory is:
 | INFO | `MIGRATION_APPLIED` | Schema migration runner | migration_version, migration_name |
 | INFO | `CVE_RISK_BOOTSTRAP_LOADED` | bundled public-risk bootstrap | source, source_version, record_count, origin |
 | INFO | `CVE_RISK_REFRESH_COMPLETED` | public-risk feed refresh | source, source_version, record_count, outcome, attempt |
+| INFO | `CVE_ADVISORY_LOCAL_LOADED` | local NVD advisory loader | source, source_version, record_count |
+| INFO | `CVE_ADVISORY_LOOKUP_STORED` | explicit Atlas CVE Intel refresh | source, outcome, record_count |
 | INFO | `RISK_ESCALATION_CREATED` | changed-CVE work processor | source, transition_kind, feed_version, owner_kind, observation_count, project_count, model_changed |
 | INFO | `PROJECT_RISK_ESCALATION_ACK_UPDATED` | Project Monitoring risk-event route | ip, session, team_id, project_id, escalation_id, ack_state, note_chars |
 | INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
@@ -438,6 +440,7 @@ The current event inventory is:
 | ERROR | `CVE_RISK_BOOTSTRAP_MANIFEST_INVALID` | bundled public-risk bootstrap | reason when available (+ traceback for unreadable or invalid JSON) |
 | ERROR | `CVE_RISK_BOOTSTRAP_FAILED` | bundled public-risk bootstrap | source (+ traceback) |
 | ERROR | `CVE_RISK_REFRESH_FAILED` | public-risk feed refresh | source, attempts, error_type (+ traceback) |
+| ERROR | `CVE_ADVISORY_LOCAL_LOAD_FAILED` | local NVD advisory loader | source, error_type |
 | ERROR | `CVE_RISK_WORK_ITEM_FAILED` | changed-CVE work processor | source, attempt, max_attempts, error_type (+ traceback) |
 | ERROR | `METRICS_ENVIRONMENT_SETUP_FAILED` | metrics startup | prometheus_multiproc_dir, source (+ traceback) |
 | ERROR | `GUNICORN_WORKER_CLEANUP_FAILED` | Gunicorn worker hook | hook, pid (+ traceback) |

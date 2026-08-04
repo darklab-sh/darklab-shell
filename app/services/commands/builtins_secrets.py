@@ -256,6 +256,17 @@ def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
         ),
         "builtin-note",
     ))
+    advisory_mode = str(risk_settings.get("advisory_mode") or "disabled")
+    lines.append(output_line(
+        format_native_record("NVD advisory data", advisory_mode, 22),
+        "builtin-kv",
+    ))
+    if advisory_mode == "disabled":
+        lines.append(output_line(
+            "Shared NVD CVSS storage is off. Choose local or external cve_risk.advisory_mode "
+            "before using explicit CVE enrichment.",
+            "builtin-note",
+        ))
 
     return lines
 

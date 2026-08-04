@@ -110,6 +110,7 @@ class AuditEventType(str, Enum):
     WORKFLOW_EXECUTION_START = "workflow_execution.start"
     WORKFLOW_EXECUTION_CANCEL = "workflow_execution.cancel"
     CVE_RISK_REFRESH = "cve_risk.refresh"
+    CVE_ADVISORY_REFRESH = "cve_advisory.refresh"
     RISK_ESCALATION_ACK = "risk_escalation.ack"
 
 
@@ -262,6 +263,11 @@ def _spec(
 
 
 EVENT_SPECS: dict[str, EventSpec] = {
+    AuditEventType.CVE_ADVISORY_REFRESH.value: _spec(
+        AuditEventType.CVE_ADVISORY_REFRESH,
+        AuditTargetType.CVE_RISK_SOURCE,
+        RecordingMode.BEST_EFFORT,
+    ),
     AuditEventType.CVE_RISK_REFRESH.value: _spec(
         AuditEventType.CVE_RISK_REFRESH,
         AuditTargetType.CVE_RISK_SOURCE,

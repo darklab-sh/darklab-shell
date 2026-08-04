@@ -20,4 +20,22 @@ describe('finding public CVE risk labels', () => {
     expect(findingRiskSummary(finding)).toBe('CISA KEV · EPSS 18.4% · stale source data');
     expect(findingRiskSummary({ risk: { kev: { listed: false }, epss: {} } })).toBe('');
   });
+
+  it('shows stored CVSS and non-active NVD states without inventing a risk score', () => {
+    expect(findingRiskSummary({
+      risk: {
+        kev: { listed: false, freshness: 'current' },
+        epss: { freshness: 'current' },
+        advisory_status: 'disputed',
+        cvss: { score: 8.8, freshness: 'current' },
+      },
+    })).toBe('CVSS 8.8 · NVD disputed');
+    expect(findingRiskSummary({
+      risk: {
+        kev: { listed: false, freshness: 'current' },
+        epss: { probability: null, freshness: 'current' },
+        cvss: { score: null, freshness: 'unavailable' },
+      },
+    })).toBe('NVD unavailable');
+  });
 });

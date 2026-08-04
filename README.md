@@ -93,7 +93,7 @@ Open **Quick Lookup** beside Atlas on the desktop rail or mobile menu, or press 
 
 Quick Lookup reads evidence and Intel snapshots the app has already saved. It doesn't run a command, create an Atlas record, or contact an Intel provider. If there isn't an exact record, the result explains what was missing and can take you to normal Atlas search; an unmatched URL can also offer its known parent host. Use **Refresh intel** from a saved profile only when you want a live provider refresh.
 
-Saved CVEs also use release-pinned FIRST EPSS and CISA KEV data to explain which findings deserve attention first. The `providers` command shows the data version and age. Live bulk-feed refresh is off by default, so a fresh or disconnected install still has a dated baseline without making an outbound request.
+Saved CVEs also use release-pinned FIRST EPSS and CISA KEV data to explain which findings deserve attention first. Operators can add stored NVD advisory status, CVSS, and CWE context from a local dataset or an explicit Atlas CVE Intel refresh; simply viewing a finding never contacts NVD. The `providers` command shows the source mode, version, and age. Live bulk-feed and NVD advisory storage are off by default, so a fresh or disconnected install still has a dated EPSS/KEV baseline without making an outbound request.
 
 ---
 

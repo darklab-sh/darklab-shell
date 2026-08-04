@@ -92,7 +92,9 @@ def _download(
     timeout = max(3, min(int(settings.get("http_timeout_seconds") or 30), 120))
     max_bytes = max(1024, min(int(settings.get("max_download_bytes") or 67108864), 268435456))
     try:
-        with urlopen(request, timeout=timeout) as response:  # nosec B310 - fixed allowlisted HTTPS URLs
+        # Feed sources are fixed HTTPS URLs whose host is checked against the
+        # configured allowlist before this request is created.
+        with urlopen(request, timeout=timeout) as response:  # nosec B310
             _validate_response_url(response.geturl(), settings)
             payload = response.read(max_bytes + 1)
             if len(payload) > max_bytes:

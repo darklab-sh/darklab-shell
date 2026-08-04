@@ -8,6 +8,7 @@ from typing import Any
 
 from .bootstrap import load_bundled_snapshots
 from .links import sync_finding_cve_links
+from .nvd_advisory import load_configured_local_nvd
 
 
 def run_cve_risk_maintenance(
@@ -19,4 +20,6 @@ def run_cve_risk_maintenance(
     settings = raw if isinstance(raw, Mapping) else {}
     if bool(settings.get("bootstrap_enabled", True)):
         run_step("cve_risk_bootstrap", lambda: load_bundled_snapshots(conn))
+    if str(settings.get("advisory_mode") or "disabled").lower() == "local":
+        run_step("cve_advisory_local_nvd", lambda: load_configured_local_nvd(conn, cfg=cfg))
     run_step("finding_cve_link_backfill", lambda: sync_finding_cve_links(conn))
