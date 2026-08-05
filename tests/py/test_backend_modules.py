@@ -6719,6 +6719,7 @@ class TestPostgresMigrations:
             "0053",
             "0054",
             "0055",
+            "0056",
         ]
         for table_name in (
             "runs",
@@ -6959,6 +6960,14 @@ class TestPostgresMigrations:
                 "unavailable_at = ?, unavailable_reason = 'source_deleted' WHERE id = 'evi_one'",
                 (now,),
             )
+            conn.execute(
+                "INSERT INTO finding_evidence_links "
+                "(id, session_id, project_id, finding_id, evidence_type, evidence_id, "
+                "created_by_session_id, created_at) VALUES "
+                "('fel_project_delete', 'session-a', 'prj_assessment', 'fnd_deleted', "
+                "'run', 'run_deleted', 'session-a', ?)",
+                (now,),
+            )
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute(
                     "UPDATE project_assessment_evidence SET unavailable_at = NULL WHERE id = 'evi_one'"
@@ -6975,6 +6984,7 @@ class TestPostgresMigrations:
             assert conn.execute("SELECT COUNT(*) FROM project_assessments").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_checks").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_evidence").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM finding_evidence_links").fetchone()[0] == 0
             conn.close()
 
     def test_schema_inventory_captures_sqlite_head_objects(self):
@@ -7634,7 +7644,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0056",
+            "0057",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7686,7 +7696,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0055"
+        assert rows[-1]["version"] == "0056"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8142,7 +8152,7 @@ class TestPostgresMigrations:
 
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
-            "0049", "0050", "0051", "0052", "0053", "0054", "0055",
+            "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8162,7 +8172,8 @@ class TestPostgresMigrations:
         assert "0053" in conn.applied_versions
         assert "0054" in conn.applied_versions
         assert "0055" in conn.applied_versions
-        assert conn.commit_count == 17
+        assert "0056" in conn.applied_versions
+        assert conn.commit_count == 18
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8315,7 +8326,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0056",
+            "0057",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8340,9 +8351,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0056"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0057"]
         assert table_exists is not None
-        assert "0056" in versions
+        assert "0057" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -15315,6 +15326,28 @@ class TestDataAccessLayerServiceCoverage:
                 ("prj_session_service", source_session, now, now),
             )
             conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, created) "
+                "VALUES ('pln_session_service', 'prj_session_service', 'run', "
+                "'run-session-service', 'manual', ?)",
+                (now,),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, first_run_id, last_run_id, signature_hash, title, created) "
+                "VALUES ('fnd_session_service', ?, 'run-session-service', 'run-session-service', "
+                "'run-session-service', 'sig-session-service', 'Migrated evidence finding', ?)",
+                (source_session, now),
+            )
+            conn.execute(
+                "INSERT INTO finding_evidence_links "
+                "(id, session_id, project_id, finding_id, evidence_type, evidence_id, run_id, "
+                "created_by_session_id, created_at) VALUES "
+                "('fel_session_service', ?, 'prj_session_service', 'fnd_session_service', "
+                "'run', 'run-session-service', 'run-session-service', ?, ?)",
+                (source_session, source_session, now),
+            )
+            conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
                 "VALUES (?, ?, 'webhook', 'Webhook', '{}', '{}', '[]', 0, ?, ?)",
@@ -15416,6 +15449,7 @@ class TestDataAccessLayerServiceCoverage:
         assert counts["migrated_finding_remediation_dispositions"] == 1
         assert counts["migrated_finding_remediation_guidance"] == 1
         assert counts["migrated_finding_remediation_merge_members"] == 2
+        assert counts["migrated_finding_evidence_links"] == 1
         assert counts["migrated_notification_channels"] == 1
         assert counts["migrated_recent_values"] == 1
         assert counts["migrated_secrets"] == 1
@@ -15458,6 +15492,10 @@ class TestDataAccessLayerServiceCoverage:
                     "WHERE session_id = ?",
                     (source_session,),
                 ).fetchone()["count"],
+                "finding_evidence_links": conn.execute(
+                    "SELECT COUNT(*) AS count FROM finding_evidence_links WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
             }
             migrated_merge_rows = conn.execute(
                 "SELECT session_id, merge_id, created_by_session_id "
@@ -15468,6 +15506,10 @@ class TestDataAccessLayerServiceCoverage:
             destination_project = conn.execute(
                 "SELECT session_id FROM projects WHERE id = 'prj_session_service'",
             ).fetchone()
+            migrated_evidence = conn.execute(
+                "SELECT session_id, created_by_session_id FROM finding_evidence_links "
+                "WHERE id = 'fel_session_service'",
+            ).fetchone()
             audit_row = conn.execute(
                 "SELECT details FROM audit_events WHERE target_id = ?",
                 (destination_session,),
@@ -15475,6 +15517,8 @@ class TestDataAccessLayerServiceCoverage:
 
         assert set(source_counts.values()) == {0}
         assert destination_project["session_id"] == destination_session
+        assert migrated_evidence["session_id"] == destination_session
+        assert migrated_evidence["created_by_session_id"] == destination_session
         assert migrated_disposition["session_id"] == destination_session
         assert migrated_disposition["review_state"] == "important"
         assert migrated_disposition["remediation"] == "Use migrated guidance."
@@ -26533,6 +26577,14 @@ class TestDatabaseInit:
                 "UPDATE findings SET status = 'reviewed' "
                 "WHERE id = 'finding-triage-related'"
             )
+            conn.execute(
+                "INSERT INTO finding_evidence_links "
+                "(id, session_id, project_id, finding_id, evidence_type, evidence_id, "
+                "created_by_session_id, created_at) VALUES "
+                "('fel-triage-cleanup', 'session-triage', 'prj-deleted', "
+                "'finding-triage-1', 'run', 'run-deleted', 'session-triage', "
+                "'2026-01-01')"
+            )
             conn.commit()
             conn.close()
 
@@ -26701,7 +26753,12 @@ class TestDatabaseInit:
                         "SELECT COUNT(*) AS count FROM finding_triage_details WHERE finding_id = ?",
                         ["finding-triage-1"],
                     ).fetchone()
+                    evidence_row = cleanup_conn.execute(
+                        "SELECT COUNT(*) AS count FROM finding_evidence_links WHERE finding_id = ?",
+                        ["finding-triage-1"],
+                    ).fetchone()
                 assert int(row["count"] or 0) == 0
+                assert int(evidence_row["count"] or 0) == 0
 
     def test_json_bearing_schema_columns_use_sqlite_json_type(self):
         with tempfile.TemporaryDirectory() as tmp:

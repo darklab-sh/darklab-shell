@@ -82,7 +82,8 @@ run_check "markdownlint" npm --prefix "$REPO_ROOT" run lint:md
 
 printf "\n\033[1m[pre-commit]\033[0m %d passed" "$PASS"
 if [ "$FAIL" -gt 0 ]; then
-    printf ", \033[31m%d failed: %s\033[0m" "$FAIL" "${FAILUR 
+    printf ", \033[31m%d failed: %s\033[0m" "$FAIL" "${FAILURES[*]}"
+    printf "\n"
     exit 1
 fi
 printf "\n"

@@ -236,6 +236,8 @@ Finding observations use owner, affected subject, stable rule, normalized vulner
 
 That merge never rewrites the exact identities. It records their membership in one owner-scoped logical remediation group only after an assessor searches, previews the affected observations, and confirms the action. The selected target group wins any existing review state and guidance so conflict handling is visible before apply. Ranking and rollups count the logical group once, while evidence, validation, confidence, verification, suppression, and occurrence history continue to belong to their original observations.
 
+Supporting finding evidence uses explicit typed references rather than copying another source record. Runs, zero-based run lines with bounded snippets, run output, run-owned workspace artifacts and screenshots, Atlas entities, curated Project targets, assessment checks, and retest runs must resolve inside the active owner and Project before they can be linked. The exact finding, type, source id, and line form the idempotent identity. If the source later disappears, the link and safe source id remain as unavailable evidence; packages preserve the same typed reference, while full transcripts and artifact bodies remain authoritative in their original stores.
+
 ### Assessment Execution, Secrets, and Packaging
 
 **Policy labels have the same behavior on every launch surface.**

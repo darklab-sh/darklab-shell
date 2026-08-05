@@ -2786,6 +2786,176 @@
         ],
         "type": "object"
       },
+      "FindingEvidenceLink": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by_member_id": {
+            "type": "string"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_type": {
+            "enum": [
+              "run",
+              "run_line",
+              "run_artifact",
+              "workspace_file",
+              "screenshot",
+              "atlas_entity",
+              "project_target",
+              "assessment_check",
+              "retest_run"
+            ],
+            "type": "string"
+          },
+          "finding_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "line_number": {
+            "minimum": -1,
+            "type": "integer"
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "snippet": {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "source_state": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "finding_id",
+          "evidence_type",
+          "evidence_id",
+          "run_id",
+          "line_number",
+          "snippet",
+          "label",
+          "observed_at",
+          "source_state",
+          "created_by_member_id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "FindingEvidenceLinkRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "evidence_type": {
+            "enum": [
+              "run",
+              "run_line",
+              "run_artifact",
+              "workspace_file",
+              "screenshot",
+              "atlas_entity",
+              "project_target",
+              "assessment_check",
+              "retest_run"
+            ],
+            "type": "string"
+          },
+          "line_number": {
+            "description": "Zero-based line for run_line evidence; omit for other types.",
+            "minimum": -1,
+            "type": "integer"
+          },
+          "snippet": {
+            "maxLength": 1000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_type",
+          "evidence_id"
+        ],
+        "type": "object"
+      },
+      "FindingEvidenceLinkResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/FindingEvidenceLink"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "created",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "FindingEvidencePage": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/FindingEvidenceLink"
+            },
+            "type": "array"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "evidence",
+          "total"
+        ],
+        "type": "object"
+      },
+      "FindingEvidenceUnlinkResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "$ref": "#/components/schemas/FindingEvidenceLink"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "evidence"
+        ],
+        "type": "object"
+      },
       "FindingObservationReference": {
         "properties": {
           "affected_subject": {
@@ -9262,6 +9432,321 @@
               }
             },
             "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/findings/{finding_id}/evidence": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Finding id",
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingEvidencePage"
+                }
+              }
+            },
+            "description": "Typed finding evidence"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid finding evidence request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot triage findings"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project finding or evidence not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Finding evidence quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Finding id",
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindingEvidenceLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingEvidenceLinkResponse"
+                }
+              }
+            },
+            "description": "Existing finding evidence link"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingEvidenceLinkResponse"
+                }
+              }
+            },
+            "description": "Finding evidence linked"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid finding evidence request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot triage findings"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project finding or evidence not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Finding evidence quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/findings/{finding_id}/evidence/{evidence_link_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Finding id",
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Finding evidence link id",
+            "in": "path",
+            "name": "evidence_link_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingEvidenceUnlinkResponse"
+                }
+              }
+            },
+            "description": "Finding evidence unlinked"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid finding evidence request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot triage findings"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project finding or evidence not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Finding evidence quota exceeded"
           },
           "429": {
             "content": {

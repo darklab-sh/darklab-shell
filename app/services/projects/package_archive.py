@@ -34,6 +34,7 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
 )
 from services.projects.findings import list_project_findings
+from services.projects.finding_evidence import attach_finding_evidence_links
 from services.projects.metadata import (
     _full_finding_triage_by_id,
     _metadata_owner_where,
@@ -879,6 +880,12 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
     findings = list_project_findings(session_id, project_id, team_id=team_id) or []
     _attach_package_finding_triage(session_id, findings, team_id=team_id)
     manifest = _evidence_manifest_from_summary(summary, payload, findings)
+    attach_finding_evidence_links(
+        session_id,
+        project_id,
+        manifest.get("findings", []),
+        team_id=team_id,
+    )
     redaction_rules = _package_redaction_rules(payload["redaction_mode"])
     if redaction_rules:
         manifest = _redact_package_manifest(manifest, redaction_rules)

@@ -195,6 +195,7 @@ def delete_project(session_id, project_id, *, team_id="", conn=None):
             "DELETE FROM evidence_packages WHERE session_id = ? AND project_id = ?",
             (session_id, project_id),
         )
+        conn.execute("DELETE FROM finding_evidence_links WHERE project_id = ?", (project_id,))
         conn.execute(
             "DELETE FROM project_assessment_evidence WHERE assessment_id IN "
             "(SELECT id FROM project_assessments WHERE project_id = ?)",

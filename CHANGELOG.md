@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Project findings can now retain typed supporting evidence.**
+  - **Why:** An assessor needs to preserve why a finding is credible even when the supporting record isn't the scanner line that first created it.
+  - **What:** Owner- and Project-scoped finding evidence can reference saved runs or transcript lines, full run output, workspace artifacts, screenshots, Atlas entities, Project targets, assessment checks, and retest runs. Every source is revalidated in the active scope, exact links are idempotent, transcript snippets stay bounded, configurable quotas reject new links without evicting history, and a removed source remains visible as unavailable. The browser and API routes share the same service, mutations are audited, session migration and Project/finding cleanup preserve owner boundaries, and evidence packages carry the typed references selected with a finding.
+  - **Tests:** Focused API, migration, package, scope, source-type, line-bound, quota, idempotency, unavailable-source, audit, OpenAPI, architecture, and documentation coverage pins the contract.
 - **Assessors can explicitly merge remediation groups that describe the same fix.**
   - **Why:** Stable finding identities correctly keep different targets, CVEs, and scanner rules separate, but real assessments sometimes produce two differently identified observations that still represent one remediation task.
   - **What:** The shared finding triage editor now searches saved findings, previews every affected observation, and asks for confirmation before joining otherwise distinct remediation groups. The selected target group's review state and guidance win, fix-first views count the joined group once, and each observation keeps its own evidence, validation method, confidence, and verification work. The merge stays inside the active personal or team scope, requires finding-triage permission to apply, records an audit event, and never happens automatically.

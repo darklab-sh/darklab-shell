@@ -291,6 +291,8 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_project_assessment_check_update": "_request_context()",
     "api_project_assessment_evidence_link": "_request_context()",
     "api_project_assessment_evidence_unlink": "_request_context()",
+    "api_project_finding_evidence_link": "Capability.TRIAGE_FINDINGS",
+    "api_project_finding_evidence_unlink": "Capability.TRIAGE_FINDINGS",
 }
 
 
@@ -1284,6 +1286,232 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     assert all(row["details"]["source"] == "api_v1" for row in check_audits)
 
 
+def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    project = _create_project(client, token, name="API Finding Evidence")
+    run_id = _seed_run(
+        token,
+        run_id="run_finding_evidence_" + uuid.uuid4().hex[:12],
+        command="nuclei -u https://evidence.example",
+        output=["first", "vulnerable response", "last"],
+    )
+    linked = client.post(
+        f"/api/v1/runs/{run_id}/projects/{project['id']}",
+        headers=_headers(token),
+    )
+    target_response = client.post(
+        f"/projects/{project['id']}/targets",
+        headers={"X-Session-ID": token},
+        json={"type": "domain", "value": "evidence.example"},
+    )
+    target_id = target_response.get_json()["target"]["id"]
+    finding_id = "fnd_evidence_" + uuid.uuid4().hex[:12]
+    text_artifact_id = "rfa_evidence_text_" + uuid.uuid4().hex[:8]
+    screenshot_id = "rfa_evidence_image_" + uuid.uuid4().hex[:8]
+    assessment_id = "asm_evidence_" + uuid.uuid4().hex[:8]
+    check_id = "ach_evidence_" + uuid.uuid4().hex[:8]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, run_id, first_run_id, last_run_id, signature_hash, "
+            "tool_root, title, raw_line, line_number, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'nuclei', 'Saved evidence finding', "
+            "'vulnerable response', 1, '2026-08-05T00:00:00+00:00')",
+            (finding_id, token, run_id, run_id, run_id, "sig_" + finding_id),
+        )
+        conn.execute(
+            "INSERT INTO run_output_artifacts "
+            "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+            "VALUES (?, 'evidence/output.txt.gz', 'gzip', 32, 3, 0, "
+            "'2026-08-05T00:00:01+00:00')",
+            (run_id,),
+        )
+        conn.execute(
+            "INSERT INTO run_file_artifacts "
+            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "detected_by, content_type, created) VALUES "
+            "(?, ?, ?, 'evidence/notes.txt', 'notes.txt', 'output', 16, 'test', "
+            "'text/plain', '2026-08-05T00:00:02+00:00'), "
+            "(?, ?, ?, 'evidence/screenshot.png', 'screenshot.png', 'screenshot', 24, "
+            "'test', 'image/png', '2026-08-05T00:00:03+00:00')",
+            (text_artifact_id, token, run_id, screenshot_id, token, run_id),
+        )
+        conn.execute(
+            "INSERT INTO project_assessments "
+            "(id, session_id, project_id, title, profile_key, profile_version, profile_snapshot, "
+            "status, started_at, created_at, updated_at) VALUES "
+            "(?, ?, ?, 'Evidence cycle', 'network', '1', '{}', 'active', "
+            "'2026-08-05T00:00:00+00:00', '2026-08-05T00:00:00+00:00', "
+            "'2026-08-05T00:00:00+00:00')",
+            (assessment_id, token, project["id"]),
+        )
+        conn.execute(
+            "INSERT INTO project_assessment_checks "
+            "(id, assessment_id, category, check_key, target_entity_id, target_type, target_value, "
+            "target_value_hash, created_at, updated_at) VALUES "
+            "(?, ?, 'validation', 'manual-evidence', ?, 'domain', 'evidence.example', ?, "
+            "'2026-08-05T00:00:00+00:00', '2026-08-05T00:00:00+00:00')",
+            (check_id, assessment_id, target_id, "hash_" + uuid.uuid4().hex),
+        )
+        conn.commit()
+
+    route = f"/api/v1/projects/{project['id']}/findings/{finding_id}/evidence"
+    created_response = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "evidence_type": "run_line",
+            "evidence_id": run_id,
+            "line_number": 1,
+            "snippet": "vulnerable response",
+        },
+    )
+    duplicate_response = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "evidence_type": "run_line",
+            "evidence_id": run_id,
+            "line_number": 1,
+            "snippet": "replacement text is ignored for an existing identity",
+        },
+    )
+    listed_response = client.get(route, headers=_headers(token))
+    cross_scope = client.get(route, headers=_headers(other_token))
+    invalid_line = client.post(
+        route,
+        headers=_headers(token),
+        json={"evidence_type": "run_line", "evidence_id": run_id, "line_number": 99},
+    )
+    invalid_screenshot = client.post(
+        route,
+        headers=_headers(token),
+        json={"evidence_type": "screenshot", "evidence_id": text_artifact_id},
+    )
+
+    assert linked.status_code == 201
+    assert target_response.status_code == 201
+    assert created_response.status_code == 201
+    created = created_response.get_json()
+    assert created["created"] is True
+    assert created["evidence"] == {
+        "id": created["evidence"]["id"],
+        "project_id": project["id"],
+        "finding_id": finding_id,
+        "evidence_type": "run_line",
+        "evidence_id": run_id,
+        "run_id": run_id,
+        "line_number": 1,
+        "snippet": "vulnerable response",
+        "label": "nuclei line 2",
+        "observed_at": "2026-05-19T00:00:01+00:00",
+        "source_state": "available",
+        "created_by_member_id": "",
+        "created_at": created["evidence"]["created_at"],
+    }
+    assert duplicate_response.status_code == 200
+    assert duplicate_response.get_json()["created"] is False
+    assert listed_response.status_code == 200
+    assert listed_response.get_json()["evidence"] == [created["evidence"]]
+    assert cross_scope.status_code == 404
+    assert invalid_line.status_code == 400
+    assert invalid_screenshot.status_code == 400
+
+    package_response = client.post(
+        f"/projects/{project['id']}/packages",
+        headers={"X-Session-ID": token},
+        json={
+            "name": "Typed finding evidence",
+            "selection": {"finding_ids": [finding_id]},
+        },
+    )
+    assert package_response.status_code == 201
+    package_finding = package_response.get_json()["package"]["manifest"]["findings"][0]
+    assert package_finding["evidence_links"] == [created["evidence"]]
+
+    evidence_link_id = created["evidence"]["id"]
+    deleted_response = client.delete(
+        f"{route}/{evidence_link_id}",
+        headers=_headers(token),
+    )
+    assert deleted_response.status_code == 200
+    assert client.get(route, headers=_headers(token)).get_json()["evidence"] == []
+
+    evidence_sources = [
+        ("run", run_id),
+        ("run_artifact", run_id),
+        ("workspace_file", text_artifact_id),
+        ("screenshot", screenshot_id),
+        ("atlas_entity", target_id),
+        ("project_target", target_id),
+        ("assessment_check", check_id),
+        ("retest_run", run_id),
+    ]
+    with mock.patch.dict(config.CFG, {
+        "max_finding_evidence_links_per_owner": 0,
+        "max_finding_evidence_links_per_finding": 0,
+    }):
+        unlimited_responses = [
+            client.post(
+                route,
+                headers=_headers(token),
+                json={"evidence_type": evidence_type, "evidence_id": evidence_id},
+            )
+            for evidence_type, evidence_id in evidence_sources
+        ]
+    assert [response.status_code for response in unlimited_responses] == [201] * 8
+    evidence_page = client.get(route, headers=_headers(token)).get_json()
+    assert {item["evidence_type"] for item in evidence_page["evidence"]} == {
+        evidence_type for evidence_type, _evidence_id in evidence_sources
+    }
+    assert evidence_page["total"] == 8
+    browser_route = f"/projects/{project['id']}/findings/{finding_id}/evidence"
+    browser_page = client.get(browser_route, headers={"X-Session-ID": token})
+    assert browser_page.status_code == 200
+    assert browser_page.get_json() == evidence_page
+    browser_duplicate = client.post(
+        browser_route,
+        headers={"X-Session-ID": token},
+        json={"evidence_type": "run", "evidence_id": run_id},
+    )
+    assert browser_duplicate.status_code == 200
+    assert browser_duplicate.get_json()["created"] is False
+    with mock.patch.dict(config.CFG, {
+        "max_finding_evidence_links_per_owner": 0,
+        "max_finding_evidence_links_per_finding": 8,
+    }):
+        quota_response = client.post(
+            route,
+            headers=_headers(token),
+            json={
+                "evidence_type": "run_line",
+                "evidence_id": run_id,
+                "line_number": 0,
+            },
+        )
+    assert quota_response.status_code == 409
+    assert quota_response.get_json()["error"]["code"] == "quota_exceeded"
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM run_file_artifacts WHERE id = ?", (screenshot_id,))
+        conn.commit()
+    unavailable_page = client.get(route, headers=_headers(token)).get_json()
+    unavailable_screenshot = next(
+        item for item in unavailable_page["evidence"] if item["evidence_type"] == "screenshot"
+    )
+    assert unavailable_screenshot["source_state"] == "unavailable"
+    assert unavailable_screenshot["evidence_id"] == screenshot_id
+
+    audit_rows = _audit_event_rows(target_id=finding_id)
+    assert [row["event_type"] for row in audit_rows] == [
+        "finding.evidence_link",
+        "finding.evidence_unlink",
+    ] + ["finding.evidence_link"] * 8
+    assert all(row["details"]["source"] == "api_v1" for row in audit_rows)
+
+
 def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context():
     from services.teams.storage import token_hash
 
@@ -1305,7 +1533,27 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     )
     assert project_response.status_code == 201
     project_id = json.loads(project_response.data)["project"]["id"]
-    _seed_assessment_target(owner_token, project_id, team_id=team_id)
+    _entity_id, evidence_run_id = _seed_assessment_target(
+        owner_token, project_id, team_id=team_id
+    )
+    finding_id = "fnd_team_evidence_" + uuid.uuid4().hex[:12]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, team_id, run_id, first_run_id, last_run_id, "
+            "signature_hash, title, created) VALUES (?, ?, ?, ?, ?, ?, ?, "
+            "'Team evidence finding', '2026-08-04T12:00:00+00:00')",
+            (
+                finding_id,
+                owner_token,
+                team_id,
+                evidence_run_id,
+                evidence_run_id,
+                evidence_run_id,
+                "sig_" + finding_id,
+            ),
+        )
+        conn.commit()
     owner_headers = _team_headers(owner_token, team_id)
     viewer_headers = _team_headers(viewer_token, team_id)
 
@@ -1332,9 +1580,20 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         headers=viewer_headers,
         json={"state": "skipped", "reason": "Viewer cannot decide this"},
     )
+    finding_evidence_route = (
+        f"/api/v1/projects/{project_id}/findings/{finding_id}/evidence"
+    )
+    viewer_evidence_list = client.get(finding_evidence_route, headers=viewer_headers)
+    viewer_evidence_write = client.post(
+        finding_evidence_route,
+        headers=viewer_headers,
+        json={"evidence_type": "run", "evidence_id": evidence_run_id},
+    )
     assert viewer_list.status_code == 200
     assert json.loads(viewer_list.data)["assessments"][0]["id"] == assessment_id
-    for response in (viewer_update, viewer_check_update):
+    assert viewer_evidence_list.status_code == 200
+    assert viewer_evidence_list.get_json() == {"evidence": [], "total": 0}
+    for response in (viewer_update, viewer_check_update, viewer_evidence_write):
         assert response.status_code == 403
         assert json.loads(response.data)["error"]["code"] == "team_forbidden"
 
@@ -1344,6 +1603,12 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         json={"state": "skipped", "reason": "Approved scope exclusion"},
     )
     assert owner_check_update.status_code == 200
+    owner_evidence_write = client.post(
+        finding_evidence_route,
+        headers=owner_headers,
+        json={"evidence_type": "run", "evidence_id": evidence_run_id},
+    )
+    assert owner_evidence_write.status_code == 201
     actor = json.loads(owner_check_update.data)["check"]["state_actor"]
     with sqlite3.connect(DB_PATH) as conn:
         member_id = conn.execute(
@@ -1351,6 +1616,11 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
             (team_id, token_hash(owner_token)),
         ).fetchone()[0]
     assert actor == {"kind": "team_member", "member_id": member_id}
+    assert owner_evidence_write.get_json()["evidence"]["created_by_member_id"] == member_id
+    assert client.get(
+        finding_evidence_route,
+        headers=viewer_headers,
+    ).get_json()["total"] == 1
 
 
 def test_api_v1_project_assessment_errors_use_the_public_error_shape():

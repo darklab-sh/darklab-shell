@@ -307,6 +307,14 @@
 # Server default if unset: 5000
 # max_finding_triage_details_per_owner: 5000
 #
+# Maximum typed evidence references saved for findings. Set either limit to 0
+# for unlimited. Existing evidence is never evicted when a limit is reached.
+# Server default if unset: 10000
+# max_finding_evidence_links_per_owner: 10000
+#
+# Server default if unset: 200
+# max_finding_evidence_links_per_finding: 200
+#
 # Evidence package final ZIP size cap in megabytes. Set to 0 for unlimited.
 # Server default if unset: 25
 # evidence_package_max_mb: 25

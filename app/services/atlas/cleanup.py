@@ -559,6 +559,10 @@ def delete_atlas_findings(
         owned,
     )
     conn.execute(
+        f"DELETE FROM finding_evidence_links WHERE finding_id IN ({owned_placeholders})",  # nosec
+        owned,
+    )
+    conn.execute(
         f"DELETE FROM findings_occurrences WHERE finding_id IN ({owned_placeholders})",  # nosec
         owned,
     )

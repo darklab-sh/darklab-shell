@@ -467,6 +467,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0053",
         "0054",
         "0055",
+        "0056",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -562,6 +563,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'cvss_score',
                 'references_json'
             ))
+            OR (table_name = 'finding_evidence_links' AND column_name = 'created_at')
         )
         """,
         (postgres_schema.schema,),
@@ -593,6 +595,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "project_assessments",
         "project_assessment_checks",
         "project_assessment_evidence",
+        "finding_evidence_links",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
     assert {
@@ -650,6 +653,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("findings", "cvss_vector", "text"),
         ("findings", "cvss_score", "double precision"),
         ("findings", "references_json", "jsonb"),
+        ("finding_evidence_links", "created_at", "timestamp with time zone"),
     }
     runs_index_rows = conn.execute(
         """
@@ -730,7 +734,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         AND tablename IN (
             'project_assessments',
             'project_assessment_checks',
-            'project_assessment_evidence'
+            'project_assessment_evidence',
+            'finding_evidence_links'
         )
         """,
         (postgres_schema.schema,),
@@ -746,6 +751,9 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_project_assessment_evidence_check_observed",
         "idx_project_assessment_evidence_assessment_type",
         "idx_project_assessment_evidence_source",
+        "idx_finding_evidence_owner_finding",
+        "idx_finding_evidence_project",
+        "idx_finding_evidence_source",
     }.issubset({row["indexname"] for row in assessment_index_rows})
     import_index_rows = conn.execute(
         """

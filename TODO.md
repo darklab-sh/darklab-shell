@@ -138,7 +138,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 - [ ] Extend the finding model so assessors can record issues that no parser or import knows about:
   - Link CVE-bearing findings to the shared Phase 0 enrichment records and serialize current EPSS, KEV, CVSS, and public-exploit signals with their source/freshness. Do not rewrite the finding or its occurrence history when a feed changes.
-  - Add typed evidence links for source runs/lines, run artifacts, workspace files, screenshots, Atlas entities, Project targets, assessment checks, and retest runs. Validate every reference in the active owner/Project scope.
   - Preserve current `findings_occurrences` behavior for selected transcript lines. Manual evidence attached to a run must keep a line number and bounded snippet without copying an entire transcript.
   - Define stable manual-finding deduplication and edit semantics. Editing title, severity, or detail must not quietly merge two user-authored findings; duplicate detection should warn and let the user choose.
 - [ ] Add one shared finding editor used from Project Findings, Atlas Findings, Assessment, and Run Details:

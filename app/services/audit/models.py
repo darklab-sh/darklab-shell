@@ -87,6 +87,8 @@ class AuditEventType(str, Enum):
     PROJECT_LINK = "project.link"
     REMEDIATION_EDIT = "finding.remediation_edit"
     REMEDIATION_MERGE = "finding.remediation_merge"
+    FINDING_EVIDENCE_LINK = "finding.evidence_link"
+    FINDING_EVIDENCE_UNLINK = "finding.evidence_unlink"
     VERIFICATION_EDIT = "finding.verification_edit"
     LABEL_CHANGE = "label.change"
     NOTE_CHANGE = "note.change"
@@ -236,6 +238,7 @@ COMMON_DETAIL_KEYS = frozenset({
     "check_id",
     "check_key",
     "evidence_id",
+    "evidence_link_id",
     "evidence_type",
     "policy_level",
     "profile_key",
@@ -465,6 +468,12 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     AuditEventType.REMEDIATION_MERGE.value: _spec(
         AuditEventType.REMEDIATION_MERGE, AuditTargetType.FINDING, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.FINDING_EVIDENCE_LINK.value: _spec(
+        AuditEventType.FINDING_EVIDENCE_LINK, AuditTargetType.FINDING, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.FINDING_EVIDENCE_UNLINK.value: _spec(
+        AuditEventType.FINDING_EVIDENCE_UNLINK, AuditTargetType.FINDING, RecordingMode.FAIL_CLOSED
     ),
     AuditEventType.VERIFICATION_EDIT.value: _spec(
         AuditEventType.VERIFICATION_EDIT, AuditTargetType.FINDING, RecordingMode.BEST_EFFORT

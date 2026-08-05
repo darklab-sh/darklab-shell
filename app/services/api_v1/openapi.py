@@ -12,6 +12,7 @@ from services.api_v1 import openapi_assessments
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.api_v1.openapi_cve_risk import cve_risk_schemas
 from services.api_v1.openapi_findings import finding_schemas
+from services.api_v1.openapi_finding_evidence import finding_evidence_paths, finding_evidence_schemas
 from services.scheduler.models import CADENCE_PRESETS
 from services.watchers.models import (
     DIFF_KINDS,
@@ -590,6 +591,7 @@ OPENAPI_SPEC: dict = {
             },
             **atlas_profile_schemas(),
             **openapi_assessments.assessment_schemas(),
+            **finding_evidence_schemas(),
             "AtlasFindingDetail": {
                 "type": "object",
                 "required": ["finding", "occurrences", "detail_limits"],
@@ -1547,7 +1549,7 @@ OPENAPI_SPEC: dict = {
         },
     },
     "security": [{"bearerToken": []}],
-    "paths": openapi_assessments.assessment_paths() | {
+    "paths": openapi_assessments.assessment_paths() | finding_evidence_paths() | {
         "/health": {
             "get": {
                 "security": [],

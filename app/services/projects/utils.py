@@ -141,6 +141,10 @@ def new_finding_target_id() -> str:
     return "fnt_" + secrets.token_hex(8)
 
 
+def new_finding_evidence_link_id() -> str:
+    return "fev_" + secrets.token_hex(8)
+
+
 def new_evidence_package_id() -> str:
     return "pkg_" + secrets.token_hex(8)
 
