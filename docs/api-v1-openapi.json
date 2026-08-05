@@ -1872,6 +1872,15 @@
       },
       "AtlasFinding": {
         "properties": {
+          "confidence": {
+            "enum": [
+              "unknown",
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
           "created": {
             "nullable": true,
             "type": "string"
@@ -1886,6 +1895,24 @@
             "items": {
               "$ref": "#/components/schemas/CveRiskSignal"
             },
+            "type": "array"
+          },
+          "cvss_score": {
+            "maximum": 10,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "cvss_vector": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "cwe_ids": {
+            "items": {
+              "pattern": "^CWE-[0-9]+$",
+              "type": "string"
+            },
+            "maxItems": 50,
             "type": "array"
           },
           "entity_id": {
@@ -1905,6 +1932,10 @@
             "type": "string"
           },
           "id": {
+            "type": "string"
+          },
+          "impact": {
+            "maxLength": 20000,
             "type": "string"
           },
           "kind": {
@@ -1938,6 +1969,15 @@
           "raw_line": {
             "type": "string"
           },
+          "references": {
+            "items": {
+              "format": "uri",
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
           "remediation_groups": {
             "items": {
               "$ref": "#/components/schemas/FindingRemediationReference"
@@ -1945,6 +1985,10 @@
             "type": "array"
           },
           "remediation_id": {
+            "type": "string"
+          },
+          "reproduction_steps": {
+            "maxLength": 20000,
             "type": "string"
           },
           "review_state": {
@@ -1966,6 +2010,10 @@
             "type": "string"
           },
           "subject_key": {
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 4000,
             "type": "string"
           },
           "suppressed": {
@@ -1999,6 +2047,15 @@
           "entity_id",
           "origin",
           "validation_method",
+          "summary",
+          "impact",
+          "reproduction_steps",
+          "confidence",
+          "cve_ids",
+          "cwe_ids",
+          "cvss_vector",
+          "cvss_score",
+          "references",
           "status",
           "title",
           "raw_line",
@@ -3660,6 +3717,15 @@
           "command_root": {
             "type": "string"
           },
+          "confidence": {
+            "enum": [
+              "unknown",
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
           "created": {
             "nullable": true,
             "type": "string"
@@ -3676,6 +3742,24 @@
             },
             "type": "array"
           },
+          "cvss_score": {
+            "maximum": 10,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "cvss_vector": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "cwe_ids": {
+            "items": {
+              "pattern": "^CWE-[0-9]+$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
           "entity_id": {
             "type": "string"
           },
@@ -3687,6 +3771,10 @@
             "type": "string"
           },
           "id": {
+            "type": "string"
+          },
+          "impact": {
+            "maxLength": 20000,
             "type": "string"
           },
           "kind": {
@@ -3720,6 +3808,15 @@
           "raw_line": {
             "type": "string"
           },
+          "references": {
+            "items": {
+              "format": "uri",
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
           "remediation_groups": {
             "items": {
               "$ref": "#/components/schemas/FindingRemediationReference"
@@ -3727,6 +3824,10 @@
             "type": "array"
           },
           "remediation_id": {
+            "type": "string"
+          },
+          "reproduction_steps": {
+            "maxLength": 20000,
             "type": "string"
           },
           "review_state": {
@@ -3759,6 +3860,10 @@
           "subject_key": {
             "type": "string"
           },
+          "summary": {
+            "maxLength": 4000,
+            "type": "string"
+          },
           "target_id": {
             "type": "string"
           },
@@ -3787,6 +3892,15 @@
           "run_id",
           "origin",
           "validation_method",
+          "summary",
+          "impact",
+          "reproduction_steps",
+          "confidence",
+          "cve_ids",
+          "cwe_ids",
+          "cvss_vector",
+          "cvss_score",
+          "references",
           "status",
           "review_state",
           "title",

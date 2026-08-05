@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.api_v1.openapi_cve_risk import cve_risk_finding_properties
+from services.api_v1.openapi_finding_details import FINDING_DETAIL_REQUIRED, finding_detail_properties
 
 
 _FINDING_ORIGINS = ["run", "import", "manual"]
@@ -39,6 +40,7 @@ def finding_schemas() -> dict[str, Any]:
                 "id",
                 "entity_id",
                 *provenance_required,
+                *FINDING_DETAIL_REQUIRED,
                 "status",
                 "title",
                 "raw_line",
@@ -51,6 +53,7 @@ def finding_schemas() -> dict[str, Any]:
                 "entity_value": {"type": "string"},
                 "subject_key": {"type": "string"},
                 **_provenance_properties(),
+                **finding_detail_properties(),
                 "severity": {"type": "string"},
                 "kind": {"type": "string"},
                 "tool_root": {"type": "string"},
@@ -79,6 +82,7 @@ def finding_schemas() -> dict[str, Any]:
                 "id",
                 "run_id",
                 *provenance_required,
+                *FINDING_DETAIL_REQUIRED,
                 "status",
                 "review_state",
                 "title",
@@ -95,6 +99,7 @@ def finding_schemas() -> dict[str, Any]:
                 "target_ids": {"type": "array", "items": {"type": "string"}},
                 "subject_key": {"type": "string"},
                 **_provenance_properties(),
+                **finding_detail_properties(),
                 "scope": {"type": "string"},
                 "kind": {"type": "string"},
                 "title": {"type": "string"},

@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Saved findings now carry a consistent assessor-detail record across Project and Atlas views.**
+  - **Why:** A title and raw scanner line aren't enough to explain impact, reproduce an issue, or hand it to another assessor.
+  - **What:** The shared SQLite/Postgres finding model now keeps bounded summary, impact, reproduction, confidence, CVE/CWE, CVSS, and HTTPS reference fields. Project findings, run findings, Atlas lists, entity profiles, finding detail, and API v1 all serialize the same safe defaults and validated shapes; the richer text also participates in the existing finding search without changing finding identity or deduplication.
+  - **Tests:** Existing migration, schema, Project/Atlas API, entity-profile, OpenAPI snapshot, architecture-boundary, and module-ratchet coverage now pins the detail fields, backend JSON types, confidence/CVSS constraints, and empty legacy defaults.
 - **Findings now preserve creation origin and validation method as separate facts.**
   - **Why:** An imported assertion, a saved run observation, and a manual assessment need different provenance even when they describe the same issue.
   - **What:** The shared SQLite/Postgres finding model stores a bounded `run`, `import`, or `manual` origin independently from captured-observation, active-confirmation, version-inference, imported-assertion, and manual-assessment evidence methods. New run and import findings save the matching values, import-only legacy rows are backfilled without changing signatures or deduplication, and Atlas, Projects, CVE ranking, and API v1 read the same serialized fields.

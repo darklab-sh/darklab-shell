@@ -23,6 +23,11 @@ from services.atlas.lookup_filters import (
     suppression_clause as _suppression_clause,
     suppression_params as _suppression_params,
 )
+from services.atlas.lookup_finding_fields import (
+    FINDING_DETAIL_SELECT_SQL,
+    FINDING_SEARCH_COLUMNS,
+    finding_detail_sql,
+)
 from services.atlas.lookup_export import (
     ATLAS_ENTITY_EXPORT_FIELDS as ATLAS_ENTITY_EXPORT_FIELDS,
     atlas_entities_export as _atlas_entities_export_impl,
@@ -413,7 +418,7 @@ def list_findings(
     debug_started_at = query_debug_started(log)
     search = str(query or "").strip()
     search_like = dialect_for_backend(get_db_backend()).text_search_param(search) if search else ""
-    search_columns = ["f.title", "f.raw_line", "f.tool_root", "e.canonical_value"]
+    search_columns = list(FINDING_SEARCH_COLUMNS)
     metadata_params = _metadata_owner_params(session_id, team_id)
     search_exprs = _finding_metadata_search_exprs(team_id)
     search_clause = _atlas_search_clause(search_columns, search_exprs)
@@ -490,6 +495,7 @@ def list_findings(
         "f.first_run_id, f.last_run_id, ",
         "r.command AS run_command, r.run_kind AS run_kind, ",
         "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, ",
+        FINDING_DETAIL_SELECT_SQL,
         "f.suppressed, f.suppressed_reason, f.suppressed_at, ",
         "(SELECT fo.line_number FROM findings_occurrences fo WHERE fo.finding_id = f.id ",
         " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS line_number, ",
@@ -592,22 +598,8 @@ def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "")
     occurrence_scope_sql = _run_scope_sql("r", team_id)
     occurrence_scope_params = _run_scope_params(session_id, team_id)
     row = conn.execute(
-        "SELECT f.id, f.session_id, f.team_id, f.entity_id, "
-        "e.type AS entity_type, e.canonical_value AS entity_value, "
-        "f.subject_key, f.origin, f.validation_method, f.severity, f.kind, f.tool_root, "
-        "f.first_run_id, f.last_run_id, "
-        "r.command AS run_command, r.run_kind AS run_kind, "
-        "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, "
-        "f.suppressed, f.suppressed_reason, f.suppressed_at, "
-        "(SELECT fo.line_number FROM findings_occurrences fo WHERE fo.finding_id = f.id "
-        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS line_number, "
-        "(SELECT fo.snippet FROM findings_occurrences fo WHERE fo.finding_id = f.id "
-        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS snippet "
-        "FROM findings f "
-        "LEFT JOIN entities e ON e.id = f.entity_id "
-        "LEFT JOIN runs r ON r.id = f.last_run_id AND " + _run_scope_sql("r", team_id) + " "  # nosec
-        "WHERE " + finding_scope_sql + " AND f.id = ?",  # nosec
-        [*_run_scope_params(session_id, team_id), *finding_scope_params, finding_id],
+        finding_detail_sql(occurrence_scope_sql, finding_scope_sql),
+        [*occurrence_scope_params, *finding_scope_params, finding_id],
     ).fetchone()
     if not row:
         return None

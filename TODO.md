@@ -137,7 +137,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 4 — Add first-class manual findings and retest provenance
 
 - [ ] Extend the finding model so assessors can record issues that no parser or import knows about:
-  - Extend finding details with summary, impact, reproduction steps, confidence, bounded CVE/CWE ids, optional CVSS vector/score, and bounded references.
   - Add a stable observation identity based on owner scope, canonical affected component/service/endpoint, normalized vulnerability or rule identity, and validation method. Add a separate remediation identity that excludes validation method so related observations can share review/remediation disposition and counting without losing provenance; keep confidence, verification, source, and evidence method on each observation, and do not collapse different affected subjects merely because they share a host or CVE.
   - Link CVE-bearing findings to the shared Phase 0 enrichment records and serialize current EPSS, KEV, CVSS, and public-exploit signals with their source/freshness. Do not rewrite the finding or its occurrence history when a feed changes.
   - Add typed evidence links for source runs/lines, run artifacts, workspace files, screenshots, Atlas entities, Project targets, assessment checks, and retest runs. Validate every reference in the active owner/Project scope.

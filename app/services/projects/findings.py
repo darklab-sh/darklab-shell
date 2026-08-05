@@ -36,6 +36,7 @@ from services.projects.finding_provenance import (
     normalize_finding_origin,
     normalize_finding_validation_method,
 )
+from services.projects.finding_details import finding_detail_fields
 from services.projects.metadata import (
     _entity_labels_by_id,
     _entity_notes_by_id,
@@ -100,6 +101,7 @@ def row_to_finding(row):
         "last_seen_at": value("last_seen_at"),
         "occurrence_count": int(value("occurrence_count", 0) or 0),
         "created": value("created"),
+        **finding_detail_fields(row),
     }
 
 
@@ -294,9 +296,11 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
         rows = conn.execute(
             base_sql
             + "SELECT f.id, f.session_id, f.team_id, f.entity_id, "  # nosec
-            "f.subject_key, f.signature_hash, f.severity, "
+            "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
+            "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
+            "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
             "d.run_id, d.line_number, d.snippet, d.run_occurrence_count "
             "FROM deduped d JOIN findings f ON f.id = d.finding_id "
             "ORDER BY d.line_number ASC, d.seen_at ASC, f.id ASC"
@@ -331,9 +335,12 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
         if result.rowcount <= 0:
             return None
         row = conn.execute(
-            "SELECT id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+            "SELECT id, session_id, entity_id, subject_key, signature_hash, origin, validation_method, "
+            "severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
-            "fingerprint, title, raw_line, created FROM findings WHERE id = ?",
+            "fingerprint, title, raw_line, created, summary, impact, reproduction_steps, confidence, "
+            "cve_ids_json, cwe_ids_json, cvss_vector, cvss_score, references_json "
+            "FROM findings WHERE id = ?",
             [finding_id],
         ).fetchone()
         conn.commit()
@@ -570,6 +577,10 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
                 "f.status",
                 "f.kind",
                 "f.tool_root",
+                "f.summary",
+                "f.impact",
+                "f.reproduction_steps",
+                "f.cvss_vector",
             )
             where_clauses.append(
                 "(" + " OR ".join(f"LOWER(COALESCE({field}, '')) LIKE ?" for field in finding_query_fields) + ")"
@@ -688,6 +699,8 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             "f.severity, f.kind, f.tool_root, "
             "f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
+            "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
+            "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
             + page_source_run_expr
             + " AS run_id, COALESCE("
             + latest_occurrence_line_expr
@@ -1307,6 +1320,8 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
             "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
+            "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
+            "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
             "fo.run_id AS occurrence_run_id, fo.line_number, fo.snippet "
             "FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id "
             "WHERE f.id = ? AND fo.run_id = ? AND fo.line_number = ?",

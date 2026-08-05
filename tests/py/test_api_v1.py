@@ -2179,11 +2179,34 @@ def test_api_v1_project_readers_are_token_scoped():
         conn.execute(
             "INSERT INTO findings "
             "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
-            "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+            "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, "
+            "summary, impact, reproduction_steps, confidence, cve_ids_json, cwe_ids_json, cvss_vector, "
+            "cvss_score, references_json, created) "
             "VALUES (?, ?, ?, ?, 'api.darklab.sh', ?, 'medium', 'finding', 'nmap', ?, ?, "
             "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:01+00:00', 1, 'new', "
-            "'API finding', 'open port', '2026-05-19T00:00:01+00:00')",
-            (finding_id, token, run_id, port_entity_id, "sig_" + uuid.uuid4().hex, run_id, run_id),
+            "'API finding', 'open port', ?, ?, ?, 'high', ?, ?, ?, 9.8, ?, "
+            "'2026-05-19T00:00:01+00:00')",
+            (
+                finding_id,
+                token,
+                run_id,
+                port_entity_id,
+                "sig_" + uuid.uuid4().hex,
+                run_id,
+                run_id,
+                "An exposed administrative service was observed.",
+                "An unauthenticated user could reach a privileged endpoint.",
+                "Open the endpoint and confirm that it responds without credentials.",
+                json.dumps(["CVE-2026-12345", "not-a-cve", "CVE-2026-12345"]),
+                json.dumps(["CWE-306", "CWE-invalid", "CWE-306"]),
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                json.dumps([
+                    "https://example.com/advisories/CVE-2026-12345",
+                    "javascript:alert(1)",
+                    "https://user:secret@example.com/private",
+                    "https://example.com\\@evil.test/advisory",
+                ]),
+            ),
         )
         conn.execute(
             "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
@@ -2201,7 +2224,10 @@ def test_api_v1_project_readers_are_token_scoped():
         conn.commit()
 
     owner_project = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(token))
-    owner_findings = client.get(f"/api/v1/projects/{project['id']}/findings", headers=_headers(token))
+    owner_findings = client.get(
+        f"/api/v1/projects/{project['id']}/findings?q=unauthenticated",
+        headers=_headers(token),
+    )
     owner_runs = client.get(f"/api/v1/projects/{project['id']}/runs", headers=_headers(token))
     owner_entities = client.get(f"/api/v1/projects/{project['id']}/entities?entity_type=domain", headers=_headers(token))
     owner_port_entities = client.get(f"/api/v1/projects/{project['id']}/entities?entity_type=port", headers=_headers(token))
@@ -2224,7 +2250,10 @@ def test_api_v1_project_readers_are_token_scoped():
         headers=_headers(token),
     )
     atlas_port_entity = client.get(f"/api/v1/atlas/entities/{port_entity_id}", headers=_headers(token))
-    atlas_findings = client.get("/api/v1/atlas/findings?q=finding&review_state=new", headers=_headers(token))
+    atlas_findings = client.get(
+        "/api/v1/atlas/findings?q=unauthenticated&review_state=new",
+        headers=_headers(token),
+    )
     atlas_finding = client.get(f"/api/v1/atlas/findings/{finding_id}", headers=_headers(token))
     cross_project = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(other_token))
     cross_findings = client.get(f"/api/v1/projects/{project['id']}/findings", headers=_headers(other_token))
@@ -2241,6 +2270,18 @@ def test_api_v1_project_readers_are_token_scoped():
     assert owner_finding_payload["id"] == finding_id
     assert owner_finding_payload["origin"] == "run"
     assert owner_finding_payload["validation_method"] == "captured_observation"
+    expected_details = {
+        "summary": "An exposed administrative service was observed.",
+        "impact": "An unauthenticated user could reach a privileged endpoint.",
+        "reproduction_steps": "Open the endpoint and confirm that it responds without credentials.",
+        "confidence": "high",
+        "cve_ids": ["CVE-2026-12345"],
+        "cwe_ids": ["CWE-306"],
+        "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "cvss_score": 9.8,
+        "references": ["https://example.com/advisories/CVE-2026-12345"],
+    }
+    assert {key: owner_finding_payload[key] for key in expected_details} == expected_details
     assert owner_runs.status_code == 200
     assert json.loads(owner_runs.data)["runs"][0]["id"] == run_id
     assert owner_entities.status_code == 200
@@ -2279,6 +2320,10 @@ def test_api_v1_project_readers_are_token_scoped():
     assert [finding["id"] for finding in atlas_related_port_payload["findings"]] == [finding_id]
     assert atlas_related_port_payload["findings"][0]["origin"] == "run"
     assert atlas_related_port_payload["findings"][0]["validation_method"] == "captured_observation"
+    assert {
+        key: atlas_related_port_payload["findings"][0][key]
+        for key in expected_details
+    } == expected_details
     assert atlas_related_port_payload["detail_limits"]["findings"] == {
         "bucket": "related_ports",
         "limit": 50,
@@ -2365,10 +2410,15 @@ def test_api_v1_project_readers_are_token_scoped():
     assert atlas_finding_row["id"] == finding_id
     assert atlas_finding_row["origin"] == "run"
     assert atlas_finding_row["validation_method"] == "captured_observation"
+    assert {key: atlas_finding_row[key] for key in expected_details} == expected_details
     assert atlas_finding.status_code == 200
     atlas_finding_payload = json.loads(atlas_finding.data)
     assert atlas_finding_payload["finding"]["origin"] == "run"
     assert atlas_finding_payload["finding"]["validation_method"] == "captured_observation"
+    assert {
+        key: atlas_finding_payload["finding"][key]
+        for key in expected_details
+    } == expected_details
     assert atlas_finding_payload["occurrences"][0]["run_id"] == run_id
     assert cross_project.status_code == 404
     assert cross_findings.status_code == 404
@@ -4229,6 +4279,33 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "imported_assertion",
         "manual_assessment",
     ]
+    finding_detail_fields = {
+        "summary",
+        "impact",
+        "reproduction_steps",
+        "confidence",
+        "cve_ids",
+        "cwe_ids",
+        "cvss_vector",
+        "cvss_score",
+        "references",
+    }
+    for schema_name in ("AtlasFinding", "ProjectFinding"):
+        assert finding_detail_fields.issubset(schemas[schema_name]["required"])
+        assert finding_detail_fields.issubset(schemas[schema_name]["properties"])
+    assert schemas["ProjectFinding"]["properties"]["confidence"]["enum"] == [
+        "unknown",
+        "low",
+        "medium",
+        "high",
+    ]
+    assert schemas["AtlasFinding"]["properties"]["references"]["maxItems"] == 50
+    assert schemas["AtlasFinding"]["properties"]["cvss_score"] == {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 10,
+        "nullable": True,
+    }
     assert schemas["PackagePage"]["properties"]["packages"]["items"] == {"$ref": "#/components/schemas/EvidencePackage"}
     assert schemas["SchedulePage"]["properties"]["schedules"]["items"] == {"$ref": "#/components/schemas/Schedule"}
     assert schemas["ScheduleFirePage"]["properties"]["fires"]["items"] == {"$ref": "#/components/schemas/ScheduleFire"}

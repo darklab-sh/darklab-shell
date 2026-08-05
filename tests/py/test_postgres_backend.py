@@ -347,12 +347,23 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "raw:scanner\x1ffinding\x1fdomain:darklab.sh\x1f[high] exposed service"
     )
     imported_provenance = conn.execute(
-        "SELECT origin, validation_method FROM findings WHERE id = %s",
+        "SELECT origin, validation_method, summary, impact, reproduction_steps, confidence, "
+        "cve_ids_json, cwe_ids_json, cvss_vector, cvss_score, references_json "
+        "FROM findings WHERE id = %s",
         ("finding-import-before-0051",),
     ).fetchone()
     assert imported_provenance == {
         "origin": "import",
         "validation_method": "imported_assertion",
+        "summary": "",
+        "impact": "",
+        "reproduction_steps": "",
+        "confidence": "unknown",
+        "cve_ids_json": [],
+        "cwe_ids_json": [],
+        "cvss_vector": "",
+        "cvss_score": None,
+        "references_json": [],
     }
     conn.execute(
         "INSERT INTO runs (id, session_id, command, started) VALUES (%s, %s, %s, %s)",
@@ -452,6 +463,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0049",
         "0050",
         "0051",
+        "0052",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -536,7 +548,16 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             ))
             OR (table_name = 'findings' AND column_name IN (
                 'origin',
-                'validation_method'
+                'validation_method',
+                'summary',
+                'impact',
+                'reproduction_steps',
+                'confidence',
+                'cve_ids_json',
+                'cwe_ids_json',
+                'cvss_vector',
+                'cvss_score',
+                'references_json'
             ))
         )
         """,
@@ -617,6 +638,15 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("project_assessment_checks", "state_changed_at", "timestamp with time zone"),
         ("findings", "origin", "text"),
         ("findings", "validation_method", "text"),
+        ("findings", "summary", "text"),
+        ("findings", "impact", "text"),
+        ("findings", "reproduction_steps", "text"),
+        ("findings", "confidence", "text"),
+        ("findings", "cve_ids_json", "jsonb"),
+        ("findings", "cwe_ids_json", "jsonb"),
+        ("findings", "cvss_vector", "text"),
+        ("findings", "cvss_score", "double precision"),
+        ("findings", "references_json", "jsonb"),
     }
     runs_index_rows = conn.execute(
         """
