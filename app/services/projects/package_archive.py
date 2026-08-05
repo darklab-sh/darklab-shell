@@ -35,7 +35,7 @@ from services.projects.contracts import (
 )
 from services.projects.findings import list_project_findings
 from services.projects.metadata import (
-    _finding_triage_by_id,
+    _full_finding_triage_by_id,
     _metadata_owner_where,
     _metadata_row_owner_values,
 )
@@ -149,7 +149,12 @@ def _attach_package_finding_triage(session_id, findings, *, team_id=""):
     if not finding_ids:
         return findings
     with get_db_connect()() as conn:
-        triage_by_id = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
+        triage_by_id = _full_finding_triage_by_id(
+            conn,
+            session_id,
+            finding_ids,
+            team_id=team_id,
+        )
     for finding in items:
         triage = triage_by_id.get(str(finding.get("id") or ""))
         if triage:

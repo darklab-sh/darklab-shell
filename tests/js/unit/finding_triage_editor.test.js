@@ -110,6 +110,9 @@ describe('finding triage editor', () => {
             verification_steps: 'Run nmap smb-security-mode again.',
             verification_status: 'ready_to_verify',
             verification_notes: 'Waiting on maintenance window.',
+            remediation_id: 'rmd_smb_signing',
+            remediation_source: 'remediation_group',
+            remediation_updated_at: '2026-08-05T12:00:00+00:00',
           },
         }))
       }
@@ -120,6 +123,9 @@ describe('finding triage editor', () => {
             verification_steps: JSON.parse(options.body).verification_steps,
             verification_status: JSON.parse(options.body).verification_status,
             verification_notes: JSON.parse(options.body).verification_notes,
+            remediation_id: 'rmd_smb_signing',
+            remediation_source: 'remediation_group',
+            remediation_updated_at: '2026-08-05T12:05:00+00:00',
           },
         }))
       }
@@ -152,6 +158,9 @@ describe('finding triage editor', () => {
       verification_status: 'verified',
       has_remediation: true,
       has_verification_steps: true,
+      remediation_id: 'rmd_smb_signing',
+      remediation_source: 'remediation_group',
+      remediation_updated_at: '2026-08-05T12:05:00+00:00',
     }))
     expect(window.DarklabFindingTriageEditor.verificationStatusTone('verified')).toBe('green')
     expect(window.DarklabFindingTriageEditor.verificationStatusTone('needs_retest')).toBe('amber')

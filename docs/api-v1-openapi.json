@@ -2781,6 +2781,9 @@
           "disposition_updated_at": {
             "type": "string"
           },
+          "has_remediation": {
+            "type": "boolean"
+          },
           "identity_kind": {
             "enum": [
               "vulnerability",
@@ -2792,6 +2795,19 @@
             "type": "string"
           },
           "remediation_id": {
+            "type": "string"
+          },
+          "remediation_preview": {
+            "type": "string"
+          },
+          "remediation_source": {
+            "enum": [
+              "observation",
+              "remediation_group"
+            ],
+            "type": "string"
+          },
+          "remediation_updated_at": {
             "type": "string"
           },
           "review_state": {
@@ -2885,7 +2901,23 @@
           "disposition_updated_at": {
             "type": "string"
           },
+          "has_remediation": {
+            "type": "boolean"
+          },
           "remediation_id": {
+            "type": "string"
+          },
+          "remediation_preview": {
+            "type": "string"
+          },
+          "remediation_source": {
+            "enum": [
+              "observation",
+              "remediation_group"
+            ],
+            "type": "string"
+          },
+          "remediation_updated_at": {
             "type": "string"
           },
           "review_state": {

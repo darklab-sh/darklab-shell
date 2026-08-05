@@ -337,7 +337,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
 | `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
 | `max_entity_notes_per_session` | `2000` | Server-side only. Maximum one-note-per-entity records one session can create |
-| `max_finding_triage_details_per_owner` | `5000` | Server-side only. Maximum finding remediation/verification detail records one personal session or team owner can create |
+| `max_finding_triage_details_per_owner` | `5000` | Server-side only. Maximum observation-specific finding verification records one personal session or team owner can create; shared remediation guidance doesn't consume this quota |
 | `evidence_package_max_mb` | `25 MB` | Maximum final ZIP size for an evidence package download. The package wizard shows a best-guess ZIP estimate before the archive is built, and the server enforces the actual compressed size before returning the file |
 | `evidence_package_max_uncompressed_mb` | `500 MB` | Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well |
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |

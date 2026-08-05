@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from services.atlas.scope import finding_source_scope_params, finding_source_scope_sql
 from services.projects.finding_details import finding_detail_fields
 from services.projects.finding_identity import finding_identity_references, owner_scope_key
 from services.projects.finding_vulnerabilities import finding_cves
@@ -23,6 +24,20 @@ _DISPOSITION_UPSERT_SQL = (
     "rule_identity = excluded.rule_identity, "
     "review_state = excluded.review_state, "
     "updated_at = excluded.updated_at"
+)
+
+_GUIDANCE_UPSERT_SQL = (
+    "INSERT INTO finding_remediation_dispositions "
+    "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+    "vulnerability_id, rule_identity, review_state, remediation, created_at, "
+    "updated_at, remediation_updated_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+    "ON CONFLICT(session_id, team_id, affected_subject, identity_value) DO UPDATE SET "
+    "identity_kind = excluded.identity_kind, "
+    "vulnerability_id = excluded.vulnerability_id, "
+    "rule_identity = excluded.rule_identity, "
+    "remediation = excluded.remediation, "
+    "remediation_updated_at = excluded.remediation_updated_at"
 )
 
 
@@ -64,6 +79,13 @@ def _finding_with_owner(
     return {**finding, "session_id": owner[0], "team_id": owner[1]}
 
 
+def _remediation_preview(value: Any, limit: int = 160) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
 def attach_remediation_dispositions(
     conn: Any,
     findings: list[dict[str, Any]],
@@ -91,7 +113,8 @@ def attach_remediation_dispositions(
         # The clause shape is fixed above; every value remains bound.
         rows = conn.execute(
             "SELECT session_id, team_id, affected_subject, identity_value, "
-            "review_state, updated_at FROM finding_remediation_dispositions WHERE "  # nosec B608
+            "review_state, updated_at, remediation, remediation_updated_at "
+            "FROM finding_remediation_dispositions WHERE "  # nosec B608
             + clauses,
             tuple(value for key in chunk for value in key),
         ).fetchall()
@@ -133,6 +156,22 @@ def attach_remediation_dispositions(
             reference["disposition_updated_at"] = (
                 str(disposition.get("updated_at") or "") if disposition else ""
             )
+            has_saved_guidance = bool(
+                disposition and disposition.get("remediation_updated_at") is not None
+            )
+            remediation = (
+                str(disposition.get("remediation") or "") if has_saved_guidance else ""
+            )
+            reference["has_remediation"] = bool(remediation.strip())
+            reference["remediation_preview"] = _remediation_preview(remediation)
+            reference["remediation_source"] = (
+                "remediation_group" if has_saved_guidance else "observation"
+            )
+            reference["remediation_updated_at"] = (
+                str(disposition.get("remediation_updated_at") or "")
+                if has_saved_guidance
+                else ""
+            )
             groups.append({
                 "remediation_id": str(reference.get("remediation_id") or ""),
                 "vulnerability_id": str(reference.get("vulnerability_id") or ""),
@@ -140,6 +179,10 @@ def attach_remediation_dispositions(
                 "review_state": reference["review_state"],
                 "review_state_source": reference["review_state_source"],
                 "disposition_updated_at": reference["disposition_updated_at"],
+                "has_remediation": reference["has_remediation"],
+                "remediation_preview": reference["remediation_preview"],
+                "remediation_source": reference["remediation_source"],
+                "remediation_updated_at": reference["remediation_updated_at"],
             })
         finding["remediation_groups"] = groups
 
@@ -162,61 +205,108 @@ def apply_primary_remediation_disposition(finding: dict[str, Any]) -> None:
     finding["status"] = review_state
 
 
+def remediation_guidance_by_finding_id(
+    conn: Any,
+    findings: list[dict[str, Any]],
+    *,
+    owner_by_finding_id: Mapping[str, tuple[str, str]] | None = None,
+) -> dict[str, str]:
+    """Return full guidance for each finding's current primary remediation."""
+    requested: dict[str, tuple[str, str, str, str]] = {}
+    for finding in findings:
+        finding_id = str(finding.get("id") or "")
+        identity_finding = _finding_with_owner(finding, owner_by_finding_id)
+        remediation_id = str(finding.get("remediation_id") or "")
+        reference = next(
+            (
+                item
+                for item in finding.get("observation_references", [])
+                if isinstance(item, dict)
+                and str(item.get("remediation_id") or "") == remediation_id
+            ),
+            None,
+        )
+        if (
+            finding_id
+            and reference
+            and reference.get("remediation_source") == "remediation_group"
+        ):
+            requested[finding_id] = _reference_key(identity_finding, reference)
+
+    guidance_by_key: dict[tuple[str, str, str, str], str] = {}
+    ordered_keys = sorted(set(requested.values()))
+    for offset in range(0, len(ordered_keys), 100):
+        chunk = ordered_keys[offset:offset + 100]
+        clauses = " OR ".join(
+            "(session_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
+            for _ in chunk
+        )
+        # The clause shape is fixed; every owner and identity value remains bound.
+        rows = conn.execute(
+            "SELECT session_id, team_id, affected_subject, identity_value, remediation "
+            "FROM finding_remediation_dispositions WHERE "  # nosec B608
+            + clauses,
+            tuple(value for key in chunk for value in key),
+        ).fetchall()
+        for row in rows:
+            key = (
+                str(row["session_id"] or ""),
+                str(row["team_id"] or ""),
+                str(row["affected_subject"] or ""),
+                str(row["identity_value"] or ""),
+            )
+            guidance_by_key[key] = str(row["remediation"] or "")
+    return {
+        finding_id: guidance_by_key.get(key, "")
+        for finding_id, key in requested.items()
+    }
+
+
 def _rows_for_affected_subject(
     conn: Any,
     session_id: str,
     team_id: str,
     affected_subject: str,
 ) -> list[Any]:
+    scope_sql = finding_source_scope_sql("findings", team_id)
+    scope_params = finding_source_scope_params(session_id, team_id)
     if affected_subject.startswith("entity:"):
         value = affected_subject.removeprefix("entity:")
-        if team_id:
-            return conn.execute(
-                "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
-                "signature_hash, origin, validation_method, title, raw_line, fingerprint, "
-                "cve_ids_json FROM findings "
-                "WHERE team_id = ? AND team_id != '' AND (entity_id = ? OR target_id = ?)",
-                (team_id, value, value),
-            ).fetchall()
+        sql = "".join((
+            "SELECT id, session_id, team_id, entity_id, target_id, subject_key, ",
+            "signature_hash, origin, validation_method, title, raw_line, fingerprint, ",
+            "cve_ids_json FROM findings WHERE ",
+            scope_sql,
+            " AND (entity_id = ? OR target_id = ?)",
+        ))
         return conn.execute(
-            "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
-            "signature_hash, origin, validation_method, title, raw_line, fingerprint, "
-            "cve_ids_json FROM findings "
-            "WHERE session_id = ? AND team_id = '' AND (entity_id = ? OR target_id = ?)",
-            (session_id, value, value),
+            sql,
+            (*scope_params, value, value),
         ).fetchall()
     if affected_subject.startswith("subject:"):
         value = affected_subject.removeprefix("subject:")
-        if team_id:
-            return conn.execute(
-                "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
-                "signature_hash, origin, validation_method, title, raw_line, fingerprint, "
-                "cve_ids_json FROM findings "
-                "WHERE team_id = ? AND team_id != '' AND subject_key = ?",
-                (team_id, value),
-            ).fetchall()
+        sql = "".join((
+            "SELECT id, session_id, team_id, entity_id, target_id, subject_key, ",
+            "signature_hash, origin, validation_method, title, raw_line, fingerprint, ",
+            "cve_ids_json FROM findings WHERE ",
+            scope_sql,
+            " AND subject_key = ?",
+        ))
         return conn.execute(
-            "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
-            "signature_hash, origin, validation_method, title, raw_line, fingerprint, "
-            "cve_ids_json FROM findings "
-            "WHERE session_id = ? AND team_id = '' AND subject_key = ?",
-            (session_id, value),
+            sql,
+            (*scope_params, value),
         ).fetchall()
     finding_id = affected_subject.removeprefix("observation:")
-    if team_id:
-        return conn.execute(
-            "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
-            "signature_hash, origin, validation_method, title, raw_line, fingerprint, "
-            "cve_ids_json FROM findings "
-            "WHERE team_id = ? AND team_id != '' AND id = ?",
-            (team_id, finding_id),
-        ).fetchall()
+    sql = "".join((
+        "SELECT id, session_id, team_id, entity_id, target_id, subject_key, ",
+        "signature_hash, origin, validation_method, title, raw_line, fingerprint, ",
+        "cve_ids_json FROM findings WHERE ",
+        scope_sql,
+        " AND id = ?",
+    ))
     return conn.execute(
-        "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
-        "signature_hash, origin, validation_method, title, raw_line, fingerprint, "
-        "cve_ids_json FROM findings "
-        "WHERE session_id = ? AND team_id = '' AND id = ?",
-        (session_id, finding_id),
+        sql,
+        (*scope_params, finding_id),
     ).fetchall()
 
 
@@ -281,7 +371,12 @@ def set_remediation_group_review_state(
             team_id,
             affected_subject,
         ):
-            candidates[str(row["id"])] = _finding_payload(row)
+            candidate = _finding_payload(row)
+            candidates[str(row["id"])] = {
+                **candidate,
+                "session_id": session_id,
+                "team_id": team_id,
+            }
     affected_ids: set[str] = set()
     for finding_id, finding in candidates.items():
         references = finding_identity_references(finding, finding_cves(finding))
@@ -294,4 +389,94 @@ def set_remediation_group_review_state(
     return {
         "remediation_group_count": len(groups),
         "affected_finding_ids": affected_ids,
+    }
+
+
+def set_remediation_group_guidance(
+    conn: Any,
+    finding_ids: set[str],
+    *,
+    remediation: str,
+    updated_at: str,
+    owner_scope: tuple[str, str] | None = None,
+) -> dict[str, Any]:
+    """Save guidance for every exact remediation identity on selected findings."""
+    if not finding_ids:
+        return {"remediation_group_count": 0}
+    placeholders = ",".join("?" for _ in finding_ids)
+    # Placeholders are generated from the bounded selected-id set; values remain bound.
+    rows = conn.execute(
+        "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
+        "signature_hash, origin, validation_method, status, title, raw_line, fingerprint, "
+        f"cve_ids_json FROM findings WHERE id IN ({placeholders}) ORDER BY id",  # nosec
+        tuple(sorted(finding_ids)),
+    ).fetchall()
+    groups: dict[tuple[str, str, str, str], dict[str, str]] = {}
+    subjects: set[tuple[str, str, str]] = set()
+    for row in rows:
+        finding = _finding_payload(row)
+        if owner_scope is not None:
+            finding = {
+                **finding,
+                "session_id": owner_scope[0],
+                "team_id": owner_scope[1],
+            }
+        for reference in finding_identity_references(finding, finding_cves(finding)):
+            key = _reference_key(finding, reference)
+            groups.setdefault(key, {
+                "identity_kind": str(reference.get("identity_kind") or "rule"),
+                "vulnerability_id": str(reference.get("vulnerability_id") or ""),
+                "rule_identity": str(reference.get("rule_identity") or ""),
+                "review_state": str(finding.get("status") or "new"),
+            })
+            subjects.add((key[0], key[1], key[2]))
+    for (session_id, team_id, affected_subject, identity_value), details in sorted(
+        groups.items()
+    ):
+        conn.execute(
+            _GUIDANCE_UPSERT_SQL,
+            (
+                session_id,
+                team_id,
+                affected_subject,
+                details["identity_kind"],
+                identity_value,
+                details["vulnerability_id"],
+                details["rule_identity"],
+                details["review_state"],
+                remediation,
+                updated_at,
+                updated_at,
+                updated_at,
+            ),
+        )
+    status_updates: dict[str, str] = {}
+    for session_id, team_id, affected_subject in sorted(subjects):
+        for candidate_row in _rows_for_affected_subject(
+            conn,
+            session_id,
+            team_id,
+            affected_subject,
+        ):
+            candidate = _finding_payload(candidate_row)
+            candidate = {
+                **candidate,
+                "session_id": session_id,
+                "team_id": team_id,
+            }
+            matching_states = [
+                groups[key]["review_state"]
+                for reference in finding_identity_references(candidate, finding_cves(candidate))
+                if (key := _reference_key(candidate, reference)) in groups
+            ]
+            if matching_states:
+                status_updates[str(candidate["id"])] = matching_states[0]
+    for finding_id, review_state in sorted(status_updates.items()):
+        conn.execute(
+            "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
+            (review_state, updated_at, finding_id),
+        )
+    return {
+        "remediation_group_count": len(groups),
+        "affected_finding_ids": set(status_updates),
     }

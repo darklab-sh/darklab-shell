@@ -6716,6 +6716,7 @@ class TestPostgresMigrations:
             "0051",
             "0052",
             "0053",
+            "0054",
         ]
         for table_name in (
             "runs",
@@ -7631,7 +7632,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0053",
+            "0055",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7683,7 +7684,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0053"
+        assert rows[-1]["version"] == "0054"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8139,7 +8140,7 @@ class TestPostgresMigrations:
 
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
-            "0049", "0050", "0051", "0052", "0053",
+            "0049", "0050", "0051", "0052", "0053", "0054",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8157,7 +8158,8 @@ class TestPostgresMigrations:
         assert "0051" in conn.applied_versions
         assert "0052" in conn.applied_versions
         assert "0053" in conn.applied_versions
-        assert conn.commit_count == 15
+        assert "0054" in conn.applied_versions
+        assert conn.commit_count == 16
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8310,7 +8312,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0053",
+            "0055",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8335,9 +8337,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0053"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0055"]
         assert table_exists is not None
-        assert "0053" in versions
+        assert "0055" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -15315,6 +15317,36 @@ class TestDataAccessLayerServiceCoverage:
                 "VALUES (?, ?, 'webhook', 'Webhook', '{}', '{}', '[]', 0, ?, ?)",
                 ("ntc_session_service", source_session, now, now),
             )
+            disposition_sql = (
+                "INSERT INTO finding_remediation_dispositions "
+                "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+                "rule_identity, review_state, remediation, created_at, updated_at, "
+                "remediation_updated_at) "
+                "VALUES (?, '', 'subject:session-migration', 'rule', "
+                "'RULE:session-migration', 'session-migration', ?, ?, ?, ?, ?)"
+            )
+            conn.execute(
+                disposition_sql,
+                (
+                    source_session,
+                    "reviewed",
+                    "Use migrated guidance.",
+                    "2026-06-01T00:00:00+00:00",
+                    "2026-06-02T00:00:00+00:00",
+                    "2026-06-04T00:00:00+00:00",
+                ),
+            )
+            conn.execute(
+                disposition_sql,
+                (
+                    destination_session,
+                    "important",
+                    "Older destination guidance.",
+                    "2026-05-31T00:00:00+00:00",
+                    "2026-06-03T00:00:00+00:00",
+                    "2026-06-01T00:00:00+00:00",
+                ),
+            )
             conn.commit()
 
         counts = session_storage.migrate_session_records(
@@ -15332,10 +15364,17 @@ class TestDataAccessLayerServiceCoverage:
         assert counts["migrated_variables"] == 1
         assert counts["migrated_workflows"] == 1
         assert counts["migrated_projects"] == 1
+        assert counts["migrated_finding_remediation_dispositions"] == 1
+        assert counts["migrated_finding_remediation_guidance"] == 1
         assert counts["migrated_notification_channels"] == 1
         assert counts["migrated_recent_values"] == 1
         assert counts["migrated_secrets"] == 1
         with database.db_connect() as conn:
+            migrated_disposition = conn.execute(
+                "SELECT session_id, review_state, remediation, remediation_updated_at "
+                "FROM finding_remediation_dispositions "
+                "WHERE affected_subject = 'subject:session-migration'",
+            ).fetchone()
             source_counts = {
                 "runs": conn.execute(
                     "SELECT COUNT(*) AS count FROM runs WHERE session_id = ?", (source_session,)
@@ -15375,6 +15414,10 @@ class TestDataAccessLayerServiceCoverage:
 
         assert set(source_counts.values()) == {0}
         assert destination_project["session_id"] == destination_session
+        assert migrated_disposition["session_id"] == destination_session
+        assert migrated_disposition["review_state"] == "important"
+        assert migrated_disposition["remediation"] == "Use migrated guidance."
+        assert migrated_disposition["remediation_updated_at"] == "2026-06-04T00:00:00+00:00"
         assert secrets_storage.get_secret_value_for_env(destination_session, "VT_API_KEY") == "secret-value"
         assert audit_row is not None
         assert json.loads(audit_row["details"])["migration_counts"]["migrated_recent_values"] == 1
@@ -26377,8 +26420,10 @@ class TestDatabaseInit:
             "vulnerability_id",
             "rule_identity",
             "review_state",
+            "remediation",
             "created_at",
             "updated_at",
+            "remediation_updated_at",
         } == finding_disposition_columns
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -26386,9 +26431,22 @@ class TestDatabaseInit:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
-                "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
+                "INSERT INTO findings "
+                "(id, session_id, subject_key, signature_hash, cve_ids_json, title, created) "
                 "VALUES ('finding-triage-1', 'session-triage', 'host:example', 'sig-triage', "
-                "'Finding', '2026-01-01')"
+                "'[\"CVE-2026-12345\"]', 'Finding', '2026-01-01')"
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, subject_key, signature_hash, cve_ids_json, origin, "
+                "validation_method, title, created) "
+                "VALUES ('finding-triage-related', 'session-triage', 'host:example', "
+                "'sig-triage-related', '[\"CVE-2026-12345\"]', 'manual', "
+                "'manual_assessment', 'Related finding', '2026-01-02')"
+            )
+            conn.execute(
+                "UPDATE findings SET status = 'reviewed' "
+                "WHERE id = 'finding-triage-related'"
             )
             conn.commit()
             conn.close()
@@ -26418,6 +26476,28 @@ class TestDatabaseInit:
                 )
                 assert loaded is not None
                 assert loaded["verification_steps"] == "Re-run the SMB checks."
+                related = project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-related",
+                )
+                assert related is not None
+                assert related["remediation"] == "Patch Samba."
+                assert related["remediation_source"] == "remediation_group"
+                assert related["remediation_id"] == saved["remediation_id"]
+                assert related["verification_status"] == "not_started"
+                assert related["verification_steps"] == ""
+                with database.db_connect() as review_conn:
+                    review_states = {
+                        row["id"]: row["status"]
+                        for row in review_conn.execute(
+                            "SELECT id, status FROM findings WHERE id IN (?, ?)",
+                            ("finding-triage-1", "finding-triage-related"),
+                        ).fetchall()
+                    }
+                assert review_states == {
+                    "finding-triage-1": "new",
+                    "finding-triage-related": "new",
+                }
                 with database.db_connect() as quota_conn:
                     quota_conn.execute(
                         "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
@@ -26425,6 +26505,10 @@ class TestDatabaseInit:
                         "'Finding 2', '2026-01-01')"
                     )
                     quota_conn.commit()
+                assert project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-2",
+                ) is None
                 with mock.patch.dict("config.CFG", {"max_finding_triage_details_per_owner": 1}, clear=False):
                     with pytest.raises(ProjectWorkspaceQuotaExceeded, match="finding triage quota exceeded"):
                         project_metadata.upsert_finding_triage_details(
@@ -26515,6 +26599,10 @@ class TestDatabaseInit:
                     {"verification_status": "not_started"},
                 ) is None
                 assert project_metadata.get_finding_triage_details("session-triage", "finding-triage-1") is None
+                assert project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-related",
+                ) is None
                 project_metadata.upsert_finding_triage_details(
                     "session-triage",
                     "finding-triage-1",

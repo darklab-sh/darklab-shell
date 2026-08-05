@@ -29,6 +29,9 @@ function compactTriage(triage) {
     has_verification_notes: !!String(item.verification_notes || '').trim() || !!item.has_verification_notes,
     remediation_preview: text(item.remediation_preview || item.remediation),
     verification_steps_preview: text(item.verification_steps_preview || item.verification_steps),
+    remediation_id: text(item.remediation_id),
+    remediation_source: text(item.remediation_source, 'observation'),
+    remediation_updated_at: text(item.remediation_updated_at),
   };
 }
 

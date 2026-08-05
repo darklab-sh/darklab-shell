@@ -70,7 +70,7 @@ from services.intel.canonical import entity_signature
 from services.projects.findings import _finding_signature, _normalize_finding_signal_key
 from services.projects.contracts import MAX_FINDING_REMEDIATION_LEN, ProjectWorkspaceQuotaExceeded
 from services.projects.links import insert_project_link_with_quota
-from services.projects.metadata import _finding_triage_by_id, upsert_finding_triage_details_on_conn
+from services.projects.metadata import _finding_triage_details_on_conn, upsert_finding_triage_details_on_conn
 from services.projects.scope import normalize_team_id
 from services.projects.targets import ensure_project_target_on_conn
 from services.projects.utils import now as project_now
@@ -742,12 +742,12 @@ def _apply_atlas_import_impl(
                 )
                 remediation = _safe_text(finding.get("remediation"), MAX_FINDING_REMEDIATION_LEN)
                 if remediation:
-                    existing_triage_row = _finding_triage_by_id(
+                    existing_triage_row = _finding_triage_details_on_conn(
                         conn,
                         session_id,
-                        [finding_id],
+                        finding_id,
                         team_id=team_id,
-                    ).get(finding_id)
+                    )
                     existing_triage = existing_triage_row if isinstance(existing_triage_row, dict) else {}
                     previous_remediation = _safe_text(
                         existing_triage.get("remediation"),

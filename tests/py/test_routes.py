@@ -3612,6 +3612,10 @@ class TestTeamRoutes:
                 headers=operator_headers,
                 json={"verification_status": "ready_to_verify", "remediation": "Patch capability finding."},
             )
+            viewer_finding_triage_after_update = client.get(
+                f"/findings/{finding_id}/triage",
+                headers=viewer_headers,
+            )
             viewer_finding_triage_update = client.put(
                 f"/findings/{finding_id}/triage",
                 headers=viewer_headers,
@@ -3659,6 +3663,10 @@ class TestTeamRoutes:
             assert viewer_finding_review.status_code == 403
             assert viewer_finding_triage_read.status_code == 200
             assert operator_finding_triage_update.status_code == 200
+            assert viewer_finding_triage_after_update.status_code == 200
+            assert viewer_finding_triage_after_update.get_json()["triage"]["remediation"] == (
+                "Patch capability finding."
+            )
             assert viewer_finding_triage_update.status_code == 403
             assert viewer_atlas_review.status_code == 403
             assert viewer_intel_refresh.status_code == 403
@@ -9220,6 +9228,9 @@ class TestProjectRoutes:
             "verification_notes": "Internal ticket APP-123.",
             "created": triage_payload["triage"]["created"],
             "updated": triage_payload["triage"]["updated"],
+            "remediation_id": triage_payload["triage"]["remediation_id"],
+            "remediation_source": "remediation_group",
+            "remediation_updated_at": triage_payload["triage"]["remediation_updated_at"],
         }
         assert downloaded_manifest["manifest"]["findings"][0]["triage"]["remediation"] == (
             "Patch TLS config for darklab.sh."

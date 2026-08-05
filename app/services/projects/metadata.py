@@ -14,7 +14,13 @@ import config as _config
 from core.database import validate_project_entity_type
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
-from services.atlas.scope import entity_exists_in_scope, finding_exists_in_scope, metadata_owner_id
+from services.atlas.scope import (
+    entity_exists_in_scope,
+    finding_exists_in_scope,
+    finding_source_scope_params,
+    finding_source_scope_sql,
+    metadata_owner_id,
+)
 from services.projects.contracts import (
     ENTITY_METADATA_TYPES,
     MAX_ENTITY_ID_LEN,
@@ -27,6 +33,11 @@ from services.projects.contracts import (
     FINDING_VERIFICATION_STATES,
     ProjectWorkspaceError,
     ProjectWorkspaceQuotaExceeded,
+)
+from services.projects.finding_details import finding_detail_fields
+from services.projects.finding_dispositions import (
+    remediation_guidance_by_finding_id,
+    set_remediation_group_guidance,
 )
 from services.projects.scope import normalize_team_id, shared_owner_where
 from services.projects.utils import text_exceeds_limit as _text_exceeds_limit, trim_text as _trim_text
@@ -265,6 +276,65 @@ def _finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
     return {str(row["finding_id"]): _row_to_finding_triage(row) for row in rows}
 
 
+def _full_finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
+    values = [str(value) for value in finding_ids if value]
+    if not values:
+        return {}
+    scope_sql = finding_source_scope_sql("f", team_id)
+    scope_params = finding_source_scope_params(session_id, team_id)
+    placeholders = ",".join("?" for _ in values)
+    rows = conn.execute(
+        "SELECT f.id, f.session_id, f.team_id, f.entity_id, f.target_id, "  # nosec B608
+        "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.status, "
+        "f.kind, f.tool_root, f.title, f.raw_line, f.fingerprint, f.cve_ids_json "
+        "FROM findings f WHERE " + scope_sql + f" AND f.id IN ({placeholders})",
+        [*scope_params, *values],
+    ).fetchall()
+    findings = [{**dict(row), **finding_detail_fields(row)} for row in rows]
+    if not findings:
+        return {}
+    from services.cve_risk.ranking import attach_risk_to_findings
+
+    normalized_team_id = normalize_team_id(team_id)
+    owner_by_finding_id = {
+        str(row["id"]): (
+            ("", normalized_team_id)
+            if normalized_team_id
+            else (str(row["session_id"] or ""), str(row["team_id"] or ""))
+        )
+        for row in rows
+    }
+    attach_risk_to_findings(
+        findings,
+        conn=conn,
+        owner_by_finding_id=owner_by_finding_id,
+    )
+    guidance_by_id = remediation_guidance_by_finding_id(
+        conn,
+        findings,
+        owner_by_finding_id=owner_by_finding_id,
+    )
+    triage_by_id = _finding_triage_by_id(
+        conn,
+        session_id,
+        values,
+        team_id=team_id,
+    )
+    combined = {}
+    for finding in findings:
+        finding_id = str(finding.get("id") or "")
+        finding["remediation_guidance"] = guidance_by_id.get(finding_id, "")
+        triage = _triage_with_remediation_guidance(
+            finding,
+            triage_by_id.get(finding_id),
+            session_id=session_id,
+            team_id=team_id,
+        )
+        if triage:
+            combined[finding_id] = triage
+    return combined
+
+
 def default_finding_triage_details(session_id, finding_id, *, team_id=""):
     item = {
         "id": "",
@@ -276,6 +346,9 @@ def default_finding_triage_details(session_id, finding_id, *, team_id=""):
         "verification_notes": "",
         "created": "",
         "updated": "",
+        "remediation_id": "",
+        "remediation_source": "observation",
+        "remediation_updated_at": "",
     }
     normalized_team_id = normalize_team_id(team_id)
     if normalized_team_id:
@@ -305,7 +378,48 @@ def compact_finding_triage_details(triage):
         "has_verification_notes": bool(verification_notes.strip()),
         "remediation_preview": _text_preview(remediation),
         "verification_steps_preview": _text_preview(verification_steps),
+        "remediation_id": str(item.get("remediation_id") or ""),
+        "remediation_source": str(item.get("remediation_source") or "observation"),
+        "remediation_updated_at": str(item.get("remediation_updated_at") or ""),
     }
+
+
+def _triage_with_remediation_guidance(finding, triage, *, session_id="", team_id=""):
+    base = dict(triage) if isinstance(triage, dict) else default_finding_triage_details(
+        session_id,
+        str(finding.get("id") or ""),
+        team_id=team_id,
+    )
+    remediation_id = str(finding.get("remediation_id") or "")
+    reference = next(
+        (
+            item
+            for item in finding.get("observation_references", [])
+            if isinstance(item, dict)
+            and str(item.get("remediation_id") or "") == remediation_id
+        ),
+        {},
+    )
+    source = str(reference.get("remediation_source") or "observation")
+    if source == "remediation_group":
+        base["remediation"] = str(
+            finding.get("remediation_guidance")
+            if "remediation_guidance" in finding
+            else reference.get("remediation_preview") or ""
+        )
+    base["remediation_id"] = remediation_id
+    base["remediation_source"] = source
+    base["remediation_updated_at"] = str(
+        reference.get("remediation_updated_at") or ""
+    )
+    if (
+        not str(base.get("remediation") or "").strip()
+        and not str(base.get("verification_steps") or "").strip()
+        and str(base.get("verification_status") or "not_started") == "not_started"
+        and not str(base.get("verification_notes") or "").strip()
+    ):
+        return None
+    return base
 
 
 def attach_finding_triage_details(conn, session_id, findings, *, team_id=""):
@@ -316,7 +430,13 @@ def attach_finding_triage_details(conn, session_id, findings, *, team_id=""):
     triage_map = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
     for finding in items:
         triage = triage_map.get(str(finding.get("id") or ""))
-        finding["triage"] = compact_finding_triage_details(triage)
+        combined = _triage_with_remediation_guidance(
+            finding,
+            triage,
+            session_id=session_id,
+            team_id=team_id,
+        )
+        finding["triage"] = compact_finding_triage_details(combined)
         finding["verification_status"] = finding["triage"]["verification_status"]
     return items
 
@@ -771,8 +891,21 @@ def get_finding_triage_details(session_id, finding_id, *, team_id=""):
     with get_db_connect()() as conn:
         if not _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id):
             return None
-        triage_map = _finding_triage_by_id(conn, session_id, [finding_id], team_id=team_id)
-    return triage_map.get(finding_id)
+        return _finding_triage_details_on_conn(
+            conn,
+            session_id,
+            finding_id,
+            team_id=team_id,
+        )
+
+
+def _finding_triage_details_on_conn(conn, session_id, finding_id, *, team_id=""):
+    return _full_finding_triage_by_id(
+        conn,
+        session_id,
+        [finding_id],
+        team_id=team_id,
+    ).get(finding_id)
 
 
 def finding_triage_target_exists(session_id, finding_id, *, team_id=""):
@@ -803,16 +936,33 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
     metadata_session, metadata_team_id = _metadata_row_owner_values(session_id, team_id)
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
     timestamp = _trim_text(now, 64) or _now()
+    guidance_update = set_remediation_group_guidance(
+        conn,
+        {finding_id},
+        remediation=payload["remediation"],
+        updated_at=timestamp,
+        owner_scope=("", metadata_team_id) if metadata_team_id else (metadata_session, ""),
+    )
+    if guidance_update["remediation_group_count"] == 0:
+        return None
+    observation_payload = {**payload, "remediation": ""}
     existing = conn.execute(
         "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
         "verification_status, verification_notes, created, updated "
         "FROM finding_triage_details WHERE " + owner_sql + " AND finding_id = ?",  # nosec
         [*owner_params, finding_id],
     ).fetchone()
-    if _finding_triage_payload_is_empty(payload):
+    if _finding_triage_payload_is_empty(observation_payload):
         if existing:
             conn.execute("DELETE FROM finding_triage_details WHERE id = ?", [existing["id"]])
-        return None
+        if _finding_triage_payload_is_empty(payload):
+            return None
+        return _finding_triage_details_on_conn(
+            conn,
+            session_id,
+            finding_id,
+            team_id=team_id,
+        )
     if existing:
         conn.execute(
             "UPDATE finding_triage_details SET session_id = ?, team_id = ?, remediation = ?, "
@@ -820,21 +970,20 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
             (
                 metadata_session,
                 metadata_team_id,
-                payload["remediation"],
-                payload["verification_steps"],
-                payload["verification_status"],
-                payload["verification_notes"],
+                observation_payload["remediation"],
+                observation_payload["verification_steps"],
+                observation_payload["verification_status"],
+                observation_payload["verification_notes"],
                 timestamp,
                 existing["id"],
             ),
         )
-        row = conn.execute(
-            "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
-            "verification_status, verification_notes, created, updated "
-            "FROM finding_triage_details WHERE id = ?",
-            [existing["id"]],
-        ).fetchone()
-        return _row_to_finding_triage(row)
+        return _finding_triage_details_on_conn(
+            conn,
+            session_id,
+            finding_id,
+            team_id=team_id,
+        )
     count_sql, count_params = _metadata_owner_where(session_id, team_id)
     owner_count = conn.execute(
         "SELECT COUNT(*) AS count FROM finding_triage_details WHERE " + count_sql,  # nosec
@@ -870,23 +1019,20 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
             metadata_session,
             metadata_team_id,
             finding_id,
-            payload["remediation"],
-            payload["verification_steps"],
-            payload["verification_status"],
-            payload["verification_notes"],
+            observation_payload["remediation"],
+            observation_payload["verification_steps"],
+            observation_payload["verification_status"],
+            observation_payload["verification_notes"],
             timestamp,
             timestamp,
         ),
     )
-    row = conn.execute(
-        "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
-        "verification_status, verification_notes, created, updated "
-        "FROM finding_triage_details WHERE " + owner_sql + " AND finding_id = ?",  # nosec
-        [*owner_params, finding_id],
-    ).fetchone()
-    if row:
-        return _row_to_finding_triage(row)
-    raise ProjectWorkspaceError("could not upsert finding triage details")
+    return _finding_triage_details_on_conn(
+        conn,
+        session_id,
+        finding_id,
+        team_id=team_id,
+    )
 
 
 def delete_finding_triage_details(session_id, finding_id, *, team_id=""):

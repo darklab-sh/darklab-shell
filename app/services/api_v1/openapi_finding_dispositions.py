@@ -16,4 +16,11 @@ def finding_disposition_properties() -> dict[str, Any]:
             "enum": ["observation", "remediation_group"],
         },
         "disposition_updated_at": {"type": "string"},
+        "has_remediation": {"type": "boolean"},
+        "remediation_preview": {"type": "string"},
+        "remediation_source": {
+            "type": "string",
+            "enum": ["observation", "remediation_group"],
+        },
+        "remediation_updated_at": {"type": "string"},
     }

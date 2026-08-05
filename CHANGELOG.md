@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Matching finding observations now share remediation guidance without sharing verification state.**
+  - **Why:** Inferred, imported, manual, and actively confirmed observations of the same issue shouldn't drift into different fix instructions, but each observation still needs its own retest record.
+  - **What:** Remediation guidance now follows the existing owner-scoped remediation identity: exact affected subject plus normalized CVE or stable scanner rule. The triage editor shows shared guidance, while verification steps, status, and notes remain attached to the selected observation. Different targets, vulnerabilities, and rules stay independent; clearing shared guidance doesn't revive older per-finding text, and session migration resolves review state and guidance by their separate update times.
+  - **Tests:** Existing SQLite/Postgres migration, schema, import, triage, Project, Run Details, Atlas, API v1, OpenAPI, browser, architecture, and documentation coverage now pins exact-match sharing, unrelated-target isolation, observation-specific verification, explicit clearing, compact provenance, and migration conflicts.
 - **Matching finding observations now share one review disposition.**
   - **Why:** Reviewing an inferred sighting should keep its imported or actively confirmed evidence aligned when every observation describes the same issue on the same exact target.
   - **What:** Personal and team findings now store review state against the owner-scoped remediation identity: exact affected subject plus normalized CVE or stable scanner rule. Single and bulk review actions update that canonical disposition and mirror it to current matching observations for existing filters and counts, while different targets, rules, and vulnerabilities remain independent. Validation method, confidence, verification, and evidence stay attached to each observation, and session-token migration carries personal dispositions forward.

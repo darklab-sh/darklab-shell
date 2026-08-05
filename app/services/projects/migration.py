@@ -66,7 +66,8 @@ def migrate_project_workspace_session(
     )
     disposition_rows = conn.execute(
         "SELECT affected_subject, identity_kind, identity_value, vulnerability_id, "
-        "rule_identity, review_state, created_at, updated_at "
+        "rule_identity, review_state, remediation, created_at, updated_at, "
+        "remediation_updated_at "
         "FROM finding_remediation_dispositions "
         "WHERE session_id = ? AND team_id = ''",
         (from_session_id,),
@@ -74,8 +75,9 @@ def migrate_project_workspace_session(
     conn.executemany(
         "INSERT INTO finding_remediation_dispositions "
         "(session_id, team_id, affected_subject, identity_kind, identity_value, "
-        "vulnerability_id, rule_identity, review_state, created_at, updated_at) "
-        "VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?) "
+        "vulnerability_id, rule_identity, review_state, remediation, created_at, "
+        "updated_at, remediation_updated_at) "
+        "VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(session_id, team_id, affected_subject, identity_value) DO UPDATE SET "
         "identity_kind = CASE WHEN excluded.updated_at >= finding_remediation_dispositions.updated_at "
         "THEN excluded.identity_kind ELSE finding_remediation_dispositions.identity_kind END, "
@@ -85,10 +87,19 @@ def migrate_project_workspace_session(
         "THEN excluded.rule_identity ELSE finding_remediation_dispositions.rule_identity END, "
         "review_state = CASE WHEN excluded.updated_at >= finding_remediation_dispositions.updated_at "
         "THEN excluded.review_state ELSE finding_remediation_dispositions.review_state END, "
+        "remediation = CASE WHEN excluded.remediation_updated_at IS NOT NULL AND "
+        "(finding_remediation_dispositions.remediation_updated_at IS NULL OR "
+        "excluded.remediation_updated_at >= finding_remediation_dispositions.remediation_updated_at) "
+        "THEN excluded.remediation ELSE finding_remediation_dispositions.remediation END, "
         "created_at = CASE WHEN excluded.created_at < finding_remediation_dispositions.created_at "
         "THEN excluded.created_at ELSE finding_remediation_dispositions.created_at END, "
         "updated_at = CASE WHEN excluded.updated_at > finding_remediation_dispositions.updated_at "
-        "THEN excluded.updated_at ELSE finding_remediation_dispositions.updated_at END",
+        "THEN excluded.updated_at ELSE finding_remediation_dispositions.updated_at END, "
+        "remediation_updated_at = CASE WHEN excluded.remediation_updated_at IS NOT NULL AND "
+        "(finding_remediation_dispositions.remediation_updated_at IS NULL OR "
+        "excluded.remediation_updated_at > finding_remediation_dispositions.remediation_updated_at) "
+        "THEN excluded.remediation_updated_at "
+        "ELSE finding_remediation_dispositions.remediation_updated_at END",
         [
             (
                 to_session_id,
@@ -98,8 +109,10 @@ def migrate_project_workspace_session(
                 row["vulnerability_id"],
                 row["rule_identity"],
                 row["review_state"],
+                row["remediation"],
                 row["created_at"],
                 row["updated_at"],
+                row["remediation_updated_at"],
             )
             for row in disposition_rows
         ],
@@ -184,6 +197,9 @@ def migrate_project_workspace_session(
         "migrated_entity_intel_snapshots": intel_result.rowcount,
         "migrated_findings": finding_result.rowcount,
         "migrated_finding_remediation_dispositions": len(disposition_rows),
+        "migrated_finding_remediation_guidance": sum(
+            1 for row in disposition_rows if row["remediation_updated_at"] is not None
+        ),
         "migrated_finding_targets": 0,
         "migrated_entity_labels": label_result.rowcount + migrated_workspace_file_labels,
         "migrated_entity_notes": note_result.rowcount + migrated_workspace_file_notes,

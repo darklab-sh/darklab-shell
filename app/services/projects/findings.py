@@ -331,6 +331,13 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             for row in rows
         },
     )
+    with get_db_connect()() as triage_conn:
+        attach_finding_triage_details(
+            triage_conn,
+            session_id,
+            findings,
+            team_id=team_id,
+        )
     if paginated:
         return _run_finding_page_payload(findings, total, safe_limit, safe_offset, occurrence_total)
     return findings
@@ -839,7 +846,6 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             finding_id = str(item["id"] or "")
             item["labels"] = finding_labels.get(finding_id, [])
             item["note"] = finding_notes.get(finding_id)
-        attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
         attach_risk_to_findings(
             findings,
             conn=conn,
@@ -848,6 +854,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
                 for row in rows
             },
         )
+        attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
 
     if paginated:
         return _project_finding_page_payload(

@@ -569,12 +569,12 @@ def list_findings(
     sources_by_finding = _finding_import_sources_by_id(conn, session_id, [finding["id"] for finding in findings], team_id=team_id)
     for finding in findings:
         finding["import_sources"] = sources_by_finding.get(str(finding["id"] or ""), [])
-    attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
     attach_risk_to_findings(
         findings,
         conn=conn,
         owner_by_finding_id=owner_by_finding_id,
     )
+    attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
     for row in count_rows:
         status = str(row["status"] or "new")
         counts[status] = int(row["count"] or 0)

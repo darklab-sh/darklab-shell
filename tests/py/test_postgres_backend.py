@@ -465,6 +465,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0051",
         "0052",
         "0053",
+        "0054",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -2957,17 +2958,32 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     disposition_sql = (
         "INSERT INTO finding_remediation_dispositions "
         "(session_id, team_id, affected_subject, identity_kind, identity_value, "
-        "rule_identity, review_state, created_at, updated_at) "
+        "rule_identity, review_state, remediation, created_at, updated_at, "
+        "remediation_updated_at) "
         "VALUES (%s, '', 'subject:postgres-migration', 'rule', "
-        "'RULE:postgres-migration', 'postgres-migration', %s, %s, %s)"
+        "'RULE:postgres-migration', 'postgres-migration', %s, %s, %s, %s, %s)"
     )
     conn.execute(
         disposition_sql,
-        (source_session_id, "reviewed", "2026-05-16T00:00:00Z", "2026-05-17T00:00:00Z"),
+        (
+            source_session_id,
+            "reviewed",
+            "Use the source guidance.",
+            "2026-05-16T00:00:00Z",
+            "2026-05-17T00:00:00Z",
+            "2026-05-19T00:00:00Z",
+        ),
     )
     conn.execute(
         disposition_sql,
-        (destination_token, "important", "2026-05-15T00:00:00Z", "2026-05-18T00:00:00Z"),
+        (
+            destination_token,
+            "important",
+            "Keep the older destination guidance only when it is newer.",
+            "2026-05-15T00:00:00Z",
+            "2026-05-18T00:00:00Z",
+            "2026-05-16T00:00:00Z",
+        ),
     )
     conn.commit()
     info_resp = client.get("/session/token/info", headers={"X-Session-ID": destination_token})
@@ -3039,7 +3055,8 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
         (destination_token,),
     ).fetchone()["count"]
     migrated_disposition = conn.execute(
-        "SELECT session_id, review_state, created_at, updated_at "
+        "SELECT session_id, review_state, remediation, created_at, updated_at, "
+        "remediation_updated_at "
         "FROM finding_remediation_dispositions "
         "WHERE affected_subject = 'subject:postgres-migration'",
     ).fetchone()
@@ -3063,6 +3080,7 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert json.loads(migrate_resp.data)["migrated_recent_values"] == 1
     assert json.loads(migrate_resp.data)["migrated_workflow_executions"] == 1
     assert json.loads(migrate_resp.data)["migrated_finding_remediation_dispositions"] == 1
+    assert json.loads(migrate_resp.data)["migrated_finding_remediation_guidance"] == 1
     assert migrated_run["session_id"] == destination_token
     assert migrated_snapshot["session_id"] == destination_token
     assert migrated_prefs["preferences"]["pref_theme_name"] == "darklab_obsidian.yaml"
@@ -3075,8 +3093,10 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert int(migrated_variables) == 1
     assert migrated_disposition["session_id"] == destination_token
     assert migrated_disposition["review_state"] == "important"
+    assert migrated_disposition["remediation"] == "Use the source guidance."
     assert migrated_disposition["created_at"].isoformat() == "2026-05-15T00:00:00+00:00"
     assert migrated_disposition["updated_at"].isoformat() == "2026-05-18T00:00:00+00:00"
+    assert migrated_disposition["remediation_updated_at"].isoformat() == "2026-05-19T00:00:00+00:00"
     assert source_workflow_execution is None
     assert migrated_workflow_execution is not None
     assert migrated_workflow_execution["session_id"] == destination_token

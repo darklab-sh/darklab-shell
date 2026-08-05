@@ -2223,6 +2223,14 @@ def test_api_v1_project_readers_are_token_scoped():
         )
         conn.commit()
 
+    triage_save = client.put(
+        f"/findings/{finding_id}/triage",
+        json={
+            "remediation": "Restrict the administrative service and require authentication.",
+            "verification_status": "ready_to_verify",
+        },
+        headers={"X-Session-ID": token},
+    )
     owner_project = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(token))
     owner_findings = client.get(
         f"/api/v1/projects/{project['id']}/findings?q=unauthenticated",
@@ -2263,6 +2271,7 @@ def test_api_v1_project_readers_are_token_scoped():
     cross_atlas_entity = client.get(f"/api/v1/atlas/entities/{entity_id}", headers=_headers(other_token))
     cross_atlas_finding = client.get(f"/api/v1/atlas/findings/{finding_id}", headers=_headers(other_token))
 
+    assert triage_save.status_code == 200
     assert owner_project.status_code == 200
     assert json.loads(owner_project.data)["project"]["id"] == project["id"]
     assert owner_findings.status_code == 200
@@ -2284,6 +2293,10 @@ def test_api_v1_project_readers_are_token_scoped():
     assert {key: owner_finding_payload[key] for key in expected_details} == expected_details
     assert owner_finding_payload["observation_id"].startswith("obs_")
     assert owner_finding_payload["remediation_id"].startswith("rmd_")
+    remediation_updated_at = owner_finding_payload["observation_references"][0][
+        "remediation_updated_at"
+    ]
+    assert remediation_updated_at
     assert owner_finding_payload["observation_references"] == [{
         "observation_id": owner_finding_payload["observation_id"],
         "remediation_id": owner_finding_payload["remediation_id"],
@@ -2292,10 +2305,25 @@ def test_api_v1_project_readers_are_token_scoped():
         "rule_identity": owner_finding_payload["observation_references"][0]["rule_identity"],
         "affected_subject": f"entity:{port_entity_id}",
         "review_state": "new",
-        "review_state_source": "observation",
-        "disposition_updated_at": "",
+        "review_state_source": "remediation_group",
+        "disposition_updated_at": remediation_updated_at,
+        "has_remediation": True,
+        "remediation_preview": "Restrict the administrative service and require authentication.",
+        "remediation_source": "remediation_group",
+        "remediation_updated_at": remediation_updated_at,
         "validation_method": "captured_observation",
     }]
+    assert owner_finding_payload["triage"] == {
+        "verification_status": "ready_to_verify",
+        "has_remediation": True,
+        "has_verification_steps": False,
+        "has_verification_notes": False,
+        "remediation_preview": "Restrict the administrative service and require authentication.",
+        "verification_steps_preview": "",
+        "remediation_id": owner_finding_payload["remediation_id"],
+        "remediation_source": "remediation_group",
+        "remediation_updated_at": remediation_updated_at,
+    }
     assert owner_runs.status_code == 200
     assert json.loads(owner_runs.data)["runs"][0]["id"] == run_id
     assert owner_entities.status_code == 200
@@ -2425,6 +2453,9 @@ def test_api_v1_project_readers_are_token_scoped():
     assert atlas_finding_row["origin"] == "run"
     assert atlas_finding_row["validation_method"] == "captured_observation"
     assert {key: atlas_finding_row[key] for key in expected_details} == expected_details
+    assert atlas_finding_row["triage"]["remediation_preview"] == (
+        "Restrict the administrative service and require authentication."
+    )
     assert atlas_finding.status_code == 200
     atlas_finding_payload = json.loads(atlas_finding.data)
     assert atlas_finding_payload["finding"]["origin"] == "run"

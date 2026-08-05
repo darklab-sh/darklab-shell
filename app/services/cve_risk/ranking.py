@@ -475,6 +475,16 @@ def build_remediation_worklist(
                 "vulnerability_id": vulnerability_id,
                 "affected_subject": str(reference.get("affected_subject") or ""),
                 "review_state": review_state,
+                "has_remediation": bool(reference.get("has_remediation")),
+                "remediation_preview": str(
+                    reference.get("remediation_preview") or ""
+                ),
+                "remediation_source": str(
+                    reference.get("remediation_source") or "observation"
+                ),
+                "remediation_updated_at": str(
+                    reference.get("remediation_updated_at") or ""
+                ),
                 "observations": [],
                 "evidence_keys": set(),
                 "validation_methods": set(),

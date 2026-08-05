@@ -22,7 +22,7 @@ from services.ai import ai_cfg
 from services.ai.prompts import scrub_prompt_boundaries
 from services.runs.output_model import LineEvent, LineKind, LineRole, LineSignal
 from services.runs.output_store import load_run_output_events_for_run
-from services.projects.metadata import _finding_triage_by_id
+from services.projects.metadata import _full_finding_triage_by_id
 from services.secrets.storage import list_secret_metadata
 from services.workspace.files import WorkspaceDisabled, session_workspace_dir
 
@@ -480,7 +480,12 @@ def _load_findings(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
         "line_number": row["line_number"],
         "status": row["status"],
     } for row in rows]
-    triage_by_id = _finding_triage_by_id(conn, session_id, [finding["id"] for finding in findings], team_id=team_id)
+    triage_by_id = _full_finding_triage_by_id(
+        conn,
+        session_id,
+        [finding["id"] for finding in findings],
+        team_id=team_id,
+    )
     for finding in findings:
         triage = triage_by_id.get(str(finding.get("id") or ""))
         if triage:
