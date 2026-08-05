@@ -1,0 +1,138 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+version: 1
+profiles:
+  - key: network
+    version: "1.0"
+    label: Network assessment
+    purpose: Confirm reachability, exposed services, and the DNS records that shape the approved network surface.
+    target_types: [domain, ip]
+    checks:
+      - key: host_reachability
+        version: "1.0"
+        category: discovery
+        label: Host reachability
+        purpose: Establish whether the approved host responds to a bounded reachability check.
+        target_types: [domain, ip]
+        evidence_rules:
+          - key: completed_reachability_run
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [ping, fping, nmap]
+            workflow_actions: []
+            structured_output_kinds: []
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:ping
+        completion_guidance: Run a bounded reachability check against the approved host and review both successful replies and a clean no-response result.
+      - key: service_discovery
+        version: "1.0"
+        category: discovery
+        label: Service discovery
+        purpose: Record the reachable TCP services exposed by the approved host.
+        target_types: [domain, ip]
+        evidence_rules:
+          - key: completed_service_scan
+            version: "1.0"
+            evidence_types: [run, atlas_entity]
+            command_roots: [nmap, naabu, rustscan, masscan]
+            workflow_actions: []
+            structured_output_kinds: [ports, services]
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:nmap
+        completion_guidance: Complete an approved service scan and review the saved port and service evidence, including a clean result with no reachable services.
+      - key: dns_inventory
+        version: "1.0"
+        category: discovery
+        label: DNS inventory
+        purpose: Capture the DNS records and resolved hosts that affect the approved domain.
+        target_types: [domain]
+        evidence_rules:
+          - key: completed_dns_inventory
+            version: "1.0"
+            evidence_types: [run, atlas_entity]
+            command_roots: [dig, dnsrecon, dnsx]
+            workflow_actions: []
+            structured_output_kinds: [dns_records, entities]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:dnsrecon
+        completion_guidance: Collect the domain's current DNS records and review resolved hosts, delegation, and an explicit clean result when a record type is absent.
+
+  - key: web
+    version: "1.0"
+    label: Web assessment
+    purpose: Map reachable web applications, discover their exposed content, and review structured vulnerability checks.
+    target_types: [domain, ip, url]
+    checks:
+      - key: http_profile
+        version: "1.0"
+        category: discovery
+        label: HTTP service profile
+        purpose: Record status, title, technologies, redirects, and other basic HTTP response context.
+        target_types: [domain, ip, url]
+        evidence_rules:
+          - key: completed_http_profile
+            version: "1.0"
+            evidence_types: [run, atlas_entity]
+            command_roots: [httpx, curl]
+            workflow_actions: []
+            structured_output_kinds: [http_responses, entities]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:httpx
+        completion_guidance: Probe the approved host or URL and review the saved response profile, redirects, technologies, and clean unreachable result when applicable.
+      - key: content_discovery
+        version: "1.0"
+        category: enumeration
+        label: Web content discovery
+        purpose: Discover reachable paths and related URLs within the approved web scope.
+        target_types: [domain, url]
+        evidence_rules:
+          - key: completed_content_discovery
+            version: "1.0"
+            evidence_types: [run, atlas_entity]
+            command_roots: [katana, gobuster, ffuf]
+            workflow_actions: []
+            structured_output_kinds: [entities, http_responses]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:katana
+        completion_guidance: Complete a bounded crawl or content-discovery run and review the saved in-scope URLs, response context, and any explicit clean result.
+      - key: vulnerability_templates
+        version: "1.0"
+        category: validation
+        label: Web vulnerability templates
+        purpose: Apply reviewed vulnerability templates to the approved web target and retain positive or clean evidence.
+        target_types: [domain, ip, url]
+        evidence_rules:
+          - key: completed_nuclei_templates
+            version: "1.0"
+            evidence_types: [run, finding]
+            command_roots: [nuclei]
+            workflow_actions: []
+            structured_output_kinds: [findings]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:nuclei
+        completion_guidance: Run the approved template set, review every saved finding, and retain a successful clean run when no template matches.

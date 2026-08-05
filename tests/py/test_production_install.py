@@ -2033,6 +2033,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
             "CONFIGURATION.md",
             "# workspace_max_file_mb: 10",
         ),
+        "starters/conf/assessment_profiles.local.yaml": (
+            "app/conf/assessment_profiles.yaml",
+            "CONFIGURATION.md#assessment-profile-catalog",
+            "checks do not merge",
+        ),
         "starters/conf/commands.local.yaml": (
             "app/conf/commands.yaml",
             "CONFIGURATION.md#command-registry-autocomplete",
@@ -3526,6 +3531,7 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert stat.S_IMODE((target / ".env").stat().st_mode) == 0o600
     assert stat.S_IMODE((target / "conf" / "config.local.yaml").stat().st_mode) == 0o600
     expected_overlays = {
+        "assessment_profiles.local.yaml",
         "commands.local.yaml",
         "faq.local.yaml",
         "welcome.local.yaml",

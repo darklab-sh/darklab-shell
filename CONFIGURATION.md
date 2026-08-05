@@ -69,6 +69,7 @@ The installer keeps the host overlay tree at `0700` with files at `0600`. Contai
 | Shipped base | Production local overlay | Development overlay | Behavior |
 |--------------|-------------------------------|----------------------------|----------|
 | `app/conf/config.yaml` | `conf/config.local.yaml` | `app/conf/config.local.yaml` | Overrides application YAML fine-tuning settings |
+| `app/conf/assessment_profiles.yaml` | `conf/assessment_profiles.local.yaml` | `app/conf/assessment_profiles.local.yaml` | Adds complete profiles or replaces a complete profile with the same key |
 | `app/conf/commands.yaml` | `conf/commands.local.yaml` | `app/conf/commands.local.yaml` | Adds new command roots and merges same-root entries into the base registry |
 | `app/conf/faq.yaml` | `conf/faq.local.yaml` | `app/conf/faq.local.yaml` | Appends local FAQ entries |
 | `app/conf/welcome.yaml` | `conf/welcome.local.yaml` | `app/conf/welcome.local.yaml` | Appends local welcome samples |
@@ -93,6 +94,7 @@ The table describes loader behavior after the app process can read the selected 
 
 | File | When changes take effect |
 |------|--------------------------|
+| `conf/assessment_profiles.yaml` | Immediately for the next assessment-profile read; invalid reloads keep the last valid catalog |
 | `conf/faq.yaml` | Immediately; re-read on every request |
 | `conf/ascii.txt` | On next page load |
 | `conf/ascii_mobile.txt` | On next page load |
@@ -106,6 +108,18 @@ The table describes loader behavior after the app process can read the selected 
 | `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` |
 | `conf/config.local.yaml` | After `docker compose restart` |
+
+---
+
+## Assessment Profile Catalog
+
+`app/conf/assessment_profiles.yaml` contains the maintained Network and Web assessment profiles. Each profile describes the targets it applies to, its versioned checks, the saved evidence that can satisfy those checks, the action the app should recommend, and the plain-language condition for calling the check complete.
+
+Use `assessment_profiles.local.yaml` to add a deployment-specific profile or replace a shipped profile with the same stable key. A local profile is always a complete definition: individual checks and fields don't merge with the shipped copy. This keeps saved cycle snapshots understandable even after the live catalog changes.
+
+The loader rejects duplicate profile, check, and evidence-rule keys; unsupported target or evidence types; unknown command/workflow references; unsupported policy levels; oversized definitions; and malformed YAML. A rejected local reload leaves the whole last valid catalog active and logs `ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED` without logging the file contents. Comment-only local files are inactive and don't produce a warning.
+
+The shipped file is the best starting point for the current schema. Every custom definition uses catalog `version: 1`; stable lowercase keys; dotted profile, check, and evidence-rule versions; one or more target types from `domain`, `ip`, `port`, or `url`; and a recommended action in `command:<root>` or `workflow:<id>` form. Evidence rules can refer only to saved runs, workflow executions, findings, Atlas entities, run artifacts, workspace artifacts, or screenshots. Their command and workflow references must already exist in the active command/workflow catalogs.
 
 ---
 
@@ -1461,6 +1475,7 @@ Normal relative paths resolve from the shipped config root. Relative filenames c
 - Add FAQ entries in `faq.local.yaml`.
 - Add welcome samples in `welcome.local.yaml`.
 - Add deployment-specific command registry entries in `commands.local.yaml`.
+- Add complete deployment-specific assessment profiles in `assessment_profiles.local.yaml`. A profile with the same key replaces the shipped profile as one unit; its checks don't merge.
 - Add deployment-specific legacy or v2 workflows in `workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries or set it to `2`; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, execution, and compatibility reference.
 - Add desktop or mobile hints in `app_hints.local.txt` or `app_hints_mobile.local.txt`.
 - Replace banner art with `ascii.local.txt` or `ascii_mobile.local.txt`. These files replace the shipped text, so the installer provides non-active `.example` files instead of empty active placeholders.

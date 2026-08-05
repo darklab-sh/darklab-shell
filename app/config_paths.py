@@ -14,6 +14,7 @@ from typing import Iterable
 DEFAULT_SHIPPED_CONF_DIR = Path(__file__).resolve().parent / "conf"
 FIXED_OVERLAY_ASSETS = (
     "config.yaml",
+    "assessment_profiles.yaml",
     "commands.yaml",
     "faq.yaml",
     "welcome.yaml",

@@ -8,7 +8,7 @@
 # Optional: add *.local.* files for untracked server-specific overrides.
 # Source-mounted development keeps them beside these files. Production installs
 # keep the same relative names under mounted ./conf (the /config container path).
-# Examples: config.local.yaml, commands.local.yaml, ascii.local.txt,
+# Examples: config.local.yaml, assessment_profiles.local.yaml, commands.local.yaml, ascii.local.txt,
 # app_hints.local.txt, faq.local.yaml, welcome.local.yaml,
 # themes/<name>.local.yaml.
 # If present, each local overlay is applied after its checked-in base file.
