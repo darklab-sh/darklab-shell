@@ -20,35 +20,14 @@ from services.assessments.contracts import (
 from services.assessments.serialization import (
     row_to_assessment,
     row_to_check,
-    row_to_rollup,
+)
+from services.assessments.summary import (
+    ASSESSMENT_COLUMNS,
+    assessment_category_rollups,
+    assessment_rollup,
 )
 from services.projects.scope import shared_owner_where
 from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
-
-
-_ASSESSMENT_COLUMNS = (
-    "a.id, a.team_id, a.project_id, a.title, a.profile_key, a.profile_version, "
-    "a.profile_snapshot, a.status, a.started_at, a.completed_at, a.archived_at, "
-    "a.created_by_member_id, a.updated_by_member_id, a.created_at, a.updated_at"
-)
-
-_ROLLUP_COLUMNS = (
-    "COUNT(*) AS total_checks, "
-    "SUM(CASE WHEN c.applicability = 'applicable' AND c.state != 'not_applicable' "
-    "THEN 1 ELSE 0 END) AS applicable_checks, "
-    "SUM(CASE WHEN c.state = 'covered' THEN 1 ELSE 0 END) AS covered_checks, "
-    "SUM(CASE WHEN c.state = 'needs_review' THEN 1 ELSE 0 END) "
-    "AS checks_awaiting_review, "
-    "SUM(CASE WHEN c.state IN ('not_started', 'running', 'failed') "
-    "THEN 1 ELSE 0 END) AS untested_checks, "
-    "SUM(CASE WHEN c.applicability = 'not_applicable' "
-    "OR c.state IN ('blocked', 'skipped', 'not_applicable') "
-    "THEN 1 ELSE 0 END) AS excluded_checks, "
-    "SUM(CASE WHEN EXISTS ("
-    "SELECT 1 FROM project_assessment_evidence e "
-    "WHERE e.check_id = c.id AND e.source_state = 'unavailable'"
-    ") THEN 1 ELSE 0 END) AS unavailable_evidence_checks"
-)
 
 
 def _normalized_filter(value: object, label: str) -> str:
@@ -73,7 +52,7 @@ def _assessment_row(
     )
     query = "".join((
         "SELECT ",
-        _ASSESSMENT_COLUMNS,
+        ASSESSMENT_COLUMNS,
         " FROM project_assessments a ",
         "JOIN projects p ON p.id = a.project_id ",
         "WHERE ",
@@ -84,36 +63,6 @@ def _assessment_row(
         query,
         (*owner_params, project_id, assessment_id),
     ).fetchone()
-
-
-def _assessment_rollup(conn: Any, assessment_id: str) -> dict[str, int]:
-    query = "".join((
-        "SELECT ",
-        _ROLLUP_COLUMNS,
-        " FROM project_assessment_checks c WHERE c.assessment_id = ?",
-    ))
-    row = conn.execute(
-        query,
-        (assessment_id,),
-    ).fetchone()
-    return row_to_rollup(row)
-
-
-def _category_rollups(conn: Any, assessment_id: str) -> list[dict[str, Any]]:
-    query = "".join((
-        "SELECT c.category, ",
-        _ROLLUP_COLUMNS,
-        " FROM project_assessment_checks c WHERE c.assessment_id = ? ",
-        "GROUP BY c.category ORDER BY c.category ASC",
-    ))
-    rows = conn.execute(
-        query,
-        (assessment_id,),
-    ).fetchall()
-    return [
-        {"category": str(row["category"] or ""), **row_to_rollup(row)}
-        for row in rows
-    ]
 
 
 def _validated_check_filters(filters: dict[str, object] | None) -> dict[str, str]:
@@ -249,8 +198,8 @@ def get_assessment_read_model(
             return None
         return {
             "assessment": row_to_assessment(row),
-            "rollup": _assessment_rollup(conn, str(row["id"])),
-            "category_rollups": _category_rollups(conn, str(row["id"])),
+            "rollup": assessment_rollup(conn, str(row["id"])),
+            "category_rollups": assessment_category_rollups(conn, str(row["id"])),
             "checks": _check_page(
                 conn,
                 str(row["id"]),
@@ -310,7 +259,7 @@ def list_assessment_cycles(
         total = int(total_row["count"] or 0) if total_row else 0
         list_query = "".join((
             "SELECT ",
-            _ASSESSMENT_COLUMNS,
+            ASSESSMENT_COLUMNS,
             " FROM project_assessments a WHERE a.project_id = ? ",
             "AND (? = '' OR a.status = ?) ",
             "AND (? = 1 OR a.status != 'archived') ",
@@ -331,7 +280,7 @@ def list_assessment_cycles(
         for row in rows:
             assessment = row_to_assessment(row)
             if assessment is not None:
-                assessment["rollup"] = _assessment_rollup(conn, str(row["id"]))
+                assessment["rollup"] = assessment_rollup(conn, str(row["id"]))
                 assessments.append(assessment)
         return page_payload(
             "assessments",

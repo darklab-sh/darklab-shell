@@ -183,6 +183,23 @@ function createProjectAssessmentController(context) {
     return loadDetail(projectId);
   }
 
+  async function focusCycle(projectId, assessmentId, filters = {}) {
+    const id = String(projectId || '');
+    const nextId = String(assessmentId || '');
+    if (!id || !nextId) return false;
+    const st = stateFor(id);
+    st.selectedId = nextId;
+    st.category = String(filters.category || '');
+    st.checkState = String(filters.state || '');
+    resetDetailState(st);
+    renderViews();
+    if (st.loaded && st.assessments.some(item => String(item?.id || '') === nextId)) {
+      return loadDetail(id);
+    }
+    st.loaded = false;
+    return load(id, { force: true });
+  }
+
   async function setFilter(projectId, key, value) {
     const st = stateFor(projectId);
     const normalized = String(value || '');
@@ -225,6 +242,7 @@ function createProjectAssessmentController(context) {
       st.category = '';
       st.checkState = '';
       resetDetailState(st);
+      ctx.invalidateProjectOverview?.(id);
       ctx.setProjectWorkspaceMessage?.('Assessment cycle started.');
       return load(id, { force: true, render: false });
     } catch (err) {
@@ -280,6 +298,7 @@ function createProjectAssessmentController(context) {
         st.loaded = false;
         st.detail = null;
       }
+      ctx.invalidateProjectOverview?.(id);
       ctx.setProjectWorkspaceMessage?.(successMessage);
       return load(id, { force: true, render: false });
     } catch (err) {
@@ -409,6 +428,7 @@ function createProjectAssessmentController(context) {
   return {
     createCycle,
     deleteCycle,
+    focusCycle,
     invalidate,
     load,
     loadDetail,

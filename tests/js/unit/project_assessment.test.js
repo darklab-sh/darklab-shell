@@ -30,6 +30,7 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     enhanceAppSelects: vi.fn(),
     renderProjectExplorer: vi.fn(),
     renderProjectMobileDetail: vi.fn(),
+    invalidateProjectOverview: vi.fn(),
     setProjectWorkspaceMessage: vi.fn(),
     showConfirm: vi.fn(async options => options.actions.at(-1).id),
     actionSheetContainer: vi.fn(() => document.body),
@@ -208,6 +209,36 @@ describe('project assessment controller', () => {
     expect(state.expandedTargets.has('domain:ent_1')).toBe(true)
   })
 
+  it('focuses an exact cycle and filter set when another Project surface links into Assessment', async () => {
+    const earlier = { ...cycle, id: 'asmt_old', status: 'completed', title: 'Earlier review' }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.includes('/assessments/asmt_old?')) {
+        return apiResponse({ ...detail, assessment: { ...detail.assessment, ...earlier } })
+      }
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(detail)
+      return apiResponse({ assessments: [cycle, earlier], profiles, total: 2 })
+    })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(
+      makeContext(projectWorkspaceRequest),
+    )
+    await controller.load('prj_1', { render: false })
+
+    await controller.focusCycle('prj_1', 'asmt_old', {
+      category: 'discovery',
+      state: 'needs_review',
+    })
+
+    const state = controller.stateFor('prj_1')
+    expect(state.selectedId).toBe('asmt_old')
+    expect(state.category).toBe('discovery')
+    expect(state.checkState).toBe('needs_review')
+    expect(state.offset).toBe(0)
+    const focusedUrl = projectWorkspaceRequest.mock.calls.map(([url]) => url).at(-1)
+    expect(focusedUrl).toContain('/assessments/asmt_old?')
+    expect(focusedUrl).toContain('category=discovery')
+    expect(focusedUrl).toContain('state=needs_review')
+  })
+
   it('starts a profile-driven cycle and keeps the action read-only for viewers', async () => {
     let cycles = []
     const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
@@ -233,6 +264,7 @@ describe('project assessment controller', () => {
       body: JSON.stringify({ profile_key: 'network' }),
     })
     expect(controller.stateFor('prj_1').selectedId).toBe('asmt_new')
+    expect(ctx.invalidateProjectOverview).toHaveBeenCalledWith('prj_1')
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle started.')
 
     const viewerRequest = vi.fn(async () => apiResponse({ assessments: [], profiles, total: 0 }))
@@ -295,6 +327,7 @@ describe('project assessment controller', () => {
 
     expect(await controller.transitionCycle('prj_1', 'completed')).toBe(true)
     expect(current.status).toBe('completed')
+    expect(ctx.invalidateProjectOverview).toHaveBeenCalledWith('prj_1')
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle completed.')
 
     expect(await controller.transitionCycle('prj_1', 'archived')).toBe(true)
@@ -306,6 +339,7 @@ describe('project assessment controller', () => {
     expect(ctx.showConfirm.mock.calls.at(-1)[0].body.note).toContain('2 saved checks and 3 evidence links')
     expect(ctx.showConfirm.mock.calls.at(-1)[0].body.note).toContain('Source runs, findings, entities, and files stay intact.')
     expect(controller.stateFor('prj_1').assessments).toEqual([])
+    expect(ctx.invalidateProjectOverview).toHaveBeenCalledTimes(3)
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle deleted.')
   })
 

@@ -2854,6 +2854,58 @@
   font-size: 13px;
 }
 
+.project-overview-assessment {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--theme-chrome-border);
+  border-radius: 8px;
+  background: var(--theme-chrome-row-bg);
+}
+
+.project-overview-assessment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.project-overview-assessment-title {
+  min-width: 0;
+}
+
+.project-overview-assessment-title h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.project-overview-assessment-title p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.project-overview-assessment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 9px;
+}
+
+.project-overview-assessment-warning {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 
 
 .project-overview-tempo {
@@ -3255,6 +3307,15 @@
 
 .project-overview-root.is-mobile .project-overview-summary-card strong {
   font-size: 18px;
+}
+
+.project-overview-root.is-mobile .project-overview-assessment-heading {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.project-overview-root.is-mobile .project-overview-assessment-heading .btn {
+  width: 100%;
 }
 
 

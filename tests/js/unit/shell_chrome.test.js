@@ -133,6 +133,7 @@ function loadShellChrome({
   activeTeamScopeCan = () => true,
   teamScopeDeniedMessage = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
   downloadUrlAsAttachmentImpl = null,
+  projectAssessmentModule = null,
 } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
@@ -396,6 +397,7 @@ function loadShellChrome({
     'applyProjectAutoLinkRunEntitiesPreference',
     'downloadBlobAsAttachment',
     'downloadUrlAsAttachment',
+    'projectAssessmentModule',
     `
       const globalThis = global;
       const APP_CONFIG = global.APP_CONFIG || {};
@@ -523,6 +525,12 @@ function loadShellChrome({
       window.loadProjectOverview = global.loadProjectOverview;
       ${PROJECT_CONTEXT_BRIDGE_SRC}
       var openFindingsBoard = exportedOpenFindingsBoard;
+      if (projectAssessmentModule) {
+        global.DarklabProjectAssessment = projectAssessmentModule;
+        window.DarklabProjectAssessment = projectAssessmentModule;
+        global.loadProjectAssessment = () => Promise.resolve(projectAssessmentModule);
+        window.loadProjectAssessment = global.loadProjectAssessment;
+      }
       ${SHELL_CHROME_SRC}
       global.openProjectWorkspace = global.__darklabShellChromeExports.openProjectWorkspace;
       global.openProjectWorkspaceById = global.__darklabShellChromeExports.openProjectWorkspaceById;
@@ -600,6 +608,7 @@ function loadShellChrome({
     applyProjectAutoLinkRunEntitiesPreference,
     downloadBlobAsAttachment,
     downloadUrlAsAttachment,
+    projectAssessmentModule,
   )
 
   return {
@@ -1162,6 +1171,86 @@ describe('shell chrome project workspace', () => {
     shell.closeProjectWorkspace()
     await tick()
     expect(shell.openAtlas).toHaveBeenCalledWith(returnToAtlas)
+  })
+
+  it('opens the exact active assessment cycle from Project Overview', async () => {
+    const project = { id: 'project-1', name: 'Assessment Project', status: 'active' }
+    const focusCycle = vi.fn(() => Promise.resolve(true))
+    const assessmentController = {
+      focusCycle,
+      invalidate: vi.fn(),
+      renderAssessment: vi.fn((container) => {
+        container.replaceChildren(document.createTextNode('Focused assessment'))
+      }),
+      renderMobileAssessmentTab: vi.fn(() => document.createElement('div')),
+    }
+    const assessmentModule = {
+      createProjectAssessmentController: vi.fn(() => assessmentController),
+    }
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
+      }
+      if (String(url).startsWith('/projects?include_archived=1')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [project] }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project,
+            counts: { runs: 0, findings: 0, entities: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/overview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            active_assessment: {
+              id: 'asmt-active',
+              title: 'Active network review',
+              profile_key: 'network',
+              profile_version: '1.0.0',
+              status: 'active',
+              rollup: { applicable_checks: 2, covered_checks: 1 },
+            },
+            rollups: { finding_severities: {}, certificate_statuses: {} },
+            targets: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ targets: [], total: 0 }) })
+    })
+    try {
+      const logClientError = vi.fn()
+      const shell = loadShellChrome({ apiFetch, logClientError, projectAssessmentModule: assessmentModule })
+      await shell.openProjectWorkspaceById('project-1')
+      document.querySelector('[data-project-tab="overview"]').click()
+      await tick()
+      await tick()
+      document.querySelector('[data-project-overview-assessment="asmt-active"]').click()
+      await tick()
+      await tick()
+
+      expect(document.querySelector('[data-project-tab="assessment"]')?.classList.contains('is-active')).toBe(true)
+      expect(logClientError.mock.calls).toEqual([])
+      await vi.waitFor(() => {
+        expect(focusCycle).toHaveBeenCalledWith('project-1', 'asmt-active', {
+          category: '',
+          state: '',
+        })
+      })
+    } finally {
+      delete global.loadProjectAssessment
+      delete window.loadProjectAssessment
+      delete global.DarklabProjectAssessment
+      delete window.DarklabProjectAssessment
+    }
   })
 
   it('pages and filters the project Details targets browser', async () => {

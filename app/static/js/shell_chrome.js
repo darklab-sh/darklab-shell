@@ -2144,6 +2144,7 @@ let importedProjectWorkspaceShell;
       enhanceAppSelects: _shellEnhanceAppSelects(),
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectMobileDetail: _renderProjectMobileDetail,
+      invalidateProjectOverview: (projectId = '') => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       showConfirm: _shellFn('showConfirm', importedShowConfirm),
       actionSheetContainer: () => projectWorkspaceModal,
@@ -2188,6 +2189,7 @@ let importedProjectWorkspaceShell;
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       setProjectWorkspaceTab: projectWorkspaceState.setTab,
+      openProjectAssessment: _openProjectAssessment,
       setProjectEntityTab: projectWorkspaceState.setEntityTab,
       projectTargetFilterSet: _projectTargetFilterSet,
       projectRunFilterSet: _projectRunFilterSet,
@@ -4530,6 +4532,23 @@ let importedProjectWorkspaceShell;
     }
     projectWorkspaceState.setTab(normalizedTab);
     _renderProjectExplorer();
+  }
+
+  function _openProjectAssessment(projectId, { assessmentId = '', category = '', state = '' } = {}) {
+    const normalizedProjectId = String(projectId || projectWorkspaceState.selectedId() || '').trim();
+    const normalizedAssessmentId = String(assessmentId || '').trim();
+    if (!normalizedProjectId || !normalizedAssessmentId) return;
+    projectWorkspaceState.setTab('assessment');
+    if (_projectMobileView() === 'detail') _renderProjectMobileDetail();
+    else _renderProjectExplorer();
+    _loadProjectAssessmentController()
+      .then(controller => controller.focusCycle(normalizedProjectId, normalizedAssessmentId, {
+        category: String(category || '').trim(),
+        state: String(state || '').trim(),
+      }))
+      .catch((err) => {
+        _shellLogClientError('failed to open project assessment cycle', err);
+      });
   }
 
   function _openProjectActivity(projectId, { targetId = '', targetType = '' } = {}) {

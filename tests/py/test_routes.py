@@ -6040,6 +6040,7 @@ class TestProjectRoutes:
         assert payload["project"]["id"] == project["id"]
         assert payload["payload_version"] == 1
         assert payload["targets"] == []
+        assert payload["active_assessment"] is None
         assert payload["rollups"]["target_count"] == 0
         assert payload["rollups"]["certificate_statuses"]["unknown"] == 0
         assert payload["rollups"]["recent_change_state"] == "not-monitored"
@@ -6106,6 +6107,13 @@ class TestProjectRoutes:
         session_id = self._session_id("project-overview")
         project = self._create_project(client, session_id, name="Overview Populated")
         target = self._create_target(client, session_id, project["id"])
+        assessment_resp = client.post(
+            f"/projects/{project['id']}/assessments",
+            json={"profile_key": "network", "title": "Overview assessment"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert assessment_resp.status_code == 201
+        assessment_id = assessment_resp.get_json()["assessment"]["id"]
         snapshot_id = f"snap-route-overview-{target['id']}"
         finding_id = f"finding-route-overview-{target['id']}"
         now = datetime.now(timezone.utc).isoformat()
@@ -6163,6 +6171,13 @@ class TestProjectRoutes:
         assert payload["rollups"]["target_count"] == 1
         assert payload["rollups"]["certificate_statuses"]["expiring_30d"] == 1
         assert payload["rollups"]["finding_severities"]["high"] == 1
+        assert payload["active_assessment"]["id"] == assessment_id
+        assert payload["active_assessment"]["title"] == "Overview assessment"
+        assert payload["active_assessment"]["profile_key"] == "network"
+        assert payload["active_assessment"]["status"] == "active"
+        assert payload["active_assessment"]["rollup"]["applicable_checks"] > 0
+        assert "profile_snapshot" not in payload["active_assessment"]
+        assert "team_id" not in payload["active_assessment"]
         target_row = payload["targets"][0]
         assert target_row["entity_id"] == target["id"]
         assert target_row["open_ports"] == [443]

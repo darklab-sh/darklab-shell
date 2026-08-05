@@ -179,6 +179,13 @@ let exportedDarklabProjectOverview = null;
         : {};
     }
 
+    function activeAssessment(st) {
+      const payload = st && st.payload && typeof st.payload === 'object' ? st.payload : {};
+      return payload.active_assessment && typeof payload.active_assessment === 'object'
+        ? payload.active_assessment
+        : null;
+    }
+
     function formatCount(value) {
       const count = Number(value || 0);
       return Number.isFinite(count) ? count.toLocaleString() : '0';
@@ -424,6 +431,77 @@ let exportedDarklabProjectOverview = null;
         ]),
       );
       return wrap;
+    }
+
+    function renderActiveAssessment(projectId, st) {
+      const assessment = activeAssessment(st);
+      if (!assessment) return null;
+      const source = assessment.rollup && typeof assessment.rollup === 'object'
+        ? assessment.rollup
+        : {};
+      const section = document.createElement('section');
+      section.className = 'project-overview-assessment';
+      const heading = document.createElement('div');
+      heading.className = 'project-overview-assessment-heading';
+      const copy = document.createElement('div');
+      copy.className = 'project-overview-assessment-title';
+      const title = document.createElement('h3');
+      title.textContent = String(assessment.title || 'Active assessment');
+      const meta = document.createElement('p');
+      meta.textContent = [
+        'Active assessment',
+        readableToken(assessment.profile_key),
+        assessment.profile_version ? `profile ${assessment.profile_version}` : '',
+        assessment.started_at ? `started ${formatDate(assessment.started_at)}` : '',
+      ].filter(Boolean).join(' · ');
+      copy.append(title, meta);
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-secondary btn-compact';
+      open.textContent = 'Open Assessment';
+      open.dataset.projectOverviewAssessment = String(assessment.id || '');
+      open.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (typeof ctx.openProjectAssessment === 'function') {
+          ctx.openProjectAssessment(projectId, { assessmentId: String(assessment.id || '') });
+          return;
+        }
+        gotoTab(projectId, 'assessment', {});
+      });
+      ctx.bindProjectRuntimePressable?.(open);
+      heading.append(copy, open);
+      const grid = document.createElement('div');
+      grid.className = 'project-overview-assessment-grid';
+      grid.append(
+        summaryCard(
+          'Covered',
+          `${formatCount(source.covered_checks)} of ${formatCount(source.applicable_checks)}`,
+          'applicable checks',
+          Number(source.covered_checks || 0) === Number(source.applicable_checks || 0) ? 'success' : '',
+          'compact',
+        ),
+        summaryCard(
+          'Awaiting review',
+          formatCount(source.checks_awaiting_review),
+          'checks with finding evidence',
+          Number(source.checks_awaiting_review || 0) ? 'attention' : '',
+          'compact',
+        ),
+        summaryCard('Untested', formatCount(source.untested_checks), 'checks outstanding', '', 'compact'),
+        summaryCard('Excluded', formatCount(source.excluded_checks), 'blocked, skipped, or not applicable', '', 'compact'),
+      );
+      section.append(heading, grid);
+      if (Number(source.unavailable_evidence_checks || 0) > 0) {
+        const unavailable = Number(source.unavailable_evidence_checks || 0);
+        const warning = document.createElement('div');
+        warning.className = 'project-overview-assessment-warning';
+        warning.append(
+          badge('Evidence unavailable', 'badge-tone-amber'),
+          document.createTextNode(`${formatCount(unavailable)} check${unavailable === 1 ? '' : 's'} reference${unavailable === 1 ? 's' : ''} saved evidence that can no longer be opened.`),
+        );
+        section.appendChild(warning);
+      }
+      return section;
     }
 
     function gapGroups(st) {
@@ -1204,6 +1282,8 @@ let exportedDarklabProjectOverview = null;
       root.appendChild(renderRollups(st));
       root.appendChild(renderProviderIntelCaveat());
       root.appendChild(renderFindingProgress(st));
+      const assessment = renderActiveAssessment(normalized, st);
+      if (assessment) root.appendChild(assessment);
       root.appendChild(renderOperationalTempo(normalized, st));
       root.appendChild(renderCoverageGaps(normalized, st));
       root.appendChild(renderDeliverablesStatus(st));

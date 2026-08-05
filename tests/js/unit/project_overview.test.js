@@ -57,6 +57,7 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     renderProjectExplorer: vi.fn(),
     renderProjectMobileDetail: vi.fn(),
     setProjectWorkspaceTab: vi.fn(),
+    openProjectAssessment: vi.fn(),
     setProjectEntityTab: vi.fn(),
     projectTargetFilterSet: vi.fn(projectId => setFor(targetFilters, projectId)),
     projectRunFilterSet: vi.fn(projectId => setFor(runFilters, projectId)),
@@ -76,6 +77,24 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
 const overviewPayload = {
   payload_version: 1,
   project: { id: 'prj_1', name: 'Client edge' },
+  active_assessment: {
+    id: 'asmt_1',
+    title: 'Network assessment',
+    profile_key: 'network',
+    profile_version: '1.0.0',
+    status: 'active',
+    started_at: '2026-06-24T12:00:00+00:00',
+    updated_at: '2026-06-24T15:00:00+00:00',
+    rollup: {
+      total_checks: 9,
+      applicable_checks: 8,
+      covered_checks: 4,
+      checks_awaiting_review: 2,
+      untested_checks: 2,
+      excluded_checks: 1,
+      unavailable_evidence_checks: 1,
+    },
+  },
   rollups: {
     target_count: 1,
     open_port_count: 2,
@@ -306,6 +325,16 @@ describe('project overview controller', () => {
     expect(progressText).toContain('Verified')
     expect(progressText).toContain('Needs retest')
     expect(progressText).toContain('Not applicable: 1')
+    const assessmentText = container.querySelector('.project-overview-assessment')?.textContent || ''
+    expect(assessmentText).toContain('Network assessment')
+    expect(assessmentText).toContain('Active assessment · network · profile 1.0.0')
+    expect(assessmentText).toContain('4 of 8')
+    expect(assessmentText).toContain('Awaiting review')
+    expect(assessmentText).toContain('Untested')
+    expect(assessmentText).toContain('Excluded')
+    expect(assessmentText).toContain('1 check references saved evidence that can no longer be opened')
+    container.querySelector('[data-project-overview-assessment="asmt_1"]').click()
+    expect(ctx.openProjectAssessment).toHaveBeenCalledWith('prj_1', { assessmentId: 'asmt_1' })
     const tempoText = container.querySelector('.project-overview-tempo')?.textContent || ''
     expect(tempoText).toContain('Last run')
     expect(tempoText).toContain('2026-06-24 13:00:00+00:00')
@@ -389,6 +418,21 @@ describe('project overview controller', () => {
     expect([...ctx._sets.targetFilters.get('prj_1')]).toEqual(['ent_1'])
     expect([...ctx._sets.severityFilters.get('prj_1')]).toEqual(['high'])
     expect(ctx.setProjectFindingOrphanFilter).toHaveBeenLastCalledWith('prj_1', 'all')
+  })
+
+  it('omits the assessment card when the Project has no active cycle', async () => {
+    const overviewApi = loadOverviewModule()
+    const payload = JSON.parse(JSON.stringify(overviewPayload))
+    payload.active_assessment = null
+    const controller = overviewApi.createProjectOverviewController(makeContext(
+      vi.fn(async () => apiResponse(payload)),
+    ))
+
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderOverview(container, 'prj_1', {})
+
+    expect(container.querySelector('.project-overview-assessment')).toBeNull()
   })
 
   it('previews long target lists so aggregate panels stay reachable', async () => {

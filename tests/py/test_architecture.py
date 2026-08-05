@@ -227,6 +227,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/schema.py", 10, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/serialization.py", 128, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/storage.py", 357, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/summary.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/actors.py", 39, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/artifact_queries.py", 249, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/entity_monitoring.py", 139, "split-package-ratchet"),

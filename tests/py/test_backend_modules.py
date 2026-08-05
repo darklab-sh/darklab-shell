@@ -3616,6 +3616,7 @@ class TestProjectOverviewContract:
             "generated_at": "",
             "payload_version": project_workspace.OVERVIEW_PAYLOAD_VERSION,
             "targets": [],
+            "active_assessment": None,
             "rollups": {
                 "target_count": 0,
                 "certificate_statuses": {
@@ -5461,6 +5462,7 @@ class TestProjectOverviewContract:
             "recent_change_count": 0,
             "payload_target_count": overview_service.OVERVIEW_TARGET_LIMIT,
             "target_truncated": True,
+            "has_active_assessment": False,
         }
 
     def test_get_project_intel_overview_logs_degraded_source_data(self, monkeypatch, tmp_path):
