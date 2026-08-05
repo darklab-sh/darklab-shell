@@ -209,6 +209,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/lookup_search.py", 73, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/__init__.py", 4, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/contracts.py", 40, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/coverage.py", 225, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/evidence_matching.py", 319, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/profiles.py", 617, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/assessments/read_model.py", 345, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/schema.py", 10, "split-package-ratchet"),

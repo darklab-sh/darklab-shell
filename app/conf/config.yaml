@@ -284,6 +284,14 @@
 # Server default if unset: 50000
 # max_project_assessment_checks_per_project: 50000
 #
+# Maximum typed evidence links retained for assessment checks. Set to 0 for
+# unlimited. Evidence history is never evicted automatically at these limits.
+# Server default if unset: 1000000
+# max_project_assessment_evidence_per_owner: 1000000
+#
+# Server default if unset: 250000
+# max_project_assessment_evidence_per_project: 250000
+#
 # Server default if unset: 25
 # max_evidence_packages_per_project: 25
 #
