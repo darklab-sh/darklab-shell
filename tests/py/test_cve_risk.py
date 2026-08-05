@@ -526,6 +526,55 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     assert len(team_worklist) == 1
     assert team_worklist[0]["observation_count"] == 2
 
+    rule_observations = [{
+        "id": "rule-confirmed",
+        "session_id": "session-one",
+        "entity_id": "ent_rule",
+        "signature_hash": "stable-rule-signature",
+        "tool_root": "nuclei",
+        "kind": "finding",
+        "title": "Original title",
+        "severity": "high",
+        "validation_method": "active_confirmation",
+    }, {
+        "id": "rule-inferred",
+        "session_id": "session-one",
+        "entity_id": "ent_rule",
+        "signature_hash": "stable-rule-signature",
+        "tool_root": "nuclei",
+        "kind": "finding",
+        "title": "Different editable title",
+        "severity": "critical",
+        "validation_method": "version_inference",
+    }]
+    attach_risk_to_findings(rule_observations, conn=risk_db)
+    confirmed_reference = rule_observations[0]["observation_references"][0]
+    inferred_reference = rule_observations[1]["observation_references"][0]
+    assert confirmed_reference["identity_kind"] == "rule"
+    assert confirmed_reference["vulnerability_id"] == ""
+    assert confirmed_reference["rule_identity"] == "signature:stable-rule-signature"
+    assert confirmed_reference["remediation_id"] == inferred_reference["remediation_id"]
+    assert confirmed_reference["observation_id"] != inferred_reference["observation_id"]
+    assert rule_observations[0]["observation_id"] == confirmed_reference["observation_id"]
+    assert rule_observations[0]["remediation_id"] == confirmed_reference["remediation_id"]
+
+    uncertain_rules = [{
+        "id": finding_id,
+        "session_id": "session-one",
+        "entity_id": "ent_rule",
+        "tool_root": "nuclei",
+        "kind": "finding",
+        "validation_method": "active_confirmation",
+    } for finding_id in ("missing-rule-one", "missing-rule-two")]
+    attach_risk_to_findings(uncertain_rules, conn=risk_db)
+    assert uncertain_rules[0]["observation_references"][0]["rule_identity"] == (
+        "observation:missing-rule-one"
+    )
+    assert uncertain_rules[1]["observation_references"][0]["rule_identity"] == (
+        "observation:missing-rule-two"
+    )
+    assert uncertain_rules[0]["remediation_id"] != uncertain_rules[1]["remediation_id"]
+
 
 def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
     risk_db.executemany(
@@ -550,6 +599,13 @@ def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
         item["remediation_id"] for item in finding["remediation_groups"]
         if item["vulnerability_id"] == "CVE-2026-23456"
     )
+    assert finding["observation_id"] == next(
+        item["observation_id"] for item in finding["observation_references"]
+        if item["vulnerability_id"] == "CVE-2026-23456"
+    )
+    assert {
+        item["vulnerability_id"] for item in finding["observation_references"]
+    } == {"CVE-2026-12345", "CVE-2026-23456"}
     legacy_material = "\x1f".join(("", "session-one", "ent_shared", "CVE-2026-23456"))
     assert finding["remediation_id"] == (
         "rmd_" + hashlib.sha256(legacy_material.encode()).hexdigest()[:32]

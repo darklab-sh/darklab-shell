@@ -1952,6 +1952,15 @@
             "nullable": true,
             "type": "integer"
           },
+          "observation_id": {
+            "type": "string"
+          },
+          "observation_references": {
+            "items": {
+              "$ref": "#/components/schemas/FindingObservationReference"
+            },
+            "type": "array"
+          },
           "occurrence_count": {
             "type": "integer"
           },
@@ -1996,6 +2005,9 @@
           },
           "risk": {
             "$ref": "#/components/schemas/CveRiskSignal"
+          },
+          "rule_identity": {
+            "type": "string"
           },
           "run_command": {
             "type": "string"
@@ -2047,6 +2059,11 @@
           "entity_id",
           "origin",
           "validation_method",
+          "rule_identity",
+          "observation_id",
+          "remediation_id",
+          "observation_references",
+          "remediation_groups",
           "summary",
           "impact",
           "reproduction_steps",
@@ -2753,6 +2770,52 @@
           "status",
           "created",
           "updated"
+        ],
+        "type": "object"
+      },
+      "FindingObservationReference": {
+        "properties": {
+          "affected_subject": {
+            "type": "string"
+          },
+          "identity_kind": {
+            "enum": [
+              "vulnerability",
+              "rule"
+            ],
+            "type": "string"
+          },
+          "observation_id": {
+            "type": "string"
+          },
+          "remediation_id": {
+            "type": "string"
+          },
+          "rule_identity": {
+            "type": "string"
+          },
+          "validation_method": {
+            "enum": [
+              "captured_observation",
+              "active_confirmation",
+              "version_inference",
+              "imported_assertion",
+              "manual_assessment"
+            ],
+            "type": "string"
+          },
+          "vulnerability_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation_id",
+          "remediation_id",
+          "identity_kind",
+          "vulnerability_id",
+          "rule_identity",
+          "affected_subject",
+          "validation_method"
         ],
         "type": "object"
       },
@@ -3788,6 +3851,15 @@
             "nullable": true,
             "type": "integer"
           },
+          "observation_id": {
+            "type": "string"
+          },
+          "observation_references": {
+            "items": {
+              "$ref": "#/components/schemas/FindingObservationReference"
+            },
+            "type": "array"
+          },
           "occurrence_count": {
             "type": "integer"
           },
@@ -3836,6 +3908,9 @@
           "risk": {
             "$ref": "#/components/schemas/CveRiskSignal"
           },
+          "rule_identity": {
+            "type": "string"
+          },
           "run_command": {
             "type": "string"
           },
@@ -3876,6 +3951,9 @@
           "title": {
             "type": "string"
           },
+          "tool_root": {
+            "type": "string"
+          },
           "validation_method": {
             "enum": [
               "captured_observation",
@@ -3892,6 +3970,11 @@
           "run_id",
           "origin",
           "validation_method",
+          "rule_identity",
+          "observation_id",
+          "remediation_id",
+          "observation_references",
+          "remediation_groups",
           "summary",
           "impact",
           "reproduction_steps",

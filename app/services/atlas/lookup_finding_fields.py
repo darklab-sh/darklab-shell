@@ -26,7 +26,7 @@ def finding_detail_sql(run_scope_sql: str, finding_scope_sql: str) -> str:
         (
             "SELECT f.id, f.session_id, f.team_id, f.entity_id, ",
             "e.type AS entity_type, e.canonical_value AS entity_value, ",
-            "f.subject_key, f.origin, f.validation_method, f.severity, f.kind, f.tool_root, ",
+            "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, f.kind, f.tool_root, ",
             "f.first_run_id, f.last_run_id, ",
             "r.command AS run_command, r.run_kind AS run_kind, ",
             "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, ",

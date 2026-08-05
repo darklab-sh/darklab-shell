@@ -2282,6 +2282,17 @@ def test_api_v1_project_readers_are_token_scoped():
         "references": ["https://example.com/advisories/CVE-2026-12345"],
     }
     assert {key: owner_finding_payload[key] for key in expected_details} == expected_details
+    assert owner_finding_payload["observation_id"].startswith("obs_")
+    assert owner_finding_payload["remediation_id"].startswith("rmd_")
+    assert owner_finding_payload["observation_references"] == [{
+        "observation_id": owner_finding_payload["observation_id"],
+        "remediation_id": owner_finding_payload["remediation_id"],
+        "identity_kind": "vulnerability",
+        "vulnerability_id": "CVE-2026-12345",
+        "rule_identity": owner_finding_payload["observation_references"][0]["rule_identity"],
+        "affected_subject": f"entity:{port_entity_id}",
+        "validation_method": "captured_observation",
+    }]
     assert owner_runs.status_code == 200
     assert json.loads(owner_runs.data)["runs"][0]["id"] == run_id
     assert owner_entities.status_code == 200
@@ -2415,6 +2426,8 @@ def test_api_v1_project_readers_are_token_scoped():
     atlas_finding_payload = json.loads(atlas_finding.data)
     assert atlas_finding_payload["finding"]["origin"] == "run"
     assert atlas_finding_payload["finding"]["validation_method"] == "captured_observation"
+    assert atlas_finding_payload["finding"]["observation_id"] == owner_finding_payload["observation_id"]
+    assert atlas_finding_payload["finding"]["remediation_id"] == owner_finding_payload["remediation_id"]
     assert {
         key: atlas_finding_payload["finding"][key]
         for key in expected_details
@@ -4293,6 +4306,17 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     for schema_name in ("AtlasFinding", "ProjectFinding"):
         assert finding_detail_fields.issubset(schemas[schema_name]["required"])
         assert finding_detail_fields.issubset(schemas[schema_name]["properties"])
+        assert {
+            "rule_identity",
+            "observation_id",
+            "remediation_id",
+            "observation_references",
+            "remediation_groups",
+        }.issubset(schemas[schema_name]["required"])
+    assert schemas["FindingObservationReference"]["properties"]["identity_kind"]["enum"] == [
+        "vulnerability",
+        "rule",
+    ]
     assert schemas["ProjectFinding"]["properties"]["confidence"]["enum"] == [
         "unknown",
         "low",

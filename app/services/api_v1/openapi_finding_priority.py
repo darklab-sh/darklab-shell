@@ -48,4 +48,34 @@ def finding_priority_schemas() -> dict[str, Any]:
                 "affected_subject": {"type": "string"},
             },
         },
+        "FindingObservationReference": {
+            "type": "object",
+            "required": [
+                "observation_id",
+                "remediation_id",
+                "identity_kind",
+                "vulnerability_id",
+                "rule_identity",
+                "affected_subject",
+                "validation_method",
+            ],
+            "properties": {
+                "observation_id": {"type": "string"},
+                "remediation_id": {"type": "string"},
+                "identity_kind": {"type": "string", "enum": ["vulnerability", "rule"]},
+                "vulnerability_id": {"type": "string"},
+                "rule_identity": {"type": "string"},
+                "affected_subject": {"type": "string"},
+                "validation_method": {
+                    "type": "string",
+                    "enum": [
+                        "captured_observation",
+                        "active_confirmation",
+                        "version_inference",
+                        "imported_assertion",
+                        "manual_assessment",
+                    ],
+                },
+            },
+        },
     }

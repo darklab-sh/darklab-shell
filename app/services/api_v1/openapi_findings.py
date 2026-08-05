@@ -33,6 +33,13 @@ def _provenance_properties() -> dict[str, Any]:
 
 def finding_schemas() -> dict[str, Any]:
     provenance_required = ["origin", "validation_method"]
+    identity_required = [
+        "rule_identity",
+        "observation_id",
+        "remediation_id",
+        "observation_references",
+        "remediation_groups",
+    ]
     return {
         "AtlasFinding": {
             "type": "object",
@@ -40,6 +47,7 @@ def finding_schemas() -> dict[str, Any]:
                 "id",
                 "entity_id",
                 *provenance_required,
+                *identity_required,
                 *FINDING_DETAIL_REQUIRED,
                 "status",
                 "title",
@@ -53,6 +61,7 @@ def finding_schemas() -> dict[str, Any]:
                 "entity_value": {"type": "string"},
                 "subject_key": {"type": "string"},
                 **_provenance_properties(),
+                "rule_identity": {"type": "string"},
                 **finding_detail_properties(),
                 "severity": {"type": "string"},
                 "kind": {"type": "string"},
@@ -82,6 +91,7 @@ def finding_schemas() -> dict[str, Any]:
                 "id",
                 "run_id",
                 *provenance_required,
+                *identity_required,
                 *FINDING_DETAIL_REQUIRED,
                 "status",
                 "review_state",
@@ -99,9 +109,11 @@ def finding_schemas() -> dict[str, Any]:
                 "target_ids": {"type": "array", "items": {"type": "string"}},
                 "subject_key": {"type": "string"},
                 **_provenance_properties(),
+                "rule_identity": {"type": "string"},
                 **finding_detail_properties(),
                 "scope": {"type": "string"},
                 "kind": {"type": "string"},
+                "tool_root": {"type": "string"},
                 "title": {"type": "string"},
                 "raw_line": {"type": "string"},
                 "line_number": {"type": "integer", "nullable": True},

@@ -12,14 +12,14 @@ import re
 from typing import Any, Mapping
 
 from core.database_access import get_db_connect
+from services.projects.finding_identity import finding_identity_references
+
 from .links import (
-    canonical_affected_subject,
     finding_cves,
     finding_evidence_keys,
     finding_priority_context,
     finding_validation_method,
     owner_scope_key,
-    remediation_identity,
 )
 from .nvd_advisory import get_advisory_source_status
 from .store import get_configured_feed_status
@@ -248,6 +248,33 @@ def _finding_with_owner(
     return {**finding, "session_id": owner[0], "team_id": owner[1]}
 
 
+def _attach_identity_references(
+    findings: list[dict[str, Any]],
+    cves_by_finding: Mapping[str, tuple[str, ...]],
+    *,
+    owner_by_finding_id: Mapping[str, tuple[str, str]] | None,
+) -> None:
+    for finding in findings:
+        finding_id = str(finding.get("id") or "")
+        identity_finding = _finding_with_owner(
+            finding,
+            owner_by_finding_id=owner_by_finding_id,
+        )
+        references = finding_identity_references(
+            identity_finding,
+            cves_by_finding.get(finding_id, ()),
+        )
+        primary = references[0]
+        finding["observation_id"] = primary["observation_id"]
+        finding["remediation_id"] = primary["remediation_id"]
+        finding["observation_references"] = references
+        finding["remediation_groups"] = [{
+            "remediation_id": reference["remediation_id"],
+            "vulnerability_id": reference["vulnerability_id"],
+            "affected_subject": reference["affected_subject"],
+        } for reference in references]
+
+
 def attach_risk_to_findings(
     findings: list[dict[str, Any]],
     conn: Any | None = None,
@@ -263,6 +290,11 @@ def attach_risk_to_findings(
         cves = finding_cves(finding)
         cves_by_finding[finding_id] = cves
         cve_ids.update(cves)
+    _attach_identity_references(
+        findings,
+        cves_by_finding,
+        owner_by_finding_id=owner_by_finding_id,
+    )
     if not cve_ids:
         return findings
     owns_connection = conn is None
@@ -289,10 +321,6 @@ def attach_risk_to_findings(
         }
         for finding in findings:
             finding_id = str(finding.get("id") or "")
-            identity_finding = _finding_with_owner(
-                finding,
-                owner_by_finding_id=owner_by_finding_id,
-            )
             cves = cves_by_finding.get(finding_id, ())
             if not cves:
                 continue
@@ -321,21 +349,17 @@ def attach_risk_to_findings(
                 )
                 enriched.append(risk)
             _sort_by_cve_risk(enriched)
-            remediation_groups = [{
-                "remediation_id": remediation_identity(identity_finding, cve_id),
-                "vulnerability_id": cve_id,
-                "affected_subject": canonical_affected_subject(identity_finding),
-            } for cve_id in cves]
             finding["cve_ids"] = list(cves)
             finding["cve_risk"] = enriched
             finding["risk"] = enriched[0]
-            finding["remediation_groups"] = remediation_groups
             primary_cve_id = str(enriched[0].get("cve_id") or "")
-            finding["remediation_id"] = next(
-                reference["remediation_id"]
-                for reference in remediation_groups
+            primary_reference = next(
+                reference
+                for reference in finding["observation_references"]
                 if reference["vulnerability_id"] == primary_cve_id
             )
+            finding["observation_id"] = primary_reference["observation_id"]
+            finding["remediation_id"] = primary_reference["remediation_id"]
             finding["priority_context"] = finding_priority_context(finding)
         return findings
     finally:

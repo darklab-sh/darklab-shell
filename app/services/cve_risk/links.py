@@ -6,10 +6,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import hashlib
 import re
 from typing import Any, Iterable
 
+from services.projects.finding_identity import (
+    canonical_affected_subject as canonical_affected_subject,
+    owner_scope_key as owner_scope_key,
+    remediation_identity as remediation_identity,
+)
 from services.projects.finding_provenance import normalize_finding_validation_method
 
 
@@ -22,62 +26,6 @@ def extract_cve_ids(*values: Any) -> tuple[str, ...]:
     for value in values:
         found.update(match.upper() for match in _CVE_IN_TEXT_RE.findall(str(value or "")))
     return tuple(sorted(found))
-
-
-def owner_scope_key(finding: dict[str, Any]) -> tuple[str, str]:
-    team_id = str(finding.get("team_id") or "")
-    session_id = "" if team_id else str(finding.get("session_id") or "")
-    return session_id, team_id
-
-
-def canonical_affected_subject(finding: dict[str, Any]) -> str:
-    """Return the exact affected-subject key used for remediation grouping.
-
-    Atlas entity ids already include owner, type, and canonical value. A stored
-    subject signature is the next-best exact identity. The final observation
-    fallback deliberately prevents two unresolved subjects from being merged.
-    """
-    entity_id = str(finding.get("entity_id") or finding.get("target_id") or "").strip()
-    if entity_id:
-        return f"entity:{entity_id}"
-    subject_key = str(finding.get("subject_key") or "").strip()
-    if subject_key:
-        return f"subject:{subject_key}"
-    explicit = finding.get("affected_subject")
-    if isinstance(explicit, dict):
-        explicit_type = str(explicit.get("type") or "").strip().lower()
-        explicit_value = str(
-            explicit.get("canonical_value") or explicit.get("value") or ""
-        ).strip()
-        if explicit_type and explicit_value:
-            return f"subject:{explicit_type}\x1f{explicit_value}"
-    elif str(explicit or "").strip():
-        return f"subject:{str(explicit).strip()}"
-    observation_id = str(finding.get("id") or "").strip()
-    return f"observation:{observation_id}"
-
-
-def remediation_identity(finding: dict[str, Any], vulnerability_id: str) -> str:
-    session_id, team_id = owner_scope_key(finding)
-    # Keep the original material for stored entity/subject-backed identities so
-    # feed refreshes do not duplicate existing escalation history after upgrade.
-    legacy_subject = str(
-        finding.get("entity_id")
-        or finding.get("target_id")
-        or finding.get("subject_key")
-        or finding.get("fingerprint")
-        or ""
-    )
-    subject = legacy_subject
-    if not subject:
-        subject = (
-            canonical_affected_subject(finding)
-            if finding.get("affected_subject")
-            else str(finding.get("id") or "")
-        )
-    normalized_vulnerability = str(vulnerability_id or "").strip().upper()
-    material = "\x1f".join((team_id, session_id, subject, normalized_vulnerability))
-    return "rmd_" + hashlib.sha256(material.encode("utf-8", errors="replace")).hexdigest()[:32]
 
 
 def finding_priority_context(finding: dict[str, Any]) -> dict[str, Any]:

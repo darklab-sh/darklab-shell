@@ -80,7 +80,12 @@ def cve_risk_finding_properties() -> dict[str, Any]:
         "cve_ids": {"type": "array", "items": {"type": "string"}},
         "cve_risk": {"type": "array", "items": _ref("CveRiskSignal")},
         "risk": _ref("CveRiskSignal"),
+        "observation_id": {"type": "string"},
         "remediation_id": {"type": "string"},
+        "observation_references": {
+            "type": "array",
+            "items": _ref("FindingObservationReference"),
+        },
         "remediation_groups": {
             "type": "array",
             "items": _ref("FindingRemediationReference"),

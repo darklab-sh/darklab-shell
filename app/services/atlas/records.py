@@ -13,6 +13,7 @@ from services.projects.finding_provenance import (
     normalize_finding_validation_method,
 )
 from services.projects.finding_details import finding_detail_fields
+from services.projects.finding_identity import stable_rule_identity
 
 
 def entity_row_to_dict(row) -> dict[str, Any]:
@@ -42,6 +43,12 @@ def finding_row_to_dict(row) -> dict[str, Any]:
         row["validation_method"] if "validation_method" in row.keys() else "",
         origin=origin,
     )
+    rule_identity = stable_rule_identity({
+        "id": row["id"],
+        "signature_hash": row["signature_hash"] if "signature_hash" in row.keys() else "",
+        "tool_root": row["tool_root"] if "tool_root" in row.keys() else "",
+        "kind": row["kind"] if "kind" in row.keys() else "finding",
+    })
     return {
         "id": row["id"],
         "entity_id": row["entity_id"] or "",
@@ -50,6 +57,7 @@ def finding_row_to_dict(row) -> dict[str, Any]:
         "subject_key": row["subject_key"] or "",
         "origin": origin,
         "validation_method": validation_method,
+        "rule_identity": rule_identity,
         "severity": row["severity"] or "",
         "kind": row["kind"] or "finding",
         "tool_root": row["tool_root"] or "",

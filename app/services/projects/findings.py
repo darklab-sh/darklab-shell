@@ -37,6 +37,7 @@ from services.projects.finding_provenance import (
     normalize_finding_validation_method,
 )
 from services.projects.finding_details import finding_detail_fields
+from services.projects.finding_identity import stable_rule_identity
 from services.projects.metadata import (
     _entity_labels_by_id,
     _entity_notes_by_id,
@@ -78,6 +79,12 @@ def row_to_finding(row):
         value("validation_method"),
         origin=origin,
     )
+    rule_identity = stable_rule_identity({
+        "id": value("id"),
+        "signature_hash": value("signature_hash"),
+        "tool_root": value("tool_root"),
+        "kind": kind,
+    })
     return {
         "id": value("id"),
         "session_id": value("session_id"),
@@ -88,8 +95,10 @@ def row_to_finding(row):
         "subject_key": value("subject_key"),
         "origin": origin,
         "validation_method": validation_method,
+        "rule_identity": rule_identity,
         "scope": value("scope") or kind,
         "kind": kind,
+        "tool_root": value("tool_root"),
         "title": value("title"),
         "raw_line": raw_line,
         "line_number": value("line_number", None),
@@ -314,7 +323,13 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             finding["target_ids"] = [row["entity_id"]] if row["entity_id"] else []
             finding["run_occurrence_count"] = int(row["run_occurrence_count"] or 0)
             findings.append(finding)
-    attach_risk_to_findings(findings)
+    attach_risk_to_findings(
+        findings,
+        owner_by_finding_id={
+            str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+            for row in rows
+        },
+    )
     if paginated:
         return _run_finding_page_payload(findings, total, safe_limit, safe_offset, occurrence_total)
     return findings
@@ -335,7 +350,7 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
         if result.rowcount <= 0:
             return None
         row = conn.execute(
-            "SELECT id, session_id, entity_id, subject_key, signature_hash, origin, validation_method, "
+            "SELECT id, session_id, team_id, entity_id, subject_key, signature_hash, origin, validation_method, "
             "severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
             "fingerprint, title, raw_line, created, summary, impact, reproduction_steps, confidence, "
@@ -343,8 +358,17 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
             "FROM findings WHERE id = ?",
             [finding_id],
         ).fetchone()
+        finding = row_to_finding(row)
+        if finding:
+            attach_risk_to_findings(
+                [finding],
+                conn=conn,
+                owner_by_finding_id={
+                    str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or "")),
+                },
+            )
         conn.commit()
-    return row_to_finding(row)
+    return finding
 
 
 def bulk_update_project_finding_review_states(session_id, project_id, data, *, team_id=""):
@@ -804,7 +828,14 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             item["labels"] = finding_labels.get(finding_id, [])
             item["note"] = finding_notes.get(finding_id)
         attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
-        attach_risk_to_findings(findings, conn=conn)
+        attach_risk_to_findings(
+            findings,
+            conn=conn,
+            owner_by_finding_id={
+                str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+                for row in rows
+            },
+        )
 
     if paginated:
         return _project_finding_page_payload(
