@@ -86,6 +86,13 @@
   align-items: flex-end;
 }
 
+.project-assessment-cycle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .project-assessment-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -315,6 +322,21 @@
 
 .project-assessment-root.is-mobile .project-assessment-pager {
   justify-content: space-between;
+}
+
+.project-assessment-mobile-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0));
+  border-top: 1px solid var(--theme-panel-border);
+  background: var(--theme-panel-bg);
+  box-shadow: 0 -8px 18px var(--theme-panel-shadow);
+}
+
+.project-assessment-mobile-actions .btn {
+  min-height: 44px;
 }
 
 @media (max-width: 640px) {

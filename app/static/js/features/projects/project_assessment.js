@@ -21,6 +21,7 @@ function createProjectAssessmentController(context) {
       detailLoading: false,
       detailPromise: null,
       creating: false,
+      mutating: '',
       error: '',
       detailError: '',
       category: '',
@@ -240,13 +241,150 @@ function createProjectAssessmentController(context) {
     }
   }
 
+  function selectedAssessment(projectId) {
+    return cycleSelection(stateFor(projectId));
+  }
+
+  async function confirmLifecycle(options) {
+    if (typeof ctx.showConfirm !== 'function') {
+      const err = new Error('Assessment lifecycle confirmations are unavailable.');
+      ctx.setProjectWorkspaceMessage?.(err.message, { error: true });
+      logFailure('PROJECT_ASSESSMENT_CLIENT_CONFIRM_UNAVAILABLE', err, { phase: 'confirmation' });
+      return false;
+    }
+    const { confirmId, ...confirmOptions } = options;
+    try {
+      const choice = await ctx.showConfirm(confirmOptions);
+      return choice === confirmId;
+    } catch (err) {
+      ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open the assessment confirmation.', { error: true });
+      logFailure('PROJECT_ASSESSMENT_CLIENT_CONFIRM_FAILED', err, { phase: 'confirmation' });
+      return false;
+    }
+  }
+
+  async function mutateCycle(projectId, action, request, successMessage, { resetSelection = false } = {}) {
+    const id = String(projectId || '');
+    const st = stateFor(id);
+    if (!id || st.mutating) return false;
+    st.mutating = String(action || 'update');
+    renderViews();
+    try {
+      await request();
+      if (resetSelection) {
+        st.selectedId = '';
+        st.category = '';
+        st.checkState = '';
+        resetDetailState(st);
+      } else {
+        st.loaded = false;
+        st.detail = null;
+      }
+      ctx.setProjectWorkspaceMessage?.(successMessage);
+      return load(id, { force: true, render: false });
+    } catch (err) {
+      const message = err?.message || 'Could not update this assessment cycle.';
+      ctx.setProjectWorkspaceMessage?.(message, { error: true });
+      logFailure(`PROJECT_ASSESSMENT_CLIENT_${String(action || 'update').toUpperCase()}_FAILED`, err, {
+        phase: 'lifecycle',
+        action: String(action || 'update'),
+        project_id: id,
+        assessment_id: st.selectedId,
+      });
+      return false;
+    } finally {
+      st.mutating = '';
+      renderViews();
+    }
+  }
+
+  async function transitionCycle(projectId, status) {
+    const assessment = selectedAssessment(projectId);
+    const nextStatus = String(status || '');
+    if (!assessment || !['completed', 'archived'].includes(nextStatus)) return false;
+    const completing = nextStatus === 'completed';
+    const actionLabel = completing ? 'Complete cycle' : 'Archive cycle';
+    const confirmed = await confirmLifecycle({
+      body: {
+        text: `${actionLabel}: ${assessment.title || 'this assessment'}?`,
+        note: completing
+          ? 'Completed cycles keep their saved checks and evidence, but they become read-only.'
+          : 'Archived cycles stay available for review and can be permanently deleted later.',
+      },
+      tone: 'warning',
+      confirmId: nextStatus,
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: nextStatus, label: actionLabel, tone: 'warning' },
+      ],
+    });
+    if (!confirmed) return false;
+    return mutateCycle(projectId, completing ? 'complete' : 'archive', async () => {
+      await ctx.projectWorkspaceRequest(
+        `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessment.id)}`,
+        { method: 'PATCH', body: JSON.stringify({ status: nextStatus }) },
+      );
+    }, completing ? 'Assessment cycle completed.' : 'Assessment cycle archived.');
+  }
+
+  async function deleteCycle(projectId) {
+    const assessment = selectedAssessment(projectId);
+    if (!assessment || assessment.status !== 'archived') return false;
+    const st = stateFor(projectId);
+    if (st.mutating) return false;
+    st.mutating = 'delete_preview';
+    renderViews();
+    let preview;
+    try {
+      const resp = await ctx.projectWorkspaceRequest(
+        `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessment.id)}/delete-preview`,
+        { cache: 'no-store' },
+      );
+      preview = (await resp.json())?.preview || null;
+    } catch (err) {
+      ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not preview assessment deletion.', { error: true });
+      logFailure('PROJECT_ASSESSMENT_CLIENT_DELETE_PREVIEW_FAILED', err, {
+        phase: 'delete_preview',
+        project_id: String(projectId || ''),
+        assessment_id: String(assessment.id || ''),
+      });
+      return false;
+    } finally {
+      st.mutating = '';
+      renderViews();
+    }
+    if (!preview?.can_delete) return false;
+    const counts = preview.will_delete || {};
+    const confirmed = await confirmLifecycle({
+      body: {
+        text: `Delete assessment: ${assessment.title || 'this cycle'}?`,
+        note: `This removes ${Number(counts.checks || 0)} saved checks and ${Number(counts.evidence_links || 0)} evidence links. Source runs, findings, entities, and files stay intact.`,
+      },
+      tone: 'danger',
+      confirmId: 'delete',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'delete', label: 'Delete assessment', role: 'destructive' },
+      ],
+    });
+    if (!confirmed) return false;
+    return mutateCycle(projectId, 'delete', async () => {
+      await ctx.projectWorkspaceRequest(
+        `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessment.id)}`,
+        { method: 'DELETE' },
+      );
+    }, 'Assessment cycle deleted.', { resetSelection: true });
+  }
+
   const renderer = createProjectAssessmentRenderer(ctx, {
+    deleteCycle,
     createCycle,
     load,
     loadDetail,
     selectCycle,
     setFilter,
     setPage,
+    transitionCycle,
   });
 
   function ensureLoad(projectId) {
@@ -270,6 +408,7 @@ function createProjectAssessmentController(context) {
 
   return {
     createCycle,
+    deleteCycle,
     invalidate,
     load,
     loadDetail,
@@ -279,6 +418,7 @@ function createProjectAssessmentController(context) {
     setFilter,
     setPage,
     stateFor,
+    transitionCycle,
   };
 }
 

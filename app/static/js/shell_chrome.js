@@ -2145,6 +2145,8 @@ let importedProjectWorkspaceShell;
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      showConfirm: _shellFn('showConfirm', importedShowConfirm),
+      actionSheetContainer: () => projectWorkspaceModal,
       logClientError: _shellLogClientError,
       mobileView: _projectMobileView,
       canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),

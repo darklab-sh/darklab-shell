@@ -129,7 +129,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Add a risk-prioritized finding worklist and recent-evidence drill-ins after the existing cycle status, truthful coverage, category progress, target worklist, and paged checks.
   - Count remediation groups rather than evidence observations in the fix-first worklist and headline finding rollups. Show the number and strongest validation state of related observations on each row, then expand inferred, confirmed, imported, and manual evidence in the finding detail.
   - Keep coverage and risk as neighboring but separate questions. Show why a finding is prioritized with KEV, EPSS, CVSS, exploit-reference, confidence, exposure, age, and freshness labels; do not let a high-risk count imply that an untested check was covered.
-  - Add recommended-action and lifecycle controls with the shared `.btn`, focus, dismissal, `showConfirm()`, and mobile `openActionSheet()` contracts. Keep mobile row actions touch-sized and use a sticky action footer where needed.
+  - Add recommended-action controls with the shared `.btn`, focus, dismissal, `showConfirm()`, and mobile `openActionSheet()` contracts. Keep mobile row actions touch-sized and use a sticky action footer where needed.
 - [ ] Connect the current Overview without duplicating it:
   - Keep Overview's existing scan gaps, finding progress, verification progress, and deliverables summary as the high-level Project view.
   - When an active assessment exists, let Overview show a compact assessment status/coverage card and a compact fix-first summary that link into the exact Assessment filters. The detailed methodology matrix and ranked worklist remain owned by the Assessment tab.

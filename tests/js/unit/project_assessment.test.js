@@ -31,6 +31,8 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     renderProjectExplorer: vi.fn(),
     renderProjectMobileDetail: vi.fn(),
     setProjectWorkspaceMessage: vi.fn(),
+    showConfirm: vi.fn(async options => options.actions.at(-1).id),
+    actionSheetContainer: vi.fn(() => document.body),
     logClientError: vi.fn(),
     mobileView: vi.fn(() => 'list'),
     canMutateProjects: vi.fn(() => true),
@@ -155,6 +157,11 @@ describe('project assessment controller', () => {
       expect(surface.textContent).toContain('Manual decision')
     }
     expect(mobile.classList.contains('is-mobile')).toBe(true)
+    mobile.querySelector('.project-assessment-mobile-actions button').click()
+    expect([...document.querySelectorAll('.action-sheet-item')].map(button => button.textContent)).toEqual([
+      'Complete cycle',
+      'Archive cycle',
+    ])
     expect(ctx.enhanceAppSelects).toHaveBeenCalledTimes(2)
   })
 
@@ -237,5 +244,80 @@ describe('project assessment controller', () => {
     viewer.renderAssessment(viewerContainer, 'prj_view')
     expect(viewerContainer.querySelector('button[type="submit"]').disabled).toBe(true)
     expect(viewerContainer.querySelector('button[type="submit"]').title).toContain('View-only')
+
+    const viewerCycle = DarklabProjectAssessment.createProjectAssessmentController(makeContext(
+      vi.fn(async (url, options) => responseFor(url, options)),
+      { canMutateProjects: vi.fn(() => false) },
+    ))
+    await viewerCycle.load('prj_view_cycle', { render: false })
+    const viewerCycleContainer = document.createElement('div')
+    viewerCycle.renderAssessment(viewerCycleContainer, 'prj_view_cycle')
+    const lifecycleButtons = [...viewerCycleContainer.querySelectorAll('.project-assessment-cycle-actions button')]
+    expect(lifecycleButtons.map(button => button.textContent)).toEqual(['Complete cycle', 'Archive cycle'])
+    expect(lifecycleButtons.every(button => button.disabled && button.title.includes('View-only'))).toBe(true)
+  })
+
+  it('confirms forward-only lifecycle changes and previews archived-cycle deletion', async () => {
+    let current = { ...cycle }
+    let deleted = false
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/delete-preview')) {
+        return apiResponse({
+          preview: {
+            can_delete: true,
+            will_delete: { checks: 2, evidence_links: 3 },
+          },
+        })
+      }
+      if (options.method === 'PATCH') {
+        current = { ...current, status: JSON.parse(options.body).status }
+        return apiResponse({ assessment: current })
+      }
+      if (options.method === 'DELETE') {
+        deleted = true
+        return apiResponse({ ok: true })
+      }
+      if (/\/assessments\/[^?]+/.test(url)) {
+        return apiResponse({ ...detail, assessment: { ...detail.assessment, ...current } })
+      }
+      return apiResponse({
+        assessments: deleted ? [] : [current],
+        profiles,
+        total: deleted ? 0 : 1,
+        limit: 100,
+        offset: 0,
+        has_more: false,
+      })
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+
+    expect(await controller.transitionCycle('prj_1', 'completed')).toBe(true)
+    expect(current.status).toBe('completed')
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle completed.')
+
+    expect(await controller.transitionCycle('prj_1', 'archived')).toBe(true)
+    expect(current.status).toBe('archived')
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle archived.')
+
+    expect(await controller.deleteCycle('prj_1')).toBe(true)
+    expect(deleted).toBe(true)
+    expect(ctx.showConfirm.mock.calls.at(-1)[0].body.note).toContain('2 saved checks and 3 evidence links')
+    expect(ctx.showConfirm.mock.calls.at(-1)[0].body.note).toContain('Source runs, findings, entities, and files stay intact.')
+    expect(controller.stateFor('prj_1').assessments).toEqual([])
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle deleted.')
+  })
+
+  it('cancels lifecycle transitions without sending a mutation', async () => {
+    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+    const ctx = makeContext(projectWorkspaceRequest, {
+      showConfirm: vi.fn(async () => 'cancel'),
+    })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+
+    expect(await controller.transitionCycle('prj_1', 'completed')).toBe(false)
+    expect(projectWorkspaceRequest.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false)
   })
 })

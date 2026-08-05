@@ -4,6 +4,7 @@
 // Shared desktop/mobile renderer for the Project Assessment tab.
 
 import { bindDisclosure } from '../../ui/ui_disclosure.js';
+import { openActionSheet } from '../../ui/ui_action_sheet.js';
 
 const checkStateLabels = {
   blocked: 'Blocked',
@@ -135,7 +136,77 @@ function createProjectAssessmentRenderer(context, actions) {
     return section;
   }
 
-  function renderCycleHeader(projectId, st, assessment) {
+  function lifecycleItems(projectId, st, assessment) {
+    const disabled = !!st.mutating || ctx.canMutateProjects?.() === false;
+    const status = String(assessment?.status || '');
+    const items = [];
+    if (status === 'active') {
+      items.push({
+        label: 'Complete cycle',
+        action: () => act.transitionCycle(projectId, 'completed'),
+        disabled,
+      });
+    }
+    if (status === 'active' || status === 'completed') {
+      items.push({
+        label: 'Archive cycle',
+        action: () => act.transitionCycle(projectId, 'archived'),
+        disabled,
+      });
+    }
+    if (status === 'archived') {
+      items.push({
+        label: 'Delete assessment',
+        action: () => act.deleteCycle(projectId),
+        disabled,
+        tone: 'danger',
+      });
+    }
+    return items;
+  }
+
+  function renderDesktopLifecycleActions(projectId, st, assessment) {
+    const wrap = makeElement('div', 'project-assessment-cycle-actions');
+    lifecycleItems(projectId, st, assessment).forEach((item) => {
+      const button = makeElement(
+        'button',
+        item.tone === 'danger' ? 'btn btn-destructive btn-compact' : 'btn btn-secondary btn-compact',
+        item.label,
+      );
+      button.type = 'button';
+      button.disabled = item.disabled;
+      if (ctx.canMutateProjects?.() === false) {
+        button.title = 'View-only team members cannot change assessment cycles.';
+      }
+      ctx.bindProjectRuntimePressable?.(button, { onActivate: item.action });
+      wrap.appendChild(button);
+    });
+    return wrap;
+  }
+
+  function renderMobileLifecycleActions(projectId, st, assessment) {
+    const items = lifecycleItems(projectId, st, assessment);
+    if (!items.length) return null;
+    const footer = makeElement('div', 'project-assessment-mobile-actions');
+    const button = makeElement('button', 'btn btn-secondary', st.mutating ? 'Working…' : 'Cycle actions');
+    button.type = 'button';
+    button.disabled = !!st.mutating || ctx.canMutateProjects?.() === false;
+    if (ctx.canMutateProjects?.() === false) {
+      button.title = 'View-only team members cannot change assessment cycles.';
+    }
+    ctx.bindProjectRuntimePressable?.(button, {
+      onActivate: () => openActionSheet({
+        title: `Assessment actions for ${assessment?.title || 'this cycle'}`,
+        items,
+        container: ctx.actionSheetContainer?.() || document.body,
+        returnFocus: button,
+      }),
+    });
+    footer.appendChild(button);
+    return footer;
+  }
+
+  function renderCycleHeader(projectId, st, assessment, { mobile = false } = {}) {
     const section = makeElement('section', 'project-assessment-cycle project-assessment-section');
     const top = makeElement('div', 'project-assessment-cycle-top');
     const title = makeElement('div', 'project-assessment-cycle-title');
@@ -172,6 +243,7 @@ function createProjectAssessmentRenderer(context, actions) {
     ].filter(Boolean).join(' · ');
     controls.appendChild(makeElement('div', 'project-assessment-cycle-dates', dates));
     section.appendChild(controls);
+    if (!mobile) section.appendChild(renderDesktopLifecycleActions(projectId, st, assessment));
     return section;
   }
 
@@ -399,7 +471,7 @@ function createProjectAssessmentRenderer(context, actions) {
       return root;
     }
 
-    root.appendChild(renderCycleHeader(projectId, st, selected));
+    root.appendChild(renderCycleHeader(projectId, st, selected, { mobile }));
     if (!st.assessments.some(item => item?.status === 'active')) {
       root.appendChild(renderStartCard(projectId, st));
     }
@@ -417,6 +489,10 @@ function createProjectAssessmentRenderer(context, actions) {
       renderCategoryProgress(projectId, st, st.detail.category_rollups),
       renderChecks(projectId, st, st.detail),
     );
+    if (mobile) {
+      const actions = renderMobileLifecycleActions(projectId, st, selected);
+      if (actions) root.appendChild(actions);
+    }
     return root;
   }
 
