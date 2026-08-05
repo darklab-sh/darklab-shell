@@ -150,6 +150,12 @@ The current event inventory is:
 | INFO | `PROJECT_ASSESSMENT_CHECK_STATE_CHANGED` | Project assessment check route | ip, session, team_id, project_id, assessment_id, check_id, check_key, policy_level, from_state, to_state, manual_override_cleared |
 | INFO | `PROJECT_ASSESSMENT_EVIDENCE_LINKED` | Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
 | INFO | `PROJECT_ASSESSMENT_EVIDENCE_UNLINKED` | Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
+| INFO | `API_PROJECT_ASSESSMENT_CREATED` | API v1 Project assessment create route | ip, session, team_id, project_id, assessment_id, source, profile_key, profile_version, check_count |
+| INFO | `API_PROJECT_ASSESSMENT_UPDATED` | API v1 Project assessment lifecycle route | ip, session, team_id, project_id, assessment_id, source, from_status, to_status, transition_kind, title_changed |
+| INFO | `API_PROJECT_ASSESSMENT_DELETED` | API v1 Project assessment deletion route | ip, session, team_id, project_id, assessment_id, source, check_count, evidence_count |
+| INFO | `API_PROJECT_ASSESSMENT_CHECK_STATE_CHANGED` | API v1 Project assessment check route | ip, session, team_id, project_id, assessment_id, check_id, source, check_key, policy_level, from_state, to_state, manual_override_cleared |
+| INFO | `API_PROJECT_ASSESSMENT_EVIDENCE_LINKED` | API v1 Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, source, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
+| INFO | `API_PROJECT_ASSESSMENT_EVIDENCE_UNLINKED` | API v1 Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, source, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
 | INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
 | INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |

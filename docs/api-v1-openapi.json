@@ -267,6 +267,947 @@
         ],
         "type": "object"
       },
+      "AssessmentCategoryRollup": {
+        "additionalProperties": false,
+        "properties": {
+          "applicable_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "category": {
+            "type": "string"
+          },
+          "checks_awaiting_review": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "covered_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "excluded_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unavailable_evidence_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "untested_checks": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "category",
+          "total_checks",
+          "applicable_checks",
+          "covered_checks",
+          "checks_awaiting_review",
+          "untested_checks",
+          "excluded_checks",
+          "unavailable_evidence_checks"
+        ],
+        "type": "object"
+      },
+      "AssessmentCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "applicability": {
+            "enum": [
+              "applicable",
+              "not_applicable"
+            ],
+            "type": "string"
+          },
+          "assessment_id": {
+            "type": "string"
+          },
+          "available_evidence_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "category": {
+            "type": "string"
+          },
+          "check_key": {
+            "type": "string"
+          },
+          "created_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "evidence_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "first_evidence_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_evidence_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "recommended_action_key": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "not_started",
+              "running",
+              "covered",
+              "needs_review",
+              "blocked",
+              "failed",
+              "skipped",
+              "not_applicable"
+            ],
+            "type": "string"
+          },
+          "state_actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssessmentStateActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state_changed_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "state_reason": {
+            "type": "string"
+          },
+          "state_source": {
+            "enum": [
+              "derived",
+              "manual"
+            ],
+            "type": "string"
+          },
+          "target_entity_id": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "target_value": {
+            "type": "string"
+          },
+          "unavailable_evidence_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updated_at": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "assessment_id",
+          "category",
+          "check_key",
+          "target_entity_id",
+          "target_type",
+          "target_value",
+          "applicability",
+          "policy_level",
+          "state",
+          "state_source",
+          "state_reason",
+          "state_actor",
+          "state_changed_at",
+          "recommended_action_key",
+          "first_evidence_at",
+          "last_evidence_at",
+          "evidence_count",
+          "available_evidence_count",
+          "unavailable_evidence_count",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AssessmentCheckPage": {
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentCheck"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "checks",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "AssessmentCheckUpdateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/AssessmentCheck"
+          },
+          "from_state": {
+            "type": "string"
+          },
+          "manual_override_cleared": {
+            "type": "boolean"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "to_state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "check",
+          "from_state",
+          "to_state",
+          "manual_override_cleared"
+        ],
+        "type": "object"
+      },
+      "AssessmentCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "profile_key": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_key"
+        ],
+        "type": "object"
+      },
+      "AssessmentCreateResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AssessmentDetail"
+          },
+          {
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "ok"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "AssessmentCycle": {
+        "additionalProperties": false,
+        "properties": {
+          "archived_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "completed_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_by_member_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "personal",
+              "team"
+            ],
+            "type": "string"
+          },
+          "profile_key": {
+            "type": "string"
+          },
+          "profile_snapshot": {
+            "$ref": "#/components/schemas/AssessmentProfileSnapshot"
+          },
+          "profile_version": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "rollup": {
+            "$ref": "#/components/schemas/AssessmentRollup"
+          },
+          "started_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "completed",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_by_member_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "owner_kind",
+          "team_id",
+          "title",
+          "profile_key",
+          "profile_version",
+          "profile_snapshot",
+          "status",
+          "started_at",
+          "completed_at",
+          "archived_at",
+          "created_by_member_id",
+          "updated_by_member_id",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AssessmentCyclePage": {
+        "additionalProperties": false,
+        "properties": {
+          "assessments": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentCycle"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assessments",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "AssessmentDeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deleted": {
+            "$ref": "#/components/schemas/AssessmentDeletionPreview"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "deleted"
+        ],
+        "type": "object"
+      },
+      "AssessmentDeletionPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "can_delete": {
+            "type": "boolean"
+          },
+          "requires_archived": {
+            "type": "boolean"
+          },
+          "source_records_deleted": {
+            "type": "boolean"
+          },
+          "will_delete": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "assessment",
+          "can_delete",
+          "requires_archived",
+          "will_delete",
+          "source_records_deleted"
+        ],
+        "type": "object"
+      },
+      "AssessmentDeletionPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/AssessmentDeletionPreview"
+          }
+        },
+        "required": [
+          "preview"
+        ],
+        "type": "object"
+      },
+      "AssessmentDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment": {
+            "$ref": "#/components/schemas/AssessmentCycle"
+          },
+          "category_rollups": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentCategoryRollup"
+            },
+            "type": "array"
+          },
+          "checks": {
+            "$ref": "#/components/schemas/AssessmentCheckPage"
+          },
+          "rollup": {
+            "$ref": "#/components/schemas/AssessmentRollup"
+          }
+        },
+        "required": [
+          "assessment",
+          "rollup",
+          "category_rollups",
+          "checks"
+        ],
+        "type": "object"
+      },
+      "AssessmentEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "linked_by": {
+            "enum": [
+              "derived",
+              "manual"
+            ],
+            "type": "string"
+          },
+          "match_rule_key": {
+            "type": "string"
+          },
+          "match_rule_version": {
+            "type": "string"
+          },
+          "observed_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "source_state": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "unavailable_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "type": "string"
+          },
+          "updated_at": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "assessment_id",
+          "check_id",
+          "evidence_type",
+          "evidence_id",
+          "source_state",
+          "observed_at",
+          "unavailable_at",
+          "unavailable_reason",
+          "match_rule_key",
+          "match_rule_version",
+          "linked_by",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AssessmentEvidenceLinkRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_type": {
+            "enum": [
+              "run",
+              "workflow_execution",
+              "finding",
+              "atlas_entity",
+              "run_artifact",
+              "workspace_artifact"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_type",
+          "evidence_id"
+        ],
+        "type": "object"
+      },
+      "AssessmentEvidenceLinkResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/AssessmentCheck"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/AssessmentEvidence"
+          },
+          "from_state": {
+            "type": "string"
+          },
+          "manual_state_preserved": {
+            "type": "boolean"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "to_state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "evidence",
+          "check",
+          "from_state",
+          "to_state",
+          "manual_state_preserved"
+        ],
+        "type": "object"
+      },
+      "AssessmentEvidenceReference": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "evidence_type",
+          "evidence_id"
+        ],
+        "type": "object"
+      },
+      "AssessmentEvidenceRuleSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "command_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "compatible_versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "completion": {
+            "type": "string"
+          },
+          "evidence_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key": {
+            "type": "string"
+          },
+          "negative_evidence": {
+            "type": "boolean"
+          },
+          "structured_output_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target_match": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "workflow_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "version",
+          "evidence_types",
+          "command_roots",
+          "workflow_actions",
+          "structured_output_kinds",
+          "target_match",
+          "completion",
+          "compatible_versions",
+          "negative_evidence"
+        ],
+        "type": "object"
+      },
+      "AssessmentEvidenceUnlinkResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/AssessmentCheck"
+          },
+          "deleted": {
+            "$ref": "#/components/schemas/AssessmentEvidenceReference"
+          },
+          "from_state": {
+            "type": "string"
+          },
+          "manual_state_preserved": {
+            "type": "boolean"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "to_state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "deleted",
+          "check",
+          "from_state",
+          "to_state",
+          "manual_state_preserved"
+        ],
+        "type": "object"
+      },
+      "AssessmentManualStateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "not_started",
+              "blocked",
+              "skipped",
+              "not_applicable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "AssessmentProfileCheckSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "completion_guidance": {
+            "type": "string"
+          },
+          "evidence_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentEvidenceRuleSnapshot"
+            },
+            "type": "array"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "recommended_action": {
+            "type": "string"
+          },
+          "target_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "version",
+          "category",
+          "label",
+          "purpose",
+          "target_types",
+          "evidence_rules",
+          "policy_level",
+          "recommended_action",
+          "completion_guidance"
+        ],
+        "type": "object"
+      },
+      "AssessmentProfileSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentProfileCheckSnapshot"
+            },
+            "type": "array"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "target_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "version",
+          "label",
+          "purpose",
+          "target_types",
+          "checks"
+        ],
+        "type": "object"
+      },
+      "AssessmentRollup": {
+        "additionalProperties": false,
+        "properties": {
+          "applicable_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "checks_awaiting_review": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "covered_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "excluded_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unavailable_evidence_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "untested_checks": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_checks",
+          "applicable_checks",
+          "covered_checks",
+          "checks_awaiting_review",
+          "untested_checks",
+          "excluded_checks",
+          "unavailable_evidence_checks"
+        ],
+        "type": "object"
+      },
+      "AssessmentStateActor": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "session",
+              "team_member"
+            ],
+            "type": "string"
+          },
+          "member_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "member_id"
+        ],
+        "type": "object"
+      },
+      "AssessmentUpdateRequest": {
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "status": {
+            "enum": [
+              "completed",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AssessmentUpdateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment": {
+            "$ref": "#/components/schemas/AssessmentCycle"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "assessment"
+        ],
+        "type": "object"
+      },
       "AtlasAppEvidence": {
         "properties": {
           "app_port_count": {
@@ -6666,6 +7607,1038 @@
               }
             },
             "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "active",
+                "completed",
+                "archived"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentCyclePage"
+                }
+              }
+            },
+            "description": "Assessment cycles"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentCreateResponse"
+                }
+              }
+            },
+            "description": "Assessment cycle created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or assessment profile not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentDeleteResponse"
+                }
+              }
+            },
+            "description": "Archived assessment deleted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment or Project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "enum": [
+                "not_started",
+                "running",
+                "covered",
+                "needs_review",
+                "blocked",
+                "failed",
+                "skipped",
+                "not_applicable"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "policy_level",
+            "schema": {
+              "enum": [
+                "safe",
+                "standard",
+                "intrusive",
+                "destructive"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "evidence_state",
+            "schema": {
+              "enum": [
+                "available",
+                "unavailable",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentDetail"
+                }
+              }
+            },
+            "description": "Assessment cycle detail"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment or Project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentUpdateResponse"
+                }
+              }
+            },
+            "description": "Assessment cycle updated"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment or Project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}": {
+      "patch": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentManualStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentCheckUpdateResponse"
+                }
+              }
+            },
+            "description": "Assessment check state updated"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment or Project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/evidence": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentEvidenceLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentEvidenceLinkResponse"
+                }
+              }
+            },
+            "description": "Assessment evidence linked"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment or Project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/evidence/{evidence_link_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment evidence link id",
+            "in": "path",
+            "name": "evidence_link_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentEvidenceUnlinkResponse"
+                }
+              }
+            },
+            "description": "Assessment evidence unlinked"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment or Project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/delete-preview": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentDeletionPreviewResponse"
+                }
+              }
+            },
+            "description": "Assessment deletion preview"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot mutate Project assessments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment or Project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment conflict or quota exceeded"
           },
           "429": {
             "content": {

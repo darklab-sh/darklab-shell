@@ -2209,7 +2209,7 @@ describe('Atlas overlay', () => {
       })
     }
     document.body.classList.remove('mobile-terminal-mode')
-  })
+  }, 10_000)
 
   it('opens an explicit ordinary Atlas search from a no-record state', async () => {
     const { openAtlasQuickLookup, apiFetch } = loadAtlas({

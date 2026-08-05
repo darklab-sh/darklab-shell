@@ -122,6 +122,15 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
+| `GET` | `/api/v1/projects/<project_id>/assessments` | Assessment-cycle page with status, archived-visibility, limit, and offset controls. |
+| `POST` | `/api/v1/projects/<project_id>/assessments` | Create an active assessment cycle from a saved profile definition. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | One assessment cycle with rollups and a bounded, filtered check page. |
+| `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Rename, complete, or archive an assessment cycle. |
+| `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Set or clear a reasoned manual check state. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Link one compatible saved evidence source to a check. |
+| `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence/<evidence_link_id>` | Unlink one manually added evidence source. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/delete-preview` | Preview the assessment-owned rows an archived-cycle deletion removes. |
+| `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Delete one archived cycle without deleting its source records. |
 | `GET` | `/api/v1/schedules` | Scheduled-command page for the token's active personal/team scope. |
 | `POST` | `/api/v1/schedules` | Create a scheduled command with `command`, `cron_expr` or `cadence_preset`, optional `timezone`, and optional `label`. |
 | `GET` | `/api/v1/schedules/<schedule_id>` | One scheduled command plus a next-fire preview. |
@@ -198,6 +207,36 @@ AI assist responses include a `progress` object while a queued request is active
 Summary payloads use `summary`, `key_findings`, `warnings`, and `next_steps_hint`. Next-command payloads use `suggestions`, where accepted and rejected drafts include command text, reason, risk label, validation result, and any rejection reason.
 
 Run, history, artifact, project, AI assist, schedule, and watcher routes are scoped to the token's active personal/team scope. Cross-scope IDs return `404` rather than confirming the object exists elsewhere.
+
+---
+
+## Project Assessments
+
+Assessment routes reuse the browser's saved cycle, check, and evidence services. List and detail reads work in personal or team scope. Team writes require the same Project mutation permission as the browser, so a viewer can inspect a cycle but can't change it.
+
+Create a cycle with a profile key and optional title:
+
+```json
+{
+  "profile_key": "network.baseline",
+  "title": "August perimeter review"
+}
+```
+
+The cycle detail endpoint accepts `category`, `state`, `target_type`, `policy_level`, and `evidence_state` filters plus `limit` and `offset`. Its response keeps cycle and category rollups separate from the bounded `checks` page, including `total`, `limit`, `offset`, and `has_more`.
+
+An active check accepts `blocked`, `skipped`, or `not_applicable` together with a reason. Send an empty state to clear that decision and return to the state derived from saved evidence. Link evidence with its saved type and id:
+
+```json
+{
+  "evidence_type": "run",
+  "evidence_id": "run_..."
+}
+```
+
+The server verifies that the source belongs to the same owner and Project and satisfies the frozen evidence rule. It never trusts caller-supplied owner, target, rule, or source metadata. Complete or archive a cycle with `PATCH` and a `status` value; archived cycles can be previewed and deleted, while their original runs, findings, entities, and artifacts remain intact.
+
+Lifecycle conflicts and quota failures return `409`; invalid profiles, filters, states, transitions, or evidence return `400`; cross-scope records return `404`; and team permission failures return `403`. Responses and the OpenAPI contract omit personal session ids, profile file paths, secrets, protected HTTP context, private workspace paths, and stored command variables.
 
 ---
 

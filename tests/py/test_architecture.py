@@ -25,6 +25,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "auth.py",
     "openapi.py",
     "openapi_atlas_profile.py",
+    "openapi_assessments.py",
     "openapi_cve_advisory.py",
     "openapi_cve_risk.py",
     "openapi_finding_priority.py",
@@ -170,6 +171,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_report.py", 301, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_targets.py", 111, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1.py", 795, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/api_v1_assessment_checks.py", 267, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_assessments.py", 359, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_atlas_lookup.py", 27, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_atlas_profile.py", 33, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_notifications.py", 159, "split-package-ratchet"),
@@ -188,6 +191,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/database.py", 1007, "already-resolved-ratchet"),
     ModuleSizeBudget("app/blueprints/history.py", 1417, "already-resolved-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi.py", 2615, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_assessments.py", 724, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_advisory.py", 66, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_risk.py", 97, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_finding_priority.py", 53, "split-package-ratchet"),
@@ -331,8 +335,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 201
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "9e805529e97f1ef5608afbcff58a3a30ebdf7e1e45cb14a3faf807511fc79161"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 210
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "97700bb4f0880d242b246a89ef57a9f7e7af6b3889c272e1016984315ffeff19"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

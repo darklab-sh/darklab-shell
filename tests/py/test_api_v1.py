@@ -140,6 +140,64 @@ def _create_project(client, token, *, name="API Project"):
     return json.loads(resp.data)["project"]
 
 
+def _seed_assessment_target(
+    session_id: str,
+    project_id: str,
+    *,
+    team_id: str = "",
+) -> tuple[str, str]:
+    suffix = uuid.uuid4().hex[:16]
+    entity_id = "ent_api_assessment_" + suffix
+    run_id = "run_api_assessment_" + suffix
+    target = f"assessment-{suffix}.example"
+    observed_at = "2026-08-04T12:00:00+00:00"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, team_id, type, canonical_value, signature_hash, "
+            "first_seen_at, last_seen_at, created) "
+            "VALUES (?, ?, ?, 'domain', ?, ?, ?, ?, ?)",
+            (
+                entity_id,
+                session_id,
+                team_id,
+                target,
+                "sig_" + entity_id,
+                observed_at,
+                observed_at,
+                observed_at,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, team_id, run_kind, command, started, finished, "
+            "exit_code, output_preview, output_line_count, output_search_text) "
+            "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, '[]', 0, '')",
+            (
+                run_id,
+                session_id,
+                team_id,
+                f"nmap -sV {target}",
+                observed_at,
+                observed_at,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO project_links "
+            "(id, project_id, entity_type, entity_id, source, review_state, created) "
+            "VALUES (?, ?, 'atlas_entity', ?, 'manual', 'confirmed', ?)",
+            ("pl_api_assessment_entity_" + suffix, project_id, entity_id, observed_at),
+        )
+        conn.execute(
+            "INSERT INTO project_links "
+            "(id, project_id, entity_type, entity_id, source, review_state, created) "
+            "VALUES (?, ?, 'run', ?, 'manual', 'confirmed', ?)",
+            ("pl_api_assessment_run_" + suffix, project_id, run_id, observed_at),
+        )
+        conn.commit()
+    return entity_id, run_id
+
+
 def _create_api_team(client, owner_token: str, *, name: str = "API Team") -> str:
     resp = client.post(
         "/api/v1/teams",
@@ -188,6 +246,9 @@ _API_V1_TEAM_SCOPED_READ_ROUTES = (
     "api_project_runs",
     "api_project_entities",
     "api_project_packages",
+    "api_project_assessments",
+    "api_project_assessment",
+    "api_project_assessment_delete_preview",
     "api_schedules",
     "api_schedule",
     "api_schedule_fires",
@@ -224,6 +285,12 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_run_cancel": "Capability.RUN_COMMANDS",
     "api_run_project_link": "Capability.MUTATE_PROJECTS",
     "api_run_project_unlink": "Capability.MUTATE_PROJECTS",
+    "api_project_assessment_create": "_request_context(write=True)",
+    "api_project_assessment_update": "_request_context(write=True)",
+    "api_project_assessment_delete": "_request_context(write=True)",
+    "api_project_assessment_check_update": "_request_context()",
+    "api_project_assessment_evidence_link": "_request_context()",
+    "api_project_assessment_evidence_unlink": "_request_context()",
 }
 
 
@@ -266,11 +333,18 @@ def test_api_v1_team_scoped_route_contracts_are_explicit():
 
     for route_name in _API_V1_TEAM_SCOPED_READ_ROUTES:
         source = inspect.getsource(getattr(api_blueprint, route_name))
-        assert "_api_request_scope(" in source, route_name
+        assert (
+            "_api_request_scope(" in source
+            or "_request_context(" in source
+        ), route_name
 
     for route_name, capability_token in _API_V1_TEAM_SCOPED_WRITE_ROUTES.items():
         source = inspect.getsource(getattr(api_blueprint, route_name))
-        assert "_api_request_scope(" in source or "_require_notification_manage_scope(" in source, route_name
+        assert any(token in source for token in (
+            "_api_request_scope(",
+            "_require_notification_manage_scope(",
+            "_request_context(",
+        )), route_name
         assert capability_token in source, route_name
 
 
@@ -1052,6 +1126,264 @@ def test_api_v1_team_project_readers_include_cross_member_entities_and_findings(
     assert findings.status_code == 200
     assert [item["id"] for item in json.loads(findings.data)["findings"]] == [finding_id]
     assert json.loads(personal_projects.data)["projects"] == []
+
+
+def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    project = _create_project(client, token, name="API Assessment Project")
+    _entity_id, run_id = _seed_assessment_target(token, project["id"])
+    headers = _headers(token)
+
+    created_response = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=headers,
+        json={"profile_key": "network", "title": "External network review"},
+    )
+    assert created_response.status_code == 201
+    created = json.loads(created_response.data)
+    assessment = created["assessment"]
+    assessment_id = assessment["id"]
+    service_check = next(
+        check for check in created["checks"]["checks"]
+        if check["check_key"] == "service_discovery"
+    )
+    check_id = service_check["id"]
+    serialized = json.dumps(created, sort_keys=True)
+    assert token not in serialized
+    for private_key in (
+        "created_by_session_id",
+        "updated_by_session_id",
+        "state_changed_by_session_id",
+        "source_path",
+        "local_path",
+    ):
+        assert private_key not in serialized
+    assert created["ok"] is True
+    assert assessment["status"] == "active"
+    assert assessment["profile_key"] == "network"
+    assert created["checks"]["total"] == 3
+    assert created["checks"]["has_more"] is False
+
+    listed_response = client.get(
+        f"/api/v1/projects/{project['id']}/assessments?status=active&limit=1",
+        headers=headers,
+    )
+    filtered_response = client.get(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}"
+        "?state=not_started&policy_level=standard&limit=1&offset=0",
+        headers=headers,
+    )
+    cross_scope = client.get(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(other_token),
+    )
+    assert listed_response.status_code == 200
+    listed = json.loads(listed_response.data)
+    assert listed["total"] == 1
+    assert listed["assessments"][0]["id"] == assessment_id
+    assert filtered_response.status_code == 200
+    filtered = json.loads(filtered_response.data)
+    assert filtered["checks"]["total"] == 1
+    assert filtered["checks"]["checks"][0]["id"] == check_id
+    assert cross_scope.status_code == 404
+    assert json.loads(cross_scope.data)["error"]["code"] == "not_found"
+
+    blocked_response = client.patch(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}/checks/{check_id}",
+        headers=headers,
+        json={"state": "blocked", "reason": "Awaiting approved scan window"},
+    )
+    assert blocked_response.status_code == 200
+    blocked = json.loads(blocked_response.data)
+    assert blocked["check"]["state"] == "blocked"
+    assert blocked["check"]["state_actor"] == {
+        "kind": "session",
+        "member_id": "",
+    }
+
+    cleared_response = client.patch(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}/checks/{check_id}",
+        headers=headers,
+        json={"state": "not_started"},
+    )
+    linked_response = client.post(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}/checks/{check_id}/evidence",
+        headers=headers,
+        json={"evidence_type": "run", "evidence_id": run_id},
+    )
+    assert cleared_response.status_code == 200
+    assert linked_response.status_code == 201
+    linked = json.loads(linked_response.data)
+    assert linked["evidence"]["evidence_type"] == "run"
+    assert linked["evidence"]["evidence_id"] == run_id
+    assert linked["check"]["state"] == "covered"
+
+    evidence_link_id = linked["evidence"]["id"]
+    unlinked_response = client.delete(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}/checks/{check_id}/"
+        f"evidence/{evidence_link_id}",
+        headers=headers,
+    )
+    assert unlinked_response.status_code == 200
+    unlinked = json.loads(unlinked_response.data)
+    assert unlinked["deleted"]["id"] == evidence_link_id
+    assert unlinked["check"]["state"] == "not_started"
+
+    renamed_response = client.patch(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
+        headers=headers,
+        json={"title": "Validated network review"},
+    )
+    completed_response = client.patch(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
+        headers=headers,
+        json={"status": "completed"},
+    )
+    archived_response = client.patch(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
+        headers=headers,
+        json={"status": "archived"},
+    )
+    preview_response = client.get(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}/delete-preview",
+        headers=headers,
+    )
+    deleted_response = client.delete(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
+        headers=headers,
+    )
+    assert renamed_response.status_code == 200
+    assert json.loads(renamed_response.data)["assessment"]["title"] == "Validated network review"
+    assert completed_response.status_code == 200
+    assert json.loads(completed_response.data)["assessment"]["status"] == "completed"
+    assert archived_response.status_code == 200
+    assert json.loads(archived_response.data)["assessment"]["status"] == "archived"
+    assert preview_response.status_code == 200
+    assert json.loads(preview_response.data)["preview"]["can_delete"] is True
+    assert deleted_response.status_code == 200
+    assert json.loads(deleted_response.data)["deleted"]["source_records_deleted"] is False
+
+    audit_rows = _audit_event_rows(target_id=assessment_id)
+    assert [row["event_type"] for row in audit_rows] == [
+        "assessment.create",
+        "assessment.update",
+        "assessment.complete",
+        "assessment.archive",
+        "assessment.delete",
+    ]
+    assert all(row["details"]["source"] == "api_v1" for row in audit_rows)
+    check_audits = _audit_event_rows(target_id=check_id)
+    assert [row["event_type"] for row in check_audits] == [
+        "assessment.check_state_change",
+        "assessment.check_state_change",
+        "assessment.evidence_link",
+        "assessment.evidence_unlink",
+    ]
+    assert all(row["details"]["source"] == "api_v1" for row in check_audits)
+
+
+def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context():
+    from services.teams.storage import token_hash
+
+    client = get_client()
+    owner_token = _token(client)
+    viewer_token = _token(client)
+    team_id = _create_api_team(client, owner_token, name="Assessment API Team")
+    _add_api_team_member(
+        client,
+        owner_token,
+        viewer_token,
+        team_id,
+        role="viewer",
+    )
+    project_response = client.post(
+        "/projects",
+        headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+        json={"name": "Team API Assessment Project"},
+    )
+    assert project_response.status_code == 201
+    project_id = json.loads(project_response.data)["project"]["id"]
+    _seed_assessment_target(owner_token, project_id, team_id=team_id)
+    owner_headers = _team_headers(owner_token, team_id)
+    viewer_headers = _team_headers(viewer_token, team_id)
+
+    created_response = client.post(
+        f"/api/v1/projects/{project_id}/assessments",
+        headers=owner_headers,
+        json={"profile_key": "network"},
+    )
+    assert created_response.status_code == 201
+    created = json.loads(created_response.data)
+    assessment_id = created["assessment"]["id"]
+    check_id = created["checks"]["checks"][0]["id"]
+    viewer_list = client.get(
+        f"/api/v1/projects/{project_id}/assessments",
+        headers=viewer_headers,
+    )
+    viewer_update = client.patch(
+        f"/api/v1/projects/{project_id}/assessments/{assessment_id}",
+        headers=viewer_headers,
+        json={"title": "Viewer cannot edit"},
+    )
+    viewer_check_update = client.patch(
+        f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}",
+        headers=viewer_headers,
+        json={"state": "skipped", "reason": "Viewer cannot decide this"},
+    )
+    assert viewer_list.status_code == 200
+    assert json.loads(viewer_list.data)["assessments"][0]["id"] == assessment_id
+    for response in (viewer_update, viewer_check_update):
+        assert response.status_code == 403
+        assert json.loads(response.data)["error"]["code"] == "team_forbidden"
+
+    owner_check_update = client.patch(
+        f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}",
+        headers=owner_headers,
+        json={"state": "skipped", "reason": "Approved scope exclusion"},
+    )
+    assert owner_check_update.status_code == 200
+    actor = json.loads(owner_check_update.data)["check"]["state_actor"]
+    with sqlite3.connect(DB_PATH) as conn:
+        member_id = conn.execute(
+            "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
+            (team_id, token_hash(owner_token)),
+        ).fetchone()[0]
+    assert actor == {"kind": "team_member", "member_id": member_id}
+
+
+def test_api_v1_project_assessment_errors_use_the_public_error_shape():
+    client = get_client()
+    token = _token(client)
+    project = _create_project(client, token, name="API Assessment Errors")
+    _seed_assessment_target(token, project["id"])
+    headers = _headers(token)
+
+    missing_profile = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=headers,
+        json={},
+    )
+    unsupported = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=headers,
+        json={"profile_key": "network", "private_path": "/tmp/profile.yaml"},
+    )
+    invalid_body = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=headers,
+        json=["network"],
+    )
+    for response, code in (
+        (missing_profile, "invalid_assessment"),
+        (unsupported, "invalid_assessment"),
+        (invalid_body, "invalid_body"),
+    ):
+        assert response.status_code == 400
+        payload = json.loads(response.data)
+        assert payload["error"]["code"] == code
+        assert isinstance(payload["error"]["message"], str)
 
 
 def test_api_v1_history_detail_output_and_cross_session_404():
@@ -4015,6 +4347,91 @@ def test_api_v1_openapi_contract_describes_public_shapes():
             assert "429" in operation["responses"]
             if path not in {"/health", "/openapi.json"}:
                 assert "401" in operation["responses"]
+
+
+def test_api_v1_openapi_contract_describes_project_assessments():
+    from services.api_v1.openapi import openapi_spec
+
+    spec = openapi_spec()
+    schemas = spec["components"]["schemas"]
+    paths = spec["paths"]
+    assessment_path = "/projects/{project_id}/assessments/{assessment_id}"
+    check_path = assessment_path + "/checks/{check_id}"
+    evidence_path = check_path + "/evidence"
+    evidence_link_path = evidence_path + "/{evidence_link_id}"
+
+    assert set(paths["/projects/{project_id}/assessments"]) == {"get", "post"}
+    assert set(paths[assessment_path]) == {"get", "patch", "delete"}
+    assert set(paths[check_path]) == {"patch"}
+    assert set(paths[evidence_path]) == {"post"}
+    assert set(paths[evidence_link_path]) == {"delete"}
+    assert paths["/projects/{project_id}/assessments"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentCreateRequest"}
+    assert paths[assessment_path]["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/AssessmentDetail"}
+    assert paths[evidence_path]["post"]["responses"]["201"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/AssessmentEvidenceLinkResponse"}
+
+    detail_params = {
+        parameter["name"]
+        for parameter in paths[assessment_path]["get"]["parameters"]
+    }
+    assert {
+        "project_id",
+        "assessment_id",
+        "category",
+        "state",
+        "target_type",
+        "policy_level",
+        "evidence_state",
+        "limit",
+        "offset",
+    } == detail_params
+    assert schemas["AssessmentManualStateRequest"]["properties"]["state"]["enum"] == [
+        "not_started",
+        "blocked",
+        "skipped",
+        "not_applicable",
+    ]
+    assert schemas["AssessmentCheck"]["properties"]["state"]["enum"] == [
+        "not_started",
+        "running",
+        "covered",
+        "needs_review",
+        "blocked",
+        "failed",
+        "skipped",
+        "not_applicable",
+    ]
+    assessment_contract = json.dumps({
+        key: value
+        for key, value in schemas.items()
+        if key.startswith("Assessment")
+    })
+    for private_field in (
+        "created_by_session_id",
+        "updated_by_session_id",
+        "state_changed_by_session_id",
+        "source_path",
+        "local_path",
+        "secret_reference",
+        "workspace_path",
+        "command_variables",
+    ):
+        assert private_field not in assessment_contract
+    for path in (
+        "/projects/{project_id}/assessments",
+        assessment_path,
+        assessment_path + "/delete-preview",
+        check_path,
+        evidence_path,
+        evidence_link_path,
+    ):
+        for operation in paths[path].values():
+            assert {"401", "429"}.issubset(operation["responses"])
 
 
 def test_api_v1_whoami_last_seen_is_current_auth_timestamp(monkeypatch):

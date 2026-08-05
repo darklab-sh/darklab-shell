@@ -8,6 +8,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from config import APP_VERSION
+from services.api_v1 import openapi_assessments
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.api_v1.openapi_cve_risk import cve_risk_finding_properties, cve_risk_schemas
 from services.scheduler.models import CADENCE_PRESETS
@@ -40,10 +41,8 @@ def _json_response(description: str, schema: dict) -> dict:
 
 
 def _text_response(description: str) -> dict:
-    return {
-        "description": description,
-        "content": {"text/plain": {"schema": {"type": "string"}}},
-    }
+    schema = {"type": "string"}
+    return {"description": description, "content": {"text/plain": {"schema": schema}}}
 
 
 def _error_response(description: str = "Error") -> dict:
@@ -619,6 +618,7 @@ OPENAPI_SPEC: dict = {
                 },
             },
             **atlas_profile_schemas(),
+            **openapi_assessments.assessment_schemas(),
             "AtlasFindingDetail": {
                 "type": "object",
                 "required": ["finding", "occurrences", "detail_limits"],
@@ -1607,7 +1607,7 @@ OPENAPI_SPEC: dict = {
         },
     },
     "security": [{"bearerToken": []}],
-    "paths": {
+    "paths": openapi_assessments.assessment_paths() | {
         "/health": {
             "get": {
                 "security": [],

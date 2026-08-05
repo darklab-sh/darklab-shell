@@ -111,22 +111,13 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 2 — Add assessment routes, API contracts, audit, and observability
 
-- [ ] Add Project-owned browser routes in a decomposed blueprint such as `app/blueprints/projects_assessments.py`:
-  - List Project assessment cycles and return one cycle's summary, category rollups, target rollups, bounded checks, evidence previews, and recommended next actions.
-  - Create a cycle from a validated profile snapshot; update its title/status; complete or archive it; and reject a second active cycle unless the caller explicitly completes or archives the current one.
-  - Page and filter checks by category, state, target, policy level, and evidence availability. Return `total`, `limit`, `offset`, and `has_more` together for every bounded collection.
-  - Update manual check state/reason and link or unlink validated evidence without allowing the caller to forge owner, team, Project, target, or source-record scope.
-  - Return preview data for assessment deletion or restart and use the shared confirmation dialog for destructive actions.
-- [ ] Add matching token-authenticated `/api/v1/projects/<project_id>/assessments...` routes and OpenAPI components:
-  - Keep browser and API serializers aligned on state names, rollups, pagination, actor context, and errors.
-  - Do not return profile implementation paths, secret references, raw HTTP context, private workspace paths, session tokens, or stored command variables.
-  - Add generated OpenAPI JSON checks and CLI commands only after the service and API contracts are stable; the CLI should list/show cycles, list checks, set an allowed manual state, and start a recommended action through the same permission checks as the browser.
-- [ ] Add assessment-specific audit events and safe logs:
-  - Audit cycle create/update/complete/archive/delete, manual state changes, evidence link/unlink, recommended-action launch, HTTP-profile use, manual finding creation, and retest disposition.
+- [ ] Add assessment commands to the bundled CLI now that the service and API contracts are stable. The CLI should list/show cycles, list checks, set an allowed manual state, and start a recommended action through the same permission checks as the browser.
+- [ ] Finish the assessment-specific audit and safe-log inventory as later features land:
+  - Audit recommended-action launch, HTTP-profile use, manual finding creation, and retest disposition. Cycle lifecycle, manual-state, and evidence-link events already use the shared audit boundary.
   - Log ids, owner kind, Project id, profile/check keys, policy level, state transitions, counts, durations, and error classes. Never log credentials, authorization headers, cookies, client-certificate contents, raw request bodies, provider payloads, finding evidence bodies, or complete target lists.
   - Add low-cardinality metrics for active cycles, check-state transitions, derived-evidence matches, action launches/failures, parser results, and connector job outcomes. Do not use target values, Project ids, commands, CVEs, or workflow ids as metric labels.
   - Apply existing request/rate-limit conventions to mutation and launch routes. Bound recalculation work and emit a clear warning when a safety or quota limit rejects work.
-- [ ] Update architecture guards as routes and modules land:
+- [ ] Update architecture guards as the remaining routes and modules land:
   - Classify every new decomposed `projects*` or `api_v1*` blueprint and any new required module-family member in the module-size ratchet.
   - Intentionally update the decomposed route count/digest after reviewing method/path ownership.
   - Keep `services/api_v1` limited to auth, serialization, and OpenAPI helpers; assessment persistence stays in its domain service.
