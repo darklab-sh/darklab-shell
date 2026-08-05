@@ -156,6 +156,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/run_pty.py", 259, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_support.py", 119, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects.py", 576, "split-target-phase3"),
+    ModuleSizeBudget("app/blueprints/projects_assessments.py", 300, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_artifacts.py", 155, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_auto_promote.py", 204, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_core.py", 412, "split-package-ratchet"),
@@ -212,6 +213,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/cleanup.py", 42, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/coverage.py", 225, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/evidence_matching.py", 319, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/lifecycle.py", 363, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/profiles.py", 617, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/assessments/read_model.py", 345, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/schema.py", 10, "split-package-ratchet"),
@@ -326,8 +328,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 192
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "b273d23d8b150634df9fda955854453101cc67b621cbead601389df5fcc5e491"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 198
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "d41d3095b50007076e20d67e64875ee8910dc37baf20f263c689acf7a1796ec0"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

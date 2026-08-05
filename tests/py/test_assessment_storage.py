@@ -10,12 +10,17 @@ import uuid
 
 import pytest
 
-from conftest import build_test_config
+from conftest import build_test_config, make_test_app
 from core.database import db_connect, db_init
 from services.assessments.contracts import (
     AssessmentConflict,
     AssessmentError,
     AssessmentNotFound,
+)
+from services.assessments.lifecycle import (
+    delete_assessment_cycle,
+    preview_assessment_deletion,
+    update_assessment_cycle,
 )
 from services.assessments.read_model import (
     get_assessment_read_model,
@@ -422,3 +427,247 @@ def test_cycle_list_is_bounded_and_rejects_unsupported_filters(project_factory):
             cycle["id"],
             check_filters={"evidence_state": "stale"},
         )
+
+
+def test_cycle_lifecycle_is_forward_only_and_completed_content_is_immutable(
+    project_factory,
+):
+    session_id, project = project_factory()
+    project_id = str(project["id"])
+    _add_target(session_id, project_id, "domain", "lifecycle.example")
+    assessment_id = create_assessment_cycle(
+        session_id,
+        project_id,
+        "network",
+    )["assessment"]["id"]
+    with pytest.raises(AssessmentNotFound, match="not found in this scope"):
+        update_assessment_cycle(
+            "another-session",
+            project_id,
+            assessment_id,
+            {"title": "Out of scope"},
+        )
+
+    renamed = update_assessment_cycle(
+        session_id,
+        project_id,
+        assessment_id,
+        {"title": "External review"},
+        actor_member_id="member-reviewer",
+    )
+    assert renamed["transition_kind"] == "update"
+    assert renamed["assessment"]["title"] == "External review"
+    assert renamed["assessment"]["updated_by_member_id"] == "member-reviewer"
+
+    completed = update_assessment_cycle(
+        session_id,
+        project_id,
+        assessment_id,
+        {"status": "completed"},
+    )
+    assert completed["from_status"] == "active"
+    assert completed["to_status"] == "completed"
+    assert completed["assessment"]["completed_at"] is not None
+    assert completed["assessment"]["archived_at"] is None
+    with pytest.raises(AssessmentConflict, match="read-only"):
+        update_assessment_cycle(
+            session_id,
+            project_id,
+            assessment_id,
+            {"title": "Changed after completion"},
+        )
+    with pytest.raises(AssessmentConflict, match="cannot be reopened"):
+        update_assessment_cycle(
+            session_id,
+            project_id,
+            assessment_id,
+            {"status": "active"},
+        )
+
+    archived = update_assessment_cycle(
+        session_id,
+        project_id,
+        assessment_id,
+        {"status": "archived"},
+    )
+    assert archived["assessment"]["completed_at"] == completed["assessment"]["completed_at"]
+    assert archived["assessment"]["archived_at"] is not None
+    with pytest.raises(AssessmentConflict, match="read-only"):
+        update_assessment_cycle(
+            session_id,
+            project_id,
+            assessment_id,
+            {"status": "archived"},
+        )
+
+
+def test_archived_cycle_deletion_previews_owned_rows_and_preserves_sources(
+    project_factory,
+):
+    session_id, project = project_factory()
+    project_id = str(project["id"])
+    target = _add_target(session_id, project_id, "domain", "delete-cycle.example")
+    created = create_assessment_cycle(session_id, project_id, "network")
+    assessment_id = created["assessment"]["id"]
+    check_id = created["checks"]["checks"][0]["id"]
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO project_assessment_evidence "
+            "(id, assessment_id, check_id, evidence_type, evidence_id, source_state, "
+            "observed_at, unavailable_at, unavailable_reason, match_rule_key, "
+            "match_rule_version, linked_by, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'atlas_entity', ?, 'available', ?, NULL, '', "
+            "'manual_target', '1.0', 'manual', ?, ?)",
+            (
+                "aev_" + uuid.uuid4().hex,
+                assessment_id,
+                check_id,
+                target["id"],
+                "2026-08-04 12:00:00",
+                "2026-08-04 12:00:00",
+                "2026-08-04 12:00:00",
+            ),
+        )
+        conn.commit()
+
+    active_preview = preview_assessment_deletion(
+        session_id,
+        project_id,
+        assessment_id,
+    )
+    assert active_preview["can_delete"] is False
+    assert active_preview["source_records_deleted"] is False
+    assert active_preview["will_delete"]["checks"] == 2
+    assert active_preview["will_delete"]["evidence_links_by_type"] == {
+        "atlas_entity": 1,
+    }
+    with pytest.raises(AssessmentConflict, match="only archived"):
+        delete_assessment_cycle(session_id, project_id, assessment_id)
+
+    update_assessment_cycle(
+        session_id,
+        project_id,
+        assessment_id,
+        {"status": "archived"},
+    )
+    deleted = delete_assessment_cycle(session_id, project_id, assessment_id)
+    assert deleted["can_delete"] is True
+    assert get_assessment_read_model(session_id, project_id, assessment_id) is None
+    with db_connect() as conn:
+        source = conn.execute(
+            "SELECT id FROM entities WHERE id = ?",
+            (target["id"],),
+        ).fetchone()
+    assert source is not None
+
+
+def test_project_assessment_browser_routes_cover_lifecycle_and_audit(project_factory):
+    session_id, project = project_factory()
+    project_id = str(project["id"])
+    _add_target(session_id, project_id, "domain", "routes.example")
+    client = make_test_app().test_client()
+    headers = {"X-Session-ID": session_id}
+
+    unauthorized = client.post(
+        f"/projects/{project_id}/assessments",
+        json={"profile_key": "network"},
+    )
+    assert unauthorized.status_code == 401
+    created_response = client.post(
+        f"/projects/{project_id}/assessments",
+        headers=headers,
+        json={"profile_key": "network", "title": "Route review"},
+    )
+    assert created_response.status_code == 201
+    created = created_response.get_json()
+    assessment_id = created["assessment"]["id"]
+    assert created["assessment"]["title"] == "Route review"
+
+    listed = client.get(
+        f"/projects/{project_id}/assessments?limit=1",
+        headers=headers,
+    )
+    assert listed.status_code == 200
+    assert listed.get_json()["assessments"][0]["id"] == assessment_id
+    detail = client.get(
+        f"/projects/{project_id}/assessments/{assessment_id}?state=not_started&limit=1",
+        headers=headers,
+    )
+    assert detail.status_code == 200
+    assert detail.get_json()["checks"]["limit"] == 1
+    assert detail.get_json()["checks"]["has_more"] is True
+
+    completed = client.patch(
+        f"/projects/{project_id}/assessments/{assessment_id}",
+        headers=headers,
+        json={"status": "completed"},
+    )
+    assert completed.status_code == 200
+    assert completed.get_json()["assessment"]["status"] == "completed"
+    archived = client.patch(
+        f"/projects/{project_id}/assessments/{assessment_id}",
+        headers=headers,
+        json={"status": "archived"},
+    )
+    assert archived.status_code == 200
+    preview = client.get(
+        f"/projects/{project_id}/assessments/{assessment_id}/delete-preview",
+        headers=headers,
+    )
+    assert preview.status_code == 200
+    assert preview.get_json()["preview"]["can_delete"] is True
+    deleted = client.delete(
+        f"/projects/{project_id}/assessments/{assessment_id}",
+        headers=headers,
+    )
+    assert deleted.status_code == 200
+    assert deleted.get_json()["deleted"]["source_records_deleted"] is False
+
+    with db_connect() as conn:
+        event_rows = conn.execute(
+            "SELECT event_type, target_type FROM audit_events "
+            "WHERE target_id = ? ORDER BY created ASC, id ASC",
+            (assessment_id,),
+        ).fetchall()
+    assert {str(row["event_type"]) for row in event_rows} == {
+        "assessment.create",
+        "assessment.complete",
+        "assessment.archive",
+        "assessment.delete",
+    }
+    assert {str(row["target_type"]) for row in event_rows} == {"assessment"}
+
+
+def test_assessment_delete_rolls_back_when_fail_closed_audit_fails(
+    project_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session_id, project = project_factory()
+    project_id = str(project["id"])
+    _add_target(session_id, project_id, "domain", "audit-rollback.example")
+    assessment_id = create_assessment_cycle(
+        session_id,
+        project_id,
+        "network",
+    )["assessment"]["id"]
+    update_assessment_cycle(
+        session_id,
+        project_id,
+        assessment_id,
+        {"status": "archived"},
+    )
+
+    def _fail_audit(*_args, **_kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr("blueprints.projects.record_event", _fail_audit)
+    client = make_test_app().test_client()
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        client.delete(
+            f"/projects/{project_id}/assessments/{assessment_id}",
+            headers={"X-Session-ID": session_id},
+        )
+    restored = get_assessment_read_model(session_id, project_id, assessment_id)
+    assert restored is not None
+    assert restored["assessment"]["status"] == "archived"
+    assert restored["checks"]["total"] == 2

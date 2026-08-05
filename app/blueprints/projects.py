@@ -64,7 +64,6 @@ from services.teams.request_scope import (
 )
 
 log = logging.getLogger("shell")
-
 projects_bp = Blueprint("projects", __name__)
 
 
@@ -512,6 +511,7 @@ from blueprints.projects_targets import (  # noqa: E402,F401
     projects_targets_list,
     projects_targets_update,
 )
+from blueprints import projects_assessments as _projects_assessments  # noqa: E402,F401
 from blueprints.projects_auto_promote import (  # noqa: E402,F401
     projects_auto_promote_rules_apply,
     projects_auto_promote_rules_create,

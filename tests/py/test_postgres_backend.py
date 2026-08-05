@@ -755,6 +755,84 @@ def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_
 
 
 @pytest.mark.postgres
+def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.lifecycle import (
+        delete_assessment_cycle,
+        preview_assessment_deletion,
+        update_assessment_cycle,
+    )
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    timestamp = "2026-08-04T12:00:00+00:00"
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "VALUES ('prj-assessment-lifecycle', 'assessment-lifecycle', '', 'Lifecycle', "
+        "'lifecycle', '', 'active', '', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, created_at, updated_at) "
+        "VALUES ('asm-lifecycle', 'assessment-lifecycle', '', "
+        "'prj-assessment-lifecycle', 'Lifecycle', 'network', '1.0', ?, "
+        "'active', ?, ?, ?)",
+        (Jsonb({}), timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, "
+        "target_value_hash, created_at, updated_at) VALUES "
+        "('chk-lifecycle', 'asm-lifecycle', 'discovery', 'open_ports', "
+        "'domain', 'lifecycle.example', 'lifecycle-hash', ?, ?)",
+        (timestamp, timestamp),
+    )
+
+    completed = update_assessment_cycle(
+        "assessment-lifecycle",
+        "prj-assessment-lifecycle",
+        "asm-lifecycle",
+        {"status": "completed"},
+        conn=conn,
+    )
+    assert completed["assessment"]["completed_at"] is not None
+    update_assessment_cycle(
+        "assessment-lifecycle",
+        "prj-assessment-lifecycle",
+        "asm-lifecycle",
+        {"status": "archived"},
+        conn=conn,
+    )
+    preview = preview_assessment_deletion(
+        "assessment-lifecycle",
+        "prj-assessment-lifecycle",
+        "asm-lifecycle",
+        conn=conn,
+    )
+    assert preview["can_delete"] is True
+    assert preview["will_delete"]["checks"] == 1
+    deleted = delete_assessment_cycle(
+        "assessment-lifecycle",
+        "prj-assessment-lifecycle",
+        "asm-lifecycle",
+        conn=conn,
+    )
+    assert deleted["source_records_deleted"] is False
+    assert conn.execute(
+        "SELECT id FROM project_assessments WHERE id = 'asm-lifecycle'"
+    ).fetchone() is None
+    assert conn.execute(
+        "SELECT id FROM projects WHERE id = 'prj-assessment-lifecycle'"
+    ).fetchone() is not None
+
+
+@pytest.mark.postgres
 def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock

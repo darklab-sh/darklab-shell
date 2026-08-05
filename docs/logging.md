@@ -144,6 +144,9 @@ The current event inventory is:
 | INFO | `CVE_ADVISORY_LOOKUP_STORED` | explicit Atlas CVE Intel refresh | source, outcome, record_count |
 | INFO | `RISK_ESCALATION_CREATED` | changed-CVE work processor | source, transition_kind, feed_version, owner_kind, observation_count, project_count, model_changed |
 | INFO | `PROJECT_RISK_ESCALATION_ACK_UPDATED` | Project Monitoring risk-event route | ip, session, team_id, project_id, escalation_id, ack_state, note_chars |
+| INFO | `PROJECT_ASSESSMENT_CREATED` | Project assessment create route | ip, session, team_id, project_id, assessment_id, profile_key, profile_version, check_count |
+| INFO | `PROJECT_ASSESSMENT_UPDATED` | Project assessment lifecycle route | ip, session, team_id, project_id, assessment_id, from_status, to_status, transition_kind, title_changed |
+| INFO | `PROJECT_ASSESSMENT_DELETED` | Project assessment deletion route | ip, session, team_id, project_id, assessment_id, check_count, evidence_count |
 | INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
 | INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |

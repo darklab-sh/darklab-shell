@@ -42,6 +42,7 @@ class AuditTargetType(str, Enum):
     WORKFLOW_EXECUTION = "workflow_execution"
     CVE_RISK_SOURCE = "cve_risk_source"
     RISK_ESCALATION = "risk_escalation"
+    ASSESSMENT = "assessment"
 
 
 class AuditEventType(str, Enum):
@@ -112,6 +113,11 @@ class AuditEventType(str, Enum):
     CVE_RISK_REFRESH = "cve_risk.refresh"
     CVE_ADVISORY_REFRESH = "cve_advisory.refresh"
     RISK_ESCALATION_ACK = "risk_escalation.ack"
+    ASSESSMENT_CREATE = "assessment.create"
+    ASSESSMENT_UPDATE = "assessment.update"
+    ASSESSMENT_COMPLETE = "assessment.complete"
+    ASSESSMENT_ARCHIVE = "assessment.archive"
+    ASSESSMENT_DELETE = "assessment.delete"
 
 
 COMMON_DETAIL_KEYS = frozenset({
@@ -219,6 +225,9 @@ COMMON_DETAIL_KEYS = frozenset({
     "source_version",
     "transition_kind",
     "observation_count",
+    "assessment_id",
+    "profile_key",
+    "profile_version",
 })
 
 HISTORY_DELETE_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
@@ -264,6 +273,31 @@ def _spec(
 
 
 EVENT_SPECS: dict[str, EventSpec] = {
+    AuditEventType.ASSESSMENT_CREATE.value: _spec(
+        AuditEventType.ASSESSMENT_CREATE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_UPDATE.value: _spec(
+        AuditEventType.ASSESSMENT_UPDATE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_COMPLETE.value: _spec(
+        AuditEventType.ASSESSMENT_COMPLETE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_ARCHIVE.value: _spec(
+        AuditEventType.ASSESSMENT_ARCHIVE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_DELETE.value: _spec(
+        AuditEventType.ASSESSMENT_DELETE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.FAIL_CLOSED,
+    ),
     AuditEventType.CVE_ADVISORY_REFRESH.value: _spec(
         AuditEventType.CVE_ADVISORY_REFRESH,
         AuditTargetType.CVE_RISK_SOURCE,
