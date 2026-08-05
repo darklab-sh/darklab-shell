@@ -23,11 +23,7 @@ from services.assessments.serialization import (
     row_to_rollup,
 )
 from services.projects.scope import shared_owner_where
-from services.projects.utils import (
-    normalize_page_limit,
-    normalize_page_offset,
-    page_payload,
-)
+from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
 
 
 _ASSESSMENT_COLUMNS = (

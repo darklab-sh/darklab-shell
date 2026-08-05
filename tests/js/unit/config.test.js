@@ -178,6 +178,14 @@ describe('frontend config bootstrap', () => {
                 url: '/static/js/features/projects/project_activity.js?v=activity-hash',
                 type: 'module',
               },
+              project_assessment_css: {
+                url: '/static/css/features/project-assessment.css?v=assessment-css-hash',
+                type: 'style',
+              },
+              project_assessment: {
+                url: '/static/js/features/projects/project_assessment.js?v=assessment-hash',
+                type: 'module',
+              },
               project_overview: {
                 url: '/static/js/features/projects/project_overview.js?v=overview-hash',
                 type: 'module',
@@ -337,6 +345,11 @@ describe('frontend config bootstrap', () => {
           window.DarklabProjectActivity = DarklabProjectActivity
           return { DarklabProjectActivity }
         }
+        if (url.includes('/project_assessment.js')) {
+          const DarklabProjectAssessment = { createProjectAssessmentController: vi.fn() }
+          window.DarklabProjectAssessment = DarklabProjectAssessment
+          return { DarklabProjectAssessment }
+        }
         if (url.includes('/project_overview.js')) {
           const DarklabProjectOverview = { createProjectOverviewController: vi.fn() }
           window.DarklabProjectOverview = DarklabProjectOverview
@@ -413,6 +426,13 @@ describe('frontend config bootstrap', () => {
     expect(activityApi).toBe(window.DarklabProjectActivity)
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/projects/project_activity.js?v=activity-hash')
 
+    const assessmentPromise = window.loadProjectAssessment()
+    const assessmentApi = await assessmentPromise
+    expect(assessmentApi).toBe(window.DarklabProjectAssessment)
+    expect(window.__darklabImportModule).toHaveBeenCalledWith(
+      '/static/js/features/projects/project_assessment.js?v=assessment-hash',
+    )
+
     const overviewPromise = window.loadProjectOverview()
     const overviewApi = await overviewPromise
     expect(overviewApi).toBe(window.DarklabProjectOverview)
@@ -469,6 +489,7 @@ describe('frontend config bootstrap', () => {
       '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
       '/static/js/features/projects/project_report.js?v=report-hash',
       '/static/js/features/projects/project_activity.js?v=activity-hash',
+      '/static/js/features/projects/project_assessment.js?v=assessment-hash',
       '/static/js/features/projects/project_overview.js?v=overview-hash',
       '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
       '/static/js/features/projects/project_packages.js?v=packages-hash',

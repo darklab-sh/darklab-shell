@@ -1095,6 +1095,10 @@ describe('shell chrome project workspace', () => {
     expect(rowText('project-4')).not.toContain('99 entities')
     const desktopTabsWrap = document.querySelector('.project-explorer-tabs-wrap')
     const desktopTabs = document.querySelector('.project-explorer-tabs')
+    const desktopTabIds = [...desktopTabs.querySelectorAll('[data-project-tab]')]
+      .map(tab => tab.dataset.projectTab)
+    expect(desktopTabIds.indexOf('assessment')).toBe(desktopTabIds.indexOf('overview') + 1)
+    expect(desktopTabs.querySelector('[data-project-tab="assessment"]')?.textContent).toBe('Assessment')
     expect(desktopTabsWrap?.classList.contains('tab-strip-wrap')).toBe(true)
     expect(desktopTabsWrap?.contains(desktopTabs)).toBe(true)
     const projectTabsScrollLeft = desktopTabsWrap.querySelector('[data-project-tabs-scroll="left"]')
@@ -1997,6 +2001,9 @@ describe('shell chrome project workspace', () => {
       expect(document.querySelector('.project-mobile-summary-menu-btn')?.dataset.projectId).toBe('project-1')
       expect(document.getElementById('project-mobile-tabs').textContent).toContain('999+')
       expect(document.getElementById('project-mobile-tabs').textContent).not.toContain('Artifacts')
+      const mobileTabIds = [...document.querySelectorAll('[data-project-mobile-detail-tab]')]
+        .map(tab => tab.dataset.projectMobileDetailTab)
+      expect(mobileTabIds.indexOf('assessment')).toBe(mobileTabIds.indexOf('overview') + 1)
 
       document.querySelector('[data-project-mobile-detail-tab="overview"]').click()
       await tick()

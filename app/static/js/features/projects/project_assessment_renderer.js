@@ -1,0 +1,426 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Shared desktop/mobile renderer for the Project Assessment tab.
+
+import { bindDisclosure } from '../../ui/ui_disclosure.js';
+
+const checkStateLabels = {
+  blocked: 'Blocked',
+  covered: 'Covered',
+  failed: 'Failed',
+  needs_review: 'Needs review',
+  not_applicable: 'Not applicable',
+  not_started: 'Not started',
+  running: 'Running',
+  skipped: 'Skipped',
+};
+
+const filterStates = [
+  '',
+  'needs_review',
+  'not_started',
+  'running',
+  'failed',
+  'blocked',
+  'skipped',
+  'not_applicable',
+  'covered',
+];
+
+function createProjectAssessmentRenderer(context, actions) {
+  const ctx = context || {};
+  const act = actions || {};
+
+  function makeElement(tag, className = '', text = '') {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== '') element.textContent = String(text);
+    return element;
+  }
+
+  function badge(text, tone = 'muted') {
+    return makeElement('span', `badge badge-tone-${tone}`, text);
+  }
+
+  function stateTone(state) {
+    const normalized = String(state || '');
+    if (normalized === 'covered') return 'green';
+    if (['needs_review', 'running', 'blocked'].includes(normalized)) return 'amber';
+    if (normalized === 'failed') return 'red';
+    return 'muted';
+  }
+
+  function statusTone(status) {
+    if (status === 'active') return 'green';
+    if (status === 'completed') return 'amber';
+    return 'muted';
+  }
+
+  function displayDate(value) {
+    const normalized = String(value || '');
+    if (!normalized) return '';
+    return typeof ctx.formatDate === 'function' ? ctx.formatDate(normalized) : normalized;
+  }
+
+  function profileByKey(st, key) {
+    return st.profiles.find(profile => String(profile?.key || '') === String(key || '')) || null;
+  }
+
+  function checkDefinition(detail, check) {
+    const definitions = detail?.assessment?.profile_snapshot?.checks;
+    if (!Array.isArray(definitions)) return null;
+    return definitions.find(item => String(item?.key || '') === String(check?.check_key || '')) || null;
+  }
+
+  function cycleLabel(st, assessment) {
+    const profile = profileByKey(st, assessment?.profile_key);
+    const title = String(assessment?.title || profile?.label || assessment?.profile_key || 'Assessment');
+    const started = displayDate(assessment?.started_at || assessment?.created_at);
+    return started ? `${title} · ${started}` : title;
+  }
+
+  function sectionHeading(title, copy) {
+    const heading = makeElement('div', 'project-assessment-section-heading');
+    const content = makeElement('div');
+    content.append(makeElement('h3', '', title), makeElement('p', '', copy));
+    heading.appendChild(content);
+    return heading;
+  }
+
+  function renderStartCard(projectId, st) {
+    const section = makeElement('section', 'project-assessment-start project-assessment-section');
+    section.appendChild(sectionHeading(
+      st.assessments.length ? 'Start another cycle' : 'Start an assessment',
+      'Choose a saved methodology. The cycle freezes its checks and current confirmed targets so later edits do not rewrite the assessment.',
+    ));
+    if (!st.profiles.length) {
+      section.appendChild(ctx.emptyProjectPanel('No assessment profiles are available.'));
+      return section;
+    }
+
+    const form = makeElement('form', 'project-assessment-start-form');
+    const label = makeElement('label', 'project-assessment-profile-field');
+    label.appendChild(makeElement('span', '', 'Profile'));
+    const select = makeElement('select', 'form-select');
+    select.name = 'profile_key';
+    select.setAttribute('aria-label', 'Assessment profile');
+    st.profiles.forEach((profile) => {
+      const option = document.createElement('option');
+      option.value = String(profile?.key || '');
+      option.textContent = `${profile?.label || profile?.key} (${Number(profile?.check_count || 0)} checks)`;
+      select.appendChild(option);
+    });
+    label.appendChild(select);
+
+    const submit = makeElement('button', 'btn btn-primary btn-compact', st.creating ? 'Starting…' : 'Start cycle');
+    submit.type = 'submit';
+    const canManage = ctx.canMutateProjects?.() !== false;
+    submit.disabled = st.creating || !canManage;
+    if (!canManage) submit.title = 'View-only team members cannot start assessment cycles.';
+    ctx.bindProjectRuntimePressable?.(submit);
+    form.append(label, submit);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void act.createCycle(projectId, select.value);
+    });
+    section.appendChild(form);
+
+    const initialProfile = profileByKey(st, select.value) || st.profiles[0];
+    const purpose = makeElement('p', 'project-assessment-profile-purpose', initialProfile?.purpose || '');
+    select.addEventListener('change', () => {
+      purpose.textContent = profileByKey(st, select.value)?.purpose || '';
+    });
+    section.appendChild(purpose);
+    return section;
+  }
+
+  function renderCycleHeader(projectId, st, assessment) {
+    const section = makeElement('section', 'project-assessment-cycle project-assessment-section');
+    const top = makeElement('div', 'project-assessment-cycle-top');
+    const title = makeElement('div', 'project-assessment-cycle-title');
+    title.append(
+      makeElement('h2', '', assessment?.title || 'Assessment'),
+      makeElement(
+        'p',
+        '',
+        `${profileByKey(st, assessment?.profile_key)?.label || assessment?.profile_key || 'Profile'} · version ${assessment?.profile_version || 'unknown'}`,
+      ),
+    );
+    top.append(title, badge(String(assessment?.status || 'unknown'), statusTone(assessment?.status)));
+    section.appendChild(top);
+
+    const controls = makeElement('div', 'project-assessment-cycle-controls');
+    const field = makeElement('label', 'project-assessment-cycle-field');
+    field.appendChild(makeElement('span', '', 'Cycle'));
+    const select = makeElement('select', 'form-select');
+    select.setAttribute('aria-label', 'Assessment cycle');
+    st.assessments.forEach((item) => {
+      const option = document.createElement('option');
+      option.value = String(item?.id || '');
+      option.textContent = cycleLabel(st, item);
+      option.selected = option.value === st.selectedId;
+      select.appendChild(option);
+    });
+    select.addEventListener('change', () => void act.selectCycle(projectId, select.value));
+    field.appendChild(select);
+    controls.appendChild(field);
+    const dates = [
+      assessment?.started_at ? `Started ${displayDate(assessment.started_at)}` : '',
+      assessment?.completed_at ? `Completed ${displayDate(assessment.completed_at)}` : '',
+      assessment?.archived_at ? `Archived ${displayDate(assessment.archived_at)}` : '',
+    ].filter(Boolean).join(' · ');
+    controls.appendChild(makeElement('div', 'project-assessment-cycle-dates', dates));
+    section.appendChild(controls);
+    return section;
+  }
+
+  function summaryCard(value, label, detail = '', tone = '') {
+    const card = makeElement('div', `project-assessment-summary-card${tone ? ` is-${tone}` : ''}`);
+    card.append(makeElement('strong', '', value), makeElement('span', '', label));
+    if (detail) card.appendChild(makeElement('small', '', detail));
+    return card;
+  }
+
+  function renderCoverage(rollup) {
+    const data = rollup || {};
+    const section = makeElement('section', 'project-assessment-section');
+    section.appendChild(sectionHeading(
+      'Coverage',
+      'Coverage reflects compatible saved evidence and explicit assessment decisions.',
+    ));
+    const cards = makeElement('div', 'project-assessment-summary-grid');
+    cards.append(
+      summaryCard(data.covered_checks || 0, 'Covered', `of ${Number(data.applicable_checks || 0)} applicable`, 'success'),
+      summaryCard(data.checks_awaiting_review || 0, 'Awaiting review', '', Number(data.checks_awaiting_review || 0) ? 'attention' : ''),
+      summaryCard(data.untested_checks || 0, 'Untested', 'not started, running, or failed'),
+      summaryCard(data.excluded_checks || 0, 'Excluded', 'blocked, skipped, or not applicable'),
+      summaryCard(
+        data.unavailable_evidence_checks || 0,
+        'Evidence unavailable',
+        'saved source was removed',
+        Number(data.unavailable_evidence_checks || 0) ? 'danger' : '',
+      ),
+    );
+    section.appendChild(cards);
+    return section;
+  }
+
+  function filterChip(label, active, onActivate) {
+    const chip = makeElement('button', `chip${active ? ' is-active' : ''}`, label);
+    chip.type = 'button';
+    chip.setAttribute('aria-pressed', active ? 'true' : 'false');
+    ctx.bindProjectRuntimePressable?.(chip, { onActivate, clearPressStyle: true });
+    return chip;
+  }
+
+  function renderCategoryProgress(projectId, st, rollups) {
+    const section = makeElement('section', 'project-assessment-section');
+    section.appendChild(sectionHeading(
+      'Category progress',
+      'Narrow the check worklist without changing the cycle.',
+    ));
+    const list = makeElement('div', 'project-assessment-category-list');
+    list.appendChild(filterChip('All categories', !st.category, () => {
+      void act.setFilter(projectId, 'category', '');
+    }));
+    (Array.isArray(rollups) ? rollups : []).forEach((item) => {
+      const category = String(item?.category || 'uncategorized');
+      const label = `${category} · ${Number(item?.covered_checks || 0)}/${Number(item?.applicable_checks || 0)} covered`;
+      list.appendChild(filterChip(label, st.category === category, () => {
+        void act.setFilter(projectId, 'category', category);
+      }));
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function targetKey(check) {
+    return [check?.target_type || 'target', check?.target_entity_id || check?.target_value || 'unknown'].join(':');
+  }
+
+  function checkMeta(check) {
+    const parts = [String(check?.policy_level || ''), `${Number(check?.evidence_count || 0)} evidence`];
+    if (Number(check?.unavailable_evidence_count || 0) > 0) {
+      parts.push(`${Number(check.unavailable_evidence_count)} unavailable`);
+    }
+    if (check?.last_evidence_at) parts.push(`last ${displayDate(check.last_evidence_at)}`);
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  function renderCheck(detail, check) {
+    const definition = checkDefinition(detail, check);
+    const row = makeElement('article', 'panel-row project-assessment-check-row');
+    const main = makeElement('div', 'project-assessment-check-main');
+    main.append(
+      makeElement('div', 'project-assessment-check-title', definition?.label || check?.check_key || 'Assessment check'),
+      makeElement('div', 'project-assessment-check-meta', checkMeta(check)),
+    );
+    const purpose = String(definition?.purpose || check?.state_reason || '');
+    if (purpose) main.appendChild(makeElement('p', 'project-assessment-check-purpose', purpose));
+    const states = makeElement('div', 'project-assessment-check-states');
+    states.appendChild(badge(checkStateLabels[check?.state] || check?.state || 'Unknown', stateTone(check?.state)));
+    if (check?.state_source === 'manual') states.appendChild(badge('Manual decision'));
+    if (Number(check?.unavailable_evidence_count || 0) > 0) {
+      states.appendChild(badge('Evidence unavailable', 'red'));
+    }
+    row.append(main, states);
+    return row;
+  }
+
+  function renderTargetGroup(st, detail, checks) {
+    const representative = checks[0] || {};
+    const key = targetKey(representative);
+    const open = st.expandedTargets.has(key);
+    const group = makeElement('section', 'project-assessment-target-group');
+    const toggle = makeElement('button', 'control-row project-assessment-target-toggle');
+    toggle.type = 'button';
+    const glyph = makeElement('span', 'project-assessment-disclosure', open ? '▾' : '▸');
+    const label = makeElement('span', 'project-assessment-target-label');
+    label.append(
+      makeElement('strong', '', representative?.target_value || representative?.target_entity_id || 'Project-wide checks'),
+      makeElement('small', '', `${representative?.target_type || 'project'} · ${checks.length} check${checks.length === 1 ? '' : 's'}`),
+    );
+    const covered = checks.filter(check => check?.state === 'covered').length;
+    const review = checks.filter(check => check?.state === 'needs_review').length;
+    const counts = makeElement(
+      'span',
+      'project-assessment-target-counts',
+      `${covered} covered${review ? ` · ${review} review` : ''}`,
+    );
+    toggle.append(glyph, label, counts);
+    const body = makeElement('div', 'project-assessment-target-body');
+    checks.forEach(check => body.appendChild(renderCheck(detail, check)));
+    bindDisclosure(toggle, {
+      panel: body,
+      initialOpen: open,
+      hiddenClass: 'u-hidden',
+      openClass: 'is-open',
+      clearPressStyle: true,
+      onToggle: (isOpen) => {
+        glyph.textContent = isOpen ? '▾' : '▸';
+        if (isOpen) st.expandedTargets.add(key);
+        else st.expandedTargets.delete(key);
+      },
+    });
+    group.append(toggle, body);
+    return group;
+  }
+
+  function renderPager(projectId, st, page) {
+    const total = Math.max(0, Number(page?.total || 0));
+    const limit = Math.max(1, Number(page?.limit || st.limit));
+    const offset = Math.max(0, Number(page?.offset || st.offset));
+    if (total <= limit && offset === 0) return null;
+    const pager = makeElement('div', 'project-assessment-pager');
+    const previous = makeElement('button', 'btn btn-secondary btn-compact', 'Previous');
+    previous.type = 'button';
+    previous.disabled = offset <= 0;
+    ctx.bindProjectRuntimePressable?.(previous, {
+      onActivate: () => void act.setPage(projectId, Math.max(0, offset - limit)),
+    });
+    const status = total ? `${offset + 1}–${Math.min(offset + limit, total)} of ${total}` : '0 checks';
+    const next = makeElement('button', 'btn btn-secondary btn-compact', 'Next');
+    next.type = 'button';
+    next.disabled = offset + limit >= total;
+    ctx.bindProjectRuntimePressable?.(next, {
+      onActivate: () => void act.setPage(projectId, offset + limit),
+    });
+    pager.append(previous, makeElement('span', '', status), next);
+    return pager;
+  }
+
+  function renderChecks(projectId, st, detail) {
+    const section = makeElement('section', 'project-assessment-section');
+    section.appendChild(sectionHeading(
+      'Check worklist',
+      'Expand a target to review what is covered, outstanding, excluded, or missing evidence.',
+    ));
+    const stateFilters = makeElement('div', 'project-assessment-state-filters');
+    filterStates.forEach((value) => {
+      const label = value ? checkStateLabels[value] : 'All states';
+      stateFilters.appendChild(filterChip(label, st.checkState === value, () => {
+        void act.setFilter(projectId, 'state', value);
+      }));
+    });
+    section.appendChild(stateFilters);
+
+    const page = detail?.checks || {};
+    const checks = Array.isArray(page?.checks) ? page.checks : [];
+    if (!checks.length) {
+      section.appendChild(ctx.emptyProjectPanel(
+        st.category || st.checkState
+          ? 'No checks match these assessment filters.'
+          : 'This assessment cycle has no checks for its saved targets.',
+      ));
+      return section;
+    }
+
+    const groups = new Map();
+    checks.forEach((check) => {
+      const key = targetKey(check);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(check);
+    });
+    const list = makeElement('div', 'project-assessment-target-list nice-scroll');
+    list.scrollTop = st.checksScrollTop;
+    list.addEventListener('scroll', () => {
+      st.checksScrollTop = list.scrollTop;
+    }, { passive: true });
+    groups.forEach(group => list.appendChild(renderTargetGroup(st, detail, group)));
+    section.appendChild(list);
+    const pager = renderPager(projectId, st, page);
+    if (pager) section.appendChild(pager);
+    return section;
+  }
+
+  function errorPanel(message, retry) {
+    const panel = ctx.emptyProjectPanel(message);
+    const button = makeElement('button', 'btn btn-secondary btn-compact', 'Retry');
+    button.type = 'button';
+    ctx.bindProjectRuntimePressable?.(button, { onActivate: retry });
+    panel.appendChild(button);
+    return panel;
+  }
+
+  function renderContent(projectId, st, selected, { mobile = false } = {}) {
+    const root = makeElement('div', `project-assessment-root${mobile ? ' is-mobile' : ''}`);
+    root.dataset.projectAssessmentRoot = String(projectId || '');
+    if (st.loading && !st.loaded) {
+      root.appendChild(ctx.emptyProjectPanel('Loading project assessments...'));
+      return root;
+    }
+    if (st.error && !st.loaded) {
+      root.appendChild(errorPanel(st.error, () => void act.load(projectId, { force: true })));
+      return root;
+    }
+    if (!st.assessments.length) {
+      root.appendChild(renderStartCard(projectId, st));
+      return root;
+    }
+
+    root.appendChild(renderCycleHeader(projectId, st, selected));
+    if (!st.assessments.some(item => item?.status === 'active')) {
+      root.appendChild(renderStartCard(projectId, st));
+    }
+    if (st.detailLoading && !st.detail) {
+      root.appendChild(ctx.emptyProjectPanel('Loading assessment coverage...'));
+      return root;
+    }
+    if (st.detailError && !st.detail) {
+      root.appendChild(errorPanel(st.detailError, () => void act.loadDetail(projectId)));
+      return root;
+    }
+    if (!st.detail) return root;
+    root.append(
+      renderCoverage(st.detail.rollup),
+      renderCategoryProgress(projectId, st, st.detail.category_rollups),
+      renderChecks(projectId, st, st.detail),
+    );
+    return root;
+  }
+
+  return { renderContent };
+}
+
+export { createProjectAssessmentRenderer };

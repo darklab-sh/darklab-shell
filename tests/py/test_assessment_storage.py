@@ -588,7 +588,14 @@ def test_project_assessment_browser_routes_cover_lifecycle_and_audit(project_fac
         headers=headers,
     )
     assert listed.status_code == 200
-    assert listed.get_json()["assessments"][0]["id"] == assessment_id
+    list_payload = listed.get_json()
+    assert list_payload["assessments"][0]["id"] == assessment_id
+    assert {profile["key"] for profile in list_payload["profiles"]} == {
+        "network",
+        "web",
+    }
+    assert all(profile["check_count"] > 0 for profile in list_payload["profiles"])
+    assert all("checks" not in profile for profile in list_payload["profiles"])
     detail = client.get(
         f"/projects/{project_id}/assessments/{assessment_id}?state=not_started&limit=1",
         headers=headers,

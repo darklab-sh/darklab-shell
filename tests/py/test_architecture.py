@@ -221,6 +221,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/evidence_sources.py", 330, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/lifecycle.py", 363, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/mutations.py", 474, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/profile_summaries.py", 27, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/profiles.py", 617, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/assessments/read_model.py", 345, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/schema.py", 10, "split-package-ratchet"),

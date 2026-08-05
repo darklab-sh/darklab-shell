@@ -99,6 +99,9 @@ let exportedLoadWatchersModal = null;
     if (name === 'export_html') return { url: '/static/js/export_html.js', type: 'module' };
     if (name === 'export_pdf') return { url: '/static/js/export_pdf.js', type: 'module' };
     if (name === 'projects_css') return { url: '/static/css/features/projects.css', type: 'style' };
+    if (name === 'project_assessment_css') {
+      return { url: '/static/css/features/project-assessment.css', type: 'style' };
+    }
     if (name === 'atlas_css') return { url: '/static/css/features/atlas.css', type: 'style' };
     if (name === 'atlas_mobile_css') return { url: '/static/css/features/atlas-mobile.css', type: 'style' };
     if (name === 'command_registry_css') return { url: '/static/css/features/command-registry.css', type: 'style' };
@@ -119,6 +122,7 @@ let exportedLoadWatchersModal = null;
     if (name === 'findings_board') return { url: '/static/js/features/findings/findings_board_modal.js', type: 'module' };
     if (name === 'finding_triage_editor') return { url: '/static/js/features/findings/finding_triage_editor.js', type: 'module' };
     if (name === 'project_activity') return { url: '/static/js/features/projects/project_activity.js', type: 'module' };
+    if (name === 'project_assessment') return { url: '/static/js/features/projects/project_assessment.js', type: 'module' };
     if (name === 'project_overview') return { url: '/static/js/features/projects/project_overview.js', type: 'module' };
     if (name === 'project_monitoring') return { url: '/static/js/features/projects/project_monitoring.js', type: 'module' };
     if (name === 'project_artifacts') return { url: '/static/js/features/projects/project_artifacts.js', type: 'module' };
@@ -931,6 +935,15 @@ let exportedLoadWatchersModal = null;
     await cssReady;
     return _requireLazyModuleExport(monitoringModule, 'DarklabProjectMonitoring', value => (
       value && typeof value.createProjectMonitoringController === 'function'
+    ));
+  }
+
+  async function loadProjectAssessment() {
+    const cssReady = loadLazyAsset('project_assessment_css');
+    const assessmentModule = await loadLazyAsset('project_assessment');
+    await cssReady;
+    return _requireLazyModuleExport(assessmentModule, 'DarklabProjectAssessment', value => (
+      value && typeof value.createProjectAssessmentController === 'function'
     ));
   }
 
@@ -1757,6 +1770,7 @@ let exportedLoadWatchersModal = null;
   window.loadFindingsBoard = loadFindingsBoard;
   window.loadFindingTriageEditor = loadFindingTriageEditor;
   window.loadProjectActivity = loadProjectActivity;
+  window.loadProjectAssessment = loadProjectAssessment;
   window.loadProjectOverview = loadProjectOverview;
   window.loadProjectMonitoring = loadProjectMonitoring;
   window.loadProjectArtifacts = loadProjectArtifacts;

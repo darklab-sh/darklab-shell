@@ -105,6 +105,7 @@ import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode 
 
 let importedOpenStatusMonitor = importedRuntimeOpenStatusMonitor;
 let importedProjectActivity;
+let importedProjectAssessment;
 let importedProjectArtifacts;
 let importedProjectDetails;
 let importedProjectEntities;
@@ -2084,6 +2085,8 @@ let importedProjectWorkspaceShell;
 
   let projectActivityController = null;
   let projectActivityControllerPromise = null;
+  let projectAssessmentController = null;
+  let projectAssessmentControllerPromise = null;
   let projectOverviewController = null;
   let projectOverviewControllerPromise = null;
   let projectMonitoringController = null;
@@ -2125,6 +2128,47 @@ let importedProjectWorkspaceShell;
         projectActivityControllerPromise = null;
       });
     return projectActivityControllerPromise;
+  }
+
+  function _projectAssessmentController() {
+    if (projectAssessmentController) return projectAssessmentController;
+    const projectAssessment = _projectModule('DarklabProjectAssessment', importedProjectAssessment);
+    const factory = projectAssessment && projectAssessment.createProjectAssessmentController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectAssessment is unavailable');
+    projectAssessmentController = factory({
+      projectWorkspaceRequest: _projectWorkspaceRequest,
+      projectResponseError: _projectResponseError,
+      formatDate: _formatProjectDate,
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      emptyProjectPanel: _emptyProjectPanel,
+      enhanceAppSelects: _shellEnhanceAppSelects(),
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      logClientError: _shellLogClientError,
+      mobileView: _projectMobileView,
+      canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),
+    });
+    return projectAssessmentController;
+  }
+
+  function _projectAssessmentControllerIfReady() {
+    return projectAssessmentController || null;
+  }
+
+  function _loadProjectAssessmentController() {
+    if (projectAssessmentController) return Promise.resolve(projectAssessmentController);
+    if (projectAssessmentControllerPromise) return projectAssessmentControllerPromise;
+    const loader = global.loadProjectAssessment;
+    projectAssessmentControllerPromise = (typeof loader === 'function' ? loader() : Promise.resolve())
+      .then((namespace) => {
+        if (namespace) importedProjectAssessment = namespace;
+        return _projectAssessmentController();
+      })
+      .finally(() => {
+        projectAssessmentControllerPromise = null;
+      });
+    return projectAssessmentControllerPromise;
   }
 
   function _projectOverviewController() {
@@ -2724,6 +2768,7 @@ let importedProjectWorkspaceShell;
       renderProjectList: _renderProjectList,
       renderProjectMobile: _renderProjectMobile,
       renderProjectActivity: _renderProjectActivity,
+      renderProjectAssessment: _renderProjectAssessment,
       renderProjectOverview: _renderProjectOverview,
       renderProjectMonitoring: _renderProjectMonitoring,
       renderProjectPackages: _renderProjectPackages,
@@ -3058,6 +3103,7 @@ let importedProjectWorkspaceShell;
       renderProjectMobileDetailTopbar: _renderProjectMobileDetailTopbar,
       renderProjectMobileTabs: _renderProjectMobileTabs,
       renderProjectMobileEntitiesTab: _renderProjectMobileEntitiesTab,
+      renderProjectMobileAssessmentTab: _renderProjectMobileAssessmentTab,
       renderProjectMobileOverviewTab: _renderProjectMobileOverviewTab,
       renderProjectMobilePackagesTab: _renderProjectMobilePackagesTab,
       renderProjectMobileReportTab: _renderProjectMobileReportTab,
@@ -3207,6 +3253,7 @@ let importedProjectWorkspaceShell;
       invalidateProjectTargetPage: projectId => _projectDetailsController().invalidateTargetPage(projectId),
       invalidateProjectEntities: (projectId = '') => _projectEntitiesControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectArtifacts: (projectId = '') => _projectArtifactsControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectAssessment: (projectId = '') => _projectAssessmentControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectOverview: (projectId = '') => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectMonitoring: (projectId = '') => _projectMonitoringControllerIfReady()?.invalidate?.(projectId),
       renderProjectWorkspace: _renderProjectWorkspace,
@@ -4435,6 +4482,24 @@ let importedProjectWorkspaceShell;
       });
   }
 
+  function _renderProjectAssessment(container, projectId) {
+    if (projectAssessmentController) {
+      projectAssessmentController.renderAssessment(container, projectId);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading project assessment...'));
+    _loadProjectAssessmentController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'assessment') return;
+        controller.renderAssessment(container, projectId);
+      })
+      .catch((err) => {
+        _shellLogClientError('failed to load project assessment', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load project assessment.'));
+      });
+  }
+
   function _renderProjectMonitoring(container, projectId, summary) {
     if (projectMonitoringController) {
       projectMonitoringController.renderMonitoring(container, projectId, summary);
@@ -4580,6 +4645,22 @@ let importedProjectWorkspaceShell;
       .catch((err) => {
         _shellLogClientError('failed to load mobile project overview', err);
         if (panel.isConnected) panel.replaceChildren('Could not load project overview.');
+      });
+    return panel;
+  }
+
+  function _renderProjectMobileAssessmentTab(projectId) {
+    if (projectAssessmentController) return projectAssessmentController.renderMobileAssessmentTab(projectId);
+    const panel = _emptyProjectPanel('Loading project assessment...');
+    _loadProjectAssessmentController()
+      .then(() => {
+        if (projectWorkspaceState.tab() === 'assessment' && _projectMobileView() === 'detail') {
+          _renderProjectMobileDetail();
+        }
+      })
+      .catch((err) => {
+        _shellLogClientError('failed to load mobile project assessment', err);
+        if (panel.isConnected) panel.replaceChildren('Could not load project assessment.');
       });
     return panel;
   }

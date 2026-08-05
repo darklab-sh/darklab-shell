@@ -62,6 +62,7 @@
   },
   "lazy": [
     "/static/css/features/projects.css",
+    "/static/css/features/project-assessment.css",
     "/static/css/features/atlas.css",
     "/static/css/features/atlas-mobile.css",
     "/static/css/features/command-registry.css",
@@ -83,6 +84,8 @@
     "/static/js/features/findings/finding_risk.js",
     "/static/js/features/findings/finding_triage_editor.js",
     "/static/js/features/projects/project_activity.js",
+    "/static/js/features/projects/project_assessment.js",
+    "/static/js/features/projects/project_assessment_renderer.js",
     "/static/js/features/projects/project_overview.js",
     "/static/js/features/projects/project_monitoring.js",
     "/static/js/features/projects/project_artifacts.js",

@@ -125,16 +125,11 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 3 — Add the Project Assessment tab on desktop and mobile
 
 - [ ] Extend the existing Projects workspace instead of creating separate chrome:
-  - Add **Assessment** to the shared Project desktop/mobile tab model and preserve the selected Project, cycle, filters, scroll position, and return context when opening Atlas, Run Details, Findings, Files, Workflows, or a confirmation.
-  - Put cycle status and truthful coverage rollups first, followed by a risk-prioritized finding worklist, category progress, a target worklist, outstanding checks, and recent evidence. Keep long run/evidence collections behind paging or focused drill-in views.
+  - Preserve the current Assessment cycle, filters, paging, expanded targets, scroll position, and return context when opening Atlas, Run Details, Findings, Files, Workflows, or a confirmation.
+  - Add a risk-prioritized finding worklist and recent-evidence drill-ins after the existing cycle status, truthful coverage, category progress, target worklist, and paged checks.
   - Count remediation groups rather than evidence observations in the fix-first worklist and headline finding rollups. Show the number and strongest validation state of related observations on each row, then expand inferred, confirmed, imported, and manual evidence in the finding detail.
   - Keep coverage and risk as neighboring but separate questions. Show why a finding is prioritized with KEV, EPSS, CVSS, exploit-reference, confidence, exposure, age, and freshness labels; do not let a high-risk count imply that an untested check was covered.
-  - Show the difference between untested, ran with no app-captured findings, findings awaiting review, blocked, intentionally skipped, and unavailable evidence. Use text and badges as well as color.
-  - Let target rows expand in place for their checks and use drill-in actions only when moving to another Project/Atlas/Run/Workflow view. Follow the disclosure-glyph mapping in `ARCHITECTURE.md`.
-  - Render recommended actions as normal `.btn` controls, state filters as `.chip` controls, passive states as `.badge` elements, list items with the shared row primitives, forms with shared controls, and scroll regions with `.nice-scroll`.
-  - Use the app-native select sync helper after programmatic state changes, the shared focus/pressable/disclosure/dismissal helpers, `showConfirm()` for confirmations, and `openActionSheet()` for mobile row actions. Do not add local Escape, backdrop, focus-trap, or sticky-hover implementations.
-  - Keep desktop information-dense but give mobile a list/detail flow with native Back behavior, touch-sized controls, a sticky action footer where needed, and the same data and permissions as desktop.
-  - Load Assessment JavaScript, CSS, and any large fragment lazily through `core/lazy_assets.js`; keep state/controller/rendering modules focused instead of growing `project_overview.js` or the Projects composition root indefinitely.
+  - Add recommended-action and lifecycle controls with the shared `.btn`, focus, dismissal, `showConfirm()`, and mobile `openActionSheet()` contracts. Keep mobile row actions touch-sized and use a sticky action footer where needed.
 - [ ] Connect the current Overview without duplicating it:
   - Keep Overview's existing scan gaps, finding progress, verification progress, and deliverables summary as the high-level Project view.
   - When an active assessment exists, let Overview show a compact assessment status/coverage card and a compact fix-first summary that link into the exact Assessment filters. The detailed methodology matrix and ranked worklist remain owned by the Assessment tab.

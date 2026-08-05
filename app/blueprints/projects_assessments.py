@@ -12,15 +12,9 @@ from services.assessments.contracts import (
     AssessmentError,
     AssessmentNotFound,
 )
-from services.assessments.lifecycle import (
-    delete_assessment_cycle,
-    preview_assessment_deletion,
-    update_assessment_cycle,
-)
-from services.assessments.read_model import (
-    get_assessment_read_model,
-    list_assessment_cycles,
-)
+from services.assessments.lifecycle import delete_assessment_cycle, preview_assessment_deletion, update_assessment_cycle
+from services.assessments.profile_summaries import list_assessment_profile_summaries
+from services.assessments.read_model import get_assessment_read_model, list_assessment_cycles
 from services.assessments.storage import create_assessment_cycle
 from services.audit.models import AuditEventType
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
@@ -85,6 +79,8 @@ def projects_assessments_list(project_id):
         )
     except AssessmentError as exc:
         return _assessment_error_response(exc)
+    if page is not None:
+        page["profiles"] = list_assessment_profile_summaries()
     return project_routes._project_json_or_404(page)
 
 

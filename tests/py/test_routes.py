@@ -270,6 +270,8 @@ class TestIndexRoute:
             "findings_board_bridge": "/static/js/features/findings/findings_board_bridge.js",
             "findings_board": "/static/js/features/findings/findings_board_modal.js",
             "project_activity": "/static/js/features/projects/project_activity.js",
+            "project_assessment": "/static/js/features/projects/project_assessment.js",
+            "project_assessment_renderer": "/static/js/features/projects/project_assessment_renderer.js",
             "project_artifacts": "/static/js/features/projects/project_artifacts.js",
             "project_workspace_shell": "/static/js/features/projects/project_workspace_shell.js",
             "project_workspace_events": "/static/js/features/projects/project_workspace_events.js",
@@ -301,6 +303,7 @@ class TestIndexRoute:
         }
         expected_styles = {
             "projects_css": "/static/css/features/projects.css",
+            "project_assessment_css": "/static/css/features/project-assessment.css",
             "atlas_css": "/static/css/features/atlas.css",
             "atlas_mobile_css": "/static/css/features/atlas-mobile.css",
             "command_registry_css": "/static/css/features/command-registry.css",

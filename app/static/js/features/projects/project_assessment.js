@@ -1,0 +1,287 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Project Assessment tab state and data controller.
+
+import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
+
+function createProjectAssessmentController(context) {
+  const ctx = context || {};
+  const states = new Map();
+
+  function defaultState() {
+    return {
+      assessments: [],
+      profiles: [],
+      selectedId: '',
+      detail: null,
+      loaded: false,
+      loading: false,
+      loadPromise: null,
+      detailLoading: false,
+      detailPromise: null,
+      creating: false,
+      error: '',
+      detailError: '',
+      category: '',
+      checkState: '',
+      limit: 50,
+      offset: 0,
+      checksScrollTop: 0,
+      expandedTargets: new Set(),
+    };
+  }
+
+  function stateFor(projectId) {
+    const id = String(projectId || '');
+    if (!states.has(id)) states.set(id, defaultState());
+    return states.get(id);
+  }
+
+  function invalidate(projectId = '') {
+    const id = String(projectId || '');
+    const targets = id ? [states.get(id)] : Array.from(states.values());
+    targets.filter(Boolean).forEach((st) => {
+      st.assessments = [];
+      st.profiles = [];
+      st.detail = null;
+      st.loaded = false;
+      st.error = '';
+      st.detailError = '';
+    });
+  }
+
+  async function responseError(resp, fallback) {
+    if (typeof ctx.projectResponseError === 'function') {
+      return ctx.projectResponseError(resp, fallback);
+    }
+    return new Error(fallback);
+  }
+
+  function logFailure(message, err, details = {}) {
+    ctx.logClientError?.(message, err, { page: 'project_assessment', ...details });
+  }
+
+  function renderViews() {
+    ctx.renderProjectExplorer?.();
+    if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
+  }
+
+  function cycleSelection(st) {
+    return st.assessments.find(item => String(item?.id || '') === st.selectedId)
+      || st.assessments.find(item => String(item?.status || '') === 'active')
+      || st.assessments[0]
+      || null;
+  }
+
+  function checkQuery(st) {
+    const params = new URLSearchParams({ limit: String(st.limit), offset: String(st.offset) });
+    if (st.category) params.set('category', st.category);
+    if (st.checkState) params.set('state', st.checkState);
+    return params.toString();
+  }
+
+  async function loadDetail(projectId, options = {}) {
+    const id = String(projectId || '');
+    const st = stateFor(id);
+    const selected = cycleSelection(st);
+    if (!id || !selected) {
+      st.detail = null;
+      st.selectedId = '';
+      st.detailError = '';
+      return false;
+    }
+    st.selectedId = String(selected.id || '');
+    if (st.detailLoading && st.detailPromise) return st.detailPromise;
+    st.detailLoading = true;
+    st.detailError = '';
+    const promise = (async () => {
+      try {
+        const resp = await ctx.projectWorkspaceRequest(
+          `/projects/${encodeURIComponent(id)}/assessments/${encodeURIComponent(st.selectedId)}?${checkQuery(st)}`,
+          { cache: 'no-store' },
+        );
+        if (!resp.ok) throw await responseError(resp, 'Could not load this assessment cycle.');
+        st.detail = await resp.json();
+        return true;
+      } catch (err) {
+        st.detailError = err?.message || 'Could not load this assessment cycle.';
+        logFailure('PROJECT_ASSESSMENT_CLIENT_DETAIL_LOAD_FAILED', err, {
+          phase: 'detail',
+          project_id: id,
+          assessment_id: st.selectedId,
+        });
+        return false;
+      } finally {
+        st.detailLoading = false;
+        st.detailPromise = null;
+        if (options.render !== false) renderViews();
+      }
+    })();
+    st.detailPromise = promise;
+    return promise;
+  }
+
+  async function load(projectId, options = {}) {
+    const id = String(projectId || '');
+    if (!id) return false;
+    const st = stateFor(id);
+    if (st.loaded && options.force !== true) {
+      if (!st.detail && st.selectedId) return loadDetail(id, options);
+      return true;
+    }
+    if (st.loading && st.loadPromise) return st.loadPromise;
+    st.loading = true;
+    st.error = '';
+    const promise = (async () => {
+      try {
+        const params = new URLSearchParams({ include_archived: '1', limit: '100' });
+        const resp = await ctx.projectWorkspaceRequest(
+          `/projects/${encodeURIComponent(id)}/assessments?${params.toString()}`,
+          { cache: 'no-store' },
+        );
+        if (!resp.ok) throw await responseError(resp, 'Could not load project assessments.');
+        const payload = await resp.json();
+        st.assessments = Array.isArray(payload?.assessments) ? payload.assessments : [];
+        st.profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+        st.selectedId = String(cycleSelection(st)?.id || '');
+        st.loaded = true;
+        if (st.selectedId) await loadDetail(id, { render: false });
+        else st.detail = null;
+        return true;
+      } catch (err) {
+        st.error = err?.message || 'Could not load project assessments.';
+        logFailure('PROJECT_ASSESSMENT_CLIENT_LOAD_FAILED', err, { phase: 'list', project_id: id });
+        return false;
+      } finally {
+        st.loading = false;
+        st.loadPromise = null;
+        if (options.render !== false) renderViews();
+      }
+    })();
+    st.loadPromise = promise;
+    return promise;
+  }
+
+  function resetDetailState(st) {
+    st.detail = null;
+    st.offset = 0;
+    st.checksScrollTop = 0;
+    st.expandedTargets.clear();
+  }
+
+  async function selectCycle(projectId, assessmentId) {
+    const st = stateFor(projectId);
+    const nextId = String(assessmentId || '');
+    if (!nextId || nextId === st.selectedId) return false;
+    st.selectedId = nextId;
+    st.category = '';
+    st.checkState = '';
+    resetDetailState(st);
+    renderViews();
+    return loadDetail(projectId);
+  }
+
+  async function setFilter(projectId, key, value) {
+    const st = stateFor(projectId);
+    const normalized = String(value || '');
+    if (key === 'category') st.category = normalized;
+    else if (key === 'state') st.checkState = normalized;
+    else return false;
+    resetDetailState(st);
+    renderViews();
+    return loadDetail(projectId);
+  }
+
+  async function setPage(projectId, offset) {
+    const st = stateFor(projectId);
+    const nextOffset = Math.max(0, Number(offset || 0));
+    if (nextOffset === st.offset) return false;
+    st.offset = nextOffset;
+    st.checksScrollTop = 0;
+    st.detail = null;
+    renderViews();
+    return loadDetail(projectId);
+  }
+
+  async function createCycle(projectId, profileKey) {
+    const id = String(projectId || '');
+    const st = stateFor(id);
+    const key = String(profileKey || '').trim();
+    if (!id || !key || st.creating) return false;
+    st.creating = true;
+    st.error = '';
+    renderViews();
+    try {
+      const resp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(id)}/assessments`, {
+        method: 'POST',
+        body: JSON.stringify({ profile_key: key }),
+      });
+      if (!resp.ok) throw await responseError(resp, 'Could not start the assessment.');
+      const payload = await resp.json();
+      st.loaded = false;
+      st.selectedId = String(payload?.assessment?.id || '');
+      st.category = '';
+      st.checkState = '';
+      resetDetailState(st);
+      ctx.setProjectWorkspaceMessage?.('Assessment cycle started.');
+      return load(id, { force: true, render: false });
+    } catch (err) {
+      st.error = err?.message || 'Could not start the assessment.';
+      logFailure('PROJECT_ASSESSMENT_CLIENT_CREATE_FAILED', err, {
+        phase: 'create',
+        project_id: id,
+        profile_key: key,
+      });
+      return false;
+    } finally {
+      st.creating = false;
+      renderViews();
+    }
+  }
+
+  const renderer = createProjectAssessmentRenderer(ctx, {
+    createCycle,
+    load,
+    loadDetail,
+    selectCycle,
+    setFilter,
+    setPage,
+  });
+
+  function ensureLoad(projectId) {
+    const st = stateFor(projectId);
+    if (!st.loaded && !st.loading) void load(projectId);
+    return st;
+  }
+
+  function renderAssessment(container, projectId) {
+    const st = ensureLoad(projectId);
+    container.replaceChildren(renderer.renderContent(projectId, st, cycleSelection(st)));
+    ctx.enhanceAppSelects?.(container);
+  }
+
+  function renderMobileAssessmentTab(projectId) {
+    const st = ensureLoad(projectId);
+    const content = renderer.renderContent(projectId, st, cycleSelection(st), { mobile: true });
+    ctx.enhanceAppSelects?.(content);
+    return content;
+  }
+
+  return {
+    createCycle,
+    invalidate,
+    load,
+    loadDetail,
+    renderAssessment,
+    renderMobileAssessmentTab,
+    selectCycle,
+    setFilter,
+    setPage,
+    stateFor,
+  };
+}
+
+const DarklabProjectAssessment = { createProjectAssessmentController };
+
+export { DarklabProjectAssessment };
