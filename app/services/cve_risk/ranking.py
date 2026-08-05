@@ -59,6 +59,14 @@ _RISK_ORDER_SQL = (
     "{age_expression} DESC, {finding_id} DESC"
 )
 _CVE_RISK_ROWS_SQL = "SELECT * FROM cve_risk_records WHERE cve_id IN ({placeholders})"
+_FINDING_SEVERITY_ORDER = {
+    "critical": 0,
+    "high": 1,
+    "medium": 2,
+    "low": 3,
+    "info": 4,
+    "": 5,
+}
 
 
 def _number(value: Any) -> float | None:
@@ -396,6 +404,27 @@ def _aggregate_priority_context(observations: list[dict[str, Any]]) -> dict[str,
     return {"confidence": confidence, "exposure": exposures, "assets": assets}
 
 
+def _aggregate_severities(observations: list[dict[str, Any]]) -> list[str]:
+    values = {
+        str(observation.get("severity") or "").strip().lower()
+        for observation in observations
+        if str(observation.get("severity") or "").strip()
+    }
+    return sorted(values, key=lambda value: (
+        _FINDING_SEVERITY_ORDER.get(value, 5),
+        value,
+    ))
+
+
+def _highest_observation_cvss(observations: list[dict[str, Any]]) -> float | None:
+    scores = [
+        score
+        for observation in observations
+        if (score := _number(observation.get("cvss_score"))) is not None
+    ]
+    return max(scores) if scores else None
+
+
 def build_remediation_worklist(
     findings: list[dict[str, Any]],
     conn: Any | None = None,
@@ -427,35 +456,40 @@ def build_remediation_worklist(
             for item in finding.get("cve_risk", [])
             if isinstance(item, dict)
         }
-        for reference in finding.get("remediation_groups", []):
+        for reference in finding.get("observation_references", []):
             if not isinstance(reference, dict):
                 continue
             remediation_id = str(reference.get("remediation_id") or "")
             vulnerability_id = str(reference.get("vulnerability_id") or "")
-            if not remediation_id or not vulnerability_id:
+            if not remediation_id:
                 continue
             key = (session_id, team_id, remediation_id)
             group = grouped.setdefault(key, {
                 "remediation_id": remediation_id,
+                "identity_kind": str(reference.get("identity_kind") or "rule"),
                 "vulnerability_id": vulnerability_id,
                 "affected_subject": str(reference.get("affected_subject") or ""),
                 "observations": [],
                 "evidence_keys": set(),
                 "validation_methods": set(),
+                "rule_identities": set(),
             })
             observation = dict(finding)
             observation["risk"] = risk_by_cve.get(vulnerability_id, finding.get("risk"))
             group["observations"].append(observation)
             group["evidence_keys"].update(finding_evidence_keys(finding))
             group["validation_methods"].add(finding_validation_method(finding))
+            group["rule_identities"].add(str(reference.get("rule_identity") or ""))
 
     worklist: list[dict[str, Any]] = []
     for group in grouped.values():
         observations = group.pop("observations")
         evidence_keys = group.pop("evidence_keys")
         validation_methods = group.pop("validation_methods")
+        rule_identities = sorted(value for value in group.pop("rule_identities") if value)
         _sort_by_cve_risk(observations)
         representative = observations[0]
+        severities = _aggregate_severities(observations)
         observed_times = [
             str(item.get("first_seen_at") or item.get("created") or "")
             for item in observations
@@ -467,8 +501,13 @@ def build_remediation_worklist(
             "observation_count": len(observations),
             "evidence_count": len(evidence_keys),
             "validation_methods": sorted(validation_methods),
+            "rule_identity": rule_identities[0] if group["identity_kind"] == "rule" else "",
+            "rule_identities": rule_identities,
             "priority_context": _aggregate_priority_context(observations),
             "risk": representative.get("risk"),
+            "severity": severities[0] if severities else "",
+            "severities": severities,
+            "cvss_score": _highest_observation_cvss(observations),
             "first_seen_at": min(observed_times) if observed_times else "",
         })
     _sort_by_cve_risk(worklist)

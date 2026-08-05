@@ -471,6 +471,11 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
     assert shared["observation_count"] == 2
     assert shared["evidence_count"] == 2
     assert shared["validation_methods"] == ["active_confirmation", "version_inference"]
+    assert shared["rule_identity"] == ""
+    assert shared["rule_identities"] == [
+        "observation:finding-confirmed",
+        "observation:finding-inferred",
+    ]
     assert shared["priority_context"] == {
         "confidence": ["high", "medium"],
         "exposure": ["internet"],
@@ -557,6 +562,19 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     assert confirmed_reference["observation_id"] != inferred_reference["observation_id"]
     assert rule_observations[0]["observation_id"] == confirmed_reference["observation_id"]
     assert rule_observations[0]["remediation_id"] == confirmed_reference["remediation_id"]
+    rule_worklist = build_remediation_worklist(rule_observations, conn=risk_db)
+    assert len(rule_worklist) == 1
+    assert rule_worklist[0]["identity_kind"] == "rule"
+    assert rule_worklist[0]["vulnerability_id"] == ""
+    assert rule_worklist[0]["rule_identity"] == "signature:stable-rule-signature"
+    assert rule_worklist[0]["rule_identities"] == ["signature:stable-rule-signature"]
+    assert rule_worklist[0]["observation_count"] == 2
+    assert rule_worklist[0]["severity"] == "critical"
+    assert rule_worklist[0]["severities"] == ["critical", "high"]
+    assert rule_worklist[0]["validation_methods"] == [
+        "active_confirmation",
+        "version_inference",
+    ]
 
     uncertain_rules = [{
         "id": finding_id,
@@ -574,6 +592,7 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
         "observation:missing-rule-two"
     )
     assert uncertain_rules[0]["remediation_id"] != uncertain_rules[1]["remediation_id"]
+    assert len(build_remediation_worklist(uncertain_rules, conn=risk_db)) == 2
 
 
 def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
