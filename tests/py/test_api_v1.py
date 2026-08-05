@@ -4804,6 +4804,168 @@ def test_darklab_cli_run_requires_no_follow_for_json_start_payload(monkeypatch, 
     assert calls == [("POST", "/runs", {"command": "echo ok", "project_id": None})]
 
 
+def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+    calls = []
+    assessment = {
+        "id": "asmt_cli",
+        "status": "active",
+        "profile_key": "network",
+        "profile_version": "1",
+        "title": "External assessment",
+    }
+    check = {
+        "id": "asmc_cli",
+        "state": "not_started",
+        "state_source": "derived",
+        "state_reason": "",
+        "policy_level": "safe",
+        "category": "discovery",
+        "target_type": "domain",
+        "target_value": "darklab.sh",
+        "check_key": "network.port_discovery",
+    }
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, **_kwargs):
+            calls.append((method, path, params, body))
+            if path == "/projects/prj_cli/assessments" and method == "GET":
+                return {
+                    "assessments": [assessment],
+                    "total": 1,
+                    "limit": 50,
+                    "offset": 0,
+                    "has_more": False,
+                }
+            if path == "/projects/prj_cli/assessments/asmt_cli" and method == "GET":
+                return {
+                    "assessment": assessment,
+                    "rollup": {
+                        "applicable_checks": 1,
+                        "covered_checks": 0,
+                        "checks_awaiting_review": 0,
+                        "untested_checks": 1,
+                    },
+                    "category_rollups": [],
+                    "checks": {
+                        "checks": [check],
+                        "total": 1,
+                        "limit": 50,
+                        "offset": 0,
+                        "has_more": False,
+                    },
+                }
+            if path == "/projects/prj_cli/assessments/asmt_cli/checks/asmc_cli" and method == "PATCH":
+                state = str((body or {}).get("state") or "")
+                reason = str((body or {}).get("reason") or "")
+                return {
+                    "ok": True,
+                    "check": {
+                        **check,
+                        "state": "not_started" if state == "not_started" else state,
+                        "state_source": "derived" if state == "not_started" else "manual",
+                        "state_reason": reason,
+                    },
+                }
+            raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main([
+        "assessment",
+        "list",
+        "prj_cli",
+        "--status",
+        "archived",
+    ]) == 0
+    assert "asmt_cli" in capsys.readouterr().out
+    assert calls[-1] == (
+        "GET",
+        "/projects/prj_cli/assessments",
+        {"limit": 50, "offset": 0, "status": "archived", "include_archived": True},
+        None,
+    )
+
+    assert cli_main.main(["assessment", "show", "prj_cli", "asmt_cli"]) == 0
+    show_output = capsys.readouterr().out
+    assert "External assessment" in show_output
+    assert "APPLICABLE CHECKS" in show_output
+    assert calls[-1] == ("GET", "/projects/prj_cli/assessments/asmt_cli", None, None)
+
+    assert cli_main.main([
+        "assessment",
+        "checks",
+        "prj_cli",
+        "asmt_cli",
+        "--state",
+        "not_started",
+        "--policy-level",
+        "safe",
+        "--evidence-state",
+        "none",
+        "--target-type",
+        "domain",
+        "--category",
+        "discovery",
+    ]) == 0
+    checks_output = capsys.readouterr().out
+    assert "asmc_cli" in checks_output
+    assert "darklab.sh" in checks_output
+    assert calls[-1] == (
+        "GET",
+        "/projects/prj_cli/assessments/asmt_cli",
+        {
+            "limit": 50,
+            "offset": 0,
+            "category": "discovery",
+            "state": "not_started",
+            "target_type": "domain",
+            "policy_level": "safe",
+            "evidence_state": "none",
+        },
+        None,
+    )
+
+    assert cli_main.main([
+        "assessment",
+        "set-state",
+        "prj_cli",
+        "asmt_cli",
+        "asmc_cli",
+        "blocked",
+        "--reason",
+        "Waiting for authorization",
+    ]) == 0
+    assert "Waiting for authorization" in capsys.readouterr().out
+    assert calls[-1] == (
+        "PATCH",
+        "/projects/prj_cli/assessments/asmt_cli/checks/asmc_cli",
+        None,
+        {"state": "blocked", "reason": "Waiting for authorization"},
+    )
+
+    assert cli_main.main([
+        "assessment",
+        "clear-state",
+        "prj_cli",
+        "asmt_cli",
+        "asmc_cli",
+        "--format",
+        "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["check"]["state_source"] == "derived"
+    assert calls[-1] == (
+        "PATCH",
+        "/projects/prj_cli/assessments/asmt_cli/checks/asmc_cli",
+        None,
+        {"state": "not_started", "reason": ""},
+    )
+
+
 def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypatch, capsys, tmp_path):
     cli_main = import_module("darklab_cli.__main__")
     help_text = cli_main._parser().format_help()
@@ -4815,7 +4977,8 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert cli_main.main(["completion", "bash"]) == 0
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
-    assert "active artifacts atlas cancel completion download grep history notify" in bash_completion
+    assert "active artifacts assessment atlas cancel completion download grep history notify" in bash_completion
+    assert "assessment) _darklab_comp_words 'checks clear-state list set-state show'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
     assert "team:invite) _darklab_word_in \"$word\" 'create revoke'" in bash_completion
     invite_create_completion = (

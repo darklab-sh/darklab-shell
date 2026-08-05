@@ -225,7 +225,7 @@ Create a cycle with a profile key and optional title:
 
 The cycle detail endpoint accepts `category`, `state`, `target_type`, `policy_level`, and `evidence_state` filters plus `limit` and `offset`. Its response keeps cycle and category rollups separate from the bounded `checks` page, including `total`, `limit`, `offset`, and `has_more`.
 
-An active check accepts `blocked`, `skipped`, or `not_applicable` together with a reason. Send an empty state to clear that decision and return to the state derived from saved evidence. Link evidence with its saved type and id:
+An active check accepts `blocked`, `skipped`, or `not_applicable` together with a reason. Send `not_started` without a reason to clear that decision and return to the state derived from saved evidence. Link evidence with its saved type and id:
 
 ```json
 {
@@ -237,6 +237,18 @@ An active check accepts `blocked`, `skipped`, or `not_applicable` together with 
 The server verifies that the source belongs to the same owner and Project and satisfies the frozen evidence rule. It never trusts caller-supplied owner, target, rule, or source metadata. Complete or archive a cycle with `PATCH` and a `status` value; archived cycles can be previewed and deleted, while their original runs, findings, entities, and artifacts remain intact.
 
 Lifecycle conflicts and quota failures return `409`; invalid profiles, filters, states, transitions, or evidence return `400`; cross-scope records return `404`; and team permission failures return `403`. Responses and the OpenAPI contract omit personal session ids, profile file paths, secrets, protected HTTP context, private workspace paths, and stored command variables.
+
+The bundled CLI exposes the same read and manual-state contract:
+
+```bash
+darklab assessment list prj_123 --status active
+darklab assessment show prj_123 asmt_123
+darklab assessment checks prj_123 asmt_123 --state not_started --policy-level safe
+darklab assessment set-state prj_123 asmt_123 asmc_123 blocked --reason "Waiting for authorization"
+darklab assessment clear-state prj_123 asmt_123 asmc_123
+```
+
+List and check commands support `text`, `json`, and `ndjson`. Cycle detail and state mutations support `text` and `json`. Selecting `--status archived` includes archived cycles automatically; use `--include-archived` to include them without narrowing to that status. Use the global `--team` option or saved CLI team scope for team-owned Projects; the server still makes the permission decision.
 
 ---
 
@@ -565,6 +577,11 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. `--limit` defaults to 50 and caps at 100. |
+| `darklab assessment list <project_id> [--status active\|completed\|archived] [--include-archived] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Project assessment cycles. `--limit` defaults to 50 and caps at 200. |
+| `darklab assessment show <project_id> <assessment_id> [--format text\|json]` | Show one cycle with its coverage rollup. JSON output retains the full detail response, including the first bounded check page. |
+| `darklab assessment checks <project_id> <assessment_id> [--category NAME] [--state STATE] [--target-type TYPE] [--policy-level LEVEL] [--evidence-state available\|unavailable\|none] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page and filter checks for one cycle. `--limit` defaults to 50 and caps at 200. |
+| `darklab assessment set-state <project_id> <assessment_id> <check_id> blocked\|skipped\|not_applicable --reason TEXT [--format text\|json]` | Save a reasoned manual decision on an active check. |
+| `darklab assessment clear-state <project_id> <assessment_id> <check_id> [--format text\|json]` | Clear a manual decision and restore the check's evidence-derived state. |
 | `darklab team list\|status [--format text\|json]` | List joined teams or show the active CLI scope. |
 | `darklab team create <name> [--slug SLUG] [--display-name NAME] [--format text\|json]` | Create a team and print the one-time recovery code. |
 | `darklab team switch <team-id\|slug\|name\|personal>` | Save the active CLI team scope, or clear it with `personal`. |

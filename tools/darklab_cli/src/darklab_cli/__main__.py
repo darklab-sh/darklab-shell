@@ -26,12 +26,29 @@ NOTIFICATION_CHANNEL_KIND_CHOICES = ("webhook", "slack", "discord", "telegram", 
 TEAM_ROLE_CHOICES = ("owner", "admin", "operator", "viewer")
 WATCHER_POLICY_SIGNAL_CLASS_CHOICES = ("findings", "entities", "ports")
 HISTORY_TYPE_CHOICES = ("all", "runs", "runs_external", "runs_builtin", "external", "builtin")
+ASSESSMENT_STATUS_CHOICES = ("active", "completed", "archived")
+ASSESSMENT_CHECK_STATE_CHOICES = (
+    "not_started",
+    "running",
+    "covered",
+    "needs_review",
+    "failed",
+    "blocked",
+    "skipped",
+    "not_applicable",
+)
+ASSESSMENT_MANUAL_STATE_CHOICES = ("blocked", "skipped", "not_applicable")
+ASSESSMENT_POLICY_LEVEL_CHOICES = ("safe", "standard", "intrusive", "destructive")
+ASSESSMENT_EVIDENCE_STATE_CHOICES = ("available", "unavailable", "none")
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="darklab",
-        description="Headless darklab_shell client for runs, history, projects, Atlas, schedules, watchers, and notifications.",
+        description=(
+            "Headless darklab_shell client for runs, history, projects, assessments, "
+            "Atlas, schedules, watchers, and notifications."
+        ),
     )
     parser.add_argument("--api-url", help="darklab_shell base URL")
     parser.add_argument("--token", help="tok_ session token")
@@ -245,6 +262,54 @@ def _parser() -> argparse.ArgumentParser:
     project_packages.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
     project_packages.add_argument("--offset", type=int, default=0)
     project_packages.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    assessment = sub.add_parser("assessment", help="Review and update project assessment cycles.")
+    assessment_sub = assessment.add_subparsers(dest="assessment_command", required=True)
+
+    assessment_list = assessment_sub.add_parser("list", help="List assessment cycles for one project.")
+    assessment_list.add_argument("project_id")
+    assessment_list.add_argument("--status", choices=ASSESSMENT_STATUS_CHOICES)
+    assessment_list.add_argument("--include-archived", action="store_true")
+    assessment_list.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 200.")
+    assessment_list.add_argument("--offset", type=int, default=0)
+    assessment_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    assessment_show = assessment_sub.add_parser("show", help="Show one assessment cycle and its coverage rollup.")
+    assessment_show.add_argument("project_id")
+    assessment_show.add_argument("assessment_id")
+    assessment_show.add_argument("--format", choices=("text", "json"), default="text")
+
+    assessment_checks = assessment_sub.add_parser("checks", help="List checks for one assessment cycle.")
+    assessment_checks.add_argument("project_id")
+    assessment_checks.add_argument("assessment_id")
+    assessment_checks.add_argument("--category")
+    assessment_checks.add_argument("--state", choices=ASSESSMENT_CHECK_STATE_CHOICES)
+    assessment_checks.add_argument("--target-type")
+    assessment_checks.add_argument("--policy-level", choices=ASSESSMENT_POLICY_LEVEL_CHOICES)
+    assessment_checks.add_argument("--evidence-state", choices=ASSESSMENT_EVIDENCE_STATE_CHOICES)
+    assessment_checks.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 200.")
+    assessment_checks.add_argument("--offset", type=int, default=0)
+    assessment_checks.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    assessment_set_state = assessment_sub.add_parser(
+        "set-state",
+        help="Set a reasoned manual state for one assessment check.",
+    )
+    assessment_set_state.add_argument("project_id")
+    assessment_set_state.add_argument("assessment_id")
+    assessment_set_state.add_argument("check_id")
+    assessment_set_state.add_argument("state", choices=ASSESSMENT_MANUAL_STATE_CHOICES)
+    assessment_set_state.add_argument("--reason", required=True)
+    assessment_set_state.add_argument("--format", choices=("text", "json"), default="text")
+
+    assessment_clear_state = assessment_sub.add_parser(
+        "clear-state",
+        help="Clear a manual check state and restore its evidence-derived state.",
+    )
+    assessment_clear_state.add_argument("project_id")
+    assessment_clear_state.add_argument("assessment_id")
+    assessment_clear_state.add_argument("check_id")
+    assessment_clear_state.add_argument("--format", choices=("text", "json"), default="text")
 
     atlas = sub.add_parser("atlas", help="Read Atlas summaries, source runs, entities, and findings.")
     atlas_sub = atlas.add_subparsers(dest="atlas_command", required=True)
@@ -915,6 +980,8 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
         case "project-packages":
             payload = client.request("GET", f"/projects/{args.project_id}/packages", params=_page_window_params(args))
             return _print_collection(payload, "packages", args.format, fields=("id", "status", "name"))
+        case "assessment":
+            return _assessment(client, args)
         case "atlas":
             return _atlas(client, args)
         case "schedule":
@@ -1826,6 +1893,82 @@ def _atlas(client: DarklabClient, args: argparse.Namespace) -> int:
                 _print_table([finding], ("id", "status", "severity", "title"))
             return 0
     return die("unknown atlas command")
+
+
+def _assessment(client: DarklabClient, args: argparse.Namespace) -> int:
+    base_path = f"/projects/{args.project_id}/assessments"
+    match args.assessment_command:
+        case "list":
+            payload = client.request("GET", base_path, params={
+                **_page_window_params(args),
+                "status": args.status,
+                "include_archived": args.include_archived or args.status == "archived",
+            })
+            return _print_collection(
+                payload,
+                "assessments",
+                args.format,
+                fields=("id", "status", "profile_key", "profile_version", "title"),
+            )
+        case "show":
+            payload = client.request("GET", f"{base_path}/{args.assessment_id}")
+            if args.format == "json":
+                return _print_payload(payload, "json")
+            assessment = payload.get("assessment") if isinstance(payload, dict) else {}
+            rollup = payload.get("rollup") if isinstance(payload, dict) else {}
+            if isinstance(assessment, dict):
+                _print_table(
+                    [assessment],
+                    ("id", "status", "profile_key", "profile_version", "title"),
+                )
+            if isinstance(rollup, dict):
+                _print_table(
+                    [rollup],
+                    ("applicable_checks", "covered_checks", "checks_awaiting_review", "untested_checks"),
+                )
+            return 0
+        case "checks":
+            payload = client.request("GET", f"{base_path}/{args.assessment_id}", params={
+                **_page_window_params(args),
+                "category": args.category,
+                "state": args.state,
+                "target_type": args.target_type,
+                "policy_level": args.policy_level,
+                "evidence_state": args.evidence_state,
+            })
+            checks_page = payload.get("checks") if isinstance(payload, dict) else {}
+            return _print_collection(
+                checks_page if isinstance(checks_page, dict) else {},
+                "checks",
+                args.format,
+                fields=(
+                    "id",
+                    "state",
+                    "policy_level",
+                    "category",
+                    "target_type",
+                    "target_value",
+                    "check_key",
+                ),
+            )
+        case "set-state" | "clear-state":
+            state = args.state if args.assessment_command == "set-state" else "not_started"
+            reason = args.reason if args.assessment_command == "set-state" else ""
+            payload = client.request(
+                "PATCH",
+                f"{base_path}/{args.assessment_id}/checks/{args.check_id}",
+                body={"state": state, "reason": reason},
+            )
+            if args.format == "json":
+                return _print_payload(payload, "json")
+            check = payload.get("check") if isinstance(payload, dict) else {}
+            if isinstance(check, dict):
+                _print_table(
+                    [check],
+                    ("id", "state", "state_source", "state_reason", "check_key"),
+                )
+            return 0
+    return die("unknown assessment command")
 
 
 def _atlas_filter_params(args: argparse.Namespace) -> dict[str, Any]:

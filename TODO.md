@@ -111,7 +111,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 2 — Add assessment routes, API contracts, audit, and observability
 
-- [ ] Add assessment commands to the bundled CLI now that the service and API contracts are stable. The CLI should list/show cycles, list checks, set an allowed manual state, and start a recommended action through the same permission checks as the browser.
+- [ ] Add `darklab assessment start-action` after the recommended-action launch route and execution contract land. Cycle list/show, filtered check paging, and reasoned manual-state commands already use the stable API and permission checks.
 - [ ] Finish the assessment-specific audit and safe-log inventory as later features land:
   - Audit recommended-action launch, HTTP-profile use, manual finding creation, and retest disposition. Cycle lifecycle, manual-state, and evidence-link events already use the shared audit boundary.
   - Log ids, owner kind, Project id, profile/check keys, policy level, state transitions, counts, durations, and error classes. Never log credentials, authorization headers, cookies, client-certificate contents, raw request bodies, provider payloads, finding evidence bodies, or complete target lists.
