@@ -6712,6 +6712,7 @@ class TestPostgresMigrations:
             "0048",
             "0049",
             "0050",
+            "0051",
         ]
         for table_name in (
             "runs",
@@ -7627,7 +7628,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0051",
+            "0052",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7679,7 +7680,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0050"
+        assert rows[-1]["version"] == "0051"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7689,16 +7690,60 @@ class TestPostgresMigrations:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         try:
-            applied = run_migrations(conn, MIGRATIONS, backend=database_backend.DatabaseBackend.SQLITE)
+            pre_provenance_migrations = tuple(
+                migration for migration in MIGRATIONS if migration.version < "0051"
+            )
+            applied = run_migrations(
+                conn,
+                pre_provenance_migrations,
+                backend=database_backend.DatabaseBackend.SQLITE,
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, subject_key, raw_line, created) "
+                "VALUES ('finding-import-before-0051', 'migration-session', "
+                "'domain:imported.darklab.sh', '[medium] imported service finding', "
+                "'2026-07-13T09:30:00Z')"
+            )
+            conn.execute(
+                "INSERT INTO atlas_finding_import_occurrences "
+                "(finding_id, batch_id, row_number, snippet, observed_at, created, updated) "
+                "VALUES ('finding-import-before-0051', 'batch-before-0051', 7, "
+                "'[medium] imported service finding', '2026-07-13T09:30:00Z', "
+                "'2026-07-13T09:30:00Z', '2026-07-13T09:30:00Z')"
+            )
+            applied.extend(run_migrations(
+                conn,
+                MIGRATIONS,
+                backend=database_backend.DatabaseBackend.SQLITE,
+            ))
             tables = {
                 str(row["name"])
                 for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
             }
+            imported_provenance = conn.execute(
+                "SELECT origin, validation_method FROM findings WHERE id = ?",
+                ("finding-import-before-0051",),
+            ).fetchone()
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO findings (id, session_id, origin, created) "
+                    "VALUES ('finding-invalid-origin', 'migration-session', 'scanner', '2026-07-13')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO findings (id, session_id, validation_method, created) "
+                    "VALUES ('finding-invalid-method', 'migration-session', 'unbounded', '2026-07-13')"
+                )
         finally:
             conn.close()
 
         assert applied == [migration.version for migration in MIGRATIONS]
         assert {"runs", "runs_fts", "schema_migrations"}.issubset(tables)
+        assert dict(imported_provenance) == {
+            "origin": "import",
+            "validation_method": "imported_assertion",
+        }
         assert not hasattr(database, "_migrate_schema")
 
     def test_sqlite_fresh_unified_baseline_does_not_call_database_schema_wrappers(self, monkeypatch):
@@ -8070,7 +8115,7 @@ class TestPostgresMigrations:
 
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
-            "0049", "0050",
+            "0049", "0050", "0051",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8085,7 +8130,8 @@ class TestPostgresMigrations:
         assert "0048" in conn.applied_versions
         assert "0049" in conn.applied_versions
         assert "0050" in conn.applied_versions
-        assert conn.commit_count == 12
+        assert "0051" in conn.applied_versions
+        assert conn.commit_count == 13
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8238,7 +8284,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0051",
+            "0052",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8263,9 +8309,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0051"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0052"]
         assert table_exists is not None
-        assert "0051" in versions
+        assert "0052" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -26262,6 +26308,8 @@ class TestDatabaseInit:
             "last_run_id",
             "occurrence_count",
             "status",
+            "origin",
+            "validation_method",
         }.issubset(finding_columns)
         assert {"finding_id", "run_id", "line_number", "snippet", "seen_at"}.issubset(occurrence_columns)
         assert {"id", "normalized_rows_json", "preview_counts_json", "warning_summary_json"}.issubset(import_draft_columns)
@@ -28223,7 +28271,8 @@ SQL syntax error near q</response>
                 record_run_findings(conn, session_id, run_id, entries, team_id="team_findings")
             conn.commit()
             finding_rows = conn.execute(
-                "SELECT session_id, team_id, entity_id, signature_hash, occurrence_count FROM findings"
+                "SELECT session_id, team_id, entity_id, signature_hash, occurrence_count, "
+                "origin, validation_method FROM findings"
             ).fetchall()
             occurrence_rows = conn.execute(
                 "SELECT finding_id, run_id FROM findings_occurrences ORDER BY run_id"
@@ -28239,6 +28288,8 @@ SQL syntax error near q</response>
         assert finding_rows[0]["team_id"] == "team_findings"
         assert finding_rows[0]["entity_id"] == entity_rows[0]["id"]
         assert finding_rows[0]["occurrence_count"] == 2
+        assert finding_rows[0]["origin"] == "run"
+        assert finding_rows[0]["validation_method"] == "captured_observation"
         assert len({row["finding_id"] for row in occurrence_rows}) == 1
         assert [row["run_id"] for row in occurrence_rows] == [
             "run-finding-team-operator",

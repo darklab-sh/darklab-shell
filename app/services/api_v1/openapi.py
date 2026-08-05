@@ -10,7 +10,8 @@ from copy import deepcopy
 from config import APP_VERSION
 from services.api_v1 import openapi_assessments
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
-from services.api_v1.openapi_cve_risk import cve_risk_finding_properties, cve_risk_schemas
+from services.api_v1.openapi_cve_risk import cve_risk_schemas
+from services.api_v1.openapi_findings import finding_schemas
 from services.scheduler.models import CADENCE_PRESETS
 from services.watchers.models import (
     DIFF_KINDS,
@@ -563,37 +564,7 @@ OPENAPI_SPEC: dict = {
                 },
             },
             **cve_risk_schemas(),
-            "AtlasFinding": {
-                "type": "object",
-                "required": ["id", "entity_id", "status", "title", "raw_line", "occurrence_count"],
-                "properties": {
-                    "id": {"type": "string"},
-                    "entity_id": {"type": "string"},
-                    "entity_type": {"type": "string"},
-                    "entity_value": {"type": "string"},
-                    "subject_key": {"type": "string"},
-                    "severity": {"type": "string"},
-                    "kind": {"type": "string"},
-                    "tool_root": {"type": "string"},
-                    "first_run_id": {"type": "string"},
-                    "last_run_id": {"type": "string"},
-                    "run_id": {"type": "string"},
-                    "run_command": {"type": "string"},
-                    "first_seen_at": {"type": "string", "nullable": True},
-                    "last_seen_at": {"type": "string", "nullable": True},
-                    "occurrence_count": {"type": "integer"},
-                    "status": {"type": "string"},
-                    "review_state": {"type": "string"},
-                    "suppressed": {"type": "boolean"},
-                    "suppressed_reason": {"type": "string"},
-                    "suppressed_at": {"type": "string"},
-                    "title": {"type": "string"},
-                    "raw_line": {"type": "string"},
-                    "line_number": {"type": "integer", "nullable": True},
-                    "created": {"type": "string", "nullable": True},
-                    **cve_risk_finding_properties(),
-                },
-            },
+            **finding_schemas(),
             "AtlasFindingPage": {
                 "type": "object",
                 "required": [
@@ -750,37 +721,6 @@ OPENAPI_SPEC: dict = {
                     "group_counts": {"type": "object", "additionalProperties": {"type": "integer"}},
                     "collapsed_group_counts": {"type": "object", "additionalProperties": {"type": "integer"}},
                     "group_order": {"type": "array", "items": {"type": "string"}},
-                },
-            },
-            "ProjectFinding": {
-                "type": "object",
-                "required": ["id", "run_id", "status", "review_state", "title", "raw_line", "target_ids", "run_command"],
-                "properties": {
-                    "id": {"type": "string"},
-                    "session_id": {"type": "string"},
-                    "run_id": {"type": "string"},
-                    "target_id": {"type": "string"},
-                    "entity_id": {"type": "string"},
-                    "target_ids": {"type": "array", "items": {"type": "string"}},
-                    "subject_key": {"type": "string"},
-                    "scope": {"type": "string"},
-                    "kind": {"type": "string"},
-                    "title": {"type": "string"},
-                    "raw_line": {"type": "string"},
-                    "line_number": {"type": "integer", "nullable": True},
-                    "severity": {"type": "string"},
-                    "fingerprint": {"type": "string"},
-                    "review_state": {"type": "string"},
-                    "status": {"type": "string"},
-                    "first_seen_at": {"type": "string", "nullable": True},
-                    "last_seen_at": {"type": "string", "nullable": True},
-                    "occurrence_count": {"type": "integer"},
-                    "created": {"type": "string", "nullable": True},
-                    "run_command": {"type": "string"},
-                    "command_root": {"type": "string"},
-                    "source_run_exists": {"type": "boolean"},
-                    "orphan_source": {"type": "boolean"},
-                    **cve_risk_finding_properties(),
                 },
             },
             "ProjectRun": {

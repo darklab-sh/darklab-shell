@@ -61,6 +61,7 @@ from . import (
     v0048_cve_risk_source_versions,
     v0049_project_assessments,
     v0050_assessment_check_actors,
+    v0051_finding_provenance,
 )
 
 _ = baseline
@@ -116,4 +117,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0048_cve_risk_source_versions.MIGRATION,
     v0049_project_assessments.MIGRATION,
     v0050_assessment_check_actors.MIGRATION,
+    v0051_finding_provenance.MIGRATION,
 )

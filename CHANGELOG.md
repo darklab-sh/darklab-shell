@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Findings now preserve creation origin and validation method as separate facts.**
+  - **Why:** An imported assertion, a saved run observation, and a manual assessment need different provenance even when they describe the same issue.
+  - **What:** The shared SQLite/Postgres finding model stores a bounded `run`, `import`, or `manual` origin independently from captured-observation, active-confirmation, version-inference, imported-assertion, and manual-assessment evidence methods. New run and import findings save the matching values, import-only legacy rows are backfilled without changing signatures or deduplication, and Atlas, Projects, CVE ranking, and API v1 read the same serialized fields.
+  - **Tests:** Existing migration, SQLite/Postgres schema, import, run-finding, Project/Atlas API, and OpenAPI contract coverage now pins the provenance fields and legacy import backfill.
 - **Projects now have a durable assessment-cycle and evidence foundation.**
   - **Why:** Assessment coverage needs to remain explainable after a cycle finishes or a source run is cleaned up, without copying source records into a second history system.
   - **What:** Shared SQLite/Postgres tables store versioned cycle snapshots, target-specific checks, and typed evidence references. Database constraints allow one active cycle per Project, reject unsupported states and evidence kinds, prevent duplicate checks and evidence links, and require complete unavailable-source tombstones. Project deletion removes the assessment tree explicitly on both backends, while owner, Project, status, check, target, and evidence indexes keep later list and rollup queries bounded.

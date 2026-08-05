@@ -1018,7 +1018,7 @@ class TestAtlasImportRoutes:
                     "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences"
                 ).fetchone()["count"]
                 finding_identity = conn.execute(
-                    "SELECT subject_key, signature_hash FROM findings"
+                    "SELECT subject_key, signature_hash, origin, validation_method FROM findings"
                 ).fetchone()
                 project_target_count = conn.execute(
                     "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
@@ -1046,6 +1046,8 @@ class TestAtlasImportRoutes:
             )
             assert finding_identity["subject_key"] == expected_finding_subject
             assert finding_identity["signature_hash"] == expected_finding_signature
+            assert finding_identity["origin"] == "import"
+            assert finding_identity["validation_method"] == "imported_assertion"
             assert project_target_count == 1
             assert quota_project_link_count == 0
             apply_success_extra = next(

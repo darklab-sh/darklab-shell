@@ -308,6 +308,31 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             "2026-07-13T09:00:00Z",
         ),
     )
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, run_id, line_number, severity, tool_root, kind, subject_key, "
+        "raw_line, created) VALUES (%s, %s, '', 7, 'medium', 'nessus', 'finding', %s, %s, %s)",
+        (
+            "finding-import-before-0051",
+            "migration-session",
+            "domain:imported.darklab.sh",
+            "[medium] imported service finding",
+            "2026-07-13T09:30:00Z",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO atlas_finding_import_occurrences "
+        "(finding_id, batch_id, row_number, snippet, observed_at, created, updated) "
+        "VALUES (%s, %s, 7, %s, %s, %s, %s)",
+        (
+            "finding-import-before-0051",
+            "batch-before-0051",
+            "[medium] imported service finding",
+            "2026-07-13T09:30:00Z",
+            "2026-07-13T09:30:00Z",
+            "2026-07-13T09:30:00Z",
+        ),
+    )
     applied.extend(run_migrations_with_advisory_lock(conn, head_migrations))
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
@@ -321,6 +346,14 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     assert backfilled_occurrence["comparison_key"] == (
         "raw:scanner\x1ffinding\x1fdomain:darklab.sh\x1f[high] exposed service"
     )
+    imported_provenance = conn.execute(
+        "SELECT origin, validation_method FROM findings WHERE id = %s",
+        ("finding-import-before-0051",),
+    ).fetchone()
+    assert imported_provenance == {
+        "origin": "import",
+        "validation_method": "imported_assertion",
+    }
     conn.execute(
         "INSERT INTO runs (id, session_id, command, started) VALUES (%s, %s, %s, %s)",
         ("run-after-0044", "migration-session", "scanner darklab.sh", "2026-07-13T10:00:00Z"),
@@ -347,7 +380,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("finding-after-0044",),
     ).fetchone()
     triggered_finding = conn.execute(
-        "SELECT first_run_id, last_run_id, occurrence_count, status, kind, signature_hash "
+        "SELECT first_run_id, last_run_id, occurrence_count, status, kind, signature_hash, "
+        "origin, validation_method "
         "FROM findings WHERE id = %s",
         ("finding-after-0044",),
     ).fetchone()
@@ -362,6 +396,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "status": "important",
         "kind": "finding",
         "signature_hash": "fingerprint-after-0044",
+        "origin": "run",
+        "validation_method": "captured_observation",
     }
 
     assert applied == [
@@ -415,6 +451,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0048",
         "0049",
         "0050",
+        "0051",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -497,6 +534,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'state_changed_by_member_id',
                 'state_changed_at'
             ))
+            OR (table_name = 'findings' AND column_name IN (
+                'origin',
+                'validation_method'
+            ))
         )
         """,
         (postgres_schema.schema,),
@@ -574,6 +615,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("project_assessment_checks", "state_changed_by_session_id", "text"),
         ("project_assessment_checks", "state_changed_by_member_id", "text"),
         ("project_assessment_checks", "state_changed_at", "timestamp with time zone"),
+        ("findings", "origin", "text"),
+        ("findings", "validation_method", "text"),
     }
     runs_index_rows = conn.execute(
         """

@@ -2237,7 +2237,10 @@ def test_api_v1_project_readers_are_token_scoped():
     assert owner_project.status_code == 200
     assert json.loads(owner_project.data)["project"]["id"] == project["id"]
     assert owner_findings.status_code == 200
-    assert json.loads(owner_findings.data)["findings"][0]["id"] == finding_id
+    owner_finding_payload = json.loads(owner_findings.data)["findings"][0]
+    assert owner_finding_payload["id"] == finding_id
+    assert owner_finding_payload["origin"] == "run"
+    assert owner_finding_payload["validation_method"] == "captured_observation"
     assert owner_runs.status_code == 200
     assert json.loads(owner_runs.data)["runs"][0]["id"] == run_id
     assert owner_entities.status_code == 200
@@ -2274,6 +2277,8 @@ def test_api_v1_project_readers_are_token_scoped():
     assert atlas_related_port_findings.status_code == 200
     atlas_related_port_payload = json.loads(atlas_related_port_findings.data)
     assert [finding["id"] for finding in atlas_related_port_payload["findings"]] == [finding_id]
+    assert atlas_related_port_payload["findings"][0]["origin"] == "run"
+    assert atlas_related_port_payload["findings"][0]["validation_method"] == "captured_observation"
     assert atlas_related_port_payload["detail_limits"]["findings"] == {
         "bucket": "related_ports",
         "limit": 50,
@@ -2356,9 +2361,15 @@ def test_api_v1_project_readers_are_token_scoped():
     assert atlas_port_detail["overview"]["observed"]["app_evidence"]["host_entity_id"] == entity_id
     assert atlas_port_detail["overview"]["observed"]["app_evidence"]["coverage_state"] == "app_ports_found"
     assert atlas_findings.status_code == 200
-    assert json.loads(atlas_findings.data)["findings"][0]["id"] == finding_id
+    atlas_finding_row = json.loads(atlas_findings.data)["findings"][0]
+    assert atlas_finding_row["id"] == finding_id
+    assert atlas_finding_row["origin"] == "run"
+    assert atlas_finding_row["validation_method"] == "captured_observation"
     assert atlas_finding.status_code == 200
-    assert json.loads(atlas_finding.data)["occurrences"][0]["run_id"] == run_id
+    atlas_finding_payload = json.loads(atlas_finding.data)
+    assert atlas_finding_payload["finding"]["origin"] == "run"
+    assert atlas_finding_payload["finding"]["validation_method"] == "captured_observation"
+    assert atlas_finding_payload["occurrences"][0]["run_id"] == run_id
     assert cross_project.status_code == 404
     assert cross_findings.status_code == 404
     assert cross_runs.status_code == 404
@@ -4210,6 +4221,14 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["ProjectEntityPage"]["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/ProjectEntity"}
     assert schemas["AtlasEntityPage"]["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/AtlasEntity"}
     assert schemas["AtlasFindingPage"]["properties"]["findings"]["items"] == {"$ref": "#/components/schemas/AtlasFinding"}
+    assert schemas["AtlasFinding"]["properties"]["origin"]["enum"] == ["run", "import", "manual"]
+    assert schemas["ProjectFinding"]["properties"]["validation_method"]["enum"] == [
+        "captured_observation",
+        "active_confirmation",
+        "version_inference",
+        "imported_assertion",
+        "manual_assessment",
+    ]
     assert schemas["PackagePage"]["properties"]["packages"]["items"] == {"$ref": "#/components/schemas/EvidencePackage"}
     assert schemas["SchedulePage"]["properties"]["schedules"]["items"] == {"$ref": "#/components/schemas/Schedule"}
     assert schemas["ScheduleFirePage"]["properties"]["fires"]["items"] == {"$ref": "#/components/schemas/ScheduleFire"}

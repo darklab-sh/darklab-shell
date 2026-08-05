@@ -10,6 +10,8 @@ import hashlib
 import re
 from typing import Any, Iterable
 
+from services.projects.finding_provenance import normalize_finding_validation_method
+
 
 _CVE_IN_TEXT_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
 _CONTEXT_KEYS = ("criticality", "environment", "role")
@@ -100,15 +102,13 @@ def finding_priority_context(finding: dict[str, Any]) -> dict[str, Any]:
 
 
 def finding_validation_method(finding: dict[str, Any]) -> str:
-    explicit = str(finding.get("validation_method") or "").strip().lower()
-    if explicit:
-        return explicit[:64]
     origin = str(finding.get("origin") or "").strip().lower()
-    if origin == "manual":
-        return "manual_assessment"
-    if origin == "import" or finding.get("import_sources"):
-        return "imported_assertion"
-    return "captured_observation"
+    if not origin and finding.get("import_sources"):
+        origin = "import"
+    return normalize_finding_validation_method(
+        finding.get("validation_method"),
+        origin=origin,
+    )
 
 
 def finding_evidence_keys(finding: dict[str, Any]) -> set[str]:

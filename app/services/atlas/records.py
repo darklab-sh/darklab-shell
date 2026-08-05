@@ -8,6 +8,10 @@ from __future__ import annotations
 from typing import Any
 
 from services.atlas.intel_summary import _load_json_dict
+from services.projects.finding_provenance import (
+    normalize_finding_origin,
+    normalize_finding_validation_method,
+)
 
 
 def entity_row_to_dict(row) -> dict[str, Any]:
@@ -32,12 +36,19 @@ def finding_row_to_dict(row) -> dict[str, Any]:
     snippet = row["snippet"] if "snippet" in row.keys() else ""
     raw_line = row["raw_line"] or ""
     line_number = row["line_number"] if "line_number" in row.keys() else None
+    origin = normalize_finding_origin(row["origin"] if "origin" in row.keys() else "")
+    validation_method = normalize_finding_validation_method(
+        row["validation_method"] if "validation_method" in row.keys() else "",
+        origin=origin,
+    )
     return {
         "id": row["id"],
         "entity_id": row["entity_id"] or "",
         "entity_type": (row["entity_type"] if "entity_type" in row.keys() else "") or "",
         "entity_value": (row["entity_value"] if "entity_value" in row.keys() else "") or "",
         "subject_key": row["subject_key"] or "",
+        "origin": origin,
+        "validation_method": validation_method,
         "severity": row["severity"] or "",
         "kind": row["kind"] or "finding",
         "tool_root": row["tool_root"] or "",

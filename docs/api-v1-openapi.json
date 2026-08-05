@@ -1924,6 +1924,14 @@
           "occurrence_count": {
             "type": "integer"
           },
+          "origin": {
+            "enum": [
+              "run",
+              "import",
+              "manual"
+            ],
+            "type": "string"
+          },
           "priority_context": {
             "$ref": "#/components/schemas/FindingPriorityContext"
           },
@@ -1974,11 +1982,23 @@
           },
           "tool_root": {
             "type": "string"
+          },
+          "validation_method": {
+            "enum": [
+              "captured_observation",
+              "active_confirmation",
+              "version_inference",
+              "imported_assertion",
+              "manual_assessment"
+            ],
+            "type": "string"
           }
         },
         "required": [
           "id",
           "entity_id",
+          "origin",
+          "validation_method",
           "status",
           "title",
           "raw_line",
@@ -3683,6 +3703,14 @@
           "occurrence_count": {
             "type": "integer"
           },
+          "origin": {
+            "enum": [
+              "run",
+              "import",
+              "manual"
+            ],
+            "type": "string"
+          },
           "orphan_source": {
             "type": "boolean"
           },
@@ -3742,11 +3770,23 @@
           },
           "title": {
             "type": "string"
+          },
+          "validation_method": {
+            "enum": [
+              "captured_observation",
+              "active_confirmation",
+              "version_inference",
+              "imported_assertion",
+              "manual_assessment"
+            ],
+            "type": "string"
           }
         },
         "required": [
           "id",
           "run_id",
+          "origin",
+          "validation_method",
           "status",
           "review_state",
           "title",

@@ -32,6 +32,10 @@ from services.projects.contracts import (
     MAX_LABEL_LEN,
     ProjectWorkspaceError,
 )
+from services.projects.finding_provenance import (
+    normalize_finding_origin,
+    normalize_finding_validation_method,
+)
 from services.projects.metadata import (
     _entity_labels_by_id,
     _entity_notes_by_id,
@@ -68,6 +72,11 @@ def row_to_finding(row):
     kind = value("kind") or value("scope") or "finding"
     status = value("status") or value("review_state") or "new"
     raw_line = value("snippet") or value("raw_line")
+    origin = normalize_finding_origin(value("origin"))
+    validation_method = normalize_finding_validation_method(
+        value("validation_method"),
+        origin=origin,
+    )
     return {
         "id": value("id"),
         "session_id": value("session_id"),
@@ -76,6 +85,8 @@ def row_to_finding(row):
         "target_id": target_id,
         "entity_id": target_id,
         "subject_key": value("subject_key"),
+        "origin": origin,
+        "validation_method": validation_method,
         "scope": value("scope") or kind,
         "kind": kind,
         "title": value("title"),
@@ -673,7 +684,8 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             base_sql  # nosec
             + "SELECT f.id, f.session_id, f.team_id, "
             "COALESCE(f.entity_id, f.target_id) AS entity_id, "
-            "f.subject_key, f.signature_hash, f.severity, f.kind, f.tool_root, "
+            "f.subject_key, f.signature_hash, f.origin, f.validation_method, "
+            "f.severity, f.kind, f.tool_root, "
             "f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
             + page_source_run_expr
@@ -1254,8 +1266,9 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
                 "(id, session_id, team_id, run_id, target_id, scope, line_number, review_state, "
                 "entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                 "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
-                "status_updated_at, fingerprint, title, raw_line, created) "
-                "VALUES (?, ?, ?, ?, ?, 'finding', ?, 'new', ?, ?, ?, ?, 'finding', ?, ?, ?, ?, ?, 0, 'new', '', ?, ?, ?, ?)",
+                "status_updated_at, fingerprint, title, raw_line, created, origin, validation_method) "
+                "VALUES (?, ?, ?, ?, ?, 'finding', ?, 'new', ?, ?, ?, ?, 'finding', ?, ?, ?, ?, ?, "
+                "0, 'new', '', ?, ?, ?, ?, 'run', 'captured_observation')",
                 (
                     finding_id,
                     session_id,
@@ -1291,7 +1304,7 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
         recalculate_atlas_findings(conn, [finding_id])
         full_row = conn.execute(
             "SELECT f.id, f.session_id, f.team_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
-            "f.subject_key, f.signature_hash, f.severity, "
+            "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
             "fo.run_id AS occurrence_run_id, fo.line_number, fo.snippet "

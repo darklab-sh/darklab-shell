@@ -486,7 +486,8 @@ def list_findings(
     rows_sql = _sql_join((
         "SELECT f.id, f.session_id, f.team_id, f.entity_id, "
         "e.type AS entity_type, e.canonical_value AS entity_value, ",
-        "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, ",
+        "f.subject_key, f.origin, f.validation_method, f.severity, f.kind, f.tool_root, "
+        "f.first_run_id, f.last_run_id, ",
         "r.command AS run_command, r.run_kind AS run_kind, ",
         "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, ",
         "f.suppressed, f.suppressed_reason, f.suppressed_at, ",
@@ -593,7 +594,8 @@ def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "")
     row = conn.execute(
         "SELECT f.id, f.session_id, f.team_id, f.entity_id, "
         "e.type AS entity_type, e.canonical_value AS entity_value, "
-        "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, "
+        "f.subject_key, f.origin, f.validation_method, f.severity, f.kind, f.tool_root, "
+        "f.first_run_id, f.last_run_id, "
         "r.command AS run_command, r.run_kind AS run_kind, "
         "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, "
         "f.suppressed, f.suppressed_reason, f.suppressed_at, "
