@@ -100,6 +100,32 @@ def migrate_project_workspace_session(
         "UPDATE evidence_packages SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
     )
+    assessment_result = conn.execute(
+        "UPDATE project_assessments SET session_id = ? "
+        "WHERE session_id = ? AND team_id = ''",
+        (to_session_id, from_session_id),
+    )
+    assessment_actor_result = conn.execute(
+        "UPDATE project_assessments SET "
+        "created_by_session_id = CASE WHEN created_by_session_id = ? THEN ? "
+        "ELSE created_by_session_id END, "
+        "updated_by_session_id = CASE WHEN updated_by_session_id = ? THEN ? "
+        "ELSE updated_by_session_id END "
+        "WHERE created_by_session_id = ? OR updated_by_session_id = ?",
+        (
+            from_session_id,
+            to_session_id,
+            from_session_id,
+            to_session_id,
+            from_session_id,
+            from_session_id,
+        ),
+    )
+    check_actor_result = conn.execute(
+        "UPDATE project_assessment_checks SET state_changed_by_session_id = ? "
+        "WHERE state_changed_by_session_id = ?",
+        (to_session_id, from_session_id),
+    )
     migrated_active_project_preference = migrate_active_project_preference(
         conn,
         from_session_id,
@@ -117,5 +143,8 @@ def migrate_project_workspace_session(
         "skipped_workspace_file_labels": source_workspace_file_labels - migrated_workspace_file_labels,
         "skipped_workspace_file_notes": source_workspace_file_notes - migrated_workspace_file_notes,
         "migrated_evidence_packages": package_result.rowcount,
+        "migrated_project_assessments": assessment_result.rowcount,
+        "migrated_project_assessment_actors": assessment_actor_result.rowcount,
+        "migrated_project_assessment_check_actors": check_actor_result.rowcount,
         "migrated_active_project_preference": migrated_active_project_preference,
     }

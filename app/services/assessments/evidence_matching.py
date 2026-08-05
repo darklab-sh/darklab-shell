@@ -66,6 +66,14 @@ def _canonical_identity(value: object, value_type: object = "target") -> Evidenc
     return None
 
 
+def canonical_evidence_identity(
+    value: object,
+    value_type: object = "target",
+) -> EvidenceIdentity | None:
+    """Return the canonical identity used by assessment evidence matching."""
+    return _canonical_identity(value, value_type)
+
+
 def _command_identities(
     command: str,
     command_target_inputs_fn: Callable[[str], list[dict[str, str]]],
@@ -273,19 +281,21 @@ def target_matches(
     return False
 
 
-def matching_run_rule(
+def matching_evidence_rule(
     check_definition: Mapping[str, Any],
     facts: RunEvidenceFacts,
     *,
+    evidence_type: str,
     target_type: str,
     target_value: str,
 ) -> dict[str, Any] | None:
-    """Return the first explicit profile rule satisfied by a saved run."""
+    """Return the first frozen profile rule satisfied by a saved source."""
+    normalized_evidence_type = str(evidence_type or "").strip().lower()
     for raw_rule in check_definition.get("evidence_rules", []):
         if not isinstance(raw_rule, Mapping):
             continue
         rule = dict(raw_rule)
-        if "run" not in rule.get("evidence_types", []):
+        if normalized_evidence_type not in rule.get("evidence_types", []):
             continue
         roots = {str(value or "").strip().lower() for value in rule.get("command_roots", [])}
         actions = {str(value or "").strip() for value in rule.get("workflow_actions", [])}
@@ -320,3 +330,20 @@ def matching_run_rule(
             continue
         return rule
     return None
+
+
+def matching_run_rule(
+    check_definition: Mapping[str, Any],
+    facts: RunEvidenceFacts,
+    *,
+    target_type: str,
+    target_value: str,
+) -> dict[str, Any] | None:
+    """Return the first explicit profile rule satisfied by a saved run."""
+    return matching_evidence_rule(
+        check_definition,
+        facts,
+        evidence_type="run",
+        target_type=target_type,
+        target_value=target_value,
+    )

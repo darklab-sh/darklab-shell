@@ -511,6 +511,7 @@ from blueprints.projects_targets import (  # noqa: E402,F401
     projects_targets_list,
     projects_targets_update,
 )
+from blueprints import projects_assessment_checks as _project_assessment_checks  # noqa: E402,F401
 from blueprints import projects_assessments as _projects_assessments  # noqa: E402,F401
 from blueprints.projects_auto_promote import (  # noqa: E402,F401
     projects_auto_promote_rules_apply,

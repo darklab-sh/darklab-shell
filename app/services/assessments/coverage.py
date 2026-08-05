@@ -61,7 +61,7 @@ def _count(conn: Any, sql: str, params: tuple[object, ...]) -> int:
     return int(row["count"] or 0) if row else 0
 
 
-def _enforce_evidence_quotas(conn: Any, candidates: list[dict[str, Any]]) -> None:
+def enforce_evidence_quotas(conn: Any, candidates: list[dict[str, Any]]) -> None:
     missing = [item for item in candidates if not item["already_linked"]]
     if not missing:
         return
@@ -176,7 +176,7 @@ def reconcile_run_evidence_on_conn(
             "already_linked": existing is not None,
         })
     summary["checks_matched"] = len(candidates)
-    _enforce_evidence_quotas(conn, candidates)
+    enforce_evidence_quotas(conn, candidates)
     timestamp = facts.finished_at or now()
     for check in candidates:
         if check["already_linked"]:

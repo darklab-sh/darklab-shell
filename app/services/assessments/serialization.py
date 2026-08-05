@@ -61,6 +61,17 @@ def row_to_check(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "state": str(_row_value(row, "state", "") or ""),
         "state_source": str(_row_value(row, "state_source", "") or ""),
         "state_reason": str(_row_value(row, "state_reason", "") or ""),
+        "state_actor": {
+            "kind": (
+                "team_member"
+                if _row_value(row, "state_changed_by_member_id", "")
+                else "session"
+            ),
+            "member_id": str(
+                _row_value(row, "state_changed_by_member_id", "") or ""
+            ),
+        } if str(_row_value(row, "state_source", "") or "") == "manual" else None,
+        "state_changed_at": _row_value(row, "state_changed_at"),
         "recommended_action_key": str(
             _row_value(row, "recommended_action_key", "") or ""
         ),
@@ -73,6 +84,31 @@ def row_to_check(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "unavailable_evidence_count": int(
             _row_value(row, "unavailable_evidence_count", 0) or 0
         ),
+        "created_at": _row_value(row, "created_at"),
+        "updated_at": _row_value(row, "updated_at"),
+    }
+
+
+def row_to_evidence(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    return {
+        "id": str(_row_value(row, "id", "") or ""),
+        "assessment_id": str(_row_value(row, "assessment_id", "") or ""),
+        "check_id": str(_row_value(row, "check_id", "") or ""),
+        "evidence_type": str(_row_value(row, "evidence_type", "") or ""),
+        "evidence_id": str(_row_value(row, "evidence_id", "") or ""),
+        "source_state": str(_row_value(row, "source_state", "") or ""),
+        "observed_at": _row_value(row, "observed_at"),
+        "unavailable_at": _row_value(row, "unavailable_at"),
+        "unavailable_reason": str(
+            _row_value(row, "unavailable_reason", "") or ""
+        ),
+        "match_rule_key": str(_row_value(row, "match_rule_key", "") or ""),
+        "match_rule_version": str(
+            _row_value(row, "match_rule_version", "") or ""
+        ),
+        "linked_by": str(_row_value(row, "linked_by", "") or ""),
         "created_at": _row_value(row, "created_at"),
         "updated_at": _row_value(row, "updated_at"),
     }

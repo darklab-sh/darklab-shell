@@ -43,6 +43,7 @@ class AuditTargetType(str, Enum):
     CVE_RISK_SOURCE = "cve_risk_source"
     RISK_ESCALATION = "risk_escalation"
     ASSESSMENT = "assessment"
+    ASSESSMENT_CHECK = "assessment_check"
 
 
 class AuditEventType(str, Enum):
@@ -118,6 +119,9 @@ class AuditEventType(str, Enum):
     ASSESSMENT_COMPLETE = "assessment.complete"
     ASSESSMENT_ARCHIVE = "assessment.archive"
     ASSESSMENT_DELETE = "assessment.delete"
+    ASSESSMENT_CHECK_STATE_CHANGE = "assessment.check_state_change"
+    ASSESSMENT_EVIDENCE_LINK = "assessment.evidence_link"
+    ASSESSMENT_EVIDENCE_UNLINK = "assessment.evidence_unlink"
 
 
 COMMON_DETAIL_KEYS = frozenset({
@@ -226,6 +230,11 @@ COMMON_DETAIL_KEYS = frozenset({
     "transition_kind",
     "observation_count",
     "assessment_id",
+    "check_id",
+    "check_key",
+    "evidence_id",
+    "evidence_type",
+    "policy_level",
     "profile_key",
     "profile_version",
 })
@@ -296,6 +305,21 @@ EVENT_SPECS: dict[str, EventSpec] = {
     AuditEventType.ASSESSMENT_DELETE.value: _spec(
         AuditEventType.ASSESSMENT_DELETE,
         AuditTargetType.ASSESSMENT,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.ASSESSMENT_CHECK_STATE_CHANGE.value: _spec(
+        AuditEventType.ASSESSMENT_CHECK_STATE_CHANGE,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.ASSESSMENT_EVIDENCE_LINK.value: _spec(
+        AuditEventType.ASSESSMENT_EVIDENCE_LINK,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.ASSESSMENT_EVIDENCE_UNLINK.value: _spec(
+        AuditEventType.ASSESSMENT_EVIDENCE_UNLINK,
+        AuditTargetType.ASSESSMENT_CHECK,
         RecordingMode.FAIL_CLOSED,
     ),
     AuditEventType.CVE_ADVISORY_REFRESH.value: _spec(

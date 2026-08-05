@@ -205,6 +205,7 @@ def _check_page(
         "SELECT c.id, c.assessment_id, c.category, c.check_key, ",
         "c.target_entity_id, c.target_type, c.target_value, c.applicability, ",
         "c.policy_level, c.state, c.state_source, c.state_reason, ",
+        "c.state_changed_by_member_id, c.state_changed_at, ",
         "c.recommended_action_key, c.first_evidence_at, c.last_evidence_at, ",
         "c.created_at, c.updated_at, ",
         "(SELECT COUNT(*) FROM project_assessment_evidence e ",

@@ -22,9 +22,17 @@ ASSESSMENT_CHECK_STATES = frozenset({
 ASSESSMENT_APPLICABILITY_STATES = frozenset({"applicable", "not_applicable", "unknown"})
 ASSESSMENT_POLICY_LEVELS = frozenset({"safe", "standard", "intrusive", "destructive"})
 ASSESSMENT_EVIDENCE_STATES = frozenset({"available", "unavailable"})
+ASSESSMENT_MANUAL_CHECK_STATES = frozenset({
+    "not_started",
+    "blocked",
+    "skipped",
+    "not_applicable",
+})
 
 ASSESSMENT_MAX_TITLE_LEN = 120
 ASSESSMENT_MAX_FILTER_LEN = 128
+ASSESSMENT_MAX_REASON_LEN = 1000
+ASSESSMENT_MAX_EVIDENCE_ID_LEN = 512
 ASSESSMENT_PAGE_MAX = 200
 
 

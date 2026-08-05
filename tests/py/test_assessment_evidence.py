@@ -10,13 +10,14 @@ import uuid
 
 import pytest
 
-from conftest import build_test_config
+from conftest import build_test_config, make_test_app
 from core.database import db_connect, db_init
 from core.database_backend import DatabaseBackend
 from services.assessments.cleanup import (
     RUN_EVIDENCE_UNAVAILABLE_REASON,
     mark_run_evidence_unavailable_on_conn,
 )
+from services.assessments.contracts import AssessmentError
 from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.assessments.evidence_matching import (
     EvidenceIdentity,
@@ -25,6 +26,8 @@ from services.assessments.evidence_matching import (
     matching_run_rule,
     target_matches,
 )
+from services.assessments.lifecycle import update_assessment_cycle
+from services.assessments.mutations import update_manual_check_state_on_conn
 from services.assessments.storage import create_assessment_cycle
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.crud import create_project, delete_project
@@ -198,6 +201,12 @@ def _check_row(assessment_id: str):
             "FROM project_assessment_checks WHERE assessment_id = ?",
             (assessment_id,),
         ).fetchone()
+
+
+def _check_id(assessment_id: str) -> str:
+    row = _check_row(assessment_id)
+    assert row is not None
+    return str(row["id"])
 
 
 def test_target_matching_keeps_exact_and_host_descendant_boundaries_distinct():
@@ -393,6 +402,171 @@ def test_reconcile_preserves_deliberate_manual_exclusions(assessment_factory):
     assert check["state_source"] == "manual"
     assert check["state_reason"] == "Customer excluded this host"
     assert check["first_evidence_at"] == "2026-08-04 12:01:00"
+
+
+def test_manual_check_state_requires_a_reason_records_actor_and_can_be_cleared(
+    assessment_factory,
+):
+    factory, cleanup = assessment_factory
+    session_id, project_id, assessment_id = factory([("domain", "manual.example")])
+    run_id = _seed_linked_run(cleanup, session_id, project_id, "nmap manual.example")
+    check_id = _check_id(assessment_id)
+    with db_connect() as conn:
+        with pytest.raises(AssessmentError, match="reason is required"):
+            update_manual_check_state_on_conn(
+                conn,
+                session_id,
+                project_id,
+                assessment_id,
+                check_id,
+                "blocked",
+            )
+        blocked = update_manual_check_state_on_conn(
+            conn,
+            session_id,
+            project_id,
+            assessment_id,
+            check_id,
+            "blocked",
+            reason="Customer maintenance window",
+            actor_member_id="member-reviewer",
+        )
+        reconcile_run_evidence_on_conn(
+            conn,
+            run_id,
+            command_target_inputs_fn=_target_inputs("manual.example"),
+        )
+        cleared = update_manual_check_state_on_conn(
+            conn,
+            session_id,
+            project_id,
+            assessment_id,
+            check_id,
+            "not_started",
+        )
+        actor_row = conn.execute(
+            "SELECT state_changed_by_session_id, state_changed_by_member_id, "
+            "state_changed_at FROM project_assessment_checks WHERE id = ?",
+            (check_id,),
+        ).fetchone()
+        conn.commit()
+
+    assert blocked["check"]["state"] == "blocked"
+    assert blocked["check"]["state_reason"] == "Customer maintenance window"
+    assert blocked["check"]["state_actor"] == {
+        "kind": "team_member",
+        "member_id": "member-reviewer",
+    }
+    assert cleared["check"]["state"] == "covered"
+    assert cleared["check"]["state_source"] == "derived"
+    assert cleared["check"]["state_actor"] is None
+    assert tuple(actor_row) == ("", "", None)
+
+
+def test_browser_routes_validate_link_and_unlink_saved_run_evidence(
+    assessment_factory,
+):
+    factory, cleanup = assessment_factory
+    session_id, project_id, assessment_id = factory([("domain", "routes.example")])
+    compatible = _seed_linked_run(cleanup, session_id, project_id, "nmap routes.example")
+    unrelated = _seed_linked_run(cleanup, session_id, project_id, "curl https://routes.example")
+    other_session, other_project, _other_assessment = factory([("domain", "other.example")])
+    other_run = _seed_linked_run(cleanup, other_session, other_project, "nmap other.example")
+    check_id = _check_id(assessment_id)
+    client = make_test_app().test_client()
+    headers = {"X-Session-ID": session_id}
+    path = f"/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}"
+
+    missing_reason = client.patch(path, headers=headers, json={"state": "skipped"})
+    assert missing_reason.status_code == 400
+    skipped = client.patch(
+        path,
+        headers=headers,
+        json={"state": "skipped", "reason": "Explicitly excluded"},
+    )
+    assert skipped.status_code == 200
+    assert skipped.get_json()["check"]["state"] == "skipped"
+    incompatible = client.post(
+        path + "/evidence",
+        headers=headers,
+        json={"evidence_type": "run", "evidence_id": unrelated},
+    )
+    assert incompatible.status_code == 409
+    out_of_scope = client.post(
+        path + "/evidence",
+        headers=headers,
+        json={"evidence_type": "run", "evidence_id": other_run},
+    )
+    assert out_of_scope.status_code == 404
+    linked = client.post(
+        path + "/evidence",
+        headers=headers,
+        json={"evidence_type": "run", "evidence_id": compatible},
+    )
+    assert linked.status_code == 201
+    linked_payload = linked.get_json()
+    assert linked_payload["evidence"]["linked_by"] == "manual"
+    assert linked_payload["check"]["state"] == "skipped"
+    assert linked_payload["manual_state_preserved"] is True
+    evidence_link_id = linked_payload["evidence"]["id"]
+    cleared = client.patch(path, headers=headers, json={"state": "not_started"})
+    assert cleared.status_code == 200
+    assert cleared.get_json()["check"]["state"] == "covered"
+    unlinked = client.delete(
+        path + f"/evidence/{evidence_link_id}",
+        headers=headers,
+    )
+    assert unlinked.status_code == 200
+    assert unlinked.get_json()["check"]["state"] == "not_started"
+
+    update_assessment_cycle(
+        session_id,
+        project_id,
+        assessment_id,
+        {"status": "completed"},
+    )
+    immutable = client.patch(
+        path,
+        headers=headers,
+        json={"state": "blocked", "reason": "Too late"},
+    )
+    assert immutable.status_code == 409
+    with db_connect() as conn:
+        events = conn.execute(
+            "SELECT event_type, target_type FROM audit_events WHERE target_id = ? "
+            "ORDER BY created ASC, id ASC",
+            (check_id,),
+        ).fetchall()
+    assert {row["event_type"] for row in events} == {
+        "assessment.check_state_change",
+        "assessment.evidence_link",
+        "assessment.evidence_unlink",
+    }
+    assert {row["target_type"] for row in events} == {"assessment_check"}
+
+
+def test_fail_closed_check_audit_rolls_back_manual_state(
+    assessment_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    factory, _cleanup = assessment_factory
+    session_id, project_id, assessment_id = factory([("domain", "audit-state.example")])
+    check_id = _check_id(assessment_id)
+
+    def _fail_audit(*_args, **_kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr("blueprints.projects.record_event", _fail_audit)
+    client = make_test_app().test_client()
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        client.patch(
+            f"/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}",
+            headers={"X-Session-ID": session_id},
+            json={"state": "blocked", "reason": "Should roll back"},
+        )
+    check = _check_row(assessment_id)
+    assert check["state"] == "not_started"
+    assert check["state_source"] == "derived"
 
 
 def test_reconcile_moves_finding_rules_to_needs_review(assessment_factory):
