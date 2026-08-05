@@ -37,6 +37,7 @@ from services.projects.finding_provenance import (
     normalize_finding_validation_method,
 )
 from services.projects.finding_details import finding_detail_fields
+from services.projects.finding_dispositions import set_remediation_group_review_state
 from services.projects.finding_identity import stable_rule_identity
 from services.projects.metadata import (
     _entity_labels_by_id,
@@ -343,11 +344,13 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
     with get_db_connect()() as conn:
         if not finding_exists_in_scope(conn, session_id, finding_id, team_id=team_id):
             return None
-        result = conn.execute(
-            "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
-            (review_state, _now(), finding_id),
+        disposition_update = set_remediation_group_review_state(
+            conn,
+            {finding_id},
+            review_state=review_state,
+            updated_at=_now(),
         )
-        if result.rowcount <= 0:
+        if finding_id not in disposition_update["affected_finding_ids"]:
             return None
         row = conn.execute(
             "SELECT id, session_id, team_id, entity_id, subject_key, signature_hash, origin, validation_method, "
@@ -427,11 +430,18 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
         found_ids = {str(row["id"] or "") for row in found_rows if row["id"]}
         if found_ids:
             updated_at = _now()
-            conn.executemany(
-                "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
-                [(review_state, updated_at, finding_id) for finding_id in sorted(found_ids)],
+            disposition_update = set_remediation_group_review_state(
+                conn,
+                found_ids,
+                review_state=review_state,
+                updated_at=updated_at,
             )
             conn.commit()
+        else:
+            disposition_update = {
+                "remediation_group_count": 0,
+                "affected_finding_ids": set(),
+            }
     results = [
         {"finding_id": finding_id, "status": "updated" if finding_id in found_ids else "not_found"}
         for finding_id in finding_ids
@@ -443,6 +453,8 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
             "updated": len(found_ids),
             "not_found": len(finding_ids) - len(found_ids),
         },
+        "remediation_groups_updated": disposition_update["remediation_group_count"],
+        "affected_observations": len(disposition_update["affected_finding_ids"]),
         "results": results,
     }
 

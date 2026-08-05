@@ -6589,6 +6589,7 @@ class TestPostgresMigrations:
         "entity_labels",
         "entity_notes",
         "finding_triage_details",
+        "finding_remediation_dispositions",
         "evidence_packages",
         "project_reports",
         "cve_risk_sources",
@@ -6714,6 +6715,7 @@ class TestPostgresMigrations:
             "0050",
             "0051",
             "0052",
+            "0053",
         ]
         for table_name in (
             "runs",
@@ -7681,7 +7683,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0052"
+        assert rows[-1]["version"] == "0053"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8137,7 +8139,7 @@ class TestPostgresMigrations:
 
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
-            "0049", "0050", "0051", "0052",
+            "0049", "0050", "0051", "0052", "0053",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8154,7 +8156,8 @@ class TestPostgresMigrations:
         assert "0050" in conn.applied_versions
         assert "0051" in conn.applied_versions
         assert "0052" in conn.applied_versions
-        assert conn.commit_count == 14
+        assert "0053" in conn.applied_versions
+        assert conn.commit_count == 15
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -26294,6 +26297,12 @@ class TestDatabaseInit:
             finding_triage_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('finding_triage_details')").fetchall()
             }
+            finding_disposition_columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info('finding_remediation_dispositions')"
+                ).fetchall()
+            }
             conn.close()
 
         assert {
@@ -26314,6 +26323,7 @@ class TestDatabaseInit:
             "entity_labels",
             "entity_notes",
             "finding_triage_details",
+            "finding_remediation_dispositions",
             "evidence_packages",
             "project_reports",
             "audit_events",
@@ -26358,6 +26368,18 @@ class TestDatabaseInit:
             "verification_status",
             "verification_notes",
         }.issubset(finding_triage_columns)
+        assert {
+            "session_id",
+            "team_id",
+            "affected_subject",
+            "identity_kind",
+            "identity_value",
+            "vulnerability_id",
+            "rule_identity",
+            "review_state",
+            "created_at",
+            "updated_at",
+        } == finding_disposition_columns
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)

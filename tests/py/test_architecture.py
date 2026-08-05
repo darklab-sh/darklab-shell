@@ -29,6 +29,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_cve_advisory.py",
     "openapi_cve_risk.py",
     "openapi_finding_details.py",
+    "openapi_finding_dispositions.py",
     "openapi_findings.py",
     "openapi_finding_priority.py",
     "serialization.py",

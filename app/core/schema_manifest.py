@@ -16,8 +16,7 @@ from core.database_backend import (
     sqlite_schema_objects,
     sqlite_table_names,
 )
-from services.assessments.schema import SHARED_TABLES as ASSESSMENT_SHARED_TABLES
-from services.cve_risk.schema import SHARED_TABLES
+from services.shared_schema import SHARED_TABLES
 
 UNIFIED_BASELINE_APP_TABLES: tuple[str, ...] = (
     "ai_run_assists",
@@ -69,7 +68,6 @@ UNIFIED_BASELINE_APP_TABLES: tuple[str, ...] = (
 
 SHARED_APP_TABLES: tuple[str, ...] = (
     *UNIFIED_BASELINE_APP_TABLES,
-    *ASSESSMENT_SHARED_TABLES,
     *SHARED_TABLES,
     "workflow_execution_steps",
     "workflow_executions",

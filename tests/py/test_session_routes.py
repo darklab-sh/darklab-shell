@@ -255,6 +255,14 @@ class TestSessionMigrate:
                 ("fnd_migrate_test", session_id, "run_migrate_test", "ent_migrate_test", "ent_migrate_test"),
             )
             conn.execute(
+                "INSERT OR REPLACE INTO finding_remediation_dispositions "
+                "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+                "rule_identity, review_state, created_at, updated_at) "
+                "VALUES (?, '', 'entity:ent_migrate_test', 'rule', 'RULE:observation:fnd_migrate_test', "
+                "'observation:fnd_migrate_test', 'reviewed', datetime('now'), datetime('now'))",
+                (session_id,),
+            )
+            conn.execute(
                 "INSERT OR REPLACE INTO entity_labels "
                 "(id, session_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'run', 'run_migrate_test', 'baseline', datetime('now'))",
@@ -623,6 +631,15 @@ class TestSessionMigrate:
                 "datetime('now'), datetime('now'))",
                 (to_id,),
             )
+            conn.execute(
+                "INSERT INTO finding_remediation_dispositions "
+                "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+                "rule_identity, review_state, created_at, updated_at) "
+                "VALUES (?, '', 'entity:ent_migrate_test', 'rule', "
+                "'RULE:observation:fnd_migrate_test', 'observation:fnd_migrate_test', "
+                "'important', '2026-08-01T00:00:00+00:00', '2099-08-01T00:00:00+00:00')",
+                (to_id,),
+            )
             conn.commit()
 
         resp = client.post(
@@ -651,6 +668,10 @@ class TestSessionMigrate:
                 "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
                 "WHERE fo.finding_id = 'fnd_migrate_test'",
             ).fetchone()
+            finding_disposition = conn.execute(
+                "SELECT session_id, review_state FROM finding_remediation_dispositions "
+                "WHERE affected_subject = 'entity:ent_migrate_test'",
+            ).fetchone()
             evidence_package = conn.execute(
                 "SELECT session_id, project_id FROM evidence_packages "
                 "WHERE id = 'pkg_migrate_test'",
@@ -667,6 +688,7 @@ class TestSessionMigrate:
         assert data["migrated_projects"] == 1
         assert data["migrated_run_file_artifacts"] == 1
         assert data["migrated_findings"] == 1
+        assert data["migrated_finding_remediation_dispositions"] == 1
         assert data["migrated_finding_targets"] == 0
         assert data["migrated_entity_labels"] == 1
         assert data["migrated_entity_notes"] == 1
@@ -684,6 +706,7 @@ class TestSessionMigrate:
         assert tuple(project_target) == (to_id, "darklab.sh")
         assert tuple(run_artifact) == (to_id, "findings.txt")
         assert tuple(finding_occurrence) == (to_id, "fnd_migrate_test", "ent_migrate_test")
+        assert tuple(finding_disposition) == (to_id, "important")
         assert tuple(evidence_package) == (to_id, "prj_migrate_test")
         assert tuple(assessment) == (to_id, to_id, to_id)
         assert tuple(assessment_check) == (to_id,)

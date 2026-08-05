@@ -8866,7 +8866,10 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert bulk_review_resp.status_code == 200
-        assert json.loads(bulk_review_resp.data)["counts"] == {"updated": 1, "not_found": 2}
+        bulk_review_data = json.loads(bulk_review_resp.data)
+        assert bulk_review_data["counts"] == {"updated": 1, "not_found": 2}
+        assert bulk_review_data["remediation_groups_updated"] == 1
+        assert bulk_review_data["affected_observations"] == 1
         audit_rows = _audit_event_rows(target_id=f"fnd_{run_id}", event_type="finding.review_change")
         assert len(audit_rows) == 1
         assert audit_rows[0]["project_id"] == project["id"]
@@ -17439,12 +17442,64 @@ class TestAtlasRoutes:
         list_resp = client.get("/atlas/findings?review_state=new", headers={"X-Session-ID": session_id})
         data = json.loads(list_resp.data)
         finding_id = data["findings"][0]["id"]
+        entity_id = data["findings"][0]["entity_id"]
+        run_id = data["findings"][0]["run_id"]
+        related_finding_id = "fnd_group_related_" + uuid.uuid4().hex
+        unrelated_finding_id = "fnd_group_unrelated_" + uuid.uuid4().hex
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE findings SET title = 'CVE-2026-12345', "
+                "cve_ids_json = '[\"CVE-2026-12345\"]' WHERE id = ?",
+                (finding_id,),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, title, "
+                "origin, validation_method, cve_ids_json, created) "
+                "VALUES (?, ?, ?, ?, 'related-proof', ?, 'CVE-2026-12345 inferred', "
+                "'run', 'version_inference', '[\"CVE-2026-12345\"]', datetime('now'))",
+                (related_finding_id, session_id, run_id, entity_id, uuid.uuid4().hex),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, title, "
+                "origin, validation_method, cve_ids_json, created) "
+                "VALUES (?, ?, ?, 'ent_unrelated_review_group', 'unrelated-proof', ?, "
+                "'CVE-2026-12345 elsewhere', 'manual', 'manual_assessment', "
+                "'[\"CVE-2026-12345\"]', datetime('now'))",
+                (unrelated_finding_id, session_id, run_id, uuid.uuid4().hex),
+            )
+            conn.execute(
+                "INSERT INTO findings_occurrences "
+                "(finding_id, run_id, line_number, snippet, seen_at) "
+                "VALUES (?, ?, 2, 'CVE-2026-12345 inferred', datetime('now'))",
+                (related_finding_id, run_id),
+            )
+            conn.commit()
         wrong_session_id = self._session_id()
         bulk_resp = client.post(
             "/atlas/findings/review",
             json={"finding_ids": [finding_id, "missing-finding"], "review_state": "important"},
             headers={"X-Session-ID": session_id},
         )
+        grouped_findings = client.get(
+            "/atlas/findings",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["findings"]
+        run_findings = client.get(
+            f"/entities/run/{run_id}/findings",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["findings"]
+        with db_connect() as conn:
+            conn.execute(
+                "DELETE FROM findings_occurrences WHERE finding_id = ?",
+                (related_finding_id,),
+            )
+            conn.executemany(
+                "DELETE FROM findings WHERE id = ?",
+                ((related_finding_id,), (unrelated_finding_id,)),
+            )
+            conn.commit()
         missing_triage_get_resp = client.get(
             "/findings/missing-finding/triage",
             headers={"X-Session-ID": session_id},
@@ -17561,6 +17616,18 @@ class TestAtlasRoutes:
         assert bulk_resp.status_code == 200
         bulk_data = json.loads(bulk_resp.data)
         assert bulk_data["counts"] == {"updated": 1, "not_found": 1}
+        assert bulk_data["remediation_groups_updated"] == 1
+        assert bulk_data["affected_observations"] == 2
+        grouped_by_id = {item["id"]: item for item in grouped_findings}
+        assert grouped_by_id[finding_id]["review_state"] == "important"
+        assert grouped_by_id[related_finding_id]["review_state"] == "important"
+        assert grouped_by_id[unrelated_finding_id]["review_state"] == "new"
+        assert grouped_by_id[related_finding_id]["observation_references"][0][
+            "review_state_source"
+        ] == "remediation_group"
+        assert {
+            item["id"]: item["review_state"] for item in run_findings
+        }[related_finding_id] == "important"
         assert missing_triage_get_resp.status_code == 404
         assert json.loads(missing_triage_get_resp.data) == {"error": "finding not found"}
         assert missing_triage_put_resp.status_code == 404

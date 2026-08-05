@@ -560,8 +560,27 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     assert confirmed_reference["rule_identity"] == "signature:stable-rule-signature"
     assert confirmed_reference["remediation_id"] == inferred_reference["remediation_id"]
     assert confirmed_reference["observation_id"] != inferred_reference["observation_id"]
+    assert confirmed_reference["review_state"] == "new"
+    assert confirmed_reference["review_state_source"] == "observation"
     assert rule_observations[0]["observation_id"] == confirmed_reference["observation_id"]
     assert rule_observations[0]["remediation_id"] == confirmed_reference["remediation_id"]
+    risk_db.execute(
+        "INSERT INTO finding_remediation_dispositions "
+        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "rule_identity, review_state, created_at, updated_at) "
+        "VALUES ('session-one', '', 'entity:ent_rule', 'rule', "
+        "'RULE:signature:stable-rule-signature', 'signature:stable-rule-signature', "
+        "'reviewed', '2026-08-05', '2026-08-05')"
+    )
+    attach_risk_to_findings(rule_observations, conn=risk_db)
+    assert {
+        item["observation_references"][0]["review_state"]
+        for item in rule_observations
+    } == {"reviewed"}
+    assert {
+        item["observation_references"][0]["review_state_source"]
+        for item in rule_observations
+    } == {"remediation_group"}
     rule_worklist = build_remediation_worklist(rule_observations, conn=risk_db)
     assert len(rule_worklist) == 1
     assert rule_worklist[0]["identity_kind"] == "rule"
@@ -575,6 +594,7 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
         "active_confirmation",
         "version_inference",
     ]
+    assert rule_worklist[0]["review_state"] == "reviewed"
 
     uncertain_rules = [{
         "id": finding_id,
@@ -625,6 +645,24 @@ def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
     assert {
         item["vulnerability_id"] for item in finding["observation_references"]
     } == {"CVE-2026-12345", "CVE-2026-23456"}
+    risk_db.execute(
+        "INSERT INTO finding_remediation_dispositions "
+        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "vulnerability_id, review_state, created_at, updated_at) "
+        "VALUES ('session-one', '', 'entity:ent_shared', 'vulnerability', "
+        "'CVE-2026-12345', 'CVE-2026-12345', 'important', '2026-08-05', '2026-08-05')"
+    )
+    finding["status"] = "important"
+    attach_risk_to_findings(findings, conn=risk_db)
+    review_by_cve = {
+        item["vulnerability_id"]: item["review_state"]
+        for item in finding["observation_references"]
+    }
+    assert review_by_cve == {
+        "CVE-2026-12345": "important",
+        "CVE-2026-23456": "new",
+    }
+    assert finding["review_state"] == "new"
     legacy_material = "\x1f".join(("", "session-one", "ent_shared", "CVE-2026-23456"))
     assert finding["remediation_id"] == (
         "rmd_" + hashlib.sha256(legacy_material.encode()).hexdigest()[:32]

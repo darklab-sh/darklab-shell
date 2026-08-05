@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Matching finding observations now share one review disposition.**
+  - **Why:** Reviewing an inferred sighting should keep its imported or actively confirmed evidence aligned when every observation describes the same issue on the same exact target.
+  - **What:** Personal and team findings now store review state against the owner-scoped remediation identity: exact affected subject plus normalized CVE or stable scanner rule. Single and bulk review actions update that canonical disposition and mirror it to current matching observations for existing filters and counts, while different targets, rules, and vulnerabilities remain independent. Validation method, confidence, verification, and evidence stay attached to each observation, and session-token migration carries personal dispositions forward.
+  - **Tests:** Existing migration, SQLite/Postgres schema, CVE-risk, Atlas/Project route, Run Details, session-migration, OpenAPI, architecture-ratchet, and documentation coverage now pins exact-group propagation, unrelated-subject isolation, cross-surface reads, and response counts.
 - **Saved findings now expose stable observation and remediation identities.**
   - **Why:** Assessors need to keep an inferred, imported, manually assessed, and actively confirmed sighting separate without counting the same issue several times.
   - **What:** Project, Run Details, Atlas, focused entity-profile, and API finding reads derive the same owner-scoped observation references from the exact affected subject, stable scanner rule, normalized CVE or fallback rule, and validation method. The paired remediation identity omits the validation method, so matching observations share one fix-first group while different owners, subjects, or vulnerabilities stay separate. Rule-only findings participate in the same grouped worklist as CVE findings, with their strongest severity, saved CVSS, evidence count, and validation methods kept visible. Editable title, severity, and detail text don't change either identity, and read surfaces don't write identity records.

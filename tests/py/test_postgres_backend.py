@@ -464,6 +464,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0050",
         "0051",
         "0052",
+        "0053",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -2953,6 +2954,22 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     client = app.test_client()
     token_resp = client.get("/session/token/generate", headers={"X-Session-ID": source_session_id})
     destination_token = json.loads(token_resp.data)["session_token"]
+    disposition_sql = (
+        "INSERT INTO finding_remediation_dispositions "
+        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "rule_identity, review_state, created_at, updated_at) "
+        "VALUES (%s, '', 'subject:postgres-migration', 'rule', "
+        "'RULE:postgres-migration', 'postgres-migration', %s, %s, %s)"
+    )
+    conn.execute(
+        disposition_sql,
+        (source_session_id, "reviewed", "2026-05-16T00:00:00Z", "2026-05-17T00:00:00Z"),
+    )
+    conn.execute(
+        disposition_sql,
+        (destination_token, "important", "2026-05-15T00:00:00Z", "2026-05-18T00:00:00Z"),
+    )
+    conn.commit()
     info_resp = client.get("/session/token/info", headers={"X-Session-ID": destination_token})
     verify_resp = client.post(
         "/session/token/verify",
@@ -3021,6 +3038,11 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
         "SELECT COUNT(*) AS count FROM session_variables WHERE session_id = %s",
         (destination_token,),
     ).fetchone()["count"]
+    migrated_disposition = conn.execute(
+        "SELECT session_id, review_state, created_at, updated_at "
+        "FROM finding_remediation_dispositions "
+        "WHERE affected_subject = 'subject:postgres-migration'",
+    ).fetchone()
     source_workflow_execution = get_execution(source_session_id, workflow_execution["id"])
     migrated_workflow_execution = get_execution(destination_token, workflow_execution["id"])
 
@@ -3040,6 +3062,7 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert json.loads(migrate_resp.data)["migrated_variables"] == 1
     assert json.loads(migrate_resp.data)["migrated_recent_values"] == 1
     assert json.loads(migrate_resp.data)["migrated_workflow_executions"] == 1
+    assert json.loads(migrate_resp.data)["migrated_finding_remediation_dispositions"] == 1
     assert migrated_run["session_id"] == destination_token
     assert migrated_snapshot["session_id"] == destination_token
     assert migrated_prefs["preferences"]["pref_theme_name"] == "darklab_obsidian.yaml"
@@ -3050,6 +3073,10 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert int(source_recent_count) == 0
     assert int(migrated_stars) == 1
     assert int(migrated_variables) == 1
+    assert migrated_disposition["session_id"] == destination_token
+    assert migrated_disposition["review_state"] == "important"
+    assert migrated_disposition["created_at"].isoformat() == "2026-05-15T00:00:00+00:00"
+    assert migrated_disposition["updated_at"].isoformat() == "2026-05-18T00:00:00+00:00"
     assert source_workflow_execution is None
     assert migrated_workflow_execution is not None
     assert migrated_workflow_execution["session_id"] == destination_token

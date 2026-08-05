@@ -2291,6 +2291,9 @@ def test_api_v1_project_readers_are_token_scoped():
         "vulnerability_id": "CVE-2026-12345",
         "rule_identity": owner_finding_payload["observation_references"][0]["rule_identity"],
         "affected_subject": f"entity:{port_entity_id}",
+        "review_state": "new",
+        "review_state_source": "observation",
+        "disposition_updated_at": "",
         "validation_method": "captured_observation",
     }]
     assert owner_runs.status_code == 200

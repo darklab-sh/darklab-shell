@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import re
 from typing import Any, Iterable
 
 from services.projects.finding_identity import (
@@ -15,17 +14,11 @@ from services.projects.finding_identity import (
     remediation_identity as remediation_identity,
 )
 from services.projects.finding_provenance import normalize_finding_validation_method
+from services.projects.finding_vulnerabilities import extract_cve_ids
+from services.projects.finding_vulnerabilities import finding_cves as finding_cves  # noqa: F401
 
 
-_CVE_IN_TEXT_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
 _CONTEXT_KEYS = ("criticality", "environment", "role")
-
-
-def extract_cve_ids(*values: Any) -> tuple[str, ...]:
-    found: set[str] = set()
-    for value in values:
-        found.update(match.upper() for match in _CVE_IN_TEXT_RE.findall(str(value or "")))
-    return tuple(sorted(found))
 
 
 def finding_priority_context(finding: dict[str, Any]) -> dict[str, Any]:
@@ -84,20 +77,6 @@ def finding_evidence_keys(finding: dict[str, Any]) -> set[str]:
             if evidence_type and evidence_id:
                 keys.add(f"{evidence_type}:{evidence_id}")
     return keys
-
-
-def finding_cves(finding: dict[str, Any]) -> tuple[str, ...]:
-    explicit = finding.get("cve_ids")
-    if isinstance(explicit, (list, tuple)):
-        normalized = extract_cve_ids(*explicit)
-        if normalized:
-            return normalized
-    return extract_cve_ids(
-        finding.get("title"),
-        finding.get("raw_line"),
-        finding.get("fingerprint"),
-        finding.get("subject_key"),
-    )
 
 
 def sync_finding_cve_links(conn: Any, *, limit: int = 5000) -> int:

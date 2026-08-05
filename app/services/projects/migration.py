@@ -64,6 +64,52 @@ def migrate_project_workspace_session(
         "UPDATE findings SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
     )
+    disposition_rows = conn.execute(
+        "SELECT affected_subject, identity_kind, identity_value, vulnerability_id, "
+        "rule_identity, review_state, created_at, updated_at "
+        "FROM finding_remediation_dispositions "
+        "WHERE session_id = ? AND team_id = ''",
+        (from_session_id,),
+    ).fetchall()
+    conn.executemany(
+        "INSERT INTO finding_remediation_dispositions "
+        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "vulnerability_id, rule_identity, review_state, created_at, updated_at) "
+        "VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(session_id, team_id, affected_subject, identity_value) DO UPDATE SET "
+        "identity_kind = CASE WHEN excluded.updated_at >= finding_remediation_dispositions.updated_at "
+        "THEN excluded.identity_kind ELSE finding_remediation_dispositions.identity_kind END, "
+        "vulnerability_id = CASE WHEN excluded.updated_at >= finding_remediation_dispositions.updated_at "
+        "THEN excluded.vulnerability_id ELSE finding_remediation_dispositions.vulnerability_id END, "
+        "rule_identity = CASE WHEN excluded.updated_at >= finding_remediation_dispositions.updated_at "
+        "THEN excluded.rule_identity ELSE finding_remediation_dispositions.rule_identity END, "
+        "review_state = CASE WHEN excluded.updated_at >= finding_remediation_dispositions.updated_at "
+        "THEN excluded.review_state ELSE finding_remediation_dispositions.review_state END, "
+        "created_at = CASE WHEN excluded.created_at < finding_remediation_dispositions.created_at "
+        "THEN excluded.created_at ELSE finding_remediation_dispositions.created_at END, "
+        "updated_at = CASE WHEN excluded.updated_at > finding_remediation_dispositions.updated_at "
+        "THEN excluded.updated_at ELSE finding_remediation_dispositions.updated_at END",
+        [
+            (
+                to_session_id,
+                row["affected_subject"],
+                row["identity_kind"],
+                row["identity_value"],
+                row["vulnerability_id"],
+                row["rule_identity"],
+                row["review_state"],
+                row["created_at"],
+                row["updated_at"],
+            )
+            for row in disposition_rows
+        ],
+    )
+    if disposition_rows:
+        conn.execute(
+            "DELETE FROM finding_remediation_dispositions "
+            "WHERE session_id = ? AND team_id = ''",
+            (from_session_id,),
+        )
     entity_result = conn.execute(
         "UPDATE entities SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
@@ -137,6 +183,7 @@ def migrate_project_workspace_session(
         "migrated_entities": entity_result.rowcount,
         "migrated_entity_intel_snapshots": intel_result.rowcount,
         "migrated_findings": finding_result.rowcount,
+        "migrated_finding_remediation_dispositions": len(disposition_rows),
         "migrated_finding_targets": 0,
         "migrated_entity_labels": label_result.rowcount + migrated_workspace_file_labels,
         "migrated_entity_notes": note_result.rowcount + migrated_workspace_file_notes,

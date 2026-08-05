@@ -12,6 +12,10 @@ import re
 from typing import Any, Mapping
 
 from core.database_access import get_db_connect
+from services.projects.finding_dispositions import (
+    apply_primary_remediation_disposition,
+    attach_remediation_dispositions,
+)
 from services.projects.finding_identity import finding_identity_references
 
 from .links import (
@@ -276,11 +280,6 @@ def _attach_identity_references(
         finding["observation_id"] = primary["observation_id"]
         finding["remediation_id"] = primary["remediation_id"]
         finding["observation_references"] = references
-        finding["remediation_groups"] = [{
-            "remediation_id": reference["remediation_id"],
-            "vulnerability_id": reference["vulnerability_id"],
-            "affected_subject": reference["affected_subject"],
-        } for reference in references]
 
 
 def attach_risk_to_findings(
@@ -303,11 +302,18 @@ def attach_risk_to_findings(
         cves_by_finding,
         owner_by_finding_id=owner_by_finding_id,
     )
-    if not cve_ids:
-        return findings
     owns_connection = conn is None
     active = conn or get_db_connect()()
     try:
+        attach_remediation_dispositions(
+            active,
+            findings,
+            owner_by_finding_id=owner_by_finding_id,
+        )
+        if not cve_ids:
+            for finding in findings:
+                apply_primary_remediation_disposition(finding)
+            return findings
         rows: list[Any] = []
         ordered = sorted(cve_ids)
         for offset in range(0, len(ordered), 500):
@@ -369,6 +375,7 @@ def attach_risk_to_findings(
             finding["observation_id"] = primary_reference["observation_id"]
             finding["remediation_id"] = primary_reference["remediation_id"]
             finding["priority_context"] = finding_priority_context(finding)
+            apply_primary_remediation_disposition(finding)
         return findings
     finally:
         if owns_connection:
@@ -441,11 +448,6 @@ def build_remediation_worklist(
     for finding in findings:
         if bool(finding.get("suppressed")):
             continue
-        review_state = str(
-            finding.get("review_state") or finding.get("status") or "new"
-        ).strip().lower()
-        if review_state in {"false_positive", "resolved"}:
-            continue
         identity_finding = _finding_with_owner(
             finding,
             owner_by_finding_id=owner_by_finding_id,
@@ -463,12 +465,16 @@ def build_remediation_worklist(
             vulnerability_id = str(reference.get("vulnerability_id") or "")
             if not remediation_id:
                 continue
+            review_state = str(reference.get("review_state") or "new").strip().lower()
+            if review_state in {"false_positive", "resolved"}:
+                continue
             key = (session_id, team_id, remediation_id)
             group = grouped.setdefault(key, {
                 "remediation_id": remediation_id,
                 "identity_kind": str(reference.get("identity_kind") or "rule"),
                 "vulnerability_id": vulnerability_id,
                 "affected_subject": str(reference.get("affected_subject") or ""),
+                "review_state": review_state,
                 "observations": [],
                 "evidence_keys": set(),
                 "validation_methods": set(),

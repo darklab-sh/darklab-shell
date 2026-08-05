@@ -106,15 +106,20 @@ def atlas_findings_bulk_review_update():
             if finding_exists_in_scope(conn, session_id, finding_id, team_id=owner_scope.team_id):
                 found_ids.add(finding_id)
         if found_ids:
-            update_finding_review_states(
+            disposition_update = update_finding_review_states(
                 conn,
                 found_ids,
                 review_state=review_state,
                 updated_at=atlas_routes._now_for_review(),
             )
-        return found_ids
+        else:
+            disposition_update = {
+                "remediation_group_count": 0,
+                "affected_finding_ids": set(),
+            }
+        return found_ids, disposition_update
 
-    found_ids = atlas_routes.run_atlas_transaction(_update_review)
+    found_ids, disposition_update = atlas_routes.run_atlas_transaction(_update_review)
     results = [
         {"finding_id": finding_id, "status": "updated" if finding_id in found_ids else "not_found"}
         for finding_id in finding_ids
@@ -125,6 +130,8 @@ def atlas_findings_bulk_review_update():
         "review_state": review_state,
         "updated": len(found_ids),
         "not_found": len(finding_ids) - len(found_ids),
+        "remediation_groups": disposition_update["remediation_group_count"],
+        "affected_observations": len(disposition_update["affected_finding_ids"]),
     })
     return jsonify({
         "ok": True,
@@ -133,6 +140,8 @@ def atlas_findings_bulk_review_update():
             "updated": len(found_ids),
             "not_found": len(finding_ids) - len(found_ids),
         },
+        "remediation_groups_updated": disposition_update["remediation_group_count"],
+        "affected_observations": len(disposition_update["affected_finding_ids"]),
         "results": results,
     })
 

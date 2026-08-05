@@ -2778,6 +2778,9 @@
           "affected_subject": {
             "type": "string"
           },
+          "disposition_updated_at": {
+            "type": "string"
+          },
           "identity_kind": {
             "enum": [
               "vulnerability",
@@ -2789,6 +2792,16 @@
             "type": "string"
           },
           "remediation_id": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "review_state_source": {
+            "enum": [
+              "observation",
+              "remediation_group"
+            ],
             "type": "string"
           },
           "rule_identity": {
@@ -2869,7 +2882,20 @@
           "affected_subject": {
             "type": "string"
           },
+          "disposition_updated_at": {
+            "type": "string"
+          },
           "remediation_id": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "review_state_source": {
+            "enum": [
+              "observation",
+              "remediation_group"
+            ],
             "type": "string"
           },
           "vulnerability_id": {

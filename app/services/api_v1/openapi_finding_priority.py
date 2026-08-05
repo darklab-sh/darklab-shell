@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from typing import Any
+from services.api_v1.openapi_finding_dispositions import finding_disposition_properties
 
 
 def _ref(name: str) -> dict[str, str]:
@@ -46,6 +47,7 @@ def finding_priority_schemas() -> dict[str, Any]:
                 "remediation_id": {"type": "string"},
                 "vulnerability_id": {"type": "string"},
                 "affected_subject": {"type": "string"},
+                **finding_disposition_properties(),
             },
         },
         "FindingObservationReference": {
@@ -66,6 +68,7 @@ def finding_priority_schemas() -> dict[str, Any]:
                 "vulnerability_id": {"type": "string"},
                 "rule_identity": {"type": "string"},
                 "affected_subject": {"type": "string"},
+                **finding_disposition_properties(),
                 "validation_method": {
                     "type": "string",
                     "enum": [
