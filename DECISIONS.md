@@ -234,6 +234,8 @@ Targets retain owner scope, their Project target or entity reference, canonical 
 
 Finding observations use owner, affected subject, stable rule, normalized vulnerability, and validation method in their fingerprints. Active confirmation, version inference, imported assertion, and manual assessment stay as separate observations. A remediation identity excludes validation method, so fix-first worklists and headline rollups count one normalized vulnerability against one affected subject once and expand its individual methods only in detail views. Review state and remediation guidance follow that shared identity, while verification steps, status, and notes stay with each observation. Mismatched subjects or vulnerability identities require an explicit human merge.
 
+That merge never rewrites the exact identities. It records their membership in one owner-scoped logical remediation group only after an assessor searches, previews the affected observations, and confirms the action. The selected target group wins any existing review state and guidance so conflict handling is visible before apply. Ranking and rollups count the logical group once, while evidence, validation, confidence, verification, suppression, and occurrence history continue to belong to their original observations.
+
 ### Assessment Execution, Secrets, and Packaging
 
 **Policy labels have the same behavior on every launch surface.**

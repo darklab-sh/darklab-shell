@@ -1177,6 +1177,24 @@
         <p class="finding-triage-guidance-note">
           This guidance is shared only with findings for the same target and vulnerability or rule.
         </p>
+        <div id="finding-triage-merge-summary" class="finding-triage-merge-summary"></div>
+        <button type="button" id="finding-triage-merge-toggle" class="btn btn-secondary btn-compact finding-triage-merge-toggle" aria-expanded="false" aria-controls="finding-triage-merge-panel">
+          Merge with another finding
+        </button>
+        <div id="finding-triage-merge-panel" class="finding-triage-merge-panel u-hidden">
+          <label class="project-target-edit-field">
+            <span>Find another saved finding</span>
+            <input id="finding-triage-merge-search" class="form-control form-control-compact" type="search" placeholder="Search by title, CVE, target, or finding ID" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Find a remediation group to merge">
+          </label>
+          <p class="finding-triage-guidance-note">
+            Use this only when both findings describe one fix despite having different targets, CVEs, or scanner rules.
+          </p>
+          <div id="finding-triage-merge-results" class="finding-triage-merge-results" aria-live="polite"></div>
+          <div id="finding-triage-merge-preview" class="finding-triage-merge-preview u-hidden" aria-live="polite"></div>
+          <div id="finding-triage-merge-actions" class="finding-triage-merge-actions u-hidden">
+            <button type="button" id="finding-triage-merge-apply" class="btn btn-warning btn-compact">Merge remediation groups</button>
+          </div>
+        </div>
       </section>
       <section class="finding-triage-section" aria-labelledby="finding-triage-verification-label">
         <span class="project-workspace-section-label" id="finding-triage-verification-label">Verification</span>

@@ -337,6 +337,7 @@ def attach_risk_to_findings(
             finding_id = str(finding.get("id") or "")
             cves = cves_by_finding.get(finding_id, ())
             if not cves:
+                apply_primary_remediation_disposition(finding)
                 continue
             enriched: list[dict[str, Any]] = []
             for cve_id in cves:
@@ -462,15 +463,25 @@ def build_remediation_worklist(
             if not isinstance(reference, dict):
                 continue
             remediation_id = str(reference.get("remediation_id") or "")
+            remediation_group_id = str(
+                reference.get("remediation_group_id") or remediation_id
+            )
             vulnerability_id = str(reference.get("vulnerability_id") or "")
             if not remediation_id:
                 continue
             review_state = str(reference.get("review_state") or "new").strip().lower()
             if review_state in {"false_positive", "resolved"}:
                 continue
-            key = (session_id, team_id, remediation_id)
+            key = (session_id, team_id, remediation_group_id)
             group = grouped.setdefault(key, {
                 "remediation_id": remediation_id,
+                "remediation_group_id": remediation_group_id,
+                "remediation_group_merged": bool(
+                    reference.get("remediation_group_merged")
+                ),
+                "remediation_group_member_count": int(
+                    reference.get("remediation_group_member_count") or 1
+                ),
                 "identity_kind": str(reference.get("identity_kind") or "rule"),
                 "vulnerability_id": vulnerability_id,
                 "affected_subject": str(reference.get("affected_subject") or ""),
@@ -489,6 +500,9 @@ def build_remediation_worklist(
                 "evidence_keys": set(),
                 "validation_methods": set(),
                 "rule_identities": set(),
+                "exact_remediation_ids": set(),
+                "affected_subjects": set(),
+                "vulnerability_ids": set(),
             })
             observation = dict(finding)
             observation["risk"] = risk_by_cve.get(vulnerability_id, finding.get("risk"))
@@ -496,6 +510,10 @@ def build_remediation_worklist(
             group["evidence_keys"].update(finding_evidence_keys(finding))
             group["validation_methods"].add(finding_validation_method(finding))
             group["rule_identities"].add(str(reference.get("rule_identity") or ""))
+            group["exact_remediation_ids"].add(remediation_id)
+            group["affected_subjects"].add(str(reference.get("affected_subject") or ""))
+            if vulnerability_id:
+                group["vulnerability_ids"].add(vulnerability_id)
 
     worklist: list[dict[str, Any]] = []
     for group in grouped.values():
@@ -503,6 +521,9 @@ def build_remediation_worklist(
         evidence_keys = group.pop("evidence_keys")
         validation_methods = group.pop("validation_methods")
         rule_identities = sorted(value for value in group.pop("rule_identities") if value)
+        exact_remediation_ids = sorted(group.pop("exact_remediation_ids"))
+        affected_subjects = sorted(value for value in group.pop("affected_subjects") if value)
+        vulnerability_ids = sorted(value for value in group.pop("vulnerability_ids") if value)
         _sort_by_cve_risk(observations)
         representative = observations[0]
         severities = _aggregate_severities(observations)
@@ -519,6 +540,9 @@ def build_remediation_worklist(
             "validation_methods": sorted(validation_methods),
             "rule_identity": rule_identities[0] if group["identity_kind"] == "rule" else "",
             "rule_identities": rule_identities,
+            "exact_remediation_ids": exact_remediation_ids,
+            "affected_subjects": affected_subjects,
+            "vulnerability_ids": vulnerability_ids,
             "priority_context": _aggregate_priority_context(observations),
             "risk": representative.get("risk"),
             "severity": severities[0] if severities else "",

@@ -10,6 +10,10 @@ from typing import Any, Mapping
 from services.atlas.scope import finding_source_scope_params, finding_source_scope_sql
 from services.projects.finding_details import finding_detail_fields
 from services.projects.finding_identity import finding_identity_references, owner_scope_key
+from services.projects.finding_remediation_merge_store import (
+    expand_remediation_group_members,
+    remediation_group_membership,
+)
 from services.projects.finding_vulnerabilities import finding_cves
 
 
@@ -94,13 +98,18 @@ def attach_remediation_dispositions(
 ) -> None:
     """Attach canonical group review state to prepared observation references."""
     requested: set[tuple[str, str, str, str]] = set()
+    references_by_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     identity_findings: dict[str, dict[str, Any]] = {}
     for finding in findings:
         identity_finding = _finding_with_owner(finding, owner_by_finding_id)
         identity_findings[str(finding.get("id") or "")] = identity_finding
         for reference in finding.get("observation_references", []):
             if isinstance(reference, dict):
-                requested.add(_reference_key(identity_finding, reference))
+                key = _reference_key(identity_finding, reference)
+                requested.add(key)
+                references_by_key[key] = reference
+
+    memberships = remediation_group_membership(conn, references_by_key)
 
     dispositions: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     ordered = sorted(requested)
@@ -144,7 +153,13 @@ def attach_remediation_dispositions(
         fallback_state = "new" if has_saved_disposition else legacy_state
         groups: list[dict[str, Any]] = []
         for reference in references:
-            disposition = dispositions.get(_reference_key(identity_finding, reference))
+            key = _reference_key(identity_finding, reference)
+            disposition = dispositions.get(key)
+            reference.update(memberships.get(key, {
+                "remediation_group_id": str(reference.get("remediation_id") or ""),
+                "remediation_group_merged": False,
+                "remediation_group_member_count": 1,
+            }))
             reference["review_state"] = (
                 str(disposition.get("review_state") or fallback_state)
                 if disposition
@@ -174,6 +189,11 @@ def attach_remediation_dispositions(
             )
             groups.append({
                 "remediation_id": str(reference.get("remediation_id") or ""),
+                "remediation_group_id": str(reference.get("remediation_group_id") or ""),
+                "remediation_group_merged": bool(reference.get("remediation_group_merged")),
+                "remediation_group_member_count": int(
+                    reference.get("remediation_group_member_count") or 1
+                ),
                 "vulnerability_id": str(reference.get("vulnerability_id") or ""),
                 "affected_subject": str(reference.get("affected_subject") or ""),
                 "review_state": reference["review_state"],
@@ -203,6 +223,15 @@ def apply_primary_remediation_disposition(finding: dict[str, Any]) -> None:
     review_state = str(reference.get("review_state") or "new")
     finding["review_state"] = review_state
     finding["status"] = review_state
+    finding["remediation_group_id"] = str(
+        reference.get("remediation_group_id") or remediation_id
+    )
+    finding["remediation_group_merged"] = bool(
+        reference.get("remediation_group_merged")
+    )
+    finding["remediation_group_member_count"] = int(
+        reference.get("remediation_group_member_count") or 1
+    )
 
 
 def remediation_guidance_by_finding_id(
@@ -316,6 +345,7 @@ def set_remediation_group_review_state(
     *,
     review_state: str,
     updated_at: str,
+    owner_scope: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Update selected findings and every exact matching observation group member."""
     if not finding_ids:
@@ -332,6 +362,12 @@ def set_remediation_group_review_state(
     groups: dict[tuple[str, str, str, str], dict[str, str]] = {}
     subjects: set[tuple[str, str, str]] = set()
     for finding in selected:
+        if owner_scope is not None:
+            finding = {
+                **finding,
+                "session_id": owner_scope[0],
+                "team_id": owner_scope[1],
+            }
         references = finding_identity_references(finding, finding_cves(finding))
         session_id, team_id = owner_scope_key(finding)
         for reference in references:
@@ -340,8 +376,12 @@ def set_remediation_group_review_state(
                 "identity_kind": str(reference.get("identity_kind") or "rule"),
                 "vulnerability_id": str(reference.get("vulnerability_id") or ""),
                 "rule_identity": str(reference.get("rule_identity") or ""),
+                "remediation_id": str(reference.get("remediation_id") or ""),
             }
             subjects.add((session_id, team_id, key[2]))
+
+    groups = expand_remediation_group_members(conn, groups)
+    subjects = {(key[0], key[1], key[2]) for key in groups}
 
     conn.executemany(
         _DISPOSITION_UPSERT_SQL,
@@ -428,8 +468,11 @@ def set_remediation_group_guidance(
                 "vulnerability_id": str(reference.get("vulnerability_id") or ""),
                 "rule_identity": str(reference.get("rule_identity") or ""),
                 "review_state": str(finding.get("status") or "new"),
+                "remediation_id": str(reference.get("remediation_id") or ""),
             })
             subjects.add((key[0], key[1], key[2]))
+    groups = expand_remediation_group_members(conn, groups)
+    subjects = {(key[0], key[1], key[2]) for key in groups}
     for (session_id, team_id, affected_subject, identity_value), details in sorted(
         groups.items()
     ):

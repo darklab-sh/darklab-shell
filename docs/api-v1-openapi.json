@@ -1987,6 +1987,16 @@
             "maxItems": 50,
             "type": "array"
           },
+          "remediation_group_id": {
+            "type": "string"
+          },
+          "remediation_group_member_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "remediation_group_merged": {
+            "type": "boolean"
+          },
           "remediation_groups": {
             "items": {
               "$ref": "#/components/schemas/FindingRemediationReference"
@@ -2062,6 +2072,9 @@
           "rule_identity",
           "observation_id",
           "remediation_id",
+          "remediation_group_id",
+          "remediation_group_merged",
+          "remediation_group_member_count",
           "observation_references",
           "remediation_groups",
           "summary",
@@ -2794,6 +2807,16 @@
           "observation_id": {
             "type": "string"
           },
+          "remediation_group_id": {
+            "type": "string"
+          },
+          "remediation_group_member_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "remediation_group_merged": {
+            "type": "boolean"
+          },
           "remediation_id": {
             "type": "string"
           },
@@ -2838,8 +2861,11 @@
           }
         },
         "required": [
-          "observation_id",
           "remediation_id",
+          "remediation_group_id",
+          "remediation_group_merged",
+          "remediation_group_member_count",
+          "observation_id",
           "identity_kind",
           "vulnerability_id",
           "rule_identity",
@@ -2904,6 +2930,16 @@
           "has_remediation": {
             "type": "boolean"
           },
+          "remediation_group_id": {
+            "type": "string"
+          },
+          "remediation_group_member_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "remediation_group_merged": {
+            "type": "boolean"
+          },
           "remediation_id": {
             "type": "string"
           },
@@ -2936,6 +2972,9 @@
         },
         "required": [
           "remediation_id",
+          "remediation_group_id",
+          "remediation_group_merged",
+          "remediation_group_member_count",
           "vulnerability_id",
           "affected_subject"
         ],
@@ -3947,6 +3986,16 @@
             "maxItems": 50,
             "type": "array"
           },
+          "remediation_group_id": {
+            "type": "string"
+          },
+          "remediation_group_member_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "remediation_group_merged": {
+            "type": "boolean"
+          },
           "remediation_groups": {
             "items": {
               "$ref": "#/components/schemas/FindingRemediationReference"
@@ -4031,6 +4080,9 @@
           "rule_identity",
           "observation_id",
           "remediation_id",
+          "remediation_group_id",
+          "remediation_group_merged",
+          "remediation_group_member_count",
           "observation_references",
           "remediation_groups",
           "summary",

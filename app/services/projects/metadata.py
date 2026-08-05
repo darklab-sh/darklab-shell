@@ -347,6 +347,9 @@ def default_finding_triage_details(session_id, finding_id, *, team_id=""):
         "created": "",
         "updated": "",
         "remediation_id": "",
+        "remediation_group_id": "",
+        "remediation_group_merged": False,
+        "remediation_group_member_count": 1,
         "remediation_source": "observation",
         "remediation_updated_at": "",
     }
@@ -379,6 +382,11 @@ def compact_finding_triage_details(triage):
         "remediation_preview": _text_preview(remediation),
         "verification_steps_preview": _text_preview(verification_steps),
         "remediation_id": str(item.get("remediation_id") or ""),
+        "remediation_group_id": str(item.get("remediation_group_id") or ""),
+        "remediation_group_merged": bool(item.get("remediation_group_merged")),
+        "remediation_group_member_count": int(
+            item.get("remediation_group_member_count") or 1
+        ),
         "remediation_source": str(item.get("remediation_source") or "observation"),
         "remediation_updated_at": str(item.get("remediation_updated_at") or ""),
     }
@@ -408,6 +416,15 @@ def _triage_with_remediation_guidance(finding, triage, *, session_id="", team_id
             else reference.get("remediation_preview") or ""
         )
     base["remediation_id"] = remediation_id
+    base["remediation_group_id"] = str(
+        reference.get("remediation_group_id") or remediation_id
+    )
+    base["remediation_group_merged"] = bool(
+        reference.get("remediation_group_merged")
+    )
+    base["remediation_group_member_count"] = int(
+        reference.get("remediation_group_member_count") or 1
+    )
     base["remediation_source"] = source
     base["remediation_updated_at"] = str(
         reference.get("remediation_updated_at") or ""

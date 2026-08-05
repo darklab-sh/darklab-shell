@@ -23,6 +23,16 @@ function mountEditor() {
         <div id="finding-triage-message" class="u-hidden"></div>
         <form id="finding-triage-form">
           <textarea id="finding-triage-remediation"></textarea>
+          <div id="finding-triage-merge-summary"></div>
+          <button type="button" id="finding-triage-merge-toggle" aria-expanded="false"></button>
+          <div id="finding-triage-merge-panel" class="u-hidden">
+            <input id="finding-triage-merge-search" type="search">
+            <div id="finding-triage-merge-results"></div>
+            <div id="finding-triage-merge-preview" class="u-hidden"></div>
+            <div id="finding-triage-merge-actions" class="u-hidden">
+              <button type="button" id="finding-triage-merge-apply"></button>
+            </div>
+          </div>
           <textarea id="finding-triage-verification-steps"></textarea>
           <select id="finding-triage-status" class="form-select form-control-compact">
             <option value="not_started">Not started</option>
@@ -97,6 +107,7 @@ describe('finding triage editor', () => {
     window.bindFocusTrap = vi.fn(() => ({ dispose: vi.fn() }))
     installAppSelectStubs()
     window.refocusComposerAfterAction = vi.fn()
+    window.showConfirm = vi.fn(() => Promise.resolve('merge'))
   })
 
   it('loads, saves, and compacts remediation and verification details', async () => {
@@ -193,6 +204,9 @@ describe('finding triage editor', () => {
 
     expect(document.getElementById('finding-triage-save').disabled).toBe(true)
     expect(document.getElementById('finding-triage-remediation').disabled).toBe(true)
+    expect(document.getElementById('finding-triage-merge-toggle').disabled).toBe(false)
+    expect(document.getElementById('finding-triage-merge-search').disabled).toBe(false)
+    expect(document.getElementById('finding-triage-merge-apply').disabled).toBe(true)
     expect(document.getElementById('finding-triage-message').textContent).toContain('cannot save changes')
     document.getElementById('finding-triage-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await flushPromises()
@@ -274,5 +288,93 @@ describe('finding triage editor', () => {
     expect(window.enhanceAppSelects).toHaveBeenCalledWith(document.getElementById('finding-triage-overlay'))
     expect(window.bindFocusTrap).not.toHaveBeenCalled()
     expect(appSelect.querySelector('.app-select-trigger').disabled).toBe(true)
+  })
+
+  it('previews and explicitly merges remediation groups without changing verification fields', async () => {
+    let triageReads = 0
+    const saved = vi.fn()
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/findings/finding-source/triage' && !options.method) {
+        triageReads += 1
+        return Promise.resolve(jsonResponse({
+          triage: {
+            remediation: 'Patch the shared service.',
+            verification_steps: 'Retest the source observation.',
+            verification_status: 'ready_to_verify',
+            verification_notes: 'Keep this note separate.',
+            remediation_id: 'rmd_source',
+            remediation_group_id: triageReads > 1 ? 'rmg_explicit' : 'rmd_source',
+            remediation_group_merged: triageReads > 1,
+            remediation_group_member_count: triageReads > 1 ? 2 : 1,
+          },
+        }))
+      }
+      if (url.endsWith('/remediation-merge/candidates')) {
+        return Promise.resolve(jsonResponse({ candidates: [{
+          finding_id: 'finding-target',
+          title: 'Imported shared issue',
+          vulnerability_id: 'CVE-2026-12345',
+          affected_subject: 'entity:target-2',
+        }] }))
+      }
+      if (url.endsWith('/remediation-merge/preview')) {
+        return Promise.resolve(jsonResponse({ preview: {
+          source: { title: 'Source issue' },
+          target: {
+            title: 'Imported shared issue',
+            review_state: 'important',
+            has_remediation: true,
+            remediation_preview: 'Apply the target-side patch.',
+          },
+          member_count: 2,
+          observation_count: 2,
+          preview_token: 'preview-token',
+          observations: [
+            { observation_id: 'obs_source', title: 'Source issue', validation_method: 'active_confirmation', vulnerability_id: 'CVE-2026-12345' },
+            { observation_id: 'obs_target', title: 'Imported shared issue', validation_method: 'imported_assertion', vulnerability_id: 'CVE-2026-12345' },
+          ],
+        } }))
+      }
+      if (url.endsWith('/remediation-merge')) {
+        return Promise.resolve(jsonResponse({ merge: { member_count: 2, observation_count: 2 } }))
+      }
+      return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 404))
+    })
+    window.apiFetch = apiFetch
+    loadEditor()
+
+    await window.DarklabFindingTriageEditor.open(
+      { id: 'finding-source', title: 'Source issue' },
+      { onSaved: saved },
+    )
+    await flushPromises()
+
+    document.getElementById('finding-triage-merge-toggle').click()
+    const search = document.getElementById('finding-triage-merge-search')
+    search.value = 'shared issue'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 275))
+    await flushPromises()
+
+    document.querySelector('.finding-triage-merge-candidate').click()
+    await flushPromises()
+    expect(document.getElementById('finding-triage-merge-preview').textContent).toContain('2 observations')
+    expect(document.getElementById('finding-triage-merge-preview').textContent).toContain('verification steps, status, and notes will stay separate')
+    expect(document.getElementById('finding-triage-merge-preview').textContent).toContain('current review state is Important')
+    expect(document.getElementById('finding-triage-merge-preview').textContent).toContain('Apply the target-side patch.')
+
+    document.getElementById('finding-triage-merge-apply').click()
+    await flushPromises(10)
+
+    const applyCall = apiFetch.mock.calls.find(([url]) => url.endsWith('/remediation-merge'))
+    expect(JSON.parse(applyCall[1].body)).toEqual({
+      target_finding_id: 'finding-target',
+      preview_token: 'preview-token',
+    })
+    expect(window.showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }))
+    expect(document.getElementById('finding-triage-remediation').value).toBe('Patch the shared service.')
+    expect(document.getElementById('finding-triage-verification-notes').value).toBe('Keep this note separate.')
+    expect(document.getElementById('finding-triage-merge-summary').textContent).toContain('2 explicitly merged')
+    expect(saved).toHaveBeenCalled()
   })
 })

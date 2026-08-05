@@ -137,7 +137,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 4 — Add first-class manual findings and retest provenance
 
 - [ ] Extend the finding model so assessors can record issues that no parser or import knows about:
-  - Add an explicit, audited remediation-group merge action for issues whose affected subjects or vulnerability/rule identities don't match exactly. Preview the affected observations before merging, keep their evidence and verification work separate, and never infer this merge automatically.
   - Link CVE-bearing findings to the shared Phase 0 enrichment records and serialize current EPSS, KEV, CVSS, and public-exploit signals with their source/freshness. Do not rewrite the finding or its occurrence history when a feed changes.
   - Add typed evidence links for source runs/lines, run artifacts, workspace files, screenshots, Atlas entities, Project targets, assessment checks, and retest runs. Validate every reference in the active owner/Project scope.
   - Preserve current `findings_occurrences` behavior for selected transcript lines. Manual evidence attached to a run must keep a line number and bounded snippet without copying an entire transcript.

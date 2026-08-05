@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Assessors can explicitly merge remediation groups that describe the same fix.**
+  - **Why:** Stable finding identities correctly keep different targets, CVEs, and scanner rules separate, but real assessments sometimes produce two differently identified observations that still represent one remediation task.
+  - **What:** The shared finding triage editor now searches saved findings, previews every affected observation, and asks for confirmation before joining otherwise distinct remediation groups. The selected target group's review state and guidance win, fix-first views count the joined group once, and each observation keeps its own evidence, validation method, confidence, and verification work. The merge stays inside the active personal or team scope, requires finding-triage permission to apply, records an audit event, and never happens automatically.
+  - **Tests:** Focused SQLite/Postgres migration, personal/team route, stale-preview, session-migration, CVE-risk ranking, Project/Atlas/API serialization, OpenAPI, browser-editor, architecture, and documentation coverage pins the explicit merge contract and its evidence boundaries.
 - **Matching finding observations now share remediation guidance without sharing verification state.**
   - **Why:** Inferred, imported, manual, and actively confirmed observations of the same issue shouldn't drift into different fix instructions, but each observation still needs its own retest record.
   - **What:** Remediation guidance now follows the existing owner-scoped remediation identity: exact affected subject plus normalized CVE or stable scanner rule. The triage editor shows shared guidance, while verification steps, status, and notes remain attached to the selected observation. Different targets, vulnerabilities, and rules stay independent; clearing shared guidance doesn't revive older per-finding text, and session migration resolves review state and guidance by their separate update times.

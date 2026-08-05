@@ -8,6 +8,7 @@ Project workspace session migration helpers.
 from __future__ import annotations
 
 from services.projects.preferences import migrate_active_project_preference
+from services.projects.finding_remediation_merge_store import migrate_remediation_merge_members
 from services.projects.slugs import allocate_slug
 
 
@@ -123,6 +124,11 @@ def migrate_project_workspace_session(
             "WHERE session_id = ? AND team_id = ''",
             (from_session_id,),
         )
+    migrated_remediation_merge_members = migrate_remediation_merge_members(
+        conn,
+        from_session_id,
+        to_session_id,
+    )
     entity_result = conn.execute(
         "UPDATE entities SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
@@ -200,6 +206,7 @@ def migrate_project_workspace_session(
         "migrated_finding_remediation_guidance": sum(
             1 for row in disposition_rows if row["remediation_updated_at"] is not None
         ),
+        "migrated_finding_remediation_merge_members": migrated_remediation_merge_members,
         "migrated_finding_targets": 0,
         "migrated_entity_labels": label_result.rowcount + migrated_workspace_file_labels,
         "migrated_entity_notes": note_result.rowcount + migrated_workspace_file_notes,

@@ -3484,6 +3484,8 @@ class TestTeamRoutes:
             run_id = "run-team-capability"
             entity_id = "ent_team_capability"
             finding_id = "fnd_team_capability"
+            merge_entity_id = "ent_team_capability_merge"
+            merge_finding_id = "fnd_team_capability_merge"
             seen_at = "2026-05-28T15:00:00+00:00"
             with db_connect() as conn:
                 conn.execute(
@@ -3530,6 +3532,41 @@ class TestTeamRoutes:
                     "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
                     "VALUES (?, ?, 1, 'capability finding', ?)",
                     (finding_id, run_id, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                    "last_seen_at, created) VALUES (?, ?, 'domain', 'capability-merge.example', "
+                    "?, ?, ?, ?)",
+                    (
+                        merge_entity_id,
+                        owner_token,
+                        "sig_" + merge_entity_id,
+                        seen_at,
+                        seen_at,
+                        seen_at,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, "
+                    "kind, tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, "
+                    "occurrence_count, status, title, raw_line, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, "
+                    "'new', 'alternate capability finding', 'alternate capability finding', ?)",
+                    (
+                        merge_finding_id,
+                        owner_token,
+                        run_id,
+                        merge_entity_id,
+                        merge_entity_id,
+                        "sig_" + merge_finding_id,
+                        run_id,
+                        run_id,
+                        seen_at,
+                        seen_at,
+                        seen_at,
+                    ),
                 )
                 conn.commit()
 
@@ -3621,6 +3658,32 @@ class TestTeamRoutes:
                 headers=viewer_headers,
                 json={"verification_status": "verified"},
             )
+            viewer_merge_candidates = client.post(
+                f"/findings/{finding_id}/remediation-merge/candidates",
+                headers=viewer_headers,
+                json={"query": "alternate capability"},
+            )
+            viewer_merge_preview = client.post(
+                f"/findings/{finding_id}/remediation-merge/preview",
+                headers=viewer_headers,
+                json={"target_finding_id": merge_finding_id},
+            )
+            viewer_merge_apply = client.post(
+                f"/findings/{finding_id}/remediation-merge",
+                headers=viewer_headers,
+                json={
+                    "target_finding_id": merge_finding_id,
+                    "preview_token": viewer_merge_preview.get_json()["preview"]["preview_token"],
+                },
+            )
+            operator_merge_apply = client.post(
+                f"/findings/{finding_id}/remediation-merge",
+                headers=operator_headers,
+                json={
+                    "target_finding_id": merge_finding_id,
+                    "preview_token": viewer_merge_preview.get_json()["preview"]["preview_token"],
+                },
+            )
             viewer_atlas_review = client.post(
                 "/atlas/findings/review",
                 headers=viewer_headers,
@@ -3668,6 +3731,15 @@ class TestTeamRoutes:
                 "Patch capability finding."
             )
             assert viewer_finding_triage_update.status_code == 403
+            assert viewer_merge_candidates.status_code == 200
+            assert [
+                item["finding_id"]
+                for item in viewer_merge_candidates.get_json()["candidates"]
+            ] == [merge_finding_id]
+            assert viewer_merge_preview.status_code == 200
+            assert viewer_merge_apply.status_code == 403
+            assert operator_merge_apply.status_code == 200
+            assert operator_merge_apply.get_json()["merge"]["member_count"] == 2
             assert viewer_atlas_review.status_code == 403
             assert viewer_intel_refresh.status_code == 403
             assert viewer_brokered_run.get_json()["error"] == "team_forbidden"
@@ -9229,6 +9301,9 @@ class TestProjectRoutes:
             "created": triage_payload["triage"]["created"],
             "updated": triage_payload["triage"]["updated"],
             "remediation_id": triage_payload["triage"]["remediation_id"],
+            "remediation_group_id": triage_payload["triage"]["remediation_group_id"],
+            "remediation_group_merged": False,
+            "remediation_group_member_count": 1,
             "remediation_source": "remediation_group",
             "remediation_updated_at": triage_payload["triage"]["remediation_updated_at"],
         }
@@ -17712,6 +17787,249 @@ class TestAtlasRoutes:
                 (session_id, finding_id),
             ).fetchone()
         assert row["status"] == "important"
+
+    def test_explicit_remediation_merge_previews_and_shares_only_disposition(self):
+        client = get_client()
+        session_id = self._session_id()
+        other_session_id = self._session_id()
+        self._register_session_token(session_id)
+        self._register_session_token(other_session_id)
+        run_id, _recorded = self._seed_entity_run(session_id)
+        source_finding = client.get(
+            "/atlas/findings",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["findings"][0]
+        source_finding_id = source_finding["id"]
+        target_finding_id = "fnd_merge_target_" + uuid.uuid4().hex
+        target_entity_id = "ent_merge_target_" + uuid.uuid4().hex
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                "last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'domain', 'merged-target.darklab.test', ?, datetime('now'), "
+                "datetime('now'), 1, datetime('now'))",
+                (target_entity_id, session_id, uuid.uuid4().hex),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, origin, "
+                "validation_method, status, severity, title, raw_line, cve_ids_json, created) "
+                "VALUES (?, ?, ?, ?, 'merged-target.darklab.test', ?, 'manual', "
+                "'manual_assessment', 'important', 'high', 'Alternate evidence for one fix', "
+                "'CVE-2026-99999 on merged-target.darklab.test', "
+                "'[\"CVE-2026-99999\"]', datetime('now'))",
+                (
+                    target_finding_id,
+                    session_id,
+                    run_id,
+                    target_entity_id,
+                    uuid.uuid4().hex,
+                ),
+            )
+            before_occurrences = conn.execute(
+                "SELECT COUNT(*) AS count FROM findings_occurrences "
+                "WHERE finding_id IN (?, ?)",
+                (source_finding_id, target_finding_id),
+            ).fetchone()["count"]
+            conn.commit()
+
+        source_triage = client.put(
+            f"/findings/{source_finding_id}/triage",
+            json={
+                "verification_status": "ready_to_verify",
+                "verification_steps": "Repeat the source check.",
+                "verification_notes": "Keep source evidence separate.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        target_review = client.put(
+            f"/findings/{target_finding_id}/review",
+            json={"review_state": "important"},
+            headers={"X-Session-ID": session_id},
+        )
+        target_triage = client.put(
+            f"/findings/{target_finding_id}/triage",
+            json={
+                "remediation": "Apply the target-side patch guidance.",
+                "verification_status": "verified",
+                "verification_steps": "Repeat the target check.",
+                "verification_notes": "Target verification stays independent.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        candidates_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/candidates",
+            json={"query": "CVE-2026-99999"},
+            headers={"X-Session-ID": session_id},
+        )
+        preview_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/preview",
+            json={"target_finding_id": target_finding_id},
+            headers={"X-Session-ID": session_id},
+        )
+        preview = preview_resp.get_json()["preview"]
+        stale_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge",
+            json={
+                "target_finding_id": target_finding_id,
+                "preview_token": "stale-preview-token",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        target_changed = client.put(
+            f"/findings/{target_finding_id}/review",
+            json={"review_state": "reviewed"},
+            headers={"X-Session-ID": session_id},
+        )
+        changed_disposition_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge",
+            json={
+                "target_finding_id": target_finding_id,
+                "preview_token": preview["preview_token"],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        target_restored = client.put(
+            f"/findings/{target_finding_id}/review",
+            json={"review_state": "important"},
+            headers={"X-Session-ID": session_id},
+        )
+        refreshed_preview_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/preview",
+            json={"target_finding_id": target_finding_id},
+            headers={"X-Session-ID": session_id},
+        )
+        refreshed_preview = refreshed_preview_resp.get_json()["preview"]
+        apply_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge",
+            json={
+                "target_finding_id": target_finding_id,
+                "preview_token": refreshed_preview["preview_token"],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        merged_again_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/preview",
+            json={"target_finding_id": target_finding_id},
+            headers={"X-Session-ID": session_id},
+        )
+        cross_scope_candidates = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/candidates",
+            json={"query": "CVE-2026-99999"},
+            headers={"X-Session-ID": other_session_id},
+        )
+        cross_scope_preview = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/preview",
+            json={"target_finding_id": target_finding_id},
+            headers={"X-Session-ID": other_session_id},
+        )
+        merged_findings = {
+            item["id"]: item
+            for item in client.get(
+                "/atlas/findings",
+                headers={"X-Session-ID": session_id},
+            ).get_json()["findings"]
+        }
+        source_after_merge = client.get(
+            f"/findings/{source_finding_id}/triage",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["triage"]
+        target_after_merge = client.get(
+            f"/findings/{target_finding_id}/triage",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["triage"]
+        review_resp = client.put(
+            f"/findings/{source_finding_id}/review",
+            json={"review_state": "reviewed"},
+            headers={"X-Session-ID": session_id},
+        )
+        guidance_resp = client.put(
+            f"/findings/{source_finding_id}/triage",
+            json={
+                "remediation": "Use the final shared patch guidance.",
+                "verification_status": "ready_to_verify",
+                "verification_steps": "Repeat the source check.",
+                "verification_notes": "Keep source evidence separate.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        target_after_guidance = client.get(
+            f"/findings/{target_finding_id}/triage",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["triage"]
+        review_states = {
+            item["id"]: item["review_state"]
+            for item in client.get(
+                "/atlas/findings",
+                headers={"X-Session-ID": session_id},
+            ).get_json()["findings"]
+        }
+        with db_connect() as conn:
+            after_occurrences = conn.execute(
+                "SELECT COUNT(*) AS count FROM findings_occurrences "
+                "WHERE finding_id IN (?, ?)",
+                (source_finding_id, target_finding_id),
+            ).fetchone()["count"]
+
+        assert source_triage.status_code == 200
+        assert target_review.status_code == 200
+        assert target_triage.status_code == 200
+        assert candidates_resp.status_code == 200
+        assert [item["finding_id"] for item in candidates_resp.get_json()["candidates"]] == [
+            target_finding_id
+        ]
+        assert preview_resp.status_code == 200
+        assert preview["member_count"] == 2
+        assert preview["observation_count"] == 2
+        assert preview["target"]["review_state"] == "important"
+        assert preview["target"]["remediation_preview"] == "Apply the target-side patch guidance."
+        assert {item["finding_id"] for item in preview["observations"]} == {
+            source_finding_id,
+            target_finding_id,
+        }
+        assert stale_resp.status_code == 400
+        assert "stale" in stale_resp.get_json()["error"]
+        assert target_changed.status_code == 200
+        assert changed_disposition_resp.status_code == 400
+        assert "stale" in changed_disposition_resp.get_json()["error"]
+        assert target_restored.status_code == 200
+        assert refreshed_preview_resp.status_code == 200
+        assert apply_resp.status_code == 200
+        merge = apply_resp.get_json()["merge"]
+        assert merge["merge_id"].startswith("rmg_")
+        assert merge["member_count"] == 2
+        assert merged_again_resp.status_code == 400
+        assert "already share" in merged_again_resp.get_json()["error"]
+        assert cross_scope_candidates.status_code == 404
+        assert cross_scope_preview.status_code == 404
+        source_group = merged_findings[source_finding_id]
+        target_group = merged_findings[target_finding_id]
+        assert source_group["remediation_id"] != target_group["remediation_id"]
+        assert source_group["remediation_group_id"] == merge["merge_id"]
+        assert target_group["remediation_group_id"] == merge["merge_id"]
+        assert source_group["remediation_group_merged"] is True
+        assert source_group["remediation_group_member_count"] == 2
+        assert source_after_merge["remediation"] == "Apply the target-side patch guidance."
+        assert source_after_merge["verification_status"] == "ready_to_verify"
+        assert source_after_merge["verification_steps"] == "Repeat the source check."
+        assert target_after_merge["verification_status"] == "verified"
+        assert target_after_merge["verification_steps"] == "Repeat the target check."
+        assert review_resp.status_code == 200
+        assert guidance_resp.status_code == 200
+        assert review_states[source_finding_id] == "reviewed"
+        assert review_states[target_finding_id] == "reviewed"
+        assert target_after_guidance["remediation"] == "Use the final shared patch guidance."
+        assert target_after_guidance["verification_status"] == "verified"
+        assert target_after_guidance["verification_steps"] == "Repeat the target check."
+        assert before_occurrences == after_occurrences
+        merge_events = _audit_event_rows(
+            target_id=source_finding_id,
+            event_type="finding.remediation_merge",
+        )
+        assert len(merge_events) == 1
+        assert merge_events[0]["details"]["remediation_group_id"] == merge["merge_id"]
+        assert merge_events[0]["details"]["member_count"] == 2
 
     def test_atlas_suppression_hides_rows_until_requested_and_preserves_project_links(self):
         client = get_client()

@@ -356,6 +356,7 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
             {finding_id},
             review_state=review_state,
             updated_at=_now(),
+            owner_scope=("" if team_id else session_id, team_id),
         )
         if finding_id not in disposition_update["affected_finding_ids"]:
             return None
@@ -442,6 +443,7 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
                 found_ids,
                 review_state=review_state,
                 updated_at=updated_at,
+                owner_scope=("" if team_id else session_id, team_id),
             )
             conn.commit()
         else:

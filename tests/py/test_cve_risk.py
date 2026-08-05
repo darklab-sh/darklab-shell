@@ -483,6 +483,32 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
     }
     assert shared["risk"]["kev"]["listed"] is True
 
+    risk_db.executemany(
+        "INSERT INTO finding_remediation_merge_members "
+        "(session_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
+        "vulnerability_id, rule_identity, created_by_session_id, created_at) "
+        "VALUES ('session-one', '', 'rmg_explicit', ?, 'vulnerability', "
+        "'CVE-2026-12345', 'CVE-2026-12345', ?, 'session-one', '2026-08-05')",
+        (
+            ("entity:ent_shared", "observation:finding-confirmed"),
+            ("entity:ent_other", "observation:finding-other-target"),
+        ),
+    )
+
+    merged_worklist = build_remediation_worklist(findings, conn=risk_db)
+
+    assert len(merged_worklist) == 2
+    merged = next(
+        item for item in merged_worklist
+        if item["remediation_group_id"] == "rmg_explicit"
+    )
+    assert merged["remediation_group_merged"] is True
+    assert merged["remediation_group_member_count"] == 2
+    assert merged["observation_count"] == 3
+    assert len(merged["exact_remediation_ids"]) == 2
+    assert merged["affected_subjects"] == ["entity:ent_other", "entity:ent_shared"]
+    assert merged["vulnerability_ids"] == ["CVE-2026-12345"]
+
 
 def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     findings = [{
@@ -616,6 +642,8 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
 
 
 def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
+    from services.projects.finding_remediation_merges import _primary_member
+
     risk_db.executemany(
         "INSERT INTO cve_risk_records (cve_id, kev_listed, epss_probability) VALUES (?, ?, ?)",
         (
@@ -645,6 +673,9 @@ def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
     assert {
         item["vulnerability_id"] for item in finding["observation_references"]
     } == {"CVE-2026-12345", "CVE-2026-23456"}
+    primary_merge_member = _primary_member(finding)
+    assert primary_merge_member["remediation_id"] == finding["remediation_id"]
+    assert primary_merge_member["vulnerability_id"] == "CVE-2026-23456"
     risk_db.execute(
         "INSERT INTO finding_remediation_dispositions "
         "(session_id, team_id, affected_subject, identity_kind, identity_value, "

@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 from typing import Any
-from services.api_v1.openapi_finding_dispositions import finding_disposition_properties
+from services.api_v1.openapi_finding_dispositions import (
+    finding_disposition_properties,
+    finding_remediation_required,
+)
 
 
 def _ref(name: str) -> dict[str, str]:
@@ -42,7 +45,9 @@ def finding_priority_schemas() -> dict[str, Any]:
         },
         "FindingRemediationReference": {
             "type": "object",
-            "required": ["remediation_id", "vulnerability_id", "affected_subject"],
+            "required": finding_remediation_required(
+                "vulnerability_id", "affected_subject"
+            ),
             "properties": {
                 "remediation_id": {"type": "string"},
                 "vulnerability_id": {"type": "string"},
@@ -52,15 +57,10 @@ def finding_priority_schemas() -> dict[str, Any]:
         },
         "FindingObservationReference": {
             "type": "object",
-            "required": [
-                "observation_id",
-                "remediation_id",
-                "identity_kind",
-                "vulnerability_id",
-                "rule_identity",
-                "affected_subject",
-                "validation_method",
-            ],
+            "required": finding_remediation_required(
+                "observation_id", "identity_kind", "vulnerability_id",
+                "rule_identity", "affected_subject", "validation_method",
+            ),
             "properties": {
                 "observation_id": {"type": "string"},
                 "remediation_id": {"type": "string"},

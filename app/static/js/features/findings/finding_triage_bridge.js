@@ -30,6 +30,9 @@ function compactTriage(triage) {
     remediation_preview: text(item.remediation_preview || item.remediation),
     verification_steps_preview: text(item.verification_steps_preview || item.verification_steps),
     remediation_id: text(item.remediation_id),
+    remediation_group_id: text(item.remediation_group_id || item.remediation_id),
+    remediation_group_merged: !!item.remediation_group_merged,
+    remediation_group_member_count: Math.max(1, Number(item.remediation_group_member_count) || 1),
     remediation_source: text(item.remediation_source, 'observation'),
     remediation_updated_at: text(item.remediation_updated_at),
   };

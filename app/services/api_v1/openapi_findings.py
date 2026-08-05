@@ -37,6 +37,9 @@ def finding_schemas() -> dict[str, Any]:
         "rule_identity",
         "observation_id",
         "remediation_id",
+        "remediation_group_id",
+        "remediation_group_merged",
+        "remediation_group_member_count",
         "observation_references",
         "remediation_groups",
     ]

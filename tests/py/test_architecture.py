@@ -166,6 +166,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_auto_promote.py", 204, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_core.py", 412, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_findings.py", 272, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_finding_merges.py", 145, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_links.py", 242, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_metadata.py", 158, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_monitoring.py", 239, "split-package-ratchet"),
@@ -344,8 +345,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 210
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "97700bb4f0880d242b246a89ef57a9f7e7af6b3889c272e1016984315ffeff19"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 213
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "d36454576daa487c2720ab26a8bdd5be29d96713604c3dac2200eaf952251c8a"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

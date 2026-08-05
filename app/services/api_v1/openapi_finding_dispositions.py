@@ -8,8 +8,21 @@ from __future__ import annotations
 from typing import Any
 
 
+def finding_remediation_required(*fields: str) -> list[str]:
+    return [
+        "remediation_id",
+        "remediation_group_id",
+        "remediation_group_merged",
+        "remediation_group_member_count",
+        *fields,
+    ]
+
+
 def finding_disposition_properties() -> dict[str, Any]:
     return {
+        "remediation_group_id": {"type": "string"},
+        "remediation_group_merged": {"type": "boolean"},
+        "remediation_group_member_count": {"type": "integer", "minimum": 1},
         "review_state": {"type": "string"},
         "review_state_source": {
             "type": "string",

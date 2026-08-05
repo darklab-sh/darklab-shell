@@ -65,6 +65,7 @@ from . import (
     v0052_finding_details,
     v0053_finding_remediation_dispositions,
     v0054_finding_remediation_guidance,
+    v0055_finding_remediation_merges,
 )
 
 _ = baseline
@@ -124,4 +125,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0052_finding_details.MIGRATION,
     v0053_finding_remediation_dispositions.MIGRATION,
     v0054_finding_remediation_guidance.MIGRATION,
+    v0055_finding_remediation_merges.MIGRATION,
 )

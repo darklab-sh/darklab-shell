@@ -2300,6 +2300,9 @@ def test_api_v1_project_readers_are_token_scoped():
     assert owner_finding_payload["observation_references"] == [{
         "observation_id": owner_finding_payload["observation_id"],
         "remediation_id": owner_finding_payload["remediation_id"],
+        "remediation_group_id": owner_finding_payload["remediation_id"],
+        "remediation_group_merged": False,
+        "remediation_group_member_count": 1,
         "identity_kind": "vulnerability",
         "vulnerability_id": "CVE-2026-12345",
         "rule_identity": owner_finding_payload["observation_references"][0]["rule_identity"],
@@ -2321,6 +2324,9 @@ def test_api_v1_project_readers_are_token_scoped():
         "remediation_preview": "Restrict the administrative service and require authentication.",
         "verification_steps_preview": "",
         "remediation_id": owner_finding_payload["remediation_id"],
+        "remediation_group_id": owner_finding_payload["remediation_id"],
+        "remediation_group_merged": False,
+        "remediation_group_member_count": 1,
         "remediation_source": "remediation_group",
         "remediation_updated_at": remediation_updated_at,
     }
@@ -4344,6 +4350,9 @@ def test_api_v1_openapi_contract_describes_public_shapes():
             "rule_identity",
             "observation_id",
             "remediation_id",
+            "remediation_group_id",
+            "remediation_group_merged",
+            "remediation_group_member_count",
             "observation_references",
             "remediation_groups",
         }.issubset(schemas[schema_name]["required"])
