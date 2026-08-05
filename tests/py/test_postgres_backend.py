@@ -688,6 +688,73 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
 
 
 @pytest.mark.postgres
+def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.cleanup import (
+        RUN_EVIDENCE_UNAVAILABLE_REASON,
+        mark_run_evidence_unavailable_on_conn,
+    )
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    timestamp = "2026-08-04T12:00:00+00:00"
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "VALUES ('prj-assessment-cleanup', 'assessment-cleanup', '', 'Cleanup', 'cleanup', '', "
+        "'active', '', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, created_at, updated_at) "
+        "VALUES ('asm-cleanup', 'assessment-cleanup', '', 'prj-assessment-cleanup', "
+        "'Cleanup', 'network', '1.0', ?, 'active', ?, ?, ?)",
+        (Jsonb({}), timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, target_value_hash, "
+        "state, first_evidence_at, last_evidence_at, created_at, updated_at) "
+        "VALUES ('chk-cleanup', 'asm-cleanup', 'discovery', 'open_ports', 'domain', "
+        "'cleanup.example', 'cleanup-hash', 'covered', ?, ?, ?, ?)",
+        (timestamp, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_evidence "
+        "(id, assessment_id, check_id, evidence_type, evidence_id, observed_at, "
+        "match_rule_key, match_rule_version, created_at, updated_at) "
+        "VALUES ('aev-cleanup', 'asm-cleanup', 'chk-cleanup', 'run', 'run-cleanup', ?, "
+        "'completed-scan', '1.0', ?, ?)",
+        (timestamp, timestamp, timestamp),
+    )
+
+    assert mark_run_evidence_unavailable_on_conn(conn, ["run-cleanup"]) == 1
+    assert mark_run_evidence_unavailable_on_conn(conn, ["run-cleanup"]) == 0
+    evidence = conn.execute(
+        "SELECT evidence_id, source_state, observed_at, unavailable_at, unavailable_reason "
+        "FROM project_assessment_evidence WHERE id = 'aev-cleanup'"
+    ).fetchone()
+    check = conn.execute(
+        "SELECT state, first_evidence_at, last_evidence_at "
+        "FROM project_assessment_checks WHERE id = 'chk-cleanup'"
+    ).fetchone()
+
+    assert evidence["evidence_id"] == "run-cleanup"
+    assert evidence["source_state"] == "unavailable"
+    assert evidence["observed_at"] is not None
+    assert evidence["unavailable_at"] is not None
+    assert evidence["unavailable_reason"] == RUN_EVIDENCE_UNAVAILABLE_REASON
+    assert check["state"] == "covered"
+    assert check["first_evidence_at"] is not None
+    assert check["last_evidence_at"] is not None
+
+
+@pytest.mark.postgres
 def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock

@@ -18,6 +18,7 @@ from core.helpers import get_log_session_id
 from core.output_signals import OutputSignalClassifier
 from core.redaction import REDACTED_ENTITY_SENTINEL, line_entries_from_events, redact_line_entries
 from services.atlas.materializer import materialize_run_entities
+from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.commands.registry import command_project_target_inputs
 from services.metrics_lazy import app_metrics
 from services.notifications.hooks import enqueue_run_complete
@@ -33,6 +34,13 @@ from services.projects.links import (
 from services.projects.targets import record_project_target_discoveries
 from services.pty.transcript import shape_completed_pty_entries
 from services.runs.kinds import RUN_KIND_EXTERNAL, run_kind_for_cmd_type
+from services.runs.finalization_assessments import reconcile_assessment_evidence_for_finalize
+from services.runs.finalization_summaries import (
+    AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT,
+    auto_promote_summary_ids,
+    auto_promote_summary_log_results,
+    auto_promote_summary_results,
+)
 from services.runs.output_model import (
     LineEvent,
     LineRole,
@@ -57,7 +65,6 @@ from services.storage.body_store import inline_threshold_bytes, maybe_store_text
 from services.teams.scope import owner_context_for_scope
 
 log = logging.getLogger("shell")
-AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT = 10
 SEARCH_ENTITY_MAX_BYTES = 4096
 
 
@@ -615,38 +622,6 @@ def _link_active_project_entities_for_finalize(
         })
 
 
-def auto_promote_summary_results(summary) -> list[dict]:
-    if not isinstance(summary, dict):
-        return []
-    results = summary.get("results")
-    if not isinstance(results, list):
-        return []
-    return [result for result in results if isinstance(result, dict)]
-
-
-def auto_promote_summary_ids(results: list[dict], key: str) -> list[str]:
-    return sorted({
-        str(result.get(key) or "")
-        for result in results
-        if str(result.get(key) or "")
-    })
-
-
-def auto_promote_summary_log_results(results: list[dict]) -> list[dict[str, object]]:
-    safe_results = []
-    for result in results[:AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT]:
-        safe_results.append({
-            "project_id": str(result.get("project_id") or ""),
-            "rule_id": str(result.get("rule_id") or ""),
-            "matched_count": int(result.get("matched_count") or 0),
-            "linked_count": int(result.get("linked_count") or 0),
-            "promoted_count": int(result.get("promoted_count") or 0),
-            "quota_limited_count": int(result.get("quota_limited_count") or 0),
-            "match_cap_limited_count": int(result.get("match_cap_limited_count") or 0),
-        })
-    return safe_results
-
-
 def log_run_finalize_records(run_id, session_id, team_id, run_kind, records: RunFinalizeRecords) -> tuple[list[dict], list[str]]:
     app_metrics.record_findings_materialized(run_kind, len(records.recorded_findings))
     if records.active_project_link:
@@ -750,6 +725,7 @@ def save_completed_run(
     command_project_target_inputs_fn: Callable = command_project_target_inputs,
     record_project_target_discoveries_fn: Callable = record_project_target_discoveries,
     link_active_project_run_entities_fn: Callable = link_active_project_run_entities,
+    reconcile_assessment_evidence_fn: Callable = reconcile_run_evidence_on_conn,
 ):
     capture.finalize()
     try:
@@ -861,6 +837,14 @@ def save_completed_run(
                 records.active_project_link,
                 records.recorded_entities,
                 link_active_project_run_entities_fn=link_active_project_run_entities_fn,
+            )
+            reconcile_assessment_evidence_for_finalize(
+                conn,
+                run_id,
+                session_id,
+                team_id,
+                records.active_project_link, records.auto_promote_summary,
+                reconcile_run_evidence_fn=reconcile_assessment_evidence_fn,
             )
 
         run_persistence_transaction_fn(_persist_completed)

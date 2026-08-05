@@ -222,6 +222,7 @@ COMMON_DETAIL_KEYS = frozenset({
 })
 
 HISTORY_DELETE_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "assessment_evidence_unavailable_count",
     "prune_atlas_requested",
     "prune_curated_atlas_requested",
     "atlas_removed_entity_count",

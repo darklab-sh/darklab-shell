@@ -14,6 +14,8 @@ Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/I
 
 Public CVE risk and advisory events log source names, feed versions, acquisition modes, outcomes, counts, timings, and error classes. Positive and negative NVD persistence events use counts only. They don't enumerate CVEs, package identities, targets, Projects, provider payloads, or finding evidence. Project acknowledgement logs keep only the escalation id, acknowledgement state, and bounded note length; the note itself stays in the database and out of logs.
 
+Assessment evidence matching logs bounded run, Project, team, and result counts after a completed run. Quota skips record the fixed quota reason, and unexpected failures record the exception through the normal error logger. These events don't include commands, target values, finding text, output, profile snapshots, or evidence payloads. History deletion and automatic retention record only how many assessment evidence links became unavailable; the preserved evidence ids and reasons stay in the database and audit boundary rather than application logs.
+
 ## Level Semantics
 
 | Level | Use |

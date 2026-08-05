@@ -10,6 +10,7 @@ from typing import Any
 from core.database import delete_run_artifacts
 from core.database_access import get_db_connect
 from services.atlas.cleanup import atlas_run_cleanup_preview, delete_atlas_cleanup_preview
+from services.assessments.cleanup import mark_run_evidence_unavailable_on_conn
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.history.cleanup_logging import history_cleanup_log_fields
@@ -33,6 +34,7 @@ def delete_history_run(
     scope_sql, scope_params = owner_scope.predicate()
     atlas_cleanup = {"entities": 0, "findings": 0}
     cleanup_preview: dict[str, Any] | None = None
+    unavailable_evidence_count = 0
     with get_db_connect()() as conn:
         owned = conn.execute(
             "SELECT id, session_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
@@ -44,6 +46,7 @@ def delete_history_run(
             cleanup_preview = atlas_run_cleanup_preview(
                 conn, cleanup_session_id, [run_id], include_curated=prune_curated_atlas, team_id=cleanup_team_id
             ) if prune_atlas else None
+            unavailable_evidence_count = mark_run_evidence_unavailable_on_conn(conn, [run_id])
             delete_run_artifacts(conn, [run_id])
             if cleanup_preview:
                 atlas_cleanup = delete_atlas_cleanup_preview(
@@ -67,6 +70,7 @@ def delete_history_run(
                     "run_id": run_id,
                     "deleted_count": int(cur.rowcount or 0),
                     "source": "history",
+                    "assessment_evidence_unavailable_count": unavailable_evidence_count,
                     **cleanup_log_fields,
                 },
                 conn=conn,
@@ -149,6 +153,7 @@ def bulk_delete_runs(
             deletable_ids.append(run_id)
             results.append(result_factory(counts, run_id, "deleted"))
         if deletable_ids:
+            unavailable_evidence_count = mark_run_evidence_unavailable_on_conn(conn, deletable_ids)
             delete_run_artifacts(conn, deletable_ids)
             delete_placeholders = ",".join("?" for _ in deletable_ids)
             delete_scope_sql, delete_scope_params = owner_scope.predicate()
@@ -159,7 +164,12 @@ def bulk_delete_runs(
             record_event(
                 AuditEventType.HISTORY_DELETE,
                 target_id="",
-                details={"run_ids": deletable_ids, "deleted_count": len(deletable_ids), "source": "history_bulk"},
+                details={
+                    "run_ids": deletable_ids,
+                    "deleted_count": len(deletable_ids),
+                    "source": "history_bulk",
+                    "assessment_evidence_unavailable_count": unavailable_evidence_count,
+                },
                 conn=conn,
                 **audit_fields,
             )
@@ -174,6 +184,7 @@ def clear_history_runs(
     run_ids: list[str] | None = None,
 ) -> int:
     with get_db_connect()() as conn:
+        unavailable_evidence_count = 0
         scope_sql, scope_params = owner_scope.predicate()
         selected_ids = run_ids
         if selected_ids is None:
@@ -186,6 +197,7 @@ def clear_history_runs(
             ]
         if selected_ids:
             placeholders = ",".join("?" for _ in selected_ids)
+            unavailable_evidence_count = mark_run_evidence_unavailable_on_conn(conn, selected_ids)
             delete_run_artifacts(conn, selected_ids)
             cur = conn.execute(
                 f"DELETE FROM runs WHERE {scope_sql} AND id IN ({placeholders})",  # nosec
@@ -201,6 +213,7 @@ def clear_history_runs(
                     "run_count": int(cur.rowcount or 0),
                     "deleted_count": int(cur.rowcount or 0),
                     "source": "history_clear",
+                    "assessment_evidence_unavailable_count": unavailable_evidence_count,
                 },
                 conn=conn,
                 **audit_fields,
