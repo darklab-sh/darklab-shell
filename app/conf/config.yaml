@@ -269,6 +269,21 @@
 # Server default if unset: 200
 # max_project_targets_per_project: 200
 #
+# Maximum saved assessment cycles and target-specific checks. The owner cap
+# applies to a personal session or team; the project cap keeps any one project
+# from consuming the owner's full allowance. Set to 0 for unlimited.
+# Server default if unset: 100
+# max_project_assessments_per_owner: 100
+#
+# Server default if unset: 25
+# max_project_assessments_per_project: 25
+#
+# Server default if unset: 250000
+# max_project_assessment_checks_per_owner: 250000
+#
+# Server default if unset: 50000
+# max_project_assessment_checks_per_project: 50000
+#
 # Server default if unset: 25
 # max_evidence_packages_per_project: 25
 #

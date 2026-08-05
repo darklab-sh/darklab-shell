@@ -327,6 +327,10 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `atlas_import_warning_sample_limit` | `50` | Server-side only. Maximum warning samples returned in one Atlas import preview and stored on draft/batch metadata |
 | `atlas_import_draft_ttl_minutes` | `30` | Server-side only. Time window in minutes before an unapplied Atlas import draft is treated as abandoned and cleaned up |
 | `max_project_targets_per_project` | `200` | Server-side only. Maximum manual or discovered project targets per project, separate from bulk-linked Atlas entities |
+| `max_project_assessments_per_owner` | `100` | Server-side only. Maximum saved assessment cycles for one personal session or team owner. `0` means unlimited |
+| `max_project_assessments_per_project` | `25` | Server-side only. Maximum saved assessment cycles for one project. `0` means unlimited |
+| `max_project_assessment_checks_per_owner` | `250000` | Server-side only. Maximum target-specific assessment checks for one personal session or team owner. `0` means unlimited |
+| `max_project_assessment_checks_per_project` | `50000` | Server-side only. Maximum target-specific assessment checks for one project. `0` means unlimited |
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
 | `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
