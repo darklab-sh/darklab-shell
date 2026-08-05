@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Projects now have a durable assessment-cycle and evidence foundation.**
+  - **Why:** Assessment coverage needs to remain explainable after a cycle finishes or a source run is cleaned up, without copying source records into a second history system.
+  - **What:** Shared SQLite/Postgres tables store versioned cycle snapshots, target-specific checks, and typed evidence references. Database constraints allow one active cycle per Project, reject unsupported states and evidence kinds, prevent duplicate checks and evidence links, and require complete unavailable-source tombstones. Project deletion removes the assessment tree explicitly on both backends, while owner, Project, status, check, target, and evidence indexes keep later list and rollup queries bounded.
+  - **Tests:** Migration, schema-manifest, SQLite/Postgres parity, index, lifecycle, duplicate, invalid-state, tombstone, and Project-cleanup coverage pins the shared contract.
 - **Findings now include offline EPSS and CISA KEV context, with feed-driven Project Monitoring alerts.**
   - **Why:** Assessors can put known-exploited and higher-probability CVEs first without sending saved targets or findings to another provider when they open a result.
   - **What:**
@@ -51,6 +55,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Tests
 
+- **The script-layout architecture guard now ignores Finder's `.DS_Store` metadata.** The exact directory and compatibility-entrypoint allowlists remain enforced, while an already-ignored macOS filesystem artifact no longer causes local failures.
 - **The configured Postgres cold-start smoke now allows for slower shared CI runners.** Its subprocess timeout covers migrations and the release-pinned EPSS/KEV baseline import without turning a functional integration check into a 30-second startup performance gate.
 - **Exact Atlas lookup coverage pins canonicalization, single-host CIDR rejection, owner isolation, project scope, legacy ambiguity, unreadable-URL parent fallback, privacy-safe completion, rejection, ambiguity, and degraded-profile logging, schema migration, and indexed query plans.** Route, API v1, OpenAPI, architecture, SQLite, and Postgres checks prove that found results reuse the ordinary entity-detail contract, personally owned entities shared through team runs or imports remain correctly scoped, candidate lists stay bounded, and lookup does not materialize records, log submitted values, write raw submitted URLs to audit data, or contact Intel providers.
 - **Atlas Quick Lookup coverage pins its privacy boundary, recoverable outcomes, shared profile handoff, and shell entry points.** Backend checks prove browser and API lookups don't read the process or Redis Intel cache, contact providers, mutate protected tables, or place submitted URLs in structured logs; the PostgreSQL fixture covers project filtering, direct-team precedence, ambiguity, URL-parent fallback, suppressed orphan records, and saved owner-scoped Intel snapshots. Browser unit checks cover failed-replacement recovery, stale-request rejection, all four finding buckets and collection pagers, related-entity and finding return state, root Back behavior, entry-point toggling, and the unchanged transcript entity-token menu. Focused Playwright coverage exercises `Alt+Q` / `Option+Q`, one-overlay focus, direct form and profile dismissal, source-run paging, hostname, URL-parent, and IP evidence, Atlas handoff, and close-to-composer focus restoration without leaking an Option-key glyph.

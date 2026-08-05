@@ -784,13 +784,16 @@ class TestScriptEntrypointLayout:
             "run_pytest.sh",
             "seed_history.py",
         }
+        ignored_top_level_files = {".DS_Store"}
         actual_directories = {
             path.name
             for path in scripts_root.iterdir()
             if path.is_dir() and path.name != "__pycache__"
         }
         actual_top_level_files = {
-            path.name for path in scripts_root.iterdir() if path.is_file()
+            path.name
+            for path in scripts_root.iterdir()
+            if path.is_file() and path.name not in ignored_top_level_files
         }
         assert actual_directories == expected_directories
         assert actual_top_level_files == expected_top_level_files

@@ -413,6 +413,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0046",
         "0047",
         "0048",
+        "0049",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -486,6 +487,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'old_source_version',
                 'new_source_version'
             ))
+            OR (table_name = 'project_assessments' AND column_name IN (
+                'profile_snapshot',
+                'started_at'
+            ))
         )
         """,
         (postgres_schema.schema,),
@@ -514,6 +519,9 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "risk_escalations",
         "risk_escalation_observations",
         "risk_escalation_projects",
+        "project_assessments",
+        "project_assessment_checks",
+        "project_assessment_evidence",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
     assert {
@@ -555,6 +563,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("risk_escalations", "new_source_version", "text"),
         ("cve_risk_work_items", "old_source_version", "text"),
         ("cve_risk_work_items", "new_source_version", "text"),
+        ("project_assessments", "profile_snapshot", "jsonb"),
+        ("project_assessments", "started_at", "timestamp with time zone"),
     }
     runs_index_rows = conn.execute(
         """
@@ -627,6 +637,31 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_risk_escalations_cve_created",
         "idx_risk_escalation_projects_project",
     }.issubset({row["indexname"] for row in risk_index_rows})
+    assessment_index_rows = conn.execute(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename IN (
+            'project_assessments',
+            'project_assessment_checks',
+            'project_assessment_evidence'
+        )
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_project_assessments_active_project",
+        "idx_project_assessments_project_updated",
+        "idx_project_assessments_personal_status",
+        "idx_project_assessments_team_status",
+        "idx_project_assessment_checks_assessment_state",
+        "idx_project_assessment_checks_assessment_category",
+        "idx_project_assessment_checks_target",
+        "idx_project_assessment_evidence_check_observed",
+        "idx_project_assessment_evidence_assessment_type",
+        "idx_project_assessment_evidence_source",
+    }.issubset({row["indexname"] for row in assessment_index_rows})
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname

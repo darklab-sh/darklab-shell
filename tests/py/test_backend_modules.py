@@ -6602,6 +6602,9 @@ class TestPostgresMigrations:
         "risk_escalations",
         "risk_escalation_observations",
         "risk_escalation_projects",
+        "project_assessments",
+        "project_assessment_checks",
+        "project_assessment_evidence",
     )
 
     @staticmethod
@@ -6705,6 +6708,7 @@ class TestPostgresMigrations:
             "0046",
             "0047",
             "0048",
+            "0049",
         ]
         for table_name in (
             "runs",
@@ -6861,6 +6865,108 @@ class TestPostgresMigrations:
         assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
         assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in postgres_sql
 
+    def test_project_assessment_schema_enforces_cycle_and_evidence_contracts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "assessment-contract.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-08-04T12:00:00+00:00"
+            conn.execute(
+                "INSERT INTO projects "
+                "(id, session_id, name, slug, created, updated) "
+                "VALUES ('prj_assessment', 'session-a', 'Assessment', 'assessment', ?, ?)",
+                (now, now),
+            )
+
+            assessment_sql = (
+                "INSERT INTO project_assessments "
+                "(id, session_id, project_id, title, profile_key, profile_version, "
+                "started_at, created_at, updated_at) VALUES (?, 'session-a', "
+                "'prj_assessment', ?, 'network', '1.0', ?, ?, ?)"
+            )
+            conn.execute(assessment_sql, ("asm_one", "First cycle", now, now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(assessment_sql, ("asm_duplicate", "Second active cycle", now, now, now))
+            conn.execute(
+                "UPDATE project_assessments SET status = 'completed', completed_at = ? WHERE id = 'asm_one'",
+                (now,),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    assessment_sql.replace(
+                        "VALUES (?, 'session-a'",
+                        "VALUES (?, ''",
+                    ),
+                    ("asm_ownerless", "Ownerless", now, now, now),
+                )
+            conn.execute(assessment_sql, ("asm_two", "Second cycle", now, now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE project_assessments SET status = 'invalid' WHERE id = 'asm_two'")
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE project_assessments SET status = 'completed' WHERE id = 'asm_two'")
+
+            check_sql = (
+                "INSERT INTO project_assessment_checks "
+                "(id, assessment_id, category, check_key, target_type, target_value, target_value_hash, "
+                "created_at, updated_at) VALUES (?, ?, 'discovery', 'open_ports', "
+                "'domain', 'darklab.sh', 'target-hash', ?, ?)"
+            )
+            conn.execute(check_sql, ("chk_one", "asm_one", now, now))
+            conn.execute(check_sql, ("chk_two", "asm_two", now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(check_sql, ("chk_duplicate", "asm_one", now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE project_assessment_checks SET state = 'unknown' WHERE id = 'chk_one'"
+                )
+
+            evidence_sql = (
+                "INSERT INTO project_assessment_evidence "
+                "(id, assessment_id, check_id, evidence_type, evidence_id, observed_at, "
+                "match_rule_key, match_rule_version, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'completed-run', '1', ?, ?)"
+            )
+            conn.execute(
+                evidence_sql,
+                ("evi_one", "asm_one", "chk_one", "run", "run_deleted", now, now, now),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    evidence_sql,
+                    ("evi_duplicate", "asm_one", "chk_one", "run", "run_deleted", now, now, now),
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    evidence_sql,
+                    ("evi_unknown", "asm_one", "chk_one", "unknown", "source", now, now, now),
+                )
+            conn.execute(
+                "UPDATE project_assessment_evidence SET source_state = 'unavailable', "
+                "unavailable_at = ?, unavailable_reason = 'source_deleted' WHERE id = 'evi_one'",
+                (now,),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE project_assessment_evidence SET unavailable_at = NULL WHERE id = 'evi_one'"
+                )
+            tombstone = conn.execute(
+                "SELECT evidence_type, evidence_id, observed_at, unavailable_reason "
+                "FROM project_assessment_evidence WHERE id = 'evi_one'"
+            ).fetchone()
+            assert tuple(tombstone) == ("run", "run_deleted", now, "source_deleted")
+
+            from services.projects.crud import delete_project
+
+            assert delete_project("session-a", "prj_assessment", conn=conn) is True
+            assert conn.execute("SELECT COUNT(*) FROM project_assessments").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM project_assessment_checks").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM project_assessment_evidence").fetchone()[0] == 0
+            conn.close()
+
     def test_schema_inventory_captures_sqlite_head_objects(self):
         from core.schema_manifest import SQLITE_BACKEND_ARTIFACTS, SHARED_APP_TABLES, sqlite_head_schema_inventory
 
@@ -6882,8 +6988,19 @@ class TestPostgresMigrations:
             inventory.tables["runs"].columns
         )
         assert {"host_entity_id", "attributes_json"}.issubset(inventory.tables["entities"].columns)
+        assert {"profile_key", "profile_version", "profile_snapshot", "status"}.issubset(
+            inventory.tables["project_assessments"].columns
+        )
+        assert {"check_key", "target_value", "target_value_hash", "applicability", "state_source"}.issubset(
+            inventory.tables["project_assessment_checks"].columns
+        )
+        assert {"evidence_type", "evidence_id", "source_state", "match_rule_version"}.issubset(
+            inventory.tables["project_assessment_evidence"].columns
+        )
         assert "idx_runs_session_started" in inventory.indexes
         assert "idx_entities_host_entity" in inventory.indexes
+        assert "idx_project_assessments_active_project" in inventory.indexes
+        assert "idx_project_assessment_evidence_source" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad", "runs_ai", "runs_ad"}.issubset(inventory.triggers)
         assert set(SQLITE_BACKEND_ARTIFACTS).issubset(set(inventory.fts_artifacts))
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in inventory.tables["run_output_summary_status"].constraints
@@ -6898,8 +7015,19 @@ class TestPostgresMigrations:
             inventory.tables["runs"].columns
         )
         assert {"host_entity_id", "attributes_json"}.issubset(inventory.tables["entities"].columns)
+        assert {"profile_key", "profile_version", "profile_snapshot", "status"}.issubset(
+            inventory.tables["project_assessments"].columns
+        )
+        assert {"check_key", "target_value", "target_value_hash", "applicability", "state_source"}.issubset(
+            inventory.tables["project_assessment_checks"].columns
+        )
+        assert {"evidence_type", "evidence_id", "source_state", "match_rule_version"}.issubset(
+            inventory.tables["project_assessment_evidence"].columns
+        )
         assert "idx_runs_session_started" in inventory.indexes
         assert "idx_entities_host_entity" in inventory.indexes
+        assert "idx_project_assessments_active_project" in inventory.indexes
+        assert "idx_project_assessment_evidence_source" in inventory.indexes
         assert "idx_runs_command_trgm" in inventory.indexes
         assert "idx_entities_canonical_value_trgm" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad"}.issubset(inventory.triggers)
@@ -6922,6 +7050,8 @@ class TestPostgresMigrations:
 
         assert set(SHARED_APP_TABLES).issubset(manifest.tables)
         assert "idx_runs_session_started" in manifest.indexes
+        assert "idx_project_assessments_active_project" in manifest.indexes
+        assert "idx_project_assessment_evidence_source" in manifest.indexes
         assert "idx_runs_command_trgm" not in manifest.indexes
         assert "findings_ad" in manifest.triggers
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in manifest.constraints["run_output_summary_status"]
@@ -7546,7 +7676,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0048"
+        assert rows[-1]["version"] == "0049"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7937,6 +8067,7 @@ class TestPostgresMigrations:
 
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
+            "0049",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -7949,7 +8080,8 @@ class TestPostgresMigrations:
         assert "0046" in conn.applied_versions
         assert "0047" in conn.applied_versions
         assert "0048" in conn.applied_versions
-        assert conn.commit_count == 10
+        assert "0049" in conn.applied_versions
+        assert conn.commit_count == 11
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 

@@ -1537,7 +1537,7 @@ Operator backups are owned by `scripts/operations/backup_system.py`, outside the
 
 The restore wrapper compares `.env` before and after a successful restore, force-recreates the app when restored environment content changed, and waits for app health before returning. Managed SQLite-to-Postgres cutover uses the migration helper bundled in the release image: `darklab-deploy` verifies the app-owned SQLite file from inside the managed `/data` mount, stops SQLite writes, takes a verified backup, starts bundled Postgres, and inspects the destination through its local container socket before network authentication. An empty cluster has its role password synchronized with the current `.env`; a retained named volume with user tables fails closed without a credential change. The wrapper then initializes the fresh Postgres schema, copies app data without replacing the destination migration ledger, validates row counts and referenced artifacts, updates the backend and Compose profile settings, and recreates the app. The host command runs as the deployment owner rather than through `sudo`, so temporary and final environment files retain operator ownership. A failure before cutover keeps SQLite active and leaves the verified backup as the recovery point.
 
-Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
+Most logical relationships are owned by the app rather than relying on SQLite foreign-key enforcement. Lifecycle-owned trees may still declare portable foreign keys for Postgres and schema-shape parity, but app services perform the corresponding scoped validation and cleanup on both backends. Project deletion explicitly removes its assessment evidence, checks, and cycles. Evidence source ids deliberately remain typed references instead of foreign keys so a deleted run or artifact can leave an explainable tombstone. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
 The supported bridge for an older pre-ledger SQLite file is to start it once with `darklab_shell` 2.3.1 so the retired compatibility ladder reaches the current head, then move to the unified schema-ledger path. Older SQLite shapes that still do not match the head fail closed before any schema mutation.
 
@@ -1572,6 +1572,7 @@ erDiagram
   LOGICAL_SESSION ||--o{ ENTITY_LABELS : "labels"
   LOGICAL_SESSION ||--o{ ENTITY_NOTES : "notes"
   LOGICAL_SESSION ||--o{ PROJECTS : "owns"
+  LOGICAL_SESSION ||--o{ PROJECT_ASSESSMENTS : "owns"
   LOGICAL_SESSION ||--o{ EVIDENCE_PACKAGES : "packages"
   LOGICAL_SESSION ||--o{ AUDIT_EVENTS : "records"
   LOGICAL_SESSION ||--o{ NOTIFICATION_CHANNELS : "sends"
@@ -1588,6 +1589,9 @@ erDiagram
   FINDINGS ||--o{ FINDINGS_OCCURRENCES : "seen in runs"
   PROJECTS ||--o{ PROJECT_LINKS : "membership"
   PROJECTS ||--o{ EVIDENCE_PACKAGES : "exports"
+  PROJECTS ||--o{ PROJECT_ASSESSMENTS : "cycles"
+  PROJECT_ASSESSMENTS ||--o{ PROJECT_ASSESSMENT_CHECKS : "snapshots"
+  PROJECT_ASSESSMENT_CHECKS ||--o{ PROJECT_ASSESSMENT_EVIDENCE : "supports"
   NOTIFICATION_CHANNELS ||--o{ NOTIFICATION_EVENTS : "delivers"
 ```
 
@@ -1774,6 +1778,48 @@ erDiagram
     TEXT created
     TEXT updated
   }
+  PROJECT_ASSESSMENTS {
+    TEXT id PK
+    TEXT session_id
+    TEXT team_id
+    TEXT project_id
+    TEXT profile_key
+    TEXT profile_version
+    TEXT profile_snapshot
+    TEXT status
+    TEXT started_at
+    TEXT completed_at
+    TEXT archived_at
+    TEXT created_at
+    TEXT updated_at
+  }
+  PROJECT_ASSESSMENT_CHECKS {
+    TEXT id PK
+    TEXT assessment_id
+    TEXT category
+    TEXT check_key
+    TEXT target_entity_id
+    TEXT target_type
+    TEXT target_value
+    TEXT target_value_hash
+    TEXT applicability
+    TEXT policy_level
+    TEXT state
+    TEXT state_source
+  }
+  PROJECT_ASSESSMENT_EVIDENCE {
+    TEXT id PK
+    TEXT assessment_id
+    TEXT check_id
+    TEXT evidence_type
+    TEXT evidence_id
+    TEXT source_state
+    TEXT observed_at
+    TEXT unavailable_at
+    TEXT unavailable_reason
+    TEXT match_rule_key
+    TEXT match_rule_version
+  }
   ENTITY_LABELS {
     TEXT id PK
     TEXT session_id
@@ -1794,6 +1840,9 @@ erDiagram
   }
   PROJECTS ||--o{ PROJECT_LINKS : "membership"
   PROJECTS ||--o{ EVIDENCE_PACKAGES : "exports"
+  PROJECTS ||--o{ PROJECT_ASSESSMENTS : "cycles"
+  PROJECT_ASSESSMENTS ||--o{ PROJECT_ASSESSMENT_CHECKS : "snapshots"
+  PROJECT_ASSESSMENT_CHECKS ||--o{ PROJECT_ASSESSMENT_EVIDENCE : "supports"
 ```
 
 - `runs` — one row per completed command. Stores run metadata, including `team_id` for team-owned runs and `run_kind` (`builtin` or `external`) so history filters, project links, and finding capture can use a durable classification instead of re-reading the command text. It also stores `owner_tab_id` for completed runs that came from a terminal tab, which lets terminal-native commands such as `project link run last` resolve "last" within the tab that issued the command. It also stores a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries plus optional signal and entity metadata so run permalinks can preserve prompt echo, timestamp metadata, scoped findings, and extracted public IP/domain/hash/CVE hints. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects the default SQLite database from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for backend search indexing. When `runs_search_text_inline_max_bytes` is set, oversized search bodies move to `data_dir/body-store` and the column keeps pointer metadata plus a short preview. Persists across restarts. Pruned by `permalink_retention_days`.
@@ -1818,6 +1867,9 @@ erDiagram
 - `secrets` — one row per encrypted secret name per vault scope `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Personal scopes use the user's session token as the stored `session_token`; team scopes use the team id as the stored vault-scope id. Storage also rejects attempts to bind the same consumer env name to two different secrets in one scope, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session attribution, optional `team_id` ownership for shared team projects, display metadata, status, timestamps, and session/team-scoped slugs. Project notes are stored through `entity_notes` with `entity_type='project'`.
 - `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs and Atlas entities without copying source data. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Run-owned file artifacts are intentionally reached through linked runs, while findings are reached through linked runs or linked Atlas entities instead of direct project links.
+- `project_assessments` — one row per saved assessment cycle. It keeps personal/team ownership, the parent Project, the profile key/version and bounded definition snapshot, `active`/`completed`/`archived` lifecycle state, timestamps, and bounded actor ids. A partial unique index permits only one active cycle for each Project; completing or archiving it preserves the row as historical context.
+- `project_assessment_checks` — the versioned check instances inside one cycle. Each row keeps its stable catalog key, category, target/entity reference, stable value hash plus bounded target snapshot, applicability, policy level, effective state and source, recommendation key, and first/last evidence times. A check belongs to exactly one assessment and duplicate check/target instances are rejected without indexing a potentially long display value.
+- `project_assessment_evidence` — typed references from a check to a run, workflow execution, finding, Atlas entity, run artifact, workspace artifact, or stored screenshot. Evidence ids remain references rather than source-table foreign keys: when cleanup removes the source, the row can change to `unavailable` while retaining its original type, id, observed time, matching rule/version, and bounded reason. Each row records both its cycle and check ownership, duplicate source links for one check are rejected, and scoped services validate that the pair belongs together before writing it.
 - `entities` — personal or team-owned Atlas rows for normalized public IPs, domains, ports, URLs, hashes, and CVEs extracted from saved external-run output metadata. The app stores a canonical value, a stable signature hash, first/last seen timestamps, an aggregate occurrence count, and `host_entity_id` for host-owned rows such as ports and URLs so entity lists are deduplicated across runs in the active owner scope.
 - `entity_run_links` — many-to-many Atlas source links from entities to runs, with first/last seen timestamps and per-run occurrence counts. Run pruning removes these link rows while leaving the deduplicated entity row available for labels, notes, project links, and intel snapshots. Run-delete confirmations can also remove disposable entities and findings that only came from the deleted run, with a separate opt-in for single-source rows kept by default.
 - `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so Atlas detail views can render intel cards without re-querying providers on every open. When `intel_payload_inline_max_bytes` is set, oversized provider JSON moves to `data_dir/body-store` and detail reads resolve the pointer before rendering. Atlas derives compact `intel_summary` highlights from these rows at read time instead of storing duplicate summary columns. The refresh route writes through the same app-native intel provider orchestration used by the `intel` terminal command.
@@ -1841,7 +1893,7 @@ erDiagram
   - Session-token audit rows store only masked labels and hashes for token identity, with revocation and migration recorded fail-closed. Workspace file write/move rows are best-effort and store path, destination, count, and byte-size metadata without file contents; workspace file delete stays fail-closed.
   - Atlas import apply rows keep source, option, project, batch, and count metadata but omit imported row bodies. Team audit rows keep one-time invite and recovery codes out of the details payload. Automation audit rows keep raw command text out of the details payload and record schedule/watcher deletes fail-closed. Notification config-change rows keep webhook URLs, bot tokens, Pushover keys, SMTP passwords, and replacement secret values out of the details payload.
   - `/diag/audit` is the operator-wide audit viewer. It is protected by the same diagnostics IP allowlist as `/diag`, can show personal and team activity to anyone with diag access, can filter rows, and exports filtered CSV/JSON with a configured row cap and truncation marker. Project Activity, object-level Recent activity panels, and Team Activity routes reuse the safe scoped serializer so users only see audit rows inside the project item or team they can already open.
-- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_user_workflows_team_updated_created`, `idx_recent_values_session_kind_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Atlas indexes cover personal/team type/last-seen lists, entity value lookup, run-link cleanup, finding status/entity/tool/severity filters, finding occurrence cleanup, and cached intel snapshot reads. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, labels, notes, evidence packages, and report drafts before UI routes depend on those query shapes. Audit indexes cover personal/team timelines, actor/member filters, event type, project, target, and correlation-id lookups.
+- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_user_workflows_team_updated_created`, `idx_recent_values_session_kind_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Atlas indexes cover personal/team type/last-seen lists, entity value lookup, run-link cleanup, finding status/entity/tool/severity filters, finding occurrence cleanup, and cached intel snapshot reads. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, labels, notes, evidence packages, report drafts, assessment cycle/status lists, check state/target rollups, and reverse evidence-source cleanup before UI routes depend on those query shapes. Audit indexes cover personal/team timelines, actor/member filters, event type, project, target, and correlation-id lookups.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs in the active personal/team scope
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
