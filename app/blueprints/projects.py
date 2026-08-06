@@ -569,6 +569,7 @@ from blueprints.projects_findings import (  # noqa: E402,F401
     projects_findings_list,
     run_findings_list,
 )
+from blueprints import projects_manual_findings as _projects_manual_findings  # noqa: E402,F401
 from blueprints.projects_metadata import (  # noqa: E402,F401
     entity_labels_create,
     entity_labels_delete,

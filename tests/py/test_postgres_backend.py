@@ -468,6 +468,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0054",
         "0055",
         "0056",
+        "0057",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -561,7 +562,13 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'cwe_ids_json',
                 'cvss_vector',
                 'cvss_score',
-                'references_json'
+                'references_json',
+                'manual_revision',
+                'manual_created_by_session_id',
+                'manual_created_by_member_id',
+                'manual_updated_by_session_id',
+                'manual_updated_by_member_id',
+                'manual_updated_at'
             ))
             OR (table_name = 'finding_evidence_links' AND column_name = 'created_at')
         )
@@ -653,6 +660,12 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("findings", "cvss_vector", "text"),
         ("findings", "cvss_score", "double precision"),
         ("findings", "references_json", "jsonb"),
+        ("findings", "manual_revision", "integer"),
+        ("findings", "manual_created_by_session_id", "text"),
+        ("findings", "manual_created_by_member_id", "text"),
+        ("findings", "manual_updated_by_session_id", "text"),
+        ("findings", "manual_updated_by_member_id", "text"),
+        ("findings", "manual_updated_at", "text"),
         ("finding_evidence_links", "created_at", "timestamp with time zone"),
     }
     runs_index_rows = conn.execute(
@@ -3322,6 +3335,75 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert prefs_row["preferences"]["pref_active_project_id"] == project["id"]
     assert port_row is not None
     assert port_row["attributes_json"] == {"service": "https", "version": "nginx"}
+
+
+@pytest.mark.postgres
+def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_schema):
+    from app import create_app
+    from core import database as core_database
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+
+    app = create_app()
+    app.config["TESTING"] = True
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    session_id = str(uuid.uuid4())
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield PostgresSqliteCompatConnection(conn)
+
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    client = app.test_client()
+    project_response = client.post(
+        "/projects",
+        headers={"X-Session-ID": session_id},
+        json={"name": "Postgres Manual Finding"},
+    )
+    project = project_response.get_json()["project"]
+    target_response = client.post(
+        f"/projects/{project['id']}/targets",
+        headers={"X-Session-ID": session_id},
+        json={"type": "domain", "value": "manual-postgres.example"},
+    )
+    target = target_response.get_json()["target"]
+    created_response = client.post(
+        f"/projects/{project['id']}/findings",
+        headers={"X-Session-ID": session_id},
+        json={
+            "target_id": target["id"],
+            "title": "Postgres manual finding",
+            "severity": "medium",
+            "cve_ids": ["CVE-2026-12345"],
+        },
+    )
+    created = created_response.get_json()["finding"]
+    updated_response = client.patch(
+        f"/projects/{project['id']}/findings/{created['id']}",
+        headers={"X-Session-ID": session_id},
+        json={"expected_revision": 1, "severity": "high"},
+    )
+    updated = updated_response.get_json()["finding"]
+    stored = conn.execute(
+        "SELECT manual_revision, cve_ids_json FROM findings WHERE id = %s",
+        (created["id"],),
+    ).fetchone()
+    cve_link = conn.execute(
+        "SELECT cve_id, link_source FROM finding_cve_links WHERE finding_id = %s",
+        (created["id"],),
+    ).fetchone()
+
+    assert project_response.status_code == 201
+    assert target_response.status_code == 201
+    assert created_response.status_code == 201
+    assert updated_response.status_code == 200
+    assert updated["manual_revision"] == 2
+    assert updated["observation_id"] == created["observation_id"]
+    assert updated["remediation_id"] == created["remediation_id"]
+    assert stored == {"manual_revision": 2, "cve_ids_json": ["CVE-2026-12345"]}
+    assert cve_link == {"cve_id": "CVE-2026-12345", "link_source": "manual"}
 
 
 @pytest.mark.postgres

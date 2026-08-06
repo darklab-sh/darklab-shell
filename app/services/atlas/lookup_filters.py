@@ -115,7 +115,7 @@ def orphan_finding_clause(alias: str, team_id: str = "") -> str:
     if normalize_team_id(team_id):
         return "AND ? != 'only' "
     source_exists = sql_join((
-        "(",
+        f"({alias}.origin = 'manual' OR ",
         finding_run_exists_sql(alias, "orphan_run", team_id),
         " OR ",
         finding_import_exists_sql(alias, "orphan_import_batch", team_id),

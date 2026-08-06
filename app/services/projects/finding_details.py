@@ -112,3 +112,22 @@ def finding_detail_fields(row: Any) -> dict[str, Any]:
         "cvss_score": _normalized_cvss_score(_row_value(row, "cvss_score", None)),
         "references": _normalized_references(_row_value(row, "references_json", [])),
     }
+
+
+def manual_finding_fields(row: Any) -> dict[str, Any]:
+    """Return public manual-edit metadata without exposing session identifiers."""
+
+    try:
+        revision = max(0, int(_row_value(row, "manual_revision", 0) or 0))
+    except (TypeError, ValueError):
+        revision = 0
+    return {
+        "manual_revision": revision,
+        "manual_created_by_member_id": _bounded_text(
+            _row_value(row, "manual_created_by_member_id"), 128
+        ),
+        "manual_updated_by_member_id": _bounded_text(
+            _row_value(row, "manual_updated_by_member_id"), 128
+        ),
+        "manual_updated_at": _bounded_text(_row_value(row, "manual_updated_at"), 64),
+    }

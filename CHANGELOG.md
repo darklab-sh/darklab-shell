@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Assessors can now save findings that weren't produced by a parser or scanner.**
+  - **Why:** Some issues come from manual review, business-logic testing, or evidence that a tool doesn't understand, and those findings still need the same risk context and stable handoff record as captured results.
+  - **What:** Project and API clients can create an assessor-authored finding against a confirmed Project target, attach bounded typed evidence, and edit its title, severity, and assessor details without changing its observation or remediation identity. CVE-bearing records use the shared stored risk enrichment, exact transcript evidence retains its line number and bounded snippet, and likely duplicates return a warning that must be explicitly overridden. Optimistic revisions prevent stale edits, team writes require `TRIAGE_FINDINGS`, audit records keep safe actor context, and private session identifiers never appear in finding responses.
+  - **Tests:** Focused SQLite and PostgreSQL migration, browser/API route, owner-scope, duplicate, stale-edit, typed-evidence, CVE-link, cleanup, session-migration, audit, OpenAPI, architecture, and input-validation coverage pins the contract.
 - **Project findings can now retain typed supporting evidence.**
   - **Why:** An assessor needs to preserve why a finding is credible even when the supporting record isn't the scanner line that first created it.
   - **What:** Owner- and Project-scoped finding evidence can reference saved runs or transcript lines, full run output, workspace artifacts, screenshots, Atlas entities, Project targets, assessment checks, and retest runs. Every source is revalidated in the active scope, exact links are idempotent, transcript snippets stay bounded, configurable quotas reject new links without evicting history, and a removed source remains visible as unavailable. The browser and API routes share the same service, mutations are audited, session migration and Project/finding cleanup preserve owner boundaries, and evidence packages carry the typed references selected with a finding.

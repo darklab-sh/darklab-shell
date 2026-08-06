@@ -33,6 +33,12 @@ def _provenance_properties() -> dict[str, Any]:
 
 def finding_schemas() -> dict[str, Any]:
     provenance_required = ["origin", "validation_method"]
+    manual_required = [
+        "manual_revision",
+        "manual_created_by_member_id",
+        "manual_updated_by_member_id",
+        "manual_updated_at",
+    ]
     identity_required = [
         "rule_identity",
         "observation_id",
@@ -52,6 +58,7 @@ def finding_schemas() -> dict[str, Any]:
                 *provenance_required,
                 *identity_required,
                 *FINDING_DETAIL_REQUIRED,
+                *manual_required,
                 "status",
                 "title",
                 "raw_line",
@@ -66,6 +73,10 @@ def finding_schemas() -> dict[str, Any]:
                 **_provenance_properties(),
                 "rule_identity": {"type": "string"},
                 **finding_detail_properties(),
+                "manual_revision": {"type": "integer", "minimum": 0},
+                "manual_created_by_member_id": {"type": "string"},
+                "manual_updated_by_member_id": {"type": "string"},
+                "manual_updated_at": {"type": "string"},
                 "severity": {"type": "string"},
                 "kind": {"type": "string"},
                 "tool_root": {"type": "string"},
@@ -96,6 +107,7 @@ def finding_schemas() -> dict[str, Any]:
                 *provenance_required,
                 *identity_required,
                 *FINDING_DETAIL_REQUIRED,
+                *manual_required,
                 "status",
                 "review_state",
                 "title",
@@ -114,6 +126,10 @@ def finding_schemas() -> dict[str, Any]:
                 **_provenance_properties(),
                 "rule_identity": {"type": "string"},
                 **finding_detail_properties(),
+                "manual_revision": {"type": "integer", "minimum": 0},
+                "manual_created_by_member_id": {"type": "string"},
+                "manual_updated_by_member_id": {"type": "string"},
+                "manual_updated_at": {"type": "string"},
                 "scope": {"type": "string"},
                 "kind": {"type": "string"},
                 "tool_root": {"type": "string"},

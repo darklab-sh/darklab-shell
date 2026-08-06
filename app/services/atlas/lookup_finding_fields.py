@@ -6,6 +6,8 @@
 FINDING_DETAIL_SELECT_SQL = (
     "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
     "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
+    "f.manual_revision, f.manual_created_by_member_id, "
+    "f.manual_updated_by_member_id, f.manual_updated_at, "
 )
 
 FINDING_SEARCH_COLUMNS = (

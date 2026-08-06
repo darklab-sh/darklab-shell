@@ -293,6 +293,8 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_project_assessment_evidence_unlink": "_request_context()",
     "api_project_finding_evidence_link": "Capability.TRIAGE_FINDINGS",
     "api_project_finding_evidence_unlink": "Capability.TRIAGE_FINDINGS",
+    "api_project_manual_finding_create": "Capability.TRIAGE_FINDINGS",
+    "api_project_manual_finding_update": "Capability.TRIAGE_FINDINGS",
 }
 
 
@@ -1510,6 +1512,80 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         "finding.evidence_unlink",
     ] + ["finding.evidence_link"] * 8
     assert all(row["details"]["source"] == "api_v1" for row in audit_rows)
+
+
+def test_api_v1_manual_findings_keep_stable_identity_and_owner_scope():
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    project = _create_project(client, token, name="API Manual Findings")
+    target_id, _run_id = _seed_assessment_target(token, project["id"])
+    route = f"/api/v1/projects/{project['id']}/findings"
+
+    created_response = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "target_id": target_id,
+            "title": "Exposed administrative console",
+            "severity": "medium",
+            "cve_ids": ["CVE-2026-12345"],
+        },
+    )
+
+    assert created_response.status_code == 201
+    created = created_response.get_json()["finding"]
+    assert created["origin"] == "manual"
+    assert created["validation_method"] == "manual_assessment"
+    assert created["manual_revision"] == 1
+    assert created["risk"]["cve_id"] == "CVE-2026-12345"
+    assert "manual_created_by_session_id" not in created
+    observation_id = created["observation_id"]
+    remediation_id = created["remediation_id"]
+
+    invalid_boolean = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "target_id": target_id,
+            "title": "Invalid duplicate override",
+            "severity": "low",
+            "allow_duplicate": "false",
+        },
+    )
+    empty_update = client.patch(
+        f"{route}/{created['id']}",
+        headers=_headers(token),
+        json={"expected_revision": 1},
+    )
+    updated_response = client.patch(
+        f"{route}/{created['id']}",
+        headers=_headers(token),
+        json={"expected_revision": 1, "severity": "high"},
+    )
+    cross_scope = client.patch(
+        f"{route}/{created['id']}",
+        headers=_headers(other_token),
+        json={"expected_revision": 2, "severity": "low"},
+    )
+
+    assert invalid_boolean.status_code == 400
+    assert empty_update.status_code == 400
+    assert updated_response.status_code == 200
+    updated = updated_response.get_json()["finding"]
+    assert updated["manual_revision"] == 2
+    assert updated["severity"] == "high"
+    assert updated["observation_id"] == observation_id
+    assert updated["remediation_id"] == remediation_id
+    assert cross_scope.status_code == 404
+
+    audit_rows = _audit_event_rows(target_id=created["id"])
+    assert [row["event_type"] for row in audit_rows] == [
+        "finding.manual_create",
+        "finding.manual_update",
+    ]
+    assert all(row["details"]["source"] == "api_v1" for row in audit_rows)
+    assert "Exposed administrative console" not in json.dumps(audit_rows)
 
 
 def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context():
@@ -4865,6 +4941,57 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     ):
         for operation in paths[path].values():
             assert {"401", "429"}.issubset(operation["responses"])
+
+
+def test_api_v1_openapi_contract_describes_manual_finding_mutations():
+    from services.api_v1.openapi import openapi_spec
+
+    spec = openapi_spec()
+    schemas = spec["components"]["schemas"]
+    paths = spec["paths"]
+    collection_path = "/projects/{project_id}/findings"
+    item_path = collection_path + "/{finding_id}"
+
+    assert paths[collection_path]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ManualFindingCreateRequest"}
+    assert paths[item_path]["patch"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ManualFindingUpdateRequest"}
+    assert paths[collection_path]["post"]["responses"]["201"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ManualFindingMutationResponse"}
+    assert paths[item_path]["patch"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ManualFindingMutationResponse"}
+
+    create_schema = schemas["ManualFindingCreateRequest"]
+    update_schema = schemas["ManualFindingUpdateRequest"]
+    assert create_schema["required"] == ["target_id", "title", "severity"]
+    assert create_schema["additionalProperties"] is False
+    assert create_schema["properties"]["evidence"]["maxItems"] == 20
+    assert create_schema["properties"]["allow_duplicate"]["type"] == "boolean"
+    assert update_schema["required"] == ["expected_revision"]
+    assert update_schema["additionalProperties"] is False
+    assert update_schema["properties"]["expected_revision"] == {
+        "type": "integer",
+        "minimum": 0,
+    }
+
+    public_finding = schemas["ProjectFinding"]
+    assert {
+        "manual_revision",
+        "manual_created_by_member_id",
+        "manual_updated_by_member_id",
+        "manual_updated_at",
+    }.issubset(public_finding["required"])
+    manual_contract = json.dumps({
+        name: schema
+        for name, schema in schemas.items()
+        if name.startswith("ManualFinding") or name == "ProjectFinding"
+    })
+    assert "manual_created_by_session_id" not in manual_contract
+    assert "manual_updated_by_session_id" not in manual_contract
 
 
 def test_api_v1_whoami_last_seen_is_current_auth_timestamp(monkeypatch):

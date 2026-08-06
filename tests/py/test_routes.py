@@ -12545,6 +12545,146 @@ class TestProjectRoutes:
 
 # ── /log ──────────────────────────────────────────────────────────────────────
 
+    def test_manual_findings_keep_stable_identity_and_bounded_line_evidence(self):
+        client = get_client()
+        session_id = self._session_id("manual-findings")
+        project = self._create_project(client, session_id)
+        target = self._create_target(
+            client,
+            session_id,
+            project["id"],
+            value="manual.example.test",
+        )
+        run_id = self._seed_run(session_id, "nmap manual.example.test")
+        self._link_run(client, session_id, project["id"], run_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "UPDATE runs SET output_line_count = 3 WHERE id = ?",
+                (run_id,),
+            )
+            conn.commit()
+
+        create_payload = {
+            "target_id": target["id"],
+            "title": "Unauthenticated admin console",
+            "severity": "high",
+            "summary": "The administrative console is reachable without authentication.",
+            "confidence": "high",
+            "cve_ids": ["CVE-2026-12345"],
+            "cwe_ids": ["CWE-306"],
+            "references": ["https://example.test/advisories/CVE-2026-12345"],
+            "evidence": [{
+                "evidence_type": "run_line",
+                "evidence_id": run_id,
+                "line_number": 1,
+                "snippet": "443/tcp open https - admin console",
+            }],
+        }
+        created_resp = client.post(
+            f"/projects/{project['id']}/findings",
+            json=create_payload,
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert created_resp.status_code == 201
+        created = created_resp.get_json()["finding"]
+        assert created["origin"] == "manual"
+        assert created["validation_method"] == "manual_assessment"
+        assert created["manual_revision"] == 1
+        assert created["run_id"] == run_id
+        assert created["line_number"] == 1
+        assert created["raw_line"] == "443/tcp open https - admin console"
+        assert created["cve_ids"] == ["CVE-2026-12345"]
+        assert created["risk"]["cve_id"] == "CVE-2026-12345"
+        assert created["evidence_links"][0]["snippet"] == created["raw_line"]
+        assert "manual_created_by_session_id" not in created
+        observation_id = created["observation_id"]
+        remediation_id = created["remediation_id"]
+
+        duplicate_resp = client.post(
+            f"/projects/{project['id']}/findings",
+            json=create_payload,
+            headers={"X-Session-ID": session_id},
+        )
+        assert duplicate_resp.status_code == 409
+        duplicate = duplicate_resp.get_json()
+        assert duplicate["conflict"] == "possible_duplicate"
+        assert duplicate["duplicates"][0]["id"] == created["id"]
+
+        updated_resp = client.patch(
+            f"/projects/{project['id']}/findings/{created['id']}",
+            json={
+                "expected_revision": 1,
+                "title": "Admin console allows anonymous access",
+                "severity": "critical",
+                "cve_ids": ["CVE-2026-12345"],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert updated_resp.status_code == 200
+        updated = updated_resp.get_json()["finding"]
+        assert updated["manual_revision"] == 2
+        assert updated["severity"] == "critical"
+        assert updated["observation_id"] == observation_id
+        assert updated["remediation_id"] == remediation_id
+
+        stale_resp = client.patch(
+            f"/projects/{project['id']}/findings/{created['id']}",
+            json={"expected_revision": 1, "severity": "low"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert stale_resp.status_code == 409
+        assert stale_resp.get_json() == {
+            "ok": False,
+            "updated": False,
+            "conflict": "stale_revision",
+            "current_revision": 2,
+        }
+
+        findings_resp = client.get(
+            f"/projects/{project['id']}/findings",
+            headers={"X-Session-ID": session_id},
+        )
+        listed = next(
+            item for item in findings_resp.get_json()["findings"]
+            if item["id"] == created["id"]
+        )
+        assert listed["manual_revision"] == 2
+        assert listed["orphan_source"] is False
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            occurrence = conn.execute(
+                "SELECT line_number, snippet, observed_severity FROM findings_occurrences "
+                "WHERE finding_id = ?",
+                (created["id"],),
+            ).fetchone()
+            cve_link = conn.execute(
+                "SELECT cve_id, link_source FROM finding_cve_links WHERE finding_id = ?",
+                (created["id"],),
+            ).fetchone()
+        assert dict(occurrence) == {
+            "line_number": 1,
+            "snippet": "443/tcp open https - admin console",
+            "observed_severity": "critical",
+        }
+        assert dict(cve_link) == {
+            "cve_id": "CVE-2026-12345",
+            "link_source": "manual",
+        }
+
+        override_payload = dict(create_payload)
+        override_payload["allow_duplicate"] = True
+        override_resp = client.post(
+            f"/projects/{project['id']}/findings",
+            json=override_payload,
+            headers={"X-Session-ID": session_id},
+        )
+        assert override_resp.status_code == 201
+        override = override_resp.get_json()
+        assert override["duplicate_override"] is True
+        assert override["finding"]["id"] != created["id"]
+
+
 class TestClientLogRoute:
     def test_accepts_client_error_payload(self):
         client = get_client()

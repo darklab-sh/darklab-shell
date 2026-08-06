@@ -12,7 +12,7 @@ from services.projects.finding_provenance import (
     normalize_finding_origin,
     normalize_finding_validation_method,
 )
-from services.projects.finding_details import finding_detail_fields
+from services.projects.finding_details import finding_detail_fields, manual_finding_fields
 from services.projects.finding_identity import stable_rule_identity
 
 
@@ -79,4 +79,5 @@ def finding_row_to_dict(row) -> dict[str, Any]:
         "line_number": line_number,
         "created": row["created"] or "",
         **finding_detail_fields(row),
+        **manual_finding_fields(row),
     }

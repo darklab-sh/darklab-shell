@@ -6720,6 +6720,7 @@ class TestPostgresMigrations:
             "0054",
             "0055",
             "0056",
+            "0057",
         ]
         for table_name in (
             "runs",
@@ -7644,7 +7645,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0057",
+            "0058",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7696,7 +7697,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0056"
+        assert rows[-1]["version"] == "0057"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8152,7 +8153,7 @@ class TestPostgresMigrations:
 
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
-            "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056",
+            "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056", "0057",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8173,7 +8174,8 @@ class TestPostgresMigrations:
         assert "0054" in conn.applied_versions
         assert "0055" in conn.applied_versions
         assert "0056" in conn.applied_versions
-        assert conn.commit_count == 18
+        assert "0057" in conn.applied_versions
+        assert conn.commit_count == 19
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8326,7 +8328,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0057",
+            "0058",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8351,9 +8353,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0057"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0058"]
         assert table_exists is not None
-        assert "0057" in versions
+        assert "0058" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -15334,10 +15336,11 @@ class TestDataAccessLayerServiceCoverage:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, first_run_id, last_run_id, signature_hash, title, created) "
+                "(id, session_id, run_id, first_run_id, last_run_id, signature_hash, title, "
+                "manual_created_by_session_id, manual_updated_by_session_id, created) "
                 "VALUES ('fnd_session_service', ?, 'run-session-service', 'run-session-service', "
-                "'run-session-service', 'sig-session-service', 'Migrated evidence finding', ?)",
-                (source_session, now),
+                "'run-session-service', 'sig-session-service', 'Migrated evidence finding', ?, ?, ?)",
+                (source_session, source_session, source_session, now),
             )
             conn.execute(
                 "INSERT INTO finding_evidence_links "
@@ -15510,6 +15513,10 @@ class TestDataAccessLayerServiceCoverage:
                 "SELECT session_id, created_by_session_id FROM finding_evidence_links "
                 "WHERE id = 'fel_session_service'",
             ).fetchone()
+            migrated_finding = conn.execute(
+                "SELECT session_id, manual_created_by_session_id, manual_updated_by_session_id "
+                "FROM findings WHERE id = 'fnd_session_service'",
+            ).fetchone()
             audit_row = conn.execute(
                 "SELECT details FROM audit_events WHERE target_id = ?",
                 (destination_session,),
@@ -15519,6 +15526,9 @@ class TestDataAccessLayerServiceCoverage:
         assert destination_project["session_id"] == destination_session
         assert migrated_evidence["session_id"] == destination_session
         assert migrated_evidence["created_by_session_id"] == destination_session
+        assert migrated_finding["session_id"] == destination_session
+        assert migrated_finding["manual_created_by_session_id"] == destination_session
+        assert migrated_finding["manual_updated_by_session_id"] == destination_session
         assert migrated_disposition["session_id"] == destination_session
         assert migrated_disposition["review_state"] == "important"
         assert migrated_disposition["remediation"] == "Use migrated guidance."
@@ -15533,6 +15543,64 @@ class TestDataAccessLayerServiceCoverage:
         assert secrets_storage.get_secret_value_for_env(destination_session, "VT_API_KEY") == "secret-value"
         assert audit_row is not None
         assert json.loads(audit_row["details"])["migration_counts"]["migrated_recent_values"] == 1
+
+    def test_manual_finding_update_reports_an_atomic_revision_race(self, monkeypatch):
+        from services.projects import manual_findings
+
+        existing = {
+            "target_id": "ent_manual",
+            "manual_revision": 1,
+            "title": "Original title",
+            "severity": "medium",
+            "subject_key": "domain\x1fmanual.example.test",
+            "fingerprint": "stable-fingerprint",
+        }
+        payload = {
+            **existing,
+            "expected_revision": 1,
+            "title": "Updated title",
+            "summary": "",
+            "impact": "",
+            "reproduction_steps": "",
+            "confidence": "unknown",
+            "cve_ids": [],
+            "cwe_ids": [],
+            "cvss_vector": "",
+            "cvss_score": None,
+            "references": [],
+            "allow_duplicate": False,
+        }
+        rows = iter([{"manual_revision": 1}, {"manual_revision": 2}])
+        monkeypatch.setattr(manual_findings, "_manual_row", lambda *_args: next(rows))
+        monkeypatch.setattr(manual_findings, "row_to_finding", lambda _row: existing)
+        monkeypatch.setattr(manual_findings, "_project_target", mock.Mock())
+        monkeypatch.setattr(
+            manual_findings,
+            "normalize_manual_finding_update",
+            lambda _data, *, existing: payload,
+        )
+        monkeypatch.setattr(
+            manual_findings,
+            "_duplicate_candidates",
+            lambda *_args, **_kwargs: [],
+        )
+        conn = mock.Mock()
+        conn.execute.return_value = mock.Mock(rowcount=0)
+
+        result = manual_findings.update_manual_finding_on_conn(
+            conn,
+            "tok_manual",
+            "prj_manual",
+            "fnd_manual",
+            {"expected_revision": 1, "title": "Updated title"},
+        )
+
+        assert result == {
+            "updated": False,
+            "conflict": "stale_revision",
+            "current_revision": 2,
+        }
+        assert conn.execute.call_count == 1
 
 
 class TestSessionWorkspace:
@@ -26585,6 +26653,10 @@ class TestDatabaseInit:
                 "'finding-triage-1', 'run', 'run-deleted', 'session-triage', "
                 "'2026-01-01')"
             )
+            conn.execute(
+                "INSERT INTO finding_cve_links (finding_id, cve_id, link_source, created_at) "
+                "VALUES ('finding-triage-1', 'CVE-2026-12345', 'manual', '2026-01-01')"
+            )
             conn.commit()
             conn.close()
 
@@ -26757,8 +26829,13 @@ class TestDatabaseInit:
                         "SELECT COUNT(*) AS count FROM finding_evidence_links WHERE finding_id = ?",
                         ["finding-triage-1"],
                     ).fetchone()
+                    cve_link_row = cleanup_conn.execute(
+                        "SELECT COUNT(*) AS count FROM finding_cve_links WHERE finding_id = ?",
+                        ["finding-triage-1"],
+                    ).fetchone()
                 assert int(row["count"] or 0) == 0
                 assert int(evidence_row["count"] or 0) == 0
+                assert int(cve_link_row["count"] or 0) == 0
 
     def test_json_bearing_schema_columns_use_sqlite_json_type(self):
         with tempfile.TemporaryDirectory() as tmp:

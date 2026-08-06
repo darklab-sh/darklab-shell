@@ -102,6 +102,28 @@ def sync_finding_cve_links(conn: Any, *, limit: int = 5000) -> int:
     return inserted
 
 
+def replace_manual_finding_cve_links(
+    conn: Any,
+    finding: dict[str, Any],
+    *,
+    created_at: str,
+) -> tuple[str, ...]:
+    """Replace the exact CVE links owned by one manual finding edit."""
+
+    finding_id = str(finding.get("id") or "").strip()
+    if not finding_id:
+        return ()
+    cve_ids = finding_cves(finding)
+    conn.execute("DELETE FROM finding_cve_links WHERE finding_id = ?", (finding_id,))
+    for cve_id in cve_ids:
+        conn.execute(
+            "INSERT INTO finding_cve_links (finding_id, cve_id, link_source, created_at) "
+            "VALUES (?, ?, 'manual', ?)",
+            (finding_id, cve_id, created_at),
+        )
+    return cve_ids
+
+
 def linked_cve_ids(conn: Any) -> set[str]:
     return {str(row["cve_id"]) for row in conn.execute(
         "SELECT DISTINCT cve_id FROM finding_cve_links"

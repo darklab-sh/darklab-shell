@@ -307,6 +307,11 @@
 # Server default if unset: 5000
 # max_finding_triage_details_per_owner: 5000
 #
+# Maximum assessor-authored findings for a personal session or team. Set to 0
+# for unlimited. Existing findings aren't evicted when the limit is reached.
+# Server default if unset: 5000
+# max_manual_findings_per_owner: 5000
+#
 # Maximum typed evidence references saved for findings. Set either limit to 0
 # for unlimited. Existing evidence is never evicted when a limit is reached.
 # Server default if unset: 10000

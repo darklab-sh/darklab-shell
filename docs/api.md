@@ -119,6 +119,8 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects` | Read-only project list. |
 | `GET` | `/api/v1/projects/<project_id>` | Read-only project detail. |
 | `GET` | `/api/v1/projects/<project_id>/findings` | Read-only project finding page. |
+| `POST` | `/api/v1/projects/<project_id>/findings` | Create an assessor-authored finding for a confirmed Project target. Likely duplicates return a conflict unless explicitly accepted. |
+| `PATCH` | `/api/v1/projects/<project_id>/findings/<finding_id>` | Edit an assessor-authored finding using its current `expected_revision`. |
 | `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |

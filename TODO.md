@@ -113,7 +113,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 - [ ] Add `darklab assessment start-action` after the recommended-action launch route and execution contract land. Cycle list/show, filtered check paging, and reasoned manual-state commands already use the stable API and permission checks.
 - [ ] Finish the assessment-specific audit and safe-log inventory as later features land:
-  - Audit recommended-action launch, HTTP-profile use, manual finding creation, and retest disposition. Cycle lifecycle, manual-state, and evidence-link events already use the shared audit boundary.
+  - Audit recommended-action launch, HTTP-profile use, and retest disposition. Cycle lifecycle, manual-state, evidence-link, and manual-finding events already use the shared audit boundary.
   - Log ids, owner kind, Project id, profile/check keys, policy level, state transitions, counts, durations, and error classes. Never log credentials, authorization headers, cookies, client-certificate contents, raw request bodies, provider payloads, finding evidence bodies, or complete target lists.
   - Add low-cardinality metrics for active cycles, check-state transitions, derived-evidence matches, action launches/failures, parser results, and connector job outcomes. Do not use target values, Project ids, commands, CVEs, or workflow ids as metric labels.
   - Apply existing request/rate-limit conventions to mutation and launch routes. Bound recalculation work and emit a clear warning when a safety or quota limit rejects work.
@@ -136,10 +136,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 4 — Add first-class manual findings and retest provenance
 
-- [ ] Extend the finding model so assessors can record issues that no parser or import knows about:
-  - Link CVE-bearing findings to the shared Phase 0 enrichment records and serialize current EPSS, KEV, CVSS, and public-exploit signals with their source/freshness. Do not rewrite the finding or its occurrence history when a feed changes.
-  - Preserve current `findings_occurrences` behavior for selected transcript lines. Manual evidence attached to a run must keep a line number and bounded snippet without copying an entire transcript.
-  - Define stable manual-finding deduplication and edit semantics. Editing title, severity, or detail must not quietly merge two user-authored findings; duplicate detection should warn and let the user choose.
 - [ ] Add one shared finding editor used from Project Findings, Atlas Findings, Assessment, and Run Details:
   - Support **Create finding**, **Create finding from selected lines**, and **Add evidence to finding** without opening a second findings board or assessment overlay.
   - Pre-fill target/entity/run context from the launch surface, but require the user to review affected targets, severity, evidence, and title before saving.

@@ -1952,6 +1952,19 @@
             "nullable": true,
             "type": "integer"
           },
+          "manual_created_by_member_id": {
+            "type": "string"
+          },
+          "manual_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "manual_updated_at": {
+            "type": "string"
+          },
+          "manual_updated_by_member_id": {
+            "type": "string"
+          },
           "observation_id": {
             "type": "string"
           },
@@ -2086,6 +2099,10 @@
           "cvss_vector",
           "cvss_score",
           "references",
+          "manual_revision",
+          "manual_created_by_member_id",
+          "manual_updated_by_member_id",
+          "manual_updated_at",
           "status",
           "title",
           "raw_line",
@@ -3298,6 +3315,282 @@
         ],
         "type": "object"
       },
+      "ManualFindingCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_duplicate": {
+            "default": false,
+            "type": "boolean"
+          },
+          "confidence": {
+            "enum": [
+              "unknown",
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "cve_ids": {
+            "items": {
+              "pattern": "^CVE-[0-9]{4}-[0-9]{4,}$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "cvss_score": {
+            "maximum": 10,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "cvss_vector": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "cwe_ids": {
+            "items": {
+              "pattern": "^CWE-[0-9]+$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/FindingEvidenceLinkRequest"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "impact": {
+            "maxLength": 20000,
+            "type": "string"
+          },
+          "references": {
+            "items": {
+              "format": "uri",
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "reproduction_steps": {
+            "maxLength": 20000,
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "target_id": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 240,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id",
+          "title",
+          "severity"
+        ],
+        "type": "object"
+      },
+      "ManualFindingDuplicate": {
+        "additionalProperties": false,
+        "properties": {
+          "cve_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "manual_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reasons": {
+            "items": {
+              "enum": [
+                "same_title",
+                "shared_cve"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "severity",
+          "cve_ids",
+          "manual_revision",
+          "reasons"
+        ],
+        "type": "object"
+      },
+      "ManualFindingMutationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "conflict": {
+            "enum": [
+              "possible_duplicate",
+              "stale_revision"
+            ],
+            "type": "string"
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "current_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "duplicate_override": {
+            "type": "boolean"
+          },
+          "duplicates": {
+            "items": {
+              "$ref": "#/components/schemas/ManualFindingDuplicate"
+            },
+            "type": "array"
+          },
+          "finding": {
+            "$ref": "#/components/schemas/ProjectFinding"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "updated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "ManualFindingUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_duplicate": {
+            "default": false,
+            "type": "boolean"
+          },
+          "confidence": {
+            "enum": [
+              "unknown",
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "cve_ids": {
+            "items": {
+              "pattern": "^CVE-[0-9]{4}-[0-9]{4,}$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "cvss_score": {
+            "maximum": 10,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "cvss_vector": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "cwe_ids": {
+            "items": {
+              "pattern": "^CWE-[0-9]+$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "expected_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "impact": {
+            "maxLength": 20000,
+            "type": "string"
+          },
+          "references": {
+            "items": {
+              "format": "uri",
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "reproduction_steps": {
+            "maxLength": 20000,
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 240,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "type": "object"
+      },
       "NdjsonStream": {
         "description": "Newline-delimited RunStreamEvent objects. The first row is the line-event schema row; output rows include v=1 plus kind/role metadata, and idle streams may include heartbeat rows.",
         "type": "string"
@@ -4118,6 +4411,19 @@
             "nullable": true,
             "type": "integer"
           },
+          "manual_created_by_member_id": {
+            "type": "string"
+          },
+          "manual_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "manual_updated_at": {
+            "type": "string"
+          },
+          "manual_updated_by_member_id": {
+            "type": "string"
+          },
           "observation_id": {
             "type": "string"
           },
@@ -4264,6 +4570,10 @@
           "cvss_vector",
           "cvss_score",
           "references",
+          "manual_revision",
+          "manual_created_by_member_id",
+          "manual_updated_by_member_id",
+          "manual_updated_at",
           "status",
           "review_state",
           "title",
@@ -9432,6 +9742,221 @@
               }
             },
             "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualFindingCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualFindingMutationResponse"
+                }
+              }
+            },
+            "description": "Manual finding created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid manual finding"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot triage findings"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project target not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ManualFindingMutationResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Possible duplicate or owner quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/findings/{finding_id}": {
+      "patch": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Finding id",
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualFindingUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualFindingMutationResponse"
+                }
+              }
+            },
+            "description": "Manual finding updated"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid manual finding request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot triage findings"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project target or manual finding not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ManualFindingMutationResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Duplicate, stale revision, or quota conflict"
           },
           "429": {
             "content": {

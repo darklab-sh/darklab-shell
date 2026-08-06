@@ -89,6 +89,8 @@ class AuditEventType(str, Enum):
     REMEDIATION_MERGE = "finding.remediation_merge"
     FINDING_EVIDENCE_LINK = "finding.evidence_link"
     FINDING_EVIDENCE_UNLINK = "finding.evidence_unlink"
+    FINDING_MANUAL_CREATE = "finding.manual_create"
+    FINDING_MANUAL_UPDATE = "finding.manual_update"
     VERIFICATION_EDIT = "finding.verification_edit"
     LABEL_CHANGE = "label.change"
     NOTE_CHANGE = "note.change"
@@ -268,6 +270,13 @@ PROJECT_UNLINK_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
     "kept_finding_count",
 })
 
+MANUAL_FINDING_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "manual_revision",
+    "severity",
+    "evidence_count",
+    "duplicate_override",
+})
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -288,6 +297,18 @@ def _spec(
 
 
 EVENT_SPECS: dict[str, EventSpec] = {
+    AuditEventType.FINDING_MANUAL_CREATE.value: _spec(
+        AuditEventType.FINDING_MANUAL_CREATE,
+        AuditTargetType.FINDING,
+        RecordingMode.FAIL_CLOSED,
+        detail_keys=MANUAL_FINDING_DETAIL_KEYS,
+    ),
+    AuditEventType.FINDING_MANUAL_UPDATE.value: _spec(
+        AuditEventType.FINDING_MANUAL_UPDATE,
+        AuditTargetType.FINDING,
+        RecordingMode.FAIL_CLOSED,
+        detail_keys=MANUAL_FINDING_DETAIL_KEYS,
+    ),
     AuditEventType.ASSESSMENT_CREATE.value: _spec(
         AuditEventType.ASSESSMENT_CREATE,
         AuditTargetType.ASSESSMENT,

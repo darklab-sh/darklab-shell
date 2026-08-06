@@ -1227,6 +1227,7 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "max_entity_labels_per_entity": 20,
         "max_entity_notes_per_session": 2000,
         "max_finding_triage_details_per_owner": 5000,
+        "max_manual_findings_per_owner": 5000,
         "max_finding_evidence_links_per_owner": 10000,
         "max_finding_evidence_links_per_finding": 200,
         "evidence_package_max_mb":    25,

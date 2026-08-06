@@ -36,7 +36,7 @@ from services.projects.finding_provenance import (
     normalize_finding_origin,
     normalize_finding_validation_method,
 )
-from services.projects.finding_details import finding_detail_fields
+from services.projects.finding_details import finding_detail_fields, manual_finding_fields
 from services.projects.finding_dispositions import set_remediation_group_review_state
 from services.projects.finding_identity import stable_rule_identity
 from services.projects.metadata import (
@@ -112,6 +112,7 @@ def row_to_finding(row):
         "occurrence_count": int(value("occurrence_count", 0) or 0),
         "created": value("created"),
         **finding_detail_fields(row),
+        **manual_finding_fields(row),
     }
 
 
@@ -235,6 +236,7 @@ def _project_finding_source_exists_sql():
         "    OR source_direct.id = f.last_run_id"
         "  )"
         ")"
+        " OR f.origin = 'manual'"
         ")"
     )
 
@@ -311,6 +313,8 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
             "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
             "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
+            "f.manual_revision, f.manual_created_by_member_id, "
+            "f.manual_updated_by_member_id, f.manual_updated_at, "
             "d.run_id, d.line_number, d.snippet, d.run_occurrence_count "
             "FROM deduped d JOIN findings f ON f.id = d.finding_id "
             "ORDER BY d.line_number ASC, d.seen_at ASC, f.id ASC"
@@ -365,7 +369,9 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
             "severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
             "fingerprint, title, raw_line, created, summary, impact, reproduction_steps, confidence, "
-            "cve_ids_json, cwe_ids_json, cvss_vector, cvss_score, references_json "
+            "cve_ids_json, cwe_ids_json, cvss_vector, cvss_score, references_json, "
+            "manual_revision, manual_created_by_member_id, manual_updated_by_member_id, "
+            "manual_updated_at "
             "FROM findings WHERE id = ?",
             [finding_id],
         ).fetchone()
@@ -746,6 +752,8 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
             "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
             "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
+            "f.manual_revision, f.manual_created_by_member_id, "
+            "f.manual_updated_by_member_id, f.manual_updated_at, "
             + page_source_run_expr
             + " AS run_id, COALESCE("
             + latest_occurrence_line_expr
@@ -1374,6 +1382,8 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
             "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
             "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
+            "f.manual_revision, f.manual_created_by_member_id, "
+            "f.manual_updated_by_member_id, f.manual_updated_at, "
             "fo.run_id AS occurrence_run_id, fo.line_number, fo.snippet "
             "FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id "
             "WHERE f.id = ? AND fo.run_id = ? AND fo.line_number = ?",

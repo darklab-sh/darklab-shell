@@ -62,8 +62,20 @@ def migrate_project_workspace_session(
         (to_session_id, from_session_id),
     )
     finding_result = conn.execute(
-        "UPDATE findings SET session_id = ? WHERE session_id = ?",
-        (to_session_id, from_session_id),
+        "UPDATE findings SET session_id = ?, "
+        "manual_created_by_session_id = CASE WHEN manual_created_by_session_id = ? THEN ? "
+        "ELSE manual_created_by_session_id END, "
+        "manual_updated_by_session_id = CASE WHEN manual_updated_by_session_id = ? THEN ? "
+        "ELSE manual_updated_by_session_id END "
+        "WHERE session_id = ?",
+        (
+            to_session_id,
+            from_session_id,
+            to_session_id,
+            from_session_id,
+            to_session_id,
+            from_session_id,
+        ),
     )
     disposition_rows = conn.execute(
         "SELECT affected_subject, identity_kind, identity_value, vulnerability_id, "
