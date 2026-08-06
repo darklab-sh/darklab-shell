@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Shared finding remediation and verification editor.
-// Loaded before shell_chrome.js; Projects and Atlas open it with a saved callback.
+// Shared finding details, remediation, and verification editor.
+// Loaded lazily; Projects and Atlas open one overlay with saved callbacks.
 import { apiFetch as importedApiFetch } from '../../session.js';
 import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_sheet.js';
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
@@ -33,11 +33,21 @@ let DarklabFindingTriageEditor = null;
   ];
 
   const MAX_TEXT_LENGTH = 20000;
+  const FINDING_SEVERITIES = new Set(['critical', 'high', 'medium', 'low', 'info']);
+  const FINDING_CONFIDENCE = new Set(['unknown', 'low', 'medium', 'high']);
+  const MAX_IDENTIFIER_COUNT = 50;
+  const MAX_REFERENCE_COUNT = 50;
+  const MAX_REFERENCE_LENGTH = 2048;
+  const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/;
+  const CWE_PATTERN = /^CWE-\d+$/;
+  const CVSS_PATTERN = /^(?:CVSS:(?:2\.0|3\.[01]|4\.0)\/)?[A-Za-z]{1,4}:[A-Za-z0-9.-]+(?:\/[A-Za-z]{1,4}:[A-Za-z0-9.-]+)+$/;
   let state = {
+    mode: 'triage',
     finding: null,
     options: {},
     bound: false,
     loadedTriage: null,
+    recordEvidence: [],
     mergePreview: null,
     mergeSearchTimer: null,
     mergeSearchGeneration: 0,
@@ -97,6 +107,91 @@ let DarklabFindingTriageEditor = null;
     };
   }
 
+  function uniqueTokens(value) {
+    return [...new Set(String(value || '')
+      .split(/[\s,]+/)
+      .map(item => item.trim().toUpperCase())
+      .filter(Boolean))];
+  }
+
+  function recordFromForm({ allowDuplicate = false } = {}) {
+    const cvssScoreText = String(el('finding-record-cvss-score')?.value || '').trim();
+    const payload = {
+      title: String(el('finding-record-title')?.value || '').trim(),
+      severity: String(el('finding-record-severity')?.value || '').trim().toLowerCase(),
+      summary: String(el('finding-record-summary')?.value || '').trim(),
+      impact: String(el('finding-record-impact')?.value || '').trim(),
+      reproduction_steps: String(el('finding-record-reproduction')?.value || '').trim(),
+      confidence: String(el('finding-record-confidence')?.value || 'unknown').trim().toLowerCase(),
+      cve_ids: uniqueTokens(el('finding-record-cves')?.value),
+      cwe_ids: uniqueTokens(el('finding-record-cwes')?.value),
+      cvss_vector: String(el('finding-record-cvss-vector')?.value || '').trim(),
+      cvss_score: cvssScoreText ? Number(cvssScoreText) : null,
+      references: String(el('finding-record-references')?.value || '')
+        .split(/\r?\n/)
+        .map(item => item.trim())
+        .filter((item, index, items) => item && items.indexOf(item) === index),
+      allow_duplicate: !!allowDuplicate,
+    };
+    if (state.finding) {
+      payload.expected_revision = Number(state.finding.manual_revision || 0);
+    } else {
+      payload.target_id = String(el('finding-record-target')?.value || '').trim();
+      payload.evidence = state.recordEvidence.slice();
+    }
+    return payload;
+  }
+
+  function validateRecord(payload) {
+    if (!state.finding && !payload.target_id) return 'Choose a confirmed Project target.';
+    if (!payload.title) return 'Enter a finding title.';
+    if (payload.title.length > 240) return 'Finding title must be 240 characters or fewer.';
+    if (!FINDING_SEVERITIES.has(payload.severity)) return 'Choose a supported finding severity.';
+    if (!FINDING_CONFIDENCE.has(payload.confidence)) return 'Choose a supported confidence level.';
+    for (const [field, limit] of [
+      ['summary', 4000],
+      ['impact', MAX_TEXT_LENGTH],
+      ['reproduction_steps', MAX_TEXT_LENGTH],
+    ]) {
+      if (String(payload[field] || '').length > limit) {
+        return `${field.replace(/_/g, ' ')} must be ${limit.toLocaleString()} characters or fewer.`;
+      }
+    }
+    for (const [field, pattern, label] of [
+      ['cve_ids', CVE_PATTERN, 'CVE'],
+      ['cwe_ids', CWE_PATTERN, 'CWE'],
+    ]) {
+      if (payload[field].length > MAX_IDENTIFIER_COUNT) {
+        return `${label} IDs must contain ${MAX_IDENTIFIER_COUNT} items or fewer.`;
+      }
+      if (payload[field].some(item => !pattern.test(item))) return `Enter valid ${label} IDs.`;
+    }
+    if (payload.cvss_vector && (
+      payload.cvss_vector.length > 256 || !CVSS_PATTERN.test(payload.cvss_vector)
+    )) return 'Enter a valid CVSS vector.';
+    if (payload.cvss_score !== null && (
+      !Number.isFinite(payload.cvss_score) || payload.cvss_score < 0 || payload.cvss_score > 10
+    )) return 'CVSS score must be between 0 and 10.';
+    if (payload.references.length > MAX_REFERENCE_COUNT) {
+      return `References must contain ${MAX_REFERENCE_COUNT} URLs or fewer.`;
+    }
+    for (const reference of payload.references) {
+      if (reference.length > MAX_REFERENCE_LENGTH || reference.includes('\\') || /[\u0000-\u001f]/.test(reference)) {
+        return 'References must use safe HTTP(S) URLs.';
+      }
+      try {
+        const parsed = new URL(reference);
+        if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) {
+          return 'References must use safe HTTP(S) URLs.';
+        }
+      } catch (_) {
+        return 'References must use safe HTTP(S) URLs.';
+      }
+    }
+    if (state.recordEvidence.length > 20) return 'A finding can start with at most 20 evidence links.';
+    return '';
+  }
+
   function triageFromForm() {
     return {
       remediation: String(el('finding-triage-remediation')?.value || '').trim(),
@@ -143,6 +238,149 @@ let DarklabFindingTriageEditor = null;
     node.classList.toggle('is-error', !!error);
   }
 
+  function setMode(mode) {
+    state.mode = mode === 'record' ? 'record' : 'triage';
+    el('finding-triage-form')?.classList.toggle('u-hidden', state.mode !== 'triage');
+    el('finding-record-form')?.classList.toggle('u-hidden', state.mode !== 'record');
+    const title = el('finding-triage-title');
+    if (title) {
+      title.textContent = state.mode === 'record'
+        ? (state.finding ? 'EDIT FINDING' : 'CREATE FINDING')
+        : 'FINDING TRIAGE';
+    }
+  }
+
+  function syncRecordSelects() {
+    ['finding-record-target', 'finding-record-severity', 'finding-record-confidence']
+      .map(el)
+      .filter(Boolean)
+      .forEach((select) => {
+        if (typeof syncAppSelect === 'function') syncAppSelect(select);
+      });
+  }
+
+  function setRecordDisabled(disabled) {
+    el('finding-record-form')?.querySelectorAll('input, textarea, select, button')
+      .forEach((node) => {
+        node.disabled = !!disabled;
+      });
+    const target = el('finding-record-target');
+    if (target && !disabled) target.disabled = !!state.finding;
+    syncRecordSelects();
+  }
+
+  function targetLabel(target) {
+    const type = text(target && target.type);
+    const value = text(target && (target.value || target.canonical_value || target.id), 'Target');
+    return type ? `${value} (${type})` : value;
+  }
+
+  function populateRecordTargets(targets, selectedId = '') {
+    const select = el('finding-record-target');
+    if (!select) return;
+    clearNode(select);
+    targets.forEach((target) => {
+      const option = document.createElement('option');
+      option.value = text(target && target.id);
+      option.textContent = targetLabel(target);
+      select.appendChild(option);
+    });
+    if (selectedId && targets.some(target => text(target && target.id) === selectedId)) {
+      select.value = selectedId;
+    }
+  }
+
+  function evidenceTitle(item) {
+    const type = text(item && item.evidence_type, 'evidence').replace(/_/g, ' ');
+    const rawLine = item && item.line_number;
+    const line = rawLine !== null && rawLine !== undefined && rawLine !== ''
+      && Number.isInteger(Number(rawLine))
+      ? ` · line ${Number(rawLine)}`
+      : '';
+    return `${type}${line}`;
+  }
+
+  function renderRecordEvidence(evidence) {
+    const section = el('finding-record-evidence-section');
+    const container = el('finding-record-evidence');
+    if (!section || !container) return;
+    clearNode(container);
+    section.classList.toggle('u-hidden', !evidence.length);
+    evidence.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'finding-record-evidence-item';
+      const title = document.createElement('div');
+      title.className = 'finding-record-evidence-title';
+      title.textContent = evidenceTitle(item);
+      const meta = document.createElement('div');
+      meta.className = 'finding-record-evidence-meta';
+      meta.textContent = text(item && (item.label || item.evidence_id), 'Saved Project evidence');
+      row.append(title, meta);
+      const snippetText = text(item && item.snippet);
+      if (snippetText) {
+        const snippet = document.createElement('div');
+        snippet.className = 'finding-record-evidence-snippet';
+        snippet.textContent = snippetText;
+        row.appendChild(snippet);
+      }
+      container.appendChild(row);
+    });
+  }
+
+  function populateRecord(finding, options) {
+    const item = finding && typeof finding === 'object' ? finding : {};
+    const suppliedTargets = Array.isArray(options.targets) ? options.targets : [];
+    const currentTargetId = text(item.target_id || options.targetId);
+    const targets = suppliedTargets.filter((target) => (
+      text(target && target.review_state, 'confirmed') === 'confirmed'
+      || text(target && target.id) === currentTargetId
+    ));
+    if (currentTargetId && !targets.some((target) => text(target && target.id) === currentTargetId)) {
+      const suppliedTarget = options.target && typeof options.target === 'object'
+        ? options.target
+        : {};
+      targets.push({
+        id: currentTargetId,
+        type: text(suppliedTarget.type || item.target_type),
+        value: text(suppliedTarget.value || item.target_value, currentTargetId),
+        review_state: 'confirmed',
+      });
+    }
+    populateRecordTargets(targets, currentTargetId);
+    const values = {
+      'finding-record-title': item.title,
+      'finding-record-summary': item.summary,
+      'finding-record-impact': item.impact,
+      'finding-record-reproduction': item.reproduction_steps,
+      'finding-record-cves': Array.isArray(item.cve_ids) ? item.cve_ids.join(', ') : '',
+      'finding-record-cwes': Array.isArray(item.cwe_ids) ? item.cwe_ids.join(', ') : '',
+      'finding-record-cvss-vector': item.cvss_vector,
+      'finding-record-cvss-score': item.cvss_score === null || item.cvss_score === undefined
+        ? ''
+        : item.cvss_score,
+      'finding-record-references': Array.isArray(item.references) ? item.references.join('\n') : '',
+    };
+    Object.entries(values).forEach(([id, value]) => {
+      const node = el(id);
+      if (node) node.value = value === null || value === undefined ? '' : String(value);
+    });
+    const severityValue = String(item.severity || 'medium');
+    const severity = el('finding-record-severity');
+    if (severity) severity.value = FINDING_SEVERITIES.has(severityValue) ? severityValue : 'medium';
+    const confidenceValue = String(item.confidence || 'unknown');
+    const confidence = el('finding-record-confidence');
+    if (confidence) confidence.value = FINDING_CONFIDENCE.has(confidenceValue)
+      ? confidenceValue
+      : 'unknown';
+    state.recordEvidence = !finding && Array.isArray(options.evidence)
+      ? options.evidence.slice()
+      : [];
+    renderRecordEvidence(state.recordEvidence);
+    const save = el('finding-record-save');
+    if (save) save.textContent = finding ? 'Save finding' : 'Create finding';
+    return targets;
+  }
+
   function isOpen() {
     return !!el('finding-triage-overlay')?.classList.contains('open');
   }
@@ -156,6 +394,7 @@ let DarklabFindingTriageEditor = null;
     state.finding = null;
     state.options = {};
     state.loadedTriage = null;
+    state.recordEvidence = [];
     state.mergePreview = null;
     state.mergeSearchGeneration += 1;
     if (state.mergeSearchTimer) global.clearTimeout(state.mergeSearchTimer);
@@ -467,6 +706,93 @@ let DarklabFindingTriageEditor = null;
     }
   }
 
+  function duplicateSummary(duplicates) {
+    const items = Array.isArray(duplicates) ? duplicates : [];
+    const titles = items.slice(0, 3).map(item => text(item && item.title, 'Untitled finding'));
+    const suffix = items.length > 3 ? ` and ${items.length - 3} more` : '';
+    return titles.length ? `${titles.join('; ')}${suffix}` : 'A similar finding already exists.';
+  }
+
+  async function confirmDuplicate(duplicates) {
+    if (!showConfirm) return false;
+    const action = state.finding ? 'Save anyway' : 'Create anyway';
+    const choice = await showConfirm({
+      body: {
+        text: `${Array.isArray(duplicates) ? duplicates.length : 0} possible duplicate findings were found for this target.`,
+        note: `${duplicateSummary(duplicates)} Review the match before keeping a separate finding.`,
+      },
+      tone: 'warning',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'override', label: action, role: 'warning' },
+      ],
+      refocusOnResolve: false,
+    });
+    return choice === 'override';
+  }
+
+  async function saveRecord({ allowDuplicate = false } = {}) {
+    const projectId = text(state.options && state.options.projectId);
+    if (!projectId) return;
+    if (state.options && state.options.canEdit === false) {
+      setMessage('View-only team members can read finding details but cannot save changes.', { error: true });
+      return;
+    }
+    const payload = recordFromForm({ allowDuplicate });
+    const validationError = validateRecord(payload);
+    if (validationError) {
+      setMessage(validationError, { error: true });
+      return;
+    }
+    const findingId = text(state.finding && state.finding.id);
+    const url = findingId
+      ? `/projects/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(findingId)}`
+      : `/projects/${encodeURIComponent(projectId)}/findings`;
+    setMessage('');
+    setRecordDisabled(true);
+    try {
+      const resp = await api()(url, {
+        method: findingId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.status === 409 && data && data.conflict === 'possible_duplicate') {
+        setRecordDisabled(false);
+        if (await confirmDuplicate(data.duplicates)) {
+          await saveRecord({ allowDuplicate: true });
+        }
+        return;
+      }
+      if (resp.status === 409 && data && data.conflict === 'stale_revision') {
+        setMessage(
+          `This finding changed after the editor opened (current revision ${Number(data.current_revision || 0)}). Close and reopen it before saving.`,
+          { error: true },
+        );
+        const onConflict = state.options && typeof state.options.onConflict === 'function'
+          ? state.options.onConflict
+          : null;
+        if (onConflict) await onConflict(data, state.finding);
+        return;
+      }
+      if (!resp.ok) throw new Error(data && data.error ? data.error : `HTTP ${resp.status}`);
+      const finding = data && data.finding && typeof data.finding === 'object'
+        ? data.finding
+        : state.finding;
+      const onSaved = state.options && typeof state.options.onSaved === 'function'
+        ? state.options.onSaved
+        : null;
+      close();
+      if (onSaved) await onSaved(finding, data);
+    } catch (err) {
+      setMessage(err.message || 'Could not save the finding.', { error: true });
+    } finally {
+      if (isOpen() && state.mode === 'record') {
+        setRecordDisabled(!(state.options && state.options.canEdit !== false));
+      }
+    }
+  }
+
   function bindOnce() {
     if (state.bound) return;
     state.bound = true;
@@ -476,6 +802,11 @@ let DarklabFindingTriageEditor = null;
     });
     el('finding-triage-close')?.addEventListener('click', close);
     el('finding-triage-cancel')?.addEventListener('click', close);
+    el('finding-record-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      saveRecord();
+    });
+    el('finding-record-cancel')?.addEventListener('click', close);
     el('finding-triage-merge-toggle')?.addEventListener('click', () => {
       const panel = el('finding-triage-merge-panel');
       const toggle = el('finding-triage-merge-toggle');
@@ -512,6 +843,7 @@ let DarklabFindingTriageEditor = null;
     bindOnce();
     state.finding = finding;
     state.options = options || {};
+    setMode('triage');
     const subtitle = el('finding-triage-subtitle');
     if (subtitle) subtitle.textContent = titleForFinding(finding);
     setMessage('Loading...');
@@ -536,11 +868,54 @@ let DarklabFindingTriageEditor = null;
     }
   }
 
+  async function openRecord(options = {}) {
+    const overlay = el('finding-triage-overlay');
+    if (!overlay || !el('finding-record-form')) {
+      throw new Error('Finding editor is not available.');
+    }
+    const projectId = text(options && options.projectId);
+    if (!projectId) throw new Error('Project is missing its identifier.');
+    const finding = options && options.finding && typeof options.finding === 'object'
+      ? options.finding
+      : null;
+    if (finding && text(finding.origin) !== 'manual') {
+      throw new Error('Only assessor-authored findings can be edited here.');
+    }
+    if (finding && !text(finding.id)) throw new Error('Finding is missing its identifier.');
+    bindOnce();
+    state.finding = finding;
+    state.options = options || {};
+    setMode('record');
+    const targets = populateRecord(finding, state.options);
+    if (!finding && !targets.length) {
+      state.finding = null;
+      state.options = {};
+      throw new Error('Create and confirm a Project target before adding a finding.');
+    }
+    const subtitle = el('finding-triage-subtitle');
+    if (subtitle) subtitle.textContent = finding
+      ? titleForFinding(finding)
+      : 'Record an issue against a confirmed Project target.';
+    setMessage(state.options.canEdit === false
+      ? 'View-only team members can read finding details but cannot save changes.'
+      : '');
+    overlay.classList.remove('u-hidden');
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    bindOpenChrome(overlay);
+    setRecordDisabled(state.options.canEdit === false);
+    global.setTimeout(() => {
+      const focusTarget = finding ? el('finding-record-title') : el('finding-record-target');
+      focusTarget?.focus({ preventScroll: true });
+    }, 0);
+  }
+
   DarklabFindingTriageEditor = {
     compactTriage,
     close,
     isOpen,
     open,
+    openRecord,
     verificationStatusLabel,
     verificationStatusTone,
     verificationStates: VERIFICATION_STATES.slice(),
@@ -551,6 +926,7 @@ const compactTriage = DarklabFindingTriageEditor.compactTriage;
 const closeFindingTriageEditor = DarklabFindingTriageEditor.close;
 const isFindingTriageEditorOpen = DarklabFindingTriageEditor.isOpen;
 const openFindingTriageEditor = DarklabFindingTriageEditor.open;
+const openFindingRecordEditor = DarklabFindingTriageEditor.openRecord;
 const verificationStatusLabel = DarklabFindingTriageEditor.verificationStatusLabel;
 const verificationStatusTone = DarklabFindingTriageEditor.verificationStatusTone;
 const verificationStates = DarklabFindingTriageEditor.verificationStates;
@@ -561,6 +937,7 @@ export {
   compactTriage,
   isFindingTriageEditorOpen,
   openFindingTriageEditor,
+  openFindingRecordEditor,
   verificationStatusLabel,
   verificationStatusTone,
   verificationStates,

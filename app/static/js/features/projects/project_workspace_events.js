@@ -96,6 +96,45 @@ let exportedDarklabProjectWorkspaceEvents = null;
       return null;
     }
 
+    function projectFindingTargets(projectId) {
+      const summary = ctx.projectSummary?.(projectId);
+      const targets = ctx.projectTargetItems?.(summary);
+      return Array.isArray(targets) ? targets : [];
+    }
+
+    async function refreshManualFindingSurface(projectId, message) {
+      ctx.invalidateProjectFindings?.(projectId);
+      ctx.invalidateProjectOverview?.(projectId);
+      await ctx.loadProjectFindings?.(projectId);
+      ctx.renderProjectExplorer?.();
+      if (mobileView() === 'detail' && workspaceTab() === 'findings' && selectedProjectId() === projectId) {
+        ctx.renderProjectMobileDetail?.();
+      }
+      if (message) ctx.setProjectWorkspaceMessage(message);
+    }
+
+    async function openManualFindingEditor(projectId, finding = null) {
+      const findingTriageEditor = ctx.findingTriageEditor || importedFindingTriageEditor;
+      if (!findingTriageEditor || typeof findingTriageEditor.openRecord !== 'function') {
+        throw new Error('Finding editor is not available.');
+      }
+      await findingTriageEditor.openRecord({
+        projectId,
+        finding,
+        targets: projectFindingTargets(projectId),
+        canEdit: activeTeamScopeCan('triage_findings'),
+        onSaved: async () => {
+          await refreshManualFindingSurface(
+            projectId,
+            finding ? 'Finding updated.' : 'Finding created.',
+          );
+        },
+        onConflict: async () => {
+          await refreshManualFindingSurface(projectId, 'Finding details refreshed after a conflicting edit.');
+        },
+      });
+    }
+
     function actionLogDetails(action, button) {
       return {
         event: 'PROJECT_WORKSPACE_ACTION_FAILED',
@@ -1159,6 +1198,25 @@ let exportedDarklabProjectWorkspaceEvents = null;
           if (!target) throw new Error('Target is missing its details.');
           ctx.setProjectWorkspaceMessage('');
           ctx.openProjectTargetEditor(projectId, target);
+          return;
+        } else if (action === 'create-manual-finding') {
+          if (!activeTeamScopeCan('triage_findings')) {
+            denyTeamScopeAction('create team findings');
+            return;
+          }
+          ctx.setProjectWorkspaceMessage('');
+          await openManualFindingEditor(projectId);
+          return;
+        } else if (action === 'edit-manual-finding') {
+          if (!activeTeamScopeCan('triage_findings')) {
+            denyTeamScopeAction('edit team findings');
+            return;
+          }
+          const findingId = String(btn.dataset.findingId || '');
+          const finding = projectFindingById(projectId, findingId);
+          if (!finding) throw new Error('Finding is missing its details.');
+          ctx.setProjectWorkspaceMessage('');
+          await openManualFindingEditor(projectId, finding);
           return;
         } else if (action === 'edit-finding-metadata') {
           const findingId = String(btn.dataset.findingId || '');

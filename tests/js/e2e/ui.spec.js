@@ -1307,6 +1307,63 @@ test.describe('project workspace modal', () => {
     ))).toBe(true)
   })
 
+  test('creates and edits an assessor-authored Project finding', async ({ page }) => {
+    test.setTimeout(45_000)
+    await openProjectsModal(page)
+
+    const projectId = await createActiveProject(page, `Manual Finding ${Date.now()}`)
+    await page.locator('#project-explorer-body [data-project-action="new-target"]').click()
+    await expectProjectTargetEditorReady(page, 'Add Target')
+    await fillProjectTargetEditor(page, {
+      value: 'manual-finding.playwright.example',
+      labels: '',
+      notes: '',
+    })
+    await page.locator('#project-target-submit').click()
+    await expect(page.locator('#project-target-editor-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await switchProjectTab(page, 'findings')
+    await page.locator('[data-project-action="create-manual-finding"]').click()
+    const editor = page.locator('#finding-triage-overlay')
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await expect(editor.locator('#finding-triage-title')).toHaveText('CREATE FINDING')
+    await expect(editor.locator('#finding-record-target')).toContainText('manual-finding.playwright.example')
+    await editor.locator('#finding-record-title').fill('Public administration endpoint')
+    await editor.locator('#finding-record-severity').selectOption('high')
+    await editor.locator('#finding-record-confidence').selectOption('high')
+    await editor.locator('#finding-record-summary').fill('The administration endpoint is reachable without authentication.')
+    await editor.locator('#finding-record-cwes').fill('CWE-306')
+    await editor.locator('#finding-record-references').fill('https://example.test/advisories/admin-endpoint')
+    const createResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/findings`
+    })
+    await editor.locator('#finding-record-save').click()
+    expect((await createResponse).status()).toBe(201)
+    await expect(editor).not.toHaveClass(/\bopen\b/)
+
+    const findingRow = page.locator('.project-explorer-item').filter({ hasText: 'Public administration endpoint' })
+    await expect(findingRow).toBeVisible()
+    await expect(findingRow.locator('[data-project-action="edit-manual-finding"]')).toBeVisible()
+    await findingRow.locator('[data-project-action="edit-manual-finding"]').click()
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await expect(editor.locator('#finding-triage-title')).toHaveText('EDIT FINDING')
+    await expect(editor.locator('#finding-record-target')).toBeDisabled()
+    await editor.locator('#finding-record-title').fill('Public administration endpoint allows anonymous access')
+    const updateResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'PATCH'
+        && url.pathname.startsWith(`/projects/${projectId}/findings/`)
+    })
+    await editor.locator('#finding-record-save').click()
+    expect((await updateResponse).ok()).toBe(true)
+    await expect(editor).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('.project-explorer-item').filter({
+      hasText: 'Public administration endpoint allows anonymous access',
+    })).toBeVisible()
+  })
+
   test('creates, previews, applies, and shows an Atlas auto-promote rule', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     const sessionId = await browserSessionId(page)

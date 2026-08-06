@@ -96,11 +96,20 @@ async function openFindingTriageEditor(finding, options = {}) {
   return editor.open(finding, options);
 }
 
+async function openFindingRecordEditor(options = {}) {
+  const editor = await loadEditor();
+  if (!editor || typeof editor.openRecord !== 'function') {
+    throw new Error('Finding editor is not available.');
+  }
+  return editor.openRecord(options);
+}
+
 const DarklabFindingTriageEditor = {
   compactTriage,
   close: closeFindingTriageEditor,
   isOpen: isFindingTriageEditorOpen,
   open: openFindingTriageEditor,
+  openRecord: openFindingRecordEditor,
   verificationStatusLabel,
   verificationStatusTone,
   verificationStates: VERIFICATION_STATES.slice(),
@@ -112,6 +121,7 @@ export {
   compactTriage,
   isFindingTriageEditorOpen,
   openFindingTriageEditor,
+  openFindingRecordEditor,
   verificationStatusLabel,
   verificationStatusTone,
   VERIFICATION_STATES as verificationStates,

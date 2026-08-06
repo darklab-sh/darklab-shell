@@ -1158,13 +1158,13 @@
 
 <div id="finding-triage-overlay" class="modal-overlay mobile-sheet-overlay finding-triage-overlay u-hidden" aria-hidden="true">
   <div id="finding-triage-modal" class="modal-card modal-card-compact mobile-sheet-surface finding-triage-modal" role="dialog" aria-modal="true" aria-labelledby="finding-triage-title">
-    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close finding triage editor"></div>
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close finding editor"></div>
     <div class="faq-header">
       <div>
         <span class="faq-title" id="finding-triage-title">FINDING TRIAGE</span>
         <div class="project-entity-editor-subtitle" id="finding-triage-subtitle"></div>
       </div>
-      <button type="button" id="finding-triage-close" class="close-btn finding-triage-close" aria-label="Close finding triage editor">✕</button>
+      <button type="button" id="finding-triage-close" class="close-btn finding-triage-close" aria-label="Close finding editor">✕</button>
     </div>
     <div id="finding-triage-message" class="project-workspace-message finding-triage-message u-hidden" role="status" aria-live="polite"></div>
     <form id="finding-triage-form" class="project-target-editor-form finding-triage-form">
@@ -1220,6 +1220,86 @@
       <div class="modal-actions">
         <button type="button" id="finding-triage-cancel" class="btn btn-secondary btn-compact finding-triage-cancel">Cancel</button>
         <button type="submit" id="finding-triage-save" class="btn btn-primary btn-compact">Save triage</button>
+      </div>
+    </form>
+    <form id="finding-record-form" class="project-target-editor-form finding-triage-form finding-record-form u-hidden">
+      <section class="finding-triage-section" aria-labelledby="finding-record-basics-label">
+        <span class="project-workspace-section-label" id="finding-record-basics-label">Finding</span>
+        <div class="finding-record-grid">
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Target</span>
+            <select id="finding-record-target" class="form-select form-control-compact" aria-label="Finding target"></select>
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Title</span>
+            <input id="finding-record-title" class="form-control form-control-compact" type="text" maxlength="240" placeholder="What did you find?" autocomplete="off" autocapitalize="sentences" spellcheck="true" required>
+          </label>
+          <label class="project-target-edit-field">
+            <span>Severity</span>
+            <select id="finding-record-severity" class="form-select form-control-compact" aria-label="Finding severity">
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Info</option>
+            </select>
+          </label>
+          <label class="project-target-edit-field">
+            <span>Confidence</span>
+            <select id="finding-record-confidence" class="form-select form-control-compact" aria-label="Finding confidence">
+              <option value="unknown">Unknown</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Summary</span>
+            <textarea id="finding-record-summary" class="form-control form-control-compact nice-scroll" maxlength="4000" rows="3" placeholder="A short explanation of the issue" autocomplete="off" autocapitalize="sentences" spellcheck="true"></textarea>
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Impact</span>
+            <textarea id="finding-record-impact" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="3" placeholder="What could happen if this is exploited?" autocomplete="off" autocapitalize="sentences" spellcheck="true"></textarea>
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Reproduction steps</span>
+            <textarea id="finding-record-reproduction" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="4" placeholder="How to reproduce or verify the issue" autocomplete="off" autocapitalize="sentences" spellcheck="true"></textarea>
+          </label>
+        </div>
+      </section>
+      <section id="finding-record-evidence-section" class="finding-triage-section u-hidden" aria-labelledby="finding-record-evidence-label">
+        <span class="project-workspace-section-label" id="finding-record-evidence-label">Evidence to attach</span>
+        <div id="finding-record-evidence" class="finding-record-evidence"></div>
+        <p class="finding-triage-guidance-note">Review this context before saving. The original source stays authoritative.</p>
+      </section>
+      <section class="finding-triage-section" aria-labelledby="finding-record-technical-label">
+        <span class="project-workspace-section-label" id="finding-record-technical-label">Technical details</span>
+        <div class="finding-record-grid">
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>CVE IDs</span>
+            <input id="finding-record-cves" class="form-control form-control-compact" type="text" placeholder="CVE-2026-12345, CVE-2026-23456" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>CWE IDs</span>
+            <input id="finding-record-cwes" class="form-control form-control-compact" type="text" placeholder="CWE-306, CWE-862" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          </label>
+          <label class="project-target-edit-field">
+            <span>CVSS vector</span>
+            <input id="finding-record-cvss-vector" class="form-control form-control-compact" type="text" maxlength="256" placeholder="CVSS:3.1/AV:N/..." autocomplete="off" autocapitalize="characters" spellcheck="false">
+          </label>
+          <label class="project-target-edit-field">
+            <span>CVSS score</span>
+            <input id="finding-record-cvss-score" class="form-control form-control-compact" type="number" min="0" max="10" step="0.1" placeholder="0.0" inputmode="decimal">
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>References</span>
+            <textarea id="finding-record-references" class="form-control form-control-compact nice-scroll" rows="3" placeholder="One HTTP(S) URL per line" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></textarea>
+          </label>
+        </div>
+      </section>
+      <div class="modal-actions">
+        <button type="button" id="finding-record-cancel" class="btn btn-secondary btn-compact finding-triage-cancel">Cancel</button>
+        <button type="submit" id="finding-record-save" class="btn btn-primary btn-compact">Create finding</button>
       </div>
     </form>
   </div>

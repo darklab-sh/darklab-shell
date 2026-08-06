@@ -93,9 +93,14 @@ let exportedDarklabProjectFindings = null;
         buttonGroup.className = 'project-finding-row-button-group';
         const triage = ctx.makeProjectButton('Triage', 'edit-finding-triage', projectId);
         triage.dataset.findingId = String(finding.id || '');
-        const edit = ctx.makeProjectButton('Edit', 'edit-finding-metadata', projectId);
-        edit.dataset.findingId = String(finding.id || '');
-        buttonGroup.append(triage, edit);
+        const metadata = ctx.makeProjectButton('Metadata', 'edit-finding-metadata', projectId);
+        metadata.dataset.findingId = String(finding.id || '');
+        buttonGroup.append(triage, metadata);
+        if (String(finding.origin || '') === 'manual') {
+          const edit = ctx.makeProjectButton('Edit finding', 'edit-manual-finding', projectId);
+          edit.dataset.findingId = String(finding.id || '');
+          buttonGroup.appendChild(edit);
+        }
         if (finding.run_id) {
           const seeRun = ctx.makeProjectButton('See in run', 'open-finding-run-details', projectId);
           seeRun.dataset.findingId = String(finding.id || '');
@@ -186,6 +191,12 @@ let exportedDarklabProjectFindings = null;
         wrap.appendChild(btn);
       });
       tools.appendChild(wrap);
+      const create = ctx.makeProjectButton('Create finding', 'create-manual-finding', projectId, 'primary');
+      if (!activeTeamScopeCan('triage_findings')) {
+        create.disabled = true;
+        create.title = teamScopeDeniedMessage('create team findings');
+      }
+      tools.appendChild(create);
       if (boardAllowed) {
         const open = ctx.makeProjectButton('Open board', 'open-findings-board', projectId);
         open.classList.add('project-finding-board-open');

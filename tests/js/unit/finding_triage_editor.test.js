@@ -45,6 +45,36 @@ function mountEditor() {
           <button type="button" id="finding-triage-cancel"></button>
           <button type="submit" id="finding-triage-save"></button>
         </form>
+        <form id="finding-record-form" class="u-hidden">
+          <select id="finding-record-target" class="form-select"></select>
+          <input id="finding-record-title">
+          <select id="finding-record-severity" class="form-select">
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="info">Info</option>
+          </select>
+          <select id="finding-record-confidence" class="form-select">
+            <option value="unknown">Unknown</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+          <textarea id="finding-record-summary"></textarea>
+          <textarea id="finding-record-impact"></textarea>
+          <textarea id="finding-record-reproduction"></textarea>
+          <input id="finding-record-cves">
+          <input id="finding-record-cwes">
+          <input id="finding-record-cvss-vector">
+          <input id="finding-record-cvss-score">
+          <textarea id="finding-record-references"></textarea>
+          <section id="finding-record-evidence-section" class="u-hidden">
+            <div id="finding-record-evidence"></div>
+          </section>
+          <button type="button" id="finding-record-cancel"></button>
+          <button type="submit" id="finding-record-save"></button>
+        </form>
       </div>
     </div>
   `
@@ -376,5 +406,155 @@ describe('finding triage editor', () => {
     expect(document.getElementById('finding-triage-verification-notes').value).toBe('Keep this note separate.')
     expect(document.getElementById('finding-triage-merge-summary').textContent).toContain('2 explicitly merged')
     expect(saved).toHaveBeenCalled()
+  })
+
+  it('creates a reviewed manual finding with normalized details and bounded source evidence', async () => {
+    const saved = vi.fn()
+    const apiFetch = vi.fn((url, options = {}) => Promise.resolve(jsonResponse({
+      finding: {
+        id: 'finding-manual',
+        origin: 'manual',
+        manual_revision: 1,
+        ...JSON.parse(options.body),
+      },
+    }, 201)))
+    window.apiFetch = apiFetch
+    loadEditor()
+
+    await window.DarklabFindingTriageEditor.openRecord({
+      projectId: 'project-1',
+      targets: [
+        { id: 'target-confirmed', type: 'domain', value: 'app.example.test', review_state: 'confirmed' },
+        { id: 'target-pending', type: 'domain', value: 'pending.example.test', review_state: 'pending' },
+      ],
+      evidence: [{
+        evidence_type: 'run_line',
+        evidence_id: 'run-1',
+        line_number: 7,
+        snippet: '<script>alert(1)</script> admin endpoint',
+      }],
+      onSaved: saved,
+    })
+
+    expect(document.getElementById('finding-record-form').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('finding-triage-form').classList.contains('u-hidden')).toBe(true)
+    expect([...document.getElementById('finding-record-target').options].map(option => option.value)).toEqual([
+      'target-confirmed',
+    ])
+    expect(document.getElementById('finding-record-evidence').textContent).toContain('<script>alert(1)</script>')
+    expect(document.getElementById('finding-record-evidence').querySelector('script')).toBeNull()
+
+    document.getElementById('finding-record-title').value = 'Unauthenticated admin console'
+    document.getElementById('finding-record-severity').value = 'high'
+    document.getElementById('finding-record-confidence').value = 'high'
+    document.getElementById('finding-record-summary').value = 'The console is public.'
+    document.getElementById('finding-record-impact').value = 'Anyone can administer the service.'
+    document.getElementById('finding-record-reproduction').value = 'Open the endpoint without credentials.'
+    document.getElementById('finding-record-cves').value = 'cve-2026-12345, CVE-2026-12345'
+    document.getElementById('finding-record-cwes').value = 'cwe-306'
+    document.getElementById('finding-record-cvss-vector').value = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
+    document.getElementById('finding-record-cvss-score').value = '9.8'
+    document.getElementById('finding-record-references').value = 'javascript:alert(1)'
+    document.getElementById('finding-record-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(document.getElementById('finding-triage-message').textContent).toContain('safe HTTP(S) URLs')
+    expect(apiFetch).not.toHaveBeenCalled()
+
+    document.getElementById('finding-record-references').value = 'https://example.test/advisory\nhttps://example.test/advisory'
+    document.getElementById('finding-record-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises(10)
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/findings', expect.objectContaining({ method: 'POST' }))
+    const payload = JSON.parse(apiFetch.mock.calls[0][1].body)
+    expect(payload).toEqual({
+      target_id: 'target-confirmed',
+      title: 'Unauthenticated admin console',
+      severity: 'high',
+      summary: 'The console is public.',
+      impact: 'Anyone can administer the service.',
+      reproduction_steps: 'Open the endpoint without credentials.',
+      confidence: 'high',
+      cve_ids: ['CVE-2026-12345'],
+      cwe_ids: ['CWE-306'],
+      cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+      cvss_score: 9.8,
+      references: ['https://example.test/advisory'],
+      evidence: [{
+        evidence_type: 'run_line',
+        evidence_id: 'run-1',
+        line_number: 7,
+        snippet: '<script>alert(1)</script> admin endpoint',
+      }],
+      allow_duplicate: false,
+    })
+    expect(saved).toHaveBeenCalledWith(expect.objectContaining({ id: 'finding-manual' }), expect.any(Object))
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('requires explicit duplicate override and rejects stale manual-finding edits', async () => {
+    let createCalls = 0
+    const onConflict = vi.fn()
+    const apiFetch = vi.fn((url, options = {}) => {
+      const payload = JSON.parse(options.body)
+      if (options.method === 'POST') {
+        createCalls += 1
+        if (!payload.allow_duplicate) {
+          return Promise.resolve(jsonResponse({
+            conflict: 'possible_duplicate',
+            duplicates: [{ id: 'existing-1', title: 'Existing admin finding' }],
+          }, 409))
+        }
+        return Promise.resolve(jsonResponse({ finding: { id: 'finding-override', origin: 'manual' } }, 201))
+      }
+      return Promise.resolve(jsonResponse({
+        conflict: 'stale_revision',
+        current_revision: 4,
+      }, 409))
+    })
+    window.apiFetch = apiFetch
+    window.showConfirm = vi.fn(() => Promise.resolve('override'))
+    loadEditor()
+
+    const targets = [{ id: 'target-1', type: 'domain', value: 'app.example.test', review_state: 'confirmed' }]
+    await window.DarklabFindingTriageEditor.openRecord({ projectId: 'project-1', targets })
+    document.getElementById('finding-record-title').value = 'Possible duplicate'
+    document.getElementById('finding-record-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises(16)
+
+    expect(createCalls).toBe(2)
+    expect(window.showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }))
+    expect(JSON.parse(apiFetch.mock.calls[1][1].body).allow_duplicate).toBe(true)
+
+    await window.DarklabFindingTriageEditor.openRecord({
+      projectId: 'project-1',
+      targets,
+      finding: {
+        id: 'finding-manual',
+        origin: 'manual',
+        target_id: 'target-1',
+        title: 'Manual finding',
+        severity: 'medium',
+        confidence: 'unknown',
+        manual_revision: 3,
+      },
+      onConflict,
+    })
+    expect(document.getElementById('finding-record-target').disabled).toBe(true)
+    document.getElementById('finding-record-title').value = 'Updated manual finding'
+    document.getElementById('finding-record-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises(10)
+
+    const patchCall = apiFetch.mock.calls.find(([, options]) => options.method === 'PATCH')
+    expect(JSON.parse(patchCall[1].body)).toEqual(expect.objectContaining({
+      expected_revision: 3,
+      title: 'Updated manual finding',
+    }))
+    expect(document.getElementById('finding-triage-message').textContent).toContain('current revision 4')
+    expect(onConflict).toHaveBeenCalled()
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
   })
 })

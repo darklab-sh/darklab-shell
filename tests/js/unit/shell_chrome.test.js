@@ -2475,6 +2475,87 @@ describe('shell chrome project workspace', () => {
     )
   })
 
+  it('opens the shared manual finding editor for Project create and edit actions', async () => {
+    const finding = {
+      id: 'finding-manual',
+      origin: 'manual',
+      title: 'Manual finding',
+      target_id: 'target-1',
+      manual_revision: 2,
+    }
+    const editor = {
+      openRecord: vi.fn(() => Promise.resolve()),
+    }
+    const sandbox = {
+      activeTeamScopeCan: () => true,
+      DarklabFindingTriageEditor: editor,
+      teamScopeDeniedMessage: action => `Denied: ${action}`,
+    }
+    const projectEvents = new Function(
+      'globalThis',
+      'window',
+      `${PROJECT_WORKSPACE_EVENTS_SRC}\nreturn exportedDarklabProjectWorkspaceEvents;`,
+    )(sandbox, sandbox)
+    const invalidateProjectFindings = vi.fn()
+    const invalidateProjectOverview = vi.fn()
+    const loadProjectFindings = vi.fn(() => Promise.resolve())
+    const renderProjectExplorer = vi.fn()
+    const setProjectWorkspaceMessage = vi.fn()
+    const summary = {
+      project: { id: 'project-1', name: 'Project' },
+      targets: [{ id: 'target-1', type: 'domain', value: 'app.example.test', review_state: 'confirmed' }],
+    }
+    const controller = projectEvents.createProjectWorkspaceEventsController({
+      findingTriageEditor: editor,
+      filteredProjectFindings: () => [finding],
+      invalidateProjectFindings,
+      invalidateProjectOverview,
+      loadProjectFindings,
+      mobileView: () => 'list',
+      projectFindingItems: () => [finding],
+      projectSummary: () => summary,
+      projectTargetItems: value => value.targets,
+      renderProjectExplorer,
+      selectedProjectId: () => 'project-1',
+      setProjectWorkspaceMessage,
+      workspaceTab: () => 'findings',
+    })
+    const createButton = document.createElement('button')
+    createButton.dataset.projectAction = 'create-manual-finding'
+    createButton.dataset.projectId = 'project-1'
+
+    await controller.handleActionButton(createButton)
+
+    expect(editor.openRecord).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      finding: null,
+      targets: summary.targets,
+      canEdit: true,
+      onSaved: expect.any(Function),
+      onConflict: expect.any(Function),
+    }))
+    const createOptions = editor.openRecord.mock.calls.at(-1)[0]
+    await createOptions.onSaved()
+    expect(invalidateProjectFindings).toHaveBeenCalledWith('project-1')
+    expect(invalidateProjectOverview).toHaveBeenCalledWith('project-1')
+    expect(loadProjectFindings).toHaveBeenCalledWith('project-1')
+    expect(renderProjectExplorer).toHaveBeenCalled()
+    expect(setProjectWorkspaceMessage).toHaveBeenCalledWith('Finding created.')
+
+    const editButton = document.createElement('button')
+    editButton.dataset.projectAction = 'edit-manual-finding'
+    editButton.dataset.projectId = 'project-1'
+    editButton.dataset.findingId = finding.id
+    await controller.handleActionButton(editButton)
+
+    expect(editor.openRecord).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      finding,
+      targets: summary.targets,
+      canEdit: true,
+    }))
+  })
+
   it('opens the mobile project compare stepper and runs a baseline label comparison', async () => {
     document.body.classList.add('mobile-terminal-mode')
     const fetchAndRenderHistoryComparison = vi.fn()
@@ -4136,6 +4217,8 @@ describe('shell chrome project workspace', () => {
                 target_id: 'target-1',
                 severity: 'high',
                 review_state: 'new',
+                origin: 'manual',
+                manual_revision: 1,
               },
               {
                 id: 'finding-2',
@@ -4641,7 +4724,9 @@ describe('shell chrome project workspace', () => {
     const findingActionGroup = findingTriageButton?.closest('.project-finding-row-button-group')
     expect(window.DarklabFindingTriageEditor?.open).toEqual(expect.any(Function))
     expect(findingTriageButton).not.toBeNull()
-    expect(findingActionGroup?.querySelector('[data-project-action="edit-finding-metadata"]')).not.toBeNull()
+    expect(findingActionGroup?.querySelector('[data-project-action="edit-finding-metadata"]')?.textContent).toBe('Metadata')
+    expect(findingActionGroup?.querySelector('[data-project-action="edit-manual-finding"]')?.textContent).toBe('Edit finding')
+    expect(document.querySelector('[data-project-action="create-manual-finding"]')?.textContent).toBe('Create finding')
     expect(findingTriageButton.disabled).toBe(false)
     expect(findingTriageButton.dataset.projectId).toBe('project-1')
     const triageOpenSpy = vi.spyOn(window.DarklabFindingTriageEditor, 'open')
