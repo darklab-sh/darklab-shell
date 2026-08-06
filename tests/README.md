@@ -182,7 +182,7 @@ Cross-cycle reconciliation coverage pins exact check, target, and evidence-rule 
 
 Assessor-authored finding coverage pins strict fields and references, confirmed-target and owner scope, bounded initial line evidence, CVE risk links, duplicate overrides, stable identity, optimistic edits, safe actor metadata, session migration, cleanup, audit records, OpenAPI, and real SQLite/Postgres behavior.
 
-HTTP assessment profile coverage pins personal/team and Project scope, exact confirmed hosts, Secret and Files references without stored credential values, team-viewer redaction, Secret-management permissions, optimistic revisions, duplicate and quota rejection, archived-Project behavior, safe audit/log fields, session migration, browser/API CRUD, OpenAPI, and matching SQLite/Postgres schema shapes.
+HTTP assessment profile coverage pins personal/team and Project scope, exact confirmed hosts, Secret and Files references without stored credential values, team-viewer redaction, Secret-management permissions, optimistic revisions, duplicate and quota rejection, archived-Project behavior, safe audit/log fields, session migration, browser/API CRUD, OpenAPI, and matching SQLite/Postgres schema shapes. Protected-launch coverage also pins last-moment revision and scope checks, HTTPx/Katana/Nuclei adapters, redacted commands, scanner-user handoff, private file modes, output masking, cleanup after failure and completion, bounded startup recovery, unsupported-feature rejection, broker handoff, and privacy-safe audit records.
 
 ### Vitest
 

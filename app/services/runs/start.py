@@ -6,38 +6,17 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
 from typing import Any, Callable
 
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected, attach_started_run  # noqa: E501,F401
 from services.runs import private_data
+from services.runs.start_context import (
+    cleanup_started_run_material,
+    display_missing_runtime,
+    real_start_kwargs,
+)
+from services.runs.start_contracts import BrokeredRunStartResult, RunStartHandlers
 from services.teams.scope import OwnerContext, owner_context_for_scope
-
-
-@dataclass(frozen=True)
-class RunStartHandlers:
-    resolves_exact_special_builtin_command: Callable[[str], bool]
-    execute_builtin_command: Callable[..., tuple[list[dict[str, Any]], int]]
-    history_safe_command_for_storage: Callable[[str], str]
-    brokered_synthetic_run: Callable[..., str]
-    prepare_command_input: Callable[..., Any]
-    resolve_builtin_command: Callable[[str], object]
-    filter_builtin_command_events: Callable[..., list[dict[str, Any]]]
-    prepare_real_command: Callable[..., Any]
-    runtime_missing_command_message: Callable[[str], str]
-    start_real_command_process: Callable[..., Any]
-    publish_run_event: Callable[[str, str, dict[str, Any]], Any]
-    brokered_real_run_worker: Callable[..., Any]
-    workspace_notice_lines: Callable[[Any], list[str]]
-    workspace_artifacts_from_validation: Callable[[Any, str], list[dict[str, Any]]]
-
-
-@dataclass(frozen=True)
-class BrokeredRunStartResult:
-    run_id: str
-    cmd_type: str
-    status: str
-    exit_code: int | None = None
 
 def start_brokered_run(
     *,
@@ -53,9 +32,11 @@ def start_brokered_run(
     workspace_cwd: str = "",
     link_project_id: str = "",
     private_values: tuple[str, ...] = (),
+    trusted_execution_args: tuple[str, ...] = (),
     thread_name_prefix: str = "run-broker",
     run_created_hook: Callable[[str, object | None], None] | None = None,
     run_finalized_hook: Callable[[str, dict[str, Any]], None] | None = None,
+    run_cleanup_hook: Callable[[], None] | None = None,
 ) -> BrokeredRunStartResult:
     safe_command = str(display_command or original_command)
     safe_private_values = private_data.normalized_private_values(private_values)
@@ -142,8 +123,10 @@ def start_brokered_run(
         safe_private_values,
         team_id=team_id,
         owner_context=owner_context,
+        trusted_execution_args=trusted_execution_args,
     )
     if prepared_real.missing_runtime:
+        cleanup_started_run_material(run_cleanup_hook)
         if link_project_id:
             raise RunStartRejected(
                 "project_link_not_supported",
@@ -157,7 +140,7 @@ def start_brokered_run(
             safe_command,
             session_id,
             client_ip,
-            [{"type": "output", "text": handlers.runtime_missing_command_message(private_data.display_missing_runtime(prepared_real))}],  # noqa: E501
+            [{"type": "output", "text": handlers.runtime_missing_command_message(display_missing_runtime(prepared_real))}],  # noqa: E501
             127,
             **synthetic_kwargs,
             **({"run_created_hook": run_created_hook} if run_created_hook else {}),
@@ -174,7 +157,7 @@ def start_brokered_run(
         session_id,
         client_ip,
         prepared_real,
-        **private_data.real_start_kwargs(
+        **real_start_kwargs(
             owner_client_id=owner_client_id,
             owner_tab_id=owner_tab_id,
             team_id=team_id,
@@ -215,6 +198,7 @@ def start_brokered_run(
             "owner_tab_id": owner_tab_id,
             "link_project_id": link_project_id,
             "run_finalized_hook": run_finalized_hook,
+            **({"run_cleanup_hook": run_cleanup_hook} if run_cleanup_hook else {}),
         },
         name=f"{thread_name_prefix}-{started.run_id[:8]}",
         daemon=True,

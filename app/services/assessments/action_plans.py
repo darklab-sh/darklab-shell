@@ -7,36 +7,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shlex
-from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
+from services.assessments.command_plans import command_plan
 from services.projects.scope import shared_owner_where
 
 
 PLAN_SCHEMA_VERSION = 1
 _SUPPORTED_POLICIES = frozenset({"safe", "standard"})
-_COMMAND_TARGET_TYPES = {
-    "ping": frozenset({"domain", "ip"}),
-    "nmap": frozenset({"domain", "ip"}),
-    "dnsrecon": frozenset({"domain"}),
-    "httpx": frozenset({"domain", "ip", "url"}),
-    "katana": frozenset({"domain", "url"}),
-    "nuclei": frozenset({"domain", "ip", "url"}),
-}
-
-
-@dataclass(frozen=True)
-class _CommandPlan:
-    command: str
-    boundary: str
-    request_limit: int | None
-    time_limit_seconds: int | None
-    credential_use: str = "none"
-
-
 class AssessmentActionError(ValueError):
     """A stable assessment-action route error."""
 
@@ -44,63 +24,6 @@ class AssessmentActionError(ValueError):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
-
-
-def _command_plan(
-    action_id: str,
-    target_type: str,
-    target_value: str,
-) -> _CommandPlan | None:
-    if target_type not in _COMMAND_TARGET_TYPES.get(action_id, frozenset()):
-        return None
-    quoted = shlex.quote(target_value)
-    web_target = target_value
-    if target_type == "domain" and action_id in {"httpx", "katana", "nuclei"}:
-        web_target = f"https://{target_value}"
-    quoted_web = shlex.quote(web_target)
-    plans = {
-        "ping": _CommandPlan(
-            f"ping -c 4 -W 2 {quoted}",
-            "Four probes against one approved host.",
-            4,
-            10,
-        ),
-        "nmap": _CommandPlan(
-            f"nmap -sT -sV -Pn --top-ports 100 --max-retries 2 "
-            f"--host-timeout 10m {quoted}",
-            "One approved host, the top 100 TCP ports, and a 10-minute host timeout.",
-            100,
-            600,
-        ),
-        "dnsrecon": _CommandPlan(
-            f"dnsrecon -d {quoted} -t std",
-            "Standard DNS record checks for one approved domain; no brute force or zone walk.",
-            None,
-            None,
-        ),
-        "httpx": _CommandPlan(
-            f"httpx -u {quoted_web} -status-code -title -tech-detect -silent",
-            "One approved host or URL with response metadata only.",
-            None,
-            None,
-        ),
-        "katana": _CommandPlan(
-            f"katana -u {quoted_web} -d 1 -ct 5 -timeout 10 -silent",
-            "One approved web target, crawl depth 1, concurrency 5, and "
-            "10-second request timeouts.",
-            None,
-            None,
-        ),
-        "nuclei": _CommandPlan(
-            f"nuclei -u {quoted_web} -severity high,critical -rl 10 -c 5 "
-            "-timeout 10 -retries 1 -silent",
-            "One approved target, high/critical templates, 10 requests per second, "
-            "concurrency 5, and one retry.",
-            None,
-            None,
-        ),
-    }
-    return plans.get(action_id)
 
 
 def current_assessment_target(
@@ -172,6 +95,9 @@ def build_assessment_action_plan(
     project_id: str,
     *,
     finding_id: str = "",
+    http_profile: Mapping[str, Any] | None = None,
+    http_profile_web_target: str = "",
+    http_profile_unavailable_reason: str = "",
 ) -> dict[str, Any]:
     """Build one bounded plan from a persisted check and its frozen profile."""
     frozen = _frozen_check(row)
@@ -180,7 +106,7 @@ def build_assessment_action_plan(
     policy_level = str(row["policy_level"] or "")
     launchable = True
     unavailable_reason = ""
-    command_plan = None
+    selected_command = None
     if str(row["project_status"] or "") == "archived":
         launchable = False
         unavailable_reason = "Assessment runs cannot start from an archived Project."
@@ -222,9 +148,18 @@ def build_assessment_action_plan(
     elif policy_level not in _SUPPORTED_POLICIES:
         launchable = False
         unavailable_reason = "The saved action has an unsupported execution policy."
+    elif http_profile_unavailable_reason:
+        launchable = False
+        unavailable_reason = http_profile_unavailable_reason
     elif target:
-        command_plan = _command_plan(action_id, target["type"], target["value"])
-        if command_plan is None:
+        selected_command = command_plan(
+            action_id,
+            target["type"],
+            target["value"],
+            web_target=http_profile_web_target,
+            http_profile=http_profile,
+        )
+        if selected_command is None:
             launchable = False
             unavailable_reason = (
                 "No bounded command template is available for this saved action."
@@ -251,7 +186,10 @@ def build_assessment_action_plan(
         },
         "target": public_target,
         "policy_level": policy_level,
-        "http_profile": {"name": "", "credential_use": "none"},
+        "http_profile": dict(http_profile) if http_profile else {
+            "name": "",
+            "credential_use": "none",
+        },
         "scope": {
             "kind": "project_target",
             "project_id": project_id,
@@ -261,14 +199,14 @@ def build_assessment_action_plan(
         "bounds": {
             "target_count": 1,
             "fan_out": 1,
-            "request_limit": command_plan.request_limit if command_plan else None,
+            "request_limit": selected_command.request_limit if selected_command else None,
             "time_limit_seconds": (
-                command_plan.time_limit_seconds if command_plan else None
+                selected_command.time_limit_seconds if selected_command else None
             ),
-            "credential_use": command_plan.credential_use if command_plan else "none",
-            "summary": command_plan.boundary if command_plan else "",
+            "credential_use": selected_command.credential_use if selected_command else "none",
+            "summary": selected_command.boundary if selected_command else "",
         },
-        "display_command": command_plan.command if command_plan else "",
+        "display_command": selected_command.command if selected_command else "",
         "launchable": launchable,
         "unavailable_reason": unavailable_reason,
         "requires_confirmation": True,
@@ -287,7 +225,7 @@ def confirm_assessment_action_plan(
             "invalid_body",
             "Request body must be a JSON object.",
         )
-    allowed = {"confirmed", "plan_digest", "workspace_cwd"}
+    allowed = {"confirmed", "http_profile_id", "plan_digest", "workspace_cwd"}
     if set(data) - allowed:
         raise AssessmentActionError(
             "unsupported_fields",

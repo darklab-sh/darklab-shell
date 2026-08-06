@@ -14,43 +14,9 @@ from services.assessments.action_plans import (
     confirm_assessment_action_plan as confirm_action_plan,
     current_assessment_target,
 )
-from services.projects.contracts import ProjectWorkspaceNotFound
-from services.projects.scope import shared_owner_where
-
-
-def _load_action_row(
-    conn: Any,
-    session_id: str,
-    team_id: str,
-    project_id: str,
-    assessment_id: str,
-    check_id: str,
-) -> Any:
-    owner_sql, owner_params = shared_owner_where(
-        session_id,
-        team_id=team_id,
-        table_alias="p",
-    )
-    sql = "".join((
-        "SELECT c.id AS check_id, c.assessment_id, c.check_key, ",
-        "c.target_entity_id, c.target_type, c.target_value, c.policy_level, ",
-        "c.recommended_action_key, a.profile_key, a.profile_version, ",
-        "a.profile_snapshot, a.status AS assessment_status, ",
-        "p.status AS project_status FROM project_assessment_checks c ",
-        "JOIN project_assessments a ON a.id = c.assessment_id ",
-        "JOIN projects p ON p.id = a.project_id WHERE ",
-        owner_sql,
-        " AND p.id = ? AND a.id = ? AND c.id = ?",
-    ))
-    row = conn.execute(
-        sql,
-        (*owner_params, project_id, assessment_id, check_id),
-    ).fetchone()
-    if not row:
-        raise ProjectWorkspaceNotFound(
-            "assessment check was not found in this project scope"
-        )
-    return row
+from services.assessments.http_profile_execution import HttpProfileExecutionError
+from services.assessments.recommended_action_profiles import selected_http_profile_context
+from services.assessments.recommended_action_queries import load_action_row
 
 
 def get_recommended_action_plan(
@@ -60,10 +26,12 @@ def get_recommended_action_plan(
     check_id: str,
     *,
     team_id: str = "",
+    actor_member_id: str = "",
+    http_profile_id: str = "",
 ) -> dict[str, Any]:
     """Return the current bounded plan for one saved Assessment check."""
     with get_db_connect()() as conn:
-        row = _load_action_row(
+        row = load_action_row(
             conn,
             session_id,
             team_id,
@@ -78,7 +46,24 @@ def get_recommended_action_plan(
             project_id,
             row,
         )
-        return build_assessment_action_plan(row, target, project_id)
+        selected_profile, profile_target, profile_error = selected_http_profile_context(
+            conn,
+            row,
+            target,
+            session_id,
+            project_id,
+            http_profile_id,
+            team_id=team_id,
+            actor_member_id=actor_member_id,
+        )
+        return build_assessment_action_plan(
+            row,
+            target,
+            project_id,
+            http_profile=selected_profile,
+            http_profile_web_target=profile_target,
+            http_profile_unavailable_reason=profile_error,
+        )
 
 
 def confirm_recommended_action_plan(
@@ -89,8 +74,14 @@ def confirm_recommended_action_plan(
     data: Any,
     *,
     team_id: str = "",
+    actor_member_id: str = "",
 ) -> dict[str, Any]:
     """Re-read and confirm a saved Assessment check recommendation."""
+    profile_id = (
+        str(data.get("http_profile_id") or "").strip()
+        if isinstance(data, dict)
+        else ""
+    )
     return confirm_action_plan(
         data,
         lambda: get_recommended_action_plan(
@@ -99,12 +90,15 @@ def confirm_recommended_action_plan(
             assessment_id,
             check_id,
             team_id=team_id,
+            actor_member_id=actor_member_id,
+            http_profile_id=profile_id,
         ),
     )
 
 
 __all__ = [
     "AssessmentActionError",
+    "HttpProfileExecutionError",
     "confirm_recommended_action_plan",
     "get_recommended_action_plan",
 ]

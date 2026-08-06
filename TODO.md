@@ -112,7 +112,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 2 — Add assessment routes, API contracts, audit, and observability
 
 - [ ] Finish the assessment-specific audit and safe-log inventory as later features land:
-  - Audit HTTP-profile use when that surface lands. Recommended-action launch, cycle lifecycle, manual-state, evidence-link, manual-finding, and retest-disposition events already use the shared audit boundary.
+  - HTTP-profile launches now use the shared audit boundary and record only the profile id, role, credential-use categories, and action metadata. Recommended-action launch, cycle lifecycle, manual-state, evidence-link, manual-finding, and retest-disposition events use the same boundary.
   - Log ids, owner kind, Project id, profile/check keys, policy level, state transitions, counts, durations, and error classes. Never log credentials, authorization headers, cookies, client-certificate contents, raw request bodies, provider payloads, finding evidence bodies, or complete target lists.
   - Add low-cardinality metrics for active cycles, check-state transitions, derived-evidence matches, action launches/failures, parser results, and connector job outcomes. Do not use target values, Project ids, commands, CVEs, or workflow ids as metric labels.
   - Apply existing request/rate-limit conventions to mutation and launch routes. Bound recalculation work and emit a clear warning when a safety or quota limit rejects work.
@@ -123,12 +123,12 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 5 — Add reusable, secret-backed HTTP assessment profiles
 
-- [ ] Add a protected execution adapter rather than rendering raw credentials into visible commands:
+- [x] Add the protected execution foundation and reviewed HTTPx, Katana, and Nuclei adapters rather than rendering raw credentials into visible commands:
   - Revalidate target scope, team membership, capability, secret availability, Files ownership, and profile enabled state immediately before every run.
   - Generate short-lived scanner-readable config/request material inside a private run directory or use safe environment injection where the tool supports it; delete temporary material after launch/finalization and recovery cleanup.
   - Show a redacted display command in the terminal, History, Run Details, workflow execution state, audit, metrics, notifications, and errors. Apply the existing secret masking pass to tool output as a second line of defense.
-  - Add adapters for Curl/HTTPx, Katana, Nuclei, Dalfox, SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported profile features instead of dropping authentication or scope controls silently.
   - Never allow a profile to broaden a Project target into an unrelated hostname through redirects, schema servers, callback URLs, or proxy behavior without a visible allowlist decision.
+- [ ] Extend protected execution to Curl, Dalfox, SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported tools or profile features instead of dropping authentication or scope controls silently.
 - [ ] Add the HTTP-profile editor inside the Project Assessment surface:
   - Reuse Options → Secrets for creating/replacing secret values and show only secret names/availability in the Project editor.
   - Make credential-sensitive actions explicit, show which role a run will use, and prevent viewers or users lacking `MANAGE_SECRETS` from learning whether an unreferenced secret exists.

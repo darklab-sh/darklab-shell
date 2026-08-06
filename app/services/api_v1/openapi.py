@@ -9,7 +9,7 @@ from copy import deepcopy
 
 from config import APP_VERSION
 from services.api_v1 import openapi_assessments as assessments, openapi_manual_findings as manual
-from services.api_v1.openapi_assessment_actions import assessment_action_paths
+from services.api_v1.openapi_assessment_actions import assessment_action_paths, assessment_action_schemas
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.api_v1.openapi_cve_risk import cve_risk_schemas
 from services.api_v1.openapi_findings import finding_schemas
@@ -596,6 +596,7 @@ OPENAPI_SPEC: dict = {
             **assessments.assessment_schemas(),
             **(
                 finding_evidence_schemas()
+                | assessment_action_schemas()
                 | http_profile_schemas()
                 | manual.manual_finding_schemas()
                 | verification_action_schemas()

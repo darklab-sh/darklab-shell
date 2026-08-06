@@ -267,6 +267,32 @@
         ],
         "type": "object"
       },
+      "AssessmentActionLaunchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "http_profile_id": {
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmed",
+          "plan_digest"
+        ],
+        "type": "object"
+      },
       "AssessmentCategoryRollup": {
         "additionalProperties": false,
         "properties": {
@@ -4026,7 +4052,8 @@
             "properties": {
               "credential_use": {
                 "enum": [
-                  "none"
+                  "none",
+                  "protected_http_profile"
                 ],
                 "type": "string"
               },
@@ -4079,13 +4106,44 @@
           "http_profile": {
             "additionalProperties": false,
             "properties": {
+              "concurrency": {
+                "minimum": 1,
+                "type": "integer"
+              },
               "credential_use": {
-                "enum": [
-                  "none"
-                ],
+                "oneOf": [
+                  {
+                    "enum": [
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "id": {
                 "type": "string"
               },
               "name": {
+                "type": "string"
+              },
+              "rate_limit_per_second": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "role": {
                 "type": "string"
               }
             },
@@ -11234,6 +11292,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Optional Project HTTP profile to apply. Selecting one requires Secret-management permission and never returns protected values.",
+            "in": "query",
+            "name": "http_profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11363,7 +11430,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FindingVerificationActionLaunchRequest"
+                "$ref": "#/components/schemas/AssessmentActionLaunchRequest"
               }
             }
           },

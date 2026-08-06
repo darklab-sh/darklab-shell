@@ -7,6 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1.openapi_assessment_action_profile import (
+    assessment_action_path_param,
+    assessment_http_profile_parameter,
+)
+
 
 def _ref(name: str) -> dict[str, str]:
     return {"$ref": f"#/components/schemas/{name}"}
@@ -19,22 +24,29 @@ def _response(description: str, schema: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _path_param(name: str, description: str) -> dict[str, Any]:
+def assessment_action_schemas() -> dict[str, Any]:
     return {
-        "name": name,
-        "in": "path",
-        "required": True,
-        "description": description,
-        "schema": {"type": "string"},
+        "AssessmentActionLaunchRequest": {
+            "type": "object",
+            "required": ["confirmed", "plan_digest"],
+            "properties": {
+                "confirmed": {"type": "boolean", "enum": [True]},
+                "http_profile_id": {"type": "string"},
+                "plan_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+                "workspace_cwd": {"type": "string"},
+            },
+            "additionalProperties": False,
+        }
     }
 
 
 def assessment_action_paths() -> dict[str, Any]:
     parameters = [
-        _path_param("project_id", "Project id"),
-        _path_param("assessment_id", "Assessment cycle id"),
-        _path_param("check_id", "Assessment check id"),
+        assessment_action_path_param("project_id", "Project id"),
+        assessment_action_path_param("assessment_id", "Assessment cycle id"),
+        assessment_action_path_param("check_id", "Assessment check id"),
     ]
+    preview_parameters = [*parameters, assessment_http_profile_parameter()]
     errors = {
         "400": _response("Invalid assessment action request", _ref("ApiError")),
         "401": _response("Missing, invalid, or revoked token", _ref("ApiError")),
@@ -49,7 +61,7 @@ def assessment_action_paths() -> dict[str, Any]:
         "/projects/{project_id}/assessments/{assessment_id}/checks/"
         "{check_id}/recommended-action": {
             "get": {
-                "parameters": parameters,
+                "parameters": preview_parameters,
                 "responses": {
                     "200": _response(
                         "Current guarded assessment action plan",
@@ -64,7 +76,7 @@ def assessment_action_paths() -> dict[str, Any]:
                     "required": True,
                     "content": {
                         "application/json": {
-                            "schema": _ref("FindingVerificationActionLaunchRequest")
+                            "schema": _ref("AssessmentActionLaunchRequest")
                         }
                     },
                 },

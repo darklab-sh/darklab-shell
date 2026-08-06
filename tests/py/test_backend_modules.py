@@ -30873,3 +30873,142 @@ class TestSecretsVault:
 
         assert exc_info.value.env_name == "SHODAN_API_KEY"
         assert exc_info.value.existing_name == "SHODAN_PRIMARY"
+
+
+class TestAssessmentHttpProfileExecution:
+    def test_private_runtime_material_is_mode_limited_and_stale_safe(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from services.assessments import http_profile_runtime as runtime
+
+        monkeypatch.setattr(runtime, "_scanner_user_exists", lambda: False)
+        monkeypatch.setattr(runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
+        cfg = build_test_config({"command_timeout_seconds": 10})
+        old_material = runtime.PrivateHttpRunMaterial(cfg=cfg)
+        old_file = old_material.write_bytes("headers.txt", b"X-Test: protected\n")
+        recent_material = runtime.PrivateHttpRunMaterial(cfg=cfg)
+        recent_file = recent_material.write_bytes("secrets.yaml", b"static: []\n")
+        now = time.time()
+        os.utime(old_material.path, (now - 4000, now - 4000))
+
+        assert stat.S_IMODE(old_material.root.stat().st_mode) == 0o730
+        assert stat.S_IMODE(old_material.path.stat().st_mode) == 0o700
+        assert stat.S_IMODE(old_file.stat().st_mode) == 0o600
+        assert stat.S_IMODE(recent_file.stat().st_mode) == 0o600
+        assert runtime.cleanup_stale_http_profile_runtime(
+            cfg=cfg,
+            now_timestamp=now,
+        ) == 1
+        assert not old_material.path.exists()
+        assert recent_material.path.exists()
+        recent_material.cleanup()
+        assert not recent_material.path.exists()
+
+    def test_http_profile_adapters_keep_scope_and_policy_in_explicit_argv(self):
+        from services.assessments.command_plans import command_plan
+        from services.assessments.http_profile_execution import (
+            _private_file_values,
+            _scope_arguments,
+            _unsupported_reason,
+        )
+
+        summary = {
+            "credential_use": ["headers"],
+            "rate_limit_per_second": 4,
+            "concurrency": 2,
+        }
+        katana = command_plan(
+            "katana",
+            "url",
+            "https://app.example/admin",
+            http_profile=summary,
+        )
+        assert katana is not None
+        assert katana.command.endswith("-H [protected]")
+        assert "-d 1 -dr -c 2 -rl 4 -timeout 10" in katana.command
+        profile = {
+            "include_paths": ["/admin"],
+            "exclude_paths": ["/admin/logout"],
+        }
+        katana_scope = _scope_arguments(profile, "katana", "https://app.example/admin")
+        assert katana_scope[:2] == ["-fs", "fqdn"]
+        assert katana_scope[2::2] == ["-cs", "-cos"]
+        assert r"\[2001:db8::1\]" in _scope_arguments(
+            profile, "katana", "https://[2001:db8::1]/admin"
+        )[3]
+        assert _scope_arguments(profile, "nuclei", "https://app.example") == ["-dr", "-ni"]
+        assert "proxy allowlist" in _unsupported_reason({"proxy_url": "https://proxy.example"}, "httpx")
+        assert "client certificate" in _unsupported_reason(
+            {"file_refs": {"client_certificate": "cert.pem"}},
+            "katana",
+        )
+        assert _private_file_values(
+            "client_key",
+            b"-----BEGIN PRIVATE KEY-----\nunique-private-key-material\n-----END PRIVATE KEY-----\n",
+        ) == ["unique-private-key-material"]
+
+    def test_private_runtime_uses_scanner_owned_handoff_in_container_mode(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from services.assessments import http_profile_runtime as runtime
+
+        calls = []
+
+        def scanner_run(arguments, *, input_bytes=None):
+            calls.append((list(arguments), input_bytes))
+            path = Path(arguments[-1])
+            if arguments[0] == "mkdir":
+                path.mkdir(mode=0o700)
+            elif arguments[0] == "tee":
+                path.write_bytes(input_bytes or b"")
+            elif arguments[0] == "chmod":
+                os.chmod(path, int(arguments[1], 8))
+            elif arguments[0] == "rm":
+                for child in path.iterdir():
+                    child.unlink()
+                path.rmdir()
+
+        monkeypatch.setattr(runtime, "_scanner_user_exists", lambda: True)
+        monkeypatch.setattr(runtime, "_scanner_run", scanner_run)
+        monkeypatch.setattr(runtime, "_SCANNER_RUNTIME_PARENT", tmp_path)
+        material = runtime.PrivateHttpRunMaterial(cfg=build_test_config())
+        protected_file = material.write_bytes("secrets.yaml", b"static: []\n")
+
+        assert material.root.parent == tmp_path
+        assert calls[0][0][:3] == ["mkdir", "-m", "700"]
+        assert calls[1] == (["tee", str(protected_file)], b"static: []\n")
+        assert calls[2][0][:2] == ["chmod", "600"]
+        material.cleanup()
+        assert calls[-1][0][:3] == ["rm", "-rf", "--"]
+        assert not material.path.exists()
+
+    def test_trusted_execution_arguments_are_appended_after_validation_only(self):
+        from services.runs.contracts import RunPreparationError
+        from services.runs.lifecycle import PreparedRealCommand
+        from services.runs.start_context import append_trusted_execution_args
+
+        prepared = PreparedRealCommand(
+            registry_command="httpx -u https://app.example",
+            execution_command="httpx -u https://app.example",
+            command="httpx -u https://app.example",
+            rewrite_notice=None,
+            validation=None,
+            missing_runtime=None,
+            display_missing_runtime=None,
+            env_overrides={},
+            secret_env_names=[],
+        )
+        protected_path = "/private/run-a/secrets profile.yaml"
+        appended = append_trusted_execution_args(prepared, ("-sf", protected_path))
+
+        assert appended.registry_command == prepared.registry_command
+        assert appended.execution_command == (
+            "httpx -u https://app.example -sf '/private/run-a/secrets profile.yaml'"
+        )
+        assert appended.command == appended.execution_command
+        with pytest.raises(RunPreparationError, match="arguments are invalid"):
+            append_trusted_execution_args(prepared, ("-H", "unsafe\nheader"))

@@ -1710,6 +1710,131 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     assert plan["display_command"] not in json.dumps(audit)
 
 
+def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
+    monkeypatch,
+    tmp_path,
+):
+    from services.assessments import http_profile_runtime
+
+    client = get_client()
+    token = _token(client)
+    project = _create_project(client, token, name="Protected HTTP launch")
+    _entity_id, _run_id = _seed_assessment_target(token, project["id"])
+    assessment = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(token),
+        json={"profile_key": "web", "title": "Protected web checks"},
+    ).get_json()
+    check = next(
+        item for item in assessment["checks"]["checks"]
+        if item["check_key"] == "http_profile"
+    )
+    secret_value = "protected-profile-value"
+    stored = client.post(
+        "/session/secrets",
+        headers={"X-Session-ID": token},
+        json={"name": "ASSESSMENT_HTTP_TOKEN", "value": secret_value},
+    )
+    assert stored.status_code == 201
+    profiles_path = f"/api/v1/projects/{project['id']}/http-profiles"
+    profile_response = client.post(
+        profiles_path,
+        headers=_headers(token),
+        json={
+            "name": "Authenticated application",
+            "role": "user",
+            "base_url": f"https://{check['target_value']}",
+            "allowed_hosts": [check["target_value"]],
+            "headers": [{
+                "name": "X-Assessment-Token",
+                "secret_name": "ASSESSMENT_HTTP_TOKEN",
+            }],
+            "rate_limit_per_second": 3,
+            "concurrency": 2,
+        },
+    )
+    assert profile_response.status_code == 201
+    profile_id = profile_response.get_json()["profile"]["id"]
+    action_path = (
+        f"/api/v1/projects/{project['id']}/assessments/"
+        f"{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
+    )
+    preview = client.get(
+        action_path,
+        headers=_headers(token),
+        query_string={"http_profile_id": profile_id},
+    )
+    assert preview.status_code == 200
+    plan = preview.get_json()["plan"]
+    assert plan["http_profile"] == {
+        "id": profile_id,
+        "name": "Authenticated application",
+        "role": "user",
+        "credential_use": ["headers"],
+        "enabled": True,
+        "revision": 1,
+        "rate_limit_per_second": 3,
+        "concurrency": 2,
+    }
+    assert plan["bounds"]["credential_use"] == "protected_http_profile"
+    assert plan["display_command"].endswith("-sf [protected]")
+    assert secret_value not in preview.get_data(as_text=True)
+
+    monkeypatch.setattr(http_profile_runtime, "_scanner_user_exists", lambda: False)
+    monkeypatch.setattr(http_profile_runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
+    started = SimpleNamespace(run_id="run_protected_http", status="running")
+    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
+         mock.patch(
+             "blueprints.api_v1._start_brokered_run_service",
+             return_value=started,
+         ) as start_run, \
+         mock.patch("blueprints.api_v1.log.info") as info_log:
+        launched = client.post(
+            action_path,
+            headers=_headers(token),
+            json={
+                "confirmed": True,
+                "http_profile_id": profile_id,
+                "plan_digest": plan["plan_digest"],
+            },
+        )
+
+    assert launched.status_code == 202
+    start_kwargs = start_run.call_args.kwargs
+    assert start_kwargs["original_command"].endswith("-rl 3 -threads 2")
+    assert "[protected]" not in start_kwargs["original_command"]
+    assert secret_value not in start_kwargs["original_command"]
+    assert start_kwargs["display_command"] == plan["display_command"]
+    assert start_kwargs["trusted_execution_args"][:1] == ("-sf",)
+    secret_path = Path(start_kwargs["trusted_execution_args"][1])
+    assert secret_path.is_file()
+    assert stat.S_IMODE(secret_path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(secret_path.stat().st_mode) == 0o600
+    secret_document = secret_path.read_text(encoding="utf-8")
+    assert secret_value in secret_document
+    assert check["target_value"] in secret_document
+    assert secret_value in start_kwargs["private_values"]
+    assert str(secret_path) in start_kwargs["private_values"]
+    assert callable(start_kwargs["run_cleanup_hook"])
+    serialized_launch = launched.get_data(as_text=True)
+    assert secret_value not in serialized_launch
+    launch_log = next(
+        call for call in info_log.call_args_list
+        if call.args == ("API_PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
+    )
+    assert secret_value not in json.dumps(launch_log.kwargs["extra"])
+    assert str(secret_path) not in json.dumps(launch_log.kwargs["extra"])
+    audit = _audit_event_rows(
+        target_id=check["id"],
+        event_type="assessment.action_launch",
+    )
+    assert audit[-1]["details"]["profile_id"] == profile_id
+    assert secret_value not in json.dumps(audit[-1])
+    assert str(secret_path) not in json.dumps(audit[-1])
+    start_kwargs["run_cleanup_hook"]()
+    assert not secret_path.parent.exists()
+
+
 def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
     client = get_client()
     token = _token(client)
@@ -2443,6 +2568,34 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
     )
     assert viewer_create.status_code == 403
     assert viewer_create.get_json()["error"]["code"] == "team_forbidden"
+    team_assessment = client.post(
+        f"/api/v1/projects/{team_project_id}/assessments",
+        headers=owner_headers,
+        json={"profile_key": "web", "title": "Team protected web checks"},
+    ).get_json()
+    team_http_check = next(
+        item for item in team_assessment["checks"]["checks"]
+        if item["check_key"] == "http_profile"
+    )
+    team_action_path = (
+        f"/api/v1/projects/{team_project_id}/assessments/"
+        f"{team_assessment['assessment']['id']}/checks/{team_http_check['id']}/"
+        "recommended-action"
+    )
+    owner_profile_preview = client.get(
+        team_action_path,
+        headers=owner_headers,
+        query_string={"http_profile_id": team_profile_id},
+    )
+    viewer_profile_preview = client.get(
+        team_action_path,
+        headers=viewer_headers,
+        query_string={"http_profile_id": team_profile_id},
+    )
+    assert owner_profile_preview.status_code == 200
+    assert owner_profile_preview.get_json()["plan"]["http_profile"]["id"] == team_profile_id
+    assert viewer_profile_preview.status_code == 403
+    assert viewer_profile_preview.get_json()["error"]["code"] == "team_forbidden"
 
     delete_response = client.delete(detail_route, headers=_headers(token))
     assert delete_response.get_json() == {"ok": True, "removed": True}
@@ -5645,9 +5798,18 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert paths[action_path]["get"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/FindingVerificationActionPreview"}
+    action_preview_params = {
+        parameter["name"]: parameter
+        for parameter in paths[action_path]["get"]["parameters"]
+    }
+    assert "http_profile_id" in action_preview_params
     assert paths[action_path]["post"]["requestBody"]["content"]["application/json"][
         "schema"
-    ] == {"$ref": "#/components/schemas/FindingVerificationActionLaunchRequest"}
+    ] == {"$ref": "#/components/schemas/AssessmentActionLaunchRequest"}
+    assert "http_profile_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
+    assert schemas["FindingVerificationActionPlan"]["properties"]["bounds"]["properties"][
+        "credential_use"
+    ]["enum"] == ["none", "protected_http_profile"]
 
     detail_params = {
         parameter["name"]

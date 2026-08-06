@@ -240,6 +240,26 @@ An active check accepts `blocked`, `skipped`, or `not_applicable` together with 
 
 The server verifies that the source belongs to the same owner and Project and satisfies the frozen evidence rule. It never trusts caller-supplied owner, target, rule, or source metadata. Complete or archive a cycle with `PATCH` and a `status` value; archived cycles can be previewed and deleted, while their original runs, findings, entities, and artifacts remain intact.
 
+For a supported HTTPx, Katana, or Nuclei check, an API client with Secret-management permission can select one of the Project's enabled HTTP profiles while previewing the action:
+
+```http
+GET /api/v1/projects/prj_123/assessments/asmt_123/checks/asmc_123/recommended-action?http_profile_id=htp_123
+```
+
+The plan reports the profile id, name, role, enabled state, revision, request limits, and credential-use categories. It never returns Secret values, private Files paths, or generated scanner material. The displayed command uses `[protected]` placeholders and the plan digest covers the selected profile and its current revision.
+
+Send the same profile id with the confirmed digest to start the action:
+
+```json
+{
+  "confirmed": true,
+  "http_profile_id": "htp_123",
+  "plan_digest": "..."
+}
+```
+
+Launch rechecks Project scope, team capability, profile revision, Secret and Files availability, and the tool's supported profile features before it creates any private material. Unsupported proxy, login-capture, redirect, or certificate combinations return a recoverable error instead of running without the saved protection. HTTPx and Nuclei receive a short-lived protected secrets file, Katana receives a short-lived header file, and supported Nuclei client certificates stay in the same private run directory until cleanup.
+
 Lifecycle conflicts and quota failures return `409`; invalid profiles, filters, states, transitions, or evidence return `400`; cross-scope records return `404`; and team permission failures return `403`. Responses and the OpenAPI contract omit personal session ids, profile file paths, secrets, protected HTTP context, private workspace paths, and stored command variables.
 
 The bundled CLI exposes the same read and manual-state contract:

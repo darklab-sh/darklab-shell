@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1.openapi_assessment_action_profile import (
+    assessment_http_profile_schema,
+)
+
 
 def _ref(name: str) -> dict[str, str]:
     return {"$ref": f"#/components/schemas/{name}"}
@@ -73,15 +77,7 @@ def verification_action_schemas() -> dict[str, Any]:
                     "type": "string",
                     "enum": ["safe", "standard", "intrusive", "destructive"],
                 },
-                "http_profile": {
-                    "type": "object",
-                    "required": ["name", "credential_use"],
-                    "properties": {
-                        "name": {"type": "string"},
-                        "credential_use": {"type": "string", "enum": ["none"]},
-                    },
-                    "additionalProperties": False,
-                },
+                "http_profile": assessment_http_profile_schema(),
                 "scope": {
                     "type": "object",
                     "required": ["kind", "project_id", "target_count", "fan_out"],
@@ -104,7 +100,10 @@ def verification_action_schemas() -> dict[str, Any]:
                         "fan_out": {"type": "integer", "enum": [1]},
                         "request_limit": {"type": "integer", "nullable": True},
                         "time_limit_seconds": {"type": "integer", "nullable": True},
-                        "credential_use": {"type": "string", "enum": ["none"]},
+                        "credential_use": {
+                            "type": "string",
+                            "enum": ["none", "protected_http_profile"],
+                        },
                         "summary": {"type": "string"},
                     },
                     "additionalProperties": False,
