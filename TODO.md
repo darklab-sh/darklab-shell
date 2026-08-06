@@ -123,12 +123,8 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 5 — Add reusable, secret-backed HTTP assessment profiles
 
-- [ ] Add Project-scoped HTTP profiles for authenticated and role-aware testing:
-  - Store a display name, base URL/scope roots, allowed hosts, headers by name, cookie/bearer/basic-auth secret references, client-certificate/key references, proxy settings, login/refresh workflow reference, CSRF/token capture rules, include/exclude paths, rate/concurrency limits, and enabled state.
-  - Store only references to app-managed Secrets and validated Files paths; never copy secret values into the HTTP-profile table, Project export, assessment snapshot, workflow input map, browser storage, logs, notifications, audit details, or API responses.
-  - Support multiple roles such as anonymous, user, and administrator so an assessment can compare authorization behavior without overwriting one shared cookie jar.
-  - Revalidate target scope, team membership, capability, secret availability, Files ownership, and profile enabled state immediately before every run.
 - [ ] Add a protected execution adapter rather than rendering raw credentials into visible commands:
+  - Revalidate target scope, team membership, capability, secret availability, Files ownership, and profile enabled state immediately before every run.
   - Generate short-lived scanner-readable config/request material inside a private run directory or use safe environment injection where the tool supports it; delete temporary material after launch/finalization and recovery cleanup.
   - Show a redacted display command in the terminal, History, Run Details, workflow execution state, audit, metrics, notifications, and errors. Apply the existing secret masking pass to tool output as a second line of defense.
   - Add adapters for Curl/HTTPx, Katana, Nuclei, Dalfox, SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported profile features instead of dropping authentication or scope controls silently.

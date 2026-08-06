@@ -70,6 +70,7 @@ from . import (
     v0057_manual_findings,
     v0058_finding_verification_dispositions,
     v0059_assessment_finding_reconciliation,
+    v0060_project_http_profiles,
 )
 
 _ = baseline
@@ -134,4 +135,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0057_manual_findings.MIGRATION,
     v0058_finding_verification_dispositions.MIGRATION,
     v0059_assessment_finding_reconciliation.MIGRATION,
+    v0060_project_http_profiles.MIGRATION,
 )

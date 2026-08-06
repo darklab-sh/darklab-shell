@@ -6106,6 +6106,55 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         return resp.get_json()["target"]
 
+    def test_project_http_profiles_support_reference_only_browser_crud(self):
+        client = get_client()
+        session_id = self._session_id("project-http-profile")
+        other_session = self._session_id("project-http-profile-other")
+        project = self._create_project(client, session_id, name="HTTP Profiles")
+        target = "browser-http-profile.example.com"
+        self._create_target(client, session_id, project["id"], value=target)
+        route = f"/projects/{project['id']}/http-profiles"
+
+        created_response = client.post(
+            route,
+            headers={"X-Session-ID": session_id},
+            json={
+                "name": "Anonymous baseline",
+                "role": "anonymous",
+                "base_url": f"https://{target}",
+                "include_paths": ["/public"],
+                "rate_limit_per_second": 3,
+                "concurrency": 1,
+            },
+        )
+        assert created_response.status_code == 201
+        created = created_response.get_json()["profile"]
+        assert created["protected_references_visible"] is True
+        assert created["reference_counts"]["secret_refs"] == 0
+
+        detail_route = f"{route}/{created['id']}"
+        listed = client.get(route, headers={"X-Session-ID": session_id})
+        detail = client.get(detail_route, headers={"X-Session-ID": session_id})
+        foreign = client.get(detail_route, headers={"X-Session-ID": other_session})
+        updated = client.patch(
+            detail_route,
+            headers={"X-Session-ID": session_id},
+            json={"revision": created["revision"], "enabled": False},
+        )
+        assert listed.get_json()["profiles"][0]["id"] == created["id"]
+        assert detail.get_json()["profile"]["id"] == created["id"]
+        assert foreign.status_code == 404
+        assert updated.status_code == 200
+        assert updated.get_json()["profile"]["revision"] == 2
+        assert updated.get_json()["profile"]["enabled"] is False
+
+        removed = client.delete(
+            detail_route,
+            headers={"X-Session-ID": session_id},
+        )
+        assert removed.get_json() == {"ok": True, "removed": True}
+        assert client.get(detail_route, headers={"X-Session-ID": session_id}).status_code == 404
+
     def test_project_overview_route_returns_empty_contract_and_404_for_foreign_project(self):
         client = get_client()
         session_id = self._session_id("project-overview-empty")

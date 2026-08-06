@@ -6611,6 +6611,7 @@ class TestPostgresMigrations:
         "project_assessments",
         "project_assessment_checks",
         "project_assessment_evidence",
+        "project_http_profiles",
     )
 
     @staticmethod
@@ -6725,6 +6726,7 @@ class TestPostgresMigrations:
             "0057",
             "0058",
             "0059",
+            "0060",
         ]
         for table_name in (
             "runs",
@@ -7022,10 +7024,21 @@ class TestPostgresMigrations:
         assert {"evidence_type", "evidence_id", "source_state", "match_rule_version"}.issubset(
             inventory.tables["project_assessment_evidence"].columns
         )
+        assert {
+            "project_id",
+            "role_key",
+            "allowed_hosts_json",
+            "secret_refs_json",
+            "file_refs_json",
+            "enabled",
+            "revision",
+        }.issubset(inventory.tables["project_http_profiles"].columns)
         assert "idx_runs_session_started" in inventory.indexes
         assert "idx_entities_host_entity" in inventory.indexes
         assert "idx_project_assessments_active_project" in inventory.indexes
         assert "idx_project_assessment_evidence_source" in inventory.indexes
+        assert "idx_project_http_profiles_project_name" in inventory.indexes
+        assert "idx_project_http_profiles_project_enabled" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad", "runs_ai", "runs_ad"}.issubset(inventory.triggers)
         assert set(SQLITE_BACKEND_ARTIFACTS).issubset(set(inventory.fts_artifacts))
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in inventory.tables["run_output_summary_status"].constraints
@@ -7049,10 +7062,21 @@ class TestPostgresMigrations:
         assert {"evidence_type", "evidence_id", "source_state", "match_rule_version"}.issubset(
             inventory.tables["project_assessment_evidence"].columns
         )
+        assert {
+            "project_id",
+            "role_key",
+            "allowed_hosts_json",
+            "secret_refs_json",
+            "file_refs_json",
+            "enabled",
+            "revision",
+        }.issubset(inventory.tables["project_http_profiles"].columns)
         assert "idx_runs_session_started" in inventory.indexes
         assert "idx_entities_host_entity" in inventory.indexes
         assert "idx_project_assessments_active_project" in inventory.indexes
         assert "idx_project_assessment_evidence_source" in inventory.indexes
+        assert "idx_project_http_profiles_project_name" in inventory.indexes
+        assert "idx_project_http_profiles_project_enabled" in inventory.indexes
         assert "idx_runs_command_trgm" in inventory.indexes
         assert "idx_entities_canonical_value_trgm" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad"}.issubset(inventory.triggers)
@@ -7077,6 +7101,8 @@ class TestPostgresMigrations:
         assert "idx_runs_session_started" in manifest.indexes
         assert "idx_project_assessments_active_project" in manifest.indexes
         assert "idx_project_assessment_evidence_source" in manifest.indexes
+        assert "idx_project_http_profiles_project_name" in manifest.indexes
+        assert "idx_project_http_profiles_project_enabled" in manifest.indexes
         assert "idx_runs_command_trgm" not in manifest.indexes
         assert "findings_ad" in manifest.triggers
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in manifest.constraints["run_output_summary_status"]
@@ -7649,7 +7675,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0060",
+            "0061",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7701,7 +7727,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0059"
+        assert rows[-1]["version"] == "0060"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8158,7 +8184,7 @@ class TestPostgresMigrations:
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
             "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056", "0057", "0058",
-            "0059",
+            "0059", "0060",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8182,7 +8208,8 @@ class TestPostgresMigrations:
         assert "0057" in conn.applied_versions
         assert "0058" in conn.applied_versions
         assert "0059" in conn.applied_versions
-        assert conn.commit_count == 21
+        assert "0060" in conn.applied_versions
+        assert conn.commit_count == 22
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8335,7 +8362,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0060",
+            "0061",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8360,9 +8387,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0060"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0061"]
         assert table_exists is not None
-        assert "0060" in versions
+        assert "0061" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -15335,6 +15362,14 @@ class TestDataAccessLayerServiceCoverage:
                 ("prj_session_service", source_session, now, now),
             )
             conn.execute(
+                "INSERT INTO project_http_profiles "
+                "(id, session_id, project_id, name, name_key, role_key, base_url, "
+                "created_by_session_id, updated_by_session_id, created_at, updated_at) "
+                "VALUES ('htp_session_service', ?, 'prj_session_service', "
+                "'Anonymous', 'anonymous', 'anonymous', 'https://darklab.sh', ?, ?, ?, ?)",
+                (source_session, source_session, source_session, now, now),
+            )
+            conn.execute(
                 "INSERT INTO project_links "
                 "(id, project_id, entity_type, entity_id, source, created) "
                 "VALUES ('pln_session_service', 'prj_session_service', 'run', "
@@ -15468,6 +15503,7 @@ class TestDataAccessLayerServiceCoverage:
         assert counts["migrated_finding_remediation_merge_members"] == 2
         assert counts["migrated_finding_evidence_links"] == 1
         assert counts["migrated_finding_triage_details"] == 1
+        assert counts["migrated_project_http_profiles"] == 1
         assert counts["migrated_notification_channels"] == 1
         assert counts["migrated_recent_values"] == 1
         assert counts["migrated_secrets"] == 1
@@ -15518,6 +15554,10 @@ class TestDataAccessLayerServiceCoverage:
                     "SELECT COUNT(*) AS count FROM finding_triage_details WHERE session_id = ?",
                     (source_session,),
                 ).fetchone()["count"],
+                "project_http_profiles": conn.execute(
+                    "SELECT COUNT(*) AS count FROM project_http_profiles WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
             }
             migrated_merge_rows = conn.execute(
                 "SELECT session_id, merge_id, created_by_session_id "
@@ -15540,6 +15580,10 @@ class TestDataAccessLayerServiceCoverage:
                 "SELECT session_id, verification_updated_by_session_id "
                 "FROM finding_triage_details WHERE id = 'ftri_session_service'",
             ).fetchone()
+            migrated_http_profile = conn.execute(
+                "SELECT session_id, created_by_session_id, updated_by_session_id "
+                "FROM project_http_profiles WHERE id = 'htp_session_service'",
+            ).fetchone()
             audit_row = conn.execute(
                 "SELECT details FROM audit_events WHERE target_id = ?",
                 (destination_session,),
@@ -15553,6 +15597,11 @@ class TestDataAccessLayerServiceCoverage:
         assert migrated_finding["manual_created_by_session_id"] == destination_session
         assert migrated_finding["manual_updated_by_session_id"] == destination_session
         assert tuple(migrated_triage) == (destination_session, destination_session)
+        assert tuple(migrated_http_profile) == (
+            destination_session,
+            destination_session,
+            destination_session,
+        )
         assert migrated_disposition["session_id"] == destination_session
         assert migrated_disposition["review_state"] == "important"
         assert migrated_disposition["remediation"] == "Use migrated guidance."

@@ -329,6 +329,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `max_project_targets_per_project` | `200` | Server-side only. Maximum manual or discovered project targets per project, separate from bulk-linked Atlas entities |
 | `max_project_assessments_per_owner` | `100` | Server-side only. Maximum saved assessment cycles for one personal session or team owner. `0` means unlimited |
 | `max_project_assessments_per_project` | `25` | Server-side only. Maximum saved assessment cycles for one project. `0` means unlimited |
+| `max_project_http_profiles_per_project` | `50` | Server-side only. Maximum saved HTTP assessment profiles for one project. `0` means unlimited |
 | `max_project_assessment_checks_per_owner` | `250000` | Server-side only. Maximum target-specific assessment checks for one personal session or team owner. `0` means unlimited |
 | `max_project_assessment_checks_per_project` | `50000` | Server-side only. Maximum target-specific assessment checks for one project. `0` means unlimited |
 | `max_project_assessment_evidence_per_owner` | `1000000` | Server-side only. Maximum typed assessment evidence links for one personal session or team owner. `0` means unlimited |

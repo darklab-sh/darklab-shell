@@ -44,6 +44,7 @@ class AuditTargetType(str, Enum):
     RISK_ESCALATION = "risk_escalation"
     ASSESSMENT = "assessment"
     ASSESSMENT_CHECK = "assessment_check"
+    HTTP_PROFILE = "http_profile"
 
 
 class AuditEventType(str, Enum):
@@ -128,6 +129,9 @@ class AuditEventType(str, Enum):
     ASSESSMENT_EVIDENCE_LINK = "assessment.evidence_link"
     ASSESSMENT_EVIDENCE_UNLINK = "assessment.evidence_unlink"
     ASSESSMENT_ACTION_LAUNCH = "assessment.action_launch"
+    HTTP_PROFILE_CREATE = "http_profile.create"
+    HTTP_PROFILE_UPDATE = "http_profile.update"
+    HTTP_PROFILE_DELETE = "http_profile.delete"
 
 
 COMMON_DETAIL_KEYS = frozenset({
@@ -246,6 +250,7 @@ COMMON_DETAIL_KEYS = frozenset({
     "policy_level",
     "profile_key",
     "profile_version",
+    "profile_id",
 })
 
 HISTORY_DELETE_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
@@ -354,6 +359,21 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditEventType.ASSESSMENT_ACTION_LAUNCH,
         AuditTargetType.ASSESSMENT_CHECK,
         RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.HTTP_PROFILE_CREATE.value: _spec(
+        AuditEventType.HTTP_PROFILE_CREATE,
+        AuditTargetType.HTTP_PROFILE,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.HTTP_PROFILE_UPDATE.value: _spec(
+        AuditEventType.HTTP_PROFILE_UPDATE,
+        AuditTargetType.HTTP_PROFILE,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.HTTP_PROFILE_DELETE.value: _spec(
+        AuditEventType.HTTP_PROFILE_DELETE,
+        AuditTargetType.HTTP_PROFILE,
+        RecordingMode.FAIL_CLOSED,
     ),
     AuditEventType.CVE_ADVISORY_REFRESH.value: _spec(
         AuditEventType.CVE_ADVISORY_REFRESH,

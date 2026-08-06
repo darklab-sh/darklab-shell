@@ -1218,6 +1218,7 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "max_project_targets_per_project": 200,
         "max_project_assessments_per_owner": 100,
         "max_project_assessments_per_project": 25,
+        "max_project_http_profiles_per_project": 50,
         "max_project_assessment_checks_per_owner": 250000,
         "max_project_assessment_checks_per_project": 50000,
         "max_project_assessment_evidence_per_owner": 1000000,

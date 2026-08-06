@@ -198,6 +198,22 @@ def migrate_project_workspace_session(
             from_session_id,
         ),
     )
+    http_profile_result = conn.execute(
+        "UPDATE project_http_profiles SET session_id = ?, "
+        "created_by_session_id = CASE WHEN created_by_session_id = ? THEN ? "
+        "ELSE created_by_session_id END, "
+        "updated_by_session_id = CASE WHEN updated_by_session_id = ? THEN ? "
+        "ELSE updated_by_session_id END "
+        "WHERE session_id = ? AND team_id = ''",
+        (
+            to_session_id,
+            from_session_id,
+            to_session_id,
+            from_session_id,
+            to_session_id,
+            from_session_id,
+        ),
+    )
     check_actor_result = conn.execute(
         "UPDATE project_assessment_checks SET state_changed_by_session_id = ? "
         "WHERE state_changed_by_session_id = ?",
@@ -242,6 +258,7 @@ def migrate_project_workspace_session(
         "migrated_evidence_packages": package_result.rowcount,
         "migrated_project_assessments": assessment_result.rowcount,
         "migrated_project_assessment_actors": assessment_actor_result.rowcount,
+        "migrated_project_http_profiles": http_profile_result.rowcount,
         "migrated_project_assessment_check_actors": check_actor_result.rowcount,
         "migrated_finding_evidence_links": finding_evidence_result.rowcount,
         "migrated_finding_triage_details": finding_triage_result.rowcount,

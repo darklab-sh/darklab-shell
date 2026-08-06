@@ -471,6 +471,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0057",
         "0058",
         "0059",
+        "0060",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -553,6 +554,13 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'state_changed_by_member_id',
                 'state_changed_at'
             ))
+            OR (table_name = 'project_http_profiles' AND column_name IN (
+                'headers_json',
+                'secret_refs_json',
+                'file_refs_json',
+                'enabled',
+                'created_at'
+            ))
             OR (table_name = 'findings' AND column_name IN (
                 'origin',
                 'validation_method',
@@ -604,6 +612,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "project_assessments",
         "project_assessment_checks",
         "project_assessment_evidence",
+        "project_http_profiles",
         "finding_evidence_links",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
@@ -651,6 +660,11 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("project_assessment_checks", "state_changed_by_session_id", "text"),
         ("project_assessment_checks", "state_changed_by_member_id", "text"),
         ("project_assessment_checks", "state_changed_at", "timestamp with time zone"),
+        ("project_http_profiles", "headers_json", "jsonb"),
+        ("project_http_profiles", "secret_refs_json", "jsonb"),
+        ("project_http_profiles", "file_refs_json", "jsonb"),
+        ("project_http_profiles", "enabled", "boolean"),
+        ("project_http_profiles", "created_at", "timestamp with time zone"),
         ("findings", "origin", "text"),
         ("findings", "validation_method", "text"),
         ("findings", "summary", "text"),
@@ -750,6 +764,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             'project_assessments',
             'project_assessment_checks',
             'project_assessment_evidence',
+            'project_http_profiles',
             'finding_evidence_links'
         )
         """,
@@ -766,6 +781,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_project_assessment_evidence_check_observed",
         "idx_project_assessment_evidence_assessment_type",
         "idx_project_assessment_evidence_source",
+        "idx_project_http_profiles_project_name",
+        "idx_project_http_profiles_project_enabled",
+        "idx_project_http_profiles_personal_updated",
+        "idx_project_http_profiles_team_updated",
         "idx_finding_evidence_owner_finding",
         "idx_finding_evidence_project",
         "idx_finding_evidence_source",
@@ -3353,6 +3372,41 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers={"X-Session-ID": session_id},
         json={"type": "domain", "value": "darklab.sh", "source_detail": {"source": "manual"}},
     )
+    http_profile_resp = client.post(
+        f"/projects/{project['id']}/http-profiles",
+        headers={"X-Session-ID": session_id},
+        json={
+            "name": "Administrator",
+            "role": "administrator",
+            "base_url": "https://darklab.sh/admin",
+            "scope_roots": ["https://darklab.sh/admin"],
+            "allowed_hosts": ["darklab.sh"],
+            "include_paths": ["/admin"],
+            "token_capture_rules": [{
+                "name": "csrf",
+                "source": "header",
+                "selector": "X-CSRF-Token",
+                "target": "header",
+                "target_name": "X-CSRF-Token",
+            }],
+            "rate_limit_per_second": 4,
+            "concurrency": 2,
+        },
+    )
+    http_profile = json.loads(http_profile_resp.data)["profile"]
+    http_profile_get_resp = client.get(
+        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers={"X-Session-ID": session_id},
+    )
+    http_profile_update_resp = client.patch(
+        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers={"X-Session-ID": session_id},
+        json={"revision": http_profile["revision"], "enabled": False},
+    )
+    http_profile_delete_resp = client.delete(
+        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers={"X-Session-ID": session_id},
+    )
     active_resp = client.post(
         "/projects/active",
         headers={"X-Session-ID": session_id},
@@ -3445,6 +3499,16 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
+    assert http_profile_resp.status_code == 201
+    assert json.loads(http_profile_get_resp.data)["profile"]["token_capture_rules"] == [{
+        "name": "csrf",
+        "source": "header",
+        "selector": "X-CSRF-Token",
+        "target": "header",
+        "target_name": "X-CSRF-Token",
+    }]
+    assert json.loads(http_profile_update_resp.data)["profile"]["enabled"] is False
+    assert http_profile_delete_resp.status_code == 200
     assert active_resp.status_code == 200
     assert link_resp.status_code == 201
     assert run_entity_preview_resp.status_code == 200

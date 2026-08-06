@@ -2204,6 +2204,252 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     ).get_json()["total"] == 1
 
 
+def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(monkeypatch):
+    from services.assessments import http_profiles as http_profile_service
+
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    project = _create_project(client, token, name="HTTP Profile API Project")
+    target = "api-http-profile.example.com"
+    target_response = client.post(
+        f"/projects/{project['id']}/targets",
+        headers={"X-Session-ID": token},
+        json={"type": "domain", "value": target},
+    )
+    assert target_response.status_code == 201
+    secret_value = "do-not-return-this-token"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO secrets "
+            "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+            "VALUES (?, 'HTTP_PROFILE_TOKEN', ?, ?, '[]', ?, ?)",
+            (
+                token,
+                b"ciphertext",
+                b"nonce",
+                "2026-08-06T00:00:00+00:00",
+                "2026-08-06T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    route = f"/api/v1/projects/{project['id']}/http-profiles"
+    create_response = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "name": "Administrator session",
+            "role": "administrator",
+            "base_url": f"https://{target}/admin",
+            "scope_roots": [f"https://{target}/admin"],
+            "allowed_hosts": [target],
+            "headers": [
+                {"name": "X-Assessment-Token", "secret_name": "HTTP_PROFILE_TOKEN"}
+            ],
+            "secret_refs": {"bearer_token": "HTTP_PROFILE_TOKEN"},
+            "token_capture_rules": [
+                {
+                    "name": "session-cookie",
+                    "source": "cookie",
+                    "selector": "session",
+                    "target": "cookie",
+                    "target_name": "session",
+                }
+            ],
+            "include_paths": ["/admin"],
+            "exclude_paths": ["/admin/logout"],
+            "rate_limit_per_second": 4,
+            "concurrency": 2,
+        },
+    )
+    assert create_response.status_code == 201
+    created = create_response.get_json()["profile"]
+    profile_id = created["id"]
+    assert created["protected_references_visible"] is True
+    assert created["secret_refs"] == {
+        "bearer_token": {"name": "HTTP_PROFILE_TOKEN", "available": True}
+    }
+    assert created["headers"] == [{
+        "name": "X-Assessment-Token",
+        "secret_name": "HTTP_PROFILE_TOKEN",
+        "available": True,
+    }]
+    assert secret_value not in create_response.get_data(as_text=True)
+
+    available_files = {"client/cert.pem", "client/key.pem"}
+
+    def _workspace_path_info(_owner, path):
+        if path not in available_files:
+            raise http_profile_service.WorkspaceError("missing")
+        return {"kind": "file"}
+
+    monkeypatch.setattr(
+        http_profile_service,
+        "owner_workspace_path_info",
+        _workspace_path_info,
+    )
+    file_profile_response = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "name": "Client certificate",
+            "base_url": f"https://{target}",
+            "file_refs": {
+                "client_certificate": "client/cert.pem",
+                "client_key": "client/key.pem",
+            },
+        },
+    )
+    missing_file_response = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "name": "Missing Files reference",
+            "base_url": f"https://{target}",
+            "file_refs": {
+                "client_certificate": "client/missing-cert.pem",
+                "client_key": "client/missing-key.pem",
+            },
+        },
+    )
+    assert file_profile_response.status_code == 201
+    assert file_profile_response.get_json()["profile"]["file_refs"] == {
+        "client_certificate": "client/cert.pem",
+        "client_key": "client/key.pem",
+    }
+    assert missing_file_response.status_code == 400
+
+    duplicate = client.post(
+        route,
+        headers=_headers(token),
+        json={"name": "administrator SESSION", "base_url": f"https://{target}"},
+    )
+    missing_secret = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "name": "Missing reference",
+            "base_url": f"https://{target}",
+            "secret_refs": {"cookie": "MISSING_PROFILE_SECRET"},
+        },
+    )
+    outside_scope = client.post(
+        route,
+        headers=_headers(token),
+        json={
+            "name": "Outside scope",
+            "base_url": "https://outside.example.com",
+        },
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.get_json()["error"]["code"] == "http_profile_conflict"
+    assert missing_secret.status_code == 400
+    assert outside_scope.status_code == 400
+
+    list_response = client.get(route, headers=_headers(token))
+    detail_route = f"{route}/{profile_id}"
+    cross_scope = client.get(detail_route, headers=_headers(other_token))
+    stale_update = client.patch(
+        detail_route,
+        headers=_headers(token),
+        json={"revision": created["revision"] + 1, "enabled": False},
+    )
+    update_response = client.patch(
+        detail_route,
+        headers=_headers(token),
+        json={"revision": created["revision"], "enabled": False},
+    )
+    assert list_response.status_code == 200
+    assert list_response.get_json()["profiles"][0]["id"] == profile_id
+    assert cross_scope.status_code == 404
+    assert stale_update.status_code == 409
+    assert update_response.status_code == 200
+    assert update_response.get_json()["profile"]["enabled"] is False
+
+    audit_rows = _audit_event_rows(target_id=profile_id)
+    assert [row["event_type"] for row in audit_rows] == [
+        "http_profile.create",
+        "http_profile.update",
+    ]
+    serialized_audit = json.dumps(audit_rows)
+    assert "HTTP_PROFILE_TOKEN" not in serialized_audit
+    assert target not in serialized_audit
+    assert "session-cookie" not in serialized_audit
+
+    team_owner = _token(client)
+    team_viewer = _token(client)
+    team_id = _create_api_team(client, team_owner, name="HTTP Profile API Team")
+    _add_api_team_member(client, team_owner, team_viewer, team_id, role="viewer")
+    owner_headers = _team_headers(team_owner, team_id)
+    viewer_headers = _team_headers(team_viewer, team_id)
+    team_project_response = client.post(
+        "/projects",
+        headers={"X-Session-ID": team_owner, "X-Team-ID": team_id},
+        json={"name": "Team HTTP Profiles"},
+    )
+    assert team_project_response.status_code == 201
+    team_project_id = team_project_response.get_json()["project"]["id"]
+    team_target = "team-http-profile.example.com"
+    team_target_response = client.post(
+        f"/projects/{team_project_id}/targets",
+        headers={"X-Session-ID": team_owner, "X-Team-ID": team_id},
+        json={"type": "domain", "value": team_target},
+    )
+    assert team_target_response.status_code == 201
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO secrets "
+            "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+            "VALUES (?, 'TEAM_HTTP_TOKEN', ?, ?, '[]', ?, ?)",
+            (
+                team_id,
+                b"ciphertext",
+                b"nonce",
+                "2026-08-06T00:00:00+00:00",
+                "2026-08-06T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    team_route = f"/api/v1/projects/{team_project_id}/http-profiles"
+    team_create = client.post(
+        team_route,
+        headers=owner_headers,
+        json={
+            "name": "Team user",
+            "role": "user",
+            "base_url": f"https://{team_target}",
+            "secret_refs": {"cookie": "TEAM_HTTP_TOKEN"},
+        },
+    )
+    assert team_create.status_code == 201
+    team_profile_id = team_create.get_json()["profile"]["id"]
+    viewer_list = client.get(team_route, headers=viewer_headers)
+    viewer_profile = viewer_list.get_json()["profiles"][0]
+    assert viewer_profile["id"] == team_profile_id
+    assert viewer_profile["protected_references_visible"] is False
+    for protected_field in (
+        "headers",
+        "secret_refs",
+        "file_refs",
+        "proxy_url",
+        "token_capture_rules",
+    ):
+        assert protected_field not in viewer_profile
+    viewer_create = client.post(
+        team_route,
+        headers=viewer_headers,
+        json={"name": "Forbidden", "base_url": f"https://{team_target}"},
+    )
+    assert viewer_create.status_code == 403
+    assert viewer_create.get_json()["error"]["code"] == "team_forbidden"
+
+    delete_response = client.delete(detail_route, headers=_headers(token))
+    assert delete_response.get_json() == {"ok": True, "removed": True}
+    deleted_audit = _audit_event_rows(target_id=profile_id)[-1]
+    assert deleted_audit["event_type"] == "http_profile.delete"
+    assert deleted_audit["details"]["deleted_count"] == 1
+
 def test_api_v1_project_assessment_errors_use_the_public_error_shape():
     client = get_client()
     token = _token(client)

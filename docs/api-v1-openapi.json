@@ -4666,6 +4666,414 @@
         ],
         "type": "object"
       },
+      "HttpProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "base_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "capture_rule_count": {
+            "type": "integer"
+          },
+          "concurrency": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "credential_use": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "exclude_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "file_refs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "header_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "headers": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "include_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "login_workflow_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "protected_references_visible": {
+            "type": "boolean"
+          },
+          "proxy_configured": {
+            "type": "boolean"
+          },
+          "proxy_url": {
+            "type": "string"
+          },
+          "rate_limit_per_second": {
+            "type": "integer"
+          },
+          "reference_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "role": {
+            "type": "string"
+          },
+          "scope_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secret_refs": {
+            "type": "object"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "token_capture_rules": {
+            "items": {
+              "$ref": "#/components/schemas/HttpProfileTokenCaptureRuleInput"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "role",
+          "base_url",
+          "allowed_hosts",
+          "enabled",
+          "revision",
+          "protected_references_visible"
+        ],
+        "type": "object"
+      },
+      "HttpProfileHeaderReferenceInput": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "secret_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "secret_name"
+        ],
+        "type": "object"
+      },
+      "HttpProfileInput": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "base_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "concurrency": {
+            "default": 5,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "exclude_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "file_refs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "headers": {
+            "items": {
+              "$ref": "#/components/schemas/HttpProfileHeaderReferenceInput"
+            },
+            "type": "array"
+          },
+          "include_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "login_workflow_id": {
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "type": "string"
+          },
+          "proxy_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "rate_limit_per_second": {
+            "default": 10,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "role": {
+            "default": "anonymous",
+            "type": "string"
+          },
+          "scope_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secret_refs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "token_capture_rules": {
+            "items": {
+              "$ref": "#/components/schemas/HttpProfileTokenCaptureRuleInput"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "base_url"
+        ],
+        "type": "object"
+      },
+      "HttpProfileList": {
+        "additionalProperties": false,
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/HttpProfile"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profiles",
+          "total"
+        ],
+        "type": "object"
+      },
+      "HttpProfileResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/HttpProfile"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "type": "object"
+      },
+      "HttpProfileTokenCaptureRuleInput": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "cookie",
+              "header",
+              "json_pointer",
+              "body_regex"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "enum": [
+              "cookie",
+              "header",
+              "bearer"
+            ],
+            "type": "string"
+          },
+          "target_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "selector",
+          "target"
+        ],
+        "type": "object"
+      },
+      "HttpProfileUpdateInput": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "base_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "concurrency": {
+            "default": 5,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "exclude_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "file_refs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "headers": {
+            "items": {
+              "$ref": "#/components/schemas/HttpProfileHeaderReferenceInput"
+            },
+            "type": "array"
+          },
+          "include_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "login_workflow_id": {
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "type": "string"
+          },
+          "proxy_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "rate_limit_per_second": {
+            "default": 10,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "role": {
+            "default": "anonymous",
+            "type": "string"
+          },
+          "scope_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secret_refs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "token_capture_rules": {
+            "items": {
+              "$ref": "#/components/schemas/HttpProfileTokenCaptureRuleInput"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      },
       "Label": {
         "properties": {
           "created": {
@@ -12211,6 +12619,482 @@
               }
             },
             "description": "Run broker unavailable"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/http-profiles": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpProfileList"
+                }
+              }
+            },
+            "description": "Project HTTP profiles"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid HTTP profile"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage protected references"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or HTTP profile not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "HTTP profile conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HttpProfileInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpProfileResponse"
+                }
+              }
+            },
+            "description": "HTTP profile created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid HTTP profile"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage protected references"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or HTTP profile not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "HTTP profile conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/http-profiles/{profile_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "HTTP profile id",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            },
+            "description": "HTTP profile removed"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid HTTP profile"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage protected references"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or HTTP profile not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "HTTP profile conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "HTTP profile id",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpProfileResponse"
+                }
+              }
+            },
+            "description": "Project HTTP profile"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid HTTP profile"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage protected references"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or HTTP profile not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "HTTP profile conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "HTTP profile id",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HttpProfileUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpProfileResponse"
+                }
+              }
+            },
+            "description": "HTTP profile updated"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid HTTP profile"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage protected references"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or HTTP profile not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "HTTP profile conflict or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
           }
         }
       }
