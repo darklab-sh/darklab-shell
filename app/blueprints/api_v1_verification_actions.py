@@ -18,6 +18,7 @@ from services.projects.verification_actions import (
     confirm_verification_action_plan,
     get_verification_action_plan,
 )
+from services.projects.finding_verification import verification_run_finalized_hook
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.teams.capabilities import Capability
 from services.teams.contracts import TeamPermissionDenied
@@ -33,9 +34,7 @@ def _error(exc: Exception):
     raise exc
 
 
-@api_routes.api_v1_bp.route(
-    "/projects/<project_id>/findings/<finding_id>/verification-actions/<check_id>"
-)
+@api_routes.api_v1_bp.route("/projects/<project_id>/findings/<finding_id>/verification-actions/<check_id>")
 @api_routes.require_api_auth
 def api_project_finding_verification_action_preview(project_id, finding_id, check_id):
     try:
@@ -95,6 +94,7 @@ def api_project_finding_verification_action_launch(project_id, finding_id, check
             owner_tab_id="",
             workspace_cwd=api_routes._workspace_cwd_value(data.get("workspace_cwd", "")),
             link_project_id=project_id,
+            run_finalized_hook=verification_run_finalized_hook(session_id, plan, team_id=owner_scope.team_id),
             thread_name_prefix="api-verification-run-broker",
         )
     except RunStartRejected as exc:

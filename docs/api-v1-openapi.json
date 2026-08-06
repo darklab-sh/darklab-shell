@@ -3515,6 +3515,9 @@
           "matched_check_id": {
             "type": "string"
           },
+          "matched_rule_key": {
+            "type": "string"
+          },
           "reason": {
             "type": "string"
           },
@@ -3525,12 +3528,17 @@
               "unavailable"
             ],
             "type": "string"
+          },
+          "supports_negative_evidence": {
+            "type": "boolean"
           }
         },
         "required": [
           "state",
           "reason",
-          "matched_check_id"
+          "matched_check_id",
+          "matched_rule_key",
+          "supports_negative_evidence"
         ],
         "type": "object"
       },
@@ -3569,6 +3577,9 @@
               "$ref": "#/components/schemas/FindingVerificationRetestRun"
             },
             "type": "array"
+          },
+          "suggestion": {
+            "$ref": "#/components/schemas/FindingVerificationSuggestion"
           }
         },
         "required": [
@@ -3577,7 +3588,8 @@
           "origin_checks",
           "retest_runs",
           "candidate_runs",
-          "candidate_limit"
+          "candidate_limit",
+          "suggestion"
         ],
         "type": "object"
       },
@@ -3741,6 +3753,47 @@
           "exit_code",
           "compatibility",
           "comparison"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationSuggestion": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "evidence_link_id": {
+            "type": "string"
+          },
+          "matched_check_id": {
+            "type": "string"
+          },
+          "matched_rule_key": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "verification_status": {
+            "enum": [
+              "",
+              "verified",
+              "needs_retest"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "verification_status",
+          "reason",
+          "run_id",
+          "evidence_link_id",
+          "matched_check_id",
+          "matched_rule_key"
         ],
         "type": "object"
       },

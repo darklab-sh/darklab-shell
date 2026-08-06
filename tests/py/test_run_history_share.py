@@ -687,6 +687,7 @@ class TestRunStreaming:
     def test_broker_worker_publishes_notices_filtered_output_exit_and_cleans_up(self):
         fake_proc = _FakeProc(lines=["skip this\n", "keep this\n", ""])
         published = []
+        finalized_hook = mock.Mock()
         capture = run_routes._run_output_capture("run-broker-worker")
         postfilter = run_routes._SyntheticPostFilterProcessor({"kind": "grep", "pattern": "keep"})
         started = datetime.now(timezone.utc).isoformat()
@@ -731,6 +732,7 @@ class TestRunStreaming:
                 workspace_artifacts=[],
                 owner_tab_id="tab-worker",
                 link_project_id=None,
+                run_finalized_hook=finalized_hook,
             )
         capture.finalize()
 
@@ -771,6 +773,7 @@ class TestRunStreaming:
         assert published[-1][2]["output_line_count"] == 4
         finalize.assert_called_once()
         assert finalize.call_args.kwargs["link_project_id"] is None
+        finalized_hook.assert_called_once_with("run-broker-worker", finalize.return_value)
         assert fake_proc.stdout is not None
         assert fake_proc.stdout.closed is True
         pid_pop.assert_called_once_with("run-broker-worker")

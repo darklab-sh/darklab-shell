@@ -5465,6 +5465,10 @@ button.project-explorer-item:focus-visible,
   background: var(--surface);
 }
 
+.finding-triage-verification-suggestion {
+  border-left: 3px solid var(--cyan);
+}
+
 .finding-triage-verification-item-title {
   font-weight: 650;
   overflow-wrap: anywhere;

@@ -7,6 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1.openapi_finding_verification_suggestion import (
+    verification_compatibility_schema,
+    verification_suggestion_schema,
+)
+
 
 def _ref(name: str) -> dict[str, str]:
     return {"$ref": f"#/components/schemas/{name}"}
@@ -31,19 +36,7 @@ def finding_verification_schemas() -> dict[str, Any]:
         "exit_code", "compatibility", "comparison",
     ]
     return {
-        "FindingVerificationCompatibility": {
-            "type": "object",
-            "required": ["state", "reason", "matched_check_id"],
-            "properties": {
-                "state": {
-                    "type": "string",
-                    "enum": ["compatible", "incomparable", "unavailable"],
-                },
-                "reason": {"type": "string"},
-                "matched_check_id": {"type": "string"},
-            },
-            "additionalProperties": False,
-        },
+        "FindingVerificationCompatibility": verification_compatibility_schema(),
         "FindingVerificationComparison": {
             "type": "object",
             "required": ["available", "left_run_id", "right_run_id"],
@@ -104,11 +97,12 @@ def finding_verification_schemas() -> dict[str, Any]:
             },
             "additionalProperties": False,
         },
+        "FindingVerificationSuggestion": verification_suggestion_schema(),
         "FindingVerificationContext": {
             "type": "object",
             "required": [
                 "baseline_run_id", "baseline_source_state", "origin_checks",
-                "retest_runs", "candidate_runs", "candidate_limit",
+                "retest_runs", "candidate_runs", "candidate_limit", "suggestion",
             ],
             "properties": {
                 "baseline_run_id": {"type": "string"},
@@ -129,6 +123,7 @@ def finding_verification_schemas() -> dict[str, Any]:
                     "items": _ref("FindingVerificationRun"),
                 },
                 "candidate_limit": {"type": "integer", "minimum": 1, "maximum": 25},
+                "suggestion": _ref("FindingVerificationSuggestion"),
             },
             "additionalProperties": False,
         },

@@ -135,8 +135,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 4 — Add first-class manual findings and retest provenance
 
-- [ ] Add evidence-backed verification-state suggestions after a launched run completes:
-  - A completed verification run may suggest `verified` or `needs_retest`, but only an authorized person can save the final verification state. Keep the suggestion separate from the saved human disposition and explain which compatible evidence supports it.
 - [ ] Reconcile finding observations across compatible assessment cycles:
   - Reconcile the same remediation identity across cycles while comparing its individual observation methods, check keys, and compatible tool/profile versions to classify it as `new`, `persistent`, `not_observed`, or `regressed`. Store remediation- and observation-level links and reasons without rewriting either cycle's finding occurrences.
   - Calculate `not_observed` only when the newer cycle completed the same compatible check with available evidence and that check has a defined negative-evidence contract. A missing linked run, failed/partial scan, changed scope, parser failure, or unavailable artifact can never prove absence.

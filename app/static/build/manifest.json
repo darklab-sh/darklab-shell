@@ -368,8 +368,8 @@
       "hash": "da8913d0affef188f5fd63641f729a73b45abdd41e6a419052ebb5876b825038"
     },
     "/static/js/features/findings/finding_triage_editor.js": {
-      "path": "/static/build/static-finding-triage-editor.fbcacb6010bd.js",
-      "hash": "ec53dda168754326265e6fcbffd5d0616c285f60eff7aafba4e81837449718ae"
+      "path": "/static/build/static-finding-triage-editor.574cc8a8c1f4.js",
+      "hash": "f896cc415e243a7afd89b0a9400e78e4356ae3354368500af94fa2708097be4b"
     },
     "/static/js/features/findings/findings_board_bridge.js": {
       "path": "/static/build/static-findings-board-bridge.f9c6af886563.js",
@@ -624,8 +624,8 @@
       "hash": "30b41832e5d397b405a0db97ac74603718e4c3fe551a1d86f495ed40b9079ded"
     },
     "/static/css/features/projects.css": {
-      "path": "/static/build/static-projects.7de17c89bf80.css",
-      "hash": "7de17c89bf80ec9ead2d41794c8b4611deb163d2c9f99efb19e7dc307560fdb4"
+      "path": "/static/build/static-projects.5ebc0bc52195.css",
+      "hash": "5ebc0bc52195c6a4bc065662414a08a57e419ceafa6897e128e732446c29f1f9"
     },
     "/static/css/features/run-comparison.css": {
       "path": "/static/build/static-run-comparison.9b96fd2915e8.css",

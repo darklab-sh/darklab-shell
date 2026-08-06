@@ -237,6 +237,7 @@ let DarklabFindingTriageEditor = null;
       el('finding-triage-merge-apply'),
       el('finding-triage-verification-run'),
       el('finding-triage-verification-attach'),
+      ...document.querySelectorAll('[data-finding-verification-use-suggestion]'),
       ...document.querySelectorAll('[data-finding-verification-unlink]'),
     ].forEach((node) => {
       if (node) node.disabled = !!disabled;
@@ -604,6 +605,56 @@ let DarklabFindingTriageEditor = null;
     });
   }
 
+  function renderVerificationSuggestion(suggestion) {
+    const node = el('finding-triage-verification-suggestion');
+    if (!node) return;
+    clearNode(node);
+    const runId = text(suggestion && suggestion.run_id);
+    if (!runId) {
+      node.classList.add('u-hidden');
+      return;
+    }
+    const suggestedStatus = text(suggestion.verification_status);
+    const available = !!suggestion.available && ['verified', 'needs_retest'].includes(suggestedStatus);
+    const row = verificationItem(
+      available ? `Suggested status: ${verificationStatusLabel(suggestedStatus)}` : 'No final status suggested',
+      `Based on compatible retest ${runId}`,
+    );
+    row.classList.add('finding-triage-verification-suggestion');
+    const badges = document.createElement('div');
+    badges.className = 'finding-triage-verification-item-badges';
+    const badge = document.createElement('span');
+    badge.className = `badge badge-tone-${available ? verificationStatusTone(suggestedStatus) : 'muted'}`;
+    badge.textContent = available ? 'Evidence-backed suggestion' : 'Human review needed';
+    badges.appendChild(badge);
+    row.appendChild(badges);
+    const reason = document.createElement('div');
+    reason.className = 'finding-triage-verification-item-reason';
+    reason.textContent = text(suggestion.reason);
+    row.appendChild(reason);
+    if (available) {
+      const actions = document.createElement('div');
+      actions.className = 'finding-triage-verification-item-actions';
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'btn btn-secondary btn-compact';
+      apply.dataset.findingVerificationUseSuggestion = suggestedStatus;
+      apply.textContent = 'Use suggested status';
+      apply.disabled = state.options.canEdit === false;
+      apply.addEventListener('click', () => {
+        const select = el('finding-triage-status');
+        if (!select || state.options.canEdit === false) return;
+        select.value = suggestedStatus;
+        syncStatusSelect();
+        setMessage(`${verificationStatusLabel(suggestedStatus)} is selected. Review the evidence, then save triage to record your decision.`);
+      });
+      actions.appendChild(apply);
+      row.appendChild(actions);
+    }
+    node.appendChild(row);
+    node.classList.remove('u-hidden');
+  }
+
   function verificationPlanContent(plan) {
     const wrap = document.createElement('div');
     wrap.className = 'finding-verification-plan';
@@ -786,6 +837,7 @@ let DarklabFindingTriageEditor = null;
     const checks = Array.isArray(context?.origin_checks) ? context.origin_checks : [];
     const retests = Array.isArray(context?.retest_runs) ? context.retest_runs : [];
     const candidates = Array.isArray(context?.candidate_runs) ? context.candidate_runs : [];
+    renderVerificationSuggestion(context?.suggestion);
     renderOriginChecks(checks);
     const retestNode = el('finding-triage-retest-runs');
     clearNode(retestNode);
@@ -808,6 +860,7 @@ let DarklabFindingTriageEditor = null;
         const compare = document.createElement('button');
         compare.type = 'button';
         compare.className = 'btn btn-secondary btn-compact';
+        compare.dataset.findingVerificationCompare = text(run.id);
         compare.textContent = 'Compare with original';
         compare.addEventListener('click', () => compareVerificationRun(run));
         actions.appendChild(compare);

@@ -16,6 +16,7 @@ from services.projects.verification_actions import (
     confirm_verification_action_plan,
     get_verification_action_plan,
 )
+from services.projects.finding_verification import verification_run_finalized_hook
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.teams.capabilities import Capability
 
@@ -28,9 +29,7 @@ def _error(exc: Exception):
     raise exc
 
 
-@project_routes.projects_bp.route(
-    "/projects/<project_id>/findings/<finding_id>/verification-actions/<check_id>"
-)
+@project_routes.projects_bp.route("/projects/<project_id>/findings/<finding_id>/verification-actions/<check_id>")
 def project_finding_verification_action_preview(project_id, finding_id, check_id):
     session_id, team_id, error_response = project_routes._project_owner()
     if error_response:
@@ -99,6 +98,7 @@ def project_finding_verification_action_launch(project_id, finding_id, check_id)
             owner_tab_id="",
             workspace_cwd=run_routes._workspace_cwd_value(body.get("workspace_cwd", "")),
             link_project_id=project_id,
+            run_finalized_hook=verification_run_finalized_hook(session_id, plan, team_id=team_id),
             thread_name_prefix="verification-run-broker",
         )
     except RunStartRejected as exc:

@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+import logging
+from typing import Any, Callable, Mapping
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
+from core.helpers import get_log_session_id
 from services.assessments.evidence_matching import (
     load_run_evidence_facts,
     matching_run_rule,
@@ -19,12 +21,17 @@ from services.assessments.contracts import AssessmentNotFound
 from services.assessments.profile_summaries import list_assessment_profile_summaries
 from services.assessments.profiles import AssessmentProfileCatalogError
 from services.projects.finding_evidence import list_finding_evidence_links_on_conn
-from services.projects.contracts import ProjectWorkspaceNotFound
+from services.projects.finding_evidence import link_finding_evidence_on_conn
+from services.projects.finding_details import finding_detail_fields
+from services.projects.finding_identity import finding_identity_references
+from services.projects.finding_vulnerabilities import finding_cves
+from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceNotFound
 from services.projects.scope import shared_owner_where
 from services.runs.kinds import RUN_KIND_EXTERNAL
 
 
 VERIFICATION_RUN_LIMIT = 25
+log = logging.getLogger("shell")
 
 
 def _finding_row(
@@ -51,7 +58,9 @@ def _finding_row(
         "SELECT f.id, f.run_id, f.first_run_id, f.last_run_id, f.target_id, f.entity_id, "
         "COALESCE(target.type, entity.type, '') AS target_type, "
         "COALESCE(target.canonical_value, entity.canonical_value, f.subject_key, '') "
-        "AS target_value FROM findings f "
+        "AS target_value, f.session_id, f.team_id, f.subject_key, f.signature_hash, "
+        "f.origin, f.validation_method, f.title, f.raw_line, f.fingerprint, f.cve_ids_json "
+        "FROM findings f "
         "LEFT JOIN entities target ON target.id = f.target_id "
         "LEFT JOIN entities entity ON entity.id = f.entity_id WHERE f.id = ?",
         (finding_id,),
@@ -172,12 +181,23 @@ def _compatibility(
     finding: Any,
     baseline_facts: Any,
 ) -> dict[str, Any]:
-    if facts is None or not facts.finished_at:
+    def result(
+        state: str,
+        reason: str,
+        *,
+        check_id: str = "",
+        rule: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return {
-            "state": "unavailable",
-            "reason": "The saved verification run is unavailable or incomplete.",
-            "matched_check_id": "",
+            "state": state,
+            "reason": reason,
+            "matched_check_id": check_id,
+            "matched_rule_key": str((rule or {}).get("key") or ""),
+            "supports_negative_evidence": bool((rule or {}).get("negative_evidence")),
         }
+
+    if facts is None or not facts.finished_at:
+        return result("unavailable", "The saved verification run is unavailable or incomplete.")
     available_checks = [
         check
         for check in origin_checks
@@ -192,35 +212,29 @@ def _compatibility(
             target_value=check["target_value"],
         )
         if rule:
-            return {
-                "state": "compatible",
-                "reason": "Matches the originating check's frozen target, tool, and completion rules.",
-                "matched_check_id": check["check_id"],
-            }
+            return result(
+                "compatible",
+                "Matches the originating check's frozen target, tool, and completion rules.",
+                check_id=check["check_id"],
+                rule=rule,
+            )
     if available_checks:
-        return {
-            "state": "incomparable",
-            "reason": "The run doesn't satisfy the originating check's frozen target, tool, completion, or output rules.",
-            "matched_check_id": "",
-        }
+        return result(
+            "incomparable",
+            "The run doesn't satisfy the originating check's frozen target, tool, completion, or output rules.",
+        )
     if origin_checks:
-        return {
-            "state": "unavailable",
-            "reason": "The originating assessment check is no longer available.",
-            "matched_check_id": "",
-        }
+        return result("unavailable", "The originating assessment check is no longer available.")
     if baseline_facts is None:
-        return {
-            "state": "unavailable",
-            "reason": "The original run is unavailable, so comparability can't be established.",
-            "matched_check_id": "",
-        }
+        return result(
+            "unavailable",
+            "The original run is unavailable, so comparability can't be established.",
+        )
     if facts.command_root != baseline_facts.command_root:
-        return {
-            "state": "incomparable",
-            "reason": "The verification run uses a different tool than the original evidence.",
-            "matched_check_id": "",
-        }
+        return result(
+            "incomparable",
+            "The verification run uses a different tool than the original evidence.",
+        )
     target_type = str(finding["target_type"] or "")
     target_value = str(finding["target_value"] or "")
     if target_type and target_value and not target_matches(
@@ -229,16 +243,93 @@ def _compatibility(
         target_value,
         "host_or_descendant",
     ):
-        return {
-            "state": "incomparable",
-            "reason": "The verification run targets a different host or endpoint.",
-            "matched_check_id": "",
-        }
+        return result(
+            "incomparable",
+            "The verification run targets a different host or endpoint.",
+        )
+    return result("compatible", "Matches the original tool and affected target.")
+
+
+def _remediation_ids(finding: Any) -> set[str]:
+    payload = dict(finding)
+    payload.update(finding_detail_fields(finding))
     return {
-        "state": "compatible",
-        "reason": "Matches the original tool and affected target.",
-        "matched_check_id": "",
+        str(reference.get("remediation_id") or "")
+        for reference in finding_identity_references(payload, finding_cves(payload))
+        if str(reference.get("remediation_id") or "")
     }
+
+
+def _run_remediation_ids(conn: Any, run_id: str) -> set[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT f.id, f.session_id, f.team_id, f.target_id, f.entity_id, "
+        "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.title, "
+        "f.raw_line, f.fingerprint, f.cve_ids_json FROM findings_occurrences occurrence "
+        "JOIN findings f ON f.id = occurrence.finding_id WHERE occurrence.run_id = ?",
+        (run_id,),
+    ).fetchall()
+    return {identity for row in rows for identity in _remediation_ids(row)}
+
+
+def _verification_suggestion(
+    conn: Any,
+    finding: Any,
+    retest_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    default = {
+        "available": False,
+        "verification_status": "",
+        "reason": "No compatible completed retest evidence is linked yet.",
+        "run_id": "",
+        "evidence_link_id": "",
+        "matched_check_id": "",
+        "matched_rule_key": "",
+    }
+    compatible = sorted(
+        (
+            run for run in retest_runs
+            if run.get("source_state") == "available"
+            and run.get("compatibility", {}).get("state") == "compatible"
+        ),
+        key=lambda run: (str(run.get("finished") or ""), str(run.get("id") or "")),
+        reverse=True,
+    )
+    if not compatible:
+        return default
+    run = compatible[0]
+    compatibility = run["compatibility"]
+    support = {
+        **default,
+        "run_id": str(run.get("id") or ""),
+        "evidence_link_id": str(run.get("evidence_link_id") or ""),
+        "matched_check_id": str(compatibility.get("matched_check_id") or ""),
+        "matched_rule_key": str(compatibility.get("matched_rule_key") or ""),
+    }
+    if _remediation_ids(finding).intersection(_run_remediation_ids(conn, support["run_id"])):
+        return {
+            **support,
+            "available": True,
+            "verification_status": "needs_retest",
+            "reason": (
+                "The newest compatible retest observed the same exact affected subject "
+                "and vulnerability or scanner rule again."
+            ),
+        }
+    if run.get("exit_code") == 0 and compatibility.get("supports_negative_evidence"):
+        return {
+            **support,
+            "available": True,
+            "verification_status": "verified",
+            "reason": (
+                "The newest compatible retest completed successfully, the frozen rule accepts "
+                "clean negative evidence, and the same vulnerability or scanner rule was not observed again."
+            ),
+        }
+    support["reason"] = (
+        "The newest compatible retest does not provide the successful clean-negative contract "
+        "required to suggest verified."
+    )
+    return support
 
 
 def _project_runs(
@@ -356,6 +447,7 @@ def finding_verification_context_on_conn(
         "retest_runs": retest_runs,
         "candidate_runs": candidate_runs,
         "candidate_limit": VERIFICATION_RUN_LIMIT,
+        "suggestion": _verification_suggestion(conn, finding, retest_runs),
     }
 
 
@@ -374,3 +466,108 @@ def get_finding_verification_context(
             finding_id,
             team_id=team_id,
         )
+
+
+def _link_completed_verification_run(
+    session_id: str,
+    project_id: str,
+    finding_id: str,
+    check_id: str,
+    run_id: str,
+    *,
+    team_id: str = "",
+    actor_member_id: str = "",
+) -> dict[str, Any]:
+    with get_db_connect()() as conn:
+        checks = _origin_checks(conn, session_id, team_id, project_id, finding_id)
+        if not any(
+            check["check_id"] == check_id and check["source_state"] == "available"
+            for check in checks
+        ):
+            raise ProjectWorkspaceNotFound(
+                "originating assessment check was not found for this finding"
+            )
+        linked = link_finding_evidence_on_conn(
+            conn,
+            session_id,
+            project_id,
+            finding_id,
+            {"evidence_type": "retest_run", "evidence_id": run_id},
+            team_id=team_id,
+            actor_member_id=actor_member_id,
+        )
+        conn.commit()
+        return linked
+
+
+def verification_run_finalized_hook(
+    session_id: str,
+    plan: Mapping[str, Any],
+    *,
+    team_id: str = "",
+) -> Callable[[str, dict[str, Any]], None]:
+    """Return a safe completion hook that retains a launched run as retest evidence."""
+    project_id = str(plan.get("project_id") or "")
+    finding_id = str(plan.get("finding_id") or "")
+    check_id = str(plan.get("check_id") or "")
+
+    def finalized(run_id: str, result: dict[str, Any]) -> None:
+        summary = result.get("finalize_summary") if isinstance(result, dict) else {}
+        project_link = result.get("active_project_link") if isinstance(result, dict) else {}
+        if (
+            not isinstance(summary, dict)
+            or not summary.get("persisted")
+            or not isinstance(project_link, dict)
+            or str(project_link.get("project_id") or "") != project_id
+        ):
+            log.warning("PROJECT_VERIFICATION_EVIDENCE_LINK_SKIPPED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "project_id": project_id,
+                "finding_id": finding_id,
+                "check_id": check_id,
+                "reason": "run_finalization_unavailable",
+            })
+            return
+        try:
+            linked = _link_completed_verification_run(
+                session_id,
+                project_id,
+                finding_id,
+                check_id,
+                run_id,
+                team_id=team_id,
+            )
+        except ProjectWorkspaceError as exc:
+            log.warning("PROJECT_VERIFICATION_EVIDENCE_LINK_SKIPPED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "project_id": project_id,
+                "finding_id": finding_id,
+                "check_id": check_id,
+                "reason": str(exc),
+            })
+            return
+        except Exception:
+            log.error("PROJECT_VERIFICATION_EVIDENCE_LINK_ERROR", exc_info=True, extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "project_id": project_id,
+                "finding_id": finding_id,
+                "check_id": check_id,
+            })
+            return
+        log.info("PROJECT_VERIFICATION_EVIDENCE_LINKED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+            "project_id": project_id,
+            "finding_id": finding_id,
+            "check_id": check_id,
+            "created": bool(linked.get("created")),
+        })
+
+    return finalized

@@ -271,6 +271,7 @@ def brokered_real_run_worker(
     workspace_artifacts,
     owner_tab_id,
     link_project_id="",
+    run_finalized_hook=None,
     cfg: Mapping[str, Any] | None = None,
     trufflehog_output_filter_cls: Callable[[str], Any],
     publish_broker_captured_line_fn: Callable[..., Any],
@@ -463,6 +464,8 @@ def brokered_real_run_worker(
             owner_tab_id=owner_tab_id,
             link_project_id=link_project_id,
         )
+        if run_finalized_hook:
+            run_finalized_hook(run_id, finalize_info)
         elapsed = finalize_info["elapsed"]
         active_project_link = finalize_info.get("active_project_link")
         finalize_summary = finalize_info.get("finalize_summary") if isinstance(finalize_info, dict) else {}

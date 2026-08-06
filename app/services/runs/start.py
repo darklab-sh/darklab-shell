@@ -39,7 +39,6 @@ class BrokeredRunStartResult:
     status: str
     exit_code: int | None = None
 
-
 def start_brokered_run(
     *,
     original_command: str,
@@ -56,6 +55,7 @@ def start_brokered_run(
     private_values: tuple[str, ...] = (),
     thread_name_prefix: str = "run-broker",
     run_created_hook: Callable[[str, object | None], None] | None = None,
+    run_finalized_hook: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> BrokeredRunStartResult:
     safe_command = str(display_command or original_command)
     safe_private_values = private_data.normalized_private_values(private_values)
@@ -89,7 +89,6 @@ def start_brokered_run(
             status=private_data.status_for_exit_code(exit_code),
             exit_code=exit_code,
         )
-
     prepared_input = private_data.prepare_command_input(
         handlers,
         original_command,
@@ -215,6 +214,7 @@ def start_brokered_run(
             "workspace_artifacts": workspace_artifacts,
             "owner_tab_id": owner_tab_id,
             "link_project_id": link_project_id,
+            "run_finalized_hook": run_finalized_hook,
         },
         name=f"{thread_name_prefix}-{started.run_id[:8]}",
         daemon=True,

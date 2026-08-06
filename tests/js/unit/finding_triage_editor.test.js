@@ -36,6 +36,7 @@ function mountEditor() {
           <textarea id="finding-triage-verification-steps"></textarea>
           <div id="finding-triage-disposition" class="u-hidden"></div>
           <div id="finding-triage-verification-context" class="u-hidden">
+            <div id="finding-triage-verification-suggestion" class="u-hidden"></div>
             <div id="finding-triage-origin-checks"></div>
             <div id="finding-triage-retest-runs"></div>
             <div id="finding-triage-verification-candidates" class="u-hidden">
@@ -298,6 +299,15 @@ describe('finding triage editor', () => {
         compatibility: { state: 'incomparable', reason: 'Targets another host.' },
         comparison: { available: true, left_run_id: 'run-original', right_run_id: 'run-other' },
       }],
+      suggestion: {
+        available: true,
+        verification_status: 'needs_retest',
+        reason: 'The same exact vulnerability was observed again.',
+        run_id: 'run-retest',
+        evidence_link_id: 'fel-retest',
+        matched_check_id: 'check-tls',
+        matched_rule_key: 'completed-tls-check',
+      },
     }
     const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/findings/finding-verification/triage' && !options.method) {
@@ -339,6 +349,13 @@ describe('finding triage editor', () => {
       .toContain('Profile now v2.0')
     expect(document.getElementById('finding-triage-retest-runs').textContent)
       .toContain('Comparable')
+    expect(document.getElementById('finding-triage-verification-suggestion').textContent)
+      .toContain('Suggested status: Needs retest')
+    document.querySelector('[data-finding-verification-use-suggestion]').click()
+    expect(document.getElementById('finding-triage-status').value).toBe('needs_retest')
+    expect(document.getElementById('finding-triage-message').textContent)
+      .toContain('Review the evidence, then save triage')
+    expect(apiFetch.mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
 
     document.getElementById('finding-triage-verification-attach').click()
     await flushPromises(12)
@@ -356,7 +373,7 @@ describe('finding triage editor', () => {
       { method: 'DELETE' },
     )
 
-    document.querySelector('.finding-triage-verification-item-actions .btn-secondary').click()
+    document.querySelector('[data-finding-verification-compare]').click()
     await flushPromises()
     expect(window.fetchAndRenderHistoryComparison).toHaveBeenCalledWith(
       'run-original',

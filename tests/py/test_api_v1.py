@@ -1452,6 +1452,32 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
     assert start_kwargs["display_command"] == plan["display_command"]
     assert start_kwargs["link_project_id"] == project["id"]
     assert start_kwargs["owner_tab_id"] == ""
+    assert callable(start_kwargs["run_finalized_hook"])
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
+            "VALUES ('run_verification_action', ?, 'external', ?, "
+            "'2026-08-05T12:01:00+00:00', '2026-08-05T12:02:00+00:00', 0)",
+            (token, plan["display_command"]),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', 'run_verification_action', 'manual', "
+            "'2026-08-05T12:02:00+00:00')",
+            ("plr_" + uuid.uuid4().hex[:16], project["id"]),
+        )
+        conn.commit()
+    start_kwargs["run_finalized_hook"]("run_verification_action", {
+        "active_project_link": {"project_id": project["id"]},
+        "finalize_summary": {"persisted": True},
+    })
+    with sqlite3.connect(DB_PATH) as conn:
+        retained = conn.execute(
+            "SELECT evidence_type, evidence_id FROM finding_evidence_links "
+            "WHERE project_id = ? AND finding_id = ? AND evidence_type = 'retest_run'",
+            (project["id"], finding_id),
+        ).fetchone()
+    assert tuple(retained) == ("retest_run", "run_verification_action")
     launch_log = next(
         call for call in info_log.call_args_list
         if call.args == ("API_PROJECT_VERIFICATION_ACTION_LAUNCHED",)
@@ -1719,6 +1745,22 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
     assert verification["origin_checks"][0]["profile_version_state"] == "changed"
     assert verification["retest_runs"][0]["id"] == retest_run_id
     assert verification["retest_runs"][0]["compatibility"]["state"] == "compatible"
+    assert verification["retest_runs"][0]["compatibility"] == {
+        **verification["retest_runs"][0]["compatibility"],
+        "matched_check_id": check_id,
+        "matched_rule_key": "",
+        "supports_negative_evidence": True,
+    }
+    assert verification["suggestion"] == {
+        "available": True,
+        "verification_status": "verified",
+        "reason": verification["suggestion"]["reason"],
+        "run_id": retest_run_id,
+        "evidence_link_id": verification["retest_runs"][0]["evidence_link_id"],
+        "matched_check_id": check_id,
+        "matched_rule_key": "",
+    }
+    assert "not observed again" in verification["suggestion"]["reason"]
     assert verification["retest_runs"][0]["comparison"] == {
         "available": True,
         "left_run_id": run_id,
@@ -1728,6 +1770,18 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         item["id"]: item for item in verification["candidate_runs"]
     }
     assert candidate_by_id[incomparable_run_id]["compatibility"]["state"] == "incomparable"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO findings_occurrences "
+            "(finding_id, run_id, line_number, snippet, seen_at) VALUES "
+            "(?, ?, 0, 'vulnerable response', '2026-08-05T00:05:00+00:00')",
+            (finding_id, retest_run_id),
+        )
+        conn.commit()
+    evidence_page = client.get(route, headers=_headers(token)).get_json()
+    repeated = evidence_page["verification"]["suggestion"]
+    assert repeated["verification_status"] == "needs_retest"
+    assert "observed" in repeated["reason"]
     browser_route = f"/projects/{project['id']}/findings/{finding_id}/evidence"
     browser_page = client.get(browser_route, headers={"X-Session-ID": token})
     assert browser_page.status_code == 200
