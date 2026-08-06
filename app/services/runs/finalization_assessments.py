@@ -11,6 +11,7 @@ import logging
 from core.helpers import get_log_session_id
 from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
+from services.runs.finalization_assessment_findings import reconcile_assessment_findings_for_finalize
 from services.runs.finalization_summaries import auto_promote_summary_ids, auto_promote_summary_results
 from services.runs.persistence import run_finalize_savepoint
 
@@ -66,4 +67,11 @@ def reconcile_assessment_evidence_for_finalize(
             "project_ids": project_ids,
             **{key: int(value or 0) for key, value in summary.items()},
         })
+        reconcile_assessment_findings_for_finalize(
+            conn,
+            run_id,
+            session_id,
+            team_id,
+            project_ids,
+        )
     return summary

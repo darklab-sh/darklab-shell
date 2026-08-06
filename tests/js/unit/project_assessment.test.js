@@ -5,12 +5,17 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { openContextualFindingRecord } = vi.hoisted(() => ({
+const { openContextualFindingRecord, openFindingTriageEditor } = vi.hoisted(() => ({
   openContextualFindingRecord: vi.fn(async () => true),
+  openFindingTriageEditor: vi.fn(async () => true),
 }))
 
 vi.mock('../../../app/static/js/features/findings/finding_record_context.js', () => ({
   openContextualFindingRecord,
+}))
+
+vi.mock('../../../app/static/js/features/findings/finding_triage_bridge.js', () => ({
+  openFindingTriageEditor,
 }))
 
 import { DarklabProjectAssessment } from '../../../app/static/js/features/projects/project_assessment.js'
@@ -49,6 +54,7 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     canMutateProjects: vi.fn(() => true),
     canTriageFindings: vi.fn(() => true),
     openContextualFindingRecord,
+    openFindingTriageEditor,
     ...overrides,
   }
 }
@@ -142,6 +148,7 @@ describe('project assessment controller', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     openContextualFindingRecord.mockClear()
+    openFindingTriageEditor.mockClear()
     document.body.replaceChildren()
   })
 
@@ -224,6 +231,69 @@ describe('project assessment controller', () => {
     const viewerCreate = viewerSurface.querySelector('.project-assessment-check-row .btn')
     expect(viewerCreate.disabled).toBe(true)
     expect(viewerCreate.title).toContain('View-only')
+  })
+
+  it('renders remediation-level cycle deltas with direct current and earlier finding links', async () => {
+    const findingDeltas = {
+      comparison: {
+        status: 'partial',
+        total_checks: 2,
+        comparable_checks: 1,
+        no_baseline_checks: 0,
+        incomparable_checks: 1,
+      },
+      rollup: {
+        new: 1,
+        persistent: 1,
+        not_observed: 1,
+        regressed: 1,
+        incomparable: 1,
+        total: 5,
+      },
+      items: [{
+        remediation_id: 'rmd_1',
+        vulnerability_id: 'CVE-2026-10001',
+        rule_identity: 'template:nuclei-test',
+        state: 'persistent',
+        reasons: ['Observed in both cycles under the same compatible check contract.'],
+        checks: [{ target_value: 'example.com' }],
+        current_observations: [{ observation_id: 'obs_current' }],
+        previous_observations: [{ observation_id: 'obs_previous' }],
+        current_findings: [{ id: 'fnd_current', title: 'Current template match', severity: 'high' }],
+        previous_findings: [{ id: 'fnd_previous', title: 'Earlier template match', severity: 'high' }],
+      }],
+      item_limit: 100,
+      truncated: false,
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse({ ...detail, finding_deltas: findingDeltas })
+      return responseFor(url, options)
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+
+    const desktop = document.createElement('div')
+    controller.renderAssessment(desktop, 'prj_1')
+    const mobile = controller.renderMobileAssessmentTab('prj_1')
+    for (const surface of [desktop, mobile]) {
+      expect(surface.textContent).toContain('Finding changes')
+      expect(surface.textContent).toContain('Some checks have a compatible earlier baseline')
+      expect(surface.textContent).toContain('CVE-2026-10001')
+      expect(surface.textContent).toContain('1 current observation')
+      const buttons = [...surface.querySelectorAll('.project-assessment-delta-evidence .btn')]
+      expect(buttons.map(button => button.textContent)).toEqual([
+        'Current template match',
+        'Earlier template match',
+      ])
+      buttons.forEach(button => button.click())
+    }
+    await vi.waitFor(() => expect(openFindingTriageEditor).toHaveBeenCalledTimes(4))
+    expect(openFindingTriageEditor).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'fnd_current' }),
+      expect.objectContaining({ projectId: 'prj_1', canEdit: true }),
+    )
+    expect(mobile.querySelector('.project-assessment-delta-evidence .btn')?.getBoundingClientRect).toBeDefined()
   })
 
   it('preserves cycle filters, paging, disclosure, and scroll state per project', async () => {

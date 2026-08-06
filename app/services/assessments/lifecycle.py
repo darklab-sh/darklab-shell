@@ -16,6 +16,11 @@ from services.assessments.contracts import (
     AssessmentError,
     AssessmentNotFound,
 )
+from services.assessments.reconciliation import reconcile_assessment_findings_on_conn
+from services.assessments.reconciliation_cleanup import (
+    delete_assessment_reconciliation_on_conn,
+    reconciliation_deletion_counts,
+)
 from services.assessments.serialization import row_to_assessment
 from services.projects.scope import shared_owner_where
 from services.projects.utils import now
@@ -167,6 +172,8 @@ def _update_cycle(
     )
     if not result.rowcount:
         raise AssessmentConflict("assessment changed during this update")
+    if next_status == "completed" and current_status == "active":
+        reconcile_assessment_findings_on_conn(conn, assessment_id)
     updated = _load_assessment(
         conn,
         session_id,
@@ -255,6 +262,7 @@ def _deletion_preview(conn: Any, row: Any) -> dict[str, Any]:
         else:
             unavailable += count
     evidence_count = available + unavailable
+    reconciliation_counts = reconciliation_deletion_counts(conn, assessment_id)
     status = str(row["status"] or "")
     serialized = row_to_assessment(row) or {}
     return {
@@ -280,6 +288,7 @@ def _deletion_preview(conn: Any, row: Any) -> dict[str, Any]:
             "available_evidence_links": available,
             "unavailable_evidence_links": unavailable,
             "evidence_links_by_type": by_type,
+            **reconciliation_counts,
         },
         "source_records_deleted": False,
     }
@@ -342,6 +351,7 @@ def delete_assessment_cycle(
         if str(row["status"] or "") != "archived":
             raise AssessmentConflict("only archived assessments can be deleted")
         preview = _deletion_preview(active_conn, row)
+        delete_assessment_reconciliation_on_conn(active_conn, normalized_assessment_id)
         active_conn.execute(
             "DELETE FROM project_assessment_evidence WHERE assessment_id = ?",
             (normalized_assessment_id,),

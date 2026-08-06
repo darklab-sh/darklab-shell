@@ -677,6 +677,62 @@
         ],
         "type": "object"
       },
+      "AssessmentDeletionCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "assessments": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "available_evidence_links": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dependent_comparisons_invalidated": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "evidence_links": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "evidence_links_by_type": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "finding_check_comparisons": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "finding_deltas": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unavailable_evidence_links": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assessments",
+          "checks",
+          "evidence_links",
+          "available_evidence_links",
+          "unavailable_evidence_links",
+          "evidence_links_by_type",
+          "finding_check_comparisons",
+          "finding_deltas",
+          "dependent_comparisons_invalidated"
+        ],
+        "type": "object"
+      },
       "AssessmentDeletionPreview": {
         "additionalProperties": false,
         "properties": {
@@ -694,8 +750,7 @@
             "type": "boolean"
           },
           "will_delete": {
-            "additionalProperties": true,
-            "type": "object"
+            "$ref": "#/components/schemas/AssessmentDeletionCounts"
           }
         },
         "required": [
@@ -734,6 +789,9 @@
           "checks": {
             "$ref": "#/components/schemas/AssessmentCheckPage"
           },
+          "finding_deltas": {
+            "$ref": "#/components/schemas/AssessmentFindingDeltaPage"
+          },
           "rollup": {
             "$ref": "#/components/schemas/AssessmentRollup"
           }
@@ -742,6 +800,7 @@
           "assessment",
           "rollup",
           "category_rollups",
+          "finding_deltas",
           "checks"
         ],
         "type": "object"
@@ -990,6 +1049,312 @@
           "from_state",
           "to_state",
           "manual_state_preserved"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_subject": {
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingDeltaCheck"
+            },
+            "type": "array"
+          },
+          "current_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "current_findings": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingDeltaFinding"
+            },
+            "type": "array"
+          },
+          "current_observations": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingDeltaObservation"
+            },
+            "type": "array"
+          },
+          "identity_kind": {
+            "enum": [
+              "vulnerability",
+              "rule"
+            ],
+            "type": "string"
+          },
+          "previous_assessment_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "previous_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "previous_findings": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingDeltaFinding"
+            },
+            "type": "array"
+          },
+          "previous_observations": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingDeltaObservation"
+            },
+            "type": "array"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "remediation_id": {
+            "type": "string"
+          },
+          "rule_identity": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "new",
+              "persistent",
+              "not_observed",
+              "regressed",
+              "incomparable"
+            ],
+            "type": "string"
+          },
+          "vulnerability_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "remediation_id",
+          "identity_kind",
+          "vulnerability_id",
+          "rule_identity",
+          "affected_subject",
+          "state",
+          "reasons",
+          "checks",
+          "current_observations",
+          "previous_observations",
+          "current_evidence_ids",
+          "previous_evidence_ids",
+          "previous_assessment_ids",
+          "current_findings",
+          "previous_findings"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingDeltaCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "check_key": {
+            "type": "string"
+          },
+          "current_check_id": {
+            "type": "string"
+          },
+          "previous_check_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "target_value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_check_id",
+          "previous_check_id",
+          "check_key",
+          "target_type",
+          "target_value",
+          "state"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingDeltaComparison": {
+        "additionalProperties": false,
+        "properties": {
+          "comparable_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "incomparable_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "no_baseline_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "comparable",
+              "partial",
+              "no_baseline",
+              "incomparable"
+            ],
+            "type": "string"
+          },
+          "total_checks": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "total_checks",
+          "comparable_checks",
+          "no_baseline_checks",
+          "incomparable_checks"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingDeltaFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "validation_method": {
+            "type": "string"
+          },
+          "verification_status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "severity",
+          "origin",
+          "validation_method",
+          "verification_status"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingDeltaObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "finding_id": {
+            "type": "string"
+          },
+          "observation_id": {
+            "type": "string"
+          },
+          "validation_method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation_id",
+          "finding_id",
+          "validation_method",
+          "evidence_ids"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingDeltaPage": {
+        "additionalProperties": false,
+        "properties": {
+          "comparison": {
+            "$ref": "#/components/schemas/AssessmentFindingDeltaComparison"
+          },
+          "item_limit": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingDelta"
+            },
+            "type": "array"
+          },
+          "rollup": {
+            "$ref": "#/components/schemas/AssessmentFindingDeltaRollup"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "comparison",
+          "rollup",
+          "items",
+          "item_limit",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingDeltaRollup": {
+        "additionalProperties": false,
+        "properties": {
+          "incomparable": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "new": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "not_observed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "persistent": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "regressed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "new",
+          "persistent",
+          "not_observed",
+          "regressed",
+          "incomparable",
+          "total"
         ],
         "type": "object"
       },

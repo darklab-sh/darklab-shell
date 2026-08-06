@@ -1194,6 +1194,26 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     filtered = json.loads(filtered_response.data)
     assert filtered["checks"]["total"] == 1
     assert filtered["checks"]["checks"][0]["id"] == check_id
+    assert filtered["finding_deltas"] == {
+        "comparison": {
+            "status": "pending",
+            "total_checks": 0,
+            "comparable_checks": 0,
+            "no_baseline_checks": 0,
+            "incomparable_checks": 0,
+        },
+        "rollup": {
+            "regressed": 0,
+            "new": 0,
+            "persistent": 0,
+            "not_observed": 0,
+            "incomparable": 0,
+            "total": 0,
+        },
+        "items": [],
+        "item_limit": 100,
+        "truncated": False,
+    }
     assert cross_scope.status_code == 404
     assert json.loads(cross_scope.data)["error"]["code"] == "not_found"
 
@@ -1268,7 +1288,13 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     assert archived_response.status_code == 200
     assert json.loads(archived_response.data)["assessment"]["status"] == "archived"
     assert preview_response.status_code == 200
-    assert json.loads(preview_response.data)["preview"]["can_delete"] is True
+    preview = json.loads(preview_response.data)["preview"]
+    assert preview["can_delete"] is True
+    assert {
+        "finding_check_comparisons",
+        "finding_deltas",
+        "dependent_comparisons_invalidated",
+    }.issubset(preview["will_delete"])
     assert deleted_response.status_code == 200
     assert json.loads(deleted_response.data)["deleted"]["source_records_deleted"] is False
 
@@ -5232,6 +5258,29 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "skipped",
         "not_applicable",
     ]
+    assert "finding_deltas" in schemas["AssessmentDetail"]["required"]
+    assert schemas["AssessmentDetail"]["properties"]["finding_deltas"] == {
+        "$ref": "#/components/schemas/AssessmentFindingDeltaPage"
+    }
+    assert schemas["AssessmentFindingDelta"]["properties"]["state"]["enum"] == [
+        "new",
+        "persistent",
+        "not_observed",
+        "regressed",
+        "incomparable",
+    ]
+    assert schemas["AssessmentFindingDeltaPage"]["properties"]["items"] == {
+        "type": "array",
+        "items": {"$ref": "#/components/schemas/AssessmentFindingDelta"},
+    }
+    assert schemas["AssessmentDeletionPreview"]["properties"]["will_delete"] == {
+        "$ref": "#/components/schemas/AssessmentDeletionCounts"
+    }
+    assert {
+        "finding_check_comparisons",
+        "finding_deltas",
+        "dependent_comparisons_invalidated",
+    }.issubset(schemas["AssessmentDeletionCounts"]["required"])
     assessment_contract = json.dumps({
         key: value
         for key, value in schemas.items()

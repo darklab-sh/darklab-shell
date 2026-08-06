@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import uuid
 
 import pytest
@@ -28,6 +29,12 @@ from services.assessments.evidence_matching import (
 )
 from services.assessments.lifecycle import update_assessment_cycle
 from services.assessments.mutations import update_manual_check_state_on_conn
+from services.assessments.reconciliation import reconcile_assessment_findings_on_conn
+from services.assessments.reconciliation_cleanup import (
+    delete_assessment_reconciliation_on_conn,
+    reconciliation_deletion_counts,
+)
+from services.assessments.reconciliation_read import assessment_finding_delta_read_model
 from services.assessments.storage import create_assessment_cycle
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.crud import create_project, delete_project
@@ -207,6 +214,65 @@ def _check_id(assessment_id: str) -> str:
     row = _check_row(assessment_id)
     assert row is not None
     return str(row["id"])
+
+
+def _seed_run_finding(
+    conn,
+    session_id: str,
+    run_id: str,
+    subject_key: str,
+    cve_id: str,
+) -> str:
+    finding_id = "fnd-assessment-delta-" + uuid.uuid4().hex
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, run_id, subject_key, signature_hash, severity, tool_root, "
+        "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, "
+        "fingerprint, title, raw_line, cve_ids_json, created) "
+        "VALUES (?, ?, ?, ?, ?, 'high', 'nuclei', ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+        (
+            finding_id,
+            session_id,
+            run_id,
+            subject_key,
+            "sig-" + cve_id,
+            run_id,
+            run_id,
+            "2026-08-04 12:01:00",
+            "2026-08-04 12:01:00",
+            "fp-" + cve_id,
+            f"{cve_id} template match",
+            f"{cve_id} matched",
+            json.dumps([cve_id]),
+            "2026-08-04 12:01:00",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO findings_occurrences "
+        "(finding_id, run_id, line_number, snippet, seen_at) VALUES (?, ?, 1, ?, ?)",
+        (finding_id, run_id, cve_id, "2026-08-04 12:01:00"),
+    )
+    return finding_id
+
+
+def _link_finding_to_run(conn, session_id: str, run_id: str, cve_id: str) -> str:
+    row = conn.execute(
+        "SELECT id FROM findings WHERE session_id = ? AND signature_hash = ?",
+        (session_id, "sig-" + cve_id),
+    ).fetchone()
+    assert row is not None
+    finding_id = str(row["id"])
+    conn.execute(
+        "INSERT INTO findings_occurrences "
+        "(finding_id, run_id, line_number, snippet, seen_at) VALUES (?, ?, 1, ?, ?)",
+        (finding_id, run_id, cve_id, "2026-08-05 12:01:00"),
+    )
+    conn.execute(
+        "UPDATE findings SET last_run_id = ?, last_seen_at = ?, occurrence_count = 2 "
+        "WHERE id = ?",
+        (run_id, "2026-08-05 12:01:00", finding_id),
+    )
+    return finding_id
 
 
 def test_target_matching_keeps_exact_and_host_descendant_boundaries_distinct():
@@ -604,6 +670,183 @@ def test_reconcile_moves_finding_rules_to_needs_review(assessment_factory):
     assert summary["evidence_linked"] == 1
     assert check["state"] == "needs_review"
     assert "app-captured findings" in check["state_reason"]
+
+
+def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
+    assessment_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    factory, cleanup = assessment_factory
+    finding_rule = _rule(
+        command_roots=["nuclei"],
+        structured_output_kinds=["findings"],
+        target_match="host_or_descendant",
+    )
+    profile = _profile(rule=finding_rule)
+    session_id, project_id, previous_assessment_id = factory(
+        [("domain", "delta.example")],
+        profile=profile,
+    )
+    previous_run_id = _seed_linked_run(
+        cleanup,
+        session_id,
+        project_id,
+        "nuclei -u https://delta.example",
+    )
+    with db_connect() as conn:
+        regressed_finding_id = _seed_run_finding(
+            conn,
+            session_id,
+            previous_run_id,
+            "delta.example",
+            "CVE-2026-10004",
+        )
+        _seed_run_finding(
+            conn,
+            session_id,
+            previous_run_id,
+            "delta.example",
+            "CVE-2026-10001",
+        )
+        _seed_run_finding(
+            conn,
+            session_id,
+            previous_run_id,
+            "delta.example",
+            "CVE-2026-10002",
+        )
+        reconcile_run_evidence_on_conn(
+            conn,
+            previous_run_id,
+            command_target_inputs_fn=_target_inputs("https://delta.example"),
+        )
+        conn.execute(
+            "UPDATE project_assessments SET started_at = ? WHERE id = ?",
+            ("2026-08-04 10:00:00", previous_assessment_id),
+        )
+        conn.commit()
+
+    update_assessment_cycle(
+        session_id,
+        project_id,
+        previous_assessment_id,
+        {"status": "completed"},
+    )
+    current = create_assessment_cycle(session_id, project_id, "evidence-test")
+    current_assessment_id = str(current["assessment"]["id"])
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO finding_triage_details "
+            "(id, session_id, finding_id, remediation, verification_steps, "
+            "verification_status, verification_notes, verification_updated_at, created, updated) "
+            "VALUES (?, ?, ?, '', '', 'verified', '', ?, ?, ?)",
+            (
+                "ftri-assessment-delta-" + uuid.uuid4().hex,
+                session_id,
+                regressed_finding_id,
+                "2026-08-04 18:00:00",
+                "2026-08-04 18:00:00",
+                "2026-08-04 18:00:00",
+            ),
+        )
+        conn.commit()
+    monkeypatch.setattr(
+        "services.assessments.reconciliation.finding_verification_context_on_conn",
+        lambda *_args, **_kwargs: {
+            "suggestion": {"available": True, "verification_status": "verified"},
+        },
+    )
+    current_run_id = _seed_linked_run(
+        cleanup,
+        session_id,
+        project_id,
+        "nuclei -u https://delta.example",
+    )
+    with db_connect() as conn:
+        _link_finding_to_run(
+            conn,
+            session_id,
+            current_run_id,
+            "CVE-2026-10001",
+        )
+        _link_finding_to_run(
+            conn,
+            session_id,
+            current_run_id,
+            "CVE-2026-10004",
+        )
+        _seed_run_finding(
+            conn,
+            session_id,
+            current_run_id,
+            "delta.example",
+            "CVE-2026-10003",
+        )
+        conn.execute(
+            "UPDATE project_assessments SET started_at = ? WHERE id = ?",
+            ("2026-08-05 10:00:00", current_assessment_id),
+        )
+        reconcile_run_evidence_on_conn(
+            conn,
+            current_run_id,
+            command_target_inputs_fn=_target_inputs("https://delta.example"),
+        )
+        summary = reconcile_assessment_findings_on_conn(conn, current_assessment_id)
+        read_model = assessment_finding_delta_read_model(conn, current_assessment_id)
+        conn.commit()
+
+    assert summary == {
+        "checks_compared": 1,
+        "comparable_checks": 1,
+        "no_baseline_checks": 0,
+        "incomparable_checks": 0,
+        "deltas_written": 4,
+    }
+    assert read_model["comparison"] == {
+        "status": "comparable",
+        "total_checks": 1,
+        "comparable_checks": 1,
+        "no_baseline_checks": 0,
+        "incomparable_checks": 0,
+    }
+    assert read_model["rollup"] == {
+        "regressed": 1,
+        "new": 1,
+        "persistent": 1,
+        "not_observed": 1,
+        "incomparable": 0,
+        "total": 4,
+    }
+    by_vulnerability = {item["vulnerability_id"]: item for item in read_model["items"]}
+    assert by_vulnerability["CVE-2026-10001"]["state"] == "persistent"
+    assert by_vulnerability["CVE-2026-10002"]["state"] == "not_observed"
+    assert by_vulnerability["CVE-2026-10003"]["state"] == "new"
+    assert by_vulnerability["CVE-2026-10004"]["state"] == "regressed"
+    assert len(by_vulnerability["CVE-2026-10001"]["current_findings"]) == 1
+    assert len(by_vulnerability["CVE-2026-10001"]["previous_findings"]) == 1
+    assert by_vulnerability["CVE-2026-10002"]["current_findings"] == []
+    assert by_vulnerability["CVE-2026-10002"]["previous_findings"][0]["id"]
+
+    with db_connect() as conn:
+        counts = reconciliation_deletion_counts(conn, previous_assessment_id)
+        assert counts["finding_check_comparisons"] == 1
+        assert counts["finding_deltas"] == 3
+        assert counts["dependent_comparisons_invalidated"] == 1
+        delete_assessment_reconciliation_on_conn(conn, previous_assessment_id)
+        comparison = conn.execute(
+            "SELECT compatibility_state, reason FROM project_assessment_check_comparisons "
+            "WHERE current_assessment_id = ?",
+            (current_assessment_id,),
+        ).fetchone()
+        delta_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM project_assessment_finding_deltas "
+            "WHERE current_assessment_id = ?",
+            (current_assessment_id,),
+        ).fetchone()
+        conn.commit()
+    assert comparison["compatibility_state"] == "incomparable"
+    assert comparison["reason"] == "The prior assessment cycle was deleted."
+    assert int(delta_count["count"] or 0) == 0
 
 
 def test_evidence_quota_rejects_all_links_before_partial_insert(

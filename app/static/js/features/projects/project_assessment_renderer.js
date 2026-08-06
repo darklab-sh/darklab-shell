@@ -29,6 +29,14 @@ const filterStates = [
   'covered',
 ];
 
+const findingDeltaLabels = {
+  new: 'New',
+  persistent: 'Persistent',
+  not_observed: 'Not observed',
+  regressed: 'Regressed',
+  incomparable: 'Incomparable',
+};
+
 function createProjectAssessmentRenderer(context, actions) {
   const ctx = context || {};
   const act = actions || {};
@@ -278,6 +286,113 @@ function createProjectAssessmentRenderer(context, actions) {
     return section;
   }
 
+  function deltaTone(state) {
+    if (state === 'regressed') return 'red';
+    if (state === 'new') return 'amber';
+    if (state === 'persistent') return 'green';
+    return 'muted';
+  }
+
+  function comparisonCopy(comparison) {
+    const status = String(comparison?.status || 'pending');
+    if (status === 'comparable') {
+      return 'This cycle is compared with the latest earlier cycle that used the same saved check and evidence rule.';
+    }
+    if (status === 'partial') {
+      return 'Some checks have a compatible earlier baseline; others remain explicitly incomparable.';
+    }
+    if (status === 'no_baseline') {
+      return 'No earlier completed cycle has the same saved check and target yet.';
+    }
+    if (status === 'incomparable') {
+      return "The saved checks can't be compared safely because their evidence contracts differ or evidence is unavailable.";
+    }
+    return 'Finding changes will appear after this cycle saves compatible evidence.';
+  }
+
+  function renderDeltaFindingButtons(projectId, side, findings) {
+    const group = makeElement('div', 'project-assessment-delta-evidence');
+    group.appendChild(makeElement('strong', '', side === 'current' ? 'This cycle' : 'Earlier cycle'));
+    const records = Array.isArray(findings) ? findings : [];
+    if (!records.length) {
+      group.appendChild(makeElement(
+        'span',
+        'project-assessment-delta-empty',
+        side === 'current' ? 'No compatible observation saved' : 'No earlier observation saved',
+      ));
+      return group;
+    }
+    records.forEach((finding) => {
+      const button = makeElement('button', 'btn btn-secondary btn-compact', finding?.title || 'Open finding');
+      button.type = 'button';
+      button.title = `${side === 'current' ? 'Open current' : 'Open earlier'} finding details`;
+      ctx.bindProjectRuntimePressable?.(button, {
+        onActivate: () => void act.openDeltaFinding(projectId, finding),
+      });
+      group.appendChild(button);
+    });
+    return group;
+  }
+
+  function renderFindingDeltas(projectId, findingDeltas) {
+    const data = findingDeltas || {};
+    const comparison = data.comparison || {};
+    const rollup = data.rollup || {};
+    const section = makeElement('section', 'project-assessment-section project-assessment-deltas');
+    section.appendChild(sectionHeading('Finding changes', comparisonCopy(comparison)));
+    const cards = makeElement('div', 'project-assessment-summary-grid');
+    cards.append(
+      summaryCard(rollup.new || 0, 'New', 'first seen in this cycle', Number(rollup.new || 0) ? 'attention' : ''),
+      summaryCard(rollup.persistent || 0, 'Persistent', 'seen in both compatible cycles'),
+      summaryCard(rollup.not_observed || 0, 'Not observed', 'absent from a compatible clean check', 'success'),
+      summaryCard(rollup.regressed || 0, 'Regressed', 'returned after verified remediation', Number(rollup.regressed || 0) ? 'danger' : ''),
+      summaryCard(rollup.incomparable || 0, 'Incomparable', 'evidence cannot support a delta'),
+    );
+    section.appendChild(cards);
+
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) return section;
+    const list = makeElement('div', 'project-assessment-delta-list');
+    items.forEach((item) => {
+      const row = makeElement('article', 'panel-row project-assessment-delta-row');
+      const heading = makeElement('div', 'project-assessment-delta-heading');
+      const identity = item?.vulnerability_id || item?.rule_identity || item?.remediation_id || 'Saved finding';
+      heading.append(
+        makeElement('strong', '', identity),
+        badge(findingDeltaLabels[item?.state] || item?.state || 'Incomparable', deltaTone(item?.state)),
+      );
+      const targets = [...new Set(
+        (Array.isArray(item?.checks) ? item.checks : [])
+          .map(check => check?.target_value)
+          .filter(Boolean),
+      )];
+      const meta = [
+        targets.join(', '),
+        `${Number(item?.current_observations?.length || 0)} current observation${Number(item?.current_observations?.length || 0) === 1 ? '' : 's'}`,
+        `${Number(item?.previous_observations?.length || 0)} earlier observation${Number(item?.previous_observations?.length || 0) === 1 ? '' : 's'}`,
+      ].filter(Boolean).join(' · ');
+      row.append(heading, makeElement('div', 'project-assessment-delta-meta', meta));
+      const reason = Array.isArray(item?.reasons) ? item.reasons[0] : '';
+      if (reason) row.appendChild(makeElement('p', 'project-assessment-delta-reason', reason));
+      const evidence = makeElement('div', 'project-assessment-delta-evidence-grid');
+      evidence.append(
+        renderDeltaFindingButtons(projectId, 'current', item?.current_findings),
+        renderDeltaFindingButtons(projectId, 'previous', item?.previous_findings),
+      );
+      row.appendChild(evidence);
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    if (data.truncated) {
+      section.appendChild(makeElement(
+        'p',
+        'project-assessment-delta-limit',
+        `Showing the first ${Number(data.item_limit || items.length)} remediation groups.`,
+      ));
+    }
+    return section;
+  }
+
   function filterChip(label, active, onActivate) {
     const chip = makeElement('button', `chip${active ? ' is-active' : ''}`, label);
     chip.type = 'button';
@@ -498,6 +613,7 @@ function createProjectAssessmentRenderer(context, actions) {
     if (!st.detail) return root;
     root.append(
       renderCoverage(st.detail.rollup),
+      renderFindingDeltas(projectId, st.detail.finding_deltas),
       renderCategoryProgress(projectId, st, st.detail.category_rollups),
       renderChecks(projectId, st, st.detail),
     );

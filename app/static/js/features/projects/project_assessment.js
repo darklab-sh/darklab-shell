@@ -5,6 +5,7 @@
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
 import { openContextualFindingRecord } from '../findings/finding_record_context.js';
+import { openFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 
 function createProjectAssessmentController(context) {
   const ctx = context || {};
@@ -446,12 +447,42 @@ function createProjectAssessmentController(context) {
     }
   }
 
+  async function openDeltaFinding(projectId, finding) {
+    const findingId = String(finding?.id || '');
+    if (!projectId || !findingId) return false;
+    const openEditor = typeof ctx.openFindingTriageEditor === 'function'
+      ? ctx.openFindingTriageEditor
+      : openFindingTriageEditor;
+    try {
+      await openEditor(finding, {
+        projectId,
+        canEdit: ctx.canTriageFindings?.() !== false,
+        onSaved: async () => {
+          ctx.invalidateProjectFindings?.(projectId);
+          ctx.invalidateProjectOverview?.(projectId);
+          await loadDetail(projectId, { render: false });
+          renderViews();
+        },
+      });
+      return true;
+    } catch (err) {
+      ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open finding details.', { error: true });
+      logFailure('PROJECT_ASSESSMENT_CLIENT_DELTA_FINDING_OPEN_FAILED', err, {
+        phase: 'finding_delta',
+        project_id: String(projectId || ''),
+        finding_id: findingId,
+      });
+      return false;
+    }
+  }
+
   const renderer = createProjectAssessmentRenderer(ctx, {
     deleteCycle,
     createCycle,
     createFinding,
     load,
     loadDetail,
+    openDeltaFinding,
     selectCycle,
     setFilter,
     setPage,

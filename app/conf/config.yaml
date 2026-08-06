@@ -292,6 +292,11 @@
 # Server default if unset: 250000
 # max_project_assessment_evidence_per_project: 250000
 #
+# Maximum stored remediation deltas rebuilt for one assessment cycle. Set to 0
+# for unlimited. Existing findings and occurrence history are never evicted.
+# Server default if unset: 100000
+# max_project_assessment_finding_deltas_per_assessment: 100000
+#
 # Server default if unset: 25
 # max_evidence_packages_per_project: 25
 #

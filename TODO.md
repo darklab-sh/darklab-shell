@@ -135,11 +135,9 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 4 — Add first-class manual findings and retest provenance
 
-- [ ] Reconcile finding observations across compatible assessment cycles:
-  - Reconcile the same remediation identity across cycles while comparing its individual observation methods, check keys, and compatible tool/profile versions to classify it as `new`, `persistent`, `not_observed`, or `regressed`. Store remediation- and observation-level links and reasons without rewriting either cycle's finding occurrences.
-  - Calculate `not_observed` only when the newer cycle completed the same compatible check with available evidence and that check has a defined negative-evidence contract. A missing linked run, failed/partial scan, changed scope, parser failure, or unavailable artifact can never prove absence.
-  - Reserve `fixed` for an authorized human disposition backed by compatible verification evidence. Mark `regressed` only when a finding that was previously dispositioned as fixed is observed again; do not turn a one-cycle absence into a permanent claim.
-  - Surface cycle deltas in Assessment, Overview, Findings, packages, and reports with direct links to both evidence sets and an explicit unknown/incomparable state when the evidence cannot support a delta.
+- [ ] Extend the stored Assessment finding changes into the remaining Project handoff surfaces:
+  - Surface the shared remediation-level new, persistent, not-observed, regressed, and incomparable rollup in Overview and Findings without recounting related observations.
+  - Carry current and earlier finding/evidence links plus explicit incomparable reasons into evidence packages and reports.
 
 #### Phase 5 — Add reusable, secret-backed HTTP assessment profiles
 

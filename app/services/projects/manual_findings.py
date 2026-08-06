@@ -388,6 +388,11 @@ def update_manual_finding_on_conn(
         "fingerprint": existing["fingerprint"],
     }
     replace_manual_finding_cve_links(conn, finding_for_links, created_at=updated_at)
+    from services.assessments.reconciliation import (  # noqa: PLC0415
+        reconcile_active_assessments_for_finding_on_conn,
+    )
+
+    reconcile_active_assessments_for_finding_on_conn(conn, finding_id)
     updated_row = _manual_row(conn, session_id, team_id, finding_id)
     return {
         "updated": True,

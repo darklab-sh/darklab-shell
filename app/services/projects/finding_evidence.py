@@ -287,6 +287,11 @@ def link_finding_evidence_on_conn(
         "FROM finding_evidence_links WHERE id = ?",
         (evidence_link_id,),
     ).fetchone()
+    from services.assessments.reconciliation import (  # noqa: PLC0415
+        reconcile_active_assessments_for_finding_on_conn,
+    )
+
+    reconcile_active_assessments_for_finding_on_conn(conn, finding_id)
     return {"created": True, "evidence": _row_payload(row, source)}
 
 
@@ -314,4 +319,9 @@ def unlink_finding_evidence_on_conn(
     if not row:
         raise ProjectWorkspaceNotFound("finding evidence link was not found")
     conn.execute("DELETE FROM finding_evidence_links WHERE id = ?", (evidence_link_id,))
+    from services.assessments.reconciliation import (  # noqa: PLC0415
+        reconcile_active_assessments_for_finding_on_conn,
+    )
+
+    reconcile_active_assessments_for_finding_on_conn(conn, finding_id)
     return _row_payload(row, None)

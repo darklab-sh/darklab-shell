@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1.openapi_assessment_deltas import assessment_delta_schemas
+
 
 def _ref(name: str) -> dict[str, str]:
     return {"$ref": f"#/components/schemas/{name}"}
@@ -71,6 +73,7 @@ def _request_body(schema_name: str) -> dict[str, Any]:
 def assessment_schemas() -> dict[str, Any]:
     nullable_string = {"type": "string", "nullable": True}
     return {
+        **assessment_delta_schemas(),
         "AssessmentEvidenceRuleSnapshot": {
             "type": "object",
             "required": [
@@ -391,7 +394,7 @@ def assessment_schemas() -> dict[str, Any]:
         },
         "AssessmentDetail": {
             "type": "object",
-            "required": ["assessment", "rollup", "category_rollups", "checks"],
+            "required": ["assessment", "rollup", "category_rollups", "finding_deltas", "checks"],
             "properties": {
                 "assessment": _ref("AssessmentCycle"),
                 "rollup": _ref("AssessmentRollup"),
@@ -399,6 +402,7 @@ def assessment_schemas() -> dict[str, Any]:
                     "type": "array",
                     "items": _ref("AssessmentCategoryRollup"),
                 },
+                "finding_deltas": _ref("AssessmentFindingDeltaPage"),
                 "checks": _ref("AssessmentCheckPage"),
             },
             "additionalProperties": False,
@@ -552,7 +556,7 @@ def assessment_schemas() -> dict[str, Any]:
                 "assessment": {"type": "object", "additionalProperties": True},
                 "can_delete": {"type": "boolean"},
                 "requires_archived": {"type": "boolean"},
-                "will_delete": {"type": "object", "additionalProperties": True},
+                "will_delete": _ref("AssessmentDeletionCounts"),
                 "source_records_deleted": {"type": "boolean"},
             },
             "additionalProperties": False,

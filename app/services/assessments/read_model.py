@@ -17,6 +17,7 @@ from services.assessments.contracts import (
     ASSESSMENT_STATUSES,
     AssessmentError,
 )
+from services.assessments.reconciliation_read import assessment_finding_delta_read_model
 from services.assessments.serialization import (
     row_to_assessment,
     row_to_check,
@@ -200,6 +201,7 @@ def get_assessment_read_model(
             "assessment": row_to_assessment(row),
             "rollup": assessment_rollup(conn, str(row["id"])),
             "category_rollups": assessment_category_rollups(conn, str(row["id"])),
+            "finding_deltas": assessment_finding_delta_read_model(conn, str(row["id"])),
             "checks": _check_page(
                 conn,
                 str(row["id"]),

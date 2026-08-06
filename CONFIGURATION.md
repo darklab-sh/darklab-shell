@@ -333,6 +333,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `max_project_assessment_checks_per_project` | `50000` | Server-side only. Maximum target-specific assessment checks for one project. `0` means unlimited |
 | `max_project_assessment_evidence_per_owner` | `1000000` | Server-side only. Maximum typed assessment evidence links for one personal session or team owner. `0` means unlimited |
 | `max_project_assessment_evidence_per_project` | `250000` | Server-side only. Maximum typed assessment evidence links retained by one project. `0` means unlimited |
+| `max_project_assessment_finding_deltas_per_assessment` | `100000` | Server-side only. Maximum stored remediation deltas rebuilt for one assessment cycle. `0` means unlimited; source findings and occurrence history are never evicted |
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
 | `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |

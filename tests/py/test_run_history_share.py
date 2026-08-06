@@ -1885,7 +1885,12 @@ class TestRunStreaming:
                  True,
                  True,
              ]), \
-             mock.patch("blueprints.run._run_belongs_to_session", return_value=True), \
+             mock.patch("blueprints.run._run_session_visibility", return_value={
+                 "allowed": True,
+                 "active_match": True,
+                 "db_match": False,
+                 "active_count": 1,
+             }), \
              mock.patch("blueprints.run.run_persistence_transaction", side_effect=Exception("db write failed")):
             resp = _post_run(client, json={"command": "echo saved"})
             body = resp.get_data(as_text=True)
