@@ -1299,10 +1299,28 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         command="nuclei -u https://evidence.example",
         output=["first", "vulnerable response", "last"],
     )
+    retest_run_id = _seed_run(
+        token,
+        run_id="run_finding_retest_" + uuid.uuid4().hex[:12],
+        command="nuclei -u https://evidence.example",
+        output=["retest complete"],
+    )
+    incomparable_run_id = _seed_run(
+        token,
+        run_id="run_finding_other_" + uuid.uuid4().hex[:12],
+        command="nmap -sV unrelated.example",
+        output=["unrelated scan"],
+    )
     linked = client.post(
         f"/api/v1/runs/{run_id}/projects/{project['id']}",
         headers=_headers(token),
     )
+    for candidate_id in (retest_run_id, incomparable_run_id):
+        response = client.post(
+            f"/api/v1/runs/{candidate_id}/projects/{project['id']}",
+            headers=_headers(token),
+        )
+        assert response.status_code == 201
     target_response = client.post(
         f"/projects/{project['id']}/targets",
         headers={"X-Session-ID": token},
@@ -1344,10 +1362,29 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
             "INSERT INTO project_assessments "
             "(id, session_id, project_id, title, profile_key, profile_version, profile_snapshot, "
             "status, started_at, created_at, updated_at) VALUES "
-            "(?, ?, ?, 'Evidence cycle', 'network', '1', '{}', 'active', "
+            "(?, ?, ?, 'Evidence cycle', 'network', '1', ?, 'active', "
             "'2026-08-05T00:00:00+00:00', '2026-08-05T00:00:00+00:00', "
             "'2026-08-05T00:00:00+00:00')",
-            (assessment_id, token, project["id"]),
+            (
+                assessment_id,
+                token,
+                project["id"],
+                json.dumps({
+                    "checks": [{
+                        "key": "manual-evidence",
+                        "evidence_rules": [{
+                            "evidence_types": ["run"],
+                            "command_roots": ["nuclei"],
+                            "workflow_actions": [],
+                            "structured_output_kinds": [],
+                            "target_match": "host_or_descendant",
+                            "completion": "succeeded",
+                            "compatible_versions": ["*"],
+                            "negative_evidence": True,
+                        }],
+                    }],
+                }),
+            ),
         )
         conn.execute(
             "INSERT INTO project_assessment_checks "
@@ -1449,7 +1486,7 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         ("atlas_entity", target_id),
         ("project_target", target_id),
         ("assessment_check", check_id),
-        ("retest_run", run_id),
+        ("retest_run", retest_run_id),
     ]
     with mock.patch.dict(config.CFG, {
         "max_finding_evidence_links_per_owner": 0,
@@ -1469,6 +1506,21 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         evidence_type for evidence_type, _evidence_id in evidence_sources
     }
     assert evidence_page["total"] == 8
+    verification = evidence_page["verification"]
+    assert verification["baseline_run_id"] == run_id
+    assert verification["origin_checks"][0]["check_id"] == check_id
+    assert verification["origin_checks"][0]["profile_version_state"] == "changed"
+    assert verification["retest_runs"][0]["id"] == retest_run_id
+    assert verification["retest_runs"][0]["compatibility"]["state"] == "compatible"
+    assert verification["retest_runs"][0]["comparison"] == {
+        "available": True,
+        "left_run_id": run_id,
+        "right_run_id": retest_run_id,
+    }
+    candidate_by_id = {
+        item["id"]: item for item in verification["candidate_runs"]
+    }
+    assert candidate_by_id[incomparable_run_id]["compatibility"]["state"] == "incomparable"
     browser_route = f"/projects/{project['id']}/findings/{finding_id}/evidence"
     browser_page = client.get(browser_route, headers={"X-Session-ID": token})
     assert browser_page.status_code == 200
@@ -1668,7 +1720,10 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     assert viewer_list.status_code == 200
     assert json.loads(viewer_list.data)["assessments"][0]["id"] == assessment_id
     assert viewer_evidence_list.status_code == 200
-    assert viewer_evidence_list.get_json() == {"evidence": [], "total": 0}
+    viewer_evidence = viewer_evidence_list.get_json()
+    assert viewer_evidence["evidence"] == []
+    assert viewer_evidence["total"] == 0
+    assert viewer_evidence["verification"]["baseline_run_id"] == evidence_run_id
     for response in (viewer_update, viewer_check_update, viewer_evidence_write):
         assert response.status_code == 403
         assert json.loads(response.data)["error"]["code"] == "team_forbidden"
@@ -2675,6 +2730,7 @@ def test_api_v1_project_readers_are_token_scoped():
         "remediation_group_member_count": 1,
         "remediation_source": "remediation_group",
         "remediation_updated_at": remediation_updated_at,
+        "verification_disposition": None,
     }
     assert owner_runs.status_code == 200
     assert json.loads(owner_runs.data)["runs"][0]["id"] == run_id

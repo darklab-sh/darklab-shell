@@ -2967,6 +2967,7 @@ let exportedCycleAtlasTab = null;
       throw new Error('Finding triage editor is not available.');
     }
     await findingTriageEditor.open(current, {
+      projectId: state.projectId,
       canEdit: canTriageAtlasRows(),
       onSaved: async (triage) => {
         const compact = findingTriageEditor.compactTriage(triage);

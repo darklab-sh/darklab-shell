@@ -7,17 +7,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1.openapi_finding_verification import finding_verification_schemas
+
 
 _EVIDENCE_TYPES = [
-    "run",
-    "run_line",
-    "run_artifact",
-    "workspace_file",
-    "screenshot",
-    "atlas_entity",
-    "project_target",
-    "assessment_check",
-    "retest_run",
+    "run", "run_line", "run_artifact", "workspace_file", "screenshot",
+    "atlas_entity", "project_target", "assessment_check", "retest_run",
 ]
 
 
@@ -44,6 +39,7 @@ def _param(name: str, description: str) -> dict[str, Any]:
 
 def finding_evidence_schemas() -> dict[str, Any]:
     return {
+        **finding_verification_schemas(),
         "FindingEvidenceLink": {
             "type": "object",
             "required": [
@@ -80,10 +76,11 @@ def finding_evidence_schemas() -> dict[str, Any]:
         },
         "FindingEvidencePage": {
             "type": "object",
-            "required": ["evidence", "total"],
+            "required": ["evidence", "total", "verification"],
             "properties": {
                 "evidence": {"type": "array", "items": _ref("FindingEvidenceLink")},
                 "total": {"type": "integer", "minimum": 0},
+                "verification": _ref("FindingVerificationContext"),
             },
             "additionalProperties": False,
         },

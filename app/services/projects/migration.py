@@ -210,6 +210,14 @@ def migrate_project_workspace_session(
         "WHERE session_id = ? AND team_id = ''",
         (to_session_id, from_session_id, to_session_id, from_session_id),
     )
+    finding_triage_result = conn.execute(
+        "UPDATE finding_triage_details SET session_id = ?, "
+        "verification_updated_by_session_id = CASE "
+        "WHEN verification_updated_by_session_id = ? THEN ? "
+        "ELSE verification_updated_by_session_id END "
+        "WHERE session_id = ? AND team_id = ''",
+        (to_session_id, from_session_id, to_session_id, from_session_id),
+    )
     migrated_active_project_preference = migrate_active_project_preference(
         conn,
         from_session_id,
@@ -236,5 +244,6 @@ def migrate_project_workspace_session(
         "migrated_project_assessment_actors": assessment_actor_result.rowcount,
         "migrated_project_assessment_check_actors": check_actor_result.rowcount,
         "migrated_finding_evidence_links": finding_evidence_result.rowcount,
+        "migrated_finding_triage_details": finding_triage_result.rowcount,
         "migrated_active_project_preference": migrated_active_project_preference,
     }

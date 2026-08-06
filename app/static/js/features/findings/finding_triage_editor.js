@@ -8,6 +8,10 @@ import { bindMobileSheet as importedBindMobileSheet } from '../../ui/mobile_shee
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import {
+  fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison,
+  hasHistoryCompareHandler as importedHasHistoryCompareHandler,
+} from '../run-comparison/history_compare_bridge.js';
+import {
   enhanceAppSelects as importedEnhanceAppSelects,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   syncAppSelect as importedSyncAppSelect,
@@ -47,6 +51,7 @@ let DarklabFindingTriageEditor = null;
     options: {},
     bound: false,
     loadedTriage: null,
+    verificationContext: null,
     recordEvidence: [],
     mergePreview: null,
     mergeSearchTimer: null,
@@ -102,6 +107,9 @@ let DarklabFindingTriageEditor = null;
       remediation_id: text(item.remediation_id),
       remediation_source: text(item.remediation_source, 'observation'),
       remediation_updated_at: text(item.remediation_updated_at),
+      verification_disposition: item.verification_disposition && typeof item.verification_disposition === 'object'
+        ? { ...item.verification_disposition }
+        : null,
       remediation_group_id: text(item.remediation_group_id || item.remediation_id),
       remediation_group_merged: !!item.remediation_group_merged,
       remediation_group_member_count: Number(item.remediation_group_member_count || 1),
@@ -223,6 +231,9 @@ let DarklabFindingTriageEditor = null;
       el('finding-triage-verification-notes'),
       el('finding-triage-save'),
       el('finding-triage-merge-apply'),
+      el('finding-triage-verification-run'),
+      el('finding-triage-verification-attach'),
+      ...document.querySelectorAll('[data-finding-verification-unlink]'),
     ].forEach((node) => {
       if (node) node.disabled = !!disabled;
     });
@@ -425,7 +436,7 @@ let DarklabFindingTriageEditor = null;
     return document.activeElement === target;
   }
 
-  function close() {
+  function close(options = {}) {
     const overlay = el('finding-triage-overlay');
     if (!overlay) return;
     const returnFocus = state.returnFocus;
@@ -435,17 +446,20 @@ let DarklabFindingTriageEditor = null;
     state.finding = null;
     state.options = {};
     state.loadedTriage = null;
+    state.verificationContext = null;
     state.recordEvidence = [];
     state.mergePreview = null;
     state.mergeSearchGeneration += 1;
     state.returnFocus = null;
     if (state.mergeSearchTimer) global.clearTimeout(state.mergeSearchTimer);
     state.mergeSearchTimer = null;
-    global.setTimeout(() => {
-      if (!restoreReturnFocus(returnFocus) && typeof refocusComposerAfterAction === 'function') {
-        refocusComposerAfterAction({ defer: true });
-      }
-    }, 0);
+    if (!options || options.restoreFocus !== false) {
+      global.setTimeout(() => {
+        if (!restoreReturnFocus(returnFocus) && typeof refocusComposerAfterAction === 'function') {
+          refocusComposerAfterAction({ defer: true });
+        }
+      }, 0);
+    }
   }
 
   async function requestTriage(findingId) {
@@ -456,6 +470,272 @@ let DarklabFindingTriageEditor = null;
     }
     const data = await resp.json().catch(() => ({}));
     return data && data.triage && typeof data.triage === 'object' ? data.triage : {};
+  }
+
+  async function requestVerificationContext(projectId, findingId) {
+    const resp = await api()(
+      `/projects/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(findingId)}/evidence`,
+      { cache: 'no-store' },
+    );
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data && data.error ? data.error : `HTTP ${resp.status}`);
+    return data && data.verification && typeof data.verification === 'object'
+      ? data.verification
+      : {};
+  }
+
+  function renderDisposition(triage) {
+    const node = el('finding-triage-disposition');
+    if (!node) return;
+    const disposition = triage && triage.verification_disposition;
+    if (!disposition || typeof disposition !== 'object') {
+      node.textContent = '';
+      node.classList.add('u-hidden');
+      return;
+    }
+    const actor = disposition.actor && typeof disposition.actor === 'object'
+      ? disposition.actor
+      : {};
+    const actorLabel = text(actor.display_name)
+      || (text(actor.kind) === 'team_member' ? 'a team member' : 'this session');
+    const savedAt = text(disposition.updated_at);
+    node.textContent = `Final disposition: ${verificationStatusLabel(disposition.status)} by ${actorLabel}${savedAt ? ` · ${savedAt}` : ''}`;
+    node.classList.remove('u-hidden');
+  }
+
+  function compatibilityBadge(compatibility) {
+    const stateValue = text(compatibility && compatibility.state, 'unavailable');
+    const badge = document.createElement('span');
+    const tone = stateValue === 'compatible'
+      ? 'green'
+      : (stateValue === 'incomparable' ? 'amber' : 'red');
+    badge.className = `badge badge-tone-${tone}`;
+    badge.textContent = stateValue === 'compatible'
+      ? 'Comparable'
+      : (stateValue === 'incomparable' ? 'Not comparable' : 'Evidence unavailable');
+    return badge;
+  }
+
+  function verificationItem(titleText, metaText = '') {
+    const row = document.createElement('div');
+    row.className = 'finding-triage-verification-item';
+    const title = document.createElement('div');
+    title.className = 'finding-triage-verification-item-title';
+    title.textContent = titleText;
+    row.appendChild(title);
+    if (metaText) {
+      const meta = document.createElement('div');
+      meta.className = 'finding-triage-verification-item-meta';
+      meta.textContent = metaText;
+      row.appendChild(meta);
+    }
+    return row;
+  }
+
+  function renderOriginChecks(checks) {
+    const node = el('finding-triage-origin-checks');
+    if (!node) return;
+    clearNode(node);
+    if (!checks.length) return;
+    checks.forEach((check) => {
+      const profile = [text(check.profile_key), text(check.profile_version) ? `v${text(check.profile_version)}` : '']
+        .filter(Boolean)
+        .join(' ');
+      const row = verificationItem(
+        text(check.check_key, 'Saved assessment check'),
+        [profile, text(check.target_value), text(check.policy_level)].filter(Boolean).join(' · '),
+      );
+      const badges = document.createElement('div');
+      badges.className = 'finding-triage-verification-item-badges';
+      const source = document.createElement('span');
+      source.className = `badge badge-tone-${check.source_state === 'available' ? 'cyan' : 'red'}`;
+      source.textContent = check.source_state === 'available' ? 'Origin available' : 'Origin unavailable';
+      badges.appendChild(source);
+      if (check.profile_version_state === 'changed') {
+        const drift = document.createElement('span');
+        drift.className = 'badge badge-tone-amber';
+        drift.textContent = `Profile now v${text(check.current_profile_version, 'unknown')}`;
+        badges.appendChild(drift);
+      } else if (check.profile_version_state === 'unavailable') {
+        const drift = document.createElement('span');
+        drift.className = 'badge badge-tone-muted';
+        drift.textContent = 'Current profile unavailable';
+        badges.appendChild(drift);
+      }
+      row.appendChild(badges);
+      node.appendChild(row);
+    });
+  }
+
+  function comparisonFunction() {
+    const hasImported = typeof importedHasHistoryCompareHandler === 'function'
+      && importedHasHistoryCompareHandler('fetchAndRenderHistoryComparison');
+    return hasImported && typeof importedFetchAndRenderHistoryComparison === 'function'
+      ? importedFetchAndRenderHistoryComparison
+      : null;
+  }
+
+  async function compareVerificationRun(run) {
+    const comparison = run && run.comparison;
+    const projectId = text(state.options && state.options.projectId);
+    const compareFn = comparisonFunction();
+    if (!comparison?.available || !compareFn) {
+      setMessage('Run comparison is not available for this evidence.', { error: true });
+      return;
+    }
+    const left = text(comparison.left_run_id);
+    const right = text(comparison.right_run_id);
+    const params = new URLSearchParams({ left, right, project_id: projectId });
+    close({ restoreFocus: false });
+    await compareFn(left, right, { url: `/history/compare?${params.toString()}` });
+  }
+
+  async function refreshVerificationContext() {
+    const projectId = text(state.options && state.options.projectId);
+    const findingId = text(state.finding && state.finding.id);
+    const panel = el('finding-triage-verification-context');
+    if (!projectId || !findingId || !panel) {
+      panel?.classList.add('u-hidden');
+      return;
+    }
+    panel.classList.remove('u-hidden');
+    const message = el('finding-triage-verification-context-message');
+    if (message) message.textContent = 'Loading saved verification evidence...';
+    try {
+      state.verificationContext = await requestVerificationContext(projectId, findingId);
+      renderVerificationContext(state.verificationContext);
+    } catch (err) {
+      state.verificationContext = null;
+      if (message) message.textContent = err.message || 'Could not load saved verification evidence.';
+    }
+  }
+
+  async function unlinkVerificationRun(run) {
+    const projectId = text(state.options && state.options.projectId);
+    const findingId = text(state.finding && state.finding.id);
+    const linkId = text(run && run.evidence_link_id);
+    if (!projectId || !findingId || !linkId || state.options.canEdit === false) return;
+    const resp = await api()(
+      `/projects/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(findingId)}/evidence/${encodeURIComponent(linkId)}`,
+      { method: 'DELETE' },
+    );
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data && data.error ? data.error : `HTTP ${resp.status}`);
+    await refreshVerificationContext();
+  }
+
+  async function attachVerificationRun() {
+    const projectId = text(state.options && state.options.projectId);
+    const findingId = text(state.finding && state.finding.id);
+    const select = el('finding-triage-verification-run');
+    const runId = text(select && select.value);
+    const candidates = Array.isArray(state.verificationContext?.candidate_runs)
+      ? state.verificationContext.candidate_runs
+      : [];
+    const run = candidates.find(item => text(item && item.id) === runId);
+    if (!projectId || !findingId || !run || state.options.canEdit === false) return;
+    const compatibility = text(run.compatibility && run.compatibility.state, 'unavailable');
+    if (compatibility !== 'compatible' && showConfirm) {
+      const choice = await showConfirm({
+        body: {
+          text: 'Attach a run that is not comparable with the original evidence?',
+          note: text(run.compatibility && run.compatibility.reason, 'The run can be saved as evidence, but it should not support a final verification disposition.'),
+        },
+        tone: 'warning',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'attach', label: 'Attach evidence', role: 'warning' },
+        ],
+        refocusOnResolve: false,
+      });
+      if (choice !== 'attach') return;
+    }
+    const resp = await api()(
+      `/projects/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(findingId)}/evidence`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ evidence_type: 'retest_run', evidence_id: runId }),
+      },
+    );
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data && data.error ? data.error : `HTTP ${resp.status}`);
+    await refreshVerificationContext();
+  }
+
+  function renderVerificationContext(context) {
+    const message = el('finding-triage-verification-context-message');
+    const checks = Array.isArray(context?.origin_checks) ? context.origin_checks : [];
+    const retests = Array.isArray(context?.retest_runs) ? context.retest_runs : [];
+    const candidates = Array.isArray(context?.candidate_runs) ? context.candidate_runs : [];
+    renderOriginChecks(checks);
+    const retestNode = el('finding-triage-retest-runs');
+    clearNode(retestNode);
+    retests.forEach((run) => {
+      const row = verificationItem(
+        text(run.command, `Saved run ${text(run.id)}`),
+        [text(run.command_root), text(run.finished || run.started)].filter(Boolean).join(' · '),
+      );
+      const badges = document.createElement('div');
+      badges.className = 'finding-triage-verification-item-badges';
+      badges.appendChild(compatibilityBadge(run.compatibility));
+      row.appendChild(badges);
+      const reason = document.createElement('div');
+      reason.className = 'finding-triage-verification-item-reason';
+      reason.textContent = text(run.compatibility && run.compatibility.reason);
+      row.appendChild(reason);
+      const actions = document.createElement('div');
+      actions.className = 'finding-triage-verification-item-actions';
+      if (run.comparison?.available) {
+        const compare = document.createElement('button');
+        compare.type = 'button';
+        compare.className = 'btn btn-secondary btn-compact';
+        compare.textContent = 'Compare with original';
+        compare.addEventListener('click', () => compareVerificationRun(run));
+        actions.appendChild(compare);
+      }
+      const unlink = document.createElement('button');
+      unlink.type = 'button';
+      unlink.className = 'btn btn-ghost btn-compact';
+      unlink.dataset.findingVerificationUnlink = text(run.evidence_link_id);
+      unlink.textContent = 'Remove evidence';
+      unlink.disabled = state.options.canEdit === false;
+      unlink.addEventListener('click', async () => {
+        try {
+          await unlinkVerificationRun(run);
+        } catch (err) {
+          if (message) message.textContent = err.message || 'Could not remove verification evidence.';
+        }
+      });
+      actions.appendChild(unlink);
+      row.appendChild(actions);
+      retestNode?.appendChild(row);
+    });
+    const candidateWrap = el('finding-triage-verification-candidates');
+    const select = el('finding-triage-verification-run');
+    clearNode(select);
+    candidates.forEach((run) => {
+      const option = document.createElement('option');
+      option.value = text(run.id);
+      const compatibility = text(run.compatibility && run.compatibility.state, 'unavailable');
+      option.textContent = `${text(run.command, run.id)} · ${compatibility.replace(/_/g, ' ')}`;
+      select?.appendChild(option);
+    });
+    candidateWrap?.classList.toggle('u-hidden', !candidates.length);
+    if (select && typeof syncAppSelect === 'function') syncAppSelect(select);
+    const attach = el('finding-triage-verification-attach');
+    if (attach) attach.disabled = state.options.canEdit === false || !candidates.length;
+    if (message) {
+      if (!checks.length && !retests.length) {
+        message.textContent = context?.baseline_source_state === 'available'
+          ? 'No assessment check or verification run is linked yet. Candidate runs are compared with the finding’s original run.'
+          : 'Original evidence is unavailable. Any attached run will stay marked as unavailable for comparison.';
+      } else if (!candidates.length) {
+        message.textContent = 'No other completed Project runs are available to attach.';
+      } else {
+        message.textContent = '';
+      }
+    }
   }
 
   function populate(triage) {
@@ -469,6 +749,7 @@ let DarklabFindingTriageEditor = null;
     if (statusSelect) statusSelect.value = VERIFICATION_STATES.some(item => item.value === status) ? status : 'not_started';
     if (notes) notes.value = String(triage && triage.verification_notes || '');
     renderMergeSummary(triage);
+    renderDisposition(triage);
     syncStatusSelect();
   }
 
@@ -861,6 +1142,14 @@ let DarklabFindingTriageEditor = null;
     });
     el('finding-triage-merge-search')?.addEventListener('input', scheduleMergeSearch);
     el('finding-triage-merge-apply')?.addEventListener('click', applyMerge);
+    el('finding-triage-verification-attach')?.addEventListener('click', async () => {
+      const message = el('finding-triage-verification-context-message');
+      try {
+        await attachVerificationRun();
+      } catch (err) {
+        if (message) message.textContent = err.message || 'Could not attach verification evidence.';
+      }
+    });
     const overlay = el('finding-triage-overlay');
     if (overlay && typeof bindDismissible === 'function') {
       bindDismissible(overlay, {
@@ -906,6 +1195,7 @@ let DarklabFindingTriageEditor = null;
       state.loadedTriage = triageFromForm();
       setMessage(canEdit ? '' : 'View-only team members can read these details but cannot save changes.');
       setDisabled(!canEdit);
+      await refreshVerificationContext();
       window.setTimeout(() => el('finding-triage-remediation')?.focus({ preventScroll: true }), 0);
     } catch (err) {
       setMessage(err.message || 'Could not load finding triage.', { error: true });

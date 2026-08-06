@@ -6721,6 +6721,7 @@ class TestPostgresMigrations:
             "0055",
             "0056",
             "0057",
+            "0058",
         ]
         for table_name in (
             "runs",
@@ -7697,7 +7698,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0057"
+        assert rows[-1]["version"] == "0058"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8153,7 +8154,7 @@ class TestPostgresMigrations:
 
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
-            "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056", "0057",
+            "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056", "0057", "0058",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8175,7 +8176,8 @@ class TestPostgresMigrations:
         assert "0055" in conn.applied_versions
         assert "0056" in conn.applied_versions
         assert "0057" in conn.applied_versions
-        assert conn.commit_count == 19
+        assert "0058" in conn.applied_versions
+        assert conn.commit_count == 20
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -15351,6 +15353,13 @@ class TestDataAccessLayerServiceCoverage:
                 (source_session, source_session, now),
             )
             conn.execute(
+                "INSERT INTO finding_triage_details "
+                "(id, session_id, finding_id, verification_status, "
+                "verification_updated_by_session_id, verification_updated_at, created, updated) "
+                "VALUES ('ftri_session_service', ?, 'fnd_session_service', 'verified', ?, ?, ?, ?)",
+                (source_session, source_session, now, now, now),
+            )
+            conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
                 "VALUES (?, ?, 'webhook', 'Webhook', '{}', '{}', '[]', 0, ?, ?)",
@@ -15453,6 +15462,7 @@ class TestDataAccessLayerServiceCoverage:
         assert counts["migrated_finding_remediation_guidance"] == 1
         assert counts["migrated_finding_remediation_merge_members"] == 2
         assert counts["migrated_finding_evidence_links"] == 1
+        assert counts["migrated_finding_triage_details"] == 1
         assert counts["migrated_notification_channels"] == 1
         assert counts["migrated_recent_values"] == 1
         assert counts["migrated_secrets"] == 1
@@ -15499,6 +15509,10 @@ class TestDataAccessLayerServiceCoverage:
                     "SELECT COUNT(*) AS count FROM finding_evidence_links WHERE session_id = ?",
                     (source_session,),
                 ).fetchone()["count"],
+                "finding_triage_details": conn.execute(
+                    "SELECT COUNT(*) AS count FROM finding_triage_details WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
             }
             migrated_merge_rows = conn.execute(
                 "SELECT session_id, merge_id, created_by_session_id "
@@ -15517,6 +15531,10 @@ class TestDataAccessLayerServiceCoverage:
                 "SELECT session_id, manual_created_by_session_id, manual_updated_by_session_id "
                 "FROM findings WHERE id = 'fnd_session_service'",
             ).fetchone()
+            migrated_triage = conn.execute(
+                "SELECT session_id, verification_updated_by_session_id "
+                "FROM finding_triage_details WHERE id = 'ftri_session_service'",
+            ).fetchone()
             audit_row = conn.execute(
                 "SELECT details FROM audit_events WHERE target_id = ?",
                 (destination_session,),
@@ -15529,6 +15547,7 @@ class TestDataAccessLayerServiceCoverage:
         assert migrated_finding["session_id"] == destination_session
         assert migrated_finding["manual_created_by_session_id"] == destination_session
         assert migrated_finding["manual_updated_by_session_id"] == destination_session
+        assert tuple(migrated_triage) == (destination_session, destination_session)
         assert migrated_disposition["session_id"] == destination_session
         assert migrated_disposition["review_state"] == "important"
         assert migrated_disposition["remediation"] == "Use migrated guidance."
@@ -26607,6 +26626,9 @@ class TestDatabaseInit:
             "verification_steps",
             "verification_status",
             "verification_notes",
+            "verification_updated_by_session_id",
+            "verification_updated_by_member_id",
+            "verification_updated_at",
         }.issubset(finding_triage_columns)
         assert {
             "session_id",
@@ -26738,6 +26760,29 @@ class TestDatabaseInit:
                 assert updated is not None
                 assert updated["id"] == saved["id"]
                 assert updated["verification_status"] == "verified"
+                assert updated["verification_disposition"] == {
+                    "status": "verified",
+                    "actor": {"kind": "session"},
+                    "updated_at": updated["verification_disposition"]["updated_at"],
+                }
+                disposition_at = updated["verification_disposition"]["updated_at"]
+                assert disposition_at
+                assert "verification_updated_by_session_id" not in updated
+                with database.db_connect() as disposition_conn:
+                    preserved = project_metadata.upsert_finding_triage_details_on_conn(
+                        disposition_conn,
+                        "session-triage",
+                        "finding-triage-1",
+                        {
+                            "remediation": "Patch Samba and restart smbd.",
+                            "verification_steps": "Re-run nmap smb-vuln scripts.",
+                            "verification_status": "verified",
+                            "verification_notes": "Added after the final decision.",
+                        },
+                        now="2099-01-01 00:00:00",
+                    )
+                    disposition_conn.commit()
+                assert preserved["verification_disposition"]["updated_at"] == disposition_at
 
                 class _MissingFirstTriageSelect:
                     def __init__(self):

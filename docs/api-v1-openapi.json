@@ -2949,11 +2949,15 @@
           "total": {
             "minimum": 0,
             "type": "integer"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/FindingVerificationContext"
           }
         },
         "required": [
           "evidence",
-          "total"
+          "total",
+          "verification"
         ],
         "type": "object"
       },
@@ -3164,6 +3168,261 @@
           "remediation_group_member_count",
           "vulnerability_id",
           "affected_subject"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationComparison": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "left_run_id": {
+            "type": "string"
+          },
+          "right_run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "left_run_id",
+          "right_run_id"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationCompatibility": {
+        "additionalProperties": false,
+        "properties": {
+          "matched_check_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "compatible",
+              "incomparable",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "reason",
+          "matched_check_id"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationContext": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_run_id": {
+            "type": "string"
+          },
+          "baseline_source_state": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "candidate_limit": {
+            "maximum": 25,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "candidate_runs": {
+            "items": {
+              "$ref": "#/components/schemas/FindingVerificationRun"
+            },
+            "type": "array"
+          },
+          "origin_checks": {
+            "items": {
+              "$ref": "#/components/schemas/FindingVerificationOriginCheck"
+            },
+            "type": "array"
+          },
+          "retest_runs": {
+            "items": {
+              "$ref": "#/components/schemas/FindingVerificationRetestRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "baseline_run_id",
+          "baseline_source_state",
+          "origin_checks",
+          "retest_runs",
+          "candidate_runs",
+          "candidate_limit"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationOriginCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "check_key": {
+            "type": "string"
+          },
+          "current_profile_version": {
+            "type": "string"
+          },
+          "evidence_link_id": {
+            "type": "string"
+          },
+          "policy_level": {
+            "type": "string"
+          },
+          "profile_key": {
+            "type": "string"
+          },
+          "profile_version": {
+            "type": "string"
+          },
+          "profile_version_state": {
+            "enum": [
+              "current",
+              "changed",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "recommended_action_key": {
+            "type": "string"
+          },
+          "source_state": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "target_value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_link_id",
+          "check_id",
+          "assessment_id",
+          "check_key",
+          "target_type",
+          "target_value",
+          "policy_level",
+          "recommended_action_key",
+          "profile_key",
+          "profile_version",
+          "current_profile_version",
+          "profile_version_state",
+          "source_state"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationRetestRun": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "command_root": {
+            "type": "string"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/FindingVerificationComparison"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/FindingVerificationCompatibility"
+          },
+          "evidence_link_id": {
+            "type": "string"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finished": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "source_state": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "started": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "command_root",
+          "started",
+          "finished",
+          "exit_code",
+          "compatibility",
+          "comparison",
+          "evidence_link_id",
+          "source_state"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationRun": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "command_root": {
+            "type": "string"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/FindingVerificationComparison"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/FindingVerificationCompatibility"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finished": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "started": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "command_root",
+          "started",
+          "finished",
+          "exit_code",
+          "compatibility",
+          "comparison"
         ],
         "type": "object"
       },

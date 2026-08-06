@@ -511,7 +511,7 @@ from blueprints.projects_targets import (  # noqa: E402,F401
     projects_targets_list,
     projects_targets_update,
 )
-from blueprints import projects_assessment_checks, projects_assessments, projects_finding_evidence, projects_finding_merges  # noqa: E402,F401,E501
+from blueprints import projects_assessment_checks, projects_assessments, projects_finding_evidence, projects_finding_merges, projects_finding_triage  # noqa: E402,F401,E501
 from blueprints.projects_auto_promote import (  # noqa: E402,F401
     projects_auto_promote_rules_apply,
     projects_auto_promote_rules_create,
@@ -562,13 +562,12 @@ from blueprints.projects_artifacts import (  # noqa: E402,F401
     projects_artifacts_preview,
 )
 from blueprints.projects_findings import (  # noqa: E402,F401
-    finding_triage_detail,
-    finding_triage_update,
     findings_review_update,
     projects_findings_bulk_review_update,
     projects_findings_list,
     run_findings_list,
 )
+from blueprints.projects_finding_triage import finding_triage_detail, finding_triage_update  # noqa: E402,F401,E501
 from blueprints import projects_manual_findings as _projects_manual_findings  # noqa: E402,F401
 from blueprints.projects_metadata import (  # noqa: E402,F401
     entity_labels_create,

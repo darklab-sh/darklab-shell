@@ -1235,6 +1235,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
             throw new Error('Finding triage editor is not available.');
           }
           await findingTriageEditor.open(finding, {
+            projectId,
             canEdit: activeTeamScopeCan('triage_findings'),
             onSaved: async (triage) => {
               const compact = findingTriageEditor.compactTriage(triage);

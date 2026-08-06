@@ -3647,7 +3647,7 @@ class TestTeamRoutes:
             operator_finding_triage_update = client.put(
                 f"/findings/{finding_id}/triage",
                 headers=operator_headers,
-                json={"verification_status": "ready_to_verify", "remediation": "Patch capability finding."},
+                json={"verification_status": "verified", "remediation": "Patch capability finding."},
             )
             viewer_finding_triage_after_update = client.get(
                 f"/findings/{finding_id}/triage",
@@ -3730,6 +3730,13 @@ class TestTeamRoutes:
             assert viewer_finding_triage_after_update.get_json()["triage"]["remediation"] == (
                 "Patch capability finding."
             )
+            verification_disposition = viewer_finding_triage_after_update.get_json()["triage"][
+                "verification_disposition"
+            ]
+            assert verification_disposition["status"] == "verified"
+            assert verification_disposition["actor"]["kind"] == "team_member"
+            assert verification_disposition["actor"]["display_name"] == "Operator"
+            assert operator_token not in json.dumps(verification_disposition)
             assert viewer_finding_triage_update.status_code == 403
             assert viewer_merge_candidates.status_code == 200
             assert [
@@ -9306,6 +9313,7 @@ class TestProjectRoutes:
             "remediation_group_member_count": 1,
             "remediation_source": "remediation_group",
             "remediation_updated_at": triage_payload["triage"]["remediation_updated_at"],
+            "verification_disposition": None,
         }
         assert downloaded_manifest["manifest"]["findings"][0]["triage"]["remediation"] == (
             "Patch TLS config for darklab.sh."
@@ -17926,7 +17934,13 @@ class TestAtlasRoutes:
                 "SELECT status FROM findings WHERE session_id = ? AND id = ?",
                 (session_id, finding_id),
             ).fetchone()
+            verification_audit = conn.execute(
+                "SELECT details FROM audit_events WHERE event_type = ? AND target_id = ?",
+                ("finding.verification_edit", finding_id),
+            ).fetchone()
         assert row["status"] == "important"
+        assert verification_audit is not None
+        assert json.loads(verification_audit["details"])["to_state"] == "ready_to_verify"
 
     def test_explicit_remediation_merge_previews_and_shares_only_disposition(self):
         client = get_client()

@@ -11,27 +11,27 @@ from services.audit.models import AuditEventType
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.finding_evidence import (
     link_finding_evidence_on_conn,
-    list_finding_evidence_links,
     unlink_finding_evidence_on_conn,
 )
+from services.projects.finding_verification import get_finding_verification_context
 from services.projects.queries import run_project_transaction
 from services.teams.capabilities import Capability
 
-
-@project_routes.projects_bp.route(
-    "/projects/<project_id>/findings/<finding_id>/evidence"
-)
+@project_routes.projects_bp.route("/projects/<project_id>/findings/<finding_id>/evidence")
 def project_finding_evidence_list(project_id, finding_id):
     session_id, team_id, error_response = project_routes._project_owner()
     if error_response:
         return error_response
     try:
-        evidence = list_finding_evidence_links(
+        verification = get_finding_verification_context(
             session_id, project_id, finding_id, team_id=team_id
         )
     except ProjectWorkspaceError as exc:
         return project_routes._project_error_response(exc)
-    return jsonify({"evidence": evidence, "total": len(evidence)})
+    evidence = verification.pop("evidence", [])
+    return jsonify(
+        {"evidence": evidence, "total": len(evidence), "verification": verification}
+    )
 
 
 @project_routes.projects_bp.route(

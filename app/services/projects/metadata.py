@@ -45,6 +45,9 @@ from services.teams.scope import team_owner_context
 from services.workspace.files import WorkspaceError, resolve_owner_workspace_path, resolve_workspace_path
 
 
+_FINAL_VERIFICATION_STATES = frozenset({"verified", "needs_retest", "not_applicable"})
+
+
 def _cfg_int(key, default, *, cfg=None):
     cfg = _config.resolve_effective_cfg(cfg)
     try:
@@ -133,6 +136,35 @@ def _row_to_finding_triage(row):
     }
     if hasattr(row, "keys") and "team_id" in row.keys():
         item["team_id"] = row["team_id"] or ""
+    row_keys = set(row.keys()) if hasattr(row, "keys") else set()
+    disposition_at = (
+        str(row["verification_updated_at"] or "")
+        if "verification_updated_at" in row_keys
+        else ""
+    )
+    if item["verification_status"] in _FINAL_VERIFICATION_STATES and disposition_at:
+        member_id = (
+            str(row["verification_updated_by_member_id"] or "")
+            if "verification_updated_by_member_id" in row_keys
+            else ""
+        )
+        display_name = (
+            str(row["verification_actor_display_name"] or "")
+            if "verification_actor_display_name" in row_keys
+            else ""
+        )
+        actor = {"kind": "team_member", "member_id": member_id}
+        if display_name:
+            actor["display_name"] = display_name
+        if not member_id:
+            actor = {"kind": "session"}
+        item["verification_disposition"] = {
+            "status": item["verification_status"],
+            "actor": actor,
+            "updated_at": disposition_at,
+        }
+    else:
+        item["verification_disposition"] = None
     return item
 
 
@@ -269,7 +301,11 @@ def _finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
         "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
-        "verification_status, verification_notes, created, updated "
+        "verification_status, verification_notes, verification_updated_by_member_id, "
+        "verification_updated_at, "
+        "COALESCE((SELECT display_name FROM team_members WHERE id = "
+        "finding_triage_details.verification_updated_by_member_id), '') "
+        "AS verification_actor_display_name, created, updated "
         "FROM finding_triage_details WHERE " + owner_sql + f" AND finding_id IN ({placeholders})",  # nosec
         [*owner_params, *values],
     ).fetchall()
@@ -352,6 +388,7 @@ def default_finding_triage_details(session_id, finding_id, *, team_id=""):
         "remediation_group_member_count": 1,
         "remediation_source": "observation",
         "remediation_updated_at": "",
+        "verification_disposition": None,
     }
     normalized_team_id = normalize_team_id(team_id)
     if normalized_team_id:
@@ -389,6 +426,11 @@ def compact_finding_triage_details(triage):
         ),
         "remediation_source": str(item.get("remediation_source") or "observation"),
         "remediation_updated_at": str(item.get("remediation_updated_at") or ""),
+        "verification_disposition": (
+            dict(item["verification_disposition"])
+            if isinstance(item.get("verification_disposition"), dict)
+            else None
+        ),
     }
 
 
@@ -933,19 +975,42 @@ def finding_triage_target_exists(session_id, finding_id, *, team_id=""):
         return _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id)
 
 
-def upsert_finding_triage_details(session_id, finding_id, data, *, team_id=""):
+def upsert_finding_triage_details(
+    session_id,
+    finding_id,
+    data,
+    *,
+    team_id="",
+    actor_member_id="",
+):
     finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
     if not finding_id:
         raise ProjectWorkspaceError("finding_id is required")
     with get_db_connect()() as conn:
         if not _finding_belongs_to_scope(conn, session_id, finding_id, team_id=team_id):
             return None
-        result = upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, team_id=team_id)
+        result = upsert_finding_triage_details_on_conn(
+            conn,
+            session_id,
+            finding_id,
+            data,
+            team_id=team_id,
+            actor_member_id=actor_member_id,
+        )
         conn.commit()
         return result
 
 
-def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *, team_id="", now=""):
+def upsert_finding_triage_details_on_conn(
+    conn,
+    session_id,
+    finding_id,
+    data,
+    *,
+    team_id="",
+    actor_member_id="",
+    now="",
+):
     finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
     if not finding_id:
         raise ProjectWorkspaceError("finding_id is required")
@@ -965,10 +1030,33 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
     observation_payload = {**payload, "remediation": ""}
     existing = conn.execute(
         "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
-        "verification_status, verification_notes, created, updated "
+        "verification_status, verification_notes, verification_updated_by_session_id, "
+        "verification_updated_by_member_id, verification_updated_at, created, updated "
         "FROM finding_triage_details WHERE " + owner_sql + " AND finding_id = ?",  # nosec
         [*owner_params, finding_id],
     ).fetchone()
+    previous_status = str(existing["verification_status"] or "not_started") if existing else "not_started"
+    next_status = observation_payload["verification_status"]
+    final_disposition_changed = (
+        next_status in _FINAL_VERIFICATION_STATES
+        and (
+            next_status != previous_status
+            or not existing
+            or not str(existing["verification_updated_at"] or "")
+        )
+    )
+    if final_disposition_changed:
+        verification_actor_session = metadata_session
+        verification_actor_member = _trim_text(actor_member_id, MAX_ENTITY_ID_LEN)
+        verification_updated_at = timestamp
+    elif next_status in _FINAL_VERIFICATION_STATES and existing:
+        verification_actor_session = str(existing["verification_updated_by_session_id"] or "")
+        verification_actor_member = str(existing["verification_updated_by_member_id"] or "")
+        verification_updated_at = str(existing["verification_updated_at"] or "")
+    else:
+        verification_actor_session = ""
+        verification_actor_member = ""
+        verification_updated_at = ""
     if _finding_triage_payload_is_empty(observation_payload):
         if existing:
             conn.execute("DELETE FROM finding_triage_details WHERE id = ?", [existing["id"]])
@@ -983,7 +1071,9 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
     if existing:
         conn.execute(
             "UPDATE finding_triage_details SET session_id = ?, team_id = ?, remediation = ?, "
-            "verification_steps = ?, verification_status = ?, verification_notes = ?, updated = ? WHERE id = ?",
+            "verification_steps = ?, verification_status = ?, verification_notes = ?, "
+            "verification_updated_by_session_id = ?, verification_updated_by_member_id = ?, "
+            "verification_updated_at = ?, updated = ? WHERE id = ?",
             (
                 metadata_session,
                 metadata_team_id,
@@ -991,6 +1081,9 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
                 observation_payload["verification_steps"],
                 observation_payload["verification_status"],
                 observation_payload["verification_notes"],
+                verification_actor_session,
+                verification_actor_member,
+                verification_updated_at,
                 timestamp,
                 existing["id"],
             ),
@@ -1021,8 +1114,9 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
     conn.execute(
         "INSERT INTO finding_triage_details "
         "(id, session_id, team_id, finding_id, remediation, verification_steps, "
-        "verification_status, verification_notes, created, updated) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "verification_status, verification_notes, verification_updated_by_session_id, "
+        "verification_updated_by_member_id, verification_updated_at, created, updated) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         f"{conflict_target}"  # nosec
         "session_id = excluded.session_id, "
         "team_id = excluded.team_id, "
@@ -1030,6 +1124,9 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
         "verification_steps = excluded.verification_steps, "
         "verification_status = excluded.verification_status, "
         "verification_notes = excluded.verification_notes, "
+        "verification_updated_by_session_id = excluded.verification_updated_by_session_id, "
+        "verification_updated_by_member_id = excluded.verification_updated_by_member_id, "
+        "verification_updated_at = excluded.verification_updated_at, "
         "updated = excluded.updated",
         (
             triage_id,
@@ -1040,6 +1137,9 @@ def upsert_finding_triage_details_on_conn(conn, session_id, finding_id, data, *,
             observation_payload["verification_steps"],
             observation_payload["verification_status"],
             observation_payload["verification_notes"],
+            verification_actor_session,
+            verification_actor_member,
+            verification_updated_at,
             timestamp,
             timestamp,
         ),

@@ -1198,6 +1198,23 @@
       </section>
       <section class="finding-triage-section" aria-labelledby="finding-triage-verification-label">
         <span class="project-workspace-section-label" id="finding-triage-verification-label">Verification</span>
+        <div id="finding-triage-disposition" class="finding-triage-disposition u-hidden"></div>
+        <div id="finding-triage-verification-context" class="finding-triage-verification-context u-hidden">
+          <div>
+            <span class="project-workspace-section-label">Origin and retest evidence</span>
+            <p class="finding-triage-guidance-note">Saved runs are compared with the finding's original tool, target, and frozen assessment check before they're presented as compatible.</p>
+          </div>
+          <div id="finding-triage-origin-checks" class="finding-triage-verification-list"></div>
+          <div id="finding-triage-retest-runs" class="finding-triage-verification-list"></div>
+          <div id="finding-triage-verification-candidates" class="finding-triage-verification-candidates u-hidden">
+            <label class="project-target-edit-field">
+              <span>Attach a completed Project run</span>
+              <select id="finding-triage-verification-run" class="form-select form-control-compact" aria-label="Verification run"></select>
+            </label>
+            <button type="button" id="finding-triage-verification-attach" class="btn btn-secondary btn-compact">Attach verification run</button>
+          </div>
+          <div id="finding-triage-verification-context-message" class="finding-triage-guidance-note" role="status" aria-live="polite"></div>
+        </div>
         <label class="project-target-edit-field">
           <span>Status</span>
           <select id="finding-triage-status" class="form-select form-control-compact" aria-label="Finding verification status">

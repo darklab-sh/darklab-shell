@@ -34,6 +34,16 @@ function mountEditor() {
             </div>
           </div>
           <textarea id="finding-triage-verification-steps"></textarea>
+          <div id="finding-triage-disposition" class="u-hidden"></div>
+          <div id="finding-triage-verification-context" class="u-hidden">
+            <div id="finding-triage-origin-checks"></div>
+            <div id="finding-triage-retest-runs"></div>
+            <div id="finding-triage-verification-candidates" class="u-hidden">
+              <select id="finding-triage-verification-run" class="form-select"></select>
+              <button type="button" id="finding-triage-verification-attach"></button>
+            </div>
+            <div id="finding-triage-verification-context-message"></div>
+          </div>
           <select id="finding-triage-status" class="form-select form-control-compact">
             <option value="not_started">Not started</option>
             <option value="ready_to_verify">Ready to verify</option>
@@ -138,6 +148,8 @@ describe('finding triage editor', () => {
     installAppSelectStubs()
     window.refocusComposerAfterAction = vi.fn()
     window.showConfirm = vi.fn(() => Promise.resolve('merge'))
+    window.hasHistoryCompareHandler = vi.fn(() => true)
+    window.fetchAndRenderHistoryComparison = vi.fn(() => Promise.resolve(true))
   })
 
   it('loads, saves, and compacts remediation and verification details', async () => {
@@ -252,6 +264,105 @@ describe('finding triage editor', () => {
     expect(document.getElementById('finding-triage-save').disabled).toBe(false)
     expect(document.getElementById('finding-triage-message').textContent).toContain('20,000 characters')
     expect(apiFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows verification provenance and attaches, removes, and compares Project retest runs', async () => {
+    const finding = { id: 'finding-verification', title: 'TLS issue' }
+    const context = {
+      baseline_run_id: 'run-original',
+      baseline_source_state: 'available',
+      origin_checks: [{
+        check_id: 'check-tls',
+        check_key: 'tls-validation',
+        target_value: 'https://example.test',
+        policy_level: 'safe',
+        profile_key: 'web',
+        profile_version: '1.0',
+        current_profile_version: '2.0',
+        profile_version_state: 'changed',
+        source_state: 'available',
+      }],
+      retest_runs: [{
+        id: 'run-retest',
+        command: 'nuclei -u https://example.test',
+        command_root: 'nuclei',
+        finished: '2026-08-05T12:00:00+00:00',
+        evidence_link_id: 'fel-retest',
+        compatibility: { state: 'compatible', reason: 'Matches the frozen check.' },
+        comparison: { available: true, left_run_id: 'run-original', right_run_id: 'run-retest' },
+      }],
+      candidate_runs: [{
+        id: 'run-other',
+        command: 'nmap other.example',
+        compatibility: { state: 'incomparable', reason: 'Targets another host.' },
+        comparison: { available: true, left_run_id: 'run-original', right_run_id: 'run-other' },
+      }],
+    }
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/findings/finding-verification/triage' && !options.method) {
+        return Promise.resolve(jsonResponse({
+          triage: {
+            verification_status: 'verified',
+            remediation: '',
+            verification_steps: 'Repeat the saved check.',
+            verification_notes: 'Patch confirmed.',
+            verification_disposition: {
+              status: 'verified',
+              actor: { kind: 'team_member', display_name: 'Alex' },
+              updated_at: '2026-08-05T12:05:00+00:00',
+            },
+          },
+        }))
+      }
+      if (url === '/projects/project-1/findings/finding-verification/evidence' && !options.method) {
+        return Promise.resolve(jsonResponse({ verification: context }))
+      }
+      if (url === '/projects/project-1/findings/finding-verification/evidence' && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ created: true, evidence: { id: 'fel-other' } }, 201))
+      }
+      if (url.endsWith('/evidence/fel-retest') && options.method === 'DELETE') {
+        return Promise.resolve(jsonResponse({ ok: true }))
+      }
+      return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 404))
+    })
+    window.apiFetch = apiFetch
+    window.showConfirm = vi.fn(() => Promise.resolve('attach'))
+    loadEditor()
+
+    await window.DarklabFindingTriageEditor.open(finding, { projectId: 'project-1' })
+    await flushPromises(10)
+
+    expect(document.getElementById('finding-triage-disposition').textContent)
+      .toContain('Final disposition: Verified by Alex')
+    expect(document.getElementById('finding-triage-origin-checks').textContent)
+      .toContain('Profile now v2.0')
+    expect(document.getElementById('finding-triage-retest-runs').textContent)
+      .toContain('Comparable')
+
+    document.getElementById('finding-triage-verification-attach').click()
+    await flushPromises(12)
+    const attachCall = apiFetch.mock.calls.find(([, options]) => options?.method === 'POST')
+    expect(JSON.parse(attachCall[1].body)).toEqual({
+      evidence_type: 'retest_run',
+      evidence_id: 'run-other',
+    })
+    expect(window.showConfirm).toHaveBeenCalled()
+
+    document.querySelector('[data-finding-verification-unlink]').click()
+    await flushPromises(12)
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/findings/finding-verification/evidence/fel-retest',
+      { method: 'DELETE' },
+    )
+
+    document.querySelector('.finding-triage-verification-item-actions .btn-secondary').click()
+    await flushPromises()
+    expect(window.fetchAndRenderHistoryComparison).toHaveBeenCalledWith(
+      'run-original',
+      'run-retest',
+      { url: '/history/compare?left=run-original&right=run-retest&project_id=project-1' },
+    )
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(false)
   })
 
   it('syncs the enhanced verification select across reopened findings and view-only mode', async () => {

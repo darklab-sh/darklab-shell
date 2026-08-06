@@ -13,9 +13,9 @@ from services.audit.recorder import record_event
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.finding_evidence import (
     link_finding_evidence_on_conn,
-    list_finding_evidence_links,
     unlink_finding_evidence_on_conn,
 )
+from services.projects.finding_verification import get_finding_verification_context
 from services.projects.queries import run_project_transaction
 from services.teams.capabilities import Capability
 from services.teams.contracts import TeamPermissionDenied
@@ -39,20 +39,21 @@ def _log_fields(session_id, owner_scope, project_id, finding_id, **extra):
     }
 
 
-@api_routes.api_v1_bp.route(
-    "/projects/<project_id>/findings/<finding_id>/evidence"
-)
+@api_routes.api_v1_bp.route("/projects/<project_id>/findings/<finding_id>/evidence")
 @api_routes.require_api_auth
 def api_project_finding_evidence_list(project_id, finding_id):
     try:
         session_id = api_routes._require_session_id()
         owner_scope = api_routes._api_request_scope()
-        evidence = list_finding_evidence_links(
+        verification = get_finding_verification_context(
             session_id, project_id, finding_id, team_id=owner_scope.team_id
         )
     except (ProjectWorkspaceError, TeamPermissionDenied) as exc:
         return _error(exc)
-    return jsonify({"evidence": evidence, "total": len(evidence)})
+    evidence = verification.pop("evidence", [])
+    return jsonify(
+        {"evidence": evidence, "total": len(evidence), "verification": verification}
+    )
 
 
 @api_routes.api_v1_bp.route(
@@ -64,9 +65,7 @@ def api_project_finding_evidence_link(project_id, finding_id):
     try:
         session_id = api_routes._require_session_id()
         owner_scope = api_routes._api_request_scope()
-        api_routes._require_api_team_capability(
-            owner_scope, Capability.TRIAGE_FINDINGS
-        )
+        api_routes._require_api_team_capability(owner_scope, Capability.TRIAGE_FINDINGS)
         data = api_routes._json_body()
         actor_member_id = str((owner_scope.member or {}).get("id") or "")
 
@@ -124,9 +123,7 @@ def api_project_finding_evidence_unlink(project_id, finding_id, evidence_link_id
     try:
         session_id = api_routes._require_session_id()
         owner_scope = api_routes._api_request_scope()
-        api_routes._require_api_team_capability(
-            owner_scope, Capability.TRIAGE_FINDINGS
-        )
+        api_routes._require_api_team_capability(owner_scope, Capability.TRIAGE_FINDINGS)
 
         def _unlink(conn):
             evidence = unlink_finding_evidence_on_conn(
