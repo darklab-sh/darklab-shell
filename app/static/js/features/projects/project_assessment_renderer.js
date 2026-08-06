@@ -152,21 +152,21 @@ function createProjectAssessmentRenderer(context, actions) {
     if (status === 'active') {
       items.push({
         label: 'Complete cycle',
-        action: () => act.transitionCycle(projectId, 'completed'),
+        action: returnFocus => act.transitionCycle(projectId, 'completed', returnFocus),
         disabled,
       });
     }
     if (status === 'active' || status === 'completed') {
       items.push({
         label: 'Archive cycle',
-        action: () => act.transitionCycle(projectId, 'archived'),
+        action: returnFocus => act.transitionCycle(projectId, 'archived', returnFocus),
         disabled,
       });
     }
     if (status === 'archived') {
       items.push({
         label: 'Delete assessment',
-        action: () => act.deleteCycle(projectId),
+        action: returnFocus => act.deleteCycle(projectId, returnFocus),
         disabled,
         tone: 'danger',
       });
@@ -187,15 +187,17 @@ function createProjectAssessmentRenderer(context, actions) {
       if (ctx.canMutateProjects?.() === false) {
         button.title = 'View-only team members cannot change assessment cycles.';
       }
-      ctx.bindProjectRuntimePressable?.(button, { onActivate: item.action });
+      ctx.bindProjectRuntimePressable?.(button, {
+        onActivate: () => item.action(button),
+      });
       wrap.appendChild(button);
     });
     return wrap;
   }
 
   function renderMobileLifecycleActions(projectId, st, assessment) {
-    const items = lifecycleItems(projectId, st, assessment);
-    if (!items.length) return null;
+    const sourceItems = lifecycleItems(projectId, st, assessment);
+    if (!sourceItems.length) return null;
     const footer = makeElement('div', 'project-assessment-mobile-actions');
     const button = makeElement('button', 'btn btn-secondary', st.mutating ? 'Working…' : 'Cycle actions');
     button.type = 'button';
@@ -203,6 +205,10 @@ function createProjectAssessmentRenderer(context, actions) {
     if (ctx.canMutateProjects?.() === false) {
       button.title = 'View-only team members cannot change assessment cycles.';
     }
+    const items = sourceItems.map(item => ({
+      ...item,
+      action: () => item.action(button),
+    }));
     ctx.bindProjectRuntimePressable?.(button, {
       onActivate: () => openActionSheet({
         title: `Assessment actions for ${assessment?.title || 'this cycle'}`,
@@ -328,7 +334,7 @@ function createProjectAssessmentRenderer(context, actions) {
       button.type = 'button';
       button.title = `${side === 'current' ? 'Open current' : 'Open earlier'} finding details`;
       ctx.bindProjectRuntimePressable?.(button, {
-        onActivate: () => void act.openDeltaFinding(projectId, finding),
+        onActivate: () => void act.openDeltaFinding(projectId, finding, button),
       });
       group.appendChild(button);
     });
@@ -436,7 +442,42 @@ function createProjectAssessmentRenderer(context, actions) {
     return parts.filter(Boolean).join(' · ');
   }
 
-  function renderCheck(projectId, detail, check) {
+  function actionLabel(check) {
+    const [kind, actionId] = String(check?.recommended_action_key || '').split(':', 2);
+    if (!actionId) return 'Run recommended action';
+    if (kind === 'workflow') return `Open ${actionId} workflow`;
+    const labels = {
+      dnsrecon: 'DNSRecon',
+      httpx: 'HTTPx',
+      katana: 'Katana',
+      nmap: 'Nmap',
+      nuclei: 'Nuclei',
+      ping: 'Ping',
+    };
+    return `Run ${labels[actionId] || actionId}`;
+  }
+
+  function checkActionItems(projectId, detail, check, returnFocus) {
+    const definition = checkDefinition(detail, check);
+    const items = [];
+    if (check?.recommended_action_key) {
+      items.push({
+        label: actionLabel(check),
+        disabled: ctx.canRunCommands?.() === false,
+        action: () => act.launchRecommendedAction(projectId, check, returnFocus),
+      });
+    }
+    if (check?.target_entity_id) {
+      items.push({
+        label: 'Create finding',
+        disabled: ctx.canTriageFindings?.() === false,
+        action: () => act.createFinding(projectId, check, definition, returnFocus),
+      });
+    }
+    return items;
+  }
+
+  function renderCheck(projectId, detail, check, { mobile = false } = {}) {
     const definition = checkDefinition(detail, check);
     const row = makeElement('article', 'panel-row project-assessment-check-row');
     const main = makeElement('div', 'project-assessment-check-main');
@@ -452,23 +493,45 @@ function createProjectAssessmentRenderer(context, actions) {
     if (Number(check?.unavailable_evidence_count || 0) > 0) {
       states.appendChild(badge('Evidence unavailable', 'red'));
     }
-    if (check?.target_entity_id) {
-      const create = makeElement('button', 'btn btn-secondary btn-compact', 'Create finding');
-      create.type = 'button';
-      create.disabled = ctx.canTriageFindings?.() === false;
-      if (create.disabled) {
-        create.title = "View-only team members can't create findings. Switch to Personal or ask for operator access.";
-      }
-      ctx.bindProjectRuntimePressable?.(create, {
-        onActivate: () => void act.createFinding(projectId, check, definition),
+    if (mobile) {
+      const button = makeElement('button', 'btn btn-secondary btn-compact', 'Check actions');
+      button.type = 'button';
+      const items = checkActionItems(projectId, detail, check, button);
+      button.disabled = !items.length;
+      ctx.bindProjectRuntimePressable?.(button, {
+        onActivate: () => openActionSheet({
+          title: `${definition?.label || check?.check_key || 'Assessment check'} actions`,
+          items,
+          container: ctx.actionSheetContainer?.() || document.body,
+          returnFocus: button,
+        }),
       });
-      states.appendChild(create);
+      states.appendChild(button);
+    } else {
+      checkActionItems(projectId, detail, check, null).forEach((item) => {
+        const button = makeElement('button', 'btn btn-secondary btn-compact', item.label);
+        button.type = 'button';
+        button.disabled = item.disabled;
+        if (item.disabled) {
+          button.title = item.label === 'Create finding'
+            ? "View-only team members can't create findings. Switch to Personal or ask for operator access."
+            : "View-only team members can't start runs. Switch to Personal or ask for operator access.";
+        }
+        ctx.bindProjectRuntimePressable?.(button, {
+          onActivate: () => {
+            const contextualItems = checkActionItems(projectId, detail, check, button);
+            const current = contextualItems.find(candidate => candidate.label === item.label);
+            return current?.action?.();
+          },
+        });
+        states.appendChild(button);
+      });
     }
     row.append(main, states);
     return row;
   }
 
-  function renderTargetGroup(projectId, st, detail, checks) {
+  function renderTargetGroup(projectId, st, detail, checks, { mobile = false } = {}) {
     const representative = checks[0] || {};
     const key = targetKey(representative);
     const open = st.expandedTargets.has(key);
@@ -490,7 +553,7 @@ function createProjectAssessmentRenderer(context, actions) {
     );
     toggle.append(glyph, label, counts);
     const body = makeElement('div', 'project-assessment-target-body');
-    checks.forEach(check => body.appendChild(renderCheck(projectId, detail, check)));
+    checks.forEach(check => body.appendChild(renderCheck(projectId, detail, check, { mobile })));
     bindDisclosure(toggle, {
       panel: body,
       initialOpen: open,
@@ -530,7 +593,7 @@ function createProjectAssessmentRenderer(context, actions) {
     return pager;
   }
 
-  function renderChecks(projectId, st, detail) {
+  function renderChecks(projectId, st, detail, { mobile = false } = {}) {
     const section = makeElement('section', 'project-assessment-section');
     section.appendChild(sectionHeading(
       'Check worklist',
@@ -567,7 +630,13 @@ function createProjectAssessmentRenderer(context, actions) {
     list.addEventListener('scroll', () => {
       st.checksScrollTop = list.scrollTop;
     }, { passive: true });
-    groups.forEach(group => list.appendChild(renderTargetGroup(projectId, st, detail, group)));
+    groups.forEach(group => list.appendChild(renderTargetGroup(
+      projectId,
+      st,
+      detail,
+      group,
+      { mobile },
+    )));
     section.appendChild(list);
     const pager = renderPager(projectId, st, page);
     if (pager) section.appendChild(pager);
@@ -617,7 +686,7 @@ function createProjectAssessmentRenderer(context, actions) {
       renderAssessmentFindingWorklist(ctx, act, projectId, st, st.detail.finding_worklist),
       renderFindingDeltas(projectId, st.detail.finding_deltas),
       renderCategoryProgress(projectId, st, st.detail.category_rollups),
-      renderChecks(projectId, st, st.detail),
+      renderChecks(projectId, st, st.detail, { mobile }),
     );
     if (mobile) {
       const actions = renderMobileLifecycleActions(projectId, st, selected);

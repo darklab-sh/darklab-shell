@@ -70,7 +70,7 @@ function observationButton(context, actions, projectId, observation) {
   button.type = 'button';
   button.title = 'Open this saved observation';
   context.bindProjectRuntimePressable?.(button, {
-    onActivate: () => void actions.openDeltaFinding(projectId, observation),
+    onActivate: () => void actions.openDeltaFinding(projectId, observation, button),
   });
   return button;
 }

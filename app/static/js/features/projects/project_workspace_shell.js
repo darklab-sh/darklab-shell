@@ -124,12 +124,13 @@ let exportedDarklabProjectWorkspaceShell = null;
       if (!ctx.projectWorkspaceOverlay || !ctx.projectWorkspaceBody) return;
       ctx.closeMajorOverlays?.({ skipProjectWorkspace: true });
       ctx.blurVisibleComposerInputIfMobile?.();
-      ctx.setProjectWorkspaceTab?.('details');
+      const requestedTab = String(options.tab || '').trim();
+      if (requestedTab) ctx.setProjectWorkspaceTab?.(requestedTab);
       showOverlay();
       ctx.markInteractionSurfaceReady?.('projects', ctx.projectWorkspaceOverlay, ctx.projectWorkspaceModal);
       await ctx.refreshProjectWorkspace?.(options.refreshOptions || {});
       const mobileMode = document.body && document.body.classList.contains('mobile-terminal-mode');
-      if (!mobileMode && ctx.projectWorkspaceNameInput) {
+      if (!mobileMode && ctx.projectWorkspaceNameInput && ctx.projectWorkspaceTab?.() === 'details') {
         window.setTimeout(() => ctx.projectWorkspaceNameInput.focus(), 0);
       }
     }

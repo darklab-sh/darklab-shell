@@ -1829,6 +1829,7 @@ let importedProjectWorkspaceShell;
       projectWorkspaceModal,
       projectWorkspaceNameInput,
       projectWorkspaceOverlay,
+      projectWorkspaceTab: projectWorkspaceState.tab,
       refocusComposerAfterAction: (options) => {
         _shellRefocusComposer(options);
       },
@@ -2137,6 +2138,7 @@ let importedProjectWorkspaceShell;
     if (typeof factory !== 'function') throw new Error('DarklabProjectAssessment is unavailable');
     projectAssessmentController = factory({
       projectWorkspaceRequest: _projectWorkspaceRequest,
+      apiFetch: _shellApiFetch,
       projectResponseError: _projectResponseError,
       formatDate: _formatProjectDate,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
@@ -2148,10 +2150,12 @@ let importedProjectWorkspaceShell;
       invalidateProjectFindings: _invalidateProjectFindings,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       showConfirm: _shellFn('showConfirm', importedShowConfirm),
+      closeProjectWorkspace: (options = {}) => closeProjectWorkspace(options),
       actionSheetContainer: () => projectWorkspaceModal,
       logClientError: _shellLogClientError,
       mobileView: _projectMobileView,
       canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),
+      canRunCommands: () => _shellActiveTeamScopeCan('run_commands'),
       canTriageFindings: () => _shellActiveTeamScopeCan('triage_findings'),
     });
     return projectAssessmentController;
@@ -4791,7 +4795,7 @@ let importedProjectWorkspaceShell;
 
   _projectActiveContextController().bindTargetDiscoveryEvent();
 
-  async function openProjectWorkspace() {
+  async function openProjectWorkspace(options = {}) {
     const openToken = ++projectWorkspaceOpenToken;
     await _ensureProjectWorkspaceDom();
     if (openToken !== projectWorkspaceOpenToken) return false;
@@ -4819,7 +4823,10 @@ let importedProjectWorkspaceShell;
       return false;
     }
     try {
-      await _projectWorkspaceShellController().open({ refreshOptions: { initialLoad } });
+      await _projectWorkspaceShellController().open({
+        ...options,
+        refreshOptions: { initialLoad, ...(options.refreshOptions || {}) },
+      });
     } catch (err) {
       _settleProjectWorkspaceInitialLoad(initialLoad);
       throw err;
@@ -4838,13 +4845,14 @@ let importedProjectWorkspaceShell;
     projectWorkspaceReturnToAtlas = options?.returnToAtlas && typeof options.returnToAtlas === 'object'
       ? { ...options.returnToAtlas }
       : null;
-    const opened = await openProjectWorkspace();
+    const requestedTab = String(options?.tab || 'details').trim() || 'details';
+    const opened = await openProjectWorkspace({ tab: requestedTab });
     if (!opened) {
       projectWorkspaceReturnToAtlas = null;
       return false;
     }
     projectWorkspaceState.setSelectedId(normalizedProjectId);
-    projectWorkspaceState.setTab('details');
+    projectWorkspaceState.setTab(requestedTab);
     await _ensureProjectSummary(normalizedProjectId);
     _renderProjectWorkspace();
     _renderProjectExplorer();

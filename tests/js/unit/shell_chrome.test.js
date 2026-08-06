@@ -1248,6 +1248,11 @@ describe('shell chrome project workspace', () => {
           priority: '',
         })
       })
+      shell.closeProjectWorkspace({ refocus: false })
+      await shell.openProjectWorkspace()
+      await tick()
+      expect(document.querySelector('[data-project-tab="assessment"]')?.classList.contains('is-active')).toBe(true)
+      expect(document.getElementById('project-explorer-body')?.textContent).toContain('Focused assessment')
     } finally {
       delete global.loadProjectAssessment
       delete window.loadProjectAssessment

@@ -85,6 +85,7 @@
     "/static/js/features/findings/finding_triage_editor.js",
     "/static/js/features/projects/project_activity.js",
     "/static/js/features/projects/project_assessment.js",
+    "/static/js/features/projects/project_assessment_actions.js",
     "/static/js/features/projects/project_assessment_renderer.js",
     "/static/js/features/projects/project_assessment_risk_renderer.js",
     "/static/js/features/projects/project_finding_changes.js",

@@ -4,12 +4,14 @@
 // Project Assessment tab state and data controller.
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
+import { launchAssessmentAction } from './project_assessment_actions.js';
 import { openContextualFindingRecord } from '../findings/finding_record_context.js';
 import { openFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 
 function createProjectAssessmentController(context) {
   const ctx = context || {};
   const states = new Map();
+  const actionLaunches = new Set();
 
   function defaultState() {
     return {
@@ -298,7 +300,16 @@ function createProjectAssessmentController(context) {
     return cycleSelection(stateFor(projectId));
   }
 
-  async function confirmLifecycle(options) {
+  function restoreFocus(target) {
+    if (!target?.isConnected || target.disabled || typeof target.focus !== 'function') return;
+    try {
+      target.focus({ preventScroll: true });
+    } catch (_) {
+      target.focus();
+    }
+  }
+
+  async function confirmLifecycle(options, returnFocus = null) {
     if (typeof ctx.showConfirm !== 'function') {
       const err = new Error('Assessment lifecycle confirmations are unavailable.');
       ctx.setProjectWorkspaceMessage?.(err.message, { error: true });
@@ -307,7 +318,8 @@ function createProjectAssessmentController(context) {
     }
     const { confirmId, ...confirmOptions } = options;
     try {
-      const choice = await ctx.showConfirm(confirmOptions);
+      const choice = await ctx.showConfirm({ ...confirmOptions, refocusOnResolve: false });
+      restoreFocus(returnFocus);
       return choice === confirmId;
     } catch (err) {
       ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open the assessment confirmation.', { error: true });
@@ -352,7 +364,7 @@ function createProjectAssessmentController(context) {
     }
   }
 
-  async function transitionCycle(projectId, status) {
+  async function transitionCycle(projectId, status, returnFocus = null) {
     const assessment = selectedAssessment(projectId);
     const nextStatus = String(status || '');
     if (!assessment || !['completed', 'archived'].includes(nextStatus)) return false;
@@ -371,7 +383,7 @@ function createProjectAssessmentController(context) {
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         { id: nextStatus, label: actionLabel, tone: 'warning' },
       ],
-    });
+    }, returnFocus);
     if (!confirmed) return false;
     return mutateCycle(projectId, completing ? 'complete' : 'archive', async () => {
       await ctx.projectWorkspaceRequest(
@@ -381,7 +393,7 @@ function createProjectAssessmentController(context) {
     }, completing ? 'Assessment cycle completed.' : 'Assessment cycle archived.');
   }
 
-  async function deleteCycle(projectId) {
+  async function deleteCycle(projectId, returnFocus = null) {
     const assessment = selectedAssessment(projectId);
     if (!assessment || assessment.status !== 'archived') return false;
     const st = stateFor(projectId);
@@ -420,7 +432,7 @@ function createProjectAssessmentController(context) {
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         { id: 'delete', label: 'Delete assessment', role: 'destructive' },
       ],
-    });
+    }, returnFocus);
     if (!confirmed) return false;
     return mutateCycle(projectId, 'delete', async () => {
       await ctx.projectWorkspaceRequest(
@@ -430,7 +442,7 @@ function createProjectAssessmentController(context) {
     }, 'Assessment cycle deleted.', { resetSelection: true });
   }
 
-  async function createFinding(projectId, check, definition = {}) {
+  async function createFinding(projectId, check, definition = {}, returnFocus = null) {
     const targetId = String(check?.target_entity_id || '');
     if (!projectId || !targetId || !check?.id) return false;
     if (ctx.canTriageFindings?.() === false) {
@@ -450,6 +462,7 @@ function createProjectAssessmentController(context) {
         targetId,
         request: ctx.projectWorkspaceRequest,
         canEdit: true,
+        returnFocus,
         defaults: {
           title: `${definition?.label || check?.check_key || 'Assessment check'}: ${check?.target_value || targetId}`,
           summary: definition?.purpose || check?.state_reason || '',
@@ -480,7 +493,7 @@ function createProjectAssessmentController(context) {
     }
   }
 
-  async function openDeltaFinding(projectId, finding) {
+  async function openDeltaFinding(projectId, finding, returnFocus = null) {
     const findingId = String(finding?.id || '');
     if (!projectId || !findingId) return false;
     const openEditor = typeof ctx.openFindingTriageEditor === 'function'
@@ -490,6 +503,7 @@ function createProjectAssessmentController(context) {
       await openEditor(finding, {
         projectId,
         canEdit: ctx.canTriageFindings?.() !== false,
+        returnFocus,
         onSaved: async () => {
           ctx.invalidateProjectFindings?.(projectId);
           ctx.invalidateProjectOverview?.(projectId);
@@ -509,12 +523,38 @@ function createProjectAssessmentController(context) {
     }
   }
 
+  async function launchRecommendedAction(projectId, check, returnFocus = null) {
+    const assessmentId = String(check?.assessment_id || stateFor(projectId).selectedId || '');
+    const checkId = String(check?.id || '');
+    const launchKey = `${String(projectId || '')}:${assessmentId}:${checkId}`;
+    if (!projectId || !assessmentId || !checkId || actionLaunches.has(launchKey)) return false;
+    if (ctx.canRunCommands?.() === false) {
+      ctx.setProjectWorkspaceMessage?.(
+        "View-only team members can't start assessment runs. Switch to Personal or ask for operator access.",
+        { error: true },
+      );
+      return false;
+    }
+    actionLaunches.add(launchKey);
+    try {
+      return await launchAssessmentAction(ctx, {
+        projectId,
+        assessmentId,
+        check,
+        returnFocus,
+      });
+    } finally {
+      actionLaunches.delete(launchKey);
+    }
+  }
+
   const renderer = createProjectAssessmentRenderer(ctx, {
     deleteCycle,
     createCycle,
     createFinding,
     load,
     loadDetail,
+    launchRecommendedAction,
     openDeltaFinding,
     selectCycle,
     setFilter,

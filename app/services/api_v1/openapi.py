@@ -9,6 +9,7 @@ from copy import deepcopy
 
 from config import APP_VERSION
 from services.api_v1 import openapi_assessments as assessments, openapi_manual_findings as manual
+from services.api_v1.openapi_assessment_actions import assessment_action_paths
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.api_v1.openapi_cve_risk import cve_risk_schemas
 from services.api_v1.openapi_findings import finding_schemas
@@ -1527,7 +1528,13 @@ OPENAPI_SPEC: dict = {
         },
     },
     "security": [{"bearerToken": []}],
-    "paths": assessments.assessment_paths() | finding_evidence_paths() | manual.manual_finding_paths() | action_paths() | {
+    "paths": (
+        assessments.assessment_paths()
+        | assessment_action_paths()
+        | finding_evidence_paths()
+        | manual.manual_finding_paths()
+        | action_paths()
+        | {
         "/health": {
             "get": {
                 "security": [],
@@ -2528,7 +2535,8 @@ OPENAPI_SPEC: dict = {
                 },
             },
         },
-    },
+        }
+    ),
 }
 
 

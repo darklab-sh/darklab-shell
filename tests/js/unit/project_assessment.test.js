@@ -52,7 +52,11 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     logClientError: vi.fn(),
     mobileView: vi.fn(() => 'list'),
     canMutateProjects: vi.fn(() => true),
+    canRunCommands: vi.fn(() => true),
     canTriageFindings: vi.fn(() => true),
+    apiFetch: projectWorkspaceRequest,
+    attachActiveRunFromMonitor: vi.fn(async () => true),
+    closeProjectWorkspace: vi.fn(),
     openContextualFindingRecord,
     openFindingTriageEditor,
     ...overrides,
@@ -159,6 +163,7 @@ const detail = {
         target_type: 'domain',
         target_value: 'example.com',
         policy_level: 'safe',
+        recommended_action_key: 'command:nmap',
         state: 'covered',
         state_source: 'derived',
         evidence_count: 2,
@@ -171,6 +176,7 @@ const detail = {
         target_type: 'domain',
         target_value: 'example.com',
         policy_level: 'safe',
+        recommended_action_key: 'command:dnsrecon',
         state: 'needs_review',
         state_source: 'manual',
         evidence_count: 1,
@@ -243,11 +249,15 @@ describe('project assessment controller', () => {
     const desktop = document.createElement('div')
     controller.renderAssessment(desktop, 'prj_1')
     const mobile = controller.renderMobileAssessmentTab('prj_1')
-    for (const surface of [desktop, mobile]) {
-      surface.querySelector('.project-assessment-target-toggle')?.click()
-      surface.querySelector('.project-assessment-check-row .btn')?.click()
-      await Promise.resolve()
-    }
+    desktop.querySelector('.project-assessment-target-toggle')?.click()
+    ;[...desktop.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'Create finding')?.click()
+    await Promise.resolve()
+    mobile.querySelector('.project-assessment-target-toggle')?.click()
+    mobile.querySelector('.project-assessment-check-row .btn')?.click()
+    ;[...document.querySelectorAll('.action-sheet-item')]
+      .find(button => button.textContent === 'Create finding')?.click()
+    await Promise.resolve()
 
     expect(openContextualFindingRecord).toHaveBeenCalledTimes(2)
     expect(openContextualFindingRecord.mock.calls[0][0]).toEqual(expect.objectContaining({
@@ -276,9 +286,96 @@ describe('project assessment controller', () => {
     const viewerSurface = document.createElement('div')
     viewer.renderAssessment(viewerSurface, 'prj_view')
     viewerSurface.querySelector('.project-assessment-target-toggle')?.click()
-    const viewerCreate = viewerSurface.querySelector('.project-assessment-check-row .btn')
+    const viewerCreate = [...viewerSurface.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'Create finding')
     expect(viewerCreate.disabled).toBe(true)
     expect(viewerCreate.title).toContain('View-only')
+  })
+
+  it('previews and confirms a saved check action before handing its run to the terminal', async () => {
+    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+    const actionPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_1/recommended-action'
+    const plan = {
+      action: { id: 'nmap', key: 'command:nmap', kind: 'command' },
+      target: { entity_id: 'ent_1', type: 'domain', value: 'example.com' },
+      http_profile: { name: '', credential_use: 'none' },
+      policy_level: 'standard',
+      scope: { target_count: 1, fan_out: 1 },
+      bounds: {
+        summary: 'One approved host, the top 100 TCP ports, and a 10-minute host timeout.',
+        credential_use: 'none',
+      },
+      display_command: 'nmap -sT -sV -Pn --top-ports 100 example.com',
+      launchable: true,
+      unavailable_reason: '',
+      plan_digest: 'a'.repeat(64),
+    }
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      expect(url).toBe(actionPath)
+      if (options.method === 'POST') {
+        return apiResponse({
+          run: {
+            run_id: 'run_assessment',
+            run_type: 'external',
+            status: 'running',
+            command: plan.display_command,
+            stream: '/runs/run_assessment/stream',
+          },
+          plan,
+        })
+      }
+      return apiResponse({ plan })
+    })
+    const attachActiveRunFromMonitor = vi.fn(async () => true)
+    const ctx = makeContext(projectWorkspaceRequest, { apiFetch, attachActiveRunFromMonitor })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+    await controller.setFilter('prj_1', 'category', 'discovery')
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle')?.click()
+    const runButton = [...container.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'Run Nmap')
+    runButton.click()
+
+    await vi.waitFor(() => expect(attachActiveRunFromMonitor).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run_assessment' }),
+    ))
+    expect(apiFetch).toHaveBeenNthCalledWith(1, actionPath, { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenNthCalledWith(2, actionPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed: true, plan_digest: 'a'.repeat(64) }),
+    })
+    expect(ctx.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.any(HTMLElement),
+      refocusOnResolve: false,
+      tone: 'warning',
+    }))
+    expect(ctx.showConfirm.mock.calls[0][0].content.textContent).toContain(plan.display_command)
+    expect(ctx.closeProjectWorkspace).toHaveBeenCalledWith({ refocus: false })
+    expect(controller.stateFor('prj_1').category).toBe('discovery')
+  })
+
+  it('uses a touch-sized action sheet for saved check actions on mobile', async () => {
+    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(makeContext(
+      projectWorkspaceRequest,
+      { canRunCommands: vi.fn(() => false) },
+    ))
+    await controller.load('prj_1', { render: false })
+    const mobile = controller.renderMobileAssessmentTab('prj_1')
+    document.body.appendChild(mobile)
+    mobile.querySelector('.project-assessment-target-toggle')?.click()
+    const actions = mobile.querySelector('.project-assessment-check-row .btn')
+    expect(actions.textContent).toBe('Check actions')
+    actions.click()
+
+    const items = [...document.querySelectorAll('.action-sheet-item')]
+    expect(items.map(button => button.textContent)).toEqual(['Run Nmap', 'Create finding'])
+    expect(items[0].disabled).toBe(true)
+    expect(items[1].disabled).toBe(false)
   })
 
   it('renders remediation-level cycle deltas with direct current and earlier finding links', async () => {

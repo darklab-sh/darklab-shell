@@ -121,12 +121,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Intentionally update the decomposed route count/digest after reviewing method/path ownership.
   - Keep `services/api_v1` limited to auth, serialization, and OpenAPI helpers; assessment persistence stays in its domain service.
 
-#### Phase 3 — Add the Project Assessment tab on desktop and mobile
-
-- [ ] Extend the existing Projects workspace instead of creating separate chrome:
-  - Preserve the current Assessment cycle, filters, paging, expanded targets, scroll position, and return context when opening Atlas, Run Details, Findings, Files, Workflows, or a confirmation.
-  - Add recommended-action controls with the shared `.btn`, focus, dismissal, `showConfirm()`, and mobile `openActionSheet()` contracts. Keep mobile row actions touch-sized and use a sticky action footer where needed.
-
 #### Phase 5 — Add reusable, secret-backed HTTP assessment profiles
 
 - [ ] Add Project-scoped HTTP profiles for authenticated and role-aware testing:

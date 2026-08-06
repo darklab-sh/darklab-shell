@@ -250,6 +250,7 @@ _API_V1_TEAM_SCOPED_READ_ROUTES = (
     "api_project_assessments",
     "api_project_assessment",
     "api_project_assessment_delete_preview",
+    "api_project_assessment_action_preview",
     "api_project_finding_verification_action_preview",
     "api_schedules",
     "api_schedule",
@@ -297,6 +298,7 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_project_finding_evidence_unlink": "Capability.TRIAGE_FINDINGS",
     "api_project_manual_finding_create": "Capability.TRIAGE_FINDINGS",
     "api_project_manual_finding_update": "Capability.TRIAGE_FINDINGS",
+    "api_project_assessment_action_launch": "Capability.RUN_COMMANDS",
     "api_project_finding_verification_action_launch": "Capability.RUN_COMMANDS",
 }
 
@@ -1560,6 +1562,150 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
         "run_id": "run_verification_action",
         "source": "api_v1",
     }
+    assert check["target_value"] not in json.dumps(audit)
+    assert plan["display_command"] not in json.dumps(audit)
+
+
+def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    project = _create_project(client, token, name="API Assessment Action")
+    entity_id, _run_id = _seed_assessment_target(token, project["id"])
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(token),
+        json={"profile_key": "network", "title": "Direct action source"},
+    ).get_json()
+    check = next(
+        item for item in created["checks"]["checks"]
+        if item["check_key"] == "service_discovery"
+    )
+    path = (
+        f"/api/v1/projects/{project['id']}/assessments/"
+        f"{created['assessment']['id']}/checks/{check['id']}/recommended-action"
+    )
+    browser_path = path.removeprefix("/api/v1")
+
+    preview_response = client.get(path, headers=_headers(token))
+    browser_preview = client.get(
+        browser_path,
+        headers={"X-Session-ID": token},
+    )
+    cross_scope = client.get(path, headers=_headers(other_token))
+    assert preview_response.status_code == 200
+    assert browser_preview.status_code == 200
+    assert cross_scope.status_code == 404
+    plan = preview_response.get_json()["plan"]
+    assert browser_preview.get_json()["plan"] == plan
+    assert plan["finding_id"] == ""
+    assert plan["project_id"] == project["id"]
+    assert plan["assessment_id"] == created["assessment"]["id"]
+    assert plan["check_id"] == check["id"]
+    assert plan["action"] == {
+        "key": "command:nmap",
+        "kind": "command",
+        "id": "nmap",
+    }
+    assert plan["target"] == {
+        "entity_id": entity_id,
+        "type": "domain",
+        "value": check["target_value"],
+    }
+    assert plan["policy_level"] == "standard"
+    assert plan["launchable"] is True
+
+    stale = client.post(
+        path,
+        headers=_headers(token),
+        json={"confirmed": True, "plan_digest": "0" * 64},
+    )
+    assert stale.status_code == 409
+    assert stale.get_json()["error"]["code"] == "stale_plan"
+
+    browser_started = SimpleNamespace(
+        run_id="run_browser_assessment_action",
+        status="running",
+    )
+    with mock.patch("blueprints.run.broker_available", return_value=True), \
+         mock.patch(
+             "blueprints.run._start_brokered_run_service",
+             return_value=browser_started,
+         ) as browser_start_run, \
+         mock.patch("blueprints.projects.log.info") as browser_info_log:
+        browser_launched_response = client.post(
+            browser_path,
+            headers={"X-Session-ID": token},
+            json={"confirmed": True, "plan_digest": plan["plan_digest"]},
+        )
+
+    assert browser_launched_response.status_code == 202
+    assert browser_launched_response.get_json()["run"]["run_id"] == (
+        "run_browser_assessment_action"
+    )
+    browser_start_kwargs = browser_start_run.call_args.kwargs
+    assert browser_start_kwargs["original_command"] == plan["display_command"]
+    assert browser_start_kwargs["link_project_id"] == project["id"]
+    assert "run_finalized_hook" not in browser_start_kwargs
+    browser_launch_log = next(
+        call for call in browser_info_log.call_args_list
+        if call.args == ("PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
+    )
+    assert check["target_value"] not in json.dumps(
+        browser_launch_log.kwargs["extra"]
+    )
+    assert plan["display_command"] not in json.dumps(
+        browser_launch_log.kwargs["extra"]
+    )
+
+    started = SimpleNamespace(run_id="run_assessment_action", status="running")
+    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
+         mock.patch(
+             "blueprints.api_v1._start_brokered_run_service",
+             return_value=started,
+         ) as start_run, \
+         mock.patch("blueprints.api_v1.log.info") as info_log:
+        launched_response = client.post(
+            path,
+            headers=_headers(token),
+            json={"confirmed": True, "plan_digest": plan["plan_digest"]},
+        )
+
+    assert launched_response.status_code == 202
+    assert launched_response.get_json()["run"]["run_id"] == "run_assessment_action"
+    start_kwargs = start_run.call_args.kwargs
+    assert start_kwargs["original_command"] == plan["display_command"]
+    assert start_kwargs["display_command"] == plan["display_command"]
+    assert start_kwargs["link_project_id"] == project["id"]
+    assert "run_finalized_hook" not in start_kwargs
+    launch_log = next(
+        call for call in info_log.call_args_list
+        if call.args == ("API_PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
+    )
+    launch_fields = dict(launch_log.kwargs["extra"])
+    assert launch_fields.pop("ip")
+    assert launch_fields == {
+        "session": get_log_session_id(token),
+        "team_id": "",
+        "project_id": project["id"],
+        "assessment_id": created["assessment"]["id"],
+        "check_id": check["id"],
+        "check_key": "service_discovery",
+        "profile_key": "network",
+        "profile_version": "1.0",
+        "policy_level": "standard",
+        "action_kind": "command",
+        "action_id": "nmap",
+        "run_id": "run_assessment_action",
+        "source": "api_v1",
+    }
+    audit = _audit_event_rows(
+        target_id=check["id"],
+        event_type="assessment.action_launch",
+    )
+    assert len(audit) == 2
+    assert {row["details"]["source"] for row in audit} == {"api_v1", "browser"}
+    assert all("finding_id" not in row["details"] for row in audit)
     assert check["target_value"] not in json.dumps(audit)
     assert plan["display_command"] not in json.dumps(audit)
 
@@ -5231,12 +5377,14 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     paths = spec["paths"]
     assessment_path = "/projects/{project_id}/assessments/{assessment_id}"
     check_path = assessment_path + "/checks/{check_id}"
+    action_path = check_path + "/recommended-action"
     evidence_path = check_path + "/evidence"
     evidence_link_path = evidence_path + "/{evidence_link_id}"
 
     assert set(paths["/projects/{project_id}/assessments"]) == {"get", "post"}
     assert set(paths[assessment_path]) == {"get", "patch", "delete"}
     assert set(paths[check_path]) == {"patch"}
+    assert set(paths[action_path]) == {"get", "post"}
     assert set(paths[evidence_path]) == {"post"}
     assert set(paths[evidence_link_path]) == {"delete"}
     assert paths["/projects/{project_id}/assessments"]["post"]["requestBody"]["content"][
@@ -5248,6 +5396,12 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert paths[evidence_path]["post"]["responses"]["201"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/AssessmentEvidenceLinkResponse"}
+    assert paths[action_path]["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/FindingVerificationActionPreview"}
+    assert paths[action_path]["post"]["requestBody"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/FindingVerificationActionLaunchRequest"}
 
     detail_params = {
         parameter["name"]
@@ -5335,6 +5489,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         assessment_path,
         assessment_path + "/delete-preview",
         check_path,
+        action_path,
         evidence_path,
         evidence_link_path,
     ):
