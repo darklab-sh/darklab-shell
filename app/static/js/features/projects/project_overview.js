@@ -3,6 +3,7 @@
 
 // Project Overview tab controller.
 // Loaded lazily; shell chrome supplies request, filter, and render callbacks.
+import { renderProjectFindingChangesSummary } from './project_finding_changes.js';
 
 let exportedDarklabProjectOverview = null;
 
@@ -1284,6 +1285,14 @@ let exportedDarklabProjectOverview = null;
       root.appendChild(renderFindingProgress(st));
       const assessment = renderActiveAssessment(normalized, st);
       if (assessment) root.appendChild(assessment);
+      const findingChanges = renderProjectFindingChangesSummary({
+        changes: st?.payload?.assessment_finding_changes,
+        projectId: normalized,
+        onOpenAssessment: ctx.openProjectAssessment,
+        bindPressable: ctx.bindProjectRuntimePressable,
+        mobile,
+      });
+      if (findingChanges) root.appendChild(findingChanges);
       root.appendChild(renderOperationalTempo(normalized, st));
       root.appendChild(renderCoverageGaps(normalized, st));
       root.appendChild(renderDeliverablesStatus(st));

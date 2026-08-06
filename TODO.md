@@ -133,12 +133,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Add a compact fix-first summary that links into the exact Assessment filters. The active-cycle status and truthful coverage card already use the shared assessment rollup and open the matching Assessment cycle; the detailed methodology matrix and ranked worklist remain owned by the Assessment tab.
   - Use the shared risk-ranking service so Overview, Assessment, Findings, API v1, packages, and reports cannot disagree about the default fix-first order.
 
-#### Phase 4 — Add first-class manual findings and retest provenance
-
-- [ ] Extend the stored Assessment finding changes into the remaining Project handoff surfaces:
-  - Surface the shared remediation-level new, persistent, not-observed, regressed, and incomparable rollup in Overview and Findings without recounting related observations.
-  - Carry current and earlier finding/evidence links plus explicit incomparable reasons into evidence packages and reports.
-
 #### Phase 5 — Add reusable, secret-backed HTTP assessment profiles
 
 - [ ] Add Project-scoped HTTP profiles for authenticated and role-aware testing:

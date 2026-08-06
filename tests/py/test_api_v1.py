@@ -5009,6 +5009,11 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "end",
     }.issubset(schemas["RunStreamEntity"]["properties"])
     assert schemas["ProjectFindingPage"]["properties"]["findings"]["items"] == {"$ref": "#/components/schemas/ProjectFinding"}
+    assert "assessment_finding_changes" in schemas["ProjectFindingPage"]["required"]
+    assert schemas["ProjectFindingPage"]["properties"]["assessment_finding_changes"] == {
+        "nullable": True,
+        "allOf": [{"$ref": "#/components/schemas/AssessmentFindingChangesHandoff"}],
+    }
     assert schemas["ProjectRunPage"]["properties"]["runs"]["items"] == {"$ref": "#/components/schemas/ProjectRun"}
     assert schemas["ProjectEntityPage"]["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/ProjectEntity"}
     assert schemas["AtlasEntityPage"]["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/AtlasEntity"}

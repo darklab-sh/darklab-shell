@@ -142,6 +142,9 @@ def _report_manifest_provenance(
     risk_snapshot = (context or {}).get("cve_risk_snapshot")
     if isinstance(risk_snapshot, dict) and risk_snapshot:
         provenance["sources"]["cve_risk"] = risk_snapshot
+    finding_changes = (context or {}).get("assessment_finding_changes")
+    if isinstance(finding_changes, dict) and finding_changes:
+        provenance["sources"]["assessment_finding_changes"] = finding_changes
     if audit_handoff:
         provenance["audit"] = {
             key: str(value)

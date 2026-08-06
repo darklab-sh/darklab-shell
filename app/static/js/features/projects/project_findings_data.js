@@ -129,6 +129,7 @@ let exportedDarklabProjectFindingsData = null;
     const ctx = context || {};
     let findings = new Map();
     let findingsPagination = new Map();
+    let findingChanges = new Map();
     let filteredFindings = new Map();
     let filteredFindingsPagination = new Map();
     let findingsLoadingId = '';
@@ -142,6 +143,10 @@ let exportedDarklabProjectFindingsData = null;
 
     function items(projectId = '') {
       return findings.get(normalizedProjectId(projectId)) || [];
+    }
+
+    function changes(projectId = '') {
+      return findingChanges.get(normalizedProjectId(projectId)) || null;
     }
 
     function page(projectId = '', summary = ctx.projectSummary?.(projectId)) {
@@ -310,10 +315,12 @@ let exportedDarklabProjectFindingsData = null;
       if (normalized) {
         findings.delete(normalized);
         findingsPagination.delete(normalized);
+        findingChanges.delete(normalized);
         invalidateFiltered(normalized);
       } else {
         findings = new Map();
         findingsPagination = new Map();
+        findingChanges = new Map();
         invalidateFiltered();
       }
     }
@@ -396,6 +403,12 @@ let exportedDarklabProjectFindingsData = null;
           const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(normalized)}/findings?${params.toString()}`, { cache: 'no-store' });
           if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load project findings.');
           const data = await resp.json();
+          findingChanges.set(
+            normalized,
+            data.assessment_finding_changes && typeof data.assessment_finding_changes === 'object'
+              ? data.assessment_finding_changes
+              : null,
+          );
           const collapsedCounts = {
             ...collapsedCountsFromPage(normalized, currentPage),
             ...(data.collapsed_group_counts && typeof data.collapsed_group_counts === 'object'
@@ -417,6 +430,7 @@ let exportedDarklabProjectFindingsData = null;
           });
         } catch (err) {
           findings.set(normalized, []);
+          findingChanges.delete(normalized);
           findingsPagination.set(normalized, {
             limit: pageLimit,
             offset,
@@ -472,6 +486,12 @@ let exportedDarklabProjectFindingsData = null;
         });
         if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load project findings.');
         const data = await resp.json();
+        findingChanges.set(
+          normalized,
+          data.assessment_finding_changes && typeof data.assessment_finding_changes === 'object'
+            ? data.assessment_finding_changes
+            : null,
+        );
         const rows = Array.isArray(data.findings) ? data.findings : [];
         collected.push(...rows);
         total = Number(data.total || collected.length);
@@ -540,6 +560,12 @@ let exportedDarklabProjectFindingsData = null;
         const resp = await ctx.apiFetch(url, { cache: 'no-store' });
         if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load filtered project findings.');
         const data = await resp.json();
+        findingChanges.set(
+          normalized,
+          data.assessment_finding_changes && typeof data.assessment_finding_changes === 'object'
+            ? data.assessment_finding_changes
+            : null,
+        );
         const collapsedCounts = {
           ...collapsedCountsFromPage(normalized, currentPage),
           ...(data.collapsed_group_counts && typeof data.collapsed_group_counts === 'object'
@@ -596,6 +622,7 @@ let exportedDarklabProjectFindingsData = null;
       boardItems,
       boardWorkflowState,
       filteredItems,
+      findingChanges: changes,
       hasFilteredKey,
       invalidate,
       invalidateFiltered,

@@ -9,31 +9,13 @@ from typing import Any
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
+from services.assessments.reconciliation_read_filters import (
+    DELTA_STATE_RANKS,
+    delta_rollup,
+)
 
 
-_STATE_RANKS = {
-    "regressed": 5,
-    "new": 4,
-    "persistent": 3,
-    "not_observed": 2,
-    "incomparable": 1,
-}
 _ITEM_LIMIT = 100
-_ROLLUP_SQL = (
-    "WITH strongest AS (SELECT remediation_id, MAX(CASE delta_state "
-    "WHEN 'regressed' THEN 5 WHEN 'new' THEN 4 WHEN 'persistent' THEN 3 "
-    "WHEN 'not_observed' THEN 2 ELSE 1 END) AS state_rank "
-    "FROM project_assessment_finding_deltas WHERE current_assessment_id = ? "
-    "GROUP BY remediation_id) SELECT state_rank, COUNT(*) AS count "
-    "FROM strongest GROUP BY state_rank"
-)
-_REMEDIATION_IDS_SQL = (
-    "SELECT remediation_id, MAX(CASE delta_state WHEN 'regressed' THEN 5 "
-    "WHEN 'new' THEN 4 WHEN 'persistent' THEN 3 WHEN 'not_observed' THEN 2 "
-    "ELSE 1 END) AS state_rank "
-    "FROM project_assessment_finding_deltas WHERE current_assessment_id = ? "
-    "GROUP BY remediation_id ORDER BY state_rank DESC, remediation_id ASC LIMIT ?"
-)
 
 
 def _comparison_rollup(conn: Any, assessment_id: str) -> dict[str, Any]:
@@ -65,23 +47,6 @@ def _comparison_rollup(conn: Any, assessment_id: str) -> dict[str, Any]:
         "no_baseline_checks": no_baseline,
         "incomparable_checks": incomparable,
     }
-
-
-def _delta_rollup(conn: Any, assessment_id: str) -> tuple[dict[str, int], list[str]]:
-    rows = conn.execute(
-        _ROLLUP_SQL,
-        (assessment_id,),
-    ).fetchall()
-    state_by_rank = {value: key for key, value in _STATE_RANKS.items()}
-    rollup = {state: 0 for state in _STATE_RANKS}
-    for row in rows:
-        state = state_by_rank.get(int(row["state_rank"] or 0), "incomparable")
-        rollup[state] += int(row["count"] or 0)
-    id_rows = conn.execute(
-        _REMEDIATION_IDS_SQL,
-        (assessment_id, _ITEM_LIMIT),
-    ).fetchall()
-    return rollup, [str(row["remediation_id"]) for row in id_rows]
 
 
 def _grouped_rows(
@@ -132,7 +97,7 @@ def _grouped_rows(
             "previous_assessment_ids": set(),
         })
         state = str(row["delta_state"] or "incomparable")
-        if _STATE_RANKS.get(state, 0) > _STATE_RANKS.get(group["state"], 0):
+        if DELTA_STATE_RANKS.get(state, 0) > DELTA_STATE_RANKS.get(group["state"], 0):
             group["state"] = state
         reason = str(row["reason"] or "")
         if reason and reason not in group["reasons"]:
@@ -161,7 +126,7 @@ def _grouped_rows(
             group["previous_assessment_ids"].add(str(row["previous_assessment_id"]))
     ordered = sorted(
         groups.values(),
-        key=lambda item: (-_STATE_RANKS.get(item["state"], 0), item["remediation_id"]),
+        key=lambda item: (-DELTA_STATE_RANKS.get(item["state"], 0), item["remediation_id"]),
     )
     return ordered
 
@@ -236,10 +201,24 @@ def _hydrate(groups: list[dict[str, Any]], findings: dict[str, dict[str, Any]]) 
         group["previous_assessment_ids"] = sorted(group["previous_assessment_ids"])
 
 
-def assessment_finding_delta_read_model(conn: Any, assessment_id: str) -> dict[str, Any]:
+def assessment_finding_delta_read_model(
+    conn: Any,
+    assessment_id: str,
+    *,
+    remediation_ids: list[str] | None = None,
+    item_limit: int = _ITEM_LIMIT,
+) -> dict[str, Any]:
     comparison = _comparison_rollup(conn, assessment_id)
-    rollup, remediation_ids = _delta_rollup(conn, assessment_id)
-    groups = _grouped_rows(conn, assessment_id, remediation_ids)
+    safe_item_limit = max(1, min(int(item_limit), _ITEM_LIMIT))
+    if remediation_ids is not None:
+        remediation_ids = sorted({str(value) for value in remediation_ids if str(value)})
+    rollup, page_remediation_ids = delta_rollup(
+        conn,
+        assessment_id,
+        remediation_ids=remediation_ids,
+        item_limit=safe_item_limit,
+    )
+    groups = _grouped_rows(conn, assessment_id, page_remediation_ids)
     findings = _finding_summaries(conn, groups)
     _hydrate(groups, findings)
     total = sum(rollup.values())
@@ -247,6 +226,6 @@ def assessment_finding_delta_read_model(conn: Any, assessment_id: str) -> dict[s
         "comparison": comparison,
         "rollup": {**rollup, "total": total},
         "items": groups,
-        "item_limit": _ITEM_LIMIT,
+        "item_limit": safe_item_limit,
         "truncated": total > len(groups),
     }

@@ -102,6 +102,35 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 <p class="muted">No methodology narrative has been written yet.</p>
 {% endif %}
 {% elif section.type == "findings_by_severity" %}
+{% if assessment_finding_changes %}
+<h3>Assessment finding changes</h3>
+<p><strong>{{ assessment_finding_changes.assessment.title }}</strong> ·
+{{ assessment_finding_changes.comparison.comparable_checks }} of
+{{ assessment_finding_changes.comparison.total_checks }} checks comparable</p>
+<table><thead><tr>
+<th>State</th><th>Remediation</th><th>Current finding / evidence</th>
+<th>Earlier finding / evidence</th><th>Comparison reason</th>
+</tr></thead><tbody>
+{% for item in assessment_finding_changes["items"] %}
+<tr>
+<td>{{ item.state|replace("_", " ") }}</td>
+<td>{{ item.vulnerability_id or item.rule_identity }}<br><code>{{ item.remediation_id }}</code></td>
+<td>
+{% for finding in item.current_findings %}{{ finding.title }} (<code>{{ finding.id }}</code>)<br>{% endfor %}
+{% for evidence_id in item.current_evidence_ids %}<code>{{ evidence_id }}</code><br>{% endfor %}
+{% if not item.current_findings and not item.current_evidence_ids %}<span class="muted">None</span>{% endif %}
+</td>
+<td>
+{% for finding in item.previous_findings %}{{ finding.title }} (<code>{{ finding.id }}</code>)<br>{% endfor %}
+{% for evidence_id in item.previous_evidence_ids %}<code>{{ evidence_id }}</code><br>{% endfor %}
+{% if not item.previous_findings and not item.previous_evidence_ids %}<span class="muted">None</span>{% endif %}
+</td>
+<td>{% if item.reasons %}{{ item.reasons|join("; ") }}{% else %}<span class="muted">No exception recorded</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+<p class="muted">Counts and rows represent distinct remediation groups, not evidence observations.</p>
+{% endif %}
 {% if findings_by_severity %}
 {% for group in findings_by_severity %}
 <h3>{{ group.severity|title }} ({{ group.count }})</h3>
@@ -297,6 +326,48 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
     return lines
 
 
+def _append_assessment_finding_changes_markdown(
+    lines: list[str],
+    context: dict[str, Any],
+) -> None:
+    changes = context.get("assessment_finding_changes")
+    if not isinstance(changes, dict):
+        return
+    assessment = changes.get("assessment") if isinstance(changes.get("assessment"), dict) else {}
+    comparison = changes.get("comparison") if isinstance(changes.get("comparison"), dict) else {}
+    lines.extend([
+        "### Assessment finding changes",
+        "",
+        f"- Cycle: {_md(assessment.get('title') or assessment.get('id'))}",
+        "- Comparison: "
+        f"{int(comparison.get('comparable_checks') or 0)} of "
+        f"{int(comparison.get('total_checks') or 0)} checks comparable",
+        "- Counts and rows represent distinct remediation groups, not evidence observations.",
+    ])
+    for item in changes.get("items", []):
+        if not isinstance(item, dict):
+            continue
+        label = item.get("vulnerability_id") or item.get("rule_identity") or "Saved remediation"
+        lines.extend(("", f"#### {_md(label)}", ""))
+        lines.append(f"- State: {_md(str(item.get('state') or 'incomparable').replace('_', ' '))}")
+        lines.append(f"- Remediation: {_md_code(item.get('remediation_id'))}")
+        for side, side_label in (("current", "Current"), ("previous", "Earlier")):
+            references = [
+                f"{_md(finding.get('title') or finding.get('id'))} ({_md_code(finding.get('id'))})"
+                for finding in item.get(f"{side}_findings", [])
+                if isinstance(finding, dict)
+            ]
+            references.extend(
+                _md_code(value)
+                for value in item.get(f"{side}_evidence_ids", [])
+                if str(value or "")
+            )
+            lines.append(f"- {side_label}: {', '.join(references) if references else 'None'}")
+        reasons = "; ".join(str(value) for value in item.get("reasons", []) if str(value or ""))
+        lines.append(f"- Comparison reason: {_md(reasons or 'No exception recorded')}")
+    lines.append("")
+
+
 def _target_reference_label(reference: Any) -> str:
     if not isinstance(reference, dict):
         return ""
@@ -358,6 +429,7 @@ def _render_markdown_section(section: dict[str, Any], context: dict[str, Any]) -
     elif section_type == "methodology":
         lines.append(_md(metadata.get("methodology")) or "_No methodology narrative has been written yet._")
     elif section_type == "findings_by_severity":
+        _append_assessment_finding_changes_markdown(lines, context)
         if not context.get("findings_by_severity"):
             lines.append("_No findings are selected for this report._")
         for group in context.get("findings_by_severity", []):
@@ -510,6 +582,7 @@ def render_report_html_from_context(
         runs=context.get("runs") or [],
         targets=context.get("targets") or [],
         findings_by_severity=context.get("findings_by_severity") or [],
+        assessment_finding_changes=context.get("assessment_finding_changes") or {},
         artifacts=context.get("artifacts") or [],
         artifact_warnings=context.get("artifact_warnings") or [],
         cve_risk_snapshot=context.get("cve_risk_snapshot") or {},

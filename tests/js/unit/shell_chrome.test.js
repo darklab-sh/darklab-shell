@@ -36,6 +36,7 @@ const PROJECT_TARGETS_SRC = readScriptSource('app/static/js/features/projects/pr
 const PROJECT_RUNS_SRC = readScriptSource('app/static/js/features/projects/project_runs.js')
 const PROJECT_MOBILE_COMPARE_SRC = readScriptSource('app/static/js/features/projects/project_mobile_compare.js')
 const PROJECT_MOBILE_SHELL_SRC = readScriptSource('app/static/js/features/projects/project_mobile_shell.js')
+const PROJECT_FINDING_CHANGES_SRC = readScriptSource('app/static/js/features/projects/project_finding_changes.js')
 const PROJECT_MOBILE_DETAIL_SRC = readScriptSource('app/static/js/features/projects/project_mobile_detail.js')
 const PROJECT_FINDINGS_DATA_SRC = readScriptSource('app/static/js/features/projects/project_findings_data.js')
 const PROJECT_FILTERS_SRC = readScriptSource('app/static/js/features/projects/project_filters.js')
@@ -487,6 +488,7 @@ function loadShellChrome({
       ${PROJECT_MOBILE_SHELL_SRC}
       global.DarklabProjectMobileShell = exportedDarklabProjectMobileShell;
       window.DarklabProjectMobileShell = exportedDarklabProjectMobileShell;
+      ${PROJECT_FINDING_CHANGES_SRC}
       ${PROJECT_MOBILE_DETAIL_SRC}
       global.DarklabProjectMobileDetail = exportedDarklabProjectMobileDetail;
       window.DarklabProjectMobileDetail = exportedDarklabProjectMobileDetail;

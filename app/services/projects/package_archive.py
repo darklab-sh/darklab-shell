@@ -20,6 +20,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules, line_entries_from_events, line_events_from_entries, redact_line_entries
+from services.assessments.handoff import get_project_assessment_finding_changes
 from services.runs.output_model import LineEvent, is_noise_event
 from services.projects.artifacts import (
     artifact_owner_context as _artifact_owner_context,
@@ -884,6 +885,12 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
         session_id,
         project_id,
         manifest.get("findings", []),
+        team_id=team_id,
+    )
+    manifest["assessment_finding_changes"] = get_project_assessment_finding_changes(
+        session_id,
+        project_id,
+        findings=manifest.get("findings", []),
         team_id=team_id,
     )
     redaction_rules = _package_redaction_rules(payload["redaction_mode"])

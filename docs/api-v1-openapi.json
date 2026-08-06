@@ -1052,6 +1052,85 @@
         ],
         "type": "object"
       },
+      "AssessmentFindingChangesAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "profile_key": {
+            "type": "string"
+          },
+          "profile_version": {
+            "type": "string"
+          },
+          "started_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "profile_key",
+          "profile_version",
+          "status",
+          "started_at",
+          "completed_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingChangesHandoff": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment": {
+            "$ref": "#/components/schemas/AssessmentFindingChangesAssessment"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/AssessmentFindingDeltaComparison"
+          },
+          "item_limit": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingDelta"
+            },
+            "type": "array"
+          },
+          "rollup": {
+            "$ref": "#/components/schemas/AssessmentFindingDeltaRollup"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "assessment",
+          "comparison",
+          "rollup",
+          "items",
+          "item_limit",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "AssessmentFindingDelta": {
         "additionalProperties": false,
         "properties": {
@@ -5580,6 +5659,14 @@
       },
       "ProjectFindingPage": {
         "properties": {
+          "assessment_finding_changes": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssessmentFindingChangesHandoff"
+              }
+            ],
+            "nullable": true
+          },
           "collapsed_group_counts": {
             "additionalProperties": {
               "type": "integer"
@@ -5625,7 +5712,8 @@
           "has_more",
           "group_counts",
           "collapsed_group_counts",
-          "group_order"
+          "group_order",
+          "assessment_finding_changes"
         ],
         "type": "object"
       },

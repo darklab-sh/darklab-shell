@@ -202,4 +202,76 @@ def assessment_delta_schemas() -> dict[str, Any]:
             },
             "additionalProperties": False,
         },
+        "AssessmentFindingChangesAssessment": {
+            "type": "object",
+            "required": [
+                "id",
+                "title",
+                "profile_key",
+                "profile_version",
+                "status",
+                "started_at",
+                "completed_at",
+                "updated_at",
+            ],
+            "properties": {
+                key: {"type": "string"}
+                for key in ("id", "title", "profile_key", "profile_version", "status")
+            } | {
+                key: {"type": "string", "nullable": True}
+                for key in ("started_at", "completed_at", "updated_at")
+            },
+            "additionalProperties": False,
+        },
+        "AssessmentFindingChangesHandoff": {
+            "type": "object",
+            "required": [
+                "assessment",
+                "comparison",
+                "rollup",
+                "items",
+                "item_limit",
+                "truncated",
+            ],
+            "properties": {
+                "assessment": _ref("AssessmentFindingChangesAssessment"),
+                "comparison": _ref("AssessmentFindingDeltaComparison"),
+                "rollup": _ref("AssessmentFindingDeltaRollup"),
+                "items": {"type": "array", "items": _ref("AssessmentFindingDelta")},
+                "item_limit": {"type": "integer", "minimum": 1},
+                "truncated": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+        "ProjectFindingPage": {
+            "type": "object",
+            "required": [
+                "findings",
+                "total",
+                "limit",
+                "offset",
+                "has_more",
+                "group_counts",
+                "collapsed_group_counts",
+                "group_order",
+                "assessment_finding_changes",
+            ],
+            "properties": {
+                "findings": {"type": "array", "items": _ref("ProjectFinding")},
+                "total": {"type": "integer"},
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+                "has_more": {"type": "boolean"},
+                "group_counts": {"type": "object", "additionalProperties": {"type": "integer"}},
+                "collapsed_group_counts": {
+                    "type": "object",
+                    "additionalProperties": {"type": "integer"},
+                },
+                "group_order": {"type": "array", "items": {"type": "string"}},
+                "assessment_finding_changes": {
+                    "nullable": True,
+                    "allOf": [_ref("AssessmentFindingChangesHandoff")],
+                },
+            },
+        },
     }

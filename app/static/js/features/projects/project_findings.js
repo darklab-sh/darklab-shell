@@ -8,6 +8,7 @@ import {
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from '../team_scope.js';
 import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
+import { renderProjectFindingChangesSummary } from './project_finding_changes.js';
 
 let exportedDarklabProjectFindings = null;
 
@@ -291,6 +292,13 @@ let exportedDarklabProjectFindings = null;
       const total = Math.max(0, Number(pagination.total || allFindings.length || 0));
       const viewMode = findingsBoardAvailable() ? ctx.findingViewMode() : 'list';
       pruneSelection(findings);
+      const findingChanges = renderProjectFindingChangesSummary({
+        changes: ctx.projectFindingChanges?.(projectId),
+        projectId,
+        onOpenAssessment: ctx.openProjectAssessment,
+        bindPressable: ctx.bindProjectRuntimePressable,
+      });
+      if (findingChanges) container.appendChild(findingChanges);
       container.appendChild(renderViewToggle(projectId));
       if (viewMode === 'board' && ctx.findingSelectMode()) {
         ctx.selectedFindingIds().clear();

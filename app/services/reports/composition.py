@@ -12,6 +12,7 @@ from typing import Any
 
 import config as _config
 from core.database_access import get_db_connect
+from services.assessments.handoff import get_project_assessment_finding_changes
 from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.projects.artifacts import artifact_owner_context
 from services.projects.contracts import ProjectWorkspaceError
@@ -499,6 +500,12 @@ def compose_report_context(
             ),
         )
     attach_finding_target_references(selected["findings"], target_reference_targets)
+    assessment_finding_changes = get_project_assessment_finding_changes(
+        session_id,
+        selected_project_id,
+        findings=selected["findings"],
+        team_id=team_id,
+    ) if session_id and selected_project_id else None
     selected["artifacts"], artifact_warnings = _attach_artifact_previews(
         session_id,
         selected["artifacts"],
@@ -523,6 +530,7 @@ def compose_report_context(
         "artifact_warnings": artifact_warnings,
         "export": normalized_draft.get("export") or {},
         "cve_risk_snapshot": build_cve_risk_snapshot(selected["findings"]),
+        "assessment_finding_changes": assessment_finding_changes,
     }
     if not bool(context["export"].get("include_private_notes")):
         context = _strip_notes(context)

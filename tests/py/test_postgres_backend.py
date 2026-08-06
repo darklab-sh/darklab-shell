@@ -1001,6 +1001,91 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
 
 
 @pytest.mark.postgres
+def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
+    postgres_schema,
+    monkeypatch,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.handoff import project_assessment_finding_changes_on_conn
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    timestamp = "2026-08-06T12:00:00+00:00"
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "VALUES ('prj-assessment-handoff', 'assessment-handoff', '', 'Handoff', "
+        "'handoff', '', 'active', '', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, created_at, updated_at) "
+        "VALUES ('asm-handoff', 'assessment-handoff', '', 'prj-assessment-handoff', "
+        "'Handoff', 'network', '1.0', ?, 'active', ?, ?, ?)",
+        (Jsonb({}), timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, "
+        "target_value_hash, created_at, updated_at) VALUES "
+        "('chk-handoff', 'asm-handoff', 'validation', 'known_cves', "
+        "'domain', 'handoff.example', 'handoff-hash', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_check_comparisons "
+        "(id, current_assessment_id, current_check_id, compatibility_state, reason, "
+        "computed_at) VALUES ('cmp-handoff', 'asm-handoff', 'chk-handoff', "
+        "'comparable', '', ?)",
+        (timestamp,),
+    )
+    for suffix, state in (("selected", "regressed"), ("other", "new")):
+        conn.execute(
+            "INSERT INTO project_assessment_finding_deltas "
+            "(id, comparison_id, current_assessment_id, current_check_id, remediation_id, "
+            "identity_kind, vulnerability_id, rule_identity, affected_subject, delta_state, "
+            "current_observations_json, previous_observations_json, "
+            "current_evidence_ids_json, previous_evidence_ids_json, computed_at) "
+            "VALUES (?, 'cmp-handoff', 'asm-handoff', 'chk-handoff', ?, 'vulnerability', "
+            "'CVE-2026-10001', 'known-cves', 'entity:handoff', ?, ?, ?, ?, ?, ?)",
+            (
+                f"delta-{suffix}",
+                f"rmd-{suffix}",
+                state,
+                Jsonb([]),
+                Jsonb([]),
+                Jsonb([f"evidence-{suffix}"]),
+                Jsonb([]),
+                timestamp,
+            ),
+        )
+
+    handoff = project_assessment_finding_changes_on_conn(
+        conn,
+        "prj-assessment-handoff",
+        remediation_ids=["rmd-selected"],
+    )
+
+    assert handoff is not None
+    assert handoff["rollup"] == {
+        "regressed": 1,
+        "new": 0,
+        "persistent": 0,
+        "not_observed": 0,
+        "incomparable": 0,
+        "total": 1,
+    }
+    assert [item["remediation_id"] for item in handoff["items"]] == ["rmd-selected"]
+    assert handoff["items"][0]["current_evidence_ids"] == ["evidence-selected"]
+
+
+@pytest.mark.postgres
 def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock

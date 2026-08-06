@@ -17,7 +17,10 @@ function apiResponse(payload = {}, { ok = true, status = ok ? 200 : 500 } = {}) 
 
 function loadOverviewModule() {
   return fromDomScripts(
-    ['app/static/js/features/projects/project_overview.js'],
+    [
+      'app/static/js/features/projects/project_finding_changes.js',
+      'app/static/js/features/projects/project_overview.js',
+    ],
     { document, window },
     'globalThis.DarklabProjectOverview',
   )
@@ -94,6 +97,31 @@ const overviewPayload = {
       excluded_checks: 1,
       unavailable_evidence_checks: 1,
     },
+  },
+  assessment_finding_changes: {
+    assessment: {
+      id: 'asmt_1',
+      title: 'Network assessment',
+      status: 'active',
+    },
+    comparison: {
+      status: 'partial',
+      total_checks: 4,
+      comparable_checks: 3,
+      no_baseline_checks: 1,
+      incomparable_checks: 0,
+    },
+    rollup: {
+      regressed: 1,
+      new: 2,
+      persistent: 3,
+      not_observed: 1,
+      incomparable: 1,
+      total: 8,
+    },
+    items: [],
+    item_limit: 5,
+    truncated: true,
   },
   rollups: {
     target_count: 1,
@@ -335,6 +363,14 @@ describe('project overview controller', () => {
     expect(assessmentText).toContain('1 check references saved evidence that can no longer be opened')
     container.querySelector('[data-project-overview-assessment="asmt_1"]').click()
     expect(ctx.openProjectAssessment).toHaveBeenCalledWith('prj_1', { assessmentId: 'asmt_1' })
+    const findingChanges = container.querySelector('.project-finding-changes-summary')
+    expect(findingChanges?.textContent).toContain('Finding changes')
+    expect(findingChanges?.textContent).toContain('3 of 4 checks comparable')
+    expect(findingChanges?.textContent).toContain('Regressed: 1')
+    expect(findingChanges?.textContent).toContain('New: 2')
+    expect(findingChanges?.textContent).toContain('distinct remediation groups')
+    findingChanges?.querySelector('[data-project-finding-changes-assessment="asmt_1"]')?.click()
+    expect(ctx.openProjectAssessment).toHaveBeenLastCalledWith('prj_1', { assessmentId: 'asmt_1' })
     const tempoText = container.querySelector('.project-overview-tempo')?.textContent || ''
     expect(tempoText).toContain('Last run')
     expect(tempoText).toContain('2026-06-24 13:00:00+00:00')

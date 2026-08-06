@@ -86,6 +86,7 @@
     "/static/js/features/projects/project_activity.js",
     "/static/js/features/projects/project_assessment.js",
     "/static/js/features/projects/project_assessment_renderer.js",
+    "/static/js/features/projects/project_finding_changes.js",
     "/static/js/features/projects/project_overview.js",
     "/static/js/features/projects/project_monitoring.js",
     "/static/js/features/projects/project_artifacts.js",

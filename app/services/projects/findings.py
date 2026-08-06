@@ -16,6 +16,7 @@ from typing import Any
 
 from core.database_access import get_db_connect
 from core.output_signals import strip_ansi_codes
+from services.assessments.handoff import project_assessment_finding_changes_on_conn
 from services.atlas.scope import finding_exists_in_scope
 from services.atlas.recalculation import recalculate_atlas_findings
 from services.atlas.materializer import (
@@ -193,6 +194,7 @@ def _project_finding_page_payload(
     collapsed_group_counts=None,
     group_order=None,
     has_more=None,
+    assessment_finding_changes=None,
 ):
     return _page_payload(
         "findings",
@@ -205,6 +207,9 @@ def _project_finding_page_payload(
             "group_counts": group_counts if isinstance(group_counts, dict) else {},
             "collapsed_group_counts": collapsed_group_counts if isinstance(collapsed_group_counts, dict) else {},
             "group_order": group_order if isinstance(group_order, list) else [],
+            "assessment_finding_changes": (
+                assessment_finding_changes if isinstance(assessment_finding_changes, dict) else None
+            ),
         },
 )
 
@@ -865,6 +870,13 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             },
         )
         attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
+        assessment_finding_changes = None
+        if paginated:
+            assessment_finding_changes = project_assessment_finding_changes_on_conn(
+                conn,
+                project_id,
+                item_limit=5,
+            )
 
     if paginated:
         return _project_finding_page_payload(
@@ -876,6 +888,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             collapsed_group_counts,
             group_order,
             has_more,
+            assessment_finding_changes,
         )
     return findings
 

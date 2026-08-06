@@ -16,6 +16,7 @@ from typing import Any
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
+from services.assessments.handoff import project_assessment_finding_changes_on_conn
 from services.assessments.summary import active_assessment_summary_for_project
 from services.atlas.finding_rollups import (
     FINDING_SEVERITY_RANK,
@@ -100,6 +101,7 @@ def overview_payload_contract(project: Mapping[str, Any] | None = None) -> dict[
         "payload_version": OVERVIEW_PAYLOAD_VERSION,
         "targets": [],
         "active_assessment": None,
+        "assessment_finding_changes": None,
         "rollups": {
             "target_count": 0,
             "certificate_statuses": {status: 0 for status in CERT_STATUS_ORDER},
@@ -279,6 +281,11 @@ def get_project_intel_overview(
         recent_activity = _overview_recent_activity(conn, session_id, team_id, project_id)
         deliverables_status = _overview_deliverables_status(conn, session_id, team_id, project_id, target_ids)
         active_assessment = active_assessment_summary_for_project(conn, project_id)
+        assessment_finding_changes = project_assessment_finding_changes_on_conn(
+            conn,
+            project_id,
+            item_limit=5,
+        )
 
     monitoring_payload = get_project_monitoring_summary(
         session_id,
@@ -309,6 +316,7 @@ def get_project_intel_overview(
     payload["coverage_gaps"] = _overview_coverage_gaps(payload["targets"])
     payload["deliverables_status"] = deliverables_status
     payload["active_assessment"] = active_assessment
+    payload["assessment_finding_changes"] = assessment_finding_changes
     log.debug("PROJECT_OVERVIEW_PAYLOAD_BUILT", extra={
         **log_context,
         "target_count": len(targets),
@@ -321,6 +329,7 @@ def get_project_intel_overview(
         "payload_target_count": len(payload["targets"]),
         "target_truncated": target_truncated,
         "has_active_assessment": active_assessment is not None,
+        "has_assessment_finding_changes": assessment_finding_changes is not None,
     })
     return payload
 

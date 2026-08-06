@@ -2452,6 +2452,9 @@ let importedProjectWorkspaceShell;
       selectedFindingIds: projectWorkspaceState.selectedFindingIds,
       projectFindingPagination: (projectId, summary) => _projectFindingPagination(projectId, summary),
       projectFindingItems: _projectFindingItems,
+      projectFindingChanges: projectId => (
+        _projectFindingsDataControllerIfReady()?.findingChanges(projectId) || null
+      ),
       projectFindingBoard: (projectId, summary, options) => (
         _projectFindingsDataControllerIfReady()?.board(projectId, summary, options) || []
       ),
@@ -2463,6 +2466,7 @@ let importedProjectWorkspaceShell;
       entityMetadataChips: _entityMetadataChips,
       makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      openProjectAssessment: _openProjectAssessment,
       emptyProjectPanel: _emptyProjectPanel,
       renderProjectFindingBoard: (container, projectId, summary, board) => (
         _projectFindingsBoardController().renderBoard(container, projectId, summary, board)
@@ -3073,6 +3077,9 @@ let importedProjectWorkspaceShell;
       projectArtifactServerFilterKey: _projectArtifactServerFilterKey,
       loadProjectArtifacts: _loadProjectArtifacts,
       projectFindingItems: _projectFindingItems,
+      projectFindingChanges: projectId => (
+        _projectFindingsDataControllerIfReady()?.findingChanges(projectId) || null
+      ),
       projectFindingsLoaded: _projectFindingsLoaded,
       projectFindingsLoadingId: () => _projectFindingsDataControllerIfReady()?.loadingId() || '',
       hasProjectFindings: _projectFindingsLoaded,
@@ -3104,6 +3111,7 @@ let importedProjectWorkspaceShell;
       shortProjectRunId: _shortProjectRunId,
       makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      openProjectAssessment: _openProjectAssessment,
       emptyProjectPanel: _emptyProjectPanel,
       findingReviewControl: _findingReviewControl,
       renderProjectMobileDetailTopbar: _renderProjectMobileDetailTopbar,
