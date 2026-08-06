@@ -127,6 +127,7 @@ class AuditEventType(str, Enum):
     ASSESSMENT_CHECK_STATE_CHANGE = "assessment.check_state_change"
     ASSESSMENT_EVIDENCE_LINK = "assessment.evidence_link"
     ASSESSMENT_EVIDENCE_UNLINK = "assessment.evidence_unlink"
+    ASSESSMENT_ACTION_LAUNCH = "assessment.action_launch"
 
 
 COMMON_DETAIL_KEYS = frozenset({
@@ -348,6 +349,11 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditEventType.ASSESSMENT_EVIDENCE_UNLINK,
         AuditTargetType.ASSESSMENT_CHECK,
         RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.ASSESSMENT_ACTION_LAUNCH.value: _spec(
+        AuditEventType.ASSESSMENT_ACTION_LAUNCH,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.BEST_EFFORT,
     ),
     AuditEventType.CVE_ADVISORY_REFRESH.value: _spec(
         AuditEventType.CVE_ADVISORY_REFRESH,

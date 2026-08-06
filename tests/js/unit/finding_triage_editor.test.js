@@ -148,6 +148,7 @@ describe('finding triage editor', () => {
     installAppSelectStubs()
     window.refocusComposerAfterAction = vi.fn()
     window.showConfirm = vi.fn(() => Promise.resolve('merge'))
+    window.attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     window.hasHistoryCompareHandler = vi.fn(() => true)
     window.fetchAndRenderHistoryComparison = vi.fn(() => Promise.resolve(true))
   })
@@ -363,6 +364,131 @@ describe('finding triage editor', () => {
       { url: '/history/compare?left=run-original&right=run-retest&project_id=project-1' },
     )
     expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('previews, confirms, and attaches one guarded verification run', async () => {
+    const finding = { id: 'finding-launch', title: 'Service needs verification' }
+    const plan = {
+      schema_version: 1,
+      project_id: 'project-1',
+      finding_id: finding.id,
+      assessment_id: 'assessment-1',
+      check_id: 'check-services',
+      check_key: 'service_discovery',
+      profile_key: 'network',
+      profile_version: '1.0',
+      action: { key: 'command:nmap', kind: 'command', id: 'nmap' },
+      target: { entity_id: 'entity-1', type: 'domain', value: 'example.test' },
+      policy_level: 'standard',
+      http_profile: { name: '', credential_use: 'none' },
+      scope: { kind: 'project_target', project_id: 'project-1', target_count: 1, fan_out: 1 },
+      bounds: {
+        target_count: 1,
+        fan_out: 1,
+        request_limit: 100,
+        time_limit_seconds: 600,
+        credential_use: 'none',
+        summary: 'One approved host, the top 100 TCP ports, and a 10-minute host timeout.',
+      },
+      display_command: 'nmap -sT -sV -Pn --top-ports 100 --max-retries 2 --host-timeout 10m example.test',
+      launchable: true,
+      unavailable_reason: '',
+      requires_confirmation: true,
+      plan_digest: 'a'.repeat(64),
+    }
+    const actionUrl = (
+      '/projects/project-1/findings/finding-launch/'
+      + 'verification-actions/check-services'
+    )
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/findings/finding-launch/triage' && !options.method) {
+        return Promise.resolve(jsonResponse({ triage: {
+          remediation: '',
+          verification_steps: 'Repeat service discovery.',
+          verification_status: 'ready_to_verify',
+          verification_notes: '',
+        } }))
+      }
+      if (url === '/projects/project-1/findings/finding-launch/evidence' && !options.method) {
+        return Promise.resolve(jsonResponse({ verification: {
+          baseline_run_id: 'run-original',
+          baseline_source_state: 'available',
+          origin_checks: [{
+            check_id: 'check-services',
+            check_key: 'service_discovery',
+            target_value: 'example.test',
+            policy_level: 'standard',
+            profile_key: 'network',
+            profile_version: '1.0',
+            current_profile_version: '1.0',
+            profile_version_state: 'current',
+            source_state: 'available',
+            recommended_action_key: 'command:nmap',
+          }],
+          retest_runs: [],
+          candidate_runs: [],
+        } }))
+      }
+      if (url === actionUrl && !options.method) {
+        return Promise.resolve(jsonResponse({ plan }))
+      }
+      if (url === actionUrl && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({
+          plan,
+          run: {
+            run_id: 'run-verification',
+            run_type: 'external',
+            status: 'running',
+            command: plan.display_command,
+            started: '2026-08-05T12:30:00+00:00',
+            last_event_id: '',
+            stream: '/runs/run-verification/stream',
+          },
+        }, 202))
+      }
+      return Promise.resolve(jsonResponse({ error: 'unexpected request' }, 404))
+    })
+    window.apiFetch = apiFetch
+    window.showConfirm = vi.fn(() => Promise.resolve('run'))
+    loadEditor()
+
+    await window.DarklabFindingTriageEditor.open(
+      finding,
+      { projectId: 'project-1', canRun: true },
+    )
+    await flushPromises(10)
+
+    const launch = document.querySelector('[data-finding-verification-launch="check-services"]')
+    expect(launch?.textContent).toBe('Run verification')
+    launch.click()
+    launch.click()
+    await flushPromises(15)
+
+    const previewCalls = apiFetch.mock.calls.filter(([url, options]) => (
+      url === actionUrl && !options?.method
+    ))
+    expect(previewCalls).toHaveLength(1)
+    expect(window.showConfirm).toHaveBeenCalledTimes(1)
+    const confirmation = window.showConfirm.mock.calls[0][0]
+    expect(confirmation.body.note).toContain('will not change the finding disposition')
+    expect(confirmation.content.textContent).toContain(plan.display_command)
+    expect(confirmation.content.textContent).toContain('domain · example.test')
+    expect(confirmation.content.textContent).toContain('HTTP profileNone')
+    expect(confirmation.content.textContent).toContain('Policystandard')
+    expect(confirmation.content.textContent).toContain('fan-out 1')
+    expect(confirmation.tone).toBe('warning')
+    const launchCall = apiFetch.mock.calls.find(([url, options]) => (
+      url === actionUrl && options?.method === 'POST'
+    ))
+    expect(JSON.parse(launchCall[1].body)).toEqual({
+      confirmed: true,
+      plan_digest: 'a'.repeat(64),
+    })
+    expect(window.attachActiveRunFromMonitor).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run-verification' }),
+    )
+    expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(false)
+    expect(apiFetch.mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
   })
 
   it('syncs the enhanced verification select across reopened findings and view-only mode', async () => {

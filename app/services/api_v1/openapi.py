@@ -8,11 +8,12 @@ from __future__ import annotations
 from copy import deepcopy
 
 from config import APP_VERSION
-from services.api_v1 import openapi_assessments, openapi_manual_findings as manual_findings
+from services.api_v1 import openapi_assessments as assessments, openapi_manual_findings as manual
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.api_v1.openapi_cve_risk import cve_risk_schemas
 from services.api_v1.openapi_findings import finding_schemas
 from services.api_v1.openapi_finding_evidence import finding_evidence_paths, finding_evidence_schemas
+from services.api_v1.openapi_verification_actions import verification_action_paths as action_paths, verification_action_schemas
 from services.scheduler.models import CADENCE_PRESETS
 from services.watchers.models import (
     DIFF_KINDS,
@@ -590,8 +591,8 @@ OPENAPI_SPEC: dict = {
                 },
             },
             **atlas_profile_schemas(),
-            **openapi_assessments.assessment_schemas(),
-            **(finding_evidence_schemas() | manual_findings.manual_finding_schemas()),
+            **assessments.assessment_schemas(),
+            **(finding_evidence_schemas() | manual.manual_finding_schemas() | verification_action_schemas()),
             "AtlasFindingDetail": {
                 "type": "object",
                 "required": ["finding", "occurrences", "detail_limits"],
@@ -1549,7 +1550,7 @@ OPENAPI_SPEC: dict = {
         },
     },
     "security": [{"bearerToken": []}],
-    "paths": openapi_assessments.assessment_paths() | finding_evidence_paths() | manual_findings.manual_finding_paths() | {
+    "paths": assessments.assessment_paths() | finding_evidence_paths() | manual.manual_finding_paths() | action_paths() | {
         "/health": {
             "get": {
                 "security": [],
@@ -2081,7 +2082,7 @@ OPENAPI_SPEC: dict = {
                     **_common_errors(not_found="Project not found"),
                 },
             },
-            "post": manual_findings.manual_finding_create_operation(),
+            "post": manual.manual_finding_create_operation(),
         },
         "/projects/{project_id}/runs": {
             "get": {

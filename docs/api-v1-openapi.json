@@ -3171,6 +3171,324 @@
         ],
         "type": "object"
       },
+      "FindingVerificationActionLaunchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "plan_digest": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmed",
+          "plan_digest"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationActionLaunchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/FindingVerificationActionPlan"
+          },
+          "run": {
+            "additionalProperties": false,
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "history_url": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "run_type": {
+                "enum": [
+                  "external"
+                ],
+                "type": "string"
+              },
+              "started": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "stream_url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "run_id",
+              "run_type",
+              "status",
+              "command",
+              "started",
+              "stream_url",
+              "history_url"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "run",
+          "plan"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationActionPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "",
+                  "command",
+                  "workflow"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          },
+          "assessment_id": {
+            "type": "string"
+          },
+          "bounds": {
+            "additionalProperties": false,
+            "properties": {
+              "credential_use": {
+                "enum": [
+                  "none"
+                ],
+                "type": "string"
+              },
+              "fan_out": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              },
+              "request_limit": {
+                "nullable": true,
+                "type": "integer"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "target_count": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              },
+              "time_limit_seconds": {
+                "nullable": true,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "target_count",
+              "fan_out",
+              "request_limit",
+              "time_limit_seconds",
+              "credential_use",
+              "summary"
+            ],
+            "type": "object"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "check_key": {
+            "type": "string"
+          },
+          "display_command": {
+            "type": "string"
+          },
+          "finding_id": {
+            "type": "string"
+          },
+          "http_profile": {
+            "additionalProperties": false,
+            "properties": {
+              "credential_use": {
+                "enum": [
+                  "none"
+                ],
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "credential_use"
+            ],
+            "type": "object"
+          },
+          "launchable": {
+            "type": "boolean"
+          },
+          "plan_digest": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "profile_key": {
+            "type": "string"
+          },
+          "profile_version": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "scope": {
+            "additionalProperties": false,
+            "properties": {
+              "fan_out": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              },
+              "kind": {
+                "enum": [
+                  "project_target"
+                ],
+                "type": "string"
+              },
+              "project_id": {
+                "type": "string"
+              },
+              "target_count": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "project_id",
+              "target_count",
+              "fan_out"
+            ],
+            "type": "object"
+          },
+          "target": {
+            "additionalProperties": false,
+            "properties": {
+              "entity_id": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "domain",
+                  "ip",
+                  "url"
+                ],
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entity_id",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          },
+          "unavailable_reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "project_id",
+          "finding_id",
+          "assessment_id",
+          "check_id",
+          "check_key",
+          "profile_key",
+          "profile_version",
+          "action",
+          "target",
+          "policy_level",
+          "http_profile",
+          "scope",
+          "bounds",
+          "display_command",
+          "launchable",
+          "unavailable_reason",
+          "requires_confirmation",
+          "plan_digest"
+        ],
+        "type": "object"
+      },
+      "FindingVerificationActionPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/FindingVerificationActionPlan"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "type": "object"
+      },
       "FindingVerificationComparison": {
         "additionalProperties": false,
         "properties": {
@@ -10541,6 +10859,264 @@
               }
             },
             "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/findings/{finding_id}/verification-actions/{check_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Finding id",
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Originating assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingVerificationActionPreview"
+                }
+              }
+            },
+            "description": "Current guarded verification plan"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid verification action request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot start runs"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project finding or origin check not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Plan is stale or the action is unavailable"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Verification run could not start"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run broker unavailable"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Finding id",
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Originating assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindingVerificationActionLaunchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingVerificationActionLaunchResponse"
+                }
+              }
+            },
+            "description": "Verification run started"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid verification action request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot start runs"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project finding or origin check not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Plan is stale or the action is unavailable"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Verification run could not start"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run broker unavailable"
           }
         }
       }

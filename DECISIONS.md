@@ -248,6 +248,8 @@ Assessor-authored findings get an opaque identity when they're created, and that
 
 Safe actions use the normal launch confirmation. Standard actions disclose target, fan-out, request, time, and credential bounds. Intrusive actions require operator enablement and per-launch confirmation. Destructive actions are unavailable from assessment recommendations, workflows, API, and CLI.
 
+A finding can repeat its saved assessment command only from a freshly recomputed plan tied to the exact originating check and still-confirmed Project target. The operator sees the command, target, policy, Project-only fan-out, request/time bounds, and credential use before confirming the plan digest. This path accepts maintained safe and standard command templates only; it rejects workflows, unsupported commands, stale plans, archived context, and intrusive or destructive policy. The resulting run stays linked to the Project, and neither launch nor completion changes the finding's human verification disposition.
+
 Protected HTTP context uses a reviewed per-tool adapter. It prefers stdin or a tool-native credential channel, then private per-run files in a `0700` directory with `0600` permissions, and uses environment injection only when no safer supported option exists. Secret values never enter argument lists, persisted commands, workflow state, or reusable scanner configuration.
 
 Quota and retention defaults come from measured small, medium, and large Projects. Reaching a hard limit rejects new work clearly instead of evicting assessment history. Completed cycles stay until explicit deletion; rebuildable feed caches, acknowledged escalation events, temporary HTTP material, and connector callbacks follow documented retention policies.

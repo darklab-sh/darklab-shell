@@ -11,6 +11,7 @@ import {
   fetchAndRenderHistoryComparison as importedFetchAndRenderHistoryComparison,
   hasHistoryCompareHandler as importedHasHistoryCompareHandler,
 } from '../run-comparison/history_compare_bridge.js';
+import { attachActiveRunFromMonitor as importedAttachActiveRunFromMonitor } from '../../runner_bridge.js';
 import {
   enhanceAppSelects as importedEnhanceAppSelects,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
@@ -23,6 +24,9 @@ let DarklabFindingTriageEditor = null;
   'use strict';
   const bindDismissible = typeof importedBindDismissible === 'function' ? importedBindDismissible : null;
   const bindMobileSheet = typeof importedBindMobileSheet === 'function' ? importedBindMobileSheet : null;
+  const attachActiveRunFromMonitor = typeof importedAttachActiveRunFromMonitor === 'function'
+    ? importedAttachActiveRunFromMonitor
+    : null;
   const enhanceAppSelects = typeof importedEnhanceAppSelects === 'function' ? importedEnhanceAppSelects : null;
   const refocusComposerAfterAction = typeof importedRefocusComposerAfterAction === 'function' ? importedRefocusComposerAfterAction : null;
   const showConfirm = typeof importedShowConfirm === 'function' ? importedShowConfirm : null;
@@ -563,8 +567,122 @@ let DarklabFindingTriageEditor = null;
         badges.appendChild(drift);
       }
       row.appendChild(badges);
+      if (text(check.recommended_action_key)) {
+        const actions = document.createElement('div');
+        actions.className = 'finding-triage-verification-item-actions';
+        const launch = document.createElement('button');
+        launch.type = 'button';
+        launch.className = 'btn btn-secondary btn-compact';
+        launch.dataset.findingVerificationLaunch = text(check.check_id);
+        launch.textContent = 'Run verification';
+        launch.disabled = state.options.canRun === false || check.source_state !== 'available';
+        if (state.options.canRun === false) {
+          launch.title = "View-only team members can't start verification runs.";
+        } else if (check.source_state !== 'available') {
+          launch.title = 'The originating check is unavailable.';
+        }
+        launch.addEventListener('click', async () => {
+          if (launch.dataset.pending === 'true') return;
+          launch.dataset.pending = 'true';
+          launch.disabled = true;
+          try {
+            await launchVerificationAction(check);
+          } catch (err) {
+            const message = el('finding-triage-verification-context-message');
+            if (message) message.textContent = err.message || 'Could not start the verification run.';
+          } finally {
+            delete launch.dataset.pending;
+            if (launch.isConnected) {
+              launch.disabled = state.options.canRun === false || check.source_state !== 'available';
+            }
+          }
+        });
+        actions.appendChild(launch);
+        row.appendChild(actions);
+      }
       node.appendChild(row);
     });
+  }
+
+  function verificationPlanContent(plan) {
+    const wrap = document.createElement('div');
+    wrap.className = 'finding-verification-plan';
+    const rows = [
+      ['Command', plan.display_command],
+      ['Target', `${text(plan.target?.type)} · ${text(plan.target?.value)}`],
+      ['HTTP profile', text(plan.http_profile?.name, 'None')],
+      ['Policy', text(plan.policy_level)],
+      ['Scope', `${Number(plan.scope?.target_count || 1)} Project target · fan-out ${Number(plan.scope?.fan_out || 1)}`],
+      ['Bounds', text(plan.bounds?.summary, 'One approved Project target')],
+      ['Credentials', text(plan.bounds?.credential_use, 'none')],
+    ];
+    rows.forEach(([labelText, valueText]) => {
+      const row = document.createElement('div');
+      row.className = 'finding-verification-plan-row';
+      const label = document.createElement('span');
+      label.className = 'finding-verification-plan-label';
+      label.textContent = labelText;
+      const value = document.createElement(labelText === 'Command' ? 'code' : 'span');
+      value.className = 'finding-verification-plan-value';
+      value.textContent = text(valueText, 'None');
+      row.append(label, value);
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
+  async function launchVerificationAction(check) {
+    const projectId = text(state.options && state.options.projectId);
+    const findingId = text(state.finding && state.finding.id);
+    const checkId = text(check && check.check_id);
+    const message = el('finding-triage-verification-context-message');
+    if (!projectId || !findingId || !checkId || state.options.canRun === false) return;
+    if (message) message.textContent = 'Loading the current verification plan...';
+    const url = `/projects/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(findingId)}/verification-actions/${encodeURIComponent(checkId)}`;
+    const previewResp = await api()(url, { cache: 'no-store' });
+    const previewData = await previewResp.json().catch(() => ({}));
+    if (!previewResp.ok) throw new Error(previewData?.error || `HTTP ${previewResp.status}`);
+    const plan = previewData?.plan || {};
+    if (!plan.launchable) {
+      if (message) message.textContent = text(plan.unavailable_reason, 'This verification action is unavailable.');
+      return;
+    }
+    if (!showConfirm) throw new Error('Verification launch confirmation is unavailable.');
+    const choice = await showConfirm({
+      body: {
+        text: 'Start this verification run?',
+        note: 'The run will be linked to this Project. Its result will not change the finding disposition automatically.',
+      },
+      content: verificationPlanContent(plan),
+      tone: plan.policy_level === 'standard' ? 'warning' : null,
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'run', label: 'Run verification', role: 'primary' },
+      ],
+      refocusOnResolve: false,
+    });
+    if (choice !== 'run') {
+      if (message) message.textContent = '';
+      return;
+    }
+    if (message) message.textContent = 'Starting the verification run...';
+    const launchResp = await api()(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed: true, plan_digest: text(plan.plan_digest) }),
+    });
+    const launchData = await launchResp.json().catch(() => ({}));
+    if (!launchResp.ok) throw new Error(launchData?.error || `HTTP ${launchResp.status}`);
+    const run = launchData?.run;
+    if (!run?.run_id) throw new Error('Verification run started without a run identifier.');
+    if (typeof attachActiveRunFromMonitor !== 'function') {
+      throw new Error('The verification run started, but the terminal handoff is unavailable. Open it from History.');
+    }
+    const attached = await attachActiveRunFromMonitor(run);
+    if (!attached) {
+      throw new Error('The verification run started, but it could not open in a terminal. Open it from History.');
+    }
+    close({ restoreFocus: false });
   }
 
   function comparisonFunction() {

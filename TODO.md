@@ -111,9 +111,8 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 2 — Add assessment routes, API contracts, audit, and observability
 
-- [ ] Add `darklab assessment start-action` after the recommended-action launch route and execution contract land. Cycle list/show, filtered check paging, and reasoned manual-state commands already use the stable API and permission checks.
 - [ ] Finish the assessment-specific audit and safe-log inventory as later features land:
-  - Audit recommended-action launch and HTTP-profile use. Cycle lifecycle, manual-state, evidence-link, manual-finding, and retest-disposition events already use the shared audit boundary.
+  - Audit HTTP-profile use when that surface lands. Recommended-action launch, cycle lifecycle, manual-state, evidence-link, manual-finding, and retest-disposition events already use the shared audit boundary.
   - Log ids, owner kind, Project id, profile/check keys, policy level, state transitions, counts, durations, and error classes. Never log credentials, authorization headers, cookies, client-certificate contents, raw request bodies, provider payloads, finding evidence bodies, or complete target lists.
   - Add low-cardinality metrics for active cycles, check-state transitions, derived-evidence matches, action launches/failures, parser results, and connector job outcomes. Do not use target values, Project ids, commands, CVEs, or workflow ids as metric labels.
   - Apply existing request/rate-limit conventions to mutation and launch routes. Bound recalculation work and emit a clear warning when a safety or quota limit rejects work.
@@ -136,9 +135,8 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 4 — Add first-class manual findings and retest provenance
 
-- [ ] Add a guarded **Run verification** launch from the traceable finding-verification record:
-  - Show the exact command/workflow, target, HTTP profile name, policy level, and scope before launch. Never reuse an expired secret value or silently run an intrusive action.
-  - A completed verification run may suggest `verified` or `needs_retest`, but only an authorized person can save the final verification state.
+- [ ] Add evidence-backed verification-state suggestions after a launched run completes:
+  - A completed verification run may suggest `verified` or `needs_retest`, but only an authorized person can save the final verification state. Keep the suggestion separate from the saved human disposition and explain which compatible evidence supports it.
 - [ ] Reconcile finding observations across compatible assessment cycles:
   - Reconcile the same remediation identity across cycles while comparing its individual observation methods, check keys, and compatible tool/profile versions to classify it as `new`, `persistent`, `not_observed`, or `regressed`. Store remediation- and observation-level links and reasons without rewriting either cycle's finding occurrences.
   - Calculate `not_observed` only when the newer cycle completed the same compatible check with available evidence and that check has a defined negative-evidence contract. A missing linked run, failed/partial scan, changed scope, parser failure, or unavailable artifact can never prove absence.

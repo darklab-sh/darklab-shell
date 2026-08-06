@@ -1237,6 +1237,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
           await findingTriageEditor.open(finding, {
             projectId,
             canEdit: activeTeamScopeCan('triage_findings'),
+            canRun: activeTeamScopeCan('run_commands'),
             onSaved: async (triage) => {
               const compact = findingTriageEditor.compactTriage(triage);
               ctx.updateCachedProjectFinding?.(projectId, findingId, {

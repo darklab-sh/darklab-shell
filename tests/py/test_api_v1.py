@@ -22,6 +22,7 @@ from conftest import reusable_test_app
 import config
 import core.process as process
 from core.database import DB_PATH
+from core.helpers import get_log_session_id
 from services.scheduler.models import CADENCE_PRESETS, Schedule
 from services.watchers.models import WATCHER_OPTION_DEFAULTS, Watcher, WatcherFire
 from werkzeug.serving import make_server
@@ -249,6 +250,7 @@ _API_V1_TEAM_SCOPED_READ_ROUTES = (
     "api_project_assessments",
     "api_project_assessment",
     "api_project_assessment_delete_preview",
+    "api_project_finding_verification_action_preview",
     "api_schedules",
     "api_schedule",
     "api_schedule_fires",
@@ -295,6 +297,7 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_project_finding_evidence_unlink": "Capability.TRIAGE_FINDINGS",
     "api_project_manual_finding_create": "Capability.TRIAGE_FINDINGS",
     "api_project_manual_finding_update": "Capability.TRIAGE_FINDINGS",
+    "api_project_finding_verification_action_launch": "Capability.RUN_COMMANDS",
 }
 
 
@@ -1286,6 +1289,210 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         "assessment.evidence_unlink",
     ]
     assert all(row["details"]["source"] == "api_v1" for row in check_audits)
+
+
+def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    project = _create_project(client, token, name="API Verification Launch")
+    entity_id, _run_id = _seed_assessment_target(token, project["id"])
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(token),
+        json={"profile_key": "network", "title": "Verification source"},
+    ).get_json()
+    check = next(
+        item for item in created["checks"]["checks"]
+        if item["check_key"] == "service_discovery"
+    )
+    finding_id = "fnd_verification_action_" + uuid.uuid4().hex[:12]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, entity_id, signature_hash, tool_root, title, raw_line, created) "
+            "VALUES (?, ?, ?, ?, 'nmap', 'Service needs verification', "
+            "'saved service evidence', '2026-08-05T12:00:00+00:00')",
+            (finding_id, token, entity_id, "sig_" + finding_id),
+        )
+        conn.commit()
+    evidence_response = client.post(
+        f"/api/v1/projects/{project['id']}/findings/{finding_id}/evidence",
+        headers=_headers(token),
+        json={"evidence_type": "assessment_check", "evidence_id": check["id"]},
+    )
+    assert evidence_response.status_code == 201
+
+    path = (
+        f"/api/v1/projects/{project['id']}/findings/{finding_id}/"
+        f"verification-actions/{check['id']}"
+    )
+    preview_response = client.get(path, headers=_headers(token))
+    cross_scope_response = client.get(path, headers=_headers(other_token))
+    browser_preview = client.get(
+        path.removeprefix("/api/v1"),
+        headers={"X-Session-ID": token},
+    )
+    assert preview_response.status_code == 200
+    assert cross_scope_response.status_code == 404
+    plan = preview_response.get_json()["plan"]
+    assert browser_preview.status_code == 200
+    assert browser_preview.get_json()["plan"] == plan
+    assert plan == {
+        **plan,
+        "project_id": project["id"],
+        "finding_id": finding_id,
+        "assessment_id": created["assessment"]["id"],
+        "check_id": check["id"],
+        "check_key": "service_discovery",
+        "profile_key": "network",
+        "profile_version": "1.0",
+        "action": {"key": "command:nmap", "kind": "command", "id": "nmap"},
+        "target": {
+            "entity_id": entity_id,
+            "type": "domain",
+            "value": check["target_value"],
+        },
+        "policy_level": "standard",
+        "http_profile": {"name": "", "credential_use": "none"},
+        "scope": {
+            "kind": "project_target",
+            "project_id": project["id"],
+            "target_count": 1,
+            "fan_out": 1,
+        },
+        "launchable": True,
+        "unavailable_reason": "",
+        "requires_confirmation": True,
+    }
+    assert plan["display_command"].endswith(check["target_value"])
+    assert plan["bounds"] == {
+        "target_count": 1,
+        "fan_out": 1,
+        "request_limit": 100,
+        "time_limit_seconds": 600,
+        "credential_use": "none",
+        "summary": (
+            "One approved host, the top 100 TCP ports, and a 10-minute host timeout."
+        ),
+    }
+    assert len(plan["plan_digest"]) == 64
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE project_links SET review_state = 'proposed' "
+            "WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
+            (project["id"], entity_id),
+        )
+        conn.commit()
+    unavailable = client.get(path, headers=_headers(token)).get_json()["plan"]
+    assert unavailable["launchable"] is False
+    assert "no longer confirmed" in unavailable["unavailable_reason"]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE project_links SET review_state = 'confirmed' "
+            "WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
+            (project["id"], entity_id),
+        )
+        conn.commit()
+
+    confirmation_required = client.post(
+        path,
+        headers=_headers(token),
+        json={"confirmed": False, "plan_digest": plan["plan_digest"]},
+    )
+    stale_plan = client.post(
+        path,
+        headers=_headers(token),
+        json={"confirmed": True, "plan_digest": "0" * 64},
+    )
+    unsupported = client.post(
+        path,
+        headers=_headers(token),
+        json={
+            "confirmed": True,
+            "plan_digest": plan["plan_digest"],
+            "command": "echo bypass",
+        },
+    )
+    assert confirmation_required.status_code == 409
+    assert confirmation_required.get_json()["error"]["code"] == "confirmation_required"
+    assert stale_plan.status_code == 409
+    assert stale_plan.get_json()["error"]["code"] == "stale_plan"
+    assert unsupported.status_code == 400
+    assert unsupported.get_json()["error"]["code"] == "unsupported_fields"
+
+    started = SimpleNamespace(run_id="run_verification_action", status="running")
+    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
+         mock.patch(
+             "blueprints.api_v1._start_brokered_run_service",
+             return_value=started,
+         ) as start_run, \
+         mock.patch("blueprints.api_v1.log.info") as info_log:
+        launched_response = client.post(
+            path,
+            headers=_headers(token),
+            json={"confirmed": True, "plan_digest": plan["plan_digest"]},
+        )
+
+    assert launched_response.status_code == 202
+    launched = launched_response.get_json()
+    assert launched["run"] == {
+        **launched["run"],
+        "id": "run_verification_action",
+        "run_id": "run_verification_action",
+        "run_type": "external",
+        "status": "running",
+        "command": plan["display_command"],
+        "stream_url": "/api/v1/runs/run_verification_action/stream",
+        "history_url": "/api/v1/history/run_verification_action",
+    }
+    start_kwargs = start_run.call_args.kwargs
+    assert start_kwargs["original_command"] == plan["display_command"]
+    assert start_kwargs["display_command"] == plan["display_command"]
+    assert start_kwargs["link_project_id"] == project["id"]
+    assert start_kwargs["owner_tab_id"] == ""
+    launch_log = next(
+        call for call in info_log.call_args_list
+        if call.args == ("API_PROJECT_VERIFICATION_ACTION_LAUNCHED",)
+    )
+    launch_log_fields = dict(launch_log.kwargs["extra"])
+    assert launch_log_fields.pop("ip")
+    assert launch_log_fields == {
+        "session": get_log_session_id(token),
+        "team_id": "",
+        "project_id": project["id"],
+        "finding_id": finding_id,
+        "assessment_id": created["assessment"]["id"],
+        "check_id": check["id"],
+        "check_key": "service_discovery",
+        "profile_key": "network",
+        "profile_version": "1.0",
+        "policy_level": "standard",
+        "action_kind": "command",
+        "action_id": "nmap",
+        "run_id": "run_verification_action",
+        "source": "api_v1",
+    }
+    audit = _audit_event_rows(
+        target_id=check["id"], event_type="assessment.action_launch"
+    )
+    assert len(audit) == 1
+    assert audit[0]["details"] == {
+        "action": "command:nmap",
+        "assessment_id": created["assessment"]["id"],
+        "check_id": check["id"],
+        "check_key": "service_discovery",
+        "finding_id": finding_id,
+        "policy_level": "standard",
+        "profile_key": "network",
+        "profile_version": "1.0",
+        "project_id": project["id"],
+        "run_id": "run_verification_action",
+        "source": "api_v1",
+    }
+    assert check["target_value"] not in json.dumps(audit)
+    assert plan["display_command"] not in json.dumps(audit)
 
 
 def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
@@ -4999,6 +5206,48 @@ def test_api_v1_openapi_contract_describes_project_assessments():
             assert {"401", "429"}.issubset(operation["responses"])
 
 
+def test_api_v1_openapi_contract_describes_guarded_verification_actions():
+    from services.api_v1.openapi import openapi_spec
+
+    spec = openapi_spec()
+    schemas = spec["components"]["schemas"]
+    path = (
+        "/projects/{project_id}/findings/{finding_id}/"
+        "verification-actions/{check_id}"
+    )
+    operations = spec["paths"][path]
+
+    assert set(operations) == {"get", "post"}
+    assert operations["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/FindingVerificationActionPreview"}
+    assert operations["post"]["requestBody"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/FindingVerificationActionLaunchRequest"}
+    assert operations["post"]["responses"]["202"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/FindingVerificationActionLaunchResponse"}
+    assert set(operations["post"]["responses"]) == {
+        "202", "400", "401", "403", "404", "409", "429", "500", "503",
+    }
+    request_schema = schemas["FindingVerificationActionLaunchRequest"]
+    assert request_schema["required"] == ["confirmed", "plan_digest"]
+    assert request_schema["additionalProperties"] is False
+    assert set(request_schema["properties"]) == {
+        "confirmed", "plan_digest", "workspace_cwd",
+    }
+    assert request_schema["properties"]["confirmed"] == {
+        "type": "boolean",
+        "enum": [True],
+    }
+    plan_schema = schemas["FindingVerificationActionPlan"]
+    assert {
+        "action", "target", "policy_level", "http_profile", "scope", "bounds",
+        "display_command", "launchable", "requires_confirmation", "plan_digest",
+    }.issubset(plan_schema["required"])
+    assert plan_schema["additionalProperties"] is False
+
+
 def test_api_v1_openapi_contract_describes_manual_finding_mutations():
     from services.api_v1.openapi import openapi_spec
 
@@ -5486,6 +5735,28 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
                         "state_reason": reason,
                     },
                 }
+            if path == "/projects/prj_cli/findings/fnd_cli/verification-actions/asmc_cli":
+                plan = {
+                    "action": {"key": "command:nmap", "kind": "command", "id": "nmap"},
+                    "target": {"type": "domain", "value": "darklab.sh"},
+                    "policy_level": "standard",
+                    "http_profile": {"name": "", "credential_use": "none"},
+                    "display_command": "nmap --top-ports 100 darklab.sh",
+                    "launchable": True,
+                    "unavailable_reason": "",
+                    "plan_digest": "a" * 64,
+                }
+                if method == "GET":
+                    return {"plan": plan}
+                if method == "POST":
+                    return {
+                        "plan": plan,
+                        "run": {
+                            "id": "run_cli_verification",
+                            "status": "running",
+                            "command": plan["display_command"],
+                        },
+                    }
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
@@ -5581,6 +5852,57 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         {"state": "not_started", "reason": ""},
     )
 
+    assert cli_main.main([
+        "assessment",
+        "start-action",
+        "prj_cli",
+        "fnd_cli",
+        "asmc_cli",
+    ]) == 0
+    preview_output = capsys.readouterr().out
+    assert "command:nmap" in preview_output
+    assert "Preview only. Re-run with --confirm" in preview_output
+    assert calls[-1] == (
+        "GET",
+        "/projects/prj_cli/findings/fnd_cli/verification-actions/asmc_cli",
+        None,
+        None,
+    )
+
+    call_count = len(calls)
+    assert cli_main.main([
+        "assessment",
+        "start-action",
+        "prj_cli",
+        "fnd_cli",
+        "asmc_cli",
+        "--confirm",
+        "--workspace-cwd",
+        "evidence",
+        "--format",
+        "json",
+    ]) == 0
+    launched = json.loads(capsys.readouterr().out)
+    assert launched["run"]["id"] == "run_cli_verification"
+    assert calls[call_count:] == [
+        (
+            "GET",
+            "/projects/prj_cli/findings/fnd_cli/verification-actions/asmc_cli",
+            None,
+            None,
+        ),
+        (
+            "POST",
+            "/projects/prj_cli/findings/fnd_cli/verification-actions/asmc_cli",
+            None,
+            {
+                "confirmed": True,
+                "plan_digest": "a" * 64,
+                "workspace_cwd": "evidence",
+            },
+        ),
+    ]
+
 
 def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypatch, capsys, tmp_path):
     cli_main = import_module("darklab_cli.__main__")
@@ -5594,7 +5916,7 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
     assert "active artifacts assessment atlas cancel completion download grep history notify" in bash_completion
-    assert "assessment) _darklab_comp_words 'checks clear-state list set-state show'" in bash_completion
+    assert "assessment) _darklab_comp_words 'checks clear-state list set-state show start-action'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
     assert "team:invite) _darklab_word_in \"$word\" 'create revoke'" in bash_completion
     invite_create_completion = (

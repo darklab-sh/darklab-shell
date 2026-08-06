@@ -35,6 +35,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_findings.py",
     "openapi_manual_findings.py",
     "openapi_finding_priority.py",
+    "openapi_verification_actions.py",
     "serialization.py",
 }
 
@@ -180,6 +181,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_packages.py", 386, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_report.py", 301, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_targets.py", 111, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_verification_actions.py", 154, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1.py", 795, "split-target-phase3"),
     ModuleSizeBudget("app/blueprints/api_v1_assessment_checks.py", 267, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_assessments.py", 359, "split-package-ratchet"),
@@ -193,6 +195,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_schedules.py", 211, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_streaming.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_teams.py", 354, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_verification_actions.py", 152, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_watchers.py", 240, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/atlas.py", 685, "split-target-phase3"),
     ModuleSizeBudget("app/blueprints/atlas_intel_refresh.py", 54, "split-package-ratchet"),
@@ -202,7 +205,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/atlas_read.py", 160, "split-package-ratchet"),
     ModuleSizeBudget("app/core/database.py", 1007, "already-resolved-ratchet"),
     ModuleSizeBudget("app/blueprints/history.py", 1417, "already-resolved-ratchet"),
-    ModuleSizeBudget("app/services/api_v1/openapi.py", 2555, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi.py", 2556, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessments.py", 724, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_advisory.py", 66, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_risk.py", 94, "split-package-ratchet"),
@@ -211,6 +214,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/api_v1/openapi_finding_evidence.py", 172, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_finding_verification.py", 135, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_manual_findings.py", 157, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_verification_actions.py", 209, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_finding_priority.py", 81, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_port_entities.py", 207, "split-package-ratchet"),
@@ -252,6 +256,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/projects/finding_identity.py", 127, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/finding_evidence.py", 317, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/finding_evidence_sources.py", 232, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/verification_actions.py", 372, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/overview.py", 1081, "split-target-phase4"),
     ModuleSizeBudget("app/services/projects/overview_app.py", 452, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/overview_intel.py", 294, "split-package-ratchet"),
@@ -358,8 +363,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 223
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "4e197d04157409cc8a43e2471b5f4ae462cfe0e7def2450b42e4b7531cbb58ea"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 227
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "2b80ab9dacd152bf0f2171e590c6b74ab854013fb2b5cd91f1486edb2e0fe213"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

@@ -311,6 +311,21 @@ def _parser() -> argparse.ArgumentParser:
     assessment_clear_state.add_argument("check_id")
     assessment_clear_state.add_argument("--format", choices=("text", "json"), default="text")
 
+    assessment_start_action = assessment_sub.add_parser(
+        "start-action",
+        help="Preview or explicitly start a finding verification action.",
+    )
+    assessment_start_action.add_argument("project_id")
+    assessment_start_action.add_argument("finding_id")
+    assessment_start_action.add_argument("check_id")
+    assessment_start_action.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Start the previewed action; without this flag the command is read-only.",
+    )
+    assessment_start_action.add_argument("--workspace-cwd")
+    assessment_start_action.add_argument("--format", choices=("text", "json"), default="text")
+
     atlas = sub.add_parser("atlas", help="Read Atlas summaries, source runs, entities, and findings.")
     atlas_sub = atlas.add_subparsers(dest="atlas_command", required=True)
 
@@ -1968,7 +1983,58 @@ def _assessment(client: DarklabClient, args: argparse.Namespace) -> int:
                     ("id", "state", "state_source", "state_reason", "check_key"),
                 )
             return 0
+        case "start-action":
+            action_path = (
+                f"/projects/{args.project_id}/findings/{args.finding_id}/"
+                f"verification-actions/{args.check_id}"
+            )
+            preview = client.request("GET", action_path)
+            plan = preview.get("plan") if isinstance(preview, dict) else {}
+            plan = plan if isinstance(plan, dict) else {}
+            if not args.confirm:
+                if args.format == "json":
+                    return _print_payload(preview, "json")
+                _print_verification_action_plan(plan)
+                print("Preview only. Re-run with --confirm to start this action.")
+                return 0
+            if not plan.get("launchable"):
+                return die(str(plan.get("unavailable_reason") or "verification action is unavailable"))
+            payload = client.request(
+                "POST",
+                action_path,
+                body={
+                    "confirmed": True,
+                    "plan_digest": str(plan.get("plan_digest") or ""),
+                    **({"workspace_cwd": args.workspace_cwd} if args.workspace_cwd else {}),
+                },
+            )
+            if args.format == "json":
+                return _print_payload(payload, "json")
+            run = payload.get("run") if isinstance(payload, dict) else {}
+            if isinstance(run, dict):
+                _print_table([run], ("id", "status", "command"))
+            return 0
     return die("unknown assessment command")
+
+
+def _print_verification_action_plan(plan: dict[str, Any]) -> None:
+    target = plan.get("target") if isinstance(plan.get("target"), dict) else {}
+    action = plan.get("action") if isinstance(plan.get("action"), dict) else {}
+    http_profile = (
+        plan.get("http_profile") if isinstance(plan.get("http_profile"), dict) else {}
+    )
+    rows = [{
+        "action": action.get("key") or "",
+        "policy": plan.get("policy_level") or "",
+        "target": f"{target.get('type') or ''}:{target.get('value') or ''}",
+        "http_profile": http_profile.get("name") or "None",
+        "launchable": bool(plan.get("launchable")),
+        "command": plan.get("display_command") or "",
+    }]
+    _print_table(
+        rows,
+        ("action", "policy", "target", "http_profile", "launchable", "command"),
+    )
 
 
 def _atlas_filter_params(args: argparse.Namespace) -> dict[str, Any]:

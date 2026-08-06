@@ -2969,6 +2969,7 @@ let exportedCycleAtlasTab = null;
     await findingTriageEditor.open(current, {
       projectId: state.projectId,
       canEdit: canTriageAtlasRows(),
+      canRun: activeTeamScopeCan('run_commands'),
       onSaved: async (triage) => {
         const compact = findingTriageEditor.compactTriage(triage);
         if (currentTab().id !== 'findings' && state.selectedId) {
