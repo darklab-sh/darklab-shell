@@ -1036,6 +1036,16 @@ const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
       triage.textContent = 'Triage';
       triage.addEventListener('click', () => handlers.onEditTriage?.(finding));
       actions.appendChild(triage);
+      if (finding.origin === 'manual' && typeof handlers.onEditFinding === 'function') {
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'btn btn-secondary btn-compact';
+        edit.textContent = 'Edit finding';
+        edit.disabled = handlers.canTriageAtlasRows === false;
+        if (edit.disabled) edit.title = handlers.triageDisabledReason || '';
+        edit.addEventListener('click', () => handlers.onEditFinding?.(finding));
+        actions.appendChild(edit);
+      }
       if (finding.run_id) {
         const run = document.createElement('button');
         run.type = 'button';
@@ -1278,6 +1288,16 @@ const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
         copy.textContent = 'Copy value';
         copy.addEventListener('click', () => handlers.onCopyValue(entity));
         actions.appendChild(copy);
+      }
+      if (handlers.canCreateFinding && typeof handlers.onCreateFinding === 'function') {
+        const finding = document.createElement('button');
+        finding.type = 'button';
+        finding.className = 'btn btn-secondary btn-compact';
+        finding.textContent = 'Create finding';
+        finding.disabled = handlers.canTriageAtlasRows === false;
+        if (finding.disabled) finding.title = handlers.findingDisabledReason || handlers.triageDisabledReason || '';
+        finding.addEventListener('click', () => handlers.onCreateFinding?.(entity));
+        actions.appendChild(finding);
       }
       if (!handlers.profileMode && typeof handlers.onViewProfile === 'function') {
         const profile = document.createElement('button');

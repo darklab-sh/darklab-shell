@@ -320,7 +320,7 @@ function createProjectAssessmentRenderer(context, actions) {
     return parts.filter(Boolean).join(' · ');
   }
 
-  function renderCheck(detail, check) {
+  function renderCheck(projectId, detail, check) {
     const definition = checkDefinition(detail, check);
     const row = makeElement('article', 'panel-row project-assessment-check-row');
     const main = makeElement('div', 'project-assessment-check-main');
@@ -336,11 +336,23 @@ function createProjectAssessmentRenderer(context, actions) {
     if (Number(check?.unavailable_evidence_count || 0) > 0) {
       states.appendChild(badge('Evidence unavailable', 'red'));
     }
+    if (check?.target_entity_id) {
+      const create = makeElement('button', 'btn btn-secondary btn-compact', 'Create finding');
+      create.type = 'button';
+      create.disabled = ctx.canTriageFindings?.() === false;
+      if (create.disabled) {
+        create.title = "View-only team members can't create findings. Switch to Personal or ask for operator access.";
+      }
+      ctx.bindProjectRuntimePressable?.(create, {
+        onActivate: () => void act.createFinding(projectId, check, definition),
+      });
+      states.appendChild(create);
+    }
     row.append(main, states);
     return row;
   }
 
-  function renderTargetGroup(st, detail, checks) {
+  function renderTargetGroup(projectId, st, detail, checks) {
     const representative = checks[0] || {};
     const key = targetKey(representative);
     const open = st.expandedTargets.has(key);
@@ -362,7 +374,7 @@ function createProjectAssessmentRenderer(context, actions) {
     );
     toggle.append(glyph, label, counts);
     const body = makeElement('div', 'project-assessment-target-body');
-    checks.forEach(check => body.appendChild(renderCheck(detail, check)));
+    checks.forEach(check => body.appendChild(renderCheck(projectId, detail, check)));
     bindDisclosure(toggle, {
       panel: body,
       initialOpen: open,
@@ -439,7 +451,7 @@ function createProjectAssessmentRenderer(context, actions) {
     list.addEventListener('scroll', () => {
       st.checksScrollTop = list.scrollTop;
     }, { passive: true });
-    groups.forEach(group => list.appendChild(renderTargetGroup(st, detail, group)));
+    groups.forEach(group => list.appendChild(renderTargetGroup(projectId, st, detail, group)));
     section.appendChild(list);
     const pager = renderPager(projectId, st, page);
     if (pager) section.appendChild(pager);

@@ -51,6 +51,7 @@ let DarklabFindingTriageEditor = null;
     mergePreview: null,
     mergeSearchTimer: null,
     mergeSearchGeneration: 0,
+    returnFocus: null,
   };
 
   function el(id) {
@@ -137,7 +138,15 @@ let DarklabFindingTriageEditor = null;
       payload.expected_revision = Number(state.finding.manual_revision || 0);
     } else {
       payload.target_id = String(el('finding-record-target')?.value || '').trim();
-      payload.evidence = state.recordEvidence.slice();
+      payload.evidence = state.recordEvidence.map(item => ({
+        evidence_type: String(item?.evidence_type || '').trim(),
+        evidence_id: String(item?.evidence_id || '').trim(),
+        line_number: Number.isInteger(Number(item?.line_number)) ? Number(item.line_number) : -1,
+        snippet: String(item?.snippet || '').trim(),
+      })).map(item => {
+        if (item.evidence_type === 'run_line') return item;
+        return { evidence_type: item.evidence_type, evidence_id: item.evidence_id };
+      });
     }
     return payload;
   }
@@ -328,7 +337,10 @@ let DarklabFindingTriageEditor = null;
   }
 
   function populateRecord(finding, options) {
-    const item = finding && typeof finding === 'object' ? finding : {};
+    const defaults = !finding && options.defaults && typeof options.defaults === 'object'
+      ? options.defaults
+      : {};
+    const item = finding && typeof finding === 'object' ? finding : defaults;
     const suppliedTargets = Array.isArray(options.targets) ? options.targets : [];
     const currentTargetId = text(item.target_id || options.targetId);
     const targets = suppliedTargets.filter((target) => (
@@ -385,9 +397,38 @@ let DarklabFindingTriageEditor = null;
     return !!el('finding-triage-overlay')?.classList.contains('open');
   }
 
+  function rememberReturnFocus(overlay, options = {}) {
+    const requested = options && options.returnFocus;
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    const target = requested || active;
+    state.returnFocus = target
+      && target !== document.body
+      && typeof target.focus === 'function'
+      && !overlay.contains(target)
+      ? target
+      : null;
+  }
+
+  function restoreReturnFocus(target) {
+    if (
+      !target
+      || !target.isConnected
+      || typeof target.focus !== 'function'
+      || target.disabled
+      || target.closest?.('[hidden], [aria-hidden="true"], .u-hidden')
+    ) return false;
+    try {
+      target.focus({ preventScroll: true });
+    } catch (_) {
+      target.focus();
+    }
+    return document.activeElement === target;
+  }
+
   function close() {
     const overlay = el('finding-triage-overlay');
     if (!overlay) return;
+    const returnFocus = state.returnFocus;
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
@@ -397,11 +438,14 @@ let DarklabFindingTriageEditor = null;
     state.recordEvidence = [];
     state.mergePreview = null;
     state.mergeSearchGeneration += 1;
+    state.returnFocus = null;
     if (state.mergeSearchTimer) global.clearTimeout(state.mergeSearchTimer);
     state.mergeSearchTimer = null;
-    if (typeof refocusComposerAfterAction === 'function') {
-      refocusComposerAfterAction({ defer: true });
-    }
+    global.setTimeout(() => {
+      if (!restoreReturnFocus(returnFocus) && typeof refocusComposerAfterAction === 'function') {
+        refocusComposerAfterAction({ defer: true });
+      }
+    }, 0);
   }
 
   async function requestTriage(findingId) {
@@ -843,6 +887,7 @@ let DarklabFindingTriageEditor = null;
     bindOnce();
     state.finding = finding;
     state.options = options || {};
+    rememberReturnFocus(overlay, state.options);
     setMode('triage');
     const subtitle = el('finding-triage-subtitle');
     if (subtitle) subtitle.textContent = titleForFinding(finding);
@@ -885,6 +930,7 @@ let DarklabFindingTriageEditor = null;
     bindOnce();
     state.finding = finding;
     state.options = options || {};
+    rememberReturnFocus(overlay, state.options);
     setMode('record');
     const targets = populateRecord(finding, state.options);
     if (!finding && !targets.length) {

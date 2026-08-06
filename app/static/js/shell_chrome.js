@@ -2145,12 +2145,14 @@ let importedProjectWorkspaceShell;
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       invalidateProjectOverview: (projectId = '') => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectFindings: _invalidateProjectFindings,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       showConfirm: _shellFn('showConfirm', importedShowConfirm),
       actionSheetContainer: () => projectWorkspaceModal,
       logClientError: _shellLogClientError,
       mobileView: _projectMobileView,
       canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),
+      canTriageFindings: () => _shellActiveTeamScopeCan('triage_findings'),
     });
     return projectAssessmentController;
   }

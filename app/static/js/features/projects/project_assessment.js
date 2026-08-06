@@ -4,6 +4,7 @@
 // Project Assessment tab state and data controller.
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
+import { openContextualFindingRecord } from '../findings/finding_record_context.js';
 
 function createProjectAssessmentController(context) {
   const ctx = context || {};
@@ -395,9 +396,60 @@ function createProjectAssessmentController(context) {
     }, 'Assessment cycle deleted.', { resetSelection: true });
   }
 
+  async function createFinding(projectId, check, definition = {}) {
+    const targetId = String(check?.target_entity_id || '');
+    if (!projectId || !targetId || !check?.id) return false;
+    if (ctx.canTriageFindings?.() === false) {
+      ctx.setProjectWorkspaceMessage?.(
+        "View-only team members can't create findings. Switch to Personal or ask for operator access.",
+        { error: true },
+      );
+      return false;
+    }
+    ctx.setProjectWorkspaceMessage?.('');
+    try {
+      const openFindingEditor = typeof ctx.openContextualFindingRecord === 'function'
+        ? ctx.openContextualFindingRecord
+        : openContextualFindingRecord;
+      await openFindingEditor({
+        projectId,
+        targetId,
+        request: ctx.projectWorkspaceRequest,
+        canEdit: true,
+        defaults: {
+          title: `${definition?.label || check?.check_key || 'Assessment check'}: ${check?.target_value || targetId}`,
+          summary: definition?.purpose || check?.state_reason || '',
+          severity: 'medium',
+          confidence: 'unknown',
+        },
+        evidence: [{
+          evidence_type: 'assessment_check',
+          evidence_id: String(check.id),
+          label: definition?.label || check?.check_key || 'Assessment check',
+        }],
+        onSaved: async () => {
+          ctx.invalidateProjectFindings?.(projectId);
+          ctx.invalidateProjectOverview?.(projectId);
+          ctx.setProjectWorkspaceMessage?.('Finding created from the assessment check.');
+          renderViews();
+        },
+      });
+      return true;
+    } catch (err) {
+      ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open the finding editor.', { error: true });
+      logFailure('PROJECT_ASSESSMENT_CLIENT_FINDING_EDITOR_FAILED', err, {
+        phase: 'finding_editor',
+        project_id: String(projectId || ''),
+        assessment_check_id: String(check?.id || ''),
+      });
+      return false;
+    }
+  }
+
   const renderer = createProjectAssessmentRenderer(ctx, {
     deleteCycle,
     createCycle,
+    createFinding,
     load,
     loadDetail,
     selectCycle,

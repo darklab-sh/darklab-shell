@@ -1364,6 +1364,80 @@ test.describe('project workspace modal', () => {
     })).toBeVisible()
   })
 
+  test('creates a Project finding from selected Run Details output', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+
+    const projectId = await createActiveProject(page, `Run Evidence ${Date.now()}`)
+    await page.locator('#project-explorer-body [data-project-action="new-target"]').click()
+    await expectProjectTargetEditorReady(page, 'Add Target')
+    await fillProjectTargetEditor(page, {
+      value: 'projects.playwright.example',
+      labels: '',
+      notes: '',
+    })
+    await page.locator('#project-target-submit').click()
+    await expect(page.locator('#project-target-editor-overlay')).not.toHaveClass(/\bopen\b/)
+
+    const { runRow, command } = await linkExternalRunToOpenProject(page, testInfo)
+    const runId = await runRow.locator('[data-project-action="edit-run-metadata"]').getAttribute('data-run-id')
+    expect(runId).toBeTruthy()
+    await page.locator('.project-workspace-close').click()
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await page.evaluate(async (run) => window.openHistoryRunDetails(run), { id: runId, command })
+    const runDetails = page.locator('#history-run-overlay')
+    await expect(runDetails).toHaveClass(/\bopen\b/)
+    await runDetails.locator('[data-history-run-tab="output"]').click()
+    const selectLines = runDetails.locator('[data-history-run-action="select-evidence-lines"]')
+    await expect(selectLines).toBeVisible({ timeout: 15_000 })
+    await selectLines.click()
+    await runDetails.locator('[data-history-run-evidence-line]').filter({
+      hasText: 'external fixture output',
+    }).click()
+    await runDetails.locator('[data-history-run-evidence-line]').filter({
+      hasText: `command: ${command}`,
+    }).click()
+    await expect(runDetails.locator('.history-run-output-evidence-count')).toHaveText('2 lines selected')
+    const createFinding = runDetails.locator('[data-history-run-action="create-finding-from-evidence"]')
+    await createFinding.click()
+
+    const editor = page.locator('#finding-triage-overlay')
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await page.keyboard.press('Escape')
+    await expect(editor).not.toHaveClass(/\bopen\b/)
+    await expect(runDetails).toHaveClass(/\bopen\b/)
+    await expect(createFinding).toBeFocused()
+    await createFinding.click()
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await expect(editor.locator('#finding-record-target')).toContainText('projects.playwright.example')
+    await editor.locator('#finding-record-title').fill('Saved run output needs review')
+    const createResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/findings`
+    })
+    await editor.locator('#finding-record-save').click()
+    const createdResponse = await createResponse
+    expect(createdResponse.status()).toBe(201)
+    const created = await createdResponse.json()
+    const findingId = created.finding?.id || ''
+    expect(findingId).toBeTruthy()
+    await expect(editor).not.toHaveClass(/\bopen\b/)
+
+    const evidence = await page.evaluate(async ({ id, finding }) => {
+      const resp = await apiFetch(
+        `/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(finding)}/evidence`,
+        { cache: 'no-store' },
+      )
+      return resp.json()
+    }, { id: projectId, finding: findingId })
+    expect(evidence.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ evidence_type: 'run_line', evidence_id: runId, line_number: 1 }),
+      expect.objectContaining({ evidence_type: 'run_line', evidence_id: runId, line_number: 2 }),
+    ]))
+  })
+
   test('creates, previews, applies, and shows an Atlas auto-promote rule', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     const sessionId = await browserSessionId(page)

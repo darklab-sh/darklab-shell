@@ -974,6 +974,62 @@ body #history-panel { background: var(--theme-chrome-bg); }
   white-space: pre-wrap;
 }
 
+.history-run-output-evidence-controls,
+.history-run-finding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-run-output-evidence-controls {
+  justify-content: flex-end;
+}
+
+.history-run-output-evidence-count {
+  margin-right: auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.history-run-output.is-selecting-evidence {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 6px;
+}
+
+.history-run-output.is-selecting-evidence .history-run-output-line {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 8px 5px 44px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.history-run-output.is-selecting-evidence .history-run-output-line::before {
+  position: absolute;
+  top: 5px;
+  left: 8px;
+  width: 28px;
+  color: var(--muted);
+  content: attr(data-line-label);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.history-run-finding-actions {
+  margin-top: 8px;
+}
+
 .history-run-list {
   display: grid;
   gap: 8px;

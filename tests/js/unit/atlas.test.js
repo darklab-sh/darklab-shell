@@ -316,6 +316,7 @@ function loadAtlas({
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
   openProjectAutoPromoteRuleFromAtlasImpl = vi.fn(() => Promise.resolve(true)),
   openProjectWorkspaceByIdImpl = vi.fn(() => Promise.resolve(true)),
+  openContextualFindingRecordImpl = vi.fn(() => Promise.resolve(true)),
   closeMajorOverlaysImpl = vi.fn(),
   useRealSelectEnhancer = false,
   activeTeamScopeCanImpl = () => true,
@@ -894,6 +895,7 @@ function loadAtlas({
         copyTextToClipboard,
         openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
         openProjectWorkspaceById: openProjectWorkspaceByIdImpl,
+        openContextualFindingRecord: openContextualFindingRecordImpl,
         closeMajorOverlays: closeMajorOverlaysImpl,
         downloadBlobAsAttachment,
         activeTeamScopeCan: activeTeamScopeCanImpl,
@@ -929,6 +931,7 @@ function loadAtlas({
         window.copyTextToClipboard = copyTextToClipboard;
         window.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
         window.openProjectWorkspaceById = openProjectWorkspaceById;
+        window.openContextualFindingRecord = openContextualFindingRecord;
         window.downloadBlobAsAttachment = downloadBlobAsAttachment;
         window.activeTeamScopeCan = activeTeamScopeCan;
         window.teamScopeDeniedMessage = teamScopeDeniedMessage;
@@ -951,6 +954,7 @@ function loadAtlas({
     logClientError,
     openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
     openProjectWorkspaceById: openProjectWorkspaceByIdImpl,
+    openContextualFindingRecord: openContextualFindingRecordImpl,
     closeMajorOverlays: closeMajorOverlaysImpl,
     syncAppSelect,
     enhanceAppSelects,
@@ -3908,6 +3912,52 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-mobile-entity-view')?.classList.contains('u-hidden')).toBe(true)
     document.body.classList.remove('mobile-terminal-mode')
   }, 10_000)
+
+  it('creates a finding from a Project-scoped Atlas entity profile', async () => {
+    const openContextualFindingRecord = vi.fn(() => Promise.resolve(true))
+    FINDING.origin = 'manual'
+    try {
+      const { openAtlas } = loadAtlas({
+        openContextualFindingRecordImpl: openContextualFindingRecord,
+      })
+
+      await openAtlas({
+        source: 'project-workspace',
+        tab: 'ip',
+        projectId: 'prj_linked',
+        projectName: 'Linked Case',
+      })
+      const create = [...document.querySelectorAll('#atlas-detail .atlas-detail-actions button')]
+        .find(button => button.textContent === 'Create finding')
+      expect(create).toBeTruthy()
+      create.click()
+      await Promise.resolve()
+
+      expect(openContextualFindingRecord).toHaveBeenCalledWith(expect.objectContaining({
+        projectId: 'prj_linked',
+        targetId: ENTITY.id,
+        canEdit: true,
+        evidence: [{
+          evidence_type: 'atlas_entity',
+          evidence_id: ENTITY.id,
+          label: ENTITY.canonical_value,
+        }],
+      }))
+
+      document.querySelector('#atlas-detail button.atlas-finding-row')?.click()
+      const edit = [...document.querySelectorAll('#atlas-detail .atlas-detail-actions button')]
+        .find(button => button.textContent === 'Edit finding')
+      expect(edit).toBeTruthy()
+      edit.click()
+      expect(openContextualFindingRecord).toHaveBeenLastCalledWith(expect.objectContaining({
+        projectId: 'prj_linked',
+        targetId: ENTITY.id,
+        finding: expect.objectContaining({ id: FINDING.id, origin: 'manual' }),
+      }))
+    } finally {
+      delete FINDING.origin
+    }
+  })
 
   it('exports filtered entity rows without leaving the Atlas surface', async () => {
     const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()

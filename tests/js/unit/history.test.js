@@ -550,6 +550,7 @@ describe('history panel actions', () => {
     openMetadataEditorImpl = vi.fn(),
     openAtlasImpl = vi.fn(() => Promise.resolve()),
     openWatchersModalImpl = vi.fn(() => Promise.resolve()),
+    openContextualFindingRecordImpl = vi.fn(() => Promise.resolve(true)),
     downloadBlobAsAttachmentImpl = vi.fn(),
     emitUiEvent = vi.fn(),
     logClientErrorImpl = vi.fn(),
@@ -839,6 +840,7 @@ describe('history panel actions', () => {
           logClientError: logClientErrorImpl,
           openAtlas: openAtlasImpl,
           openWatchersModal: openWatchersModalImpl,
+          openContextualFindingRecord: openContextualFindingRecordImpl,
           downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
           bindPressable,
           confirmHistAction: () => {},
@@ -908,6 +910,7 @@ describe('history panel actions', () => {
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refreshProjectWorkspace = refreshProjectWorkspace;
+        window.openContextualFindingRecord = openContextualFindingRecord;
         window.enhanceAppSelects = enhanceAppSelects;
         window.syncAppSelect = syncAppSelect;
         window.bindDismissible = bindDismissible;
@@ -934,6 +937,7 @@ describe('history panel actions', () => {
       openMetadataEditor: openMetadataEditorImpl,
       openAtlas: openAtlasImpl,
       openWatchersModal: openWatchersModalImpl,
+      openContextualFindingRecord: openContextualFindingRecordImpl,
       downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
       emitUiEvent,
       logClientError: logClientErrorImpl,
@@ -1988,6 +1992,139 @@ describe('history panel actions', () => {
     document.querySelector('[data-history-run-tab="summary"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(document.getElementById('history-run-body').textContent).toContain('Findings / Occurrences51 / 60')
+  })
+
+  it('creates findings and attaches bounded saved-line evidence from Run Details', async () => {
+    const openContextualFindingRecord = vi.fn(() => Promise.resolve(true))
+    const showConfirm = vi.fn(() => Promise.resolve('add'))
+    const manualFinding = {
+      id: 'finding-manual',
+      origin: 'manual',
+      target_id: 'target-1',
+      entity_id: 'target-1',
+      title: 'Manual TLS finding',
+      severity: 'medium',
+      review_state: 'new',
+      line_number: 0,
+      scope: 'tls',
+    }
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['nmap'],
+            items: [{
+              id: 'run-evidence',
+              type: 'run',
+              command: 'nmap -sV app.example.test',
+              label: 'nmap -sV app.example.test',
+              started: '2026-08-05T00:00:00Z',
+              created: '2026-08-05T00:00:00Z',
+              exit_code: 0,
+              finding_count: 1,
+            }],
+            runs: [],
+          }),
+        })
+      }
+      if (url === '/history/run-evidence?json&preview=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'run-evidence',
+            command: 'nmap -sV app.example.test',
+            output_line_count: 2,
+            output_entries: [
+              { text: '443/tcp open https', line_number: 0 },
+              { text: 'TLSv1.0 supported', line_number: 1 },
+            ],
+            exit_code: 0,
+            finding_count: 1,
+          }),
+        })
+      }
+      if (url === '/entities/run/run-evidence/findings?limit=50&offset=0') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ findings: [manualFinding], total: 1, limit: 50, offset: 0 }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ runs: [{ id: 'run-evidence' }] }),
+        })
+      }
+      if (url === '/projects/project-1/findings/finding-manual/evidence' && options.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ created: true, evidence: {} }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      activeProject: { id: 'project-1', name: 'Active assessment' },
+      openContextualFindingRecordImpl: openContextualFindingRecord,
+      showConfirmImpl: showConfirm,
+    })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-history-run-tab="output"]')).toBeTruthy()
+      expect(document.getElementById('history-run-body')?.textContent).toContain('Attached')
+    })
+    document.querySelector('[data-history-run-tab="output"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const select = document.querySelector('[data-history-run-action="select-evidence-lines"]')
+    expect(select).toBeTruthy()
+    select.click()
+    expect(document.querySelectorAll('[data-history-run-evidence-line]')).toHaveLength(2)
+    document.querySelector('[data-history-run-evidence-line="0"]').click()
+    document.querySelector('[data-history-run-evidence-line="1"]').click()
+    expect(document.querySelector('[data-history-run-evidence-line="0"]').getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('.history-run-output-evidence-count')?.textContent).toContain('2 lines selected')
+
+    document.querySelector('[data-history-run-action="create-finding-from-evidence"]').click()
+    await Promise.resolve()
+    expect(openContextualFindingRecord).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      evidence: [
+        expect.objectContaining({ evidence_type: 'run_line', evidence_id: 'run-evidence', line_number: 0 }),
+        expect.objectContaining({ evidence_type: 'run_line', evidence_id: 'run-evidence', line_number: 1 }),
+      ],
+    }))
+    const createOptions = openContextualFindingRecord.mock.calls[0][0]
+    expect(createOptions.selectTargetId([
+      { id: 'target-other', source_run_id: 'run-other' },
+      { id: 'target-1', source_run_id: 'run-evidence' },
+    ])).toBe('target-1')
+
+    document.querySelector('[data-history-run-action="choose-finding-for-evidence"]').click()
+    const add = document.querySelector('[data-history-run-action="add-evidence:finding-manual"]')
+    expect(add).toBeTruthy()
+    add.click()
+    await vi.waitFor(() => {
+      expect(apiFetch.mock.calls.filter(([url, options]) => (
+        url === '/projects/project-1/findings/finding-manual/evidence'
+        && options?.method === 'POST'
+      ))).toHaveLength(2)
+    })
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({ text: 'Add 2 selected lines to Manual TLS finding?' }),
+    }))
+
+    document.querySelector('[data-history-run-action="edit-manual-finding:finding-manual"]').click()
+    expect(openContextualFindingRecord).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      targetId: 'target-1',
+      finding: manualFinding,
+    }))
   })
 
   it('closes the history panel for permalink but keeps it open for star and delete', async () => {

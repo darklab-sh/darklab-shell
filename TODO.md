@@ -136,11 +136,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 4 — Add first-class manual findings and retest provenance
 
-- [ ] Finish rolling the shared Project finding editor into Atlas Findings, Assessment, and Run Details:
-  - Add **Create finding from selected lines** and **Add evidence to finding** to the surfaces where saved source context gives those actions distinct value, without opening a second findings board or assessment overlay.
-  - Pre-fill target/entity/run context from each launch surface, but require the user to review affected targets, severity, evidence, and title before saving.
-  - Reuse the Project editor's `TRIAGE_FINDINGS`, view-only, actor-privacy, bounded text, CVE/CWE/CVSS, and safe HTTP(S)-reference contracts rather than creating surface-specific variants.
-  - Keep markdown rendering, share/export redaction, and JavaScript-URL rejection consistent with current finding triage and report rendering.
 - [ ] Make verification a traceable action rather than a status-only edit:
   - Let a finding link to its originating assessment check/action, one or more verification runs, comparison results, verification notes, and the actor who made the final disposition.
   - **Run verification** must show the exact command/workflow, target, HTTP profile name, policy level, and scope before launch. It must never reuse an expired secret value or silently run an intrusive action.

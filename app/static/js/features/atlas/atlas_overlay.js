@@ -34,6 +34,7 @@ import { apiFetch as importedApiFetch, logClientError as importedLogClientError 
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_bridge.js';
 import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_modal_state_bridge.js';
 import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
+import { openContextualFindingRecord as importedOpenContextualFindingRecord } from '../findings/finding_record_context.js';
 import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
 import {
   DarklabTeamScope as importedTeamScope,
@@ -107,6 +108,10 @@ let exportedCycleAtlasTab = null;
   const copyTextToClipboard = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard) || null;
   const downloadBlobAsAttachment = (typeof importedDownloadBlobAsAttachment !== 'undefined' && importedDownloadBlobAsAttachment) || null;
   const markInteractionSurfaceReady = (typeof importedMarkInteractionSurfaceReady !== 'undefined' && importedMarkInteractionSurfaceReady) || null;
+  const openContextualFindingRecord = (
+    typeof importedOpenContextualFindingRecord !== 'undefined'
+    && importedOpenContextualFindingRecord
+  ) || null;
   const portalDropdownMenu = (typeof importedPortalDropdownMenu !== 'undefined' && importedPortalDropdownMenu) || null;
   const refocusComposerAfterAction = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction) || null;
   const setComposerValue = (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue) || null;
@@ -2217,6 +2222,11 @@ let exportedCycleAtlasTab = null;
       triageDisabledReason: teamScopeDeniedMessage('triage Atlas rows'),
       canDeleteAtlasRows: canDeleteAtlasRows(),
       deleteDisabledReason: teamScopeDeniedMessage('delete Atlas rows'),
+      canCreateFinding: !!(
+        state.projectId
+        && ['domain', 'ip', 'url'].includes(String(state.detail?.entity?.type || ''))
+      ),
+      findingDisabledReason: teamScopeDeniedMessage('create Atlas findings'),
       isLinkedToActiveProject: (entity) => {
         const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
         return !!activeId && (Array.isArray(entity.project_links) ? entity.project_links : [])
@@ -2233,6 +2243,7 @@ let exportedCycleAtlasTab = null;
       onOpenEntity: (entity) => openEntityFromRelatedEntity(entity),
       onCleanRunAtlas: (run) => confirmCleanRunAtlas(run),
       onDeleteEntity: () => confirmDeleteEntity(),
+      onCreateFinding: (entity) => createFindingForAtlasEntity(entity),
       onSuppressEntity: (entity) => updateSuppression(entity, !entity.suppressed),
       onPageRuns: (offset) => pageEntityDetail('runs', offset),
       onPageFindings: (offset) => pageEntityDetail('findings', offset),
@@ -2414,6 +2425,7 @@ let exportedCycleAtlasTab = null;
       onOpenEntity: (item) => openEntityFromFinding(item),
       onDeleteFinding: (item) => confirmDeleteFinding(item),
       onEditTriage: (item) => openFindingTriageEditor(item),
+      onEditFinding: (item) => editAtlasManualFinding(item),
       onSuppressFinding: (item) => updateSuppression(item, !item.suppressed),
     };
   }
@@ -2974,6 +2986,63 @@ let exportedCycleAtlasTab = null;
         renderDetail();
       },
     });
+  }
+
+  async function refreshAfterManualFindingSave(action = 'created') {
+    if (currentTab().id === 'findings') await refreshAtlas();
+    else if (state.selectedId) await loadDetail(state.selectedId, { renderLoading: false });
+    broadcastProjectWorkspaceChange('atlas_manual_finding_saved', state.projectId);
+    showToastSafe(action === 'updated' ? 'Finding updated' : 'Finding created', 'success');
+  }
+
+  async function createFindingForAtlasEntity(entity) {
+    const target = entity && typeof entity === 'object' ? entity : state.detail?.entity;
+    const targetId = String(target?.id || '');
+    if (!state.projectId || !targetId || !['domain', 'ip', 'url'].includes(String(target?.type || ''))) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('create Atlas findings');
+      return;
+    }
+    try {
+      if (typeof openContextualFindingRecord !== 'function') throw new Error('Finding editor is unavailable.');
+      await openContextualFindingRecord({
+        projectId: state.projectId,
+        targetId,
+        canEdit: true,
+        evidence: [{
+          evidence_type: 'atlas_entity',
+          evidence_id: targetId,
+          label: String(target.canonical_value || targetId),
+        }],
+        onSaved: async () => refreshAfterManualFindingSave('created'),
+      });
+    } catch (err) {
+      logImportClientError('failed to open Atlas finding editor', err);
+      showToastSafe(err?.message || 'Failed to open finding editor', 'error');
+    }
+  }
+
+  async function editAtlasManualFinding(finding) {
+    const targetId = String(finding?.entity_id || '');
+    if (!state.projectId || !targetId || String(finding?.origin || '') !== 'manual') return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('edit Atlas findings');
+      return;
+    }
+    try {
+      if (typeof openContextualFindingRecord !== 'function') throw new Error('Finding editor is unavailable.');
+      await openContextualFindingRecord({
+        projectId: state.projectId,
+        targetId,
+        finding,
+        canEdit: true,
+        onSaved: async () => refreshAfterManualFindingSave('updated'),
+        onConflict: async () => refreshAfterFindingMutation(finding.id),
+      });
+    } catch (err) {
+      logImportClientError('failed to open Atlas manual finding editor', err);
+      showToastSafe(err?.message || 'Failed to open finding editor', 'error');
+    }
   }
 
   async function updateFindingReviewState(finding, reviewState) {

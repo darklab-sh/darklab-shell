@@ -427,11 +427,18 @@ describe('finding triage editor', () => {
         { id: 'target-confirmed', type: 'domain', value: 'app.example.test', review_state: 'confirmed' },
         { id: 'target-pending', type: 'domain', value: 'pending.example.test', review_state: 'pending' },
       ],
+      defaults: {
+        title: 'Finding from saved run output',
+        summary: 'Two saved lines were selected as evidence.',
+        severity: 'medium',
+        confidence: 'unknown',
+      },
       evidence: [{
         evidence_type: 'run_line',
         evidence_id: 'run-1',
         line_number: 7,
         snippet: '<script>alert(1)</script> admin endpoint',
+        label: 'Line 8',
       }],
       onSaved: saved,
     })
@@ -443,6 +450,8 @@ describe('finding triage editor', () => {
     ])
     expect(document.getElementById('finding-record-evidence').textContent).toContain('<script>alert(1)</script>')
     expect(document.getElementById('finding-record-evidence').querySelector('script')).toBeNull()
+    expect(document.getElementById('finding-record-title').value).toBe('Finding from saved run output')
+    expect(document.getElementById('finding-record-summary').value).toBe('Two saved lines were selected as evidence.')
 
     document.getElementById('finding-record-title').value = 'Unauthenticated admin console'
     document.getElementById('finding-record-severity').value = 'high'
@@ -556,5 +565,24 @@ describe('finding triage editor', () => {
     expect(document.getElementById('finding-triage-message').textContent).toContain('current revision 4')
     expect(onConflict).toHaveBeenCalled()
     expect(document.getElementById('finding-triage-overlay').classList.contains('open')).toBe(true)
+  })
+
+  it('returns focus to the launch control when the editor closes over another surface', async () => {
+    const launch = document.createElement('button')
+    launch.type = 'button'
+    launch.textContent = 'Create finding'
+    document.body.appendChild(launch)
+    launch.focus()
+    loadEditor()
+
+    await window.DarklabFindingTriageEditor.openRecord({
+      projectId: 'project-1',
+      targets: [{ id: 'target-1', type: 'domain', value: 'app.example.test', review_state: 'confirmed' }],
+    })
+    document.getElementById('finding-record-cancel').click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(document.activeElement).toBe(launch)
+    expect(window.refocusComposerAfterAction).not.toHaveBeenCalled()
   })
 })

@@ -23,8 +23,9 @@
 // Level priority (highest first): 'modal' > 'sheet' > 'panel'. When
 // multiple dismissibles are open, closeTopmostDismissible() closes the
 // topmost one at the highest populated level only. Within a level, the
-// most recently registered (topmost) one wins — stacks the same way a
-// z-indexed overlay pile does today.
+// highest rendered z-index wins, then the most recently registered surface
+// breaks ties. This keeps persistent and lazy-mounted overlays aligned with
+// the same stack users can see.
 //
 // Composes bindPressable for close buttons so "dismiss me" controls go
 // through the same activation path (click + Enter/Space + blur) as every
@@ -108,21 +109,33 @@ const DarklabDismissible = (function (global) {
     };
   }
 
+  function _renderedZIndex(el) {
+    if (!el || typeof global.getComputedStyle !== 'function') return 0;
+    const value = Number.parseInt(global.getComputedStyle(el).zIndex, 10);
+    return Number.isFinite(value) ? value : 0;
+  }
+
   // Close the topmost open dismissible by level priority
-  // (modal > sheet > panel), and within a level the most recently
-  // registered one wins. Returns true if something was closed, false
-  // if nothing was open.
+  // (modal > sheet > panel), then rendered z-index and registration order.
+  // Returns true if something was closed, false if nothing was open.
   function closeTopmostDismissible() {
     let best = null;
     let bestPriority = -1;
+    let bestZIndex = -1;
     let bestIdx = -1;
     for (let i = 0; i < _registry.length; i += 1) {
       const entry = _registry[i];
       if (!entry.isOpen()) continue;
       const pri = LEVEL_PRIORITY[entry.level] || 0;
-      if (pri > bestPriority || (pri === bestPriority && i > bestIdx)) {
+      const zIndex = _renderedZIndex(entry.el);
+      if (
+        pri > bestPriority
+        || (pri === bestPriority && zIndex > bestZIndex)
+        || (pri === bestPriority && zIndex === bestZIndex && i > bestIdx)
+      ) {
         best = entry;
         bestPriority = pri;
+        bestZIndex = zIndex;
         bestIdx = i;
       }
     }

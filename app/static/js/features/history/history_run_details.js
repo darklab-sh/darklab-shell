@@ -15,6 +15,7 @@ import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
 import { DarklabOutputCore as importedOutputCore } from '../../core/output_core.js';
 import {
   apiFetch as importedApiFetch,
+  logClientError as importedLogClientError,
 } from '../../session.js';
 import {
   _renderAnsiWithEntityTokens as importedRenderAnsiWithEntityTokens,
@@ -36,7 +37,9 @@ import {
   syncModalOverlayState as importedSyncModalOverlayState,
 } from '../../ui/ui_helpers.js';
 import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissible.js';
+import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from '../run-comparison/history_compare_launcher.js';
+import { openContextualFindingRecord as importedOpenContextualFindingRecord } from '../findings/finding_record_context.js';
 import { openWorkflows as importedOpenWorkflows } from '../../controller_action_bridge.js';
 import { _closeHistoryRunActionMenus } from './history_actions.js';
 import { copyHistoryRunPermalink as importedCopyHistoryRunPermalink } from './history_links.js';
@@ -313,6 +316,24 @@ function _historyRunApiFetch(...args) {
   return fetcher(...args);
 }
 
+function _historyRunLogClientError(context, error, details = {}) {
+  const logger = typeof importedLogClientError === 'function' ? importedLogClientError : null;
+  if (typeof logger === 'function') logger(context, error, details);
+}
+
+function _historyRunShowConfirm(options) {
+  const confirm = typeof importedShowConfirm === 'function' ? importedShowConfirm : null;
+  return typeof confirm === 'function' ? confirm(options) : Promise.resolve(null);
+}
+
+function _historyRunOpenContextualFindingRecord(options) {
+  const open = typeof importedOpenContextualFindingRecord === 'function'
+    ? importedOpenContextualFindingRecord
+    : null;
+  if (typeof open !== 'function') throw new Error('Finding editor is unavailable.');
+  return open(options);
+}
+
 function _historyRunSyncModalOverlayState() {
   const sync = (typeof importedSyncModalOverlayState !== 'undefined' && importedSyncModalOverlayState)
     || _historyRunGlobalFunction('syncModalOverlayState');
@@ -437,6 +458,8 @@ let _historyRunModalState = {
   entitiesPagination: null,
   activeEntityTab: 'ip',
   projectState: null,
+  selectingEvidence: false,
+  selectedEvidenceLines: new Set(),
   aiAssists: [],
   aiAssistsLoaded: false,
   loadingAiAssists: false,
@@ -458,6 +481,8 @@ let _historyRunModalToken = 0;
 const HISTORY_RUN_FINDINGS_PAGE_LIMIT = 50;
 const HISTORY_RUN_ENTITIES_PAGE_LIMIT = 50;
 const HISTORY_RUN_OUTPUT_OUTLINE_LIMIT = 16;
+const HISTORY_RUN_EVIDENCE_LINE_LIMIT = 20;
+const HISTORY_RUN_EVIDENCE_SNIPPET_LIMIT = 1000;
 const HISTORY_RUN_AI_ASSIST_POLL_MS = 2000;
 const HISTORY_RUN_AI_THINKING_PHRASES = [
   'Reading the signal map',
@@ -710,6 +735,54 @@ function _historyRunOutputEntries(run) {
     return String(run.output_preview).split(/\r?\n/).map(line => ({ text: line, cls: '' }));
   }
   return [];
+}
+
+function _historyRunEvidenceProject() {
+  const projectState = _historyRunModalState.projectState;
+  return projectState?.attached && projectState.project?.id ? projectState.project : null;
+}
+
+function _historyRunCanTriageFindings() {
+  return _historyRunActiveTeamScopeCan('triage_findings');
+}
+
+function _historyRunSelectedLineEvidence(run = _historyRunPrimary()) {
+  const runId = String(run?.id || '');
+  if (!runId) return [];
+  const selected = _historyRunModalState.selectedEvidenceLines;
+  if (!(selected instanceof Set) || !selected.size) return [];
+  return _historyRunOutputEntries(run).map((entry, index) => {
+    const lineNumber = Number.isInteger(entry.line_number) ? entry.line_number : index;
+    if (!selected.has(lineNumber)) return null;
+    return {
+      evidence_type: 'run_line',
+      evidence_id: runId,
+      line_number: lineNumber,
+      snippet: String(entry.text || '').slice(0, HISTORY_RUN_EVIDENCE_SNIPPET_LIMIT),
+      label: `Line ${lineNumber + 1}`,
+    };
+  }).filter(Boolean);
+}
+
+function _historyRunClearEvidenceSelection() {
+  _historyRunModalState.selectingEvidence = false;
+  _historyRunModalState.selectedEvidenceLines = new Set();
+}
+
+function _historyRunToggleEvidenceLine(lineNumber) {
+  if (!_historyRunModalState.selectingEvidence) return;
+  const normalized = Number(lineNumber);
+  if (!Number.isInteger(normalized) || normalized < 0) return;
+  const selected = _historyRunModalState.selectedEvidenceLines;
+  if (selected.has(normalized)) {
+    selected.delete(normalized);
+  } else if (selected.size < HISTORY_RUN_EVIDENCE_LINE_LIMIT) {
+    selected.add(normalized);
+  } else {
+    _historyRunShowToast(`Select up to ${HISTORY_RUN_EVIDENCE_LINE_LIMIT} output lines.`, 'error');
+    return;
+  }
+  _renderHistoryRunModal();
 }
 
 function _historyCommandOutcomeSummariesEnabled() {
@@ -1643,18 +1716,76 @@ function _renderHistoryRunOutput(body, run) {
     return;
   }
   _renderHistoryOutputSummary(body, run);
+  const project = _historyRunEvidenceProject();
+  if (project) {
+    const controls = document.createElement('div');
+    controls.className = 'history-run-output-evidence-controls';
+    if (_historyRunModalState.selectingEvidence) {
+      const count = _historyRunModalState.selectedEvidenceLines.size;
+      const summary = document.createElement('span');
+      summary.className = 'history-run-output-evidence-count';
+      summary.textContent = count
+        ? `${_historyRunCountLabel(count, 'line', 'lines')} selected`
+        : `Select up to ${HISTORY_RUN_EVIDENCE_LINE_LIMIT} lines`;
+      const create = _historyRunActionButton('Create finding', 'create-finding-from-evidence', {
+        disabled: !count || !_historyRunCanTriageFindings(),
+        tone: 'primary',
+      });
+      const add = _historyRunActionButton('Add to finding', 'choose-finding-for-evidence', {
+        disabled: !count || !_historyRunCanTriageFindings(),
+      });
+      const cancel = _historyRunActionButton('Cancel', 'cancel-evidence-selection', { tone: 'ghost' });
+      if (!_historyRunCanTriageFindings()) {
+        const denied = _historyRunScopeDeniedMessage('triage findings');
+        create.title = denied;
+        add.title = denied;
+      }
+      controls.append(summary, create, add, cancel);
+    } else {
+      const select = _historyRunActionButton('Select evidence lines', 'select-evidence-lines', {
+        disabled: !_historyRunCanTriageFindings(),
+      });
+      if (select.disabled) select.title = _historyRunScopeDeniedMessage('triage findings');
+      controls.appendChild(select);
+    }
+    body.appendChild(controls);
+  }
   const pre = document.createElement('pre');
-  pre.className = 'history-run-output';
+  pre.className = `history-run-output${_historyRunModalState.selectingEvidence ? ' is-selecting-evidence' : ''}`;
   output.forEach((entry, index) => {
-    const line = document.createElement('span');
-    line.className = 'history-run-output-line';
+    const line = document.createElement(_historyRunModalState.selectingEvidence ? 'button' : 'span');
+    line.className = _historyRunModalState.selectingEvidence
+      ? 'btn btn-ghost panel-row panel-row-clickable selection-row history-run-output-line'
+      : 'history-run-output-line';
+    const lineNumber = Number.isInteger(entry.line_number) ? entry.line_number : index;
+    line.dataset.lineNumber = String(lineNumber);
+    line.dataset.lineLabel = String(lineNumber + 1);
+    if (_historyRunModalState.selectingEvidence) {
+      const selected = _historyRunModalState.selectedEvidenceLines.has(lineNumber);
+      line.type = 'button';
+      line.dataset.historyRunEvidenceLine = String(lineNumber);
+      line.classList.toggle('is-selected', selected);
+      line.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      line.setAttribute('aria-label', `Select output line ${lineNumber + 1}`);
+    }
     const text = String(entry.text || '');
-    if (!_historyRunRenderAnsiWithEntityTokens(line, text, Array.isArray(entry.entities) ? entry.entities : [], '')) {
+    if (
+      _historyRunModalState.selectingEvidence
+      || !_historyRunRenderAnsiWithEntityTokens(line, text, Array.isArray(entry.entities) ? entry.entities : [], '')
+    ) {
       line.textContent = text;
     }
     pre.appendChild(line);
-    if (index < output.length - 1) pre.appendChild(document.createTextNode('\n'));
+    if (!_historyRunModalState.selectingEvidence && index < output.length - 1) {
+      pre.appendChild(document.createTextNode('\n'));
+    }
   });
+  if (_historyRunModalState.selectingEvidence) {
+    pre.addEventListener('click', (event) => {
+      const line = event.target.closest?.('[data-history-run-evidence-line]');
+      if (line) _historyRunToggleEvidenceLine(line.dataset.historyRunEvidenceLine);
+    });
+  }
   body.appendChild(pre);
   _renderHistoryCommandOutcomeSummary(body, run);
   if (run.preview_notice) {
@@ -1674,6 +1805,8 @@ function _renderHistoryRunFindings(body) {
     return;
   }
   const findings = Array.isArray(_historyRunModalState.findings) ? _historyRunModalState.findings : [];
+  const project = _historyRunEvidenceProject();
+  const evidence = _historyRunSelectedLineEvidence();
   const pager = _renderHistoryRunFindingsPagination(findings);
   if (!findings.length) {
     const empty = document.createElement('div');
@@ -1710,6 +1843,29 @@ function _renderHistoryRunFindings(body) {
       raw.className = 'history-run-finding-raw';
       raw.textContent = finding.raw_line;
       item.appendChild(raw);
+    }
+    if (project && (evidence.length || finding.origin === 'manual')) {
+      const actions = document.createElement('div');
+      actions.className = 'history-run-finding-actions';
+      if (evidence.length) {
+        const add = _historyRunActionButton(
+          'Add selected evidence',
+          `add-evidence:${String(finding.id || '')}`,
+          { disabled: !_historyRunCanTriageFindings() },
+        );
+        if (add.disabled) add.title = _historyRunScopeDeniedMessage('triage findings');
+        actions.appendChild(add);
+      }
+      if (finding.origin === 'manual') {
+        const edit = _historyRunActionButton(
+          'Edit finding',
+          `edit-manual-finding:${String(finding.id || '')}`,
+          { disabled: !_historyRunCanTriageFindings() },
+        );
+        if (edit.disabled) edit.title = _historyRunScopeDeniedMessage('triage findings');
+        actions.appendChild(edit);
+      }
+      item.appendChild(actions);
     }
     list.appendChild(item);
   });
@@ -2509,6 +2665,158 @@ function _historyRunAiErrorMessage(error, fallback) {
   return fallback;
 }
 
+async function _historyRunResponseError(resp, fallback) {
+  const payload = await resp?.json?.().catch(() => ({}));
+  return new Error(String(payload?.error || '').trim() || fallback);
+}
+
+async function _openHistoryRunFindingEditor() {
+  const run = _historyRunPrimary();
+  const project = _historyRunEvidenceProject();
+  const evidence = _historyRunSelectedLineEvidence(run);
+  if (!project?.id || !run?.id || !evidence.length) return false;
+  if (!_historyRunCanTriageFindings()) {
+    _historyRunShowToast(_historyRunScopeDeniedMessage('triage findings'), 'error');
+    return false;
+  }
+  try {
+    await _historyRunOpenContextualFindingRecord({
+      projectId: project.id,
+      request: _historyRunApiFetch,
+      canEdit: true,
+      selectTargetId: (targets) => {
+        const runTargets = targets.filter(target => String(target?.source_run_id || '') === String(run.id));
+        if (runTargets.length === 1) return String(runTargets[0].id || '');
+        return targets.length === 1 ? String(targets[0]?.id || '') : '';
+      },
+      defaults: {
+        title: `Finding from ${String(run.command || run.label || 'saved run')}`,
+        summary: `${_historyRunCountLabel(evidence.length, 'saved output line', 'saved output lines')} selected as evidence.`,
+        severity: 'medium',
+        confidence: 'unknown',
+      },
+      evidence,
+      onSaved: async () => {
+        _historyRunClearEvidenceSelection();
+        _historyRunModalState.activeTab = 'findings';
+        await _loadHistoryRunFindings(run.id, _historyRunModalToken);
+        _historyRunShowToast('Finding created from saved output.', 'success');
+      },
+    });
+    return true;
+  } catch (error) {
+    _historyRunLogClientError('failed to open Run Details finding editor', error, {
+      run_id: String(run.id || ''),
+      project_id: String(project.id || ''),
+      selected_line_count: evidence.length,
+    });
+    _historyRunShowToast(error?.message || 'Failed to open finding editor.', 'error');
+    return false;
+  }
+}
+
+async function _editHistoryRunManualFinding(findingId) {
+  const run = _historyRunPrimary();
+  const project = _historyRunEvidenceProject();
+  const finding = (Array.isArray(_historyRunModalState.findings) ? _historyRunModalState.findings : [])
+    .find(item => String(item?.id || '') === String(findingId || ''));
+  if (!project?.id || !finding || String(finding.origin || '') !== 'manual') return false;
+  if (!_historyRunCanTriageFindings()) {
+    _historyRunShowToast(_historyRunScopeDeniedMessage('triage findings'), 'error');
+    return false;
+  }
+  try {
+    await _historyRunOpenContextualFindingRecord({
+      projectId: project.id,
+      targetId: String(finding.target_id || finding.entity_id || ''),
+      finding,
+      request: _historyRunApiFetch,
+      canEdit: true,
+      onSaved: async () => {
+        await _loadHistoryRunFindings(run.id, _historyRunModalToken);
+        _historyRunShowToast('Finding updated.', 'success');
+      },
+      onConflict: async () => _loadHistoryRunFindings(run.id, _historyRunModalToken),
+    });
+    return true;
+  } catch (error) {
+    _historyRunLogClientError('failed to open Run Details manual finding editor', error, {
+      run_id: String(run.id || ''),
+      project_id: String(project.id || ''),
+      finding_id: String(finding.id || ''),
+    });
+    _historyRunShowToast(error?.message || 'Failed to open finding editor.', 'error');
+    return false;
+  }
+}
+
+async function _addHistoryRunEvidenceToFinding(findingId) {
+  const run = _historyRunPrimary();
+  const project = _historyRunEvidenceProject();
+  const evidence = _historyRunSelectedLineEvidence(run);
+  const finding = (Array.isArray(_historyRunModalState.findings) ? _historyRunModalState.findings : [])
+    .find(item => String(item?.id || '') === String(findingId || ''));
+  if (!project?.id || !finding || !evidence.length) return false;
+  if (!_historyRunCanTriageFindings()) {
+    _historyRunShowToast(_historyRunScopeDeniedMessage('triage findings'), 'error');
+    return false;
+  }
+  const choice = await _historyRunShowConfirm({
+    body: {
+      text: `Add ${_historyRunCountLabel(evidence.length, 'selected line', 'selected lines')} to ${String(finding.title || 'this finding')}?`,
+      note: 'The saved lines stay linked to this run and remain separate from the finding description.',
+    },
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'add', label: 'Add evidence', role: 'primary' },
+    ],
+    refocusOnResolve: false,
+  });
+  if (choice !== 'add') return false;
+  try {
+    let created = 0;
+    for (const item of evidence) {
+      const payload = {
+        evidence_type: item.evidence_type,
+        evidence_id: item.evidence_id,
+        line_number: item.line_number,
+        snippet: item.snippet,
+      };
+      const resp = await _historyRunApiFetch(
+        `/projects/${encodeURIComponent(project.id)}/findings/${encodeURIComponent(finding.id)}/evidence`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!resp?.ok) throw await _historyRunResponseError(resp, 'Could not add selected evidence.');
+      const result = await resp.json().catch(() => ({}));
+      if (result?.created) created += 1;
+    }
+    _historyRunClearEvidenceSelection();
+    await _loadHistoryRunFindings(run.id, _historyRunModalToken);
+    const duplicateCount = evidence.length - created;
+    const duplicateSuffix = duplicateCount
+      ? ` ${_historyRunCountLabel(duplicateCount, 'line was', 'lines were')} already linked.`
+      : '';
+    _historyRunShowToast(
+      `${_historyRunCountLabel(created, 'line', 'lines')} added as evidence.${duplicateSuffix}`,
+      'success',
+    );
+    return true;
+  } catch (error) {
+    _historyRunLogClientError('failed to add Run Details finding evidence', error, {
+      run_id: String(run.id || ''),
+      project_id: String(project.id || ''),
+      finding_id: String(finding.id || ''),
+      selected_line_count: evidence.length,
+    });
+    _historyRunShowToast(error?.message || 'Failed to add selected evidence.', 'error');
+    return false;
+  }
+}
+
 function openHistoryRunDetails(run) {
   if (!run || !run.id) return;
   _historyRunModalToken += 1;
@@ -2537,6 +2845,8 @@ function openHistoryRunDetails(run) {
     },
     activeEntityTab: _historyRunEntityTabs()[0]?.id || 'ip',
     projectState: null,
+    selectingEvidence: false,
+    selectedEvidenceLines: new Set(),
     aiAssists: [],
     aiAssistsLoaded: false,
     loadingAiAssists: false,
@@ -2566,7 +2876,22 @@ function openHistoryRunDetails(run) {
 async function _handleHistoryRunModalAction(action) {
   const run = _historyRunPrimary();
   if (!run || !run.id) return;
-  if (action === 'use-command') {
+  if (action === 'select-evidence-lines') {
+    _historyRunModalState.selectingEvidence = true;
+    _historyRunModalState.selectedEvidenceLines = new Set();
+    _renderHistoryRunModal();
+  } else if (action === 'cancel-evidence-selection') {
+    _historyRunClearEvidenceSelection();
+    _renderHistoryRunModal();
+  } else if (action === 'choose-finding-for-evidence') {
+    _setHistoryRunOverlayTab('findings', { focus: true });
+  } else if (action === 'create-finding-from-evidence') {
+    await _openHistoryRunFindingEditor();
+  } else if (action.startsWith('add-evidence:')) {
+    await _addHistoryRunEvidenceToFinding(action.slice('add-evidence:'.length));
+  } else if (action.startsWith('edit-manual-finding:')) {
+    await _editHistoryRunManualFinding(action.slice('edit-manual-finding:'.length));
+  } else if (action === 'use-command') {
     const cmd = run.command || '';
     _historyRunSetComposerValue(cmd, cmd.length, cmd.length);
     closeHistoryRunOverlay();

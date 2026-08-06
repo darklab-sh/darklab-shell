@@ -4,6 +4,15 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const { openContextualFindingRecord } = vi.hoisted(() => ({
+  openContextualFindingRecord: vi.fn(async () => true),
+}))
+
+vi.mock('../../../app/static/js/features/findings/finding_record_context.js', () => ({
+  openContextualFindingRecord,
+}))
+
 import { DarklabProjectAssessment } from '../../../app/static/js/features/projects/project_assessment.js'
 
 function apiResponse(payload = {}, { ok = true } = {}) {
@@ -30,6 +39,7 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     enhanceAppSelects: vi.fn(),
     renderProjectExplorer: vi.fn(),
     renderProjectMobileDetail: vi.fn(),
+    invalidateProjectFindings: vi.fn(),
     invalidateProjectOverview: vi.fn(),
     setProjectWorkspaceMessage: vi.fn(),
     showConfirm: vi.fn(async options => options.actions.at(-1).id),
@@ -37,6 +47,8 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     logClientError: vi.fn(),
     mobileView: vi.fn(() => 'list'),
     canMutateProjects: vi.fn(() => true),
+    canTriageFindings: vi.fn(() => true),
+    openContextualFindingRecord,
     ...overrides,
   }
 }
@@ -129,6 +141,7 @@ function responseFor(url, options = {}) {
 describe('project assessment controller', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    openContextualFindingRecord.mockClear()
     document.body.replaceChildren()
   })
 
@@ -164,6 +177,53 @@ describe('project assessment controller', () => {
       'Archive cycle',
     ])
     expect(ctx.enhanceAppSelects).toHaveBeenCalledTimes(2)
+  })
+
+  it('creates a target-scoped finding from an assessment check on desktop and mobile', async () => {
+    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+
+    const desktop = document.createElement('div')
+    controller.renderAssessment(desktop, 'prj_1')
+    const mobile = controller.renderMobileAssessmentTab('prj_1')
+    for (const surface of [desktop, mobile]) {
+      surface.querySelector('.project-assessment-target-toggle')?.click()
+      surface.querySelector('.project-assessment-check-row .btn')?.click()
+      await Promise.resolve()
+    }
+
+    expect(openContextualFindingRecord).toHaveBeenCalledTimes(2)
+    expect(openContextualFindingRecord.mock.calls[0][0]).toEqual(expect.objectContaining({
+      projectId: 'prj_1',
+      targetId: 'ent_1',
+      canEdit: true,
+      defaults: expect.objectContaining({
+        title: 'Service inventory: example.com',
+        summary: 'Record exposed services.',
+      }),
+      evidence: [{
+        evidence_type: 'assessment_check',
+        evidence_id: 'asmc_1',
+        label: 'Service inventory',
+      }],
+    }))
+    await openContextualFindingRecord.mock.calls[0][0].onSaved()
+    expect(ctx.invalidateProjectFindings).toHaveBeenCalledWith('prj_1')
+    expect(ctx.invalidateProjectOverview).toHaveBeenCalledWith('prj_1')
+
+    const viewer = DarklabProjectAssessment.createProjectAssessmentController(makeContext(
+      projectWorkspaceRequest,
+      { canTriageFindings: vi.fn(() => false) },
+    ))
+    await viewer.load('prj_view', { render: false })
+    const viewerSurface = document.createElement('div')
+    viewer.renderAssessment(viewerSurface, 'prj_view')
+    viewerSurface.querySelector('.project-assessment-target-toggle')?.click()
+    const viewerCreate = viewerSurface.querySelector('.project-assessment-check-row .btn')
+    expect(viewerCreate.disabled).toBe(true)
+    expect(viewerCreate.title).toContain('View-only')
   })
 
   it('preserves cycle filters, paging, disclosure, and scroll state per project', async () => {
