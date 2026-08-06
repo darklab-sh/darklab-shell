@@ -135,9 +135,7 @@ def projects_assessments_create(project_id):
     return jsonify({"ok": True, **created}), 201
 
 
-@project_routes.projects_bp.route(
-    "/projects/<project_id>/assessments/<assessment_id>"
-)
+@project_routes.projects_bp.route("/projects/<project_id>/assessments/<assessment_id>")
 def projects_assessments_get(project_id, assessment_id):
     session_id, team_id, error_response = project_routes._project_owner()
     if error_response:
@@ -154,6 +152,9 @@ def projects_assessments_get(project_id, assessment_id):
             check_offset=project_routes._parse_int(
                 request.args.get("offset"), 0, minimum=0, maximum=100000
             ),
+            finding_priority=request.args.get("finding_priority") or "",
+            finding_limit=project_routes._parse_int(request.args.get("finding_limit"), 20, minimum=1, maximum=100),
+            finding_offset=project_routes._parse_int(request.args.get("finding_offset"), 0, minimum=0, maximum=100000),
             team_id=team_id,
         )
     except AssessmentError as exc:

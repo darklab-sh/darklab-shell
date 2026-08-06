@@ -71,6 +71,13 @@ _FINDING_SEVERITY_ORDER = {
     "info": 4,
     "": 5,
 }
+_VALIDATION_METHOD_ORDER = {
+    "active_confirmation": 0,
+    "captured_observation": 1,
+    "manual_assessment": 2,
+    "imported_assertion": 3,
+    "version_inference": 4,
+}
 
 
 def _number(value: Any) -> float | None:
@@ -433,6 +440,33 @@ def _highest_observation_cvss(observations: list[dict[str, Any]]) -> float | Non
     return max(scores) if scores else None
 
 
+def _strongest_validation_method(validation_methods: set[str]) -> str:
+    return min(
+        validation_methods,
+        key=lambda value: (_VALIDATION_METHOD_ORDER.get(value, 5), value),
+        default="",
+    )
+
+
+def _observation_summary(observation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(observation.get("id") or ""),
+        "observation_id": str(observation.get("_worklist_observation_id") or ""),
+        "title": str(observation.get("title") or "Saved finding"),
+        "severity": str(observation.get("severity") or "info"),
+        "validation_method": finding_validation_method(observation),
+        "first_seen_at": str(
+            observation.get("first_seen_at") or observation.get("created") or ""
+        ),
+        "last_seen_at": str(
+            observation.get("last_seen_at")
+            or observation.get("first_seen_at")
+            or observation.get("created")
+            or ""
+        ),
+    }
+
+
 def build_remediation_worklist(
     findings: list[dict[str, Any]],
     conn: Any | None = None,
@@ -506,6 +540,9 @@ def build_remediation_worklist(
             })
             observation = dict(finding)
             observation["risk"] = risk_by_cve.get(vulnerability_id, finding.get("risk"))
+            observation["_worklist_observation_id"] = str(
+                reference.get("observation_id") or ""
+            )
             group["observations"].append(observation)
             group["evidence_keys"].update(finding_evidence_keys(finding))
             group["validation_methods"].add(finding_validation_method(finding))
@@ -532,12 +569,34 @@ def build_remediation_worklist(
             for item in observations
             if str(item.get("first_seen_at") or item.get("created") or "")
         ]
+        latest_times = [
+            str(
+                item.get("last_seen_at")
+                or item.get("first_seen_at")
+                or item.get("created")
+                or ""
+            )
+            for item in observations
+            if str(
+                item.get("last_seen_at")
+                or item.get("first_seen_at")
+                or item.get("created")
+                or ""
+            )
+        ]
         worklist.append({
             **group,
             "representative_finding_id": str(representative.get("id") or ""),
+            "title": str(representative.get("title") or "Saved finding"),
             "observation_count": len(observations),
             "evidence_count": len(evidence_keys),
             "validation_methods": sorted(validation_methods),
+            "strongest_validation_method": _strongest_validation_method(
+                validation_methods
+            ),
+            "observation_summaries": [
+                _observation_summary(observation) for observation in observations
+            ],
             "rule_identity": rule_identities[0] if group["identity_kind"] == "rule" else "",
             "rule_identities": rule_identities,
             "exact_remediation_ids": exact_remediation_ids,
@@ -549,6 +608,7 @@ def build_remediation_worklist(
             "severities": severities,
             "cvss_score": _highest_observation_cvss(observations),
             "first_seen_at": min(observed_times) if observed_times else "",
+            "last_seen_at": max(latest_times) if latest_times else "",
         })
     _sort_by_cve_risk(worklist)
     return worklist

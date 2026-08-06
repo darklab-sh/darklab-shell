@@ -1245,6 +1245,7 @@ describe('shell chrome project workspace', () => {
         expect(focusCycle).toHaveBeenCalledWith('project-1', 'asmt-active', {
           category: '',
           state: '',
+          priority: '',
         })
       })
     } finally {

@@ -18,6 +18,7 @@ function apiResponse(payload = {}, { ok = true, status = ok ? 200 : 500 } = {}) 
 function loadOverviewModule() {
   return fromDomScripts(
     [
+      'app/static/js/features/findings/finding_risk.js',
       'app/static/js/features/projects/project_finding_changes.js',
       'app/static/js/features/projects/project_overview.js',
     ],
@@ -96,6 +97,31 @@ const overviewPayload = {
       untested_checks: 2,
       excluded_checks: 1,
       unavailable_evidence_checks: 1,
+    },
+    fix_first: {
+      items: [{
+        remediation_id: 'rmd_1',
+        vulnerability_id: 'CVE-2026-10001',
+        title: 'Internet-facing vulnerable service',
+        risk: {
+          kev: { listed: true, freshness: 'current' },
+          epss: { probability: 0.42, freshness: 'current' },
+          cvss: { score: 9.8, freshness: 'current' },
+        },
+      }],
+      total: 4,
+      limit: 3,
+      offset: 0,
+      has_more: true,
+      priority: '',
+      rollup: {
+        total: 4,
+        kev_listed: 1,
+        epss_scored: 3,
+        cvss_scored: 4,
+        unscored: 0,
+      },
+      source_finding_count: 5,
     },
   },
   assessment_finding_changes: {
@@ -360,6 +386,10 @@ describe('project overview controller', () => {
     expect(assessmentText).toContain('Awaiting review')
     expect(assessmentText).toContain('Untested')
     expect(assessmentText).toContain('Excluded')
+    expect(assessmentText).toContain('Fix first')
+    expect(assessmentText).toContain('4 remediation groups · 1 CISA KEV')
+    expect(assessmentText).toContain('CVE-2026-10001')
+    expect(assessmentText).toContain('EPSS 42.0%')
     expect(assessmentText).toContain('1 check references saved evidence that can no longer be opened')
     container.querySelector('[data-project-overview-assessment="asmt_1"]').click()
     expect(ctx.openProjectAssessment).toHaveBeenCalledWith('prj_1', { assessmentId: 'asmt_1' })
@@ -371,6 +401,18 @@ describe('project overview controller', () => {
     expect(findingChanges?.textContent).toContain('distinct remediation groups')
     findingChanges?.querySelector('[data-project-finding-changes-assessment="asmt_1"]')?.click()
     expect(ctx.openProjectAssessment).toHaveBeenLastCalledWith('prj_1', { assessmentId: 'asmt_1' })
+    const fixFirstButtons = [...container.querySelectorAll('.project-overview-assessment-fix-first-actions .btn')]
+    expect(fixFirstButtons.map(button => button.textContent)).toEqual(['Open fix-first', 'Show CISA KEV'])
+    fixFirstButtons[0].click()
+    expect(ctx.openProjectAssessment).toHaveBeenLastCalledWith('prj_1', {
+      assessmentId: 'asmt_1',
+      priority: '',
+    })
+    fixFirstButtons[1].click()
+    expect(ctx.openProjectAssessment).toHaveBeenLastCalledWith('prj_1', {
+      assessmentId: 'asmt_1',
+      priority: 'kev',
+    })
     const tempoText = container.querySelector('.project-overview-tempo')?.textContent || ''
     expect(tempoText).toContain('Last run')
     expect(tempoText).toContain('2026-06-24 13:00:00+00:00')

@@ -5,6 +5,7 @@
 
 import { bindDisclosure } from '../../ui/ui_disclosure.js';
 import { openActionSheet } from '../../ui/ui_action_sheet.js';
+import { renderAssessmentFindingWorklist } from './project_assessment_risk_renderer.js';
 
 const checkStateLabels = {
   blocked: 'Blocked',
@@ -613,6 +614,7 @@ function createProjectAssessmentRenderer(context, actions) {
     if (!st.detail) return root;
     root.append(
       renderCoverage(st.detail.rollup),
+      renderAssessmentFindingWorklist(ctx, act, projectId, st, st.detail.finding_worklist),
       renderFindingDeltas(projectId, st.detail.finding_deltas),
       renderCategoryProgress(projectId, st, st.detail.category_rollups),
       renderChecks(projectId, st, st.detail),

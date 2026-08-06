@@ -28,6 +28,9 @@ function createProjectAssessmentController(context) {
       detailError: '',
       category: '',
       checkState: '',
+      findingPriority: '',
+      findingLimit: 10,
+      findingOffset: 0,
       limit: 50,
       offset: 0,
       checksScrollTop: 0,
@@ -81,6 +84,9 @@ function createProjectAssessmentController(context) {
     const params = new URLSearchParams({ limit: String(st.limit), offset: String(st.offset) });
     if (st.category) params.set('category', st.category);
     if (st.checkState) params.set('state', st.checkState);
+    params.set('finding_limit', String(st.findingLimit));
+    params.set('finding_offset', String(st.findingOffset));
+    if (st.findingPriority) params.set('finding_priority', st.findingPriority);
     return params.toString();
   }
 
@@ -166,11 +172,15 @@ function createProjectAssessmentController(context) {
     return promise;
   }
 
-  function resetDetailState(st) {
+  function resetDetailState(st, { findings = true } = {}) {
     st.detail = null;
     st.offset = 0;
     st.checksScrollTop = 0;
     st.expandedTargets.clear();
+    if (findings) {
+      st.findingPriority = '';
+      st.findingOffset = 0;
+    }
   }
 
   async function selectCycle(projectId, assessmentId) {
@@ -193,7 +203,9 @@ function createProjectAssessmentController(context) {
     st.selectedId = nextId;
     st.category = String(filters.category || '');
     st.checkState = String(filters.state || '');
-    resetDetailState(st);
+    st.findingPriority = String(filters.priority || '');
+    st.findingOffset = 0;
+    resetDetailState(st, { findings: false });
     renderViews();
     if (st.loaded && st.assessments.some(item => String(item?.id || '') === nextId)) {
       return loadDetail(id);
@@ -208,7 +220,7 @@ function createProjectAssessmentController(context) {
     if (key === 'category') st.category = normalized;
     else if (key === 'state') st.checkState = normalized;
     else return false;
-    resetDetailState(st);
+    resetDetailState(st, { findings: false });
     renderViews();
     return loadDetail(projectId);
   }
@@ -219,6 +231,27 @@ function createProjectAssessmentController(context) {
     if (nextOffset === st.offset) return false;
     st.offset = nextOffset;
     st.checksScrollTop = 0;
+    st.detail = null;
+    renderViews();
+    return loadDetail(projectId);
+  }
+
+  async function setFindingFilter(projectId, priority) {
+    const st = stateFor(projectId);
+    const normalized = String(priority || '');
+    if (normalized === st.findingPriority && st.findingOffset === 0) return false;
+    st.findingPriority = normalized;
+    st.findingOffset = 0;
+    st.detail = null;
+    renderViews();
+    return loadDetail(projectId);
+  }
+
+  async function setFindingPage(projectId, offset) {
+    const st = stateFor(projectId);
+    const nextOffset = Math.max(0, Number(offset || 0));
+    if (nextOffset === st.findingOffset) return false;
+    st.findingOffset = nextOffset;
     st.detail = null;
     renderViews();
     return loadDetail(projectId);
@@ -485,6 +518,8 @@ function createProjectAssessmentController(context) {
     openDeltaFinding,
     selectCycle,
     setFilter,
+    setFindingFilter,
+    setFindingPage,
     setPage,
     transitionCycle,
   });
@@ -519,6 +554,8 @@ function createProjectAssessmentController(context) {
     renderMobileAssessmentTab,
     selectCycle,
     setFilter,
+    setFindingFilter,
+    setFindingPage,
     setPage,
     stateFor,
     transitionCycle,

@@ -139,10 +139,7 @@ def api_project_assessments(project_id):
     return jsonify(page)
 
 
-@api_routes.api_v1_bp.route(
-    "/projects/<project_id>/assessments",
-    methods=["POST"],
-)
+@api_routes.api_v1_bp.route("/projects/<project_id>/assessments", methods=["POST"])
 @api_routes.require_api_auth
 def api_project_assessment_create(project_id):
     try:
@@ -211,6 +208,9 @@ def api_project_assessment(project_id, assessment_id):
                 minimum=0,
                 maximum=100000,
             ),
+            finding_priority=request.args.get("finding_priority") or "",
+            finding_limit=api_routes._parse_int(request.args.get("finding_limit"), 20, minimum=1, maximum=100),
+            finding_offset=api_routes._parse_int(request.args.get("finding_offset"), 0, minimum=0, maximum=100000),
             team_id=owner_scope.team_id,
         )
     except AssessmentError as exc:

@@ -792,6 +792,9 @@
           "finding_deltas": {
             "$ref": "#/components/schemas/AssessmentFindingDeltaPage"
           },
+          "finding_worklist": {
+            "$ref": "#/components/schemas/AssessmentFindingWorklistPage"
+          },
           "rollup": {
             "$ref": "#/components/schemas/AssessmentRollup"
           }
@@ -801,6 +804,7 @@
           "rollup",
           "category_rollups",
           "finding_deltas",
+          "finding_worklist",
           "checks"
         ],
         "type": "object"
@@ -1434,6 +1438,298 @@
           "regressed",
           "incomparable",
           "total"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingObservationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "first_seen_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "observation_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "validation_method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "observation_id",
+          "title",
+          "severity",
+          "validation_method",
+          "first_seen_at",
+          "last_seen_at"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingWorklistItem": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_subject": {
+            "type": "string"
+          },
+          "affected_subjects": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "cvss_score": {
+            "nullable": true,
+            "type": "number"
+          },
+          "evidence_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exact_remediation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "first_seen_at": {
+            "type": "string"
+          },
+          "has_remediation": {
+            "type": "boolean"
+          },
+          "identity_kind": {
+            "enum": [
+              "vulnerability",
+              "rule"
+            ],
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "observation_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "observation_summaries": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingObservationSummary"
+            },
+            "type": "array"
+          },
+          "priority_context": {
+            "$ref": "#/components/schemas/FindingPriorityContext"
+          },
+          "remediation_group_id": {
+            "type": "string"
+          },
+          "remediation_group_member_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "remediation_group_merged": {
+            "type": "boolean"
+          },
+          "remediation_id": {
+            "type": "string"
+          },
+          "remediation_preview": {
+            "type": "string"
+          },
+          "remediation_source": {
+            "type": "string"
+          },
+          "remediation_updated_at": {
+            "type": "string"
+          },
+          "representative_finding_id": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CveRiskSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rule_identities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rule_identity": {
+            "type": "string"
+          },
+          "severities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "strongest_validation_method": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "validation_methods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "vulnerability_id": {
+            "type": "string"
+          },
+          "vulnerability_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "remediation_id",
+          "remediation_group_id",
+          "remediation_group_merged",
+          "remediation_group_member_count",
+          "identity_kind",
+          "vulnerability_id",
+          "affected_subject",
+          "review_state",
+          "has_remediation",
+          "remediation_preview",
+          "remediation_source",
+          "remediation_updated_at",
+          "representative_finding_id",
+          "title",
+          "observation_count",
+          "evidence_count",
+          "validation_methods",
+          "strongest_validation_method",
+          "observation_summaries",
+          "rule_identity",
+          "rule_identities",
+          "exact_remediation_ids",
+          "affected_subjects",
+          "vulnerability_ids",
+          "priority_context",
+          "risk",
+          "severity",
+          "severities",
+          "cvss_score",
+          "first_seen_at",
+          "last_seen_at"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingWorklistPage": {
+        "additionalProperties": false,
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentFindingWorklistItem"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "priority": {
+            "enum": [
+              "",
+              "kev",
+              "epss",
+              "cvss",
+              "unscored"
+            ],
+            "type": "string"
+          },
+          "rollup": {
+            "$ref": "#/components/schemas/AssessmentFindingWorklistRollup"
+          },
+          "source_finding_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "priority",
+          "rollup",
+          "source_finding_count"
+        ],
+        "type": "object"
+      },
+      "AssessmentFindingWorklistRollup": {
+        "additionalProperties": false,
+        "properties": {
+          "cvss_scored": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "epss_scored": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kev_listed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unscored": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "kev_listed",
+          "epss_scored",
+          "cvss_scored",
+          "unscored"
         ],
         "type": "object"
       },
@@ -9922,6 +10218,40 @@
                 "none"
               ],
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "finding_priority",
+            "schema": {
+              "enum": [
+                "",
+                "kev",
+                "epss",
+                "cvss",
+                "unscored"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "finding_limit",
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "finding_offset",
+            "schema": {
+              "default": 0,
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
             }
           },
           {

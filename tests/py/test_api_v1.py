@@ -1179,7 +1179,8 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     )
     filtered_response = client.get(
         f"/api/v1/projects/{project['id']}/assessments/{assessment_id}"
-        "?state=not_started&policy_level=standard&limit=1&offset=0",
+        "?state=not_started&policy_level=standard&limit=1&offset=0"
+        "&finding_priority=unscored&finding_limit=1&finding_offset=0",
         headers=headers,
     )
     cross_scope = client.get(
@@ -1213,6 +1214,22 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         "items": [],
         "item_limit": 100,
         "truncated": False,
+    }
+    assert filtered["finding_worklist"] == {
+        "items": [],
+        "total": 0,
+        "limit": 1,
+        "offset": 0,
+        "has_more": False,
+        "priority": "unscored",
+        "rollup": {
+            "total": 0,
+            "kev_listed": 0,
+            "epss_scored": 0,
+            "cvss_scored": 0,
+            "unscored": 0,
+        },
+        "source_finding_count": 0,
     }
     assert cross_scope.status_code == 404
     assert json.loads(cross_scope.data)["error"]["code"] == "not_found"
@@ -5244,6 +5261,9 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "target_type",
         "policy_level",
         "evidence_state",
+        "finding_priority",
+        "finding_limit",
+        "finding_offset",
         "limit",
         "offset",
     } == detail_params
@@ -5264,8 +5284,16 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "not_applicable",
     ]
     assert "finding_deltas" in schemas["AssessmentDetail"]["required"]
+    assert "finding_worklist" in schemas["AssessmentDetail"]["required"]
     assert schemas["AssessmentDetail"]["properties"]["finding_deltas"] == {
         "$ref": "#/components/schemas/AssessmentFindingDeltaPage"
+    }
+    assert schemas["AssessmentDetail"]["properties"]["finding_worklist"] == {
+        "$ref": "#/components/schemas/AssessmentFindingWorklistPage"
+    }
+    assert schemas["AssessmentFindingWorklistPage"]["properties"]["items"] == {
+        "type": "array",
+        "items": {"$ref": "#/components/schemas/AssessmentFindingWorklistItem"},
     }
     assert schemas["AssessmentFindingDelta"]["properties"]["state"]["enum"] == [
         "new",

@@ -8,6 +8,11 @@ from __future__ import annotations
 from typing import Any
 
 from services.api_v1.openapi_assessment_deltas import assessment_delta_schemas
+from services.api_v1.openapi_assessment_worklist import (
+    assessment_detail_schema,
+    assessment_worklist_query_params,
+    assessment_worklist_schemas,
+)
 
 
 def _ref(name: str) -> dict[str, str]:
@@ -74,6 +79,7 @@ def assessment_schemas() -> dict[str, Any]:
     nullable_string = {"type": "string", "nullable": True}
     return {
         **assessment_delta_schemas(),
+        **assessment_worklist_schemas(),
         "AssessmentEvidenceRuleSnapshot": {
             "type": "object",
             "required": [
@@ -392,21 +398,7 @@ def assessment_schemas() -> dict[str, Any]:
             },
             "additionalProperties": False,
         },
-        "AssessmentDetail": {
-            "type": "object",
-            "required": ["assessment", "rollup", "category_rollups", "finding_deltas", "checks"],
-            "properties": {
-                "assessment": _ref("AssessmentCycle"),
-                "rollup": _ref("AssessmentRollup"),
-                "category_rollups": {
-                    "type": "array",
-                    "items": _ref("AssessmentCategoryRollup"),
-                },
-                "finding_deltas": _ref("AssessmentFindingDeltaPage"),
-                "checks": _ref("AssessmentCheckPage"),
-            },
-            "additionalProperties": False,
-        },
+        "AssessmentDetail": assessment_detail_schema(),
         "AssessmentCreateRequest": {
             "type": "object",
             "required": ["profile_key"],
@@ -614,6 +606,7 @@ def assessment_paths() -> dict[str, Any]:
             "evidence_state",
             values=["available", "unavailable", "none"],
         ),
+        *assessment_worklist_query_params(_query_param),
         *page,
     ]
     return {

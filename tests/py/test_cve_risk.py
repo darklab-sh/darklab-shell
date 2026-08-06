@@ -471,6 +471,13 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
     assert shared["observation_count"] == 2
     assert shared["evidence_count"] == 2
     assert shared["validation_methods"] == ["active_confirmation", "version_inference"]
+    assert shared["strongest_validation_method"] == "active_confirmation"
+    assert shared["title"] == "CVE-2026-12345 confirmed"
+    assert [item["id"] for item in shared["observation_summaries"]] == [
+        "finding-confirmed",
+        "finding-inferred",
+    ]
+    assert shared["last_seen_at"] == "2026-08-02"
     assert shared["rule_identity"] == ""
     assert shared["rule_identities"] == [
         "observation:finding-confirmed",

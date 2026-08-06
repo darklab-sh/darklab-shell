@@ -4,6 +4,7 @@
 // Project Overview tab controller.
 // Loaded lazily; shell chrome supplies request, filter, and render callbacks.
 import { renderProjectFindingChangesSummary } from './project_finding_changes.js';
+import { findingRiskSummary } from '../findings/finding_risk.js';
 
 let exportedDarklabProjectOverview = null;
 
@@ -492,6 +493,64 @@ let exportedDarklabProjectOverview = null;
         summaryCard('Excluded', formatCount(source.excluded_checks), 'blocked, skipped, or not applicable', '', 'compact'),
       );
       section.append(heading, grid);
+      const fixFirst = assessment.fix_first && typeof assessment.fix_first === 'object'
+        ? assessment.fix_first
+        : {};
+      const fixRollup = fixFirst.rollup && typeof fixFirst.rollup === 'object'
+        ? fixFirst.rollup
+        : {};
+      const fixFirstPanel = document.createElement('div');
+      fixFirstPanel.className = 'project-overview-assessment-fix-first';
+      const fixFirstHeading = document.createElement('div');
+      fixFirstHeading.className = 'project-overview-assessment-fix-first-heading';
+      const fixFirstCopy = document.createElement('div');
+      const fixFirstTitle = document.createElement('strong');
+      fixFirstTitle.textContent = 'Fix first';
+      const fixFirstMeta = document.createElement('span');
+      fixFirstMeta.textContent = `${formatCount(fixRollup.total)} remediation groups · ${formatCount(fixRollup.kev_listed)} CISA KEV`;
+      fixFirstCopy.append(fixFirstTitle, fixFirstMeta);
+      const fixFirstActions = document.createElement('div');
+      fixFirstActions.className = 'project-overview-assessment-fix-first-actions';
+      const openFixFirst = (label, priority = '') => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-secondary btn-compact';
+        button.textContent = label;
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (typeof ctx.openProjectAssessment === 'function') {
+            ctx.openProjectAssessment(projectId, {
+              assessmentId: String(assessment.id || ''),
+              priority,
+            });
+            return;
+          }
+          gotoTab(projectId, 'assessment', {});
+        });
+        ctx.bindProjectRuntimePressable?.(button);
+        fixFirstActions.appendChild(button);
+      };
+      openFixFirst('Open fix-first');
+      if (Number(fixRollup.kev_listed || 0) > 0) openFixFirst('Show CISA KEV', 'kev');
+      fixFirstHeading.append(fixFirstCopy, fixFirstActions);
+      fixFirstPanel.appendChild(fixFirstHeading);
+      const priorityItems = Array.isArray(fixFirst.items) ? fixFirst.items : [];
+      if (priorityItems.length) {
+        const list = document.createElement('div');
+        list.className = 'project-overview-assessment-fix-first-list';
+        priorityItems.forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'project-overview-assessment-fix-first-row';
+          const identity = document.createElement('strong');
+          identity.textContent = String(item?.vulnerability_id || item?.rule_identity || item?.title || 'Saved finding');
+          const signals = document.createElement('span');
+          signals.textContent = findingRiskSummary(item) || 'No stored public exploit signal';
+          row.append(identity, signals);
+          list.appendChild(row);
+        });
+        fixFirstPanel.appendChild(list);
+      }
+      section.appendChild(fixFirstPanel);
       if (Number(source.unavailable_evidence_checks || 0) > 0) {
         const unavailable = Number(source.unavailable_evidence_checks || 0);
         const warning = document.createElement('div');

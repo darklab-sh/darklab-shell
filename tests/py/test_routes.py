@@ -6265,6 +6265,22 @@ class TestProjectRoutes:
         assert payload["active_assessment"]["profile_key"] == "network"
         assert payload["active_assessment"]["status"] == "active"
         assert payload["active_assessment"]["rollup"]["applicable_checks"] > 0
+        assert payload["active_assessment"]["fix_first"] == {
+            "items": [],
+            "total": 0,
+            "limit": 3,
+            "offset": 0,
+            "has_more": False,
+            "priority": "",
+            "rollup": {
+                "total": 0,
+                "kev_listed": 0,
+                "epss_scored": 0,
+                "cvss_scored": 0,
+                "unscored": 0,
+            },
+            "source_finding_count": 0,
+        }
         assert "profile_snapshot" not in payload["active_assessment"]
         assert "team_id" not in payload["active_assessment"]
         target_row = payload["targets"][0]

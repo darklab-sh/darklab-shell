@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
 from services.assessments.serialization import row_to_rollup
 
 
@@ -97,4 +98,9 @@ def active_assessment_summary_for_project(
         "started_at": row["started_at"],
         "updated_at": row["updated_at"],
         "rollup": assessment_rollup(conn, str(row["id"] or "")),
+        "fix_first": assessment_finding_worklist_on_conn(
+            conn,
+            str(row["id"] or ""),
+            limit=3,
+        ),
     }

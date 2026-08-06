@@ -4544,7 +4544,9 @@ let importedProjectWorkspaceShell;
     _renderProjectExplorer();
   }
 
-  function _openProjectAssessment(projectId, { assessmentId = '', category = '', state = '' } = {}) {
+  function _openProjectAssessment(projectId, {
+    assessmentId = '', category = '', state = '', priority = '',
+  } = {}) {
     const normalizedProjectId = String(projectId || projectWorkspaceState.selectedId() || '').trim();
     const normalizedAssessmentId = String(assessmentId || '').trim();
     if (!normalizedProjectId || !normalizedAssessmentId) return;
@@ -4555,6 +4557,7 @@ let importedProjectWorkspaceShell;
       .then(controller => controller.focusCycle(normalizedProjectId, normalizedAssessmentId, {
         category: String(category || '').trim(),
         state: String(state || '').trim(),
+        priority: String(priority || '').trim(),
       }))
       .catch((err) => {
         _shellLogClientError('failed to open project assessment cycle', err);

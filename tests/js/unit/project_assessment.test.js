@@ -102,6 +102,54 @@ const detail = {
     applicable_checks: 2,
     covered_checks: 1,
   }],
+  finding_worklist: {
+    items: [{
+      remediation_id: 'rmd_1',
+      remediation_group_id: 'rmd_1',
+      vulnerability_id: 'CVE-2026-10001',
+      rule_identity: '',
+      title: 'Internet-facing service is vulnerable',
+      severity: 'critical',
+      observation_count: 2,
+      evidence_count: 2,
+      last_seen_at: '2026-08-05T12:00:00+00:00',
+      strongest_validation_method: 'active_confirmation',
+      validation_methods: ['active_confirmation', 'version_inference'],
+      observation_summaries: [
+        {
+          id: 'fnd_confirmed',
+          title: 'Confirmed template match',
+          severity: 'critical',
+          validation_method: 'active_confirmation',
+        },
+        {
+          id: 'fnd_inferred',
+          title: 'Version match',
+          severity: 'high',
+          validation_method: 'version_inference',
+        },
+      ],
+      priority_context: { confidence: ['high'], exposure: ['internet'], assets: [] },
+      risk: {
+        kev: { listed: true, freshness: 'current' },
+        epss: { probability: 0.42, percentile: 0.97, freshness: 'current' },
+        cvss: { score: 9.8, freshness: 'current' },
+      },
+    }],
+    total: 12,
+    limit: 10,
+    offset: 0,
+    has_more: true,
+    priority: '',
+    rollup: {
+      total: 12,
+      kev_listed: 1,
+      epss_scored: 8,
+      cvss_scored: 10,
+      unscored: 2,
+    },
+    source_finding_count: 13,
+  },
   checks: {
     checks: [
       {
@@ -296,6 +344,46 @@ describe('project assessment controller', () => {
     expect(mobile.querySelector('.project-assessment-delta-evidence .btn')?.getBoundingClientRect).toBeDefined()
   })
 
+  it('renders and filters a remediation-level fix-first worklist on desktop and mobile', async () => {
+    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+
+    const desktop = document.createElement('div')
+    controller.renderAssessment(desktop, 'prj_1')
+    const mobile = controller.renderMobileAssessmentTab('prj_1')
+    for (const surface of [desktop, mobile]) {
+      const worklist = surface.querySelector('.project-assessment-risk')
+      expect(worklist?.textContent).toContain('Fix first')
+      expect(worklist?.textContent).toContain('CISA KEV · 1')
+      expect(worklist?.textContent).toContain('CVE-2026-10001')
+      expect(worklist?.textContent).toContain('EPSS 42.0%')
+      expect(worklist?.textContent).toContain('CVSS 9.8')
+      expect(worklist?.textContent).toContain('Actively confirmed')
+      expect(worklist?.textContent).toContain('last seen')
+      const observations = worklist.querySelector('.project-assessment-risk-observation-toggle')
+      expect(observations.getAttribute('aria-expanded')).toBe('false')
+      observations.click()
+      expect(observations.getAttribute('aria-expanded')).toBe('true')
+      expect(worklist.textContent).toContain('Confirmed template match')
+      expect(worklist.textContent).toContain('Version match')
+    }
+
+    desktop.querySelectorAll('.project-assessment-risk-observation .btn')[0].click()
+    await vi.waitFor(() => expect(openFindingTriageEditor).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'fnd_confirmed' }),
+      expect.objectContaining({ projectId: 'prj_1' }),
+    ))
+    await controller.setFindingFilter('prj_1', 'kev')
+    await controller.setFindingPage('prj_1', 10)
+    const focusedUrl = projectWorkspaceRequest.mock.calls.map(([url]) => url).at(-1)
+    expect(focusedUrl).toContain('finding_priority=kev')
+    expect(focusedUrl).toContain('finding_offset=10')
+    expect(controller.stateFor('prj_1').category).toBe('')
+    expect(controller.stateFor('prj_1').offset).toBe(0)
+  })
+
   it('preserves cycle filters, paging, disclosure, and scroll state per project', async () => {
     const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
     const controller = DarklabProjectAssessment.createProjectAssessmentController(
@@ -305,6 +393,8 @@ describe('project assessment controller', () => {
     await controller.setFilter('prj_1', 'category', 'discovery')
     await controller.setFilter('prj_1', 'state', 'needs_review')
     await controller.setPage('prj_1', 50)
+    await controller.setFindingFilter('prj_1', 'epss')
+    await controller.setFindingPage('prj_1', 10)
 
     const detailUrls = projectWorkspaceRequest.mock.calls
       .map(([url]) => url)
@@ -312,6 +402,8 @@ describe('project assessment controller', () => {
     expect(detailUrls.at(-1)).toContain('limit=50&offset=50')
     expect(detailUrls.at(-1)).toContain('category=discovery')
     expect(detailUrls.at(-1)).toContain('state=needs_review')
+    expect(detailUrls.at(-1)).toContain('finding_priority=epss')
+    expect(detailUrls.at(-1)).toContain('finding_offset=10')
 
     const container = document.createElement('div')
     controller.renderAssessment(container, 'prj_1')
@@ -325,6 +417,8 @@ describe('project assessment controller', () => {
     expect(state.category).toBe('discovery')
     expect(state.checkState).toBe('needs_review')
     expect(state.offset).toBe(50)
+    expect(state.findingPriority).toBe('epss')
+    expect(state.findingOffset).toBe(10)
     expect(state.checksScrollTop).toBe(137)
     expect(container.querySelector('.project-assessment-target-list').scrollTop).toBe(137)
     expect(container.querySelector('.project-assessment-target-toggle').getAttribute('aria-expanded')).toBe('true')
@@ -335,6 +429,8 @@ describe('project assessment controller', () => {
     expect(state.category).toBe('discovery')
     expect(state.checkState).toBe('needs_review')
     expect(state.offset).toBe(50)
+    expect(state.findingPriority).toBe('epss')
+    expect(state.findingOffset).toBe(10)
     expect(state.checksScrollTop).toBe(137)
     expect(state.expandedTargets.has('domain:ent_1')).toBe(true)
   })
@@ -352,21 +448,26 @@ describe('project assessment controller', () => {
       makeContext(projectWorkspaceRequest),
     )
     await controller.load('prj_1', { render: false })
+    controller.stateFor('prj_1').findingOffset = 10
 
     await controller.focusCycle('prj_1', 'asmt_old', {
       category: 'discovery',
       state: 'needs_review',
+      priority: 'kev',
     })
 
     const state = controller.stateFor('prj_1')
     expect(state.selectedId).toBe('asmt_old')
     expect(state.category).toBe('discovery')
     expect(state.checkState).toBe('needs_review')
+    expect(state.findingPriority).toBe('kev')
+    expect(state.findingOffset).toBe(0)
     expect(state.offset).toBe(0)
     const focusedUrl = projectWorkspaceRequest.mock.calls.map(([url]) => url).at(-1)
     expect(focusedUrl).toContain('/assessments/asmt_old?')
     expect(focusedUrl).toContain('category=discovery')
     expect(focusedUrl).toContain('state=needs_review')
+    expect(focusedUrl).toContain('finding_priority=kev')
   })
 
   it('starts a profile-driven cycle and keeps the action read-only for viewers', async () => {

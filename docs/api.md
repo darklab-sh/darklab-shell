@@ -126,7 +126,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
 | `GET` | `/api/v1/projects/<project_id>/assessments` | Assessment-cycle page with status, archived-visibility, limit, and offset controls. |
 | `POST` | `/api/v1/projects/<project_id>/assessments` | Create an active assessment cycle from a saved profile definition. |
-| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | One assessment cycle with rollups and a bounded, filtered check page. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | One assessment cycle with coverage, finding-change, and fix-first rollups plus independently paged check and remediation worklists. Check filters use `category`, `state`, `target_type`, `policy_level`, and `evidence_state`; fix-first filters use `finding_priority`, `finding_limit`, and `finding_offset`. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Rename, complete, or archive an assessment cycle. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Set or clear a reasoned manual check state. |
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Link one compatible saved evidence source to a check. |

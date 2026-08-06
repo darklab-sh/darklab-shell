@@ -1008,7 +1008,9 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
     from services.assessments.handoff import project_assessment_finding_changes_on_conn
+    from services.projects.finding_identity import finding_identity_references
 
     raw_conn = postgres_schema.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
@@ -1045,7 +1047,41 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
         "'comparable', '', ?)",
         (timestamp,),
     )
+    finding = {
+        "id": "finding-handoff",
+        "session_id": "assessment-handoff",
+        "team_id": "",
+        "subject_key": "handoff.example",
+        "signature_hash": "signature-handoff",
+        "origin": "run",
+        "validation_method": "active_confirmation",
+    }
+    selected_remediation_id = finding_identity_references(
+        finding,
+        ["CVE-2026-10001"],
+    )[0]["remediation_id"]
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, team_id, subject_key, signature_hash, origin, "
+        "validation_method, severity, status, title, cve_ids_json, first_seen_at, "
+        "last_seen_at, created) VALUES (?, ?, '', ?, ?, ?, ?, 'critical', 'new', "
+        "'Postgres worklist finding', ?, ?, ?, ?)",
+        (
+            finding["id"],
+            finding["session_id"],
+            finding["subject_key"],
+            finding["signature_hash"],
+            finding["origin"],
+            finding["validation_method"],
+            Jsonb(["CVE-2026-10001"]),
+            timestamp,
+            timestamp,
+            timestamp,
+        ),
+    )
     for suffix, state in (("selected", "regressed"), ("other", "new")):
+        remediation_id = selected_remediation_id if suffix == "selected" else "rmd-other"
+        observations = Jsonb([{"finding_id": finding["id"]}]) if suffix == "selected" else Jsonb([])
         conn.execute(
             "INSERT INTO project_assessment_finding_deltas "
             "(id, comparison_id, current_assessment_id, current_check_id, remediation_id, "
@@ -1056,9 +1092,9 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
             "'CVE-2026-10001', 'known-cves', 'entity:handoff', ?, ?, ?, ?, ?, ?)",
             (
                 f"delta-{suffix}",
-                f"rmd-{suffix}",
+                remediation_id,
                 state,
-                Jsonb([]),
+                observations,
                 Jsonb([]),
                 Jsonb([f"evidence-{suffix}"]),
                 Jsonb([]),
@@ -1069,8 +1105,9 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
     handoff = project_assessment_finding_changes_on_conn(
         conn,
         "prj-assessment-handoff",
-        remediation_ids=["rmd-selected"],
+        remediation_ids=[selected_remediation_id],
     )
+    worklist = assessment_finding_worklist_on_conn(conn, "asm-handoff")
 
     assert handoff is not None
     assert handoff["rollup"] == {
@@ -1081,8 +1118,13 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
         "incomparable": 0,
         "total": 1,
     }
-    assert [item["remediation_id"] for item in handoff["items"]] == ["rmd-selected"]
+    assert [item["remediation_id"] for item in handoff["items"]] == [
+        selected_remediation_id,
+    ]
     assert handoff["items"][0]["current_evidence_ids"] == ["evidence-selected"]
+    assert worklist["total"] == 1
+    assert worklist["items"][0]["remediation_id"] == selected_remediation_id
+    assert worklist["items"][0]["strongest_validation_method"] == "active_confirmation"
 
 
 @pytest.mark.postgres

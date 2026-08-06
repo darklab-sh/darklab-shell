@@ -125,13 +125,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 - [ ] Extend the existing Projects workspace instead of creating separate chrome:
   - Preserve the current Assessment cycle, filters, paging, expanded targets, scroll position, and return context when opening Atlas, Run Details, Findings, Files, Workflows, or a confirmation.
-  - Add a risk-prioritized finding worklist and recent-evidence drill-ins after the existing cycle status, truthful coverage, category progress, target worklist, and paged checks.
-  - Count remediation groups rather than evidence observations in the fix-first worklist and headline finding rollups. Show the number and strongest validation state of related observations on each row, then expand inferred, confirmed, imported, and manual evidence in the finding detail.
-  - Keep coverage and risk as neighboring but separate questions. Show why a finding is prioritized with KEV, EPSS, CVSS, exploit-reference, confidence, exposure, age, and freshness labels; do not let a high-risk count imply that an untested check was covered.
   - Add recommended-action controls with the shared `.btn`, focus, dismissal, `showConfirm()`, and mobile `openActionSheet()` contracts. Keep mobile row actions touch-sized and use a sticky action footer where needed.
-- [ ] Finish the risk side of the Overview connection:
-  - Add a compact fix-first summary that links into the exact Assessment filters. The active-cycle status and truthful coverage card already use the shared assessment rollup and open the matching Assessment cycle; the detailed methodology matrix and ranked worklist remain owned by the Assessment tab.
-  - Use the shared risk-ranking service so Overview, Assessment, Findings, API v1, packages, and reports cannot disagree about the default fix-first order.
 
 #### Phase 5 — Add reusable, secret-backed HTTP assessment profiles
 

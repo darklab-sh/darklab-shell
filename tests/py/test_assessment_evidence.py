@@ -27,6 +27,7 @@ from services.assessments.evidence_matching import (
     matching_run_rule,
     target_matches,
 )
+from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
 from services.assessments.handoff import get_project_assessment_finding_changes
 from services.assessments.lifecycle import update_assessment_cycle
 from services.assessments.mutations import update_manual_check_state_on_conn
@@ -794,6 +795,12 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
         )
         summary = reconcile_assessment_findings_on_conn(conn, current_assessment_id)
         read_model = assessment_finding_delta_read_model(conn, current_assessment_id)
+        worklist = assessment_finding_worklist_on_conn(
+            conn,
+            current_assessment_id,
+            priority="unscored",
+            limit=2,
+        )
         conn.commit()
 
     assert summary == {
@@ -827,6 +834,23 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
     assert len(by_vulnerability["CVE-2026-10001"]["previous_findings"]) == 1
     assert by_vulnerability["CVE-2026-10002"]["current_findings"] == []
     assert by_vulnerability["CVE-2026-10002"]["previous_findings"][0]["id"]
+    assert worklist["rollup"] == {
+        "total": 3,
+        "kev_listed": 0,
+        "epss_scored": 0,
+        "cvss_scored": 0,
+        "unscored": 3,
+    }
+    assert worklist["total"] == 3
+    assert worklist["has_more"] is True
+    assert worklist["source_finding_count"] == 3
+    assert all(item["observation_count"] == 1 for item in worklist["items"])
+    with pytest.raises(AssessmentError, match="priority filter is unsupported"):
+        assessment_finding_worklist_on_conn(
+            conn,
+            current_assessment_id,
+            priority="owner-private-signal",
+        )
 
     handoff = get_project_assessment_finding_changes(session_id, project_id)
     assert handoff is not None

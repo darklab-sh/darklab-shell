@@ -17,6 +17,7 @@ from services.assessments.contracts import (
     ASSESSMENT_STATUSES,
     AssessmentError,
 )
+from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
 from services.assessments.reconciliation_read import assessment_finding_delta_read_model
 from services.assessments.serialization import (
     row_to_assessment,
@@ -183,10 +184,15 @@ def get_assessment_read_model(
     check_filters: dict[str, object] | None = None,
     check_limit: int = 50,
     check_offset: int = 0,
+    finding_priority: object = "",
+    finding_limit: int = 20,
+    finding_offset: int = 0,
     team_id: str = "",
 ) -> dict[str, Any] | None:
     safe_limit = normalize_page_limit(check_limit, maximum=ASSESSMENT_PAGE_MAX)
     safe_offset = normalize_page_offset(check_offset)
+    safe_finding_limit = normalize_page_limit(finding_limit, default=20, maximum=100)
+    safe_finding_offset = normalize_page_offset(finding_offset)
     with get_db_connect()() as conn:
         row = _assessment_row(
             conn,
@@ -202,6 +208,13 @@ def get_assessment_read_model(
             "rollup": assessment_rollup(conn, str(row["id"])),
             "category_rollups": assessment_category_rollups(conn, str(row["id"])),
             "finding_deltas": assessment_finding_delta_read_model(conn, str(row["id"])),
+            "finding_worklist": assessment_finding_worklist_on_conn(
+                conn,
+                str(row["id"]),
+                priority=finding_priority,
+                limit=safe_finding_limit,
+                offset=safe_finding_offset,
+            ),
             "checks": _check_page(
                 conn,
                 str(row["id"]),
