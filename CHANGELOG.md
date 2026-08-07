@@ -30,6 +30,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment fan-out now has bounded resumable checkpoint state.**
   - **What:** Child ordinals can move from pending to completed or failed state without relaunching completed work, and cancellation prevents further batches.
   - **Tests:** Focused workflow coverage pins stable resume order, failure tracking, cancellation, and item bounds.
+- **Assessment fan-out checkpoints now have a strict persistence shape.**
+  - **What:** Checkpoints serialize to bounded JSON-compatible payloads and reject malformed, overlapping, duplicate, or non-boolean state during recovery.
+  - **Tests:** Focused workflow coverage pins round-trip restoration and invalid-payload rejection.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.

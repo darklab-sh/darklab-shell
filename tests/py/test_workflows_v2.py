@@ -23,7 +23,7 @@ from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.fanout import expand_collection_step
 from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy
-from services.workflows.fanout_checkpoint import create_fanout_checkpoint
+from services.workflows.fanout_checkpoint import checkpoint_from_payload, create_fanout_checkpoint
 from services.workflows.compiler import (
     WorkflowDefinitionError,
     compile_execution_definition,
@@ -490,6 +490,10 @@ def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_chil
     assert checkpoint.cancel().next_batch(2) == ()
     with pytest.raises(ValueError, match="between 0 and 32"):
         create_fanout_checkpoint(33)
+    restored = checkpoint_from_payload(checkpoint.to_payload())
+    assert restored == checkpoint
+    with pytest.raises(ValueError, match="overlap"):
+        checkpoint_from_payload({"pending": [1], "completed": [1], "failed": [], "cancelled": False})
 
 
 def test_execution_state_machine_advances_once_and_keeps_snapshot():

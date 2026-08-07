@@ -38,6 +38,15 @@ class FanoutCheckpoint:
     def cancel(self) -> "FanoutCheckpoint":
         return FanoutCheckpoint(self.pending, self.completed, self.failed, True)
 
+    def to_payload(self) -> dict[str, object]:
+        """Return a bounded JSON-compatible checkpoint payload."""
+        return {
+            "pending": list(self.pending),
+            "completed": list(self.completed),
+            "failed": list(self.failed),
+            "cancelled": self.cancelled,
+        }
+
     def _advance(self, ordinals: tuple[int, ...] | list[int], *, completed: bool) -> "FanoutCheckpoint":
         chosen = {int(item) for item in ordinals if int(item) in self.pending}
         pending = tuple(item for item in self.pending if item not in chosen)
@@ -48,6 +57,41 @@ class FanoutCheckpoint:
         if len(pending) + len(target) + len(failures) > MAX_CHECKPOINT_ITEMS:
             raise ValueError("fan-out checkpoint exceeds the item limit")
         return FanoutCheckpoint(pending, target, failures, self.cancelled)
+
+
+def checkpoint_from_payload(value: object) -> FanoutCheckpoint:
+    """Restore checkpoint state, rejecting malformed or oversized payloads."""
+    if not isinstance(value, dict):
+        raise ValueError("fan-out checkpoint must be an object")
+
+    def ordinals(name: str) -> tuple[int, ...]:
+        raw = value.get(name, [])
+        if not isinstance(raw, list) or len(raw) > MAX_CHECKPOINT_ITEMS:
+            raise ValueError(f"fan-out checkpoint {name} is invalid")
+        result = []
+        for item in raw:
+            if isinstance(item, bool):
+                raise ValueError(f"fan-out checkpoint {name} contains an invalid ordinal")
+            try:
+                ordinal = int(item)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"fan-out checkpoint {name} contains an invalid ordinal") from exc
+            if ordinal < 0 or ordinal in result:
+                raise ValueError(f"fan-out checkpoint {name} contains an invalid ordinal")
+            result.append(ordinal)
+        return tuple(result)
+
+    pending = ordinals("pending")
+    completed = ordinals("completed")
+    failed = ordinals("failed")
+    if set(pending) & (set(completed) | set(failed)):
+        raise ValueError("fan-out checkpoint states overlap")
+    if len(pending) + len(completed) + len(failed) > MAX_CHECKPOINT_ITEMS:
+        raise ValueError("fan-out checkpoint exceeds the item limit")
+    cancelled = value.get("cancelled", False)
+    if not isinstance(cancelled, bool):
+        raise ValueError("fan-out checkpoint cancelled must be a boolean")
+    return FanoutCheckpoint(pending, completed, failed, cancelled)
 
 
 def create_fanout_checkpoint(child_count: int) -> FanoutCheckpoint:
