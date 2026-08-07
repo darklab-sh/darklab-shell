@@ -78,6 +78,7 @@ import { clearTab as importedClearTab } from './tabs_bridge.js';
 import { cancelWelcome as importedCancelWelcome } from './welcome_bridge.js';
 import { loadProjectAutocompleteTargets as importedLoadProjectAutocompleteTargets } from './features/autocomplete/suggestions.js';
 import {
+  activateOptionsTab as importedActivateOptionsTab,
   getHudClockPreference as importedGetHudClockPreference,
   getPreference as importedGetPreference,
   setPreferenceCookie as importedSetPreferenceCookie,
@@ -2151,11 +2152,16 @@ let importedProjectWorkspaceShell;
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       showConfirm: _shellFn('showConfirm', importedShowConfirm),
       closeProjectWorkspace: (options = {}) => closeProjectWorkspace(options),
+      openSecretsOptions: () => {
+        importedOpenOptions?.();
+        importedActivateOptionsTab?.('secrets', { persist: true, focus: true });
+      },
       actionSheetContainer: () => projectWorkspaceModal,
       logClientError: _shellLogClientError,
       mobileView: _projectMobileView,
       canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),
       canRunCommands: () => _shellActiveTeamScopeCan('run_commands'),
+      canManageSecrets: () => _shellActiveTeamScopeCan('manage_secrets'),
       canTriageFindings: () => _shellActiveTeamScopeCan('triage_findings'),
     });
     return projectAssessmentController;

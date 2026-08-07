@@ -88,6 +88,8 @@
     "/static/js/features/projects/project_assessment_actions.js",
     "/static/js/features/projects/project_assessment_renderer.js",
     "/static/js/features/projects/project_assessment_risk_renderer.js",
+    "/static/js/features/projects/project_http_profile_editor.js",
+    "/static/js/features/projects/project_http_profiles.js",
     "/static/js/features/projects/project_finding_changes.js",
     "/static/js/features/projects/project_overview.js",
     "/static/js/features/projects/project_monitoring.js",

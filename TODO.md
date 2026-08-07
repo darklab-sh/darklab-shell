@@ -129,10 +129,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Show a redacted display command in the terminal, History, Run Details, workflow execution state, audit, metrics, notifications, and errors. Apply the existing secret masking pass to tool output as a second line of defense.
   - Never allow a profile to broaden a Project target into an unrelated hostname through redirects, schema servers, callback URLs, or proxy behavior without a visible allowlist decision.
 - [ ] Extend protected execution to Curl, Dalfox, SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported tools or profile features instead of dropping authentication or scope controls silently.
-- [ ] Add the HTTP-profile editor inside the Project Assessment surface:
-  - Reuse Options → Secrets for creating/replacing secret values and show only secret names/availability in the Project editor.
-  - Make credential-sensitive actions explicit, show which role a run will use, and prevent viewers or users lacking `MANAGE_SECRETS` from learning whether an unreferenced secret exists.
-  - Handle missing, replaced, expired, disabled, and permission-denied credentials as recoverable profile states rather than generic command failures.
 
 #### Phase 6 — Close the web and API discovery/validation gaps
 

@@ -5,6 +5,7 @@
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
 import { launchAssessmentAction } from './project_assessment_actions.js';
+import { createProjectHttpProfileManager } from './project_http_profiles.js';
 import { openContextualFindingRecord } from '../findings/finding_record_context.js';
 import { openFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 
@@ -57,6 +58,7 @@ function createProjectAssessmentController(context) {
       st.error = '';
       st.detailError = '';
     });
+    httpProfileManager.invalidate(id);
   }
 
   async function responseError(resp, fallback) {
@@ -74,6 +76,8 @@ function createProjectAssessmentController(context) {
     ctx.renderProjectExplorer?.();
     if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
   }
+
+  const httpProfileManager = createProjectHttpProfileManager(ctx, { renderViews });
 
   function cycleSelection(st) {
     return st.assessments.find(item => String(item?.id || '') === st.selectedId)
@@ -157,6 +161,7 @@ function createProjectAssessmentController(context) {
         st.profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
         st.selectedId = String(cycleSelection(st)?.id || '');
         st.loaded = true;
+        await httpProfileManager.load(id, { render: false });
         if (st.selectedId) await loadDetail(id, { render: false });
         else st.detail = null;
         return true;
@@ -541,6 +546,8 @@ function createProjectAssessmentController(context) {
         projectId,
         assessmentId,
         check,
+        httpProfiles: httpProfileManager.profilesForLaunch(projectId),
+        canManageSecrets: ctx.canManageSecrets?.() !== false,
         returnFocus,
       });
     } finally {
@@ -562,6 +569,7 @@ function createProjectAssessmentController(context) {
     setFindingPage,
     setPage,
     transitionCycle,
+    renderHttpProfiles: (projectId, options = {}) => httpProfileManager.renderSection(projectId, options),
   });
 
   function ensureLoad(projectId) {
@@ -592,6 +600,7 @@ function createProjectAssessmentController(context) {
     loadDetail,
     renderAssessment,
     renderMobileAssessmentTab,
+    httpProfileStateFor: httpProfileManager.stateFor,
     selectCycle,
     setFilter,
     setFindingFilter,

@@ -53,7 +53,9 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     mobileView: vi.fn(() => 'list'),
     canMutateProjects: vi.fn(() => true),
     canRunCommands: vi.fn(() => true),
+    canManageSecrets: vi.fn(() => true),
     canTriageFindings: vi.fn(() => true),
+    openSecretsOptions: vi.fn(),
     apiFetch: projectWorkspaceRequest,
     attachActiveRunFromMonitor: vi.fn(async () => true),
     closeProjectWorkspace: vi.fn(),
@@ -80,6 +82,29 @@ const profiles = [{
   target_types: ['domain', 'ip'],
   check_count: 2,
 }]
+
+const httpProfile = {
+  id: 'htp_1',
+  project_id: 'prj_1',
+  name: 'Authenticated member',
+  role: 'member',
+  base_url: 'https://example.com/',
+  scope_roots: ['https://example.com/'],
+  allowed_hosts: ['example.com'],
+  headers: [],
+  header_names: [],
+  secret_refs: { bearer_token: { name: 'APP_BEARER_TOKEN', available: true } },
+  file_refs: {},
+  credential_use: ['bearer_token'],
+  include_paths: ['/app'],
+  exclude_paths: ['/logout'],
+  rate_limit_per_second: 10,
+  concurrency: 5,
+  enabled: true,
+  revision: 1,
+  protected_references_visible: true,
+  reference_counts: { secret_refs: 1, file_refs: 0, headers: 0 },
+}
 
 const detail = {
   assessment: {
@@ -194,6 +219,7 @@ function responseFor(url, options = {}) {
   if (options.method === 'POST') {
     return apiResponse({ assessment: { ...cycle, id: 'asmt_new' } })
   }
+  if (url.endsWith('/http-profiles')) return apiResponse({ profiles: [], total: 0 })
   if (/\/assessments\/[^?]+/.test(url)) return apiResponse(detail)
   return apiResponse({ assessments: [cycle], profiles, total: 1, limit: 100, offset: 0, has_more: false })
 }
@@ -238,6 +264,92 @@ describe('project assessment controller', () => {
       'Archive cycle',
     ])
     expect(ctx.enhanceAppSelects).toHaveBeenCalledTimes(2)
+  })
+
+  it('manages reusable HTTP profiles in the shared desktop and mobile Assessment surface', async () => {
+    let savedProfiles = [httpProfile]
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) {
+        if (options.method === 'POST') {
+          const payload = JSON.parse(options.body)
+          savedProfiles = [{ ...httpProfile, id: 'htp_new', ...payload }]
+          return apiResponse({ profile: savedProfiles[0] })
+        }
+        return apiResponse({ profiles: savedProfiles, total: savedProfiles.length })
+      }
+      return responseFor(url, options)
+    })
+    const showConfirm = vi.fn(async (options) => {
+      if (options.body?.text === 'Create an HTTP assessment profile') {
+        const fields = [...options.content.querySelectorAll('.project-http-profile-field')]
+        const control = label => fields.find(field => field.textContent.startsWith(label))?.querySelector('input, textarea')
+        control('Profile name').value = 'Admin role'
+        control('Authentication role').value = 'admin'
+        control('Base URL').value = 'https://example.com/'
+        control('Allowed Project hosts').value = 'example.com'
+        control('Bearer token Secret').value = 'APP_ADMIN_TOKEN'
+        expect(await options.actions.find(action => action.id === 'save').onActivate()).toBe(true)
+        return 'save'
+      }
+      return options.actions.at(-1).id
+    })
+    const ctx = makeContext(projectWorkspaceRequest, { showConfirm })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+
+    const desktop = document.createElement('div')
+    controller.renderAssessment(desktop, 'prj_1')
+    const mobile = controller.renderMobileAssessmentTab('prj_1')
+    for (const surface of [desktop, mobile]) {
+      expect(surface.querySelector('.project-http-profiles')?.textContent).toContain('Authenticated member')
+      expect(surface.querySelector('.project-http-profiles')?.textContent).toContain('Credentials ready')
+      expect(surface.querySelector('.project-http-profiles')?.textContent).toContain('bearer token')
+    }
+    desktop.querySelector('.project-http-profile-header-actions .btn-secondary').click()
+    expect(ctx.openSecretsOptions).toHaveBeenCalledTimes(1)
+    desktop.querySelector('.project-http-profile-header-actions .btn-primary').click()
+    await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      '/projects/prj_1/http-profiles',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const createBody = JSON.parse(projectWorkspaceRequest.mock.calls.find(([, options]) => options?.method === 'POST')[1].body)
+    expect(createBody).toMatchObject({
+      name: 'Admin role',
+      role: 'admin',
+      allowed_hosts: ['example.com'],
+      secret_refs: { bearer_token: 'APP_ADMIN_TOKEN' },
+    })
+    await vi.waitFor(() => expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('HTTP profile created.'))
+  })
+
+  it('keeps protected HTTP profile references hidden and actions read-only without Secret permission', async () => {
+    const publicProfile = {
+      ...httpProfile,
+      protected_references_visible: false,
+      headers: undefined,
+      secret_refs: undefined,
+      file_refs: undefined,
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) return apiResponse({ profiles: [publicProfile], total: 1 })
+      return responseFor(url, options)
+    })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(makeContext(
+      projectWorkspaceRequest,
+      { canManageSecrets: vi.fn(() => false) },
+    ))
+    await controller.load('prj_1', { render: false })
+    const desktop = document.createElement('div')
+    controller.renderAssessment(desktop, 'prj_1')
+
+    const section = desktop.querySelector('.project-http-profiles')
+    expect(section.textContent).toContain('Reference access required')
+    expect(section.textContent).toContain('1 protected reference')
+    expect(section.textContent).not.toContain('APP_BEARER_TOKEN')
+    expect([...section.querySelectorAll('.project-http-profile-header-actions .btn')]
+      .every(button => button.disabled)).toBe(true)
+    expect([...section.querySelectorAll('.project-http-profile-actions .btn')]
+      .every(button => button.disabled)).toBe(true)
   })
 
   it('creates a target-scoped finding from an assessment check on desktop and mobile', async () => {
@@ -356,6 +468,90 @@ describe('project assessment controller', () => {
     expect(ctx.showConfirm.mock.calls[0][0].content.textContent).toContain(plan.display_command)
     expect(ctx.closeProjectWorkspace).toHaveBeenCalledWith({ refocus: false })
     expect(controller.stateFor('prj_1').category).toBe('discovery')
+  })
+
+  it('selects an available HTTP role before previewing and launching a protected assessment action', async () => {
+    const protectedDetail = {
+      ...detail,
+      checks: {
+        ...detail.checks,
+        checks: [{ ...detail.checks.checks[0], recommended_action_key: 'command:httpx' }],
+        total: 1,
+      },
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) {
+        return apiResponse({
+          profiles: [
+            httpProfile,
+            { ...httpProfile, id: 'htp_disabled', name: 'Disabled admin', enabled: false },
+            {
+              ...httpProfile,
+              id: 'htp_missing',
+              name: 'Missing token',
+              secret_refs: { bearer_token: { name: 'MISSING_TOKEN', available: false } },
+            },
+          ],
+          total: 3,
+        })
+      }
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(protectedDetail)
+      return responseFor(url, options)
+    })
+    const actionPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_1/recommended-action'
+    const plan = {
+      action: { id: 'httpx', key: 'command:httpx', kind: 'command' },
+      target: { entity_id: 'ent_1', type: 'domain', value: 'example.com' },
+      http_profile: { name: 'Authenticated member', role: 'member', credential_use: ['bearer_token'] },
+      policy_level: 'safe',
+      scope: { target_count: 1, fan_out: 1 },
+      bounds: { summary: 'One approved web target.', credential_use: 'protected_http_profile' },
+      display_command: 'httpx -u https://example.com/ -secrets-file [protected]',
+      launchable: true,
+      plan_digest: 'b'.repeat(64),
+    }
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (options.method === 'POST') return apiResponse({ run: { run_id: 'run_httpx' }, plan })
+      return apiResponse({ plan })
+    })
+    const showConfirm = vi.fn(async (options) => {
+      if (options.body?.text === 'Choose the web role for this run.') {
+        const choices = [...options.content.querySelectorAll('option')]
+        expect(choices.find(option => option.value === 'htp_disabled').disabled).toBe(true)
+        expect(choices.find(option => option.value === 'htp_missing').disabled).toBe(true)
+        options.content.querySelector('select').value = 'htp_1'
+        return 'continue'
+      }
+      expect(options.content.textContent).toContain('Profile rolemember')
+      expect(options.content.textContent).toContain('Credentialsbearer token')
+      return 'run'
+    })
+    const attachActiveRunFromMonitor = vi.fn(async () => true)
+    const ctx = makeContext(projectWorkspaceRequest, {
+      apiFetch,
+      showConfirm,
+      attachActiveRunFromMonitor,
+    })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle').click()
+    ;[...container.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'Run HTTPx').click()
+
+    await vi.waitFor(() => expect(attachActiveRunFromMonitor).toHaveBeenCalled())
+    expect(apiFetch).toHaveBeenNthCalledWith(
+      1,
+      `${actionPath}?http_profile_id=htp_1`,
+      { cache: 'no-store' },
+    )
+    expect(apiFetch).toHaveBeenNthCalledWith(2, actionPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed: true, plan_digest: 'b'.repeat(64), http_profile_id: 'htp_1' }),
+    })
   })
 
   it('uses a touch-sized action sheet for saved check actions on mobile', async () => {

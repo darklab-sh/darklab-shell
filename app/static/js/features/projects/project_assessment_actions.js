@@ -30,10 +30,13 @@ function planContent(plan) {
     ['Command', plan.display_command],
     ['Target', `${text(plan.target?.type)} · ${text(plan.target?.value)}`],
     ['HTTP profile', text(plan.http_profile?.name, 'None')],
+    ['Profile role', text(plan.http_profile?.role, 'Anonymous')],
     ['Policy', text(plan.policy_level)],
     ['Scope', `${Number(plan.scope?.target_count || 1)} Project target · fan-out ${Number(plan.scope?.fan_out || 1)}`],
     ['Bounds', text(plan.bounds?.summary, 'One approved Project target')],
-    ['Credentials', text(plan.bounds?.credential_use, 'none')],
+    ['Credentials', Array.isArray(plan.http_profile?.credential_use)
+      ? plan.http_profile.credential_use.map(value => String(value).replaceAll('_', ' ')).join(', ')
+      : text(plan.bounds?.credential_use, 'none')],
   ];
   rows.forEach(([labelText, valueText]) => {
     const row = document.createElement('div');
@@ -50,6 +53,61 @@ function planContent(plan) {
   return wrap;
 }
 
+function profileIssue(profile) {
+  if (profile?.enabled === false) return 'disabled';
+  if (profile?.protected_references_visible === false) return 'permission required';
+  const unavailableHeader = (Array.isArray(profile?.headers) ? profile.headers : [])
+    .some(header => header?.available === false);
+  const unavailableSecret = Object.values(profile?.secret_refs || {})
+    .some(reference => reference && typeof reference === 'object' && reference.available === false);
+  if (unavailableHeader || unavailableSecret) return 'missing Secret';
+  return '';
+}
+
+function supportsHttpProfile(check) {
+  const [kind, actionId] = String(check?.recommended_action_key || '').split(':', 2);
+  return kind === 'command' && ['httpx', 'katana', 'nuclei'].includes(actionId);
+}
+
+async function chooseHttpProfile(confirm, profiles) {
+  const candidates = Array.isArray(profiles) ? profiles : [];
+  if (!candidates.length) return { cancelled: false, profileId: '' };
+  const content = document.createElement('label');
+  content.className = 'project-assessment-action-profile-field';
+  const label = document.createElement('span');
+  label.textContent = 'HTTP profile';
+  const select = document.createElement('select');
+  select.className = 'form-select';
+  select.setAttribute('aria-label', 'HTTP profile for assessment run');
+  const anonymous = document.createElement('option');
+  anonymous.value = '';
+  anonymous.textContent = 'No profile — unauthenticated';
+  select.appendChild(anonymous);
+  candidates.forEach((profile) => {
+    const option = document.createElement('option');
+    const issue = profileIssue(profile);
+    option.value = String(profile?.id || '');
+    option.textContent = `${text(profile?.name, 'HTTP profile')} · ${text(profile?.role, 'anonymous')}${issue ? ` · ${issue}` : ''}`;
+    option.disabled = Boolean(issue);
+    select.appendChild(option);
+  });
+  content.append(label, select);
+  const choice = await confirm({
+    body: {
+      text: 'Choose the web role for this run.',
+      note: 'The next screen shows the exact redacted plan. Secret values are never placed in the visible command.',
+    },
+    content,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'continue', label: 'Review run', role: 'primary' },
+    ],
+    defaultFocus: select,
+    refocusOnResolve: false,
+  });
+  return { cancelled: choice !== 'continue', profileId: select.value };
+}
+
 async function launchAssessmentAction(context, options = {}) {
   const ctx = context || {};
   const projectId = text(options.projectId);
@@ -64,7 +122,21 @@ async function launchAssessmentAction(context, options = {}) {
   const path = `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/checks/${encodeURIComponent(checkId)}/recommended-action`;
   try {
     trigger?.setAttribute('aria-busy', 'true');
-    const previewResp = await request(path, { cache: 'no-store' });
+    let httpProfileId = '';
+    if (supportsHttpProfile(options.check) && options.canManageSecrets !== false) {
+      if (typeof confirm !== 'function') {
+        throw new Error('Assessment launch confirmation is unavailable.');
+      }
+      trigger?.removeAttribute('aria-busy');
+      const selected = await chooseHttpProfile(confirm, options.httpProfiles);
+      if (selected.cancelled) return false;
+      httpProfileId = selected.profileId;
+      trigger?.setAttribute('aria-busy', 'true');
+    }
+    const previewPath = httpProfileId
+      ? `${path}?${new URLSearchParams({ http_profile_id: httpProfileId }).toString()}`
+      : path;
+    const previewResp = await request(previewPath, { cache: 'no-store' });
     const previewData = await previewResp.json().catch(() => ({}));
     if (!previewResp.ok) {
       throw responseError(previewData, previewResp.status, 'Could not load this assessment action.');
@@ -99,7 +171,11 @@ async function launchAssessmentAction(context, options = {}) {
     const launchResp = await request(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirmed: true, plan_digest: text(plan.plan_digest) }),
+      body: JSON.stringify({
+        confirmed: true,
+        plan_digest: text(plan.plan_digest),
+        ...(httpProfileId ? { http_profile_id: httpProfileId } : {}),
+      }),
     });
     const launchData = await launchResp.json().catch(() => ({}));
     if (!launchResp.ok) {

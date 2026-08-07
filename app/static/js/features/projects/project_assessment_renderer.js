@@ -665,6 +665,7 @@ function createProjectAssessmentRenderer(context, actions) {
     }
     if (!st.assessments.length) {
       root.appendChild(renderStartCard(projectId, st));
+      root.appendChild(act.renderHttpProfiles(projectId, { mobile }));
       return root;
     }
 
@@ -672,6 +673,7 @@ function createProjectAssessmentRenderer(context, actions) {
     if (!st.assessments.some(item => item?.status === 'active')) {
       root.appendChild(renderStartCard(projectId, st));
     }
+    root.appendChild(act.renderHttpProfiles(projectId, { mobile }));
     if (st.detailLoading && !st.detail) {
       root.appendChild(ctx.emptyProjectPanel('Loading assessment coverage...'));
       return root;
