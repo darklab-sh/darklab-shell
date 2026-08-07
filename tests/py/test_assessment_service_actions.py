@@ -10,6 +10,8 @@ from services.assessments.version_correlation import correlate_version_observati
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
 from services.assessments.historical_urls import filter_historical_urls, normalize_historical_url, normalize_historical_urls
 from services.assessments.web_gallery import filter_web_surface_rows
+from services.runs.finalization import capture_event_with_signals
+from services.runs.output_model import to_wire
 from services.intel.epss import normalize_epss_rows
 from services.intel.kev import normalize_kev_catalog
 from core.output_signals import OutputSignalClassifier
@@ -194,6 +196,21 @@ def test_gau_output_carries_historical_url_provenance_only():
         "url": "https://example.com/archive?a=1", "source": "gau", "source_run_id": "run-gau",
     }]
     assert any(entity.get("type") == "url" for entity in metadata["entities"])
+
+
+def test_passive_web_metadata_survives_run_event_wire_round_trip():
+    class Capture:
+        def __init__(self):
+            self.events = []
+
+        def add_event(self, event):
+            self.events.append(event)
+
+    capture = Capture()
+    capture_event_with_signals(capture, OutputSignalClassifier("gau example.com", source_run_id="run-1"), "https://example.com/a")
+    assert capture.events[0].source_detail["historical_urls"][0]["source_run_id"] == "run-1"
+    wire = to_wire(capture.events[0])
+    assert wire["source_detail"]["historical_urls"][0]["url"] == "https://example.com/a"
 
 
 def test_gau_command_plan_is_domain_scoped_and_passive():

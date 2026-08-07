@@ -162,6 +162,14 @@ def capture_event_with_signals(
         signals=metadata.get("signals") if isinstance(metadata.get("signals"), list) else None,
         entities=metadata.get("entities") if isinstance(metadata.get("entities"), list) else None,
     )
+    source_detail = (
+        dict(metadata.get("source_detail"))
+        if isinstance(metadata.get("source_detail"), dict)
+        else {}
+    )
+    for key in ("screenshots", "historical_urls"):
+        if isinstance(metadata.get(key), list):
+            source_detail[key] = metadata[key]
     captured_event = replace(
         base_event,
         signals=metadata_event.signals,
@@ -170,7 +178,7 @@ def capture_event_with_signals(
         command_root=str(metadata.get("command_root", "")),
         target=str(metadata.get("target", "")),
         entities=metadata_event.entities,
-        source_detail=metadata.get("source_detail") if isinstance(metadata.get("source_detail"), dict) else {},
+        source_detail=source_detail,
     )
     capture.add_event(captured_event)
     return metadata, captured_event

@@ -84,6 +84,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment output now preserves source-run provenance for web captures.**
   - **What:** Completed runs attach their run ID to HTTPx screenshot and gau historical-URL metadata when tool output does not provide one.
   - **Tests:** Screenshot and passive URL provenance coverage verifies the run link and URL entity remain available to downstream gallery and review surfaces.
+- **Passive web metadata now survives run-event persistence.**
+  - **What:** Bounded screenshot and historical-URL lists are retained in the event's safe source details and wire representation instead of disappearing after line classification.
+  - **Tests:** Run-event coverage verifies the metadata through capture and wire round-trip serialization.
 - **Assessment recommendations now include a bounded passive gau plan.**
   - **What:** Operators can generate one-domain historical URL discovery plans with a fixed thread count and timeout; discovered URLs remain passive metadata until separately reviewed.
   - **Tests:** Command-plan coverage pins the domain-only target contract and no-auto-probe description.
