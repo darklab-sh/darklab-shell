@@ -22,7 +22,7 @@ def test_service_evidence_does_not_infer_from_port_numbers():
 def test_common_protocol_aliases_are_bounded_safe_recommendations():
     actions = service_actions("microsoft-ds", target_type="ip")
     assert [(action.key, action.command, action.policy_level) for action in actions] == [
-        ("smb_enumeration", "workflow:smb-safe", "standard"),
+        ("smb_enumeration", "command:nmap", "standard"),
     ]
     assert service_actions("version-cve", target_type="url")[0].command == (
         "evidence:version_cve_correlation"
