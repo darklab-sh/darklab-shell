@@ -1834,6 +1834,74 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     start_kwargs["run_cleanup_hook"]()
     assert not secret_path.parent.exists()
 
+    with sqlite3.connect(DB_PATH) as conn:
+        snapshot_row = conn.execute(
+            "SELECT profile_snapshot FROM project_assessments WHERE id = ?",
+            (assessment["assessment"]["id"],),
+        ).fetchone()
+        snapshot = json.loads(snapshot_row[0])
+        frozen_check = next(
+            item for item in snapshot["checks"] if item["key"] == check["check_key"]
+        )
+        frozen_check["recommended_action"] = "command:curl"
+        conn.execute(
+            "UPDATE project_assessments SET profile_snapshot = ? WHERE id = ?",
+            (json.dumps(snapshot), assessment["assessment"]["id"]),
+        )
+        conn.execute(
+            "UPDATE project_assessment_checks SET recommended_action_key = 'command:curl' "
+            "WHERE id = ?",
+            (check["id"],),
+        )
+        conn.commit()
+
+    curl_preview = client.get(
+        action_path,
+        headers=_headers(token),
+        query_string={"http_profile_id": profile_id},
+    )
+    assert curl_preview.status_code == 200
+    curl_plan = curl_preview.get_json()["plan"]
+    assert curl_plan["action"]["id"] == "curl"
+    assert curl_plan["display_command"].startswith(
+        "curl -q --silent --show-error --head --no-location"
+    )
+    assert curl_plan["display_command"].endswith("--config [protected]")
+    assert curl_plan["bounds"]["request_limit"] == 1
+    assert curl_plan["bounds"]["time_limit_seconds"] == 30
+
+    curl_started = SimpleNamespace(run_id="run_protected_curl", status="running")
+    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
+         mock.patch(
+             "blueprints.api_v1._start_brokered_run_service",
+             return_value=curl_started,
+         ) as curl_start_run:
+        curl_launched = client.post(
+            action_path,
+            headers=_headers(token),
+            json={
+                "confirmed": True,
+                "http_profile_id": profile_id,
+                "plan_digest": curl_plan["plan_digest"],
+            },
+        )
+
+    assert curl_launched.status_code == 202
+    curl_start_kwargs = curl_start_run.call_args.kwargs
+    assert curl_start_kwargs["original_command"].endswith(
+        f"https://{check['target_value']}"
+    )
+    assert curl_start_kwargs["trusted_execution_args"][:1] == ("--config",)
+    curl_config_path = Path(curl_start_kwargs["trusted_execution_args"][1])
+    assert curl_config_path.read_text(encoding="utf-8") == (
+        f'header = "X-Assessment-Token: {secret_value}"\n'
+    )
+    assert secret_value in curl_start_kwargs["private_values"]
+    assert str(curl_config_path) in curl_start_kwargs["private_values"]
+    assert secret_value not in curl_launched.get_data(as_text=True)
+    curl_start_kwargs["run_cleanup_hook"]()
+    assert not curl_config_path.parent.exists()
+
 
 def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
     client = get_client()

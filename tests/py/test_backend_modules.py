@@ -30882,6 +30882,7 @@ class TestAssessmentHttpProfileExecution:
         tmp_path,
     ):
         from services.assessments import http_profile_runtime as runtime
+        from services.assessments.http_profile_material import materialize_tool_profile
 
         monkeypatch.setattr(runtime, "_scanner_user_exists", lambda: False)
         monkeypatch.setattr(runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
@@ -30905,14 +30906,35 @@ class TestAssessmentHttpProfileExecution:
         assert recent_material.path.exists()
         recent_material.cleanup()
         assert not recent_material.path.exists()
+        curl_material = materialize_tool_profile(
+            "curl",
+            {"allowed_hosts": ["app.example"], "file_refs": {}},
+            [("Authorization", 'Bearer protected"token')],
+            session_id="tok-http-profile",
+            team_id="",
+            actor_member_id="",
+        )
+        assert curl_material.trusted_args[:1] == ("--config",)
+        curl_config = Path(curl_material.trusted_args[1])
+        assert stat.S_IMODE(curl_config.stat().st_mode) == 0o600
+        assert curl_config.read_text(encoding="utf-8") == (
+            'header = "Authorization: Bearer protected\\"token"\n'
+        )
+        assert str(curl_config) in curl_material.private_values
+        curl_material.cleanup()
+        assert not curl_config.parent.exists()
 
     def test_http_profile_adapters_keep_scope_and_policy_in_explicit_argv(self):
         from services.assessments.command_plans import command_plan
         from services.assessments.http_profile_execution import (
-            _private_file_values,
             _scope_arguments,
             _unsupported_reason,
         )
+        from services.assessments.http_profile_material import (
+            _curl_config,
+            private_file_values,
+        )
+        from services.commands.registry import is_command_allowed
 
         summary = {
             "credential_use": ["headers"],
@@ -30928,6 +30950,21 @@ class TestAssessmentHttpProfileExecution:
         assert katana is not None
         assert katana.command.endswith("-H [protected]")
         assert "-d 1 -dr -c 2 -rl 4 -timeout 10" in katana.command
+        curl = command_plan(
+            "curl",
+            "ip",
+            "192.0.2.10",
+            http_profile=summary,
+        )
+        assert curl is not None
+        assert curl.command.startswith("curl -q --silent --show-error --head --no-location")
+        assert "--noproxy '*' --proto '=http,https'" in curl.command
+        assert "--connect-timeout 10 --max-time 30 https://192.0.2.10" in curl.command
+        assert curl.command.endswith("--config [protected]")
+        assert curl.request_limit == 1
+        assert curl.time_limit_seconds == 30
+        allowed, reason = is_command_allowed(curl.command.removesuffix(" --config [protected]"))
+        assert allowed, reason
         profile = {
             "include_paths": ["/admin"],
             "exclude_paths": ["/admin/logout"],
@@ -30938,16 +30975,28 @@ class TestAssessmentHttpProfileExecution:
         assert r"\[2001:db8::1\]" in _scope_arguments(
             profile, "katana", "https://[2001:db8::1]/admin"
         )[3]
+        assert _scope_arguments(profile, "curl", "https://app.example/admin") == []
         assert _scope_arguments(profile, "nuclei", "https://app.example") == ["-dr", "-ni"]
         assert "proxy allowlist" in _unsupported_reason({"proxy_url": "https://proxy.example"}, "httpx")
         assert "client certificate" in _unsupported_reason(
             {"file_refs": {"client_certificate": "cert.pem"}},
             "katana",
         )
-        assert _private_file_values(
+        assert private_file_values(
             "client_key",
             b"-----BEGIN PRIVATE KEY-----\nunique-private-key-material\n-----END PRIVATE KEY-----\n",
         ) == ["unique-private-key-material"]
+        assert _curl_config(
+            [("X-Token", 'quote" slash\\ tab\tvalue')],
+            {
+                "client_certificate": "/private/client cert.pem",
+                "client_key": "/private/client key.pem",
+            },
+        ).decode("utf-8") == (
+            'header = "X-Token: quote\\" slash\\\\ tab\\tvalue"\n'
+            'cert = "/private/client cert.pem"\n'
+            'key = "/private/client key.pem"\n'
+        )
 
     def test_private_runtime_uses_scanner_owned_handoff_in_container_mode(
         self,

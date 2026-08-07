@@ -66,7 +66,7 @@ function profileIssue(profile) {
 
 function supportsHttpProfile(check) {
   const [kind, actionId] = String(check?.recommended_action_key || '').split(':', 2);
-  return kind === 'command' && ['httpx', 'katana', 'nuclei'].includes(actionId);
+  return kind === 'command' && ['curl', 'httpx', 'katana', 'nuclei'].includes(actionId);
 }
 
 async function chooseHttpProfile(confirm, profiles) {

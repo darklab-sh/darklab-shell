@@ -11,14 +11,12 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-import yaml
-
 from core.database_access import get_db_connect
 from services.assessments.http_profile_contracts import HttpProfileError
 from services.assessments.command_plans import command_plan
-from services.assessments.http_profile_runtime import (
-    PrivateHttpMaterialError,
-    PrivateHttpRunMaterial,
+from services.assessments.http_profile_material import (
+    HttpProfileMaterialError,
+    materialize_tool_profile,
 )
 from services.assessments.http_profiles import (
     _internal_profile,
@@ -28,14 +26,9 @@ from services.assessments.http_profiles import (
 )
 from services.secrets.storage import get_secret_value_by_name
 from services.secrets.vault import MasterKeyError, SecretDecryptError
-from services.teams.scope import owner_context_for_scope
-from services.workspace.files import (
-    WorkspaceError,
-    open_owner_workspace_file_for_download,
-)
 
 
-_SUPPORTED_TOOLS = frozenset({"httpx", "katana", "nuclei"})
+_SUPPORTED_TOOLS = frozenset({"curl", "httpx", "katana", "nuclei"})
 _UNSUPPORTED_SECRET_SLOTS = frozenset({
     "client_key_passphrase",
     "proxy_authorization",
@@ -253,7 +246,7 @@ def _resolved_headers(
 
 
 def _scope_arguments(profile: Mapping[str, Any], tool: str, target_value: str) -> list[str]:
-    if tool == "httpx":
+    if tool in {"curl", "httpx"}:
         return []
     if tool == "nuclei":
         return ["-dr", "-ni"]
@@ -265,16 +258,6 @@ def _scope_arguments(profile: Mapping[str, Any], tool: str, target_value: str) -
     for prefix in profile.get("exclude_paths", []):
         arguments.extend(["-cos", rf"^https?://{host}(?::\d+)?{re.escape(str(prefix))}"])
     return arguments
-
-
-def _private_file_values(slot: str, content: bytes) -> list[str]:
-    if slot != "client_key":
-        return []
-    return [
-        line
-        for line in content.decode("utf-8", errors="ignore").splitlines()
-        if len(line) >= 16 and not line.startswith("-----")
-    ]
 
 
 def materialize_http_profile_launch(
@@ -340,61 +323,17 @@ def materialize_http_profile_launch(
         session_id=session_id,
         team_id=team_id,
     )
-    material: PrivateHttpRunMaterial | None = None
     trusted_args = _scope_arguments(profile, tool, target_value)
     try:
-        if headers or profile.get("file_refs"):
-            material = PrivateHttpRunMaterial()
-        if headers and material:
-            if tool in {"httpx", "nuclei"}:
-                secret_payload = {
-                    "id": "darklab-http-profile",
-                    "info": {"name": "Protected DarkLab HTTP profile"},
-                    "static": [{
-                        "type": "Header",
-                        "domains": list(profile.get("allowed_hosts", [])),
-                        "headers": [
-                            {"key": name, "value": value}
-                            for name, value in headers
-                        ],
-                    }],
-                }
-                secret_path = material.write_bytes(
-                    "secrets.yaml",
-                    yaml.safe_dump(secret_payload, sort_keys=False).encode("utf-8"),
-                )
-                trusted_args.extend(["-sf", str(secret_path)])
-                private_values.append(str(secret_path))
-            else:
-                header_path = material.write_bytes(
-                    "headers.txt",
-                    "".join(f"{name}: {value}\n" for name, value in headers).encode("utf-8"),
-                )
-                trusted_args.extend(["-H", str(header_path)])
-                private_values.append(str(header_path))
-        if profile.get("file_refs") and material:
-            owner = owner_context_for_scope(
-                session_id,
-                team_id=team_id,
-                actor_member_id=actor_member_id,
-            )
-            copied: dict[str, str] = {}
-            for slot, relative_path in profile["file_refs"].items():
-                with open_owner_workspace_file_for_download(owner, str(relative_path)) as stream:
-                    content = stream.read()
-                destination = material.write_bytes(f"{slot}.pem", content)
-                copied[str(slot)] = str(destination)
-                private_values.append(str(destination))
-                private_values.extend(_private_file_values(str(slot), content))
-            trusted_args.extend([
-                "-cc",
-                copied["client_certificate"],
-                "-ck",
-                copied["client_key"],
-            ])
-    except (OSError, PrivateHttpMaterialError, WorkspaceError) as exc:
-        if material:
-            material.cleanup()
+        tool_material = materialize_tool_profile(
+            tool,
+            profile,
+            headers,
+            session_id=session_id,
+            team_id=team_id,
+            actor_member_id=actor_member_id,
+        )
+    except HttpProfileMaterialError as exc:
         raise HttpProfileExecutionError(
             "http_profile_materialization_failed",
             "Protected HTTP run material could not be prepared.",
@@ -402,9 +341,9 @@ def materialize_http_profile_launch(
         ) from exc
     return ProtectedHttpLaunch(
         execution_command=protected_command.command,
-        trusted_execution_args=tuple(trusted_args),
-        private_values=tuple(private_values),
-        cleanup=material.cleanup if material else None,
+        trusted_execution_args=tuple(trusted_args) + tool_material.trusted_args,
+        private_values=tuple(private_values) + tool_material.private_values,
+        cleanup=tool_material.cleanup,
         audit_summary={
             "profile_id": summary["id"],
             "profile_role": summary["role"],

@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 
 _COMMAND_TARGET_TYPES = {
+    "curl": frozenset({"domain", "ip", "url"}),
     "ping": frozenset({"domain", "ip"}),
     "nmap": frozenset({"domain", "ip"}),
     "dnsrecon": frozenset({"domain"}),
@@ -43,7 +44,11 @@ def command_plan(
         return None
     quoted = shlex.quote(target_value)
     selected_web_target = web_target or target_value
-    if not web_target and target_type == "domain" and action_id in {"httpx", "katana", "nuclei"}:
+    if (
+        not web_target
+        and target_type in {"domain", "ip"}
+        and action_id in {"curl", "httpx", "katana", "nuclei"}
+    ):
         selected_web_target = f"https://{target_value}"
     quoted_web = shlex.quote(selected_web_target)
     rate = int((http_profile or {}).get("rate_limit_per_second") or 10)
@@ -52,12 +57,25 @@ def command_plan(
     protected_suffix = ""
     if http_profile and protected_display:
         uses = set(http_profile.get("credential_use") or [])
-        if uses:
+        header_uses = uses - {"client_certificate"}
+        if action_id == "curl" and uses:
+            protected_suffix = " --config [protected]"
+        elif header_uses:
             protected_suffix = " -H [protected]" if action_id == "katana" else " -sf [protected]"
         if action_id == "nuclei" and "client_certificate" in uses:
             protected_suffix += " -cc [protected] -ck [protected]"
     httpx_bounds = f" -rl {rate} -threads {concurrency}" if http_profile else ""
     plans = {
+        "curl": CommandPlan(
+            f"curl -q --silent --show-error --head --no-location --noproxy '*' "
+            f"--proto '=http,https' --connect-timeout 10 --max-time 30 {quoted_web}"
+            f"{protected_suffix}",
+            "One HEAD request to one approved HTTP target, with no redirects, a "
+            "10-second connect timeout, and a 30-second total timeout.",
+            1,
+            30,
+            credential_use,
+        ),
         "ping": CommandPlan(
             f"ping -c 4 -W 2 {quoted}",
             "Four probes against one approved host.",

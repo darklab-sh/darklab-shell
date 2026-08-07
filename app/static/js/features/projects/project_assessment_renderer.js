@@ -447,6 +447,7 @@ function createProjectAssessmentRenderer(context, actions) {
     if (!actionId) return 'Run recommended action';
     if (kind === 'workflow') return `Open ${actionId} workflow`;
     const labels = {
+      curl: 'Curl',
       dnsrecon: 'DNSRecon',
       httpx: 'HTTPx',
       katana: 'Katana',

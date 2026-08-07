@@ -123,12 +123,12 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 5 — Add reusable, secret-backed HTTP assessment profiles
 
-- [x] Add the protected execution foundation and reviewed HTTPx, Katana, and Nuclei adapters rather than rendering raw credentials into visible commands:
+- [x] Add the protected execution foundation and reviewed Curl, HTTPx, Katana, and Nuclei adapters rather than rendering raw credentials into visible commands:
   - Revalidate target scope, team membership, capability, secret availability, Files ownership, and profile enabled state immediately before every run.
   - Generate short-lived scanner-readable config/request material inside a private run directory or use safe environment injection where the tool supports it; delete temporary material after launch/finalization and recovery cleanup.
   - Show a redacted display command in the terminal, History, Run Details, workflow execution state, audit, metrics, notifications, and errors. Apply the existing secret masking pass to tool output as a second line of defense.
   - Never allow a profile to broaden a Project target into an unrelated hostname through redirects, schema servers, callback URLs, or proxy behavior without a visible allowlist decision.
-- [ ] Extend protected execution to Curl, Dalfox, SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported tools or profile features instead of dropping authentication or scope controls silently.
+- [ ] Extend protected execution to Dalfox, SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported tools or profile features instead of dropping authentication or scope controls silently.
 
 #### Phase 6 — Close the web and API discovery/validation gaps
 

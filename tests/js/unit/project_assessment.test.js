@@ -475,7 +475,7 @@ describe('project assessment controller', () => {
       ...detail,
       checks: {
         ...detail.checks,
-        checks: [{ ...detail.checks.checks[0], recommended_action_key: 'command:httpx' }],
+        checks: [{ ...detail.checks.checks[0], recommended_action_key: 'command:curl' }],
         total: 1,
       },
     }
@@ -500,18 +500,18 @@ describe('project assessment controller', () => {
     })
     const actionPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_1/recommended-action'
     const plan = {
-      action: { id: 'httpx', key: 'command:httpx', kind: 'command' },
+      action: { id: 'curl', key: 'command:curl', kind: 'command' },
       target: { entity_id: 'ent_1', type: 'domain', value: 'example.com' },
       http_profile: { name: 'Authenticated member', role: 'member', credential_use: ['bearer_token'] },
       policy_level: 'safe',
       scope: { target_count: 1, fan_out: 1 },
       bounds: { summary: 'One approved web target.', credential_use: 'protected_http_profile' },
-      display_command: 'httpx -u https://example.com/ -secrets-file [protected]',
+      display_command: 'curl -q --head https://example.com/ --config [protected]',
       launchable: true,
       plan_digest: 'b'.repeat(64),
     }
     const apiFetch = vi.fn(async (url, options = {}) => {
-      if (options.method === 'POST') return apiResponse({ run: { run_id: 'run_httpx' }, plan })
+      if (options.method === 'POST') return apiResponse({ run: { run_id: 'run_curl' }, plan })
       return apiResponse({ plan })
     })
     const showConfirm = vi.fn(async (options) => {
@@ -539,7 +539,7 @@ describe('project assessment controller', () => {
     controller.renderAssessment(container, 'prj_1')
     container.querySelector('.project-assessment-target-toggle').click()
     ;[...container.querySelectorAll('.project-assessment-check-row .btn')]
-      .find(button => button.textContent === 'Run HTTPx').click()
+      .find(button => button.textContent === 'Run Curl').click()
 
     await vi.waitFor(() => expect(attachActiveRunFromMonitor).toHaveBeenCalled())
     expect(apiFetch).toHaveBeenNthCalledWith(
