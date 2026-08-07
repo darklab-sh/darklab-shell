@@ -301,6 +301,7 @@ def test_version_correlation_requires_exact_identifier_and_version_matches():
         "vulnerability_id": "CVE-2026-1234", "confidence": "high",
         "match_basis": "exact_purl_version", "observed_identifier": "pkg:pypi/requests",
         "observed_version": "2.31.0", "affected_range": "==2.31.0",
+        "range_type": "EXACT", "advisory_source": "", "advisory_source_version": "",
         "validation_method": "version_inference",
     }]
     assert correlate_version_observation({"product": "requests", "version": "2.31.0"}, advisories) == []
@@ -315,3 +316,45 @@ def test_version_correlation_requires_exact_identifier_and_version_matches():
         "run_id": "run-1", "kind": "run", "observation_id": "obs-1",
         "observed_at": "2026-08-07T00:00:00Z", "tool_version": "nmap 7.96",
     }
+    ranged_advisory = [{
+        "id": "GHSA-range", "source": "osv", "source_version": "2026-08-07",
+        "package_purl": "pkg:pypi/requests",
+        "ranges": [{
+            "range_type": "SEMVER",
+            "events_json": '[{"introduced":"2.30.0"},{"fixed":"2.32.0"}]',
+        }],
+    }]
+    ranged = correlate_version_observation({"purl": "pkg:pypi/requests@2.31.0"}, ranged_advisory)
+    assert ranged == [{
+        "vulnerability_id": "GHSA-range", "confidence": "high",
+        "match_basis": "exact_purl_semver_range", "observed_identifier": "pkg:pypi/requests",
+        "observed_version": "2.31.0", "affected_range": "SEMVER: introduced 2.30.0; fixed 2.32.0",
+        "range_type": "SEMVER", "advisory_source": "osv", "advisory_source_version": "2026-08-07",
+        "validation_method": "version_inference",
+    }]
+    assert correlate_version_observation({"purl": "pkg:pypi/requests@2.29.9"}, ranged_advisory) == []
+    assert correlate_version_observation({"purl": "pkg:pypi/requests@2.32.0"}, ranged_advisory) == []
+    assert correlate_version_observation({
+        "purl": "pkg:pypi/requests@2.31.0", "version": "2.32.0",
+    }, ranged_advisory) == []
+    unsupported = [{
+        **ranged_advisory[0],
+        "ranges": [{"range_type": "ECOSYSTEM", "introduced": "2.30.0", "fixed": "2.32.0"}],
+    }]
+    assert correlate_version_observation({"purl": "pkg:pypi/requests@2.31.0"}, unsupported) == []
+    assert correlate_version_observation({"purl": "pkg:npm/@scope/widget@2.31.0"}, [{
+        **ranged_advisory[0], "package_purl": "pkg:npm/@scope/widget",
+    }])[0]["observed_identifier"] == "pkg:npm/@scope/widget"
+    reversed_events = [{
+        **ranged_advisory[0],
+        "ranges": [{
+            "range_type": "SEMVER",
+            "events": [{"fixed": "2.32.0"}, {"introduced": "2.30.0"}],
+        }],
+    }]
+    assert correlate_version_observation({"purl": "pkg:pypi/requests@2.31.0"}, reversed_events) == []
+    ranged_records = materialize_version_findings(
+        {"purl": "pkg:pypi/requests@2.31.0", "target": "api.example.test"}, ranged_advisory,
+    )
+    assert ranged_records[0]["advisory_source"] == "osv"
+    assert ranged_records[0]["advisory_source_version"] == "2026-08-07"
