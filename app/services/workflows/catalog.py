@@ -132,7 +132,8 @@ def normalize_workflow_entry(entry):
         return None
     inputs = normalize_workflow_inputs(entry.get("inputs") or [])
     declared_ids = {item["id"] for item in inputs}
-    version = 2 if str(entry.get("version") or "").strip() == "2" else 1
+    raw_version = str(entry.get("version") or "").strip()
+    version = int(raw_version) if raw_version in {"1", "2", "3"} else 1
     clean_steps = []
     capture_names = set()
     for index, step in enumerate(steps):
@@ -162,6 +163,13 @@ def normalize_workflow_entry(entry):
                 "source": source,
                 "required": bool(raw_capture.get("required", False)),
             }
+            capture_kind = str(raw_capture.get("kind") or raw_capture.get("mode") or "").strip().lower()
+            if capture_kind == "collection":
+                capture["kind"] = "collection"
+                try:
+                    capture["item_limit"] = int(raw_capture.get("item_limit") or 32)
+                except (TypeError, ValueError):
+                    capture["item_limit"] = 0
             for field in ("contains", "entity_type", "pointer"):
                 field_value = str(raw_capture.get(field) or "").strip()
                 if field_value:
@@ -182,13 +190,13 @@ def normalize_workflow_entry(entry):
             "cmd": cmd,
             "note": note,
         }
-        if version == 2:
+        if version >= 2:
             clean_step["id"] = str(step.get("id") or f"step_{index + 1}").strip().lower()
-        if version == 2 and captures:
+        if version >= 2 and captures:
             clean_step["captures"] = captures
             capture_names.update(pending_capture_names)
         raw_next = step.get("next")
-        if version == 2 and isinstance(raw_next, dict):
+        if version >= 2 and isinstance(raw_next, dict):
             next_value: dict[str, object] = {}
             for outcome in ("success", "failure"):
                 destination = str(raw_next.get(outcome) or "").strip().lower()
@@ -214,8 +222,8 @@ def normalize_workflow_entry(entry):
         "inputs": inputs,
         "steps": clean_steps,
     }
-    if version == 2:
-        normalized["version"] = 2
+    if version >= 2:
+        normalized["version"] = version
     workflow_id = str(entry.get("id") or "").strip().lower()
     if workflow_id:
         normalized["id"] = workflow_id

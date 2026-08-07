@@ -422,6 +422,33 @@ def test_collection_capture_accumulator_is_bounded_deduplicated_and_required():
     assert missing.result() == ({}, "required collection captures were not found: items")
 
 
+def test_collection_capture_definitions_require_version_three_and_validate_limits():
+    base = {
+        "id": "collect_hosts",
+        "title": "Collect hosts",
+        "inputs": [],
+        "steps": [{
+            "id": "collect",
+            "cmd": "echo hosts",
+            "captures": [{
+                "name": "hosts", "kind": "collection", "source": "json_pointer",
+                "pointer": "/hosts", "item_limit": 4,
+            }],
+        }],
+    }
+    with pytest.raises(WorkflowDefinitionError, match="version 3"):
+        compile_workflow_definition({**base, "version": 2})
+    compiled = compile_workflow_definition({**base, "version": 3})
+    assert compiled["version"] == 3
+    assert compiled["steps"][0]["captures"][0]["kind"] == "collection"
+    with pytest.raises(WorkflowDefinitionError, match="between 1 and 32"):
+        compile_workflow_definition({
+            **base,
+            "version": 3,
+            "steps": [{**base["steps"][0], "captures": [{**base["steps"][0]["captures"][0], "item_limit": 33}]}],
+        })
+
+
 def test_execution_state_machine_advances_once_and_keeps_snapshot():
     from services.workflows.events import replay_execution_events
 

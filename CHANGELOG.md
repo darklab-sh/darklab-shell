@@ -18,6 +18,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment workflows now have bounded collection-capture groundwork.**
   - **What:** Collection values support normalization, deduplication, item and byte limits, and required-capture reporting while existing scalar workflow captures remain unchanged.
   - **Tests:** Focused workflow coverage pins JSON-array and entity collection behavior.
+- **Collection capture definitions now use an explicit workflow version.**
+  - **What:** Version 3 is reserved for collection semantics; v1 and v2 definitions continue to reject collection metadata rather than silently changing execution behavior.
+  - **Tests:** Compiler and user-workflow validation cover version gating and item-limit bounds.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.

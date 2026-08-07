@@ -175,7 +175,7 @@ def _validate_capture_paths(
 def compile_workflow_definition(entry: object, *, require_workflow_id: bool = False) -> dict[str, object]:
     if not isinstance(entry, dict):
         raise WorkflowDefinitionError("workflow payload must be an object", field="workflow")
-    if "version" in entry and str(entry.get("version") or "").strip() not in {"1", "2"}:
+    if "version" in entry and str(entry.get("version") or "").strip() not in {"1", "2", "3"}:
         raise WorkflowDefinitionError("unsupported workflow version", field="version")
     raw_inputs = _raw_list(entry.get("inputs") or [], "inputs")
     raw_steps = _raw_list(entry.get("steps"), "steps")
@@ -233,11 +233,12 @@ def compile_workflow_definition(entry: object, *, require_workflow_id: bool = Fa
             field="steps",
         )
 
-    version = 2 if str(entry.get("version") or "").strip() == "2" else 1
+    raw_version = str(entry.get("version") or "").strip()
+    version = int(raw_version) if raw_version in {"1", "2", "3"} else 1
     workflow_id = str(entry.get("id") or "").strip().lower()
-    if version == 2 and require_workflow_id and not workflow_id:
-        raise WorkflowDefinitionError("version 2 operator workflows require a stable id", field="id")
-    if version == 2 and workflow_id and not WORKFLOW_INPUT_ID_RE.fullmatch(workflow_id):
+    if version >= 2 and require_workflow_id and not workflow_id:
+        raise WorkflowDefinitionError(f"version {version} operator workflows require a stable id", field="id")
+    if version >= 2 and workflow_id and not WORKFLOW_INPUT_ID_RE.fullmatch(workflow_id):
         raise WorkflowDefinitionError(
             "workflow ids must use lowercase letters, numbers, and underscores",
             field="id",
@@ -247,7 +248,7 @@ def compile_workflow_definition(entry: object, *, require_workflow_id: bool = Fa
         for step in raw_steps
     ):
         raise WorkflowDefinitionError(
-            "workflow step ids, captures, and transitions require version 2",
+        "workflow step ids, captures, and transitions require version 2",
             field="version",
         )
     normalized["version"] = version
@@ -290,6 +291,21 @@ def compile_workflow_definition(entry: object, *, require_workflow_id: bool = Fa
                 raise WorkflowDefinitionError(f"workflow capture {name!r} requires entity_type")
             if source == "json_pointer" and not str(capture.get("pointer") or "").startswith("/"):
                 raise WorkflowDefinitionError(f"workflow capture {name!r} requires a JSON Pointer")
+            capture_kind = str(capture.get("kind") or capture.get("mode") or "").strip().lower()
+            if capture_kind:
+                if capture_kind != "collection":
+                    raise WorkflowDefinitionError(f"unsupported workflow capture kind {capture_kind!r}")
+                if version < 3:
+                    raise WorkflowDefinitionError(
+                        "collection captures require workflow version 3",
+                        field=f"steps.{step_index}.captures",
+                    )
+                try:
+                    item_limit = int(capture.get("item_limit") or 32)
+                except (TypeError, ValueError) as exc:
+                    raise WorkflowDefinitionError("collection item_limit must be an integer") from exc
+                if not 1 <= item_limit <= 32:
+                    raise WorkflowDefinitionError("collection item_limit must be between 1 and 32")
             capture_names.add(name)
 
     for item in inputs:
