@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Assessment workflows now have bounded collection-capture groundwork.**
+  - **What:** Collection values support normalization, deduplication, item and byte limits, and required-capture reporting while existing scalar workflow captures remain unchanged.
+  - **Tests:** Focused workflow coverage pins JSON-array and entity collection behavior.
+
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
   - **What:** The assessment domain now classifies explicit service evidence and returns only reviewed, target-compatible actions; unknown, ambiguous, and unsupported services stay in review instead of producing a launch recommendation.

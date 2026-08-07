@@ -20,6 +20,7 @@ from core.database import delete_run_artifacts
 from core.database_access import get_db_connect
 from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNoiseKind, LineRole
 from services.workflows.captures import WorkflowCaptureAccumulator
+from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.compiler import (
     WorkflowDefinitionError,
     compile_execution_definition,
@@ -391,6 +392,34 @@ def test_capture_accumulator_enforces_value_total_and_control_character_limits()
     ])
     controlled.observe(LineEvent("unsafe\x01value"))
     assert controlled.result() == ({}, "capture result contains control characters")
+
+
+def test_collection_capture_accumulator_is_bounded_deduplicated_and_required():
+    accumulator = WorkflowCollectionAccumulator([{
+        "name": "hosts", "kind": "collection", "source": "json_pointer",
+        "pointer": "/hosts", "item_limit": 2, "required": True,
+    }])
+    accumulator.observe(LineEvent('{"hosts":[" one ","two","two","three"]}'))
+    assert accumulator.result() == ({"hosts": ["one", "two"]}, "")
+
+    entities = WorkflowCollectionAccumulator([{
+        "name": "domains", "mode": "collection", "source": "entity",
+        "entity_type": "domain", "required": True,
+    }])
+    entities.observe(LineEvent(
+        "entities",
+        entities=(
+            LineEntity("domain", "One.EXAMPLE", "one.example", "high"),
+            LineEntity("domain", "Two.EXAMPLE", "two.example", "high"),
+        ),
+    ))
+    assert entities.result() == ({"domains": ["one.example", "two.example"]}, "")
+
+    missing = WorkflowCollectionAccumulator([{
+        "name": "items", "kind": "collection", "source": "json_pointer",
+        "pointer": "/items", "required": True,
+    }])
+    assert missing.result() == ({}, "required collection captures were not found: items")
 
 
 def test_execution_state_machine_advances_once_and_keeps_snapshot():
