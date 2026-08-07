@@ -1902,6 +1902,77 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     curl_start_kwargs["run_cleanup_hook"]()
     assert not curl_config_path.parent.exists()
 
+    with sqlite3.connect(DB_PATH) as conn:
+        snapshot_row = conn.execute(
+            "SELECT profile_snapshot FROM project_assessments WHERE id = ?",
+            (assessment["assessment"]["id"],),
+        ).fetchone()
+        snapshot = json.loads(snapshot_row[0])
+        frozen_check = next(
+            item for item in snapshot["checks"] if item["key"] == check["check_key"]
+        )
+        frozen_check["recommended_action"] = "command:dalfox"
+        conn.execute(
+            "UPDATE project_assessments SET profile_snapshot = ? WHERE id = ?",
+            (json.dumps(snapshot), assessment["assessment"]["id"]),
+        )
+        conn.execute(
+            "UPDATE project_assessment_checks SET recommended_action_key = 'command:dalfox' "
+            "WHERE id = ?",
+            (check["id"],),
+        )
+        conn.commit()
+
+    dalfox_preview = client.get(
+        action_path,
+        headers=_headers(token),
+        query_string={"http_profile_id": profile_id},
+    )
+    assert dalfox_preview.status_code == 200
+    dalfox_plan = dalfox_preview.get_json()["plan"]
+    assert dalfox_plan["action"]["id"] == "dalfox"
+    assert "--only-discovery --skip-mining-dict --format jsonl" in (
+        dalfox_plan["display_command"]
+    )
+    assert "--scan-timeout 60 --rate-limit 3 --workers 2" in (
+        dalfox_plan["display_command"]
+    )
+    assert dalfox_plan["display_command"].endswith("--config [protected]")
+    assert dalfox_plan["bounds"]["time_limit_seconds"] == 60
+
+    dalfox_started = SimpleNamespace(run_id="run_protected_dalfox", status="running")
+    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
+         mock.patch(
+             "blueprints.api_v1._start_brokered_run_service",
+             return_value=dalfox_started,
+         ) as dalfox_start_run:
+        dalfox_launched = client.post(
+            action_path,
+            headers=_headers(token),
+            json={
+                "confirmed": True,
+                "http_profile_id": profile_id,
+                "plan_digest": dalfox_plan["plan_digest"],
+            },
+        )
+
+    assert dalfox_launched.status_code == 202
+    dalfox_start_kwargs = dalfox_start_run.call_args.kwargs
+    assert dalfox_start_kwargs["original_command"].endswith("--max-targets-per-host 1")
+    assert dalfox_start_kwargs["trusted_execution_args"][:1] == ("--config",)
+    dalfox_config_path = Path(dalfox_start_kwargs["trusted_execution_args"][1])
+    assert json.loads(dalfox_config_path.read_text(encoding="utf-8")) == {
+        "scan": {
+            "follow_redirects": False,
+            "headers": [f"X-Assessment-Token: {secret_value}"],
+        },
+    }
+    assert secret_value in dalfox_start_kwargs["private_values"]
+    assert str(dalfox_config_path) in dalfox_start_kwargs["private_values"]
+    assert secret_value not in dalfox_launched.get_data(as_text=True)
+    dalfox_start_kwargs["run_cleanup_hook"]()
+    assert not dalfox_config_path.parent.exists()
+
 
 def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
     client = get_client()

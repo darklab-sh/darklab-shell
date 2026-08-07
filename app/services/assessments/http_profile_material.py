@@ -14,6 +14,11 @@ from services.assessments.http_profile_runtime import (
     PrivateHttpMaterialError,
     PrivateHttpRunMaterial,
 )
+from services.assessments.http_profile_material_formats import (
+    HttpProfileMaterialFormatError,
+    curl_config,
+    dalfox_config,
+)
 from services.teams.scope import owner_context_for_scope
 from services.workspace.files import (
     WorkspaceError,
@@ -41,32 +46,6 @@ def private_file_values(slot: str, content: bytes) -> list[str]:
         for line in content.decode("utf-8", errors="ignore").splitlines()
         if len(line) >= 16 and not line.startswith("-----")
     ]
-
-
-def _curl_config_value(value: str) -> str:
-    if any(ord(character) < 32 and character not in {"\t"} for character in value):
-        raise HttpProfileMaterialError("Curl profile material contains an unsafe value")
-    return (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\t", "\\t")
-    )
-
-
-def _curl_config(
-    headers: list[tuple[str, str]],
-    copied: Mapping[str, str],
-) -> bytes:
-    lines = [
-        f'header = "{_curl_config_value(f"{name}: {value}")}"'
-        for name, value in headers
-    ]
-    if copied:
-        lines.extend([
-            f'cert = "{_curl_config_value(copied["client_certificate"])}"',
-            f'key = "{_curl_config_value(copied["client_key"])}"',
-        ])
-    return ("\n".join(lines) + "\n").encode("utf-8")
 
 
 def _copy_profile_files(
@@ -122,8 +101,12 @@ def materialize_tool_profile(
         if tool == "curl":
             config_path = material.write_bytes(
                 "curl.conf",
-                _curl_config(headers, copied),
+                curl_config(headers, copied),
             )
+            trusted_args.extend(["--config", str(config_path)])
+            private_values.append(str(config_path))
+        elif tool == "dalfox" and headers:
+            config_path = material.write_bytes("config.json", dalfox_config(headers))
             trusted_args.extend(["--config", str(config_path)])
             private_values.append(str(config_path))
         elif headers:
@@ -159,7 +142,13 @@ def materialize_tool_profile(
                 "-ck",
                 copied["client_key"],
             ])
-    except (OSError, PrivateHttpMaterialError, WorkspaceError, HttpProfileMaterialError) as exc:
+    except (
+        OSError,
+        PrivateHttpMaterialError,
+        WorkspaceError,
+        HttpProfileMaterialError,
+        HttpProfileMaterialFormatError,
+    ) as exc:
         if material:
             material.cleanup()
         raise HttpProfileMaterialError(

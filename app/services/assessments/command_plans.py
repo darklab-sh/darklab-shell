@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass
 from typing import Any, Mapping
+
+from services.assessments.command_plan_contracts import CommandPlan
+from services.assessments.command_plans_web import web_command_plans
 
 
 _COMMAND_TARGET_TYPES = {
@@ -18,16 +20,8 @@ _COMMAND_TARGET_TYPES = {
     "httpx": frozenset({"domain", "ip", "url"}),
     "katana": frozenset({"domain", "url"}),
     "nuclei": frozenset({"domain", "ip", "url"}),
+    "dalfox": frozenset({"domain", "ip", "url"}),
 }
-
-
-@dataclass(frozen=True)
-class CommandPlan:
-    command: str
-    boundary: str
-    request_limit: int | None
-    time_limit_seconds: int | None
-    credential_use: str = "none"
 
 
 def command_plan(
@@ -47,7 +41,7 @@ def command_plan(
     if (
         not web_target
         and target_type in {"domain", "ip"}
-        and action_id in {"curl", "httpx", "katana", "nuclei"}
+        and action_id in {"curl", "httpx", "katana", "nuclei", "dalfox"}
     ):
         selected_web_target = f"https://{target_value}"
     quoted_web = shlex.quote(selected_web_target)
@@ -60,22 +54,13 @@ def command_plan(
         header_uses = uses - {"client_certificate"}
         if action_id == "curl" and uses:
             protected_suffix = " --config [protected]"
+        elif action_id == "dalfox" and header_uses:
+            protected_suffix = " --config [protected]"
         elif header_uses:
             protected_suffix = " -H [protected]" if action_id == "katana" else " -sf [protected]"
         if action_id == "nuclei" and "client_certificate" in uses:
             protected_suffix += " -cc [protected] -ck [protected]"
-    httpx_bounds = f" -rl {rate} -threads {concurrency}" if http_profile else ""
     plans = {
-        "curl": CommandPlan(
-            f"curl -q --silent --show-error --head --no-location --noproxy '*' "
-            f"--proto '=http,https' --connect-timeout 10 --max-time 30 {quoted_web}"
-            f"{protected_suffix}",
-            "One HEAD request to one approved HTTP target, with no redirects, a "
-            "10-second connect timeout, and a 30-second total timeout.",
-            1,
-            30,
-            credential_use,
-        ),
         "ping": CommandPlan(
             f"ping -c 4 -W 2 {quoted}",
             "Four probes against one approved host.",
@@ -95,31 +80,13 @@ def command_plan(
             None,
             None,
         ),
-        "httpx": CommandPlan(
-            f"httpx -u {quoted_web} -status-code -title -tech-detect -silent"
-            f"{httpx_bounds}{protected_suffix}",
-            "One approved host or URL with response metadata only.",
-            None,
-            None,
+        **web_command_plans(
+            quoted_web,
+            rate,
+            concurrency,
             credential_use,
-        ),
-        "katana": CommandPlan(
-            f"katana -u {quoted_web} -d 1 -dr -c {concurrency} -rl {rate} "
-            f"-timeout 10 -silent{protected_suffix}",
-            f"One approved web target, crawl depth 1, concurrency {concurrency}, and "
-            "10-second request timeouts.",
-            None,
-            None,
-            credential_use,
-        ),
-        "nuclei": CommandPlan(
-            f"nuclei -u {quoted_web} -severity high,critical -rl {rate} "
-            f"-c {concurrency} -timeout 10 -retries 1 -silent{protected_suffix}",
-            f"One approved target, high/critical templates, {rate} requests per second, "
-            f"concurrency {concurrency}, and one retry.",
-            None,
-            None,
-            credential_use,
+            protected_suffix,
+            profiled=bool(http_profile),
         ),
     }
     return plans.get(action_id)

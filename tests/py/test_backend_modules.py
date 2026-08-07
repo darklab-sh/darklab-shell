@@ -17890,6 +17890,25 @@ class TestDerivedCommandRegistry:
         ]
 
         assert missing == []
+        dalfox = by_root["dalfox"]
+        assert dalfox["policy"]["allow"] == ["dalfox"]
+        assert {
+            "dalfox server",
+            "dalfox payload",
+            "dalfox file",
+            "dalfox pipe",
+            "dalfox --config",
+            "dalfox --follow-redirects",
+            "dalfox --remote-wordlists",
+            "dalfox --blind-oob",
+        }.issubset(set(dalfox["policy"]["deny"]))
+        assert is_command_allowed("dalfox https://darklab.sh/?view=summary")[0]
+        assert not is_command_allowed("dalfox server")[0]
+        assert not is_command_allowed("dalfox https://darklab.sh/ --follow-redirects")[0]
+        rewritten, _notice = commands.rewrite_command("dalfox https://darklab.sh/")
+        assert rewritten.endswith("--only-discovery --skip-mining-dict")
+        help_command, _notice = commands.rewrite_command("dalfox --help")
+        assert help_command == "dalfox --help"
         ipinfo = by_root["ipinfo"]
         assert ipinfo["requires_secrets"] == [{"env": "IPINFO_TOKEN", "optional": True}]
         assert "ipinfo --token" in ipinfo["policy"]["deny"]
@@ -30931,8 +30950,11 @@ class TestAssessmentHttpProfileExecution:
             _unsupported_reason,
         )
         from services.assessments.http_profile_material import (
-            _curl_config,
             private_file_values,
+        )
+        from services.assessments.http_profile_material_formats import (
+            curl_config,
+            dalfox_config,
         )
         from services.commands.registry import is_command_allowed
 
@@ -30965,6 +30987,19 @@ class TestAssessmentHttpProfileExecution:
         assert curl.time_limit_seconds == 30
         allowed, reason = is_command_allowed(curl.command.removesuffix(" --config [protected]"))
         assert allowed, reason
+        dalfox = command_plan(
+            "dalfox",
+            "url",
+            "https://app.example/admin?view=summary",
+            http_profile=summary,
+        )
+        assert dalfox is not None
+        assert dalfox.command.endswith("--max-targets-per-host 1 --config [protected]")
+        assert "--only-discovery --skip-mining-dict --format jsonl --no-color" in dalfox.command
+        assert "--scan-timeout 60 --rate-limit 4 --workers 2" in dalfox.command
+        assert dalfox.time_limit_seconds == 60
+        allowed, reason = is_command_allowed(dalfox.command.removesuffix(" --config [protected]"))
+        assert allowed, reason
         profile = {
             "include_paths": ["/admin"],
             "exclude_paths": ["/admin/logout"],
@@ -30976,6 +31011,7 @@ class TestAssessmentHttpProfileExecution:
             profile, "katana", "https://[2001:db8::1]/admin"
         )[3]
         assert _scope_arguments(profile, "curl", "https://app.example/admin") == []
+        assert _scope_arguments(profile, "dalfox", "https://app.example/admin") == []
         assert _scope_arguments(profile, "nuclei", "https://app.example") == ["-dr", "-ni"]
         assert "proxy allowlist" in _unsupported_reason({"proxy_url": "https://proxy.example"}, "httpx")
         assert "client certificate" in _unsupported_reason(
@@ -30986,7 +31022,7 @@ class TestAssessmentHttpProfileExecution:
             "client_key",
             b"-----BEGIN PRIVATE KEY-----\nunique-private-key-material\n-----END PRIVATE KEY-----\n",
         ) == ["unique-private-key-material"]
-        assert _curl_config(
+        assert curl_config(
             [("X-Token", 'quote" slash\\ tab\tvalue')],
             {
                 "client_certificate": "/private/client cert.pem",
@@ -30997,6 +31033,14 @@ class TestAssessmentHttpProfileExecution:
             'cert = "/private/client cert.pem"\n'
             'key = "/private/client key.pem"\n'
         )
+        assert json.loads(dalfox_config([
+            ("Authorization", "Bearer protected"),
+        ])) == {
+            "scan": {
+                "follow_redirects": False,
+                "headers": ["Authorization: Bearer protected"],
+            },
+        }
 
     def test_private_runtime_uses_scanner_owned_handoff_in_container_mode(
         self,

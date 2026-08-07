@@ -1336,7 +1336,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "probe openssl-legacy-provider openssl list -providers -provider legacy" in (
         bundled_tool_smoke
     )
-    for tool in ("rustscan", "nuclei", "massdns", "pg_restore", "openssl"):
+    for tool in ("rustscan", "dalfox", "nuclei", "massdns", "pg_restore", "openssl"):
         assert f"probe {tool} " in bundled_tool_smoke
 
     bin_dir, runtime_log = _fake_image_runtime(tmp_path)
@@ -1706,6 +1706,16 @@ def test_container_license_inventory_matches_dockerfile_and_release():
         assert f"/usr/share/doc/darklab-shell/licenses/{notice_name}" in (
             ROOT / "Dockerfile"
         ).read_text(encoding="utf-8")
+    dalfox_component = next(
+        item for item in inventory["components"] if item["name"] == "Dalfox"
+    )
+    assert dalfox_component["license"] == "MIT"
+    assert dalfox_component["notice_location"].endswith("/licenses/Dalfox.txt")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "FROM ${PYTHON_BASE_IMAGE} AS dalfox-asset" in dockerfile
+    assert "COPY --from=dalfox-asset /out/ /" in dockerfile
+    assert "sha256sum -c dalfox.tar.gz.sha256" in dockerfile
+    assert "sha256sum -c LICENSE.txt.sha256" in dockerfile
     publisher = (ROOT / "scripts" / "release" / "publish_release_artifacts.sh").read_text(
         encoding="utf-8"
     )

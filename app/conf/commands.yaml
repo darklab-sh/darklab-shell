@@ -5429,6 +5429,153 @@ commands:
           suggest:
             - value: wpscan-results.txt
               description: Save WPScan output
+  - root: dalfox
+    description: Discovers web parameters with a bounded, payload-free Dalfox pass.
+    category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - darklab_shell forces parameter-discovery mode and disables remote dictionary mining for every Dalfox run.
+        - Saved Project HTTP profiles pass headers through a short-lived private config file rather than command arguments.
+      gotchas:
+        - This integration doesn't send XSS payloads or confirm XSS findings; active validation remains outside the discovery-only command contract.
+        - Redirects, remote wordlists, callbacks, proxying, server mode, file/pipe target fan-out, and custom request bodies are blocked.
+      safe_defaults:
+        - Start with one exact URL and review the discovered query, body, DOM, cookie, header, and path parameters before choosing a separate validation step.
+      common_flags:
+        - "--only-discovery — stop before XSS payload scanning"
+        - "--skip-mining-dict — disable dictionary-based parameter guessing"
+        - "--rate-limit — cap total requests per second"
+        - "--scan-timeout — cap the scan stage per target"
+      artifact_behavior: Assessment discovery results stream as JSONL in saved run output. Direct runs use the selected output format; file output and input-list modes are not exposed.
+    help:
+      flags:
+        - -h
+        - --help
+        - -V
+        - --version
+    policy:
+      allow:
+        - dalfox
+      deny:
+        - dalfox server
+        - dalfox payload
+        - dalfox mcp
+        - dalfox file
+        - dalfox pipe
+        - dalfox --config
+        - dalfox -i
+        - dalfox --input-type
+        - dalfox -o
+        - dalfox --output
+        - dalfox --state-file
+        - dalfox --include-request
+        - dalfox --include-response
+        - dalfox --include-all
+        - dalfox -d
+        - dalfox --data
+        - dalfox --cookies
+        - dalfox -X
+        - dalfox --method
+        - dalfox --cookie-from-raw
+        - dalfox --out-of-scope-file
+        - dalfox -W
+        - dalfox --mining-dict-word
+        - dalfox --remote-wordlists
+        - dalfox --proxy
+        - dalfox -F
+        - dalfox --follow-redirects
+        - dalfox --remote-payloads
+        - dalfox --custom-blind-xss-payload
+        - dalfox -b
+        - dalfox --blind
+        - dalfox --blind-oob
+        - dalfox --blind-oob-secret
+        - dalfox --custom-payload
+        - dalfox --only-custom-payload
+        - dalfox --inject-marker
+        - dalfox --deep-scan
+        - dalfox --sxss
+        - dalfox --sxss-url
+        - dalfox --analyze-external-js
+        - dalfox --hpp
+        - dalfox --waf-bypass
+        - dalfox --force-waf
+        - dalfox --waf-evasion
+        - dalfox --skip-discovery
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - --only-discovery
+          position: append
+          unless_any:
+            - --only-discovery
+            - -h
+            - --help
+            - -V
+            - --version
+        - flags:
+            - --skip-mining-dict
+          position: append
+          unless_any:
+            - --skip-mining-dict
+            - -h
+            - --help
+            - -V
+            - --version
+    autocomplete:
+      examples:
+        - value: dalfox --help
+          description: Show discovery options and usage
+          smoke:
+            profile: unauthenticated
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -V
+          description: Show the installed Dalfox version
+          closes: true
+        - value: --version
+          description: Show the installed Dalfox version
+          closes: true
+        - value: --only-discovery
+          description: Stop after parameter discovery
+        - value: --skip-mining-dict
+          description: Disable dictionary parameter mining
+        - value: --format
+          description: Output format
+          takes_value: true
+          suggest:
+            - value: jsonl
+              description: Machine-readable JSON lines
+        - value: --no-color
+          description: Disable ANSI colors
+        - value: --timeout
+          description: Per-request timeout in seconds
+          takes_value: true
+        - value: --scan-timeout
+          description: Scan-stage timeout in seconds
+          takes_value: true
+        - value: --rate-limit
+          description: Total requests per second
+          takes_value: true
+        - value: --workers
+          description: Concurrent workers for the target
+          takes_value: true
+        - value: --max-concurrent-targets
+          description: Concurrent target cap
+          takes_value: true
+        - value: --max-targets-per-host
+          description: Per-host target cap
+          takes_value: true
+      arguments:
+        - placeholder: <url>
+          hint_only: true
+          value_type: url
+          description: One exact HTTP or HTTPS target
   - root: nuclei
     description: Runs template-based checks to detect known exposures, misconfigurations, and vulnerabilities.
     category: Vulnerability Scanning

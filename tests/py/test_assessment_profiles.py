@@ -104,13 +104,20 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
         "http_profile",
         "content_discovery",
         "vulnerability_templates",
+        "parameter_discovery",
     }
+    assert by_key["network"]["version"] == "1.0"
+    assert by_key["web"]["version"] == "1.1"
     for profile in catalog.profiles:
-        assert profile["version"] == "1.0"
         for check in profile["checks"]:
             assert check["recommended_action"].startswith("command:")
             assert check["completion_guidance"]
             assert all(rule["version"] == "1.0" for rule in check["evidence_rules"])
+    parameter_check = next(
+        check for check in by_key["web"]["checks"] if check["key"] == "parameter_discovery"
+    )
+    assert parameter_check["recommended_action"] == "command:dalfox"
+    assert parameter_check["evidence_rules"][0]["command_roots"] == ["dalfox"]
 
 
 def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(tmp_path: Path):

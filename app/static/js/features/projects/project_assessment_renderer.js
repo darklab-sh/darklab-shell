@@ -448,6 +448,7 @@ function createProjectAssessmentRenderer(context, actions) {
     if (kind === 'workflow') return `Open ${actionId} workflow`;
     const labels = {
       curl: 'Curl',
+      dalfox: 'Dalfox',
       dnsrecon: 'DNSRecon',
       httpx: 'HTTPx',
       katana: 'Katana',

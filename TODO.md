@@ -128,7 +128,8 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Generate short-lived scanner-readable config/request material inside a private run directory or use safe environment injection where the tool supports it; delete temporary material after launch/finalization and recovery cleanup.
   - Show a redacted display command in the terminal, History, Run Details, workflow execution state, audit, metrics, notifications, and errors. Apply the existing secret masking pass to tool output as a second line of defense.
   - Never allow a profile to broaden a Project target into an unrelated hostname through redirects, schema servers, callback URLs, or proxy behavior without a visible allowlist decision.
-- [ ] Extend protected execution to Dalfox, SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported tools or profile features instead of dropping authentication or scope controls silently.
+- [x] Add a protected Dalfox parameter-discovery adapter with one-target bounds, no redirects, no remote dictionaries, no active XSS payloads, and private header material.
+- [ ] Extend protected execution to SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported tools or profile features instead of dropping authentication or scope controls silently.
 
 #### Phase 6 — Close the web and API discovery/validation gaps
 
@@ -156,7 +157,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Group/filter by target, status, technology, authentication role, visual hash, and changed-since-previous capture. A visual difference is evidence, not automatically a finding.
   - Add bounded gallery paging, thumbnails, full-image viewing, keyboard/touch navigation, package/report selection, redaction behavior, cleanup, and storage quotas.
 - [ ] Add focused parameter and application testing tools:
-  - Add Dalfox for reflected/DOM XSS and parameter mining with structured, confidence-aware findings and proof/evidence fields.
+  - Extend the bounded Dalfox parameter-discovery foundation with separately confirmed reflected/DOM XSS validation, structured confidence-aware findings, and proof/evidence fields.
   - Add SQLmap behind a detection-only default policy. Deny data dumping, filesystem access, OS command execution, registry access, database takeover, destructive statements, and other takeover options in normal and intrusive profiles.
   - Add Schemathesis for OpenAPI/GraphQL operation coverage, bounded negative testing, minimized failure examples, and per-operation evidence. Schema fetches and `$ref` resolution must obey the same scope and private-network rules as the target.
   - Prefer version-pinned multi-arch binaries or isolated Python environments that keep the runtime dependency graph reproducible. Update licenses, hashes, SBOM/provenance, image-size budgets, and container smoke checks for every addition.

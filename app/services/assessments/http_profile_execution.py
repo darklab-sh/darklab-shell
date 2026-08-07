@@ -28,7 +28,7 @@ from services.secrets.storage import get_secret_value_by_name
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
 
-_SUPPORTED_TOOLS = frozenset({"curl", "httpx", "katana", "nuclei"})
+_SUPPORTED_TOOLS = frozenset({"curl", "httpx", "katana", "nuclei", "dalfox"})
 _UNSUPPORTED_SECRET_SLOTS = frozenset({
     "client_key_passphrase",
     "proxy_authorization",
@@ -125,7 +125,7 @@ def _unsupported_reason(profile: Mapping[str, Any], tool: str) -> str:
     secret_slots = set(profile.get("secret_refs", {}))
     if secret_slots & _UNSUPPORTED_SECRET_SLOTS:
         return "This tool cannot safely use one or more selected HTTP-profile secret fields."
-    if tool in {"httpx", "katana"} and profile.get("file_refs"):
+    if tool in {"httpx", "katana", "dalfox"} and profile.get("file_refs"):
         return "This tool does not support the profile's client certificate contract."
     return ""
 
@@ -246,7 +246,7 @@ def _resolved_headers(
 
 
 def _scope_arguments(profile: Mapping[str, Any], tool: str, target_value: str) -> list[str]:
-    if tool in {"curl", "httpx"}:
+    if tool in {"curl", "httpx", "dalfox"}:
         return []
     if tool == "nuclei":
         return ["-dr", "-ni"]

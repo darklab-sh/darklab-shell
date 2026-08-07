@@ -36,6 +36,12 @@ ARG RUSTSCAN_LINUX_AMD64_ASSET=x86_64-linux-rustscan.tar.gz.zip
 ARG RUSTSCAN_LINUX_AMD64_SHA256=f3a4365d939e3b81f25ba8c37852ce9ac9e938c3cc882c5b3e6fff6152c740be
 ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
 ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
+ARG DALFOX_VERSION=v3.1.2
+ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.1.2-linux-x86_64-musl.tar.gz
+ARG DALFOX_LINUX_AMD64_SHA256=0818b75082bf8527c5c4b6f4ed0f745f393290637328335788c9eadfea6cf0b2
+ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.1.2-linux-aarch64-musl.tar.gz
+ARG DALFOX_LINUX_ARM64_SHA256=d21f541038a40d8dd5c4b655fb88159a4b9a75c63f61c3e244647326a5199bc2
+ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
 ARG TCPING_VERSION=v2.8.0
 ARG WPSCAN_VERSION=4.0.1
 ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
@@ -330,6 +336,41 @@ RUN case "${TARGETARCH}" in \
     mkdir -p /out/usr/local/bin && \
     install -m 0755 rustscan /out/usr/local/bin/rustscan
 
+FROM ${PYTHON_BASE_IMAGE} AS dalfox-asset
+ARG TARGETARCH
+ARG DALFOX_VERSION
+ARG DALFOX_LINUX_AMD64_ASSET
+ARG DALFOX_LINUX_AMD64_SHA256
+ARG DALFOX_LINUX_ARM64_ASSET
+ARG DALFOX_LINUX_ARM64_SHA256
+ARG DALFOX_LICENSE_SHA256
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /tmp
+RUN case "${TARGETARCH}" in \
+        amd64) dalfox_asset="${DALFOX_LINUX_AMD64_ASSET}"; dalfox_sha256="${DALFOX_LINUX_AMD64_SHA256}" ;; \
+        arm64) dalfox_asset="${DALFOX_LINUX_ARM64_ASSET}"; dalfox_sha256="${DALFOX_LINUX_ARM64_SHA256}" ;; \
+        *) echo "unsupported Dalfox target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    curl --fail --location --connect-timeout 15 --max-time 90 \
+        --retry 4 --retry-delay 3 --retry-all-errors \
+        --output dalfox.tar.gz \
+        "https://github.com/hahwul/dalfox/releases/download/${DALFOX_VERSION}/${dalfox_asset}" && \
+    printf "%s  dalfox.tar.gz\n" "${dalfox_sha256}" > dalfox.tar.gz.sha256 && \
+    sha256sum -c dalfox.tar.gz.sha256 && \
+    mkdir dalfox && \
+    tar xzf dalfox.tar.gz --strip-components=1 -C dalfox && \
+    mkdir -p /out/usr/local/bin /out/usr/share/doc/darklab-shell/licenses && \
+    install -m 0755 dalfox/dalfox /out/usr/local/bin/dalfox && \
+    curl --fail --location --connect-timeout 15 --max-time 30 \
+        --retry 4 --retry-delay 3 --retry-all-errors \
+        --output LICENSE.txt \
+        "https://raw.githubusercontent.com/hahwul/dalfox/${DALFOX_VERSION}/LICENSE.txt" && \
+    printf "%s  LICENSE.txt\n" "${DALFOX_LICENSE_SHA256}" > LICENSE.txt.sha256 && \
+    sha256sum -c LICENSE.txt.sha256 && \
+    install -m 0644 LICENSE.txt /out/usr/share/doc/darklab-shell/licenses/Dalfox.txt
+
 FROM ${PYTHON_BASE_IMAGE} AS ruby-tools
 ARG WPSCAN_VERSION
 RUN apt-get update && \
@@ -391,6 +432,7 @@ COPY --from=native-tools /out/ /
 COPY --from=wordlist-assets /usr/share/wordlists/seclists/ /usr/share/wordlists/seclists/
 COPY --from=script-assets /out/ /
 COPY --from=rustscan-asset /out/ /
+COPY --from=dalfox-asset /out/ /
 COPY --from=ruby-tools /out/ /
 
 RUN ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \

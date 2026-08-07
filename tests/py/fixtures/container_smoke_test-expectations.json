@@ -392,6 +392,14 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "dalfox --help",
+      "expected_text": [
+        "Usage: dalfox"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "nuclei -h",
       "expected_text": [
         "Nuclei is a fast, template"

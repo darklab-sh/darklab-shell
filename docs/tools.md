@@ -117,6 +117,10 @@ The app runs `nuclei` with a writable temporary home and adds `-ud /tmp/nuclei-t
 
 Saved output records whether a finding used the managed cache, a workspace template path, a pinned-looking template clone, or an operator-updated template set. Normal relative selectors such as `http/` count as managed-cache templates. ProjectDiscovery config, resume, and useful generated state is stored in Files under `/tools/` as described above.
 
+### `dalfox`
+
+darklab_shell uses Dalfox for bounded parameter discovery. Normal commands and the Project Assessment action add discovery-only mode and disable remote mining dictionaries, so Dalfox doesn't send XSS payloads. Server, callback, file/pipe input, proxy, redirect, custom payload, and remote-wordlist modes remain blocked. A protected Project HTTP profile can supply request headers through a short-lived private config without placing their values in the command or saved history.
+
 ### `wpscan`
 
 `wpscan` works without a token. Save `WPSCAN_API_TOKEN` for API-backed vulnerability data. Inline `--api-token` values are blocked so they cannot enter saved history or output.

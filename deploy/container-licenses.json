@@ -247,6 +247,13 @@
       "notice_location": "/usr/share/common-licenses/GPL-3"
     },
     {
+      "name": "Dalfox",
+      "version_arg": "DALFOX_VERSION",
+      "source": "https://github.com/hahwul/dalfox",
+      "license": "MIT",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/Dalfox.txt"
+    },
+    {
       "name": "WPScan",
       "version_arg": "WPSCAN_VERSION",
       "source": "https://github.com/wpscanteam/wpscan",
