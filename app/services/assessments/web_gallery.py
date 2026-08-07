@@ -43,6 +43,8 @@ def filter_web_surface_rows(
         page_limit = min(MAX_GALLERY_ROWS, max(0, int(limit)))
     except (TypeError, ValueError):
         page_limit = MAX_GALLERY_ROWS
+    if page_limit == 0:
+        return []
     target_key = str(target or "").strip().casefold()
     technology_key = str(technology or "").strip().casefold()
     role_key = str(profile_role or "").strip().casefold()

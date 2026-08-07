@@ -167,7 +167,7 @@ def test_web_gallery_paging_is_bounded_and_skips_malformed_rows():
         limit=9999,
     )
     assert [row["url"] for row in rows] == ["https://two.example"]
-    assert filter_web_surface_rows([], offset=-5, limit=0) == []
+    assert filter_web_surface_rows([{"url": "https://one.example"}], offset=-5, limit=0) == []
 
 
 def test_httpx_json_output_carries_safe_screenshot_metadata_only():
