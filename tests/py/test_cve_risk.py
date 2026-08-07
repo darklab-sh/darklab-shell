@@ -34,6 +34,7 @@ from services.cve_risk.nvd_advisory import (
     parse_nvd_dataset,
     persist_external_nvd_lookup,
 )
+from services.cve_risk.osv_parser import OsvDatasetError, parse_osv_dataset
 from services.cve_risk.parsers import FeedValidationError, ParsedFeed, parse_epss, parse_kev
 from services.cve_risk.ranking import (
     attach_risk_to_findings,
@@ -104,6 +105,31 @@ def _nvd_dataset(version: str, *, status: str, score: float) -> ParsedNvdDataset
         "timestamp": version,
         "vulnerabilities": [{"cve": cve}],
     }).encode())
+
+
+def _osv_record(**overrides):
+    record = {
+        "schema_version": "1.6.0",
+        "id": "GHSA-abcd-1234-efgh",
+        "modified": "2026-08-04T12:00:00Z",
+        "published": "2026-08-01T00:00:00Z",
+        "aliases": ["CVE-2026-12345"],
+        "summary": "Example package vulnerability",
+        "affected": [{
+            "package": {
+                "ecosystem": "PyPI",
+                "name": "requests",
+                "purl": "pkg:pypi/requests",
+            },
+            "versions": ["2.30.0"],
+            "ranges": [{
+                "type": "SEMVER",
+                "events": [{"introduced": "2.0.0"}, {"fixed": "2.32.0"}],
+            }],
+        }],
+    }
+    record.update(overrides)
+    return record
 
 
 def _insert_project_finding(
@@ -250,6 +276,119 @@ def test_cve_risk_config_bounds_network_and_hysteresis_contracts():
         CveRiskConfig(advisory_mode="local")
     with pytest.raises(ValidationError, match="advisory_cvss_downgrade_delta"):
         CveRiskConfig(advisory_cvss_downgrade_delta=0)
+
+
+def test_osv_parser_normalizes_exact_package_versions_and_semver_ranges():
+    first = _osv_record()
+    first["affected"].append({
+        "package": {
+            "ecosystem": "PyPI",
+            "name": "requests",
+            "purl": "pkg:pypi/requests",
+        },
+        "versions": ["2.31.0", "2.30.0"],
+        "ranges": [{
+            "type": "SEMVER",
+            "events": [{"introduced": "2.0.0"}, {"fixed": "2.32.0"}],
+        }],
+    })
+    withdrawn = _osv_record(
+        id="GHSA-withdrawn-1234",
+        aliases=["CVE-2026-99999"],
+        modified="2026-08-05T12:00:00Z",
+        withdrawn="2026-08-05T13:00:00Z",
+        affected=[],
+    )
+
+    parsed = parse_osv_dataset(json.dumps([first, withdrawn]).encode())
+
+    assert parsed.version == "osv:2026-08-05T12:00:00+00:00"
+    assert parsed.published_at == "2026-08-05T12:00:00+00:00"
+    assert parsed.withdrawn_record_count == 1
+    assert parsed.skipped_affected_count == 0
+    assert parsed.skipped_range_count == 0
+    assert len(parsed.records) == 1
+    record = parsed.records[0]
+    assert record["advisory_id"].startswith("osv_")
+    assert record["source_advisory_id"] == "GHSA-abcd-1234-efgh"
+    assert record["normalized_vulnerability_id"] == "CVE-2026-12345"
+    assert record["package_purl"] == "pkg:pypi/requests"
+    assert record["affected_versions"] == ["2.30.0", "2.31.0"]
+    assert record["ranges"] == [{
+        "range_type": "SEMVER",
+        "events": [{"introduced": "2.0.0"}, {"fixed": "2.32.0"}],
+    }]
+
+
+def test_osv_parser_keeps_arbitrary_exact_versions_but_skips_unsupported_ranges():
+    valid = _osv_record(affected=[{
+        "package": {
+            "ecosystem": "Debian:12",
+            "name": "openssl",
+            "purl": "pkg:deb/debian/openssl",
+        },
+        "versions": ["1:3.0.17-1~deb12u2"],
+        "ranges": [{
+            "type": "ECOSYSTEM",
+            "events": [{"introduced": "0"}, {"fixed": "1:3.0.18-1"}],
+        }],
+    }, {
+        "package": {"ecosystem": "PyPI", "name": "missing-purl"},
+        "versions": ["1.0.0"],
+    }])
+
+    parsed = parse_osv_dataset(json.dumps([valid]).encode())
+
+    assert parsed.records[0]["affected_versions"] == ["1:3.0.17-1~deb12u2"]
+    assert parsed.records[0]["ranges"] == []
+    assert parsed.skipped_range_count == 1
+    assert parsed.skipped_affected_count == 1
+
+
+@pytest.mark.parametrize(("payload", "message"), (
+    ({"id": "GHSA-index-only", "modified": "2026-08-04T00:00:00Z"}, "root"),
+    ([_osv_record(schema_version="2.0.0")], "schema version"),
+    ([_osv_record(modified="2026-08-04T00:00:00")], "timezone"),
+    ([_osv_record(id="bad id")], "id is invalid"),
+    ([_osv_record(affected={})], "affected field"),
+))
+def test_osv_parser_rejects_malformed_dataset_contracts(payload, message):
+    with pytest.raises(OsvDatasetError, match=message):
+        parse_osv_dataset(json.dumps(payload).encode())
+
+
+def test_osv_parser_rejects_duplicates_invalid_semver_and_bounded_inputs():
+    duplicate = _osv_record()
+    with pytest.raises(OsvDatasetError, match="duplicate advisory"):
+        parse_osv_dataset(json.dumps([duplicate, duplicate]).encode())
+
+    invalid_range = _osv_record()
+    invalid_range["affected"][0]["ranges"][0]["events"][1]["fixed"] = "not-semver"
+    with pytest.raises(OsvDatasetError, match="SEMVER boundary"):
+        parse_osv_dataset(json.dumps([invalid_range]).encode())
+
+    reversed_range = _osv_record()
+    reversed_range["affected"][0]["ranges"][0]["events"] = [
+        {"introduced": "2.0.0"},
+        {"fixed": "1.0.0"},
+    ]
+    with pytest.raises(OsvDatasetError, match="SEMVER range"):
+        parse_osv_dataset(json.dumps([reversed_range]).encode())
+
+    with pytest.raises(OsvDatasetError, match="record count"):
+        parse_osv_dataset(json.dumps([_osv_record()]).encode(), max_records=0)
+    with pytest.raises(OsvDatasetError, match="size limit"):
+        parse_osv_dataset(json.dumps([_osv_record()]).encode(), max_uncompressed_bytes=32)
+
+
+def test_osv_parser_requires_at_least_one_exact_supported_package_identity():
+    unsupported = _osv_record(affected=[{
+        "package": {"ecosystem": "PyPI", "name": "requests"},
+        "versions": ["2.31.0"],
+    }])
+
+    with pytest.raises(OsvDatasetError, match="no supported package"):
+        parse_osv_dataset(json.dumps([unsupported]).encode())
 
 
 def test_kev_parser_requires_catalog_provenance_and_complete_rows():

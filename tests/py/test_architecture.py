@@ -390,6 +390,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/intel/cpe.py", 31, "split-package-ratchet"),
     ModuleSizeBudget("app/services/intel/nvd_applicability.py", 169, "split-package-ratchet"),
     ModuleSizeBudget("app/services/cve_risk/nvd_applicability_store.py", 100, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/cve_risk/osv_parser.py", 267, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_sources.py", 226, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/capture.py", 422, "split-package-ratchet"),
