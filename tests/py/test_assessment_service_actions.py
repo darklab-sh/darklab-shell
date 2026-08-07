@@ -19,6 +19,11 @@ from services.assessments.httpx_version_observations import (
     HTTPX_JSON_CPE_PARSER_VERSION,
     normalize_httpx_version_observations,
 )
+from services.assessments.dns_takeover_observations import (
+    DNSX_MAX_CNAME_CHAIN,
+    DNSX_TAKEOVER_PARSER_VERSION,
+    normalize_dnsx_takeover_observation,
+)
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.takeover_detection import evaluate_takeover_signal
@@ -191,6 +196,122 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
             "in_scope": False,
         }
     )["reason"] == "out_of_scope_target"
+
+
+def test_dnsx_json_preserves_bounded_takeover_evidence_without_claiming_a_dangling_target():
+    record = {
+        "host": "App.Example.test.",
+        "cname": [f"hop-{index}.vendor.test." for index in range(20)],
+        "a": ["93.184.216.34"],
+        "aaaa": ["2001:4860:4860::8888"],
+        "resolver": ["udp:1.1.1.1:53", "https://user:secret@resolver.test/dns-query"],
+        "status_code": "NOERROR",
+        "timestamp": "2026-08-07T20:00:00Z",
+        "cdn-name": "CloudFront",
+        "cdn-type": "cdn",
+        "raw": "must not survive",
+    }
+    observation = normalize_dnsx_takeover_observation(
+        record,
+        command="dnsx -d example.test -a -aaaa -cname -cdn -json -auto-wildcard",
+        source_run_id="run-dnsx",
+    )
+    assert observation is not None
+    assert observation == {
+        "observation_id": observation["observation_id"],
+        "hostname": "app.example.test",
+        "cname_chain": [f"hop-{index}.vendor.test" for index in range(DNSX_MAX_CNAME_CHAIN)],
+        "addresses": ["93.184.216.34", "2001:4860:4860::8888"],
+        "status_code": "NOERROR",
+        "resolution_state": "resolved",
+        "target_resolution_state": "not_checked",
+        "provider_fingerprint": {"name": "cloudfront", "type": "cdn"},
+        "resolvers": ["udp:1.1.1.1:53"],
+        "wildcard_filter": "auto",
+        "scope_root": "example.test",
+        "scope_decision": "in_scope",
+        "source_run_id": "run-dnsx",
+        "observed_at": "2026-08-07T20:00:00Z",
+        "parser_version": DNSX_TAKEOVER_PARSER_VERSION,
+        "truncated": True,
+    }
+    assert observation["observation_id"].startswith("dnsobs_")
+    assert evaluate_takeover_signal(observation)["state"] == "not_indicated"
+    assert "raw" not in observation
+
+
+def test_dnsx_takeover_observations_fail_closed_on_missing_provenance_and_record_scope():
+    base = {
+        "host": "app.example.test",
+        "cname": ["app.vendor.test"],
+        "status_code": "NOERROR",
+        "timestamp": "2026-08-07T20:00:00Z",
+    }
+    assert normalize_dnsx_takeover_observation(
+        base, command="dnsx -d example.test -json", source_run_id="",
+    ) is None
+    assert normalize_dnsx_takeover_observation(
+        {**base, "timestamp": "2026-08-07T20:00:00"},
+        command="dnsx -d example.test -json", source_run_id="run-1",
+    ) is None
+    ambiguous_scope = normalize_dnsx_takeover_observation(
+        base, command="dnsx -d example.test -d other.test -json", source_run_id="run-1",
+    )
+    assert ambiguous_scope is not None
+    assert ambiguous_scope["scope_decision"] == "unknown"
+    out_of_scope = normalize_dnsx_takeover_observation(
+        base, command="dnsx -d other.test -json", source_run_id="run-1",
+    )
+    assert out_of_scope is not None
+    assert out_of_scope["scope_decision"] == "out_of_scope"
+    negative_target = {
+        **out_of_scope,
+        "scope_decision": "in_scope",
+        "target_resolution_state": "negative",
+    }
+    potential = evaluate_takeover_signal(negative_target)
+    assert potential["state"] == "potential"
+    assert potential["uncertainties"] == ["wildcard_not_checked"]
+
+
+def test_dnsx_json_takeover_evidence_survives_event_wire_without_resolver_entities():
+    class Capture:
+        def __init__(self):
+            self.events = []
+
+        def add_event(self, event):
+            self.events.append(event)
+
+    line = json.dumps({
+        "host": "app.example.test",
+        "cname": ["app.vendor.test"],
+        "a": ["93.184.216.34"],
+        "resolver": ["1.1.1.1:53"],
+        "status_code": "NOERROR",
+        "timestamp": "2026-08-07T20:00:00Z",
+    })
+    capture = Capture()
+    classifier = OutputSignalClassifier(
+        "dnsx -d example.test -a -cname -json -silent",
+        source_run_id="run-dnsx",
+    )
+    metadata, event = capture_event_with_signals(capture, classifier, line)
+    assert metadata["signals"] == ["findings"]
+    assert {
+        (entity["type"], entity["canonical_value"])
+        for entity in metadata["entities"]
+    } == {
+        ("domain", "app.example.test"),
+        ("domain", "app.vendor.test"),
+        ("ip", "93.184.216.34"),
+    }
+    assert ("ip", "1.1.1.1") not in {
+        (entity["type"], entity["canonical_value"])
+        for entity in metadata["entities"]
+    }
+    observation = event.source_detail["takeover_observations"][0]
+    assert observation["source_run_id"] == "run-dnsx"
+    assert to_wire(capture.events[0])["source_detail"]["takeover_observations"] == [observation]
 
 
 def test_httpx_screenshot_metadata_is_bounded_and_path_safe():

@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Structured DNSx runs now retain bounded dangling-record evidence.**
+  - **What:** DNSx JSON rows keep the queried hostname, CNAME chain, returned addresses, response code, resolver names, provider fingerprint, wildcard-filter mode, explicit domain-scope decision, observation time, source run, and parser version. The stored row says when the CNAME target wasn't checked, omits raw DNS payloads and credential-bearing resolver URLs, and doesn't label a CNAME as a takeover finding. Structured entity extraction also excludes resolver addresses from Atlas.
+  - **Tests:** Focused parser, scope, bounds, uncertainty, entity, event-wire, and module-size coverage pins the evidence-only boundary.
 - **Exact HTTPx version matches now have a guarded persistence boundary.**
   - **What:** A bounded materializer can save at most 100 exact stored-NVD matches from one structured HTTPx row. Before writing, it rechecks the successful owner-scoped HTTPx run, its exact linked URL entity, the HTTPx parser family, and the stored advisory rule. Cross-tool, failed, ambiguous, stale, or tampered provenance is rejected; repeating the same source decision is idempotent, and read surfaces still never trigger the write.
   - **Tests:** SQLite and real Postgres coverage pins caps, idempotency, completed-run and linked-entity requirements, parser-to-command agreement, cross-tool rejection, immutable source decisions, and the shared module-size boundary.

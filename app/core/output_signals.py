@@ -23,6 +23,7 @@ from core.output_targets import (
     extract_target,
     tokenize_command,
 )
+from core.output_dnsx import dnsx_json_entities
 from core.output_entities import (
     _add_entity,
     _is_public_ip,
@@ -39,7 +40,6 @@ from core.output_port_entities import (
     _nmap_target_entities,
     _port_entities_for_host,
 )
-from services.assessments.historical_urls import historical_url_entity_attributes, normalize_historical_url
 from core.output_shodan import (
     _SHODAN_DNS_FINDING_TYPES,
     _SHODAN_LABEL_RE,
@@ -49,6 +49,8 @@ from core.output_shodan import (
     _is_shodan_warning,
     _parse_shodan_dns_row,
 )
+from services.assessments.dns_takeover_observations import dnsx_json_metadata
+from services.assessments.historical_urls import historical_url_entity_attributes, normalize_historical_url
 from core.output_structured_signals import (
     _cdncheck_json_entities,
     _is_cdncheck_json_summary,
@@ -586,6 +588,8 @@ def _is_nmap_vulners_finding(stripped: str) -> bool:
 
 
 def _is_command_scoped_finding(root: str, stripped: str) -> bool:
+    if root == "dnsx" and stripped.startswith("{"):
+        return bool(dnsx_json_metadata(_json_object_line(stripped), command="dnsx", source_run_id="classification"))
     if root in {"dnsx", "subfinder"}:
         return bool(_HOSTNAME_RE.search(stripped))
     if root == "tlsx":
@@ -870,15 +874,12 @@ def _extract_entities_for_command(
             )
         # Keep curl on the generic extraction path: verbose/header output often
         # contains useful domains or URLs even when it is not a connect line.
-    if root == "tlsx":
+    if root in {"dnsx", "tlsx", "cdncheck", "trufflehog"}:
         data = _json_object_line(stripped)
-        return _tlsx_json_entities(data, source_line) if data else []
-    if root == "cdncheck":
-        data = _json_object_line(stripped)
-        return _cdncheck_json_entities(data, source_line) if data else []
-    if root == "trufflehog":
-        data = _json_object_line(stripped)
-        return _trufflehog_json_entities(data, source_line) if data else []
+        extractors = {"dnsx": dnsx_json_entities, "tlsx": _tlsx_json_entities,
+            "cdncheck": _cdncheck_json_entities, "trufflehog": _trufflehog_json_entities,
+        }
+        return extractors[root](data, source_line) if data else []
     if root == "puredns":
         return _puredns_entities(stripped, source_line)
     if root == "openssl" and _is_openssl_noise(stripped):
@@ -1019,6 +1020,9 @@ class OutputSignalClassifier:
                 _json_object_line(normalized_text), source_run_id=self.source_run_id,
                 profile_role=self.profile_role,
             ))
+        if self.root == "dnsx" and normalized_text.startswith("{"):
+            metadata.update(dnsx_json_metadata(_json_object_line(normalized_text), command=self.command,
+                                               source_run_id=self.source_run_id))
         historical = None
         if self.root == "gau":
             historical = normalize_historical_url(normalized_text, source="gau", run_id=self.source_run_id)
@@ -1073,7 +1077,7 @@ class OutputSignalClassifier:
                             entity["attributes"] = attributes
                 metadata["entities"] = entities
         if (
-            self.root in {"tlsx", "cdncheck", "trufflehog"}
+            self.root in {"dnsx", "tlsx", "cdncheck", "trufflehog"}
             and normalized_text
             and normalized_text.lstrip().startswith("{")
             and _json_object_line(normalized_text) is None

@@ -184,6 +184,8 @@ Workspace artifact and finalization coverage marks validated Nmap XML intent fro
 
 Structured HTTPx coverage pins the maintained JSON/CPE command, exact versioned technology-to-CPE agreement, canonical target and source-run provenance, bounded event serialization, read-only stored-NVD candidate correlation, guarded and capped inference persistence on SQLite and Postgres, complete tool/parser context, and fail-closed handling for unversioned, conflicting, mismatched, credential-bearing, malformed, incomplete, cross-tool, or ambiguous rows.
 
+Structured DNSx coverage pins bounded CNAME, address, response, resolver, provider, wildcard-filter, scope, time, source-run, and parser context; unchecked-target labeling; raw and credential-bearing resolver omission; resolver-entity exclusion; conservative takeover states; and run-event serialization.
+
 Structured CycloneDX component coverage pins shared document bounds, separate exact PURL/version and CPE/version observations, component and import provenance, conflicting-version rejection, read-only stored-OSV and stored-NVD candidates on SQLite and Postgres, and the no-network, no-inventory-write, no-finding boundary.
 
 Cross-cycle reconciliation coverage pins exact check, target, and evidence-rule compatibility; one-count-per-remediation rollups; new, persistent, and not-observed derivation; bounded current and earlier observation links; incomparable cleanup; the preferred active-or-latest-completed handoff; selected-finding filtering; package/report references and reasons; and the shared API/OpenAPI read shape.

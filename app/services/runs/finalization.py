@@ -174,7 +174,7 @@ def capture_event_with_signals(
         if isinstance(metadata.get("source_detail"), dict)
         else {}
     )
-    for key in ("screenshots", "historical_urls", "version_observations"):
+    for key in ("screenshots", "historical_urls", "version_observations", "takeover_observations"):
         if isinstance(metadata.get(key), list):
             source_detail[key] = metadata[key]
     captured_event = replace(

@@ -105,6 +105,8 @@ When a successful Nmap service scan writes validated XML with `-oX`, exact versi
 
 Maintained HTTPx assessment actions request structured CPE metadata. When HTTPx reports a versioned technology and the CPE vendor, product, and version agree, darklab_shell keeps that exact observation with the saved run for later review. It can check that observation against already stored NVD rules and prepare an inference candidate with the original run and advisory context. A separate guarded write can save that inference only after rechecking the successful HTTPx run, its exact linked URL, the parser family, and the stored advisory rule. Plain technology names, conflicts, fuzzy matches, and incomplete provenance stay as output only; viewing or checking the evidence never contacts NVD or saves a finding automatically.
 
+Structured DNSx output can also keep the CNAME chain, DNS result, returned addresses, provider hint, wildcard-filter mode, and scope decision with the saved run. This gives assessors the evidence needed to review a possible dangling record without treating the CNAME alone as proof or following and claiming the provider resource.
+
 Exact versioned PURLs and CPEs in a CycloneDX JSON document can be checked in the same read-only way: PURLs use stored OSV rules, while CPEs use stored NVD rules. The results keep their component, import batch, format, parser, observation time, affected range, and advisory context. An inventory component isn't treated as a vulnerability by itself, PURL and CPE evidence stays distinct, and malformed or conflicting versions don't produce a candidate.
 
 ---
@@ -174,7 +176,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
 | `amass` | OWASP subdomain enumeration and attack-surface asset discovery |
 | `httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery) |
-| `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
+| `dnsx` | Fast DNS resolution and record querying, with structured CNAME evidence for dangling-record review (ProjectDiscovery) |
 | `tlsx` | TLS certificate, protocol, cipher, and DNS metadata collection (ProjectDiscovery) |
 | `cdncheck` | CDN, cloud, and WAF provider classification for hosts and IPs (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost discovery |
