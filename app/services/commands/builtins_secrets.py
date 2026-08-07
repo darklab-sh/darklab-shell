@@ -287,8 +287,8 @@ def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
     ))
     if osv_mode == "disabled":
         lines.append(output_line(
-            "Shared OSV package matching is off. Choose local "
-            "cve_risk.osv_advisory_mode before loading package applicability.",
+            "Shared OSV package matching is off. Choose local or external "
+            "cve_risk.osv_advisory_mode before acquiring package applicability.",
             "builtin-note",
         ))
 

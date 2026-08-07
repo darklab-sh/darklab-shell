@@ -481,6 +481,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0062",
         "0063",
         "0064",
+        "0065",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -548,7 +549,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             OR (table_name = 'package_advisories' AND column_name IN (
                 'source_advisory_id',
                 'schema_version',
-                'affected_versions_json'
+                'affected_versions_json',
+                'lookup_key_hash'
             ))
             OR (table_name = 'risk_escalation_states' AND column_name IN (
                 'kev_listed',
@@ -672,6 +674,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("package_advisories", "source_advisory_id", "text"),
         ("package_advisories", "schema_version", "text"),
         ("package_advisories", "affected_versions_json", "text"),
+        ("package_advisories", "lookup_key_hash", "text"),
         ("risk_escalation_states", "kev_listed", "boolean"),
         ("risk_escalation_states", "epss_active", "boolean"),
         ("risk_escalations", "model_changed", "boolean"),
@@ -777,6 +780,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_cve_advisory_cpe_product",
         "idx_cve_advisory_cpe_source_version",
         "idx_package_advisories_source_version",
+        "idx_package_advisories_lookup",
         "idx_cve_risk_work_items_due",
         "idx_finding_cve_links_cve",
         "idx_risk_escalation_states_cve",
@@ -1388,6 +1392,7 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
 ):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.cve_risk.osv_external_store import accept_external_osv_query
     from services.cve_risk.osv_parser import parse_osv_dataset
     from services.cve_risk.osv_store import accept_local_osv_dataset
 
@@ -1463,6 +1468,52 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
         "status": "current",
         "checksum_sha256": hashlib.sha256(payload).hexdigest(),
         "record_count": 1,
+    }
+
+    external = accept_external_osv_query(
+        conn,
+        package_purl="pkg:pypi/requests",
+        lookup_key_hash="a" * 64,
+        parsed=parsed,
+        now=datetime.fromisoformat("2026-08-07T14:00:00+00:00"),
+        source_url="https://api.osv.dev/v1/query",
+    )
+    raw_conn.commit()
+
+    external_source = dict(conn.execute(
+        "SELECT acquisition_mode, origin, status, record_count "
+        "FROM cve_advisory_sources WHERE source = 'osv'"
+    ).fetchone())
+    cache = dict(conn.execute(
+        "SELECT lookup_kind, lookup_key_hash, result_state, record_count "
+        "FROM cve_advisory_lookup_cache WHERE source = 'osv'"
+    ).fetchone())
+    external_advisory = dict(conn.execute(
+        "SELECT origin, lookup_key_hash FROM package_advisories "
+        "WHERE source = 'osv' AND origin = 'external'"
+    ).fetchone())
+    assert external == {
+        "source": "osv",
+        "outcome": "stored",
+        "record_count": 1,
+        "exact_version_count": 1,
+        "range_count": 1,
+    }
+    assert external_source == {
+        "acquisition_mode": "external",
+        "origin": "external",
+        "status": "current",
+        "record_count": 1,
+    }
+    assert cache == {
+        "lookup_kind": "purl_version",
+        "lookup_key_hash": "a" * 64,
+        "result_state": "positive",
+        "record_count": 1,
+    }
+    assert external_advisory == {
+        "origin": "external",
+        "lookup_key_hash": "a" * 64,
     }
 
 

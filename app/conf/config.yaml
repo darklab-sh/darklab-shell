@@ -431,8 +431,10 @@
 # refresh setting. HTTPS_PROXY/NO_PROXY are honored by Python's standard HTTP
 # client when a live refresh is enabled.
 # NVD and OSV advisory storage are separate opt-ins. Their local modes load an
-# operator-managed dataset during startup, keep the last accepted snapshot after
-# a bad reload, and never make a network request from a read surface.
+# operator-managed dataset during startup and keep the last accepted snapshot
+# after a bad reload. OSV external mode sends one exact PURL and version only
+# when an explicit acquisition action asks for it. Read surfaces never acquire
+# advisory data.
 # Server default if unset:
 # cve_risk:
 #   bootstrap_enabled: true
@@ -460,6 +462,7 @@
 #   allowed_hosts:
 #     - epss.cyentia.com
 #     - www.cisa.gov
+#     - api.osv.dev
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 

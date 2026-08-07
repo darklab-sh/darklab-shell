@@ -38,7 +38,7 @@ def accept_local_osv_dataset(
     ttl = int(ttl_seconds)
     if ttl < 300 or ttl > 31536000:
         raise OsvDatasetError("OSV dataset expiry is outside the supported range")
-    prepared, exact_version_count, range_count = _prepare_records(parsed)
+    prepared, exact_version_count, range_count = prepare_osv_records(parsed)
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     fetched_at = current.isoformat()
     expires_at = (current + timedelta(seconds=ttl)).isoformat()
@@ -127,7 +127,7 @@ def accept_local_osv_dataset(
     }
 
 
-def _prepare_records(
+def prepare_osv_records(
     parsed: ParsedOsvDataset,
 ) -> tuple[list[tuple[tuple[str, ...], list[tuple[int, str, str]]]], int, int]:
     if not isinstance(parsed, ParsedOsvDataset) or not parsed.records:
@@ -210,4 +210,4 @@ def _text(value: Any, limit: int) -> str:
     return str(value or "").strip()[:limit]
 
 
-__all__ = ["OSV_ATTRIBUTION", "OSV_TERMS_URL", "accept_local_osv_dataset"]
+__all__ = ["OSV_ATTRIBUTION", "OSV_TERMS_URL", "accept_local_osv_dataset", "prepare_osv_records"]

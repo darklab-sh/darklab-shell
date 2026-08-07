@@ -75,6 +75,7 @@ from . import (
     v0062_nvd_cpe_applicability,
     v0063_finding_version_inference_sources,
     v0064_osv_package_applicability,
+    v0065_osv_external_query_scope,
 )
 
 _ = baseline
@@ -144,4 +145,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0062_nvd_cpe_applicability.MIGRATION,
     v0063_finding_version_inference_sources.MIGRATION,
     v0064_osv_package_applicability.MIGRATION,
+    v0065_osv_external_query_scope.MIGRATION,
 )

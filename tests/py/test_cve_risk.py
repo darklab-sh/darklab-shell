@@ -18,7 +18,7 @@ from config import CveRiskConfig
 from core.database_backend import DatabaseBackend
 from core.migrations import MIGRATIONS
 from core.migrations.runner import run_migrations
-from services.cve_risk import bootstrap, maintenance, refresh
+from services.cve_risk import bootstrap, maintenance, osv_external, osv_external_http, refresh
 from services.cve_risk import escalation
 from services.cve_risk.escalation import (
     acknowledge_escalation,
@@ -39,6 +39,7 @@ from services.cve_risk.osv_acquisition import (
     load_configured_local_osv,
 )
 from services.cve_risk.osv_parser import OsvDatasetError, parse_osv_dataset
+from services.cve_risk.osv_external_store import accept_external_osv_query
 from services.cve_risk.osv_store import accept_local_osv_dataset
 from services.cve_risk.parsers import FeedValidationError, ParsedFeed, parse_epss, parse_kev
 from services.cve_risk.ranking import (
@@ -279,8 +280,9 @@ def test_cve_risk_config_bounds_network_and_hysteresis_contracts():
         CveRiskConfig(advisory_mode="automatic")
     with pytest.raises(ValidationError, match="nvd_local_path"):
         CveRiskConfig(advisory_mode="local")
+    assert "api.osv.dev" in CveRiskConfig(osv_advisory_mode="external").allowed_hosts
     with pytest.raises(ValidationError, match="osv_advisory_mode"):
-        CveRiskConfig(osv_advisory_mode="external")
+        CveRiskConfig(osv_advisory_mode="automatic")
     with pytest.raises(ValidationError, match="osv_local_path"):
         CveRiskConfig(osv_advisory_mode="local")
     with pytest.raises(ValidationError, match="advisory_cvss_downgrade_delta"):
@@ -611,6 +613,261 @@ def test_cve_risk_maintenance_runs_independent_local_advisory_loaders(monkeypatc
         "finding_cve_link_backfill",
     ]
     assert executed == ["nvd", "osv", "links"]
+
+
+def test_external_osv_query_uses_hash_cache_and_replaces_one_package(
+    risk_db,
+    monkeypatch,
+    caplog,
+):
+    payload = json.dumps({"vulns": [_osv_record()]}).encode()
+    monkeypatch.setattr(osv_external, "download_osv_query", lambda *_args: payload)
+    cfg = {"cve_risk": {
+        "osv_advisory_mode": "external",
+        "max_attempts": 1,
+    }}
+    now = datetime.fromisoformat("2026-08-07T13:00:00+00:00")
+
+    stored = osv_external.query_external_osv(
+        risk_db,
+        "pkg:pypi/requests",
+        "2.30.0",
+        cfg=cfg,
+        now=now,
+    )
+
+    assert stored == {
+        "source": "osv",
+        "outcome": "stored",
+        "record_count": 1,
+        "exact_version_count": 1,
+        "range_count": 1,
+    }
+    advisory = dict(risk_db.execute(
+        "SELECT package_purl, origin, affected_versions_json "
+        "FROM package_advisories WHERE source = 'osv'"
+    ).fetchone())
+    assert advisory == {
+        "package_purl": "pkg:pypi/requests",
+        "origin": "external",
+        "affected_versions_json": '["2.30.0"]',
+    }
+    cache = dict(risk_db.execute(
+        "SELECT lookup_kind, lookup_key_hash, result_state, record_count "
+        "FROM cve_advisory_lookup_cache WHERE source = 'osv'"
+    ).fetchone())
+    assert cache["lookup_kind"] == "purl_version"
+    assert len(cache["lookup_key_hash"]) == 64
+    assert "requests" not in cache["lookup_key_hash"]
+    assert cache["result_state"] == "positive"
+    assert cache["record_count"] == 1
+
+    monkeypatch.setattr(
+        osv_external,
+        "download_osv_query",
+        lambda *_args: pytest.fail("fresh positive cache attempted a provider query"),
+    )
+    assert osv_external.query_external_osv(
+        risk_db,
+        "pkg:pypi/requests",
+        "2.30.0",
+        cfg=cfg,
+        now=datetime.fromisoformat("2026-08-07T13:01:00+00:00"),
+    ) == {"source": "osv", "outcome": "positive_cached", "record_count": 1}
+
+    monkeypatch.setattr(osv_external, "download_osv_query", lambda *_args: b"{}")
+    assert osv_external.query_external_osv(
+        risk_db,
+        "pkg:pypi/requests",
+        "2.30.0",
+        cfg=cfg,
+        force=True,
+        now=datetime.fromisoformat("2026-08-07T14:00:00+00:00"),
+    ) == {
+        "source": "osv",
+        "outcome": "negative_cached",
+        "record_count": 0,
+        "exact_version_count": 0,
+        "range_count": 0,
+    }
+    assert risk_db.execute(
+        "SELECT COUNT(*) FROM package_advisories WHERE source = 'osv'"
+    ).fetchone()[0] == 0
+    assert risk_db.execute(
+        "SELECT result_state FROM cve_advisory_lookup_cache WHERE source = 'osv'"
+    ).fetchone()[0] == "negative"
+    assert "pkg:pypi/requests" not in caplog.text
+    assert "2.30.0" not in caplog.text
+
+
+def test_external_osv_failure_preserves_last_good_and_hides_identifiers(
+    risk_db,
+    monkeypatch,
+    caplog,
+):
+    cfg = {"cve_risk": {
+        "osv_advisory_mode": "external",
+        "max_attempts": 1,
+    }}
+    monkeypatch.setattr(
+        osv_external,
+        "download_osv_query",
+        lambda *_args: json.dumps({"vulns": [_osv_record()]}).encode(),
+    )
+    assert osv_external.query_external_osv(
+        risk_db,
+        "pkg:pypi/requests",
+        "2.30.0",
+        cfg=cfg,
+        now=datetime.fromisoformat("2026-08-07T13:00:00+00:00"),
+    )["outcome"] == "stored"
+
+    def fail_download(*_args):
+        raise osv_external.URLError("offline")
+
+    monkeypatch.setattr(osv_external, "download_osv_query", fail_download)
+    failed = osv_external.query_external_osv(
+        risk_db,
+        "pkg:pypi/requests",
+        "2.30.0",
+        cfg=cfg,
+        force=True,
+        now=datetime.fromisoformat("2026-08-08T13:00:00+00:00"),
+    )
+
+    assert failed == {"source": "osv", "outcome": "failed", "error": "URLError"}
+    assert risk_db.execute(
+        "SELECT COUNT(*) FROM package_advisories "
+        "WHERE source = 'osv' AND origin = 'external'"
+    ).fetchone()[0] == 1
+    source = dict(risk_db.execute(
+        "SELECT status, source_version, record_count, last_error "
+        "FROM cve_advisory_sources WHERE source = 'osv'"
+    ).fetchone())
+    assert source["status"] == "failed"
+    assert source["source_version"].startswith("osv:")
+    assert source["record_count"] == 1
+    assert source["last_error"] == "URLError"
+    assert "pkg:pypi/requests" not in caplog.text
+    assert "2.30.0" not in caplog.text
+
+
+def test_external_osv_query_replacement_is_scoped_to_one_hash(risk_db):
+    parsed = parse_osv_dataset(json.dumps([_osv_record()]).encode())
+    now = datetime.fromisoformat("2026-08-07T13:00:00+00:00")
+    for lookup_hash in ("a" * 64, "b" * 64):
+        accept_external_osv_query(
+            risk_db,
+            package_purl="pkg:pypi/requests",
+            lookup_key_hash=lookup_hash,
+            parsed=parsed,
+            now=now,
+            source_url="https://api.osv.dev/v1/query",
+        )
+
+    rows = risk_db.execute(
+        "SELECT lookup_key_hash, advisory_id FROM package_advisories "
+        "WHERE source = 'osv' AND origin = 'external' ORDER BY lookup_key_hash"
+    ).fetchall()
+    assert [row["lookup_key_hash"] for row in rows] == ["a" * 64, "b" * 64]
+    assert rows[0]["advisory_id"] != rows[1]["advisory_id"]
+
+    accept_external_osv_query(
+        risk_db,
+        package_purl="pkg:pypi/requests",
+        lookup_key_hash="a" * 64,
+        parsed=None,
+        now=now,
+        source_url="https://api.osv.dev/v1/query",
+    )
+
+    remaining = risk_db.execute(
+        "SELECT lookup_key_hash FROM package_advisories "
+        "WHERE source = 'osv' AND origin = 'external'"
+    ).fetchall()
+    assert [row["lookup_key_hash"] for row in remaining] == ["b" * 64]
+
+
+def test_external_osv_http_boundary_posts_one_identifier_and_rejects_redirects(monkeypatch):
+    captured = {}
+
+    class Response:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://api.osv.dev/v1/query"
+
+        def read(self, limit):
+            captured["read_limit"] = limit
+            return b"{}"
+
+    class Opener:
+        def open(self, request, *, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return Response()
+
+    def build_test_opener(*handlers):
+        captured["handlers"] = handlers
+        return Opener()
+
+    monkeypatch.setattr(osv_external_http, "build_opener", build_test_opener)
+    settings = {
+        "allowed_hosts": ["api.osv.dev"],
+        "http_timeout_seconds": 9,
+        "max_download_bytes": 2048,
+    }
+    assert osv_external_http.download_osv_query(
+        settings, "pkg:pypi/requests", "2.30.0"
+    ) == b"{}"
+    request = captured["request"]
+    assert request.full_url == "https://api.osv.dev/v1/query"
+    assert request.get_method() == "POST"
+    assert json.loads(request.data) == {
+        "package": {"purl": "pkg:pypi/requests"},
+        "version": "2.30.0",
+    }
+    assert captured["timeout"] == 9
+    assert captured["read_limit"] == 2049
+    assert len(captured["handlers"]) == 1
+    assert isinstance(captured["handlers"][0], osv_external_http.RejectRedirects)
+    assert captured["handlers"][0].redirect_request(None, None, 302, "", {}, "") is None
+    osv_external_http.validate_response_url("https://api.osv.dev/v1/query", settings)
+    with pytest.raises(OsvDatasetError, match="redirected outside"):
+        osv_external_http.validate_response_url("https://example.invalid/v1/query", settings)
+    with pytest.raises(OsvDatasetError, match="redirected outside"):
+        osv_external_http.validate_response_url(
+            "https://api.osv.dev/v1/query?next=1", settings
+        )
+    with pytest.raises(OsvDatasetError, match="outside the configured"):
+        osv_external_http.allowed_query_url({"allowed_hosts": []})
+
+
+def test_external_osv_disabled_and_invalid_queries_never_open_network(risk_db, monkeypatch):
+    monkeypatch.setattr(
+        osv_external,
+        "download_osv_query",
+        lambda *_args: pytest.fail("disabled or invalid OSV query opened the network"),
+    )
+    assert osv_external.query_external_osv(
+        risk_db,
+        "pkg:pypi/requests",
+        "2.30.0",
+        cfg={"cve_risk": {"osv_advisory_mode": "disabled"}},
+    ) == {"source": "osv", "outcome": "disabled"}
+    with pytest.raises(ValueError, match="exact PURL and version"):
+        osv_external.query_external_osv(
+            risk_db,
+            "requests",
+            "2.30.0",
+            cfg={"cve_risk": {"osv_advisory_mode": "external"}},
+        )
 
 
 def test_kev_parser_requires_catalog_provenance_and_complete_rows():

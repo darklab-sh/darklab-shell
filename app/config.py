@@ -500,7 +500,9 @@ class CveRiskConfig(_ConfigModel):
     allowed_hosts: list[StrictStr] = Field(default_factory=lambda: [
         "epss.cyentia.com",
         "www.cisa.gov",
+        "api.osv.dev",
     ])
+
     @model_validator(mode="after")
     def validate_contract(self):
         if not 0 <= self.epss_reset_probability < self.epss_activation_probability <= 1:
@@ -514,8 +516,10 @@ class CveRiskConfig(_ConfigModel):
         if self.advisory_mode == "local" and not self.nvd_local_path:
             raise ValueError("cve_risk.nvd_local_path is required when advisory_mode is local")
         self.osv_advisory_mode = self.osv_advisory_mode.strip().lower()
-        if self.osv_advisory_mode not in {"disabled", "local"}:
-            raise ValueError("cve_risk.osv_advisory_mode must be disabled or local")
+        if self.osv_advisory_mode not in {"disabled", "local", "external"}:
+            raise ValueError(
+                "cve_risk.osv_advisory_mode must be disabled, local, or external"
+            )
         self.osv_local_path = self.osv_local_path.strip()
         if self.osv_advisory_mode == "local" and not self.osv_local_path:
             raise ValueError(
@@ -1302,7 +1306,7 @@ def load_config(conf_dir=None, local_conf_dir=None):
             "epss_activation_probability": 0.10,
             "epss_reset_probability": 0.08,
             "advisory_cvss_downgrade_delta": 1.0,
-            "allowed_hosts": ["epss.cyentia.com", "www.cisa.gov"],
+            "allowed_hosts": ["epss.cyentia.com", "www.cisa.gov", "api.osv.dev"],
         },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,
