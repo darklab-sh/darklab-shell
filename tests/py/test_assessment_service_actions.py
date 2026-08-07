@@ -193,6 +193,7 @@ def test_gau_output_carries_historical_url_provenance_only():
     assert metadata["historical_urls"] == [{
         "url": "https://example.com/archive?a=1", "source": "gau", "source_run_id": "run-gau",
     }]
+    assert any(entity.get("type") == "url" for entity in metadata["entities"])
 
 
 def test_gau_command_plan_is_domain_scoped_and_passive():
