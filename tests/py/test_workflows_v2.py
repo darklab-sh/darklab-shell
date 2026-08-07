@@ -21,6 +21,7 @@ from core.database_access import get_db_connect
 from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNoiseKind, LineRole
 from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
+from services.workflows.fanout import expand_collection_step
 from services.workflows.compiler import (
     WorkflowDefinitionError,
     compile_execution_definition,
@@ -447,6 +448,22 @@ def test_collection_capture_definitions_require_version_three_and_validate_limit
             "version": 3,
             "steps": [{**base["steps"][0], "captures": [{**base["steps"][0]["captures"][0], "item_limit": 33}]}],
         })
+
+
+def test_collection_fanout_renders_bounded_deduplicated_child_commands_without_public_items():
+    children = expand_collection_step(
+        {"cmd": "probe --host {{host}} --mode safe"},
+        {},
+        "host",
+        ["one.example", "one.example", "two.example", "three.example"],
+        max_children=2,
+    )
+    assert children == [
+        {"ordinal": 0, "command": "probe --host one.example --mode safe"},
+        {"ordinal": 1, "command": "probe --host two.example --mode safe"},
+    ]
+    with pytest.raises(WorkflowDefinitionError, match="control characters"):
+        expand_collection_step({"cmd": "probe {{host}}"}, {}, "host", ["bad\x01host"])
 
 
 def test_execution_state_machine_advances_once_and_keeps_snapshot():

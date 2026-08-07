@@ -362,6 +362,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/web_surface.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/version_correlation.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/collections.py", 180, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workflows/fanout.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_sources.py", 226, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/capture.py", 422, "split-package-ratchet"),

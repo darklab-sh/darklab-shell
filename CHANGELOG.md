@@ -21,6 +21,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Collection capture definitions now use an explicit workflow version.**
   - **What:** Version 3 is reserved for collection semantics; v1 and v2 definitions continue to reject collection metadata rather than silently changing execution behavior.
   - **Tests:** Compiler and user-workflow validation cover version gating and item-limit bounds.
+- **Assessment workflows now expose bounded fan-out command expansion.**
+  - **What:** A private launch-layer helper deduplicates collection items, enforces child and value limits, and renders one command per child; each child still requires normal policy and scope checks before launch.
+  - **Tests:** Focused workflow coverage pins bounded expansion and control-character rejection.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
