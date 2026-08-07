@@ -6,6 +6,7 @@ from services.assessments.command_plans import command_plan
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.web_surface import normalize_httpx_screenshot
+from services.assessments.version_correlation import correlate_version_observation
 from core.output_signals import OutputSignalClassifier
 from services.atlas.observations import public_app_port_record
 
@@ -96,3 +97,19 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
         "visual_hash": "", "source_run_id": "", "profile_role": "",
     }]
     assert "html" not in metadata
+
+
+def test_version_correlation_requires_exact_identifier_and_version_matches():
+    advisories = [{
+        "id": "CVE-2026-1234", "purls": ["pkg:pypi/requests"],
+        "affected_versions": ["2.31.0"], "affected_range": "==2.31.0",
+    }]
+    matches = correlate_version_observation({"purl": "pkg:pypi/requests", "version": "2.31.0"}, advisories)
+    assert matches == [{
+        "vulnerability_id": "CVE-2026-1234", "confidence": "high",
+        "match_basis": "exact_purl_version", "observed_identifier": "pkg:pypi/requests",
+        "observed_version": "2.31.0", "affected_range": "==2.31.0",
+        "validation_method": "version_inference",
+    }]
+    assert correlate_version_observation({"product": "requests", "version": "2.31.0"}, advisories) == []
+    assert correlate_version_observation({"purl": "pkg:pypi/requests", "version": "2.32.0"}, advisories) == []
