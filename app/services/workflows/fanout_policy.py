@@ -47,3 +47,19 @@ def normalize_fanout_policy(value: object) -> FanoutPolicy:
     if failure_mode == "fail_fast" and max_failures != 1:
         raise ValueError("fail-fast fan-out must stop after the first failure")
     return FanoutPolicy(failure_mode, retries, max_parallel, max_failures)
+
+
+_NON_RETRYABLE_FAILURES = frozenset({"scope_rejected", "cancelled", "permission_denied"})
+
+
+def should_retry(policy: FanoutPolicy, *, attempt: int, error_code: str = "") -> bool:
+    """Return whether a failed child may be retried under the policy."""
+    try:
+        current_attempt = int(attempt)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("fan-out attempt must be an integer") from exc
+    if current_attempt < 1:
+        raise ValueError("fan-out attempt must be at least 1")
+    if str(error_code or "").strip().lower() in _NON_RETRYABLE_FAILURES:
+        return False
+    return current_attempt <= policy.retries

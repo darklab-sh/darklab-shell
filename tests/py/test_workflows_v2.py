@@ -22,7 +22,7 @@ from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNois
 from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.fanout import expand_collection_step, next_fanout_batch
-from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy
+from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy, should_retry
 from services.workflows.fanout_checkpoint import checkpoint_from_payload, create_fanout_checkpoint
 from services.workflows.fanout_summary import summarize_fanout_results
 from services.workflows.compiler import (
@@ -490,6 +490,12 @@ def test_collection_fanout_policy_normalizes_retry_parallel_and_failure_modes():
         normalize_fanout_policy({"failure_mode": "fail_fast", "max_failures": 2})
     with pytest.raises(ValueError, match="between 0 and 3"):
         normalize_fanout_policy({"retries": 4})
+    policy = normalize_fanout_policy({"mode": "continue", "retries": 2})
+    assert should_retry(policy, attempt=1) is True
+    assert should_retry(policy, attempt=3) is False
+    assert should_retry(policy, attempt=1, error_code="scope_rejected") is False
+    with pytest.raises(ValueError, match="at least 1"):
+        should_retry(policy, attempt=0)
 
 
 def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_children():

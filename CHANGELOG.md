@@ -51,6 +51,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Fan-out checkpoints now track running children explicitly.**
   - **What:** Planned batches move from pending to running before launch, so recovery cannot schedule the same children twice; completion and failure transition them out of running.
   - **Tests:** Checkpoint and public-summary coverage pins running-state persistence.
+- **Fan-out retry decisions now honor safety boundaries.**
+  - **What:** Retries are capped by policy attempts, while scope, cancellation, and permission failures are never retried.
+  - **Tests:** Workflow policy coverage pins retry limits and non-retryable failure codes.
 - **Assessment Nuclei plans now use reviewed profiles.**
   - **What:** Safe, standard, and explicitly intrusive profiles have fixed severity/headless arguments; safe remains the default and unknown names fail closed.
   - **Tests:** Command-plan coverage pins profile allowlisting and default behavior.
