@@ -108,6 +108,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Structured Nmap version matches now have a bounded materialization step.**
   - **What:** One Nmap XML result can correlate against stored NVD rules and persist at most 100 revalidated inference candidates in deterministic observation order. Repeated source decisions remain idempotent, rejected candidates don't stop valid siblings, and matches beyond the cap stay unpersisted rather than displacing earlier evidence.
   - **Tests:** Focused orchestration coverage pins personal/team context, created versus repeated counts, candidate rejection, deterministic caps, and reject-don't-evict behavior.
+- **Validated Nmap XML output keeps its structured artifact intent.**
+  - **What:** Workspace artifact capture marks only an unambiguous, already-validated `nmap -oX` write for structured parsing. Other XML-named outputs and ambiguous rewritten paths stay ordinary artifacts, so finalization never guesses from a file extension.
+  - **Tests:** Command-boundary coverage pins separate and attached `-oX` values, ordinary XML output, non-Nmap commands, and ambiguous path rejection.
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.

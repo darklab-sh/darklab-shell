@@ -410,6 +410,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/streaming.py", 156, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/structured_filters.py", 317, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/structured_summary.py", 59, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/workspace_artifact_metadata.py", 78, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/workspace_artifacts.py", 92, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/worker_cleanup.py", 37, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/__init__.py", 0, "split-package-ratchet"),
