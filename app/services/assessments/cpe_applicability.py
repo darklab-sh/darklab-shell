@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from services.intel.cpe import parse_cpe23
+
 
 _NUMERIC_VERSION_RE = re.compile(r"^\d+(?:\.\d+){0,15}$")
 _LIMITS = (
@@ -21,7 +23,7 @@ _LIMITS = (
 def normalize_observed_cpe(value: Any, *, explicit_version: Any = "") -> dict[str, Any] | None:
     """Return one exact CPE 2.3 observation or fail closed."""
     identifier = str(value or "").strip()
-    fields = _parse_cpe23(identifier)
+    fields = parse_cpe23(identifier)
     stated_version = _component(explicit_version, limit=128)
     if fields is None or fields[2] not in {"a", "h", "o"}:
         return None
@@ -46,7 +48,7 @@ def match_cpe_applicability(
     for item in matches[:64]:
         if not _eligible_match(item):
             continue
-        criteria = _parse_cpe23(item.get("criteria") or item.get("cpe23Uri"))
+        criteria = parse_cpe23(item.get("criteria") or item.get("cpe23Uri"))
         if criteria is None or not _identity_matches(observed_fields, criteria):
             continue
         criteria_version = criteria[5]
@@ -143,30 +145,6 @@ def _numeric_version(value: Any) -> tuple[int, ...] | None:
     if not _NUMERIC_VERSION_RE.fullmatch(text):
         return None
     return tuple(int(part) for part in text.split("."))
-
-
-def _parse_cpe23(value: Any) -> tuple[str, ...] | None:
-    text = str(value or "").strip()
-    if len(text) > 512 or any(char.isspace() or ord(char) < 32 for char in text):
-        return None
-    fields, current, escaped = [], [], False
-    for char in text:
-        if escaped:
-            current.append(char)
-            escaped = False
-        elif char == "\\":
-            escaped = True
-        elif char == ":":
-            fields.append("".join(current))
-            current = []
-        else:
-            current.append(char)
-    if escaped:
-        return None
-    fields.append("".join(current))
-    if len(fields) != 13 or fields[:2] != ["cpe", "2.3"]:
-        return None
-    return tuple(fields)
 
 
 def _snake_case(value: str) -> str:

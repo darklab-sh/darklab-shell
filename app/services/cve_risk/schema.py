@@ -4,6 +4,7 @@
 """Shared table inventory for CVE risk intelligence."""
 
 SHARED_TABLES: tuple[str, ...] = (
+    "cve_advisory_cpe_matches",
     "cve_advisory_lookup_cache",
     "cve_advisory_sources",
     "cve_risk_records",

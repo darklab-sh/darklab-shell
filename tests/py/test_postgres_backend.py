@@ -473,6 +473,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0059",
         "0060",
         "0061",
+        "0062",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -532,6 +533,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             OR (table_name = 'cve_advisory_sources' AND column_name IN (
                 'acquisition_mode',
                 'record_count'
+            ))
+            OR (table_name = 'cve_advisory_cpe_matches' AND column_name IN (
+                'all_versions',
+                'source_version'
             ))
             OR (table_name = 'risk_escalation_states' AND column_name IN (
                 'kev_listed',
@@ -603,6 +608,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "cve_risk_work_items",
         "cve_advisory_sources",
         "cve_advisory_lookup_cache",
+        "cve_advisory_cpe_matches",
         "package_advisories",
         "package_advisory_ranges",
         "finding_cve_links",
@@ -649,6 +655,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("cve_risk_records", "nvd_origin", "text"),
         ("cve_advisory_sources", "acquisition_mode", "text"),
         ("cve_advisory_sources", "record_count", "integer"),
+        ("cve_advisory_cpe_matches", "all_versions", "boolean"),
+        ("cve_advisory_cpe_matches", "source_version", "text"),
         ("risk_escalation_states", "kev_listed", "boolean"),
         ("risk_escalation_states", "epss_active", "boolean"),
         ("risk_escalations", "model_changed", "boolean"),
@@ -737,6 +745,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             'cve_risk_records',
             'cve_risk_work_items',
             'cve_advisory_lookup_cache',
+            'cve_advisory_cpe_matches',
             'finding_cve_links',
             'risk_escalation_states',
             'risk_escalations',
@@ -749,6 +758,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_cve_risk_records_kev_epss",
         "idx_cve_risk_records_cvss",
         "idx_cve_advisory_lookup_cache_expiry",
+        "idx_cve_advisory_cpe_product",
+        "idx_cve_advisory_cpe_source_version",
         "idx_cve_risk_work_items_due",
         "idx_finding_cve_links_cve",
         "idx_risk_escalation_states_cve",

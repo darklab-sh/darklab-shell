@@ -896,9 +896,47 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
                 "cvss_version": "3.1",
                 "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
                 "cwes": ["CWE-79"],
+                "cpe_matches": [{
+                    "criteria": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+                    "matchCriteriaId": "00000000-0000-4000-8000-000000000012",
+                    "vulnerable": True,
+                    "applicability_complete": True,
+                    "negate": False,
+                }],
             },
             cfg=cfg,
             now=datetime.fromisoformat("2026-08-04T12:00:00+00:00"),
+        )
+        replacement = persist_external_nvd_lookup(
+            risk_db,
+            "CVE-2026-12345",
+            {
+                "status": "active",
+                "published": "2026-08-01T00:00:00Z",
+                "last_modified": "2026-08-05T00:00:00Z",
+                "severity": "HIGH",
+                "score": 8.8,
+                "cvss_version": "3.1",
+                "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+                "cwes": ["CWE-79"],
+                "cpe_matches": [{
+                    "criteria": "cpe:2.3:a:example:server:*:*:*:*:*:*:*:*",
+                    "matchCriteriaId": "00000000-0000-4000-8000-000000000013",
+                    "vulnerable": True,
+                    "applicability_complete": True,
+                    "negate": False,
+                    "versionStartIncluding": "2.4",
+                    "versionEndExcluding": "2.6",
+                }, {
+                    "criteria": "cpe:2.3:a:example:unsafe:*:*:*:*:*:*:*:*",
+                    "matchCriteriaId": "00000000-0000-4000-8000-000000000014",
+                    "vulnerable": True,
+                    "applicability_complete": False,
+                    "negate": False,
+                }],
+            },
+            cfg=cfg,
+            now=datetime.fromisoformat("2026-08-05T12:00:00+00:00"),
         )
         negative = persist_external_nvd_lookup(
             risk_db,
@@ -909,6 +947,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         )
 
     assert result == {"source": "nvd", "outcome": "stored", "record_count": 1}
+    assert replacement == {"source": "nvd", "outcome": "stored", "record_count": 1}
     assert negative == {"source": "nvd", "outcome": "negative_cached", "record_count": 0}
     row = risk_db.execute(
         "SELECT advisory_status, cvss_score, cvss_vector, cwe_ids_json, nvd_origin "
@@ -921,6 +960,24 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "cwe_ids_json": '["CWE-79"]',
         "nvd_origin": "external",
     }
+    applicability_rows = risk_db.execute(
+        "SELECT cve_id, match_criteria_id, cpe_part, cpe_vendor, cpe_product, "
+        "criteria_version, version_start_including, version_end_excluding, all_versions, "
+        "source_version, origin FROM cve_advisory_cpe_matches"
+    ).fetchall()
+    assert [dict(item) for item in applicability_rows] == [{
+        "cve_id": "CVE-2026-12345",
+        "match_criteria_id": "00000000-0000-4000-8000-000000000013",
+        "cpe_part": "a",
+        "cpe_vendor": "example",
+        "cpe_product": "server",
+        "criteria_version": "*",
+        "version_start_including": "2.4",
+        "version_end_excluding": "2.6",
+        "all_versions": 0,
+        "source_version": "2026-08-05T00:00:00Z",
+        "origin": "external",
+    }]
     cache_rows = risk_db.execute(
         "SELECT result_state, record_count FROM cve_advisory_lookup_cache ORDER BY result_state"
     ).fetchall()
@@ -944,6 +1001,14 @@ def test_local_nvd_dataset_replaces_prior_local_snapshot_and_enriches_ranking(ri
                 "baseSeverity": "HIGH",
                 "cvssData": {"version": "3.1", "vectorString": "CVSS:3.1/AV:N", "baseScore": 8.1},
             }]},
+            "configurations": [{"nodes": [{
+                "operator": "OR",
+                "cpeMatch": [{
+                    "criteria": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+                    "matchCriteriaId": "00000000-0000-4000-8000-000000000015",
+                    "vulnerable": True,
+                }],
+            }]}],
         }}],
     }).encode())
     accept_local_nvd_dataset(
@@ -969,6 +1034,29 @@ def test_local_nvd_dataset_replaces_prior_local_snapshot_and_enriches_ranking(ri
     )
     assert source["origin"] == "local"
     assert source["record_count"] == 1
+    assert risk_db.execute(
+        "SELECT match_criteria_id FROM cve_advisory_cpe_matches"
+    ).fetchone()["match_criteria_id"] == "00000000-0000-4000-8000-000000000015"
+
+    replacement = parse_nvd_dataset(json.dumps({
+        "timestamp": "2026-08-05T00:00:00Z",
+        "vulnerabilities": [{"cve": {
+            "id": "CVE-2026-99999",
+            "vulnStatus": "Analyzed",
+            "published": "2026-08-05",
+            "lastModified": "2026-08-05",
+        }}],
+    }).encode())
+    accept_local_nvd_dataset(
+        risk_db,
+        replacement,
+        checksum="local-two",
+        cfg={"cve_risk": {"advisory_mode": "local"}},
+        now=datetime.fromisoformat("2026-08-05T12:00:00+00:00"),
+    )
+    assert risk_db.execute(
+        "SELECT COUNT(*) AS count FROM cve_advisory_cpe_matches"
+    ).fetchone()["count"] == 0
 
 
 def test_local_nvd_changes_create_deduplicated_owner_events_with_source_versions(risk_db):

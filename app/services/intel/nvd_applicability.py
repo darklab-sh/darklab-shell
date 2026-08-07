@@ -9,6 +9,8 @@ import re
 from typing import Any
 from uuid import UUID
 
+from services.intel.cpe import parse_cpe23
+
 
 _MAX_CONFIGURATIONS = 128
 _MAX_NODES_PER_CONFIGURATION = 128
@@ -82,7 +84,7 @@ def _normalize_match(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict) or value.get("vulnerable") is not True:
         return None
     criteria = str(value.get("criteria") or "").strip()
-    fields = _parse_cpe23(criteria)
+    fields = parse_cpe23(criteria)
     match_id = _match_criteria_id(value.get("matchCriteriaId"))
     if fields is None or match_id is None:
         return None
@@ -143,27 +145,6 @@ def _ordered_limits(limits: dict[str, str]) -> bool:
 
 def _numeric_version(value: str) -> tuple[int, ...]:
     return tuple(int(part) for part in value.split("."))
-
-
-def _parse_cpe23(value: str) -> tuple[str, ...] | None:
-    if not value or len(value) > 512 or any(char.isspace() or ord(char) < 32 for char in value):
-        return None
-    fields, current, escaped = [], [], False
-    for char in value:
-        if escaped:
-            current.append(char)
-            escaped = False
-        elif char == "\\":
-            escaped = True
-        elif char == ":":
-            fields.append("".join(current))
-            current = []
-        else:
-            current.append(char)
-    if escaped:
-        return None
-    fields.append("".join(current))
-    return tuple(fields) if len(fields) == 13 and fields[:2] == ["cpe", "2.3"] else None
 
 
 def _match_criteria_id(value: Any) -> str | None:

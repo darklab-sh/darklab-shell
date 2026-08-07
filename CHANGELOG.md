@@ -90,6 +90,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **NVD applicability trees now fail closed before version correlation.**
   - **What:** NVD 2.0 CVE normalization keeps only vulnerable CPE criteria from bounded, standalone, non-negated `OR` roots. `AND`, nested, negated, malformed, and over-quota branches stay unavailable rather than being flattened into unsafe product matches.
   - **Tests:** NVD dataset coverage pins exact-version, numeric-range, and all-version output plus conditional, negated, malformed, non-vulnerable, and oversized input rejection.
+- **Normalized NVD applicability now survives advisory refreshes.**
+  - **What:** Local NVD datasets and explicit NVD lookups store only the accepted CPE product identity and version limits, together with their source version, origin, and expiry. A newer accepted snapshot replaces obsolete matches instead of leaving stale ranges behind.
+  - **Tests:** SQLite and Postgres migration checks pin the shared table and indexes, while advisory tests cover local-snapshot cleanup, external replacement, and rejection of incomplete matches.
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.

@@ -23,6 +23,10 @@ from .nvd_transitions import (
     queue_nvd_transitions,
     state_from_values,
 )
+from .nvd_applicability_store import (
+    remove_stale_local_nvd_cpe_matches,
+    replace_nvd_cpe_matches,
+)
 
 
 log = logging.getLogger("shell")
@@ -290,6 +294,7 @@ def persist_external_nvd_lookup(
     expires_at = (current + timedelta(seconds=ttl)).isoformat()
     source_version = _text(provider_payload.get("last_modified") or fetched_at, limit=128)
     previous = linked_nvd_state(conn, canonical) if positive else None
+    cpe_match_count = 0
     if positive:
         item = _upsert_record(
             conn,
@@ -307,6 +312,15 @@ def persist_external_nvd_lookup(
             current=state_from_values(item, source_version=source_version),
             downgrade_delta=float(settings.get("advisory_cvss_downgrade_delta") or 1.0),
             now=fetched_at,
+        )
+        cpe_match_count = replace_nvd_cpe_matches(
+            conn,
+            canonical,
+            provider_payload,
+            origin="external",
+            source_version=source_version,
+            fetched_at=fetched_at,
+            expires_at=expires_at,
         )
     _cache_result(
         conn,
@@ -336,6 +350,7 @@ def persist_external_nvd_lookup(
     CVE_ADVISORY_ACQUISITIONS.labels(source="nvd", mode="external", outcome=outcome).inc()
     log.info("CVE_ADVISORY_LOOKUP_STORED", extra={
         "source": "nvd", "outcome": outcome, "record_count": 1 if positive else 0,
+        "cpe_match_count": cpe_match_count,
     })
     return {"source": "nvd", "outcome": outcome, "record_count": 1 if positive else 0}
 
@@ -355,6 +370,7 @@ def accept_local_nvd_dataset(
     expires_at = (current + timedelta(seconds=ttl)).isoformat()
     previous = linked_nvd_states(conn)
     queued = 0
+    cpe_match_count = 0
     for cve_id, provider_payload in parsed.records:
         item = _upsert_record(
             conn,
@@ -373,6 +389,15 @@ def accept_local_nvd_dataset(
             downgrade_delta=float(settings.get("advisory_cvss_downgrade_delta") or 1.0),
             now=fetched_at,
         )
+        cpe_match_count += replace_nvd_cpe_matches(
+            conn,
+            cve_id,
+            provider_payload,
+            origin="local",
+            source_version=parsed.version,
+            fetched_at=fetched_at,
+            expires_at=expires_at,
+        )
     conn.execute(
         "UPDATE cve_risk_records SET advisory_status = 'unknown', cvss_version = '', "
         "cvss_vector = '', cvss_score = NULL, cvss_severity = '', cwe_ids_json = '[]', "
@@ -381,6 +406,7 @@ def accept_local_nvd_dataset(
         "WHERE nvd_origin = 'local' AND nvd_source_version != ?",
         (fetched_at, parsed.version, fetched_at, parsed.version),
     )
+    remove_stale_local_nvd_cpe_matches(conn, source_version=parsed.version)
     _upsert_source(
         conn,
         mode="local",
@@ -394,7 +420,7 @@ def accept_local_nvd_dataset(
     )
     log.info("CVE_ADVISORY_LOCAL_LOADED", extra={
         "source": "nvd", "source_version": parsed.version, "record_count": len(parsed.records),
-        "transition_count": queued,
+        "transition_count": queued, "cpe_match_count": cpe_match_count,
     })
     from services.metrics.cve_risk import CVE_ADVISORY_ACQUISITIONS  # noqa: PLC0415
 
