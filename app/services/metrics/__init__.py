@@ -73,7 +73,7 @@ HISTORY_SEARCH_FALLBACK_REASONS = frozenset({"missing_fts", "fts_error"})
 EVIDENCE_PACKAGE_OUTCOMES = frozenset({"success", "too_large", "not_found", "error"})
 HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"})
 STATUS_CLASSES = frozenset({"1xx", "2xx", "3xx", "4xx", "5xx", "unknown"})
-RUN_FINALIZE_STAGES = frozenset({"capture", "db_write", "artifact_write", "entity_materialize"})
+RUN_FINALIZE_STAGES = frozenset({"capture", "db_write", "artifact_write", "entity_materialize", "version_inference"})
 BROKER_EVENT_TYPES = frozenset({
     "clear",
     "error",
@@ -772,7 +772,7 @@ def pty_metrics_snapshot() -> dict[str, object]:
 
 
 def record_run_finalize_error(stage: str) -> None:
-    stage_label = stage if stage in {"capture", "db_write", "artifact_write", "entity_materialize"} else "db_write"
+    stage_label = stage if stage in RUN_FINALIZE_STAGES else "db_write"
     RUN_FINALIZE_ERRORS.labels(stage_label).inc()
 
 

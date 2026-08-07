@@ -1058,6 +1058,13 @@ class TestIsCommandAllowedEdges:
                 exec_command="nmap -sV -oX /workspace/session-1/reports/scan.xml darklab.sh",
                 workspace_writes=["reports/scan.xml"],
             ),
+            commands.CommandValidationResult(
+                True,
+                display_command="nmap -oX first.xml -oX second.xml darklab.sh",
+                exec_command="nmap -oX /workspace/session-1/first.xml "
+                "-oX /workspace/session-1/second.xml darklab.sh",
+                workspace_writes=["first.xml", "second.xml"],
+            ),
         ]
 
         for validation in cases:

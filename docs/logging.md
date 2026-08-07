@@ -162,7 +162,7 @@ The current event inventory is:
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
 | INFO | `REQUEST_COMPLETED` | `after_request` | ip, session, request_id, method, path, endpoint, http_status, duration_ms |
 | INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type, scan_transport (raw/connect scanner runs only) |
-| INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
+| INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, version_inference_count, full_output_truncated |
 | INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
 | INFO | `RUN_OUTPUT_ARTIFACT_FINALIZED` | full-output artifact capture | run_id, rel_path, artifact_bytes, lines, truncated, available |
 | INFO | `WORKFLOW_EXECUTION_STARTED` | durable workflow route | execution_id, workflow_id, workflow_source, step_count, team_id, session, ip |
@@ -254,6 +254,9 @@ The current event inventory is:
 | INFO | `PROJECT_AUTO_PROMOTE_RUN_APPLIED` | run finalization | run_id, session, team_id, project_ids, rule_ids, bounded rule_results, aggregate match/link/promote/quota/cap counts |
 | INFO | `PROJECT_UPDATED` | Project update route | ip, session, project_id, project_status |
 | INFO | `ATLAS_ENTITIES_CAPTURED` | run finalization | run_id, session, team_id, count, entity_type_counts, port_entity_count, scan_observation_count |
+| INFO | `NMAP_VERSION_INFERENCE_FINALIZED` | run finalization | run_id, session, team_id, observation_count, candidate_count, attempted_count, materialized_count, finding_created_count, source_created_count, rejected_count, skipped_count, truncated |
+| WARN | `NMAP_VERSION_INFERENCE_ARTIFACT_REJECTED` | run finalization | run_id, session, team_id, marked_artifact_count |
+| ERROR | `NMAP_VERSION_INFERENCE_FINALIZE_ERROR` | run finalization | run_id, session, team_id, error_class |
 | INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, team_id, source, schedule_id, fire_status, fired_at, run_id, last_error |
 | INFO | `API_SCHEDULE_CREATED` | API schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `API_SCHEDULE_UPDATED` | API schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |

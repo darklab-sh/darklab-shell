@@ -19,6 +19,7 @@ from core.output_signals import OutputSignalClassifier
 from core.redaction import REDACTED_ENTITY_SENTINEL, line_entries_from_events, redact_line_entries
 from services.atlas.materializer import materialize_run_entities
 from services.assessments.coverage import reconcile_run_evidence_on_conn
+from services.assessments.nmap_inference_materialization import materialize_nmap_xml_version_inferences
 from services.commands.registry import command_project_target_inputs
 from services.metrics_lazy import app_metrics
 from services.notifications.hooks import enqueue_run_complete
@@ -35,6 +36,10 @@ from services.projects.targets import record_project_target_discoveries
 from services.pty.transcript import shape_completed_pty_entries
 from services.runs.kinds import RUN_KIND_EXTERNAL, run_kind_for_cmd_type
 from services.runs.finalization_assessments import reconcile_assessment_evidence_for_finalize
+from services.runs.finalization_version_inference import (
+    materialize_nmap_inferences_for_finalize,
+    materialize_run_entities_for_finalize,
+)
 from services.runs.finalization_summaries import (
     AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT,
     auto_promote_summary_ids,
@@ -63,6 +68,7 @@ from services.runs.structured_summary import replace_run_output_summary
 from services.runs.workspace_artifacts import workspace_artifacts_with_sizes
 from services.storage.body_store import inline_threshold_bytes, maybe_store_text_body
 from services.teams.scope import owner_context_for_scope
+from services.workspace.files import read_owner_workspace_text_file
 
 log = logging.getLogger("shell")
 SEARCH_ENTITY_MAX_BYTES = 4096
@@ -83,6 +89,7 @@ class RunFinalizeRecords:
     recorded_findings: list = field(default_factory=list)
     recorded_targets: list = field(default_factory=list)
     scan_observation_count: int = 0
+    version_inference_summary: dict | None = None
     auto_promote_summary: dict | None = None
 
 
@@ -530,41 +537,6 @@ def _record_run_findings_for_finalize(
     return []
 
 
-def _materialize_run_entities_for_finalize(
-    conn,
-    session_id,
-    team_id,
-    run_id,
-    command,
-    persisted_entries,
-    finished_iso,
-    *,
-    materialize_run_entities_fn: Callable = materialize_run_entities,
-) -> list:
-    try:
-        return run_finalize_savepoint(
-            conn,
-            "atlas_entities",
-            lambda: materialize_run_entities_fn(
-                conn,
-                session_id,
-                run_id,
-                persisted_entries,
-                team_id=team_id,
-                seen_at=finished_iso,
-                command=command,
-            ),
-        )
-    except Exception:
-        app_metrics.record_run_finalize_error("entity_materialize")
-        log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "cmd": command,
-        })
-    return []
-
-
 def _apply_auto_promote_for_finalize(
     conn,
     session_id,
@@ -697,6 +669,9 @@ def update_run_finalize_summary(
         "artifact_count": len(records.recorded_artifacts),
         "finding_count": len(records.recorded_findings),
         "atlas_entity_count": len(records.recorded_entities),
+        "version_inference_count": int(
+            (records.version_inference_summary or {}).get("materialized_count") or 0
+        ),
         "project_target_count": len(records.recorded_targets),
         "project_auto_promote_count": int(records.auto_promote_summary.get("linked_count") or 0)
         if isinstance(records.auto_promote_summary, dict) else 0,
@@ -728,6 +703,8 @@ def save_completed_run(
     workspace_artifacts_with_sizes_fn: Callable = workspace_artifacts_with_sizes,
     record_run_findings_fn: Callable = record_run_findings,
     materialize_run_entities_fn: Callable = materialize_run_entities,
+    read_owner_workspace_text_file_fn: Callable = read_owner_workspace_text_file,
+    materialize_nmap_xml_version_inferences_fn: Callable = materialize_nmap_xml_version_inferences,
     run_persistence_transaction_fn: Callable = run_persistence_transaction,
     apply_auto_promote_rules_for_run_fn: Callable = apply_auto_promote_rules_for_run,
     command_project_target_inputs_fn: Callable = command_project_target_inputs,
@@ -806,7 +783,7 @@ def save_completed_run(
                 output_state.persisted_entries,
                 record_run_findings_fn=record_run_findings_fn,
             )
-            records.recorded_entities = _materialize_run_entities_for_finalize(
+            records.recorded_entities = materialize_run_entities_for_finalize(
                 conn,
                 session_id,
                 team_id,
@@ -815,6 +792,19 @@ def save_completed_run(
                 output_state.persisted_entries,
                 finished_iso,
                 materialize_run_entities_fn=materialize_run_entities_fn,
+            )
+            records.version_inference_summary = materialize_nmap_inferences_for_finalize(
+                conn,
+                session_id,
+                team_id,
+                run_id,
+                exit_code,
+                finished_iso,
+                workspace_artifacts,
+                workspace_owner,
+                cfg=cfg,
+                read_owner_workspace_text_file_fn=read_owner_workspace_text_file_fn,
+                materialize_nmap_xml_version_inferences_fn=materialize_nmap_xml_version_inferences_fn,
             )
             records.recorded_targets = _discover_project_targets_for_finalize(
                 conn,
@@ -922,6 +912,7 @@ def finalize_completed_run(
         "artifact_count": int(finalize_summary.get("artifact_count") or len(workspace_artifacts or [])),
         "finding_count": int(finalize_summary.get("finding_count") or 0),
         "atlas_entity_count": int(finalize_summary.get("atlas_entity_count") or 0),
+        "version_inference_count": int(finalize_summary.get("version_inference_count") or 0),
         "project_target_count": int(finalize_summary.get("project_target_count") or 0),
     })
     app_metrics.record_completed_run(original_command, run_kind_for_cmd_type(cmd_type), exit_code, elapsed, capture)

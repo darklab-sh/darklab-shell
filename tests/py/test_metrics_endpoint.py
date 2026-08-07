@@ -230,6 +230,8 @@ class TestMetricsEndpoint:
 
     def test_run_finalize_metric_uses_bounded_labels(self):
         app_metrics.record_completed_run("nmap -sV darklab.sh", "external", 0, 1.25, _Capture())
+        app_metrics.record_run_finalize_error("version_inference")
+        app_metrics.record_run_finalize_error("user-supplied-stage")
 
         body = _allowed_metrics(get_client(use_forwarded_for=False)).get_data(as_text=True)
 
@@ -238,6 +240,8 @@ class TestMetricsEndpoint:
             in body
         )
         assert 'darklab_run_output_bytes_bucket{le="1024.0",tool="nmap"}' in body
+        assert 'darklab_run_finalize_errors_total{stage="version_inference"}' in body
+        assert 'darklab_run_finalize_errors_total{stage="db_write"}' in body
 
     def test_rate_limit_and_intel_helpers_render_expected_labels(self):
         app_metrics.record_rate_limit_rejection("run.start_brokered_run", scope="global")

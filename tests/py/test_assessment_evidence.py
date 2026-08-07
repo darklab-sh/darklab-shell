@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import logging
 import uuid
 
 import pytest
@@ -1072,6 +1073,170 @@ def test_completed_run_assessment_failure_rolls_back_only_the_optional_hook(
     assert saved_run is not None
     assert int(evidence_count["count"] or 0) == 0
     assert _check_row(assessment_id)["state"] == "not_started"
+
+
+def test_completed_run_finalization_materializes_one_marked_nmap_xml_artifact(
+    assessment_factory,
+    caplog: pytest.LogCaptureFixture,
+):
+    factory, cleanup = assessment_factory
+    session_id, _project_id, _assessment_id = factory([("domain", "inference.example")])
+    run_id = "run-nmap-inference-" + uuid.uuid4().hex
+    calls = []
+    finalize_summary = {}
+
+    def materialize_entities(*_args, **_kwargs):
+        calls.append("entities")
+        return [{"id": "ent-inference-test"}]
+
+    def read_xml(owner, workspace_path, cfg):
+        calls.append("read")
+        assert owner.owner_id == session_id
+        assert workspace_path == "reports/scan.xml"
+        assert cfg is None
+        return "<nmaprun version='7.96'/>"
+
+    def materialize_inferences(conn, owner_session_id, payload, **kwargs):
+        calls.append("inferences")
+        assert owner_session_id == session_id
+        assert payload == "<nmaprun version='7.96'/>"
+        assert kwargs == {
+            "source_run_id": run_id,
+            "team_id": "",
+            "observed_at": "2026-08-04 12:01:00",
+        }
+        assert conn.execute("SELECT id FROM runs WHERE id = ?", (run_id,)).fetchone() is not None
+        return {
+            "observation_count": 1,
+            "candidate_count": 1,
+            "attempted_count": 1,
+            "materialized_count": 1,
+            "finding_created_count": 1,
+            "source_created_count": 1,
+            "rejected_count": 0,
+            "skipped_count": 0,
+            "truncated": False,
+        }
+
+    with caplog.at_level(logging.INFO, logger="shell"):
+        save_completed_run(
+            run_id,
+            session_id,
+            "",
+            "nmap -sV -oX reports/scan.xml inference.example",
+            "2026-08-04 12:00:00",
+            "2026-08-04 12:01:00",
+            0,
+            _CompletedCapture(),
+            workspace_artifacts=[{
+                "workspace_path": "reports/scan.xml",
+                "display_name": "scan.xml",
+                "kind": "output",
+                "detected_by": "workspace_flag",
+                "structured_output": "nmap_xml",
+                "source_flag": "-oX",
+            }],
+            link_active_project=False,
+            finalize_summary=finalize_summary,
+            materialize_run_entities_fn=materialize_entities,
+            read_owner_workspace_text_file_fn=read_xml,
+            materialize_nmap_xml_version_inferences_fn=materialize_inferences,
+        )
+    cleanup[-1][3].append(run_id)
+
+    assert calls == ["entities", "read", "inferences"]
+    assert finalize_summary["persisted"] is True
+    assert finalize_summary["version_inference_count"] == 1
+    event = next(record for record in caplog.records if record.message == "NMAP_VERSION_INFERENCE_FINALIZED")
+    assert event.run_id == run_id
+    assert event.materialized_count == 1
+    assert not hasattr(event, "workspace_path")
+
+
+def test_completed_run_nmap_inference_failure_rolls_back_only_the_optional_hook(
+    assessment_factory,
+    caplog: pytest.LogCaptureFixture,
+):
+    factory, cleanup = assessment_factory
+    session_id, _project_id, _assessment_id = factory([("domain", "rollback.example")])
+    run_id = "run-nmap-inference-rollback-" + uuid.uuid4().hex
+    finalize_summary = {}
+
+    def failing_materializer(conn, *_args, **_kwargs):
+        conn.execute("UPDATE runs SET command = 'unsafe mutation' WHERE id = ?", (run_id,))
+        raise RuntimeError("reports/scan.xml CVE-2026-12345 rollback.example")
+
+    with caplog.at_level(logging.ERROR, logger="shell"):
+        save_completed_run(
+            run_id,
+            session_id,
+            "",
+            "nmap -sV -oX reports/scan.xml rollback.example",
+            "2026-08-04 12:00:00",
+            "2026-08-04 12:01:00",
+            0,
+            _CompletedCapture(),
+            workspace_artifacts=[{
+                "workspace_path": "reports/scan.xml",
+                "kind": "output",
+                "structured_output": "nmap_xml",
+                "source_flag": "-oX",
+            }],
+            link_active_project=False,
+            finalize_summary=finalize_summary,
+            materialize_run_entities_fn=lambda *_args, **_kwargs: [],
+            read_owner_workspace_text_file_fn=lambda *_args: "<nmaprun/>",
+            materialize_nmap_xml_version_inferences_fn=failing_materializer,
+        )
+    cleanup[-1][3].append(run_id)
+
+    with db_connect() as conn:
+        saved_run = conn.execute("SELECT command FROM runs WHERE id = ?", (run_id,)).fetchone()
+    assert saved_run["command"] == "nmap -sV -oX reports/scan.xml rollback.example"
+    assert finalize_summary["persisted"] is True
+    assert finalize_summary["version_inference_count"] == 0
+    event = next(
+        record for record in caplog.records
+        if record.message == "NMAP_VERSION_INFERENCE_FINALIZE_ERROR"
+    )
+    assert event.error_class == "RuntimeError"
+    assert not hasattr(event, "workspace_path")
+    assert "reports/scan.xml CVE-2026-12345 rollback.example" not in caplog.text
+
+
+def test_failed_completed_run_does_not_read_marked_nmap_xml_artifact(assessment_factory):
+    factory, cleanup = assessment_factory
+    session_id, _project_id, _assessment_id = factory([("domain", "failed.example")])
+    run_id = "run-nmap-inference-failed-" + uuid.uuid4().hex
+    finalize_summary = {}
+
+    save_completed_run(
+        run_id,
+        session_id,
+        "",
+        "nmap -sV -oX reports/scan.xml failed.example",
+        "2026-08-04 12:00:00",
+        "2026-08-04 12:01:00",
+        7,
+        _CompletedCapture(),
+        workspace_artifacts=[{
+            "workspace_path": "reports/scan.xml",
+            "kind": "output",
+            "structured_output": "nmap_xml",
+            "source_flag": "-oX",
+        }],
+        link_active_project=False,
+        finalize_summary=finalize_summary,
+        materialize_run_entities_fn=lambda *_args, **_kwargs: [],
+        read_owner_workspace_text_file_fn=lambda *_args: pytest.fail("failed run read XML"),
+        materialize_nmap_xml_version_inferences_fn=lambda *_args, **_kwargs: pytest.fail(
+            "failed run materialized inference"
+        ),
+    )
+    cleanup[-1][3].append(run_id)
+
+    assert finalize_summary["persisted"] is True
+    assert finalize_summary["version_inference_count"] == 0
 
 
 def test_history_delete_paths_preserve_idempotent_assessment_evidence_tombstones(

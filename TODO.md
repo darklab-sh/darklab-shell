@@ -132,10 +132,10 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 6 — Close the web and API discovery/validation gaps
 
-- [ ] Add passive product/package-version correlation without presenting inference as confirmation:
-  - Normalize exact product identifiers and versions from Nmap CPE/service evidence, reviewed HTTPx technology mappings that include an exact version, other structured scanner output, and CycloneDX components. Preserve the original banner/technology/component observation, source run/import, target, parser/tool version, and observed time.
-  - Use NVD applicability ranges only for defensible CPE matches and cached OSV affected-version ranges for exact package ecosystem/PURL matches. HTTPx technology names, unversioned banners, fuzzy product text, or an ambiguous CPE guess may suggest a follow-up check but must not create a CVE finding.
-  - Materialize a `version_cve_correlation` finding only when a versioned observation satisfies a recorded matching rule. Store the advisory/data version, match basis, affected range, confidence, and source observation so review can reproduce the inference.
+- [ ] Finish passive product/package-version correlation without presenting inference as confirmation:
+  - Add exact product or package observations from reviewed HTTPx technology mappings that include a version, other structured scanner output, and CycloneDX components. Preserve the original banner, technology, or component observation together with its source run/import, target, parser/tool version, and observed time.
+  - Reuse the stored NVD applicability boundary for later exact CPE sources and add cached OSV affected-version ranges for exact package ecosystem/PURL matches. HTTPx technology names, unversioned banners, fuzzy product text, or an ambiguous CPE guess may suggest a follow-up check but must not create a CVE finding.
+  - Route later exact version observations through the existing `version_cve_correlation` finding contract only when they satisfy a recorded matching rule. Preserve the advisory/data version, match basis, affected range, confidence, and source observation so review can reproduce the inference.
   - Keep inferred version/package findings distinct from Nuclei or another active probe that confirmed vulnerable behavior. Link or deduplicate related observations without discarding their different evidence methods or allowing an inference to upgrade itself to confirmed.
 - [ ] Extend the Atlas import parser with SARIF and CycloneDX:
   - Parse bounded SARIF 2.1 results through the normal preview/apply flow, preserving tool/driver version, rule id, level, message, locations, fingerprints, help/reference links, automation details, and original artifact provenance. Reject unsafe paths/URIs and never fetch referenced source files while viewing or importing.

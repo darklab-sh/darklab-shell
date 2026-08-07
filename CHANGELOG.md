@@ -111,6 +111,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Validated Nmap XML output keeps its structured artifact intent.**
   - **What:** Workspace artifact capture marks only an unambiguous, already-validated `nmap -oX` write for structured parsing. Other XML-named outputs and ambiguous rewritten paths stay ordinary artifacts, so finalization never guesses from a file extension.
   - **Tests:** Command-boundary coverage pins separate and attached `-oX` values, ordinary XML output, non-Nmap commands, and ambiguous path rejection.
+- **Successful Nmap XML runs now materialize inferred CVE findings.**
+  - **What:** Completed-run finalization reads the one validated XML artifact through the run owner's Files scope after Atlas entities exist, then performs bounded stored-NVD correlation and inference persistence in its own savepoint. Failed scans and optional read, parse, or persistence failures leave the saved run intact.
+  - **Tests:** Finalization coverage pins entity-before-inference ordering, owner-scoped reads, source metadata, count-only logs, failed-run abstention, and savepoint rollback without losing the run.
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.

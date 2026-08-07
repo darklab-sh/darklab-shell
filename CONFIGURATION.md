@@ -442,6 +442,8 @@ Release images include dated FIRST EPSS and CISA KEV snapshots, so saved CVE fin
 
 NVD advisory storage is separate from the EPSS/KEV bulk-feed switch. Use `advisory_mode: local` with `nvd_local_path` to load a bounded NVD 2.0 JSON dataset during startup, or use `advisory_mode: external` to retain the normalized result only when a user with finding-triage permission explicitly refreshes a saved CVE in Atlas. The external mode doesn't create a scheduler job or send scan-derived products, packages, targets, or findings to NVD. A failed local reload keeps the last accepted dataset and reports the failure through `providers`, logs, and metrics. Later accepted data records withdrawal, rejection, dispute, reinstatement, and CVSS decreases of at least `advisory_cvss_downgrade_delta` for linked findings; the first accepted record is a silent baseline. `disabled` keeps shared NVD CVSS storage off; the existing explicit `intel cve` provider lookup remains available under its own cache and rate limits.
 
+When stored NVD data includes complete CPE applicability, a successful validated Nmap `-oX` run can use those local rules to save an inferred finding. Finalization doesn't contact an advisory provider, and `advisory_mode: disabled` leaves the run with no stored advisory matches.
+
 See [Logging Reference](docs/logging.md) for level semantics, event names, fields, redaction rules, formats, and troubleshooting.
 
 ---

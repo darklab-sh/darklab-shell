@@ -11,6 +11,8 @@ from services.commands.registry_validation import split_command_argv
 APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES = (
     AMASS_DEFAULT_WORKSPACE_DIR.strip("/"),
 )
+NMAP_XML_SOURCE_FLAG = "-oX"
+NMAP_XML_STRUCTURED_OUTPUT = "nmap_xml"
 
 
 def _nmap_xml_exec_paths(validation: CommandValidationResult) -> list[str]:
@@ -23,13 +25,13 @@ def _nmap_xml_exec_paths(validation: CommandValidationResult) -> list[str]:
     index = 1
     while index < len(tokens):
         argument = tokens[index]
-        if argument == "-oX":
+        if argument == NMAP_XML_SOURCE_FLAG:
             if index + 1 < len(tokens) and not tokens[index + 1].startswith("-"):
                 paths.append(tokens[index + 1])
                 index += 2
                 continue
-        elif argument.startswith("-oX"):
-            value = argument[len("-oX"):]
+        elif argument.startswith(NMAP_XML_SOURCE_FLAG):
+            value = argument[len(NMAP_XML_SOURCE_FLAG):]
             if value and not value.startswith(("-", "=")):
                 paths.append(value)
         index += 1
@@ -59,15 +61,16 @@ def workspace_artifact_metadata(validation: CommandValidationResult) -> dict[str
     if not validation.allowed:
         return {}
     writes = list(dict.fromkeys(validation.workspace_writes))
-    metadata = {}
-    for resolved_path in _nmap_xml_exec_paths(validation):
-        workspace_path = _matching_workspace_write(resolved_path, writes)
-        if workspace_path:
-            metadata[workspace_path] = {
-                "structured_output": "nmap_xml",
-                "source_flag": "-oX",
-            }
-    return metadata
+    resolved_paths = _nmap_xml_exec_paths(validation)
+    if len(resolved_paths) != 1:
+        return {}
+    workspace_path = _matching_workspace_write(resolved_paths[0], writes)
+    if not workspace_path:
+        return {}
+    return {workspace_path: {
+        "structured_output": NMAP_XML_STRUCTURED_OUTPUT,
+        "source_flag": NMAP_XML_SOURCE_FLAG,
+    }}
 
 
 def is_app_managed_workspace_artifact_path(workspace_path: str) -> bool:
