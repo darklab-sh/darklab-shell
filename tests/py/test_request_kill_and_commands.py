@@ -123,6 +123,7 @@ _EXPECTED_BUILTIN_ROOTS = {
     "uname",
     "uniq",
     "uptime",
+    "urlscope",
     "var",
     "version",
     "watch",
@@ -1567,6 +1568,7 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("diff --last") == "diff"
             assert resolve_builtin_command("diff file:expected.txt run:run-1") == "diff"
             assert resolve_builtin_command("rm targets.txt") == "rm"
+            assert resolve_builtin_command("urlscope example.com candidates.txt scoped.txt") == "urlscope"
 
     def test_workspace_builtin_commands_are_hidden_when_disabled(self):
         with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
@@ -1577,6 +1579,7 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("diff run:run-1 run:run-2") == "diff"
             assert resolve_builtin_command("diff --last") == "diff"
             assert resolve_builtin_command("rm targets.txt") is None
+            assert resolve_builtin_command("urlscope example.com candidates.txt scoped.txt") is None
 
     def test_tour_builtin_command_is_hidden_when_disabled(self):
         with mock.patch.dict("config.CFG", {"tour_enabled": False}):

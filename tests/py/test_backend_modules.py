@@ -17866,9 +17866,9 @@ class TestDerivedCommandRegistry:
         disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})
         enabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
-        assert {"file", "cat", "cp", "ls", "rm", "touch"}.isdisjoint(disabled)
+        assert {"file", "cat", "cp", "ls", "rm", "touch", "urlscope"}.isdisjoint(disabled)
         assert "diff" in disabled
-        assert {"file", "cat", "cp", "diff", "ls", "rm", "touch"}.issubset(enabled)
+        assert {"file", "cat", "cp", "diff", "ls", "rm", "touch", "urlscope"}.issubset(enabled)
         assert [item["value"] for item in enabled["file"]["arg_hints"]["__positional__"]] == [
             "list <folder>",
             "ls <folder>",
@@ -17888,6 +17888,10 @@ class TestDerivedCommandRegistry:
         assert enabled["touch"]["arg_hints"]["__positional__"][0]["value_type"] == "workspace_path"
         assert "rm" in enabled["file"]["expects_value"]
         assert "rm" in enabled["file"]["arg_hints"]
+        assert [
+            item["value_type"]
+            for item in enabled["urlscope"]["arg_hints"]["__positional__"]
+        ] == ["domain", "workspace_path", "workspace_path"]
 
     def test_real_registry_commands_have_root_descriptions(self):
         registry = load_commands_registry()
@@ -24679,8 +24683,10 @@ class TestWorkflowInputLoading:
         enabled_titles = {item["title"] for item in enabled}
 
         assert "Subdomain HTTP Triage" not in disabled_titles
+        assert "Historical Web Surface Triage" not in disabled_titles
         assert "Crawl And Scan" not in disabled_titles
         assert "Subdomain HTTP Triage" in enabled_titles
+        assert "Historical Web Surface Triage" in enabled_titles
         assert "Crawl And Scan" in enabled_titles
 
         subdomain = next(item for item in enabled if item["title"] == "Subdomain HTTP Triage")
@@ -24691,6 +24697,38 @@ class TestWorkflowInputLoading:
             "httpx -l subdomains.txt -silent -o live-urls.txt",
             "httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
         ]
+        historical = next(item for item in enabled if item["title"] == "Historical Web Surface Triage")
+        assert historical["id"] == "historical_web_surface_triage"
+        assert historical["version"] == 2
+        historical_steps = cast(list[dict[str, object]], historical["steps"])
+        assert [step["id"] for step in historical_steps] == [
+            "collect_archives",
+            "scope_archives",
+            "confirm_live",
+            "scope_live",
+            "crawl_live",
+            "scope_crawl",
+            "summarize_surface",
+        ]
+        assert [step["cmd"] for step in historical_steps] == [
+            "gau --subs --threads 2 --timeout 10 {{domain}} | head -n 1024 > historical-urls.txt",
+            "urlscope {{domain}} historical-urls.txt historical-scoped-urls.txt",
+            (
+                "httpx -l historical-scoped-urls.txt -silent -threads 10 -timeout 10 -retries 1 "
+                "| head -n 256 > live-urls.txt"
+            ),
+            "urlscope {{domain}} live-urls.txt live-scoped-urls.txt",
+            (
+                "katana -list live-scoped-urls.txt -d 1 -ct 5 -timeout 10 -silent "
+                "| head -n 1024 > crawled-urls.txt"
+            ),
+            "urlscope {{domain}} crawled-urls.txt crawled-scoped-urls.txt",
+            (
+                "httpx -l crawled-scoped-urls.txt -status-code -title -tech-detect "
+                "-threads 10 -timeout 10 -retries 1 | head -n 256 > http-summary.txt"
+            ),
+        ]
+        assert historical_steps[-1]["next"] == {"success": "complete", "failure": "stop"}
 
 
 class TestSeedHistoryFixtures:
@@ -30480,7 +30518,16 @@ class TestSessionVariables:
 
 class TestBuiltinConfigAccess:
     def test_split_builtin_modules_read_shared_config_without_cfg_sync(self, monkeypatch):
-        from services.commands import builtins_discovery, builtins_misc, builtins_runtime, builtins_system, builtins_workspace
+        from services.commands import (
+            builtins_assessment,
+            builtins_discovery,
+            builtins_misc,
+            builtins_runtime,
+            builtins_system,
+            builtins_workspace,
+        )
+        from services.commands.builtin_registry import BuiltinExecutionContext
+        from services.teams.scope import personal_owner_context
 
         active_cfg = build_test_config({
             "app_name": "Phase Three Shell",
@@ -30533,6 +30580,41 @@ class TestBuiltinConfigAccess:
         workspace_lines = builtins_workspace.run_builtin_workspace("file list", "sess-phase3")
         assert any(str(line["text"]).startswith("Session files:") for line in workspace_lines)
         assert seen_workspace_cfg == [active_cfg]
+
+        writes = []
+
+        def fake_read(_owner, path, cfg):
+            assert path == "historical-urls.txt"
+            seen_workspace_cfg.append(cfg)
+            return "\n".join([
+                "HTTPS://Example.COM/admin",
+                "https://api.example.com/live",
+                "https://example.com.evil.test/lookalike",
+            ])
+
+        def fake_write(_owner, path, payload, cfg):
+            seen_workspace_cfg.append(cfg)
+            writes.append((path, payload))
+            return {"path": path}
+
+        monkeypatch.setattr(builtins_assessment, "read_owner_workspace_text_file", fake_read)
+        monkeypatch.setattr(builtins_assessment, "write_owner_workspace_text_file", fake_write)
+        context = BuiltinExecutionContext(
+            "sess-phase3",
+            supplied_owner_context=personal_owner_context("sess-phase3"),
+            config_resolver=lambda: active_cfg,
+        )
+        scoped_lines, exit_code = builtins_assessment.run_builtin_urlscope(
+            "urlscope example.com historical-urls.txt scoped-urls.txt",
+            context,
+        )
+        assert exit_code == 0
+        assert writes == [(
+            "scoped-urls.txt",
+            "https://example.com/admin\nhttps://api.example.com/live\n",
+        )]
+        assert scoped_lines[0]["text"] == "urlscope: wrote 2 scoped URLs to scoped-urls.txt"
+        assert seen_workspace_cfg == [active_cfg, active_cfg, active_cfg]
 
 
 class TestBuiltinStatus:

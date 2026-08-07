@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Historical web discovery now has a scope-gated built-in workflow.**
+  - **What:** Historical Web Surface Triage collects a bounded set of passive `gau` URLs, normalizes and restricts them to the approved domain, checks that scoped set for live HTTP services, and rechecks scope before Katana crawling and the final HTTPx summary. Its app-owned `urlscope` helper reads and writes only through the active personal or team Files workspace and rejects malformed domains, credentials, fragments, and suffix lookalikes.
+  - **Tests:** URL normalization, command routing, Files ownership, feature gating, workflow graph, route payload, and module-ratchet coverage pins the passive-to-active safety boundary.
 - **Historical URL discovery now ships as a reviewed external tool.**
   - **What:** The image builds the reviewed `gau` 2.2.4 module with checksum-pinned AMD64 and ARM64 Go toolchains and includes its MIT notice. The command catalog exposes a passive one-domain command, keeps config and output paths inside Files, blocks custom proxy arguments, and preserves historical URLs as review-only metadata.
   - **Tests:** Registry, workspace-path, target-extraction, container-smoke, module-version, module-checksum, toolchain-checksum, and license-inventory coverage pins the integration.

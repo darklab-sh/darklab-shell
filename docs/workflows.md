@@ -14,6 +14,12 @@ Open **Browse all workflows** from the desktop rail, press `Alt+G`, or choose **
 
 The in-app editor saves personal workflows in personal scope and shared workflows in active team scope. Team owners and admins can create, edit, and delete shared definitions. Team members with command-run permission can run them.
 
+### Historical Web Surface Triage
+
+The built-in Historical Web Surface Triage playbook starts with passive `gau` archive discovery and saves a bounded candidate list in Files. It then normalizes and restricts the candidates to the domain you supplied (including its subdomains), checks only that scoped set for live HTTP services, and rechecks scope before Katana crawls confirmed live URLs. A final scope pass protects the HTTPx summary too.
+
+This playbook requires Files. Its intermediate candidate, scoped, live, crawl, and summary files are deliberately capped so archive volume can't turn into an unbounded scan. A scope or Files error stops the playbook instead of handing the previous step's unreviewed output to the next tool.
+
 ## Terminal Commands
 
 The `workflow` command exposes the same catalog and durable execution state:

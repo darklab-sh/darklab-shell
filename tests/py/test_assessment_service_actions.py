@@ -8,7 +8,13 @@ from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
-from services.assessments.historical_urls import filter_historical_urls, normalize_historical_url, normalize_historical_urls
+from services.assessments.historical_urls import (
+    filter_historical_urls,
+    normalize_domain_scoped_historical_urls,
+    normalize_historical_url,
+    normalize_historical_urls,
+    normalize_scope_domain,
+)
 from services.assessments.web_gallery import filter_web_surface_rows, web_surface_rows_from_events
 from services.runs.finalization import capture_event_with_signals
 from services.runs.output_model import to_wire
@@ -84,6 +90,9 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
 
 
 def test_historical_urls_are_safe_bounded_and_provenance_only():
+    assert normalize_scope_domain("Example.COM.") == "example.com"
+    assert normalize_scope_domain("-invalid.example") is None
+    assert normalize_scope_domain("example.com/path") is None
     assert normalize_historical_url(
         "HTTPS://Example.COM/a#fragment", run_id="run-1"
     ) is None
@@ -104,6 +113,29 @@ def test_historical_urls_are_safe_bounded_and_provenance_only():
         allowed_hosts=["example.com"],
         scope_roots=["https://example.com/a"],
     )] == ["https://example.com/a"]
+    scoped = normalize_domain_scoped_historical_urls(
+        [
+            "HTTPS://Example.COM/a?x=1",
+            "https://example.com/a?x=1",
+            "https://api.example.com/live",
+            "https://example.com.evil.test/lookalike",
+            "https://other.test/outside",
+        ],
+        "example.com",
+        source="gau",
+        run_id="run-1",
+    )
+    assert scoped == [
+        {"url": "https://example.com/a?x=1", "source": "gau", "source_run_id": "run-1"},
+        {"url": "https://api.example.com/live", "source": "gau", "source_run_id": "run-1"},
+    ]
+    bounded = normalize_domain_scoped_historical_urls(
+        [f"https://outside.test/{index}" for index in range(300)]
+        + [f"https://sub.example.com/{index}" for index in range(300)],
+        "example.com",
+    )
+    assert len(bounded) == 256
+    assert bounded[-1]["url"] == "https://sub.example.com/255"
 
 
 def test_epss_and_kev_feeds_normalize_risk_signals_without_network_access():

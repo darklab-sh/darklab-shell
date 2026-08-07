@@ -15270,9 +15270,21 @@ class TestWorkflowsRoute:
         enabled_by_title = {item["title"]: item for item in enabled["items"]}
 
         assert "Subdomain HTTP Triage" not in disabled_titles
+        assert "Historical Web Surface Triage" not in disabled_titles
         assert "Crawl And Scan" not in disabled_titles
         assert enabled_by_title["Subdomain HTTP Triage"]["steps"][0]["cmd"] == (
             "subfinder -d {{domain}} -silent -o subdomains.txt"
+        )
+        historical = enabled_by_title["Historical Web Surface Triage"]
+        assert historical["version"] == 2
+        assert historical["steps"][0]["cmd"] == (
+            "gau --subs --threads 2 --timeout 10 {{domain}} | head -n 1024 > historical-urls.txt"
+        )
+        assert historical["steps"][1]["cmd"] == (
+            "urlscope {{domain}} historical-urls.txt historical-scoped-urls.txt"
+        )
+        assert historical["steps"][4]["cmd"].startswith(
+            "katana -list live-scoped-urls.txt"
         )
         assert enabled_by_title["Crawl And Scan"]["steps"][2]["cmd"] == (
             "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt"

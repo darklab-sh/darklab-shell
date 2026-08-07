@@ -11,6 +11,7 @@ from typing import TypedDict
 import yaml
 
 import config as app_config
+from services.commands.registry_assessment_workflows import historical_web_surface_workflow
 from services.workflows import catalog as workflow_catalog
 
 log = logging.getLogger("shell")
@@ -58,8 +59,7 @@ def _load_yaml_list_with_local(path: str, *, local_path: str | None = None) -> l
 
 
 def builtin_workflows() -> list[dict[str, object]]:
-    return [
-        {
+    return [{
             "title": "DNS Troubleshooting",
             "description": "Diagnose why a domain isn't resolving or returns unexpected results.",
             "inputs": [
@@ -218,6 +218,7 @@ def builtin_workflows() -> list[dict[str, object]]:
                 },
             ],
         },
+        historical_web_surface_workflow(),
         {
             "title": "Crawl And Scan",
             "description": (

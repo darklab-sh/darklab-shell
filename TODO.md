@@ -133,7 +133,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 6 — Close the web and API discovery/validation gaps
 
-- [ ] Add a built-in workflow that combines `gau`, current HTTPx probing, Katana crawling, normalization, deduplication, and bounded output files without sending archived URLs to active scanners until live/scope checks pass.
 - [ ] Add passive product/package-version correlation without presenting inference as confirmation:
   - Normalize exact product identifiers and versions from Nmap CPE/service evidence, reviewed HTTPx technology mappings that include an exact version, other structured scanner output, and CycloneDX components. Preserve the original banner/technology/component observation, source run/import, target, parser/tool version, and observed time.
   - Use NVD applicability ranges only for defensible CPE matches and cached OSV affected-version ranges for exact package ecosystem/PURL matches. HTTPx technology names, unversioned banners, fuzzy product text, or an ambiguous CPE guess may suggest a follow-up check but must not create a CVE finding.

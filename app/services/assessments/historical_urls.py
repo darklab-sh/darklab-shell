@@ -5,10 +5,20 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 MAX_HISTORICAL_URLS = 256
 MAX_URL_LENGTH = 2048
+_DOMAIN_RE = re.compile(
+    r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z"
+)
+
+
+def normalize_scope_domain(value: object) -> str | None:
+    """Return one safe ASCII domain for suffix-based URL scope checks."""
+    domain = str(value or "").strip().casefold().rstrip(".")
+    return domain if _DOMAIN_RE.fullmatch(domain) else None
 
 
 def normalize_historical_url(value: object, *, source: str = "gau", run_id: str = "") -> dict[str, str] | None:
@@ -46,6 +56,32 @@ def normalize_historical_urls(values: object, *, source: str = "gau", run_id: st
     for value in rows:
         row = normalize_historical_url(value, source=source, run_id=run_id)
         if not row or row["url"] in seen:
+            continue
+        seen.add(row["url"])
+        result.append(row)
+        if len(result) >= MAX_HISTORICAL_URLS:
+            break
+    return result
+
+
+def normalize_domain_scoped_historical_urls(
+    values: object,
+    domain: object,
+    *, source: str = "gau", run_id: str = "",
+) -> list[dict[str, str]]:
+    """Normalize and bound URLs whose host is one approved domain or subdomain."""
+    scope_domain = normalize_scope_domain(domain)
+    if not scope_domain:
+        return []
+    candidates = values if isinstance(values, (list, tuple)) else []
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for value in candidates:
+        row = normalize_historical_url(value, source=source, run_id=run_id)
+        if not row:
+            continue
+        host = (urlsplit(row["url"]).hostname or "").casefold().rstrip(".")
+        if (host != scope_domain and not host.endswith("." + scope_domain)) or row["url"] in seen:
             continue
         seen.add(row["url"])
         result.append(row)
