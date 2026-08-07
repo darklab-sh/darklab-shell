@@ -15,6 +15,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Assessment logic now has a conservative service-action recommendation contract.**
+  - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
+  - **What:** The assessment domain now classifies explicit service evidence and returns only reviewed, target-compatible actions; unknown, ambiguous, and unsupported services stay in review instead of producing a launch recommendation.
+  - **Tests:** Focused service evidence and architecture-ratchet coverage pins the contract.
+
 - **Projects can now save reusable HTTP assessment profiles without storing credentials in the profile.**
   - **Why:** Authenticated and role-aware web testing needs consistent scope, identity, and request limits, but copying credential values into scanner settings would expose them through ordinary Project and history surfaces.
   - **What:** Personal and team Projects can create, read, update, and delete named HTTP profiles through browser and API routes. Profiles keep exact confirmed Project hosts, URL roots, role, header names, Secret references, validated Files references, login-workflow reference, token-capture rules, path boundaries, proxy reference, rate, concurrency, enabled state, and an optimistic revision. They never store or return Secret values. Team viewers receive a redacted summary, while reference details and mutations require `MANAGE_SECRETS`; archived Projects reject changes, quotas reject new profiles without eviction, session migration carries private ownership metadata forward, and logs plus fail-closed audits record only ids, roles, state, and counts. Saving a profile doesn't launch a scanner or place credentials in a visible command.

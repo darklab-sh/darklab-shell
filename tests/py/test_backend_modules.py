@@ -31061,7 +31061,7 @@ class TestAssessmentHttpProfileExecution:
                 "follow_redirects": False,
                 "headers": ["Authorization: Bearer protected"],
             },
-        } 
+        }
         assert sqlmap_config([("Authorization", "Bearer protected")]).decode("utf-8") == (
             "[Target]\n\n[Request]\nheaders = Authorization: Bearer protected\n"
             "ignoreRedirects = True\n"
