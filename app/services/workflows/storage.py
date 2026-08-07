@@ -22,6 +22,7 @@ from services.teams.scope import personal_owner_context, shared_owner_predicate
 from services.workflows.captures import MAX_CAPTURE_TOTAL_BYTES
 from services.workflows.compiler import workflow_private_values
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
+from services.workflows.fanout_checkpoint import checkpoint_from_payload
 
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running", "canceling")
@@ -353,6 +354,23 @@ def get_execution_by_id(execution_id: str) -> dict[str, Any] | None:
     if result is not None:
         result["steps"] = [_step_from_row(step) for step in step_rows]
     return result
+
+
+def set_fanout_checkpoint(
+    execution_id: str,
+    step_id: str,
+    checkpoint: Mapping[str, object],
+) -> bool:
+    """Persist one validated private fan-out checkpoint for a workflow step."""
+    normalized = checkpoint_from_payload(dict(checkpoint)).to_payload()
+    dialect = _dialect()
+    with get_db_connect()() as conn:
+        result = conn.execute(
+            "UPDATE workflow_execution_steps SET fanout_checkpoint = ? "
+            "WHERE execution_id = ? AND step_id = ?",
+            (dialect.json_param(normalized), execution_id, step_id),
+        )
+        return bool(getattr(result, "rowcount", 0))
 
 
 def active_execution_page_for_recovery(

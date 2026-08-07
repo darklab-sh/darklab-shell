@@ -36,6 +36,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Workflow execution steps now reserve private fan-out checkpoint storage.**
   - **What:** SQLite and Postgres keep backend-parity JSON checkpoint state for future resumable child execution; it is decoded as internal state and is not part of public execution payloads.
   - **Tests:** Migration and workflow coverage pin the new schema head and private decoding boundary.
+- **Workflow storage now validates fan-out checkpoint updates.**
+  - **What:** Internal callers can persist and recover one validated checkpoint per step; malformed or overlapping state is rejected, and public execution payloads remain unchanged.
+  - **Tests:** Workflow storage coverage pins persistence, validation, and private serialization boundaries.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.

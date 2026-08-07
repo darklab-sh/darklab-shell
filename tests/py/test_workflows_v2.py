@@ -43,6 +43,7 @@ from services.workflows.storage import (
     finalize_run_step,
     get_execution,
     public_execution,
+    set_fanout_checkpoint,
 )
 from services.runs.start import BrokeredRunStartResult
 
@@ -494,6 +495,30 @@ def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_chil
     assert restored == checkpoint
     with pytest.raises(ValueError, match="overlap"):
         checkpoint_from_payload({"pending": [1], "completed": [1], "failed": [], "cancelled": False})
+
+
+def test_collection_fanout_checkpoint_persists_on_private_step_state():
+    make_test_app()
+    session_id = "workflow-checkpoint-" + uuid.uuid4().hex
+    execution = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="checkpoint",
+        workflow_source="config",
+        definition=compile_execution_definition(_v2_definition()),
+        inputs={"target": "example.com", "ports": "443"},
+    )
+    execution_id = execution["id"]
+    step_id = execution["steps"][0]["step_id"]
+    assert set_fanout_checkpoint(execution_id, step_id, {"pending": [0, 1], "completed": [], "failed": [], "cancelled": False})
+    stored = get_execution(session_id, execution_id)
+    assert stored["steps"][0]["fanout_checkpoint"] == {
+        "pending": [0, 1], "completed": [], "failed": [], "cancelled": False,
+    }
+    public = public_execution(stored)
+    assert "fanout_checkpoint" not in public["steps"][0]
+    with pytest.raises(ValueError, match="overlap"):
+        set_fanout_checkpoint(execution_id, step_id, {"pending": [1], "completed": [1], "failed": [], "cancelled": False})
 
 
 def test_execution_state_machine_advances_once_and_keeps_snapshot():
