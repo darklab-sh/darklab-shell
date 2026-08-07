@@ -8,6 +8,7 @@ from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
+from services.assessments.historical_urls import normalize_historical_url, normalize_historical_urls
 from core.output_signals import OutputSignalClassifier
 from services.atlas.observations import public_app_port_record
 
@@ -70,6 +71,20 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     standard = command_plan("nuclei", "domain", "example.com", nuclei_profile="standard")
     assert "-severity high,critical" in safe.command
     assert "-severity medium,high,critical" in standard.command
+
+
+def test_historical_urls_are_safe_bounded_and_provenance_only():
+    assert normalize_historical_url(
+        "HTTPS://Example.COM/a#fragment", run_id="run-1"
+    ) is None
+    assert normalize_historical_url("https://user:pass@example.com/a") is None
+    rows = normalize_historical_urls([
+        "HTTPS://Example.COM/a?x=1", "https://example.com/a?x=1", "ftp://example.com/a",
+        "https://example.com/b#ignored",
+    ], source="gau", run_id="run-1")
+    assert rows == [{
+        "url": "https://example.com/a?x=1", "source": "gau", "source_run_id": "run-1",
+    }]
 
 
 def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirmation():

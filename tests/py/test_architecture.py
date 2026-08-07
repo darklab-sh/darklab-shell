@@ -367,6 +367,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/fanout_checkpoint.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_summary.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nuclei_profiles.py", 100, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/historical_urls.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_sources.py", 226, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/capture.py", 422, "split-package-ratchet"),

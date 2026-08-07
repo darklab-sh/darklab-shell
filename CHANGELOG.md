@@ -48,6 +48,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Nuclei profiles now expose provenance and safety exclusions.**
   - **What:** Each reviewed profile identifies its app-managed template source, excluded categories, and whether launch confirmation is required.
   - **Tests:** Profile coverage pins safe exclusions and intrusive confirmation metadata.
+- **Assessment discovery now normalizes passive historical URLs safely.**
+  - **What:** Historical HTTP(S) URLs retain source/run provenance, are deduplicated and bounded, and are never classified as vulnerability findings by normalization alone.
+  - **Tests:** URL coverage pins credential, fragment, scheme, deduplication, and provenance boundaries.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
