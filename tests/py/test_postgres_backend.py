@@ -275,6 +275,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
+    from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
     from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
 
     conn = postgres_schema.conn
@@ -848,6 +849,17 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     )
     assert postgres_candidates["candidates"][0]["source"]["batch_id"] == "import-postgres-1"
     assert postgres_candidates["candidates"][0]["advisory_match_criteria_id"].endswith("6201")
+    postgres_nmap_candidates = correlate_nmap_xml_with_stored_nvd(
+        compat,
+        """<nmaprun version="7.96"><host><address addr="2001:db8::10" addrtype="ipv6"/>
+        <ports><port protocol="tcp" portid="5432"><state state="open"/><service name="postgresql">
+        <cpe>cpe:/a:example:postgres:1.5</cpe></service></port></ports></host></nmaprun>""",
+        source_run_id="run-postgres-nmap-1",
+        observed_at="2026-08-08T11:00:00+00:00",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_nmap_candidates["candidate_count"] == 1
+    assert postgres_nmap_candidates["observations"][0]["target"] == "[2001:db8::10]:5432/tcp"
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname

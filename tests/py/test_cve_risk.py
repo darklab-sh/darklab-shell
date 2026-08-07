@@ -43,6 +43,7 @@ from services.cve_risk.ranking import (
 from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
+from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
 from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
 from services.intel.nvd_applicability import normalize_nvd_cpe_matches
 from services.reports.rendering import (
@@ -1016,6 +1017,29 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "rejected_candidate_count": 0,
         "has_more": False,
         "next_offset": None,
+    }
+    assert risk_db.total_changes == changes_before_read
+    nmap_candidate_result = correlate_nmap_xml_with_stored_nvd(
+        risk_db,
+        """<nmaprun version="7.96"><host><address addr="192.0.2.10" addrtype="ipv4"/>
+        <ports><port protocol="tcp" portid="443"><state state="open"/><service name="https">
+        <cpe>cpe:/a:example:server:2.5.1</cpe></service></port></ports></host></nmaprun>""",
+        source_run_id="run-nmap-xml-1",
+        observed_at="2026-08-05T12:30:00+00:00",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert nmap_candidate_result["observation_count"] == 1
+    assert nmap_candidate_result["candidate_count"] == 1
+    nmap_candidate = nmap_candidate_result["observations"][0]["candidates"][0]
+    assert nmap_candidate["target"] == "192.0.2.10:443/tcp"
+    assert nmap_candidate["vulnerability_id"] == "CVE-2026-12345"
+    assert nmap_candidate["source"] == {
+        "kind": "run",
+        "observation_id": nmap_candidate_result["observations"][0]["observation_id"],
+        "observed_at": "2026-08-05T12:30:00+00:00",
+        "tool_version": "7.96",
+        "run_id": "run-nmap-xml-1",
+        "parser_version": "nmap-xml-cpe-v1",
     }
     assert risk_db.total_changes == changes_before_read
     candidate_page = materialize_stored_nvd_cpe_candidate_page(

@@ -4,6 +4,7 @@
 from services.assessments.service_actions import service_actions, service_evidence_state
 from services.assessments.command_plans import command_plan
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
+from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
@@ -397,6 +398,56 @@ def test_version_correlation_requires_exact_identifier_and_version_matches():
     assert correlate_version_observation({
         "cpe": "cpe:2.3:a:example:server:2.6:*:*:*:*:*:*:*",
     }, cpe_advisory) == []
+    nmap_xml = """<?xml version="1.0"?>
+<nmaprun version="7.96">
+  <host><address addr="192.0.2.10" addrtype="ipv4"/><ports>
+    <port protocol="tcp" portid="443"><state state="open"/><service name="https">
+      <cpe>cpe:/a:example:server:2.5.1</cpe>
+    </service></port>
+    <port protocol="tcp" portid="22"><state state="closed"/><service name="ssh">
+      <cpe>cpe:/a:example:ssh:1.0</cpe>
+    </service></port>
+  </ports></host>
+</nmaprun>"""
+    nmap_observations = parse_nmap_xml_cpe_observations(
+        nmap_xml,
+        source_run_id="run-nmap-xml-1",
+        observed_at="2026-08-07T12:00:00+00:00",
+    )
+    assert nmap_observations == {
+        "source": "nmap_xml",
+        "source_run_id": "run-nmap-xml-1",
+        "tool_version": "7.96",
+        "parser_version": "nmap-xml-cpe-v1",
+        "observed_at": "2026-08-07T12:00:00+00:00",
+        "observations": [{
+            "observation_id": nmap_observations["observations"][0]["observation_id"],
+            "target": "192.0.2.10:443/tcp",
+            "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            "version": "2.5.1",
+        }],
+        "truncated": False,
+    }
+    assert nmap_observations["observations"][0]["observation_id"].startswith("obs_")
+    assert parse_nmap_xml_cpe_observations(
+        '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><nmaprun version="7.96">&xxe;</nmaprun>',
+        source_run_id="run-nmap-xml-1",
+        observed_at="2026-08-07T12:00:00+00:00",
+    )["observations"] == []
+    bounded_ports = "".join(
+        f'<port protocol="tcp" portid="{1000 + index}"><state state="open"/>'
+        f'<service><cpe>cpe:2.3:a:example:service{index}:1.0:*:*:*:*:*:*:*</cpe>'
+        "</service></port>"
+        for index in range(51)
+    )
+    bounded_nmap = parse_nmap_xml_cpe_observations(
+        f'<nmaprun version="7.96"><host><address addr="192.0.2.20"/>'
+        f"<ports>{bounded_ports}</ports></host></nmaprun>",
+        source_run_id="run-nmap-xml-bounded",
+        observed_at="2026-08-07T12:00:00+00:00",
+    )
+    assert len(bounded_nmap["observations"]) == 50
+    assert bounded_nmap["truncated"] is True
     incomplete_cpe = [{
         **cpe_advisory[0],
         "cpe_matches": [{

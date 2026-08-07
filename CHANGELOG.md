@@ -99,6 +99,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Stored NVD matches now retain complete finding-candidate provenance.**
   - **What:** Unsaved version-inference candidates carry the exact observed product/version, target, observation, tool/parser version, run or import-batch source, matching NVD criteria, advisory version, origin, expiry, and freshness. Missing provenance fails closed, and building a candidate still performs no write or provider request.
   - **Tests:** Shared service, SQLite, and real Postgres coverage pins run/import sources, parser context, NVD rule preservation, read-only behavior, and incomplete-provenance rejection.
+- **Structured Nmap service evidence now feeds read-only version inference.**
+  - **What:** Bounded Nmap XML can supply exact CPE 2.3 product versions, including the simple CPE 2.2 URI form Nmap emits when it converts without guessing. Only open services are accepted, and each unsaved candidate keeps its run, Nmap and parser versions, observation time, and canonical port target. Malformed or unsafe XML, ambiguous CPEs, and unversioned observations fail closed without making a provider request or changing a finding.
+  - **Tests:** Service, SQLite, and real Postgres coverage pins IPv4 and IPv6 targets, closed-port exclusion, unsafe-XML rejection, complete candidate provenance, stored-NVD matching, and read-only behavior.
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.
