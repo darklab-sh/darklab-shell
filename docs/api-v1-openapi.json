@@ -5891,6 +5891,60 @@
         ],
         "type": "object"
       },
+      "OsvLookupRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "purl": {
+            "description": "Exact Package URL disclosed to OSV.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Exact package version disclosed to OSV.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purl",
+          "version"
+        ],
+        "type": "object"
+      },
+      "OsvLookupResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "outcome": {
+            "enum": [
+              "stored",
+              "positive_cached",
+              "negative_cached"
+            ],
+            "type": "string"
+          },
+          "record_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source": {
+            "enum": [
+              "osv"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "source",
+          "outcome",
+          "record_count"
+        ],
+        "type": "object"
+      },
       "PackagePage": {
         "properties": {
           "has_more": {
@@ -8276,6 +8330,94 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/advisories/osv/lookup": {
+      "post": {
+        "description": "Explicitly sends only the supplied PURL and version to the configured OSV endpoint. It never uploads an SBOM or saved inventory.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OsvLookupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OsvLookupResponse"
+                }
+              }
+            },
+            "description": "Stored or cached lookup result"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Look up one exact package version in OSV"
+      }
+    },
     "/atlas": {
       "get": {
         "parameters": [

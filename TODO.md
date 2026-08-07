@@ -84,12 +84,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - **Recommended decision:** Treat ZAP, private OAST, and Greenbone integration as follow-on deliverables after assessment cycles, evidence matching, manual findings, imports, and reporting are stable. Keep their contracts in this plan, but do not block the core assessment workspace on an external service deployment.
   - **Why:** The core workflow is useful with local tools and imports, while connector lifecycle, privacy, and failure handling can be qualified independently.
 
-#### Phase 0 — Add shared CVE risk intelligence and ranking contracts
-
-- [ ] Add exact package applicability:
-  - Add operator-selectable local or bounded external OSV acquisition for exact package ecosystem/PURL and version matches. Keep it disabled by default, disclose which package identifiers leave the instance, and never upload an imported SBOM or discovered package inventory automatically.
-  - Reuse the existing capability, outbound allowlist/proxy/timeout, audit, privacy-safe logging, positive/negative cache, last-good, and source-attribution contracts. Viewing an assessment, finding, report, or Atlas entity must remain read-only.
-
 #### Phase 1 — Define the assessment and evidence data contracts
 
 - [ ] Add the next available shared SQLite/Postgres migration after the Phase 0 risk-intelligence migration and register it in `app/core/migrations/__init__.py`:

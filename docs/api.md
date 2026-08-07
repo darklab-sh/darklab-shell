@@ -91,6 +91,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/health` | Unauthenticated liveness check. |
 | `GET` | `/api/v1/openapi.json` | Unauthenticated OpenAPI document. |
 | `GET` | `/api/v1/whoami` | Token smoke test with creation metadata and the current successful-auth timestamp, without echoing the token. |
+| `POST` | `/api/v1/advisories/osv/lookup` | Explicitly look up one exact PURL and version when external OSV mode is enabled. |
 | `GET` | `/api/v1/teams` | List teams joined by the current token. |
 | `POST` | `/api/v1/teams` | Create a team and return the one-time recovery code. |
 | `GET` | `/api/v1/teams/<team_id>` | Team detail with members, invites, and recovery-code metadata. |
@@ -211,6 +212,19 @@ AI assist responses include a `progress` object while a queued request is active
 Summary payloads use `summary`, `key_findings`, `warnings`, and `next_steps_hint`. Next-command payloads use `suggestions`, where accepted and rejected drafts include command text, reason, risk label, validation result, and any rejection reason.
 
 Run, history, artifact, project, AI assist, schedule, and watcher routes are scoped to the token's active personal/team scope. Cross-scope IDs return `404` rather than confirming the object exists elsewhere.
+
+### Exact OSV package lookup
+
+External OSV package acquisition is disabled by default. When an operator enables it, an authenticated client can make one explicit request:
+
+```json
+{
+  "purl": "pkg:pypi/requests",
+  "version": "2.30.0"
+}
+```
+
+That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. Disabled mode returns `409`, and a provider failure returns `503` while keeping the last accepted data.
 
 ---
 

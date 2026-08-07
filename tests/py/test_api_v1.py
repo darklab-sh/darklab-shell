@@ -298,6 +298,7 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_project_finding_evidence_unlink": "Capability.TRIAGE_FINDINGS",
     "api_project_manual_finding_create": "Capability.TRIAGE_FINDINGS",
     "api_project_manual_finding_update": "Capability.TRIAGE_FINDINGS",
+    "api_osv_advisory_lookup": "Capability.TRIAGE_FINDINGS",
     "api_project_assessment_action_launch": "Capability.RUN_COMMANDS",
     "api_project_finding_verification_action_launch": "Capability.RUN_COMMANDS",
 }
@@ -417,6 +418,144 @@ def test_api_v1_whoami_accepts_bearer_token():
             assert "require_api_auth" in str(exc)
         else:
             raise AssertionError("current_api_session should require the auth decorator cache")
+
+
+def test_api_v1_osv_lookup_is_explicit_audited_and_privacy_safe(caplog):
+    client = get_client()
+    token = _token(client)
+    package_purl = "pkg:pypi/private-package"
+    package_version = "9.8.7-internal"
+    provider_result = {
+        "source": "osv",
+        "outcome": "stored",
+        "record_count": 2,
+        "exact_version_count": 1,
+        "range_count": 1,
+    }
+
+    with mock.patch(
+        "blueprints.api_v1_osv_lookup.query_external_osv",
+        return_value=provider_result,
+    ) as lookup:
+        response = client.post(
+            "/api/v1/advisories/osv/lookup",
+            headers=_headers(token),
+            json={"purl": package_purl, "version": package_version},
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "ok": True,
+        "source": "osv",
+        "outcome": "stored",
+        "record_count": 2,
+    }
+    assert lookup.call_args.args[1:] == (package_purl, package_version)
+    audit = _audit_event_rows(
+        target_id="osv",
+        event_type="cve_advisory.refresh",
+    )[-1]
+    assert audit["target_type"] == "cve_risk_source"
+    assert audit["details"] == {
+        "origin": "external",
+        "outcome": "stored",
+        "record_count": 2,
+        "source": "osv",
+    }
+    assert package_purl not in json.dumps(audit)
+    assert package_version not in json.dumps(audit)
+    assert package_purl not in caplog.text
+    assert package_version not in caplog.text
+
+
+def test_api_v1_osv_lookup_reports_disabled_failure_and_invalid_requests(caplog):
+    client = get_client()
+    token = _token(client)
+    endpoint = "/api/v1/advisories/osv/lookup"
+    body = {"purl": "pkg:pypi/requests", "version": "2.30.0"}
+
+    with mock.patch(
+        "blueprints.api_v1_osv_lookup.query_external_osv",
+        return_value={"source": "osv", "outcome": "disabled"},
+    ):
+        disabled = client.post(endpoint, headers=_headers(token), json=body)
+    with mock.patch(
+        "blueprints.api_v1_osv_lookup.query_external_osv",
+        return_value={"source": "osv", "outcome": "failed", "error": "URLError"},
+    ):
+        failed = client.post(endpoint, headers=_headers(token), json=body)
+    with mock.patch("blueprints.api_v1_osv_lookup.query_external_osv") as lookup:
+        invalid = client.post(
+            endpoint,
+            headers=_headers(token),
+            json={"purl": ["pkg:pypi/requests"], "version": "2.30.0"},
+        )
+        extra = client.post(
+            endpoint,
+            headers=_headers(token),
+            json={**body, "sbom": {"components": []}},
+        )
+    invalid_purl = "private-package-without-a-purl"
+    invalid_version = "2.30.0-private"
+    with mock.patch.dict(
+        "config.CFG",
+        {"cve_risk": {"osv_advisory_mode": "external"}},
+    ), mock.patch(
+        "services.cve_risk.osv_external.download_osv_query",
+        side_effect=AssertionError("invalid package opened the provider boundary"),
+    ):
+        malformed = client.post(
+            endpoint,
+            headers=_headers(token),
+            json={"purl": invalid_purl, "version": invalid_version},
+        )
+
+    assert disabled.status_code == 409
+    assert disabled.get_json()["error"]["code"] == "osv_lookup_disabled"
+    assert failed.status_code == 503
+    assert failed.get_json()["error"]["code"] == "osv_lookup_failed"
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_osv_lookup"
+    assert extra.status_code == 400
+    assert extra.get_json()["error"]["code"] == "invalid_osv_lookup"
+    assert malformed.status_code == 400
+    assert malformed.get_json()["error"]["code"] == "invalid_osv_lookup"
+    lookup.assert_not_called()
+    assert invalid_purl not in caplog.text
+    assert invalid_version not in caplog.text
+
+
+def test_api_v1_osv_lookup_requires_team_triage_capability():
+    client = get_client()
+    owner_token = _token(client)
+    viewer_token = _token(client)
+    operator_token = _token(client)
+    team_id = _create_api_team(client, owner_token, name="OSV Lookup Team")
+    _add_api_team_member(client, owner_token, viewer_token, team_id, role="viewer")
+    _add_api_team_member(client, owner_token, operator_token, team_id, role="operator")
+    endpoint = "/api/v1/advisories/osv/lookup"
+    body = {"purl": "pkg:pypi/requests", "version": "2.30.0"}
+
+    with mock.patch(
+        "blueprints.api_v1_osv_lookup.query_external_osv",
+        return_value={"source": "osv", "outcome": "negative_cached", "record_count": 0},
+    ) as lookup:
+        viewer = client.post(
+            endpoint,
+            headers=_team_headers(viewer_token, team_id),
+            json=body,
+        )
+        assert viewer.status_code == 403
+        lookup.assert_not_called()
+        operator = client.post(
+            endpoint,
+            headers=_team_headers(operator_token, team_id),
+            json=body,
+        )
+
+    assert operator.status_code == 200
+    assert operator.get_json()["outcome"] == "negative_cached"
+    assert lookup.call_count == 1
 
 
 def test_api_v1_read_routes_use_api_rate_limit(monkeypatch):
@@ -5609,6 +5748,8 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "HistorySearchMatch",
         "HistorySearchPage",
         "NdjsonStream",
+        "OsvLookupRequest",
+        "OsvLookupResponse",
             "NotificationChannel",
             "NotificationChannelCreateRequest",
             "NotificationChannelKind",
@@ -5676,6 +5817,16 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert spec["paths"]["/runs"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/RunStartRequest"
     }
+    osv_lookup = spec["paths"]["/advisories/osv/lookup"]["post"]
+    assert osv_lookup["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/OsvLookupRequest"
+    }
+    assert osv_lookup["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/OsvLookupResponse"
+    }
+    assert "supplied PURL and version" in osv_lookup["description"]
+    assert schemas["OsvLookupRequest"]["required"] == ["purl", "version"]
+    assert schemas["OsvLookupRequest"]["additionalProperties"] is False
     assert spec["paths"]["/runs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ActiveRunList"
     }
