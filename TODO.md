@@ -129,7 +129,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Show a redacted display command in the terminal, History, Run Details, workflow execution state, audit, metrics, notifications, and errors. Apply the existing secret masking pass to tool output as a second line of defense.
   - Never allow a profile to broaden a Project target into an unrelated hostname through redirects, schema servers, callback URLs, or proxy behavior without a visible allowlist decision.
 - [x] Add a protected Dalfox parameter-discovery adapter with one-target bounds, no redirects, no remote dictionaries, no active XSS payloads, and private header material.
-- [ ] Extend protected execution to SQLmap, Schemathesis, and ZAP only where each tool has a safe, testable contract. Reject unsupported tools or profile features instead of dropping authentication or scope controls silently.
+- [x] Extend protected execution to SQLmap where it has a safe, testable contract. SQLmap is URL-scoped and detection-only; extraction, takeover, fan-out, redirects, and unsupported profile features fail closed. Schemathesis and ZAP remain pending until their schema-fetch and operator-managed contracts are separately reviewed.
 
 #### Phase 6 — Close the web and API discovery/validation gaps
 
