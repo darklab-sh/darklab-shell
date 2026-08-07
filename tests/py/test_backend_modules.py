@@ -4368,6 +4368,14 @@ class TestProjectOverviewContract:
                 "occurrence_count": 1,
                 "last_seen_at": now,
                 "source_run_count": 1,
+                "assessment_actions": [{
+                    "key": "https_profile",
+                    "label": "Review HTTPS surface",
+                    "rationale": "The service identified an HTTPS endpoint.",
+                    "command": "command:httpx",
+                    "policy_level": "standard",
+                    "target_types": ["domain", "ip", "url"],
+                }],
             },
             {
                 "port": 8443,

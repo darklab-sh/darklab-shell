@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 from services.assessments.service_actions import service_actions, service_evidence_state
+from services.atlas.observations import public_app_port_record
 
 
 def test_service_actions_require_explicit_service_evidence_and_target_compatibility():
@@ -16,3 +17,12 @@ def test_service_evidence_does_not_infer_from_port_numbers():
     assert service_evidence_state(None, port=22) == "needs_review"
     assert service_evidence_state("ssh", port=22) == "identified"
     assert service_evidence_state("telnet", port=22) == "unsupported"
+
+
+def test_service_actions_can_be_serialized_for_read_surfaces_without_launching():
+    action = service_actions("https")[0]
+    assert action.command == "command:httpx"
+    assert "url" in action.target_types
+    record = public_app_port_record({"port": 443, "service": "https", "_run_ids": {"run-1"}})
+    assert record["assessment_actions"][0]["command"] == "command:httpx"
+    assert "_run_ids" not in record

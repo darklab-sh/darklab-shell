@@ -3785,6 +3785,14 @@ def test_api_v1_project_readers_are_token_scoped():
         "occurrence_count": 1,
         "last_seen_at": "2026-05-19T00:00:00+00:00",
         "source_run_count": 1,
+        "assessment_actions": [{
+            "key": "https_profile",
+            "label": "Review HTTPS surface",
+            "rationale": "The service identified an HTTPS endpoint.",
+            "command": "command:httpx",
+            "policy_level": "standard",
+            "target_types": ["domain", "ip", "url"],
+        }],
     }]
     assert atlas_entity_payload["overview"]["observed"]["app_services"] == ["https"]
     assert atlas_entity_payload["overview"]["observed"]["app_ports_truncated"] is False

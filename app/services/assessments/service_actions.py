@@ -60,7 +60,7 @@ def service_actions(
         return ()
     key = _ALIASES.get(normalized, normalized)
     action = _ACTIONS.get(key)
-    if action is None or target_type not in action.target_types:
+    if action is None or (target_type and target_type not in action.target_types):
         return ()
     return (action,)
 

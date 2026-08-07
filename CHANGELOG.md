@@ -19,6 +19,9 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
   - **What:** The assessment domain now classifies explicit service evidence and returns only reviewed, target-compatible actions; unknown, ambiguous, and unsupported services stay in review instead of producing a launch recommendation.
   - **Tests:** Focused service evidence and architecture-ratchet coverage pins the contract.
+- **Atlas port observations now include reviewed next-action metadata.**
+  - **What:** Port details expose the matching service action, rationale, policy level, and compatible target types for read-only guidance. The metadata does not launch commands; explicit confirmation remains in Assessment actions.
+  - **Tests:** Service-action serialization coverage keeps unknown services and port-only evidence recommendation-free.
 
 - **Projects can now save reusable HTTP assessment profiles without storing credentials in the profile.**
   - **Why:** Authenticated and role-aware web testing needs consistent scope, identity, and request limits, but copying credential values into scanner settings would expose them through ordinary Project and history surfaces.

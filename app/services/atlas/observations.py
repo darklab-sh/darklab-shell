@@ -13,6 +13,7 @@ from typing import Any
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.intel.canonical import CanonicalizationError, parse_canonical_port
+from services.assessments.service_actions import service_actions
 from services.projects.scope import shared_owner_where
 
 
@@ -263,7 +264,21 @@ def _app_port_record(row: Mapping[str, Any], *, dialect) -> tuple[dict[str, Any]
 
 
 def public_app_port_record(port: Mapping[str, Any]) -> dict[str, Any]:
-    return {str(key): value for key, value in port.items() if not str(key).startswith("_")}
+    result = {str(key): value for key, value in port.items() if not str(key).startswith("_")}
+    actions = [
+        {
+            "key": action.key,
+            "label": action.label,
+            "rationale": action.rationale,
+            "command": action.command,
+            "policy_level": action.policy_level,
+            "target_types": sorted(action.target_types),
+        }
+        for action in service_actions(str(result.get("service") or ""))
+    ]
+    if actions:
+        result["assessment_actions"] = actions
+    return result
 
 
 def app_port_run_count(app_ports: Sequence[Mapping[str, Any]]) -> int:
