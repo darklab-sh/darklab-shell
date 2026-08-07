@@ -45,6 +45,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment Nuclei plans now use reviewed profiles.**
   - **What:** Safe, standard, and explicitly intrusive profiles have fixed severity/headless arguments; safe remains the default and unknown names fail closed.
   - **Tests:** Command-plan coverage pins profile allowlisting and default behavior.
+- **Nuclei profiles now expose provenance and safety exclusions.**
+  - **What:** Each reviewed profile identifies its app-managed template source, excluded categories, and whether launch confirmation is required.
+  - **Tests:** Profile coverage pins safe exclusions and intrusive confirmation metadata.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.

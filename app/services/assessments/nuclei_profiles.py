@@ -13,12 +13,22 @@ class NucleiProfile(NamedTuple):
     policy_level: str
     severity: str
     headless: bool = False
+    template_source: str = "app-managed"
+    excluded_categories: tuple[str, ...] = ()
+    requires_confirmation: bool = False
 
 
 _PROFILES = {
-    "safe": NucleiProfile("safe", "safe", "high,critical"),
-    "standard": NucleiProfile("standard", "standard", "medium,high,critical"),
-    "intrusive": NucleiProfile("intrusive", "intrusive", "low,medium,high,critical", True),
+    "safe": NucleiProfile(
+        "safe", "safe", "high,critical", excluded_categories=("auth", "brute", "dos", "exploit", "fuzzer", "intrusive"),
+    ),
+    "standard": NucleiProfile(
+        "standard", "standard", "medium,high,critical", excluded_categories=("auth", "brute", "dos", "exploit"),
+    ),
+    "intrusive": NucleiProfile(
+        "intrusive", "intrusive", "low,medium,high,critical", True,
+        excluded_categories=("auth", "brute", "dos"), requires_confirmation=True,
+    ),
 }
 
 

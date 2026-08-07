@@ -63,6 +63,9 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     assert nuclei_profile_args("intrusive") == (
         "-severity", "low,medium,high,critical", "-headless"
     )
+    assert "exploit" in nuclei_profile("safe").excluded_categories
+    assert nuclei_profile("intrusive").requires_confirmation is True
+    assert nuclei_profile("safe").template_source == "app-managed"
     safe = command_plan("nuclei", "domain", "example.com")
     standard = command_plan("nuclei", "domain", "example.com", nuclei_profile="standard")
     assert "-severity high,critical" in safe.command
