@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 from services.assessments.command_plan_contracts import CommandPlan
 from services.assessments.command_plans_web import web_command_plans
+from services.assessments.nmap_profiles import nmap_profile_args
 
 
 _COMMAND_TARGET_TYPES = {
@@ -33,6 +34,7 @@ def command_plan(
     web_target: str = "",
     http_profile: Mapping[str, Any] | None = None,
     protected_display: bool = True,
+    nmap_profile: str = "",
 ) -> CommandPlan | None:
     """Return one bounded command without resolving any protected values."""
     if target_type not in _COMMAND_TARGET_TYPES.get(action_id, frozenset()):
@@ -63,6 +65,8 @@ def command_plan(
             protected_suffix = " -H [protected]" if action_id == "katana" else " -sf [protected]"
         if action_id == "nuclei" and "client_certificate" in uses:
             protected_suffix += " -cc [protected] -ck [protected]"
+    nmap_args = " ".join(nmap_profile_args(nmap_profile))
+    nmap_script_suffix = f" {nmap_args}" if nmap_args else ""
     plans = {
         "ping": CommandPlan(
             f"ping -c 4 -W 2 {quoted}",
@@ -71,7 +75,7 @@ def command_plan(
             10,
         ),
         "nmap": CommandPlan(
-            f"nmap -sT -sV -Pn --top-ports 100 --max-retries 2 "
+            f"nmap -sT -sV -Pn --top-ports 100 --max-retries 2{nmap_script_suffix} "
             f"--host-timeout 10m {quoted}",
             "One approved host, the top 100 TCP ports, and a 10-minute host timeout.",
             100,

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 from services.assessments.service_actions import service_actions, service_evidence_state
+from services.assessments.command_plans import command_plan
+from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.atlas.observations import public_app_port_record
 
 
@@ -38,3 +40,12 @@ def test_service_actions_can_be_serialized_for_read_surfaces_without_launching()
     record = public_app_port_record({"port": 443, "service": "https", "_run_ids": {"run-1"}})
     assert record["assessment_actions"][0]["command"] == "command:httpx"
     assert "_run_ids" not in record
+
+
+def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
+    assert nmap_profile_args("tls") == ("--script", "ssl-cert,ssl-enum-ciphers")
+    assert nmap_profile_args("--script=exploit") == ()
+    assert nmap_profile_keys() == ("safe", "version", "discovery", "tls", "ssh", "smtp")
+    plan = command_plan("nmap", "ip", "192.0.2.10", nmap_profile="ssh")
+    assert plan is not None
+    assert "--script ssh2-enum-algos,ssh-hostkey" in plan.command

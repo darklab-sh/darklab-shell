@@ -25,6 +25,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Service recommendations now cover common protocol families and passive version correlation.**
   - **What:** Explicit SMB, SNMP, LDAP, NFS/RPC, mail, FTP, DNS, and database evidence can expose bounded standard-workflow guidance. Versioned observations can also point to the non-launchable `version_cve_correlation` evidence family without treating a port number as proof.
   - **Tests:** Alias, target-compatibility, and non-launchable correlation coverage pins the expanded registry contract.
+- **Assessment Nmap plans now accept only named, reviewed NSE profiles.**
+  - **What:** Safe, version, discovery, TLS, SSH, and SMTP profiles expand to fixed `--script` arguments; arbitrary script names, categories, and arguments are ignored rather than interpolated into a command.
+  - **Tests:** Profile allowlist, command rendering, and architecture-ratchet coverage pin the boundary.
 
 - **Projects can now save reusable HTTP assessment profiles without storing credentials in the profile.**
   - **Why:** Authenticated and role-aware web testing needs consistent scope, identity, and request limits, but copying credential values into scanner settings would expose them through ordinary Project and history surfaces.

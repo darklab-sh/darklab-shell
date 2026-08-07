@@ -270,6 +270,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/http_profile_material_formats.py", 49, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/service_actions.py", 90, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/service_action_catalog.py", 130, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/nmap_profiles.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_runtime.py", 176, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_validation.py", 362, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profiles.py", 550, "split-package-ratchet"),
