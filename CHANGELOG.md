@@ -48,6 +48,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Fan-out planning now resumes from checkpoint ordinals.**
   - **What:** The next-batch helper applies the configured parallel limit, skips completed work, preserves source ordinals, and leaves cancellation handling deterministic.
   - **Tests:** Workflow coverage pins resumed ordering and child command rendering.
+- **Fan-out checkpoints now track running children explicitly.**
+  - **What:** Planned batches move from pending to running before launch, so recovery cannot schedule the same children twice; completion and failure transition them out of running.
+  - **Tests:** Checkpoint and public-summary coverage pins running-state persistence.
 - **Assessment Nuclei plans now use reviewed profiles.**
   - **What:** Safe, standard, and explicitly intrusive profiles have fixed severity/headless arguments; safe remains the default and unknown names fail closed.
   - **Tests:** Command-plan coverage pins profile allowlisting and default behavior.

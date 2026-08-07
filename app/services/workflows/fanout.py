@@ -76,4 +76,4 @@ def next_fanout_batch(
     )
     # The planner returns ordinals relative to the batch; restore source ordinals.
     children = [dict(child, ordinal=ordinal) for child, ordinal in zip(expanded, ordinals, strict=False)]
-    return children, checkpoint
+    return children, checkpoint.mark_running([child["ordinal"] for child in children])

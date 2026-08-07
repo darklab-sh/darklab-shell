@@ -15,6 +15,7 @@ class FanoutCheckpoint:
     """Child ordinal state retained by a durable execution owner."""
 
     pending: tuple[int, ...] = ()
+    running: tuple[int, ...] = ()
     completed: tuple[int, ...] = ()
     failed: tuple[int, ...] = ()
     cancelled: bool = False
@@ -29,6 +30,12 @@ class FanoutCheckpoint:
             return ()
         return self.pending[:batch_limit]
 
+    def mark_running(self, ordinals: tuple[int, ...] | list[int]) -> "FanoutCheckpoint":
+        chosen = {int(item) for item in ordinals if int(item) in self.pending}
+        pending = tuple(item for item in self.pending if item not in chosen)
+        running = tuple(dict.fromkeys((*self.running, *chosen)))
+        return FanoutCheckpoint(pending, running, self.completed, self.failed, self.cancelled)
+
     def mark_completed(self, ordinals: tuple[int, ...] | list[int]) -> "FanoutCheckpoint":
         return self._advance(ordinals, completed=True)
 
@@ -36,27 +43,30 @@ class FanoutCheckpoint:
         return self._advance(ordinals, completed=False)
 
     def cancel(self) -> "FanoutCheckpoint":
-        return FanoutCheckpoint(self.pending, self.completed, self.failed, True)
+        return FanoutCheckpoint(self.pending, self.running, self.completed, self.failed, True)
 
     def to_payload(self) -> dict[str, object]:
         """Return a bounded JSON-compatible checkpoint payload."""
         return {
             "pending": list(self.pending),
+            "running": list(self.running),
             "completed": list(self.completed),
             "failed": list(self.failed),
             "cancelled": self.cancelled,
         }
 
     def _advance(self, ordinals: tuple[int, ...] | list[int], *, completed: bool) -> "FanoutCheckpoint":
-        chosen = {int(item) for item in ordinals if int(item) in self.pending}
+        available = set(self.pending) | set(self.running)
+        chosen = {int(item) for item in ordinals if int(item) in available}
         pending = tuple(item for item in self.pending if item not in chosen)
+        running = tuple(item for item in self.running if item not in chosen)
         target = tuple(dict.fromkeys((*self.completed, *chosen))) if completed else self.completed
         failures = self.failed if completed else tuple(dict.fromkeys((*self.failed, *chosen)))
-        if any(item < 0 for item in (*pending, *target, *failures)):
+        if any(item < 0 for item in (*pending, *running, *target, *failures)):
             raise ValueError("checkpoint ordinals must be non-negative")
-        if len(pending) + len(target) + len(failures) > MAX_CHECKPOINT_ITEMS:
+        if len(pending) + len(running) + len(target) + len(failures) > MAX_CHECKPOINT_ITEMS:
             raise ValueError("fan-out checkpoint exceeds the item limit")
-        return FanoutCheckpoint(pending, target, failures, self.cancelled)
+        return FanoutCheckpoint(pending, running, target, failures, self.cancelled)
 
 
 def checkpoint_from_payload(value: object) -> FanoutCheckpoint:
@@ -82,16 +92,18 @@ def checkpoint_from_payload(value: object) -> FanoutCheckpoint:
         return tuple(result)
 
     pending = ordinals("pending")
+    running = ordinals("running")
     completed = ordinals("completed")
     failed = ordinals("failed")
-    if set(pending) & (set(completed) | set(failed)):
+    groups = (set(pending), set(running), set(completed), set(failed))
+    if any(left & right for index, left in enumerate(groups) for right in groups[index + 1:]):
         raise ValueError("fan-out checkpoint states overlap")
-    if len(pending) + len(completed) + len(failed) > MAX_CHECKPOINT_ITEMS:
+    if len(pending) + len(running) + len(completed) + len(failed) > MAX_CHECKPOINT_ITEMS:
         raise ValueError("fan-out checkpoint exceeds the item limit")
     cancelled = value.get("cancelled", False)
     if not isinstance(cancelled, bool):
         raise ValueError("fan-out checkpoint cancelled must be a boolean")
-    return FanoutCheckpoint(pending, completed, failed, cancelled)
+    return FanoutCheckpoint(pending, running, completed, failed, cancelled)
 
 
 def create_fanout_checkpoint(child_count: int) -> FanoutCheckpoint:

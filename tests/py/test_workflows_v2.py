@@ -478,7 +478,7 @@ def test_collection_fanout_next_batch_uses_source_ordinals_after_checkpoint_resu
     )
     assert [child["ordinal"] for child in children] == [1, 2]
     assert [child["command"] for child in children] == ["probe two", "probe three"]
-    assert resumed == checkpoint
+    assert resumed.running == (1, 2)
 
 
 def test_collection_fanout_policy_normalizes_retry_parallel_and_failure_modes():
@@ -525,7 +525,7 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     assert set_fanout_checkpoint(execution_id, step_id, {"pending": [0, 1], "completed": [], "failed": [], "cancelled": False})
     stored = get_execution(session_id, execution_id)
     assert stored["steps"][0]["fanout_checkpoint"] == {
-        "pending": [0, 1], "completed": [], "failed": [], "cancelled": False,
+        "pending": [0, 1], "running": [], "completed": [], "failed": [], "cancelled": False,
     }
     public = public_execution(stored)
     assert "fanout_checkpoint" not in public["steps"][0]

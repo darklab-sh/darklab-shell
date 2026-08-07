@@ -161,6 +161,7 @@ def public_execution(execution: Mapping[str, Any] | None) -> dict[str, Any]:
         if isinstance(checkpoint, Mapping):
             rows = [
                 *({"status": "pending"} for _ in checkpoint.get("pending", [])),
+                *({"status": "running"} for _ in checkpoint.get("running", [])),
                 *({"status": "succeeded"} for _ in checkpoint.get("completed", [])),
                 *({"status": "failed", "error_code": "child_failed"} for _ in checkpoint.get("failed", [])),
             ]
