@@ -127,7 +127,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 6 — Close the web and API discovery/validation gaps
 
 - [ ] Finish passive product/package-version correlation without presenting inference as confirmation:
-  - Add exact product or package observations from other reviewed structured scanner output and CycloneDX components. Preserve the original banner or component observation together with its source run/import, target, parser/tool version, and observed time.
+  - Add exact product or package observations from other reviewed structured scanner output. Preserve the original observation together with its source run/import, target, parser/tool version, and observed time.
   - Route later exact version observations through the existing `version_cve_correlation` finding contract only when they satisfy a recorded matching rule. Preserve the advisory/data version, match basis, affected range, confidence, and source observation so review can reproduce the inference.
   - Keep inferred version/package findings distinct from Nuclei or another active probe that confirmed vulnerable behavior. Link or deduplicate related observations without discarding their different evidence methods or allowing an inference to upgrade itself to confirmed.
 - [ ] Extend the Atlas import parser with SARIF and CycloneDX:

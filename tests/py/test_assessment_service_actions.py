@@ -1,8 +1,15 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
+import json
+
 from services.assessments.service_actions import service_actions, service_evidence_state
 from services.assessments.command_plans import command_plan
+from services.assessments.cyclonedx_package_observations import (
+    CYCLONEDX_COMPONENT_PARSER_VERSION,
+    CYCLONEDX_MAX_PACKAGE_OBSERVATIONS,
+    parse_cyclonedx_package_observations,
+)
 from services.assessments.httpx_version_observations import (
     HTTPX_JSON_CPE_PARSER_VERSION,
     normalize_httpx_version_observations,
@@ -451,6 +458,54 @@ def test_gau_command_plan_is_domain_scoped_and_passive():
 
 
 def test_version_correlation_requires_exact_identifier_and_version_matches():
+    component_payload = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "metadata": {"timestamp": "2026-08-07T00:00:00Z"},
+        "components": [{
+            "type": "library",
+            "bom-ref": "pkg:pypi/requests@2.31.0",
+            "name": "requests",
+            "version": "2.31.0",
+            "purl": "pkg:pypi/requests@2.31.0",
+        }, {
+            "name": "conflict",
+            "version": "2.32.0",
+            "purl": "pkg:pypi/requests@2.31.0",
+        }],
+    }
+    parsed_components = parse_cyclonedx_package_observations(
+        json.dumps(component_payload).encode(),
+        source_batch_id="batch-cyclonedx-1",
+    )
+    assert parsed_components["parser_version"] == CYCLONEDX_COMPONENT_PARSER_VERSION
+    assert parsed_components["tool_version"] == "CycloneDX 1.5"
+    assert parsed_components["observations"] == [{
+        "observation_id": parsed_components["observations"][0]["observation_id"],
+        "target": "pkg:pypi/requests",
+        "purl": "pkg:pypi/requests",
+        "version": "2.31.0",
+        "component_name": "requests",
+        "component_type": "library",
+        "bom_ref": "pkg:pypi/requests@2.31.0",
+        "source_batch_id": "batch-cyclonedx-1",
+        "observed_at": "2026-08-07T00:00:00Z",
+        "tool_version": "CycloneDX 1.5",
+        "parser_version": CYCLONEDX_COMPONENT_PARSER_VERSION,
+    }]
+    bounded_components = parse_cyclonedx_package_observations(
+        json.dumps({
+            **component_payload,
+            "components": [{
+                "name": f"package-{index}",
+                "version": "1.0.0",
+                "purl": f"pkg:pypi/package-{index}@1.0.0",
+            } for index in range(CYCLONEDX_MAX_PACKAGE_OBSERVATIONS + 1)],
+        }).encode(),
+        source_batch_id="batch-cyclonedx-bounded",
+    )
+    assert len(bounded_components["observations"]) == CYCLONEDX_MAX_PACKAGE_OBSERVATIONS
+    assert bounded_components["truncated"] is True
     advisories = [{
         "id": "CVE-2026-1234", "purls": ["pkg:pypi/requests"],
         "affected_versions": ["2.31.0"], "affected_range": "==2.31.0",

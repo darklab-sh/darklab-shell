@@ -1420,6 +1420,7 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
 ):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.cyclonedx_stored_osv import correlate_cyclonedx_json_with_stored_osv
     from services.assessments.osv_package_correlation import correlate_stored_osv_package_page
     from services.cve_risk.osv_external_store import accept_external_osv_query
     from services.cve_risk.osv_parser import parse_osv_dataset
@@ -1513,6 +1514,32 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
     assert correlation["matches"][0]["vulnerability_id"] == "CVE-2026-12345"
     assert correlation["matches"][0]["match_basis"] == "exact_purl_semver_range"
     assert correlation["matches"][0]["advisory_origin"] == "local"
+    cyclonedx_correlation = correlate_cyclonedx_json_with_stored_osv(
+        conn,
+        json.dumps({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "components": [{
+                "type": "library",
+                "bom-ref": "pkg:pypi/requests@2.31.0",
+                "name": "requests",
+                "version": "2.31.0",
+                "purl": "pkg:pypi/requests@2.31.0",
+            }],
+        }).encode(),
+        source_batch_id="batch-postgres-cyclonedx-1",
+        observed_at="2026-08-08T12:30:00Z",
+        now=datetime.fromisoformat("2026-08-08T13:00:00+00:00"),
+    )
+    assert cyclonedx_correlation["candidate_count"] == 1
+    assert cyclonedx_correlation["observations"][0]["candidates"][0]["source"] == {
+        "kind": "import",
+        "observation_id": cyclonedx_correlation["observations"][0]["observation_id"],
+        "observed_at": "2026-08-08T12:30:00Z",
+        "tool_version": "CycloneDX 1.6",
+        "batch_id": "batch-postgres-cyclonedx-1",
+        "parser_version": "cyclonedx-component-v1",
+    }
     assert tuple(conn.execute(
         "SELECT "
         "(SELECT COUNT(*) FROM package_advisories), "

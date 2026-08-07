@@ -24,6 +24,9 @@ _MATCH_FIELDS = (
     "advisory_criteria",
     "advisory_match_criteria_id",
 )
+_OPTIONAL_MATCH_FIELDS = (
+    "advisory_id", "advisory_source_id", "advisory_schema_version", "advisory_modified_at",
+)
 
 
 def materialize_version_match_candidates(
@@ -88,6 +91,9 @@ def _candidate(
     }
     for key in _MATCH_FIELDS:
         candidate[key] = _text(match.get(key), 1024 if key == "advisory_criteria" else 256)
+    for key in _OPTIONAL_MATCH_FIELDS:
+        if value := _text(match.get(key), 256):
+            candidate[key] = value
     return candidate
 
 

@@ -51,6 +51,7 @@ from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
 from services.assessments.osv_package_correlation import correlate_stored_osv_package_page
+from services.assessments.cyclonedx_stored_osv import correlate_cyclonedx_json_with_stored_osv
 from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
 from services.assessments.nmap_inference_materialization import (
     NMAP_INFERENCE_MAX_CANDIDATES,
@@ -566,6 +567,51 @@ def test_stored_osv_package_correlation_is_bounded_read_only_and_fail_closed(ris
         "advisory_source_state": "current",
     }]
     assert first["matches"][0]["advisory_id"].startswith("osv_")
+    cyclonedx_result = correlate_cyclonedx_json_with_stored_osv(
+        risk_db,
+        json.dumps({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "components": [{
+                "type": "library",
+                "bom-ref": "pkg:pypi/requests@2.31.0",
+                "name": "requests",
+                "version": "2.31.0",
+                "purl": "pkg:pypi/requests@2.31.0",
+            }],
+        }).encode(),
+        source_batch_id="batch-osv-cyclonedx-1",
+        observed_at="2026-08-08T11:00:00Z",
+        advisory_limit=1,
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert cyclonedx_result["observation_count"] == 1
+    assert cyclonedx_result["candidate_count"] == 1
+    cyclonedx_observation = cyclonedx_result["observations"][0]
+    assert {
+        key: cyclonedx_observation[key]
+        for key in ("purl", "version", "component_name", "component_type", "bom_ref")
+    } == {
+        "purl": "pkg:pypi/requests",
+        "version": "2.31.0",
+        "component_name": "requests",
+        "component_type": "library",
+        "bom_ref": "pkg:pypi/requests@2.31.0",
+    }
+    cyclonedx_candidate = cyclonedx_observation["candidates"][0]
+    assert cyclonedx_candidate["target"] == "pkg:pypi/requests"
+    assert cyclonedx_candidate["match_basis"] == "exact_purl_semver_range"
+    assert cyclonedx_candidate["advisory_source_id"] == "GHSA-abcd-1234-efgh"
+    assert cyclonedx_candidate["advisory_schema_version"] == "1.6.0"
+    assert cyclonedx_candidate["source"] == {
+        "kind": "import",
+        "observation_id": cyclonedx_result["observations"][0]["observation_id"],
+        "observed_at": "2026-08-08T11:00:00Z",
+        "tool_version": "CycloneDX 1.5",
+        "batch_id": "batch-osv-cyclonedx-1",
+        "parser_version": "cyclonedx-component-v1",
+    }
+    assert risk_db.total_changes == changes_before_read
     second = correlate_stored_osv_package_page(
         risk_db,
         {"purl": "pkg:pypi/requests", "version": "2.31.0"},
