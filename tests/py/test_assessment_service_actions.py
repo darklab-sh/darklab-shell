@@ -229,7 +229,11 @@ def test_gau_output_carries_historical_url_provenance_only():
     assert metadata["historical_urls"] == [{
         "url": "https://example.com/archive?a=1", "source": "gau", "source_run_id": "run-gau",
     }]
-    assert any(entity.get("type") == "url" for entity in metadata["entities"])
+    url_entity = next(entity for entity in metadata["entities"] if entity.get("type") == "url")
+    assert url_entity["attributes"] == {
+        "discovery_mode": "passive", "provider": "gau", "source_run_id": "run-gau",
+    }
+    assert "signals" not in metadata
 
 
 def test_passive_web_metadata_survives_run_event_wire_round_trip():

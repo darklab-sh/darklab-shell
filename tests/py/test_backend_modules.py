@@ -27777,6 +27777,10 @@ SQL syntax error near q</response>
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
                 ("run-atlas", "atlas-session", "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
             )
+            gau_metadata = OutputSignalClassifier(
+                "gau example.com",
+                source_run_id="run-atlas",
+            ).classify_line("https://example.com/path")
             recorded = materialize_run_entities(
                 conn,
                 "atlas-session",
@@ -27791,11 +27795,7 @@ SQL syntax error near q</response>
                             {"type": "ip", "value": "2001:0db8::0001", "canonical_value": "2001:db8::1"},
                             {"type": "hash", "value": "A" * 40, "canonical_value": f"sha1:{'a' * 40}"},
                             {"type": "cve", "value": "cve-2025-49113", "canonical_value": "CVE-2025-49113"},
-                            {
-                                "type": "url",
-                                "value": "HTTPS://Example.com:443/path/#frag",
-                                "canonical_value": "https://example.com/path",
-                            },
+                            *gau_metadata["entities"],
                             {"type": "domain", "value": "<redacted>", "canonical_value": REDACTED_ENTITY_SENTINEL},
                         ],
                     }
@@ -27804,7 +27804,7 @@ SQL syntax error near q</response>
             )
             conn.commit()
             entity_rows = conn.execute(
-                "SELECT id, type, canonical_value, occurrence_count, host_entity_id "
+                "SELECT id, type, canonical_value, occurrence_count, host_entity_id, attributes_json "
                 "FROM entities ORDER BY type, canonical_value"
             ).fetchall()
             link_rows = conn.execute(
@@ -27834,6 +27834,11 @@ SQL syntax error near q</response>
         example_host_id = next(row["id"] for row in entity_rows if row["canonical_value"] == "example.com")
         url_row = next(row for row in entity_rows if row["canonical_value"] == "https://example.com/path")
         assert url_row["host_entity_id"] == example_host_id
+        assert json.loads(url_row["attributes_json"]) == {
+            "discovery_mode": "passive",
+            "provider": "gau",
+            "source_run_id": "run-atlas",
+        }
         assert len(recorded) == 7
         assert [row["run_id"] for row in link_rows] == ["run-atlas"] * 7
         warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}

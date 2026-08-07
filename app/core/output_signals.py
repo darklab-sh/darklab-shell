@@ -39,7 +39,7 @@ from core.output_port_entities import (
     _nmap_target_entities,
     _port_entities_for_host,
 )
-from services.assessments.historical_urls import normalize_historical_url
+from services.assessments.historical_urls import historical_url_entity_attributes, normalize_historical_url
 from core.output_shodan import (
     _SHODAN_DNS_FINDING_TYPES,
     _SHODAN_LABEL_RE,
@@ -1022,6 +1022,7 @@ class OutputSignalClassifier:
                 if not screenshot.get("profile_role"):
                     screenshot["profile_role"] = self.profile_role
                 metadata["screenshots"] = [screenshot]
+        historical = None
         if self.root == "gau":
             historical = normalize_historical_url(normalized_text, source="gau", run_id=self.source_run_id)
             if historical:
@@ -1068,6 +1069,11 @@ class OutputSignalClassifier:
                 command_url_template=self.url_template,
             )
             if entities:
+                if historical:
+                    attributes = historical_url_entity_attributes(historical)
+                    for entity in entities:
+                        if entity.get("type") == "url":
+                            entity["attributes"] = attributes
                 metadata["entities"] = entities
         if (
             self.root in {"tlsx", "cdncheck", "trufflehog"}

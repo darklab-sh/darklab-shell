@@ -54,6 +54,23 @@ def normalize_historical_urls(values: object, *, source: str = "gau", run_id: st
     return result
 
 
+def historical_url_entity_attributes(row: object) -> dict[str, str]:
+    """Return bounded Atlas attributes for one passive URL observation."""
+    if not isinstance(row, dict):
+        return {}
+    provider = str(row.get("source") or "").strip().lower()[:32]
+    if not provider:
+        return {}
+    attributes = {
+        "discovery_mode": "passive",
+        "provider": provider,
+    }
+    source_run_id = str(row.get("source_run_id") or "").strip()[:128]
+    if source_run_id:
+        attributes["source_run_id"] = source_run_id
+    return attributes
+
+
 def filter_historical_urls(
     rows: object,
     *,

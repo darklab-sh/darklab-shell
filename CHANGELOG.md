@@ -18,6 +18,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Historical URL discovery now ships as a reviewed external tool.**
   - **What:** The image builds the reviewed `gau` 2.2.4 module with checksum-pinned AMD64 and ARM64 Go toolchains and includes its MIT notice. The command catalog exposes a passive one-domain command, keeps config and output paths inside Files, blocks custom proxy arguments, and preserves historical URLs as review-only metadata.
   - **Tests:** Registry, workspace-path, target-extraction, container-smoke, module-version, module-checksum, toolchain-checksum, and license-inventory coverage pins the integration.
+- **Historical URL discoveries now retain provenance in Atlas.**
+  - **What:** Gau output materializes URL entities with passive-discovery, provider, and source-run attributes while the normal entity-to-run link preserves the source relationship. A historical URL alone still doesn't create a vulnerability finding.
+  - **Tests:** Output-classification and Atlas-materialization coverage pins the metadata, run provenance, and no-finding boundary.
 - **Assessment workflows now have bounded collection-capture groundwork.**
   - **What:** Collection values support normalization, deduplication, item and byte limits, and required-capture reporting while existing scalar workflow captures remain unchanged.
   - **Tests:** Focused workflow coverage pins JSON-array and entity collection behavior.
