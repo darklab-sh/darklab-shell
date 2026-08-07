@@ -152,6 +152,17 @@ function renderWorkflowExecutionStep(step, options) {
     captures.textContent = `Captured: ${captureNames.join(', ')}`;
     summary.appendChild(captures);
   }
+  const fanout = step?.fanout_summary;
+  const fanoutTotal = Number(fanout?.total || 0);
+  if (Number.isFinite(fanoutTotal) && fanoutTotal > 0) {
+    const progress = document.createElement('span');
+    progress.className = 'workflow-execution-fanout';
+    const succeeded = Math.max(0, Number(fanout?.succeeded || 0));
+    const failed = Math.max(0, Number(fanout?.failed || 0));
+    const suffix = failed ? `, ${failed} failed` : '';
+    progress.textContent = `Fan-out: ${Math.min(fanoutTotal, succeeded)}/${fanoutTotal} complete${suffix}`;
+    summary.appendChild(progress);
+  }
   row.appendChild(summary);
 
   const runId = String(step?.run_id || '').trim();

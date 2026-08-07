@@ -3067,6 +3067,7 @@ describe('app helpers', () => {
           selected_transition: 'scan',
           transition_reason: 'success',
           capture_names: ['resolved_ip'],
+          fanout_summary: { total: 4, succeeded: 3, failed: 1, pending: 0, running: 0 },
         }],
       }],
     }, { nowMs: finished })
@@ -3081,6 +3082,7 @@ describe('app helpers', () => {
     expect(body.textContent).toContain('Elapsed: 1m 05s')
     expect(body.textContent).toContain('to scan (success)')
     expect(body.textContent).toContain('Captured: resolved_ip')
+    expect(body.textContent).toContain('Fan-out: 3/4 complete, 1 failed')
     expect(body.textContent).toContain('run-resolve-1')
   })
 
