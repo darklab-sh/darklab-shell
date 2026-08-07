@@ -23,19 +23,19 @@ class ServiceAction:
 _ACTIONS = {
     "http": ServiceAction(
         "http_profile", "Review HTTP surface", "The service identified an HTTP endpoint.",
-        "workflow:http-recon", "standard", frozenset({"domain", "ip", "url"}),
+        "command:httpx", "standard", frozenset({"domain", "ip", "url"}),
     ),
     "https": ServiceAction(
         "https_profile", "Review HTTPS surface", "The service identified an HTTPS endpoint.",
-        "workflow:http-recon", "standard", frozenset({"domain", "ip", "url"}),
+        "command:httpx", "standard", frozenset({"domain", "ip", "url"}),
     ),
     "ssh": ServiceAction(
         "ssh_enumeration", "Enumerate SSH safely", "The service fingerprint explicitly identified SSH.",
-        "workflow:ssh-enumeration", "standard", frozenset({"domain", "ip"}),
+        "command:nmap", "standard", frozenset({"domain", "ip"}),
     ),
     "smtp": ServiceAction(
         "smtp_enumeration", "Review SMTP service", "The service fingerprint explicitly identified SMTP.",
-        "workflow:email-recon", "standard", frozenset({"domain", "ip"}),
+        "command:nmap", "standard", frozenset({"domain", "ip"}),
     ),
 }
 
