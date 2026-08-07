@@ -9,6 +9,8 @@ from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
 from services.assessments.historical_urls import filter_historical_urls, normalize_historical_url, normalize_historical_urls
+from services.intel.epss import normalize_epss_rows
+from services.intel.kev import normalize_kev_catalog
 from core.output_signals import OutputSignalClassifier
 from services.atlas.observations import public_app_port_record
 
@@ -94,6 +96,20 @@ def test_historical_urls_are_safe_bounded_and_provenance_only():
         allowed_hosts=["example.com"],
         scope_roots=["https://example.com/a"],
     )] == ["https://example.com/a"]
+
+
+def test_epss_and_kev_feeds_normalize_risk_signals_without_network_access():
+    assert normalize_epss_rows(
+        "# comment\ncve,epss,percentile,date\nCVE-2026-12345,0.42,0.91,2026-08-01\nCVE-invalid,2,0.1,"
+    ) == [{"cve": "CVE-2026-12345", "epss": 0.42, "percentile": 0.91, "date": "2026-08-01"}]
+    assert normalize_kev_catalog({"vulnerabilities": [{
+        "cveID": "CVE-2026-12345", "vendorProject": "Vendor", "product": "Product",
+        "vulnerabilityName": "Example", "dateAdded": "2026-08-01", "dueDate": "2026-08-21",
+        "knownRansomwareCampaignUse": "Known",
+    }, {"cveID": "not-cve"}]}) == [{
+        "cve": "CVE-2026-12345", "vendor": "Vendor", "product": "Product", "name": "Example",
+        "date_added": "2026-08-01", "due_date": "2026-08-21", "known_ransomware_use": "Known",
+    }]
 
 
 def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirmation():

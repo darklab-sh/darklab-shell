@@ -54,6 +54,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Passive historical URLs now have an explicit scope filter.**
   - **What:** Archived URLs can be restricted by approved host and path roots before they reach any active probing workflow; host suffix lookalikes are rejected.
   - **Tests:** Scope coverage pins exact-host and path-root matching.
+- **Risk intelligence now has bounded EPSS and CISA KEV feed normalizers.**
+  - **What:** Keyless feed records are canonicalized into bounded CVE risk signals with validated score ranges, exploit dates, vendor/product context, and due dates.
+  - **Tests:** Focused assessment coverage pins malformed-record rejection without making provider requests.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
