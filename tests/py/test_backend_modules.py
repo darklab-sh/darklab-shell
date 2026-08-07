@@ -31138,3 +31138,30 @@ class TestAssessmentHttpProfileExecution:
         assert appended.command == appended.execution_command
         with pytest.raises(RunPreparationError, match="arguments are invalid"):
             append_trusted_execution_args(prepared, ("-H", "unsafe\nheader"))
+
+
+def test_atlas_import_parser_normalizes_bounded_sarif_and_rejects_file_uris():
+    payload = json.dumps({
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "Semgrep", "version": "1.2", "rules": [{
+                "id": "py/path-traversal", "name": "Path traversal", "helpUri": "https://example.test/rule"
+            }]}},
+            "results": [{
+                "ruleId": "py/path-traversal", "level": "error",
+                "message": {"text": "User input reaches a file path."},
+                "locations": [{"physicalLocation": {"artifactLocation": {"uri": "https://app.example.test/api"}}}],
+            }, {
+                "ruleId": "py/path-traversal", "level": "warning",
+                "message": {"text": "Local source path only."},
+                "locations": [{"physicalLocation": {"artifactLocation": {"uri": "file:///src/app.py"}}}],
+            }],
+        }],
+    }).encode()
+    result = parse_import_file(payload, format_id="sarif_json")
+    assert result.row_count == 2
+    assert len(result.findings) == 2
+    assert result.findings[0].source_detail["tool"] == "Semgrep"
+    assert result.findings[0].source_detail["rule_id"] == "py/path-traversal"
+    assert result.entities[0].canonical_value == "https://app.example.test/api"
+    assert all(entity.canonical_value != "file:///src/app.py" for entity in result.entities)

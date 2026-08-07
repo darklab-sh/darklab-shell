@@ -10,8 +10,7 @@ from typing import Any, Mapping
 
 from services.assessments.command_plan_contracts import CommandPlan
 from services.assessments.command_plans_web import web_command_plans
-from services.assessments.nmap_profiles import nmap_profile_args
-
+from services.assessments.nmap_profiles import nmap_profile_suffix
 
 _COMMAND_TARGET_TYPES = {
     "curl": frozenset({"domain", "ip", "url"}),
@@ -24,7 +23,6 @@ _COMMAND_TARGET_TYPES = {
     "dalfox": frozenset({"domain", "ip", "url"}),
     "sqlmap": frozenset({"url"}),
 }
-
 
 def command_plan(
     action_id: str,
@@ -65,8 +63,7 @@ def command_plan(
             protected_suffix = " -H [protected]" if action_id == "katana" else " -sf [protected]"
         if action_id == "nuclei" and "client_certificate" in uses:
             protected_suffix += " -cc [protected] -ck [protected]"
-    nmap_args = " ".join(nmap_profile_args(nmap_profile))
-    nmap_script_suffix = f" {nmap_args}" if nmap_args else ""
+    nmap_script_suffix = nmap_profile_suffix(nmap_profile)
     plans = {
         "ping": CommandPlan(
             f"ping -c 4 -W 2 {quoted}",

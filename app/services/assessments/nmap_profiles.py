@@ -27,9 +27,15 @@ def nmap_profile_args(profile: str | None) -> tuple[str, ...]:
     return ("--script", scripts)
 
 
+def nmap_profile_suffix(profile: str | None) -> str:
+    """Return a command-safe optional script suffix."""
+    args = nmap_profile_args(profile)
+    return f" {' '.join(args)}" if args else ""
+
+
 def nmap_profile_keys() -> tuple[str, ...]:
     """Return the stable profile names exposed to assessment catalogs."""
     return tuple(_PROFILES)
 
 
-__all__ = ["nmap_profile_args", "nmap_profile_keys"]
+__all__ = ["nmap_profile_args", "nmap_profile_keys", "nmap_profile_suffix"]

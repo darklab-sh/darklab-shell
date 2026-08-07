@@ -15,6 +15,7 @@ from typing import Any, BinaryIO, IO, cast
 from urllib.parse import urlsplit
 
 from services.nuclei.provenance import nuclei_source_detail
+from services.atlas.sarif_parser import parse_sarif_json
 
 from defusedxml import ElementTree as SafeElementTree
 from defusedxml.common import DefusedXmlException
@@ -34,6 +35,7 @@ SUPPORTED_FORMATS = frozenset({
     "zap_xml",
     "burp_xml",
     "nuclei_jsonl",
+    "sarif_json",
 })
 
 ENTITY_KINDS = ATLAS_ENTITY_TYPES
@@ -172,6 +174,8 @@ def parse_import_file(
         _parse_generic_jsonl(payload, state, entities, findings)
     elif normalized_format == "nuclei_jsonl":
         _parse_nuclei_jsonl(payload, state, entities, findings)
+    elif normalized_format == "sarif_json":
+        parse_sarif_json(payload, state, entities, findings)
     elif normalized_format == "nessus_xml":
         _parse_nessus_xml(payload, state, entities, findings)
     elif normalized_format == "zap_json":

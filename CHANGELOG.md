@@ -28,6 +28,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment Nmap plans now accept only named, reviewed NSE profiles.**
   - **What:** Safe, version, discovery, TLS, SSH, and SMTP profiles expand to fixed `--script` arguments; arbitrary script names, categories, and arguments are ignored rather than interpolated into a command.
   - **Tests:** Profile allowlist, command rendering, and architecture-ratchet coverage pin the boundary.
+- **Atlas imports now accept bounded SARIF 2.1.0 results.**
+  - **What:** SARIF tool, rule, severity, message, help-link, location, and provenance details normalize through the existing preview/apply model. Local file paths and unsafe URIs are never fetched or materialized as entities.
+  - **Tests:** SARIF normalization, provenance, unsafe-location, and architecture-ratchet coverage pin the parser boundary.
 
 - **Projects can now save reusable HTTP assessment profiles without storing credentials in the profile.**
   - **Why:** Authenticated and role-aware web testing needs consistent scope, identity, and request limits, but copying credential values into scanner settings would expose them through ordinary Project and history surfaces.
