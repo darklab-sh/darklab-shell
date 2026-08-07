@@ -51,6 +51,7 @@ from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
 from services.assessments.osv_package_correlation import correlate_stored_osv_package_page
+from services.assessments.cyclonedx_stored_nvd import correlate_cyclonedx_json_with_stored_nvd
 from services.assessments.cyclonedx_stored_osv import correlate_cyclonedx_json_with_stored_osv
 from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
 from services.assessments.nmap_inference_materialization import (
@@ -1920,6 +1921,36 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "run_id": "run-httpx-json-1",
         "parser_version": "httpx-json-cpe-v1",
     }
+    cyclonedx_cpe_result = correlate_cyclonedx_json_with_stored_nvd(
+        risk_db,
+        json.dumps({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "components": [{
+                "type": "application",
+                "bom-ref": "component-server-2.5.1",
+                "name": "server",
+                "version": "2.5.1",
+                "purl": "pkg:generic/example/server@2.5.1",
+                "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            }],
+        }).encode(),
+        source_batch_id="batch-cyclonedx-nvd-1",
+        observed_at="2026-08-05T12:30:00Z",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert cyclonedx_cpe_result["candidate_count"] == 1
+    cyclonedx_cpe_observation = cyclonedx_cpe_result["observations"][0]
+    assert cyclonedx_cpe_observation["component_purl"] == "pkg:generic/example/server@2.5.1"
+    assert cyclonedx_cpe_observation["candidates"][0]["source"] == {
+        "kind": "import",
+        "observation_id": cyclonedx_cpe_observation["observation_id"],
+        "observed_at": "2026-08-05T12:30:00Z",
+        "tool_version": "CycloneDX 1.6",
+        "batch_id": "batch-cyclonedx-nvd-1",
+        "parser_version": "cyclonedx-cpe-v1",
+    }
+    assert risk_db.total_changes == changes_before_read
     incomplete_httpx = correlate_httpx_json_with_stored_nvd(
         risk_db,
         {

@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Exact CycloneDX product CPEs can now be checked against stored NVD data.**
+  - **What:** A separate bounded adapter accepts versioned CPEs from CycloneDX JSON components and checks them through the read-only stored-NVD candidate boundary. Results preserve the component, CPE, import batch, format, parser, observation time, affected range, and matching NVD rule. PURL/OSV and CPE/NVD evidence stay distinct, conflicting versions fail closed, and the check doesn't contact NVD, change inventory, or save a finding.
+  - **Tests:** SQLite and real Postgres coverage pins exact matches, shared document and observation limits, conflicting-version rejection, complete import provenance, and the no-write boundary.
 - **Exact CycloneDX package evidence can now be checked against stored OSV data.**
   - **What:** A bounded parser accepts versioned PURLs from CycloneDX JSON components and a read-only correlation step checks them against already accepted OSV applicability rules. Results keep the import batch, component, CycloneDX format, parser, observation time, affected range, and advisory provenance. Conflicting or incomplete versions fail closed, and correlation doesn't contact OSV, change inventory, or save a finding.
   - **Tests:** SQLite and real Postgres coverage pins exact matches, component bounds, conflicting-version rejection, complete provenance, and the no-write boundary.

@@ -274,6 +274,7 @@ def test_postgres_backend_smoke_exercises_phase6_contract(postgres_schema):
 def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.cyclonedx_stored_nvd import correlate_cyclonedx_json_with_stored_nvd
     from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
     from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
     from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
@@ -850,6 +851,11 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             "2026-08-14T12:00:00+00:00",
         ),
     )
+    nvd_counts_before_read = tuple(conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM cve_advisory_cpe_matches), "
+        "(SELECT COUNT(*) FROM findings)"
+    ).fetchone())
     postgres_correlation = correlate_stored_nvd_cpe_page(
         compat,
         {"cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*"},
@@ -909,6 +915,32 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "run_id": "run-postgres-httpx-1",
         "parser_version": "httpx-json-cpe-v1",
     }
+    postgres_cyclonedx_candidates = correlate_cyclonedx_json_with_stored_nvd(
+        compat,
+        json.dumps({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "components": [{
+                "type": "application",
+                "bom-ref": "component-postgres-1.5",
+                "name": "postgres",
+                "version": "1.5",
+                "cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*",
+            }],
+        }).encode(),
+        source_batch_id="batch-postgres-cyclonedx-nvd-1",
+        observed_at="2026-08-08T11:00:00Z",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_cyclonedx_candidates["candidate_count"] == 1
+    assert postgres_cyclonedx_candidates["observations"][0]["candidates"][0]["source"]["batch_id"] == (
+        "batch-postgres-cyclonedx-nvd-1"
+    )
+    assert tuple(conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM cve_advisory_cpe_matches), "
+        "(SELECT COUNT(*) FROM findings)"
+    ).fetchone()) == nvd_counts_before_read
     compat.execute(
         "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
         "VALUES (?, ?, ?, ?, ?, 0)",

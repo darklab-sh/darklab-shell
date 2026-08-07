@@ -105,7 +105,7 @@ When a successful Nmap service scan writes validated XML with `-oX`, exact versi
 
 Maintained HTTPx assessment actions request structured CPE metadata. When HTTPx reports a versioned technology and the CPE vendor, product, and version agree, darklab_shell keeps that exact observation with the saved run for later review. It can check that observation against already stored NVD rules and prepare an inference candidate with the original run and advisory context. Plain technology names, conflicts, fuzzy matches, and incomplete provenance stay as output only, and the check doesn't contact NVD or create a vulnerability finding automatically.
 
-Exact versioned PURLs in a CycloneDX JSON document can be checked against already stored OSV rules in the same read-only way. The result keeps its component, import batch, format, parser, observation time, affected range, and advisory context. An inventory component isn't treated as a vulnerability by itself, and malformed or conflicting versions don't produce a candidate.
+Exact versioned PURLs and CPEs in a CycloneDX JSON document can be checked in the same read-only way: PURLs use stored OSV rules, while CPEs use stored NVD rules. The results keep their component, import batch, format, parser, observation time, affected range, and advisory context. An inventory component isn't treated as a vulnerability by itself, PURL and CPE evidence stays distinct, and malformed or conflicting versions don't produce a candidate.
 
 ---
 
