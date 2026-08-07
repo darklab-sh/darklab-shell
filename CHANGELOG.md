@@ -22,6 +22,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Atlas port observations now include reviewed next-action metadata.**
   - **What:** Port details expose the matching service action, rationale, policy level, and compatible target types for read-only guidance. The metadata does not launch commands; explicit confirmation remains in Assessment actions.
   - **Tests:** Service-action serialization coverage keeps unknown services and port-only evidence recommendation-free.
+- **Service recommendations now cover common protocol families and passive version correlation.**
+  - **What:** Explicit SMB, SNMP, LDAP, NFS/RPC, mail, FTP, DNS, and database evidence can expose bounded standard-workflow guidance. Versioned observations can also point to the non-launchable `version_cve_correlation` evidence family without treating a port number as proof.
+  - **Tests:** Alias, target-compatibility, and non-launchable correlation coverage pins the expanded registry contract.
 
 - **Projects can now save reusable HTTP assessment profiles without storing credentials in the profile.**
   - **Why:** Authenticated and role-aware web testing needs consistent scope, identity, and request limits, but copying credential values into scanner settings would expose them through ordinary Project and history surfaces.

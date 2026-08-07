@@ -20,32 +20,7 @@ class ServiceAction:
     target_types: frozenset[str]
 
 
-_ACTIONS = {
-    "http": ServiceAction(
-        "http_profile", "Review HTTP surface", "The service identified an HTTP endpoint.",
-        "command:httpx", "standard", frozenset({"domain", "ip", "url"}),
-    ),
-    "https": ServiceAction(
-        "https_profile", "Review HTTPS surface", "The service identified an HTTPS endpoint.",
-        "command:httpx", "standard", frozenset({"domain", "ip", "url"}),
-    ),
-    "ssh": ServiceAction(
-        "ssh_enumeration", "Enumerate SSH safely", "The service fingerprint explicitly identified SSH.",
-        "command:nmap", "standard", frozenset({"domain", "ip"}),
-    ),
-    "smtp": ServiceAction(
-        "smtp_enumeration", "Review SMTP service", "The service fingerprint explicitly identified SMTP.",
-        "command:nmap", "standard", frozenset({"domain", "ip"}),
-    ),
-}
-
-_ALIASES = {
-    "http-alt": "http",
-    "http-proxy": "http",
-    "ssl/http": "https",
-    "ssh?": "review",
-    "unknown": "review",
-}
+from .service_action_catalog import ACTIONS, ALIASES  # noqa: E402
 
 
 def service_actions(
@@ -58,8 +33,8 @@ def service_actions(
     normalized = str(service or "").strip().casefold()
     if not normalized or normalized in {"review", "ambiguous"}:
         return ()
-    key = _ALIASES.get(normalized, normalized)
-    action = _ACTIONS.get(key)
+    key = ALIASES.get(normalized, normalized)
+    action = ACTIONS.get(key)
     if action is None or (target_type and target_type not in action.target_types):
         return ()
     return (action,)
@@ -70,7 +45,7 @@ def service_evidence_state(service: str | None, *, port: int | None = None) -> s
     normalized = str(service or "").strip().casefold()
     if not normalized or normalized in {"unknown", "ambiguous", "review"}:
         return "needs_review"
-    return "identified" if normalized in _ACTIONS or normalized in _ALIASES else "unsupported"
+    return "identified" if normalized in ACTIONS or normalized in ALIASES else "unsupported"
 
 
 __all__ = ["ServiceAction", "service_actions", "service_evidence_state"]

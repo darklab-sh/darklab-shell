@@ -19,6 +19,17 @@ def test_service_evidence_does_not_infer_from_port_numbers():
     assert service_evidence_state("telnet", port=22) == "unsupported"
 
 
+def test_common_protocol_aliases_are_bounded_safe_recommendations():
+    actions = service_actions("microsoft-ds", target_type="ip")
+    assert [(action.key, action.command, action.policy_level) for action in actions] == [
+        ("smb_enumeration", "workflow:smb-safe", "standard"),
+    ]
+    assert service_actions("version-cve", target_type="url")[0].command == (
+        "evidence:version_cve_correlation"
+    )
+    assert service_actions("version-cve", target_type="port") == ()
+
+
 def test_service_actions_can_be_serialized_for_read_surfaces_without_launching():
     action = service_actions("https")[0]
     assert action.command == "command:httpx"
