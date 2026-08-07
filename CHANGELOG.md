@@ -75,6 +75,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Risk intelligence now has bounded EPSS and CISA KEV feed normalizers.**
   - **What:** Keyless feed records are canonicalized into bounded CVE risk signals with validated score ranges, exploit dates, vendor/product context, and due dates.
   - **Tests:** Focused assessment coverage pins malformed-record rejection without making provider requests.
+- **Exact version correlation now materializes provenance-rich inference records.**
+  - **What:** Matching PURL/CPE versions produce distinct `version_inference` finding candidates with target, source run/import, observation, tool version, and observed-time context.
+  - **Tests:** Correlation coverage pins provenance fields and keeps active confirmation separate.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.

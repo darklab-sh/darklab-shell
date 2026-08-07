@@ -48,6 +48,42 @@ def correlate_version_observation(
     return matches
 
 
+def materialize_version_findings(
+    observation: dict[str, Any] | None,
+    advisories: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    source_run_id: str = "",
+    source_kind: str = "run",
+    observed_at: str = "",
+    tool_version: str = "",
+) -> list[dict[str, Any]]:
+    """Build provenance-rich inference records from exact advisory matches."""
+    item = observation if isinstance(observation, dict) else {}
+    matches = correlate_version_observation(item, advisories)
+    observation_id = _text(item.get("observation_id"), 128)
+    target = _text(item.get("target") or item.get("canonical_value"), 512)
+    records = []
+    for match in matches:
+        records.append({
+            "kind": "finding",
+            "validation_method": "version_inference",
+            "title": f"Version may be affected by {match['vulnerability_id']}",
+            "vulnerability_id": match["vulnerability_id"],
+            "confidence": match["confidence"],
+            "match_basis": match["match_basis"],
+            "affected_range": match["affected_range"],
+            "target": target,
+            "source": {
+                "run_id": _text(source_run_id, 128),
+                "kind": _text(source_kind, 32),
+                "observation_id": observation_id,
+                "observed_at": _text(observed_at, 64),
+                "tool_version": _text(tool_version, 128),
+            },
+        })
+    return records
+
+
 def _text(value: Any, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
 

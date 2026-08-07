@@ -6,7 +6,7 @@ from services.assessments.command_plans import command_plan
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.web_surface import normalize_httpx_screenshot
-from services.assessments.version_correlation import correlate_version_observation
+from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
 from services.assessments.historical_urls import filter_historical_urls, normalize_historical_url, normalize_historical_urls
 from services.intel.epss import normalize_epss_rows
@@ -183,3 +183,13 @@ def test_version_correlation_requires_exact_identifier_and_version_matches():
     }]
     assert correlate_version_observation({"product": "requests", "version": "2.31.0"}, advisories) == []
     assert correlate_version_observation({"purl": "pkg:pypi/requests", "version": "2.32.0"}, advisories) == []
+    records = materialize_version_findings(
+        {"purl": "pkg:pypi/requests", "version": "2.31.0", "target": "api.example.test", "observation_id": "obs-1"},
+        advisories,
+        source_run_id="run-1", observed_at="2026-08-07T00:00:00Z", tool_version="nmap 7.96",
+    )
+    assert records[0]["validation_method"] == "version_inference"
+    assert records[0]["source"] == {
+        "run_id": "run-1", "kind": "run", "observation_id": "obs-1",
+        "observed_at": "2026-08-07T00:00:00Z", "tool_version": "nmap 7.96",
+    }

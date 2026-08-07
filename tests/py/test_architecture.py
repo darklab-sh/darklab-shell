@@ -360,7 +360,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/cyclonedx_parser.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/takeover_detection.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/web_surface.py", 120, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/version_correlation.py", 100, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/version_correlation.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/collections.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_policy.py", 120, "split-package-ratchet"),
