@@ -30,9 +30,9 @@ def web_command_plans(
             credential_use,
         ),
         "httpx": CommandPlan(
-            f"httpx -u {target} -status-code -title -tech-detect -silent"
+            f"httpx -u {target} -status-code -title -tech-detect -json -cpe -silent"
             f"{httpx_bounds}{protected_suffix}",
-            "One approved host or URL with response metadata only.",
+            "One approved host or URL with structured response and versioned CPE metadata only.",
             None,
             None,
             credential_use,

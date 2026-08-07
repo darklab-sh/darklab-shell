@@ -3,6 +3,10 @@
 
 from services.assessments.service_actions import service_actions, service_evidence_state
 from services.assessments.command_plans import command_plan
+from services.assessments.httpx_version_observations import (
+    HTTPX_JSON_CPE_PARSER_VERSION,
+    normalize_httpx_version_observations,
+)
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.takeover_detection import evaluate_takeover_signal
@@ -18,6 +22,7 @@ from services.assessments.historical_urls import (
 )
 from services.assessments.web_gallery import filter_web_surface_rows, web_surface_rows_from_events
 from services.runs.finalization import capture_event_with_signals
+from services.runs.lifecycle import PreparedRealCommand, start_real_command_process
 from services.runs.output_model import to_wire
 from services.intel.epss import normalize_epss_rows
 from services.intel.kev import normalize_kev_catalog
@@ -254,6 +259,159 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
         "visual_hash": "", "source_run_id": "run-httpx", "profile_role": "anonymous",
     }]
     assert "html" not in metadata
+
+
+def test_httpx_json_preserves_only_exact_versioned_technology_cpe_observations():
+    record = {
+        "url": "https://App.Example.test:443/",
+        "timestamp": "2026-08-07T20:00:00Z",
+        "tech": ["Nginx:1.25.5", "PHP"],
+        "cpe": [{
+            "product": "nginx",
+            "vendor": "F5",
+            "cpe": "cpe:2.3:a:f5:nginx:1.25.5:*:*:*:*:*:*:*",
+        }],
+    }
+    parsed = normalize_httpx_version_observations(record, source_run_id="run-httpx")
+    assert parsed["source"] == "httpx_json"
+    assert parsed["parser_version"] == HTTPX_JSON_CPE_PARSER_VERSION
+    assert parsed["truncated"] is False
+    assert parsed["observations"] == [{
+        "observation_id": parsed["observations"][0]["observation_id"],
+        "target": "https://app.example.test",
+        "cpe": "cpe:2.3:a:f5:nginx:1.25.5:*:*:*:*:*:*:*",
+        "version": "1.25.5",
+        "technology": "Nginx:1.25.5",
+        "product": "nginx",
+        "vendor": "F5",
+        "source_run_id": "run-httpx",
+        "observed_at": "2026-08-07T20:00:00Z",
+        "parser_version": HTTPX_JSON_CPE_PARSER_VERSION,
+    }]
+    assert parsed["observations"][0]["observation_id"].startswith("obs_")
+
+
+def test_httpx_json_version_observations_fail_closed_on_ambiguous_or_unsafe_input():
+    base = {
+        "url": "https://app.example.test",
+        "timestamp": "2026-08-07T20:00:00+00:00",
+        "tech": ["Nginx:1.25.5"],
+        "cpe": [{
+            "product": "nginx", "vendor": "F5",
+            "cpe": "cpe:2.3:a:f5:nginx:1.25.5:*:*:*:*:*:*:*",
+        }],
+    }
+    assert not normalize_httpx_version_observations(
+        {**base, "tech": ["Nginx"]}, source_run_id="run-1",
+    )["observations"]
+    assert not normalize_httpx_version_observations(
+        {**base, "tech": ["Nginx:1.25.4"]}, source_run_id="run-1",
+    )["observations"]
+    assert not normalize_httpx_version_observations(
+        {**base, "tech": ["Nginx:1.25.5", "Nginx:1.26.0"]}, source_run_id="run-1",
+    )["observations"]
+    assert not normalize_httpx_version_observations(
+        {**base, "url": "https://user:secret@app.example.test"}, source_run_id="run-1",
+    )["observations"]
+    assert not normalize_httpx_version_observations(
+        {**base, "timestamp": "2026-08-07T20:00:00"}, source_run_id="run-1",
+    )["observations"]
+    assert not normalize_httpx_version_observations(
+        {**base, "cpe": [{**base["cpe"][0], "product": "Apache"}]},
+        source_run_id="run-1",
+    )["observations"]
+
+
+def test_httpx_json_version_observations_are_bounded_without_evicting_earlier_rows():
+    parsed = normalize_httpx_version_observations({
+        "url": "https://app.example.test",
+        "timestamp": "2026-08-07T20:00:00Z",
+        "tech": ["Nginx:1.25.5"],
+        "cpe": [{
+            "product": "nginx",
+            "vendor": "F5",
+            "cpe": f"cpe:2.3:a:f5:nginx:1.25.5:update-{index}:*:*:*:*:*:*",
+        } for index in range(40)],
+    }, source_run_id="run-httpx")
+    assert len(parsed["observations"]) == 32
+    assert parsed["truncated"] is True
+    assert parsed["observations"][0]["cpe"].endswith("update-0:*:*:*:*:*:*")
+    assert parsed["observations"][-1]["cpe"].endswith("update-31:*:*:*:*:*:*")
+
+
+def test_httpx_json_version_observations_survive_run_event_wire_round_trip():
+    class Capture:
+        def __init__(self):
+            self.events = []
+
+        def add_event(self, event):
+            self.events.append(event)
+
+    line = (
+        '{"url":"https://app.example.test","timestamp":"2026-08-07T20:00:00Z",'
+        '"tech":["Nginx:1.25.5"],"cpe":[{"product":"nginx","vendor":"F5",'
+        '"cpe":"cpe:2.3:a:f5:nginx:1.25.5:*:*:*:*:*:*:*"}]}'
+    )
+    capture = Capture()
+    classifier = OutputSignalClassifier("httpx -json -cpe", source_run_id="run-httpx")
+    capture_event_with_signals(capture, classifier, line)
+    observation = capture.events[0].source_detail["version_observations"][0]
+    assert observation["source_run_id"] == "run-httpx"
+    assert observation["technology"] == "Nginx:1.25.5"
+    assert to_wire(capture.events[0])["source_detail"]["version_observations"] == [observation]
+
+
+def test_real_command_classifier_receives_generated_run_id():
+    classifier_call = {}
+
+    class Classifier:
+        def __init__(self, command, **kwargs):
+            classifier_call.update({"command": command, **kwargs})
+
+    class Process:
+        pid = 4321
+
+    prepared = PreparedRealCommand(
+        registry_command="httpx -u https://app.example.test -json -cpe",
+        execution_command="httpx -u https://app.example.test -json -cpe",
+        command="httpx -u https://app.example.test -json -cpe",
+        rewrite_notice=None,
+        validation=None,
+        missing_runtime=None,
+        display_missing_runtime=None,
+        env_overrides={},
+        secret_env_names=[],
+    )
+    started = start_real_command_process(
+        prepared.command,
+        "session-httpx",
+        "192.0.2.1",
+        prepared,
+        cfg={"output_entity_extra_domain_suffixes": []},
+        run_output_capture_fn=lambda run_id: {"run_id": run_id},
+        popen_fn=lambda *args, **kwargs: Process(),
+        pid_register_fn=lambda *args: None,
+        active_run_register_fn=lambda *args, **kwargs: None,
+        output_signal_classifier_cls=Classifier,
+        workspace_path_filter_cls=lambda *args, **kwargs: object(),
+        owner_context_for_scope_fn=lambda *args, **kwargs: object(),
+        scanner_prefix=(),
+        stdbuf_bin=None,
+        shell_bin="/bin/sh",
+    )
+    assert classifier_call == {
+        "command": prepared.command,
+        "cmd_type": "real",
+        "extra_domain_suffixes": [],
+        "source_run_id": started.run_id,
+    }
+
+
+def test_httpx_assessment_plan_requests_structured_versioned_cpe_output():
+    plan = command_plan("httpx", "url", "https://app.example.test")
+    assert plan is not None
+    assert "-tech-detect -json -cpe -silent" in plan.command
+    assert "versioned CPE metadata" in plan.boundary
 
 
 def test_gau_output_carries_historical_url_provenance_only():

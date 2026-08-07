@@ -270,6 +270,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/evidence_sources.py", 330, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/finding_worklist.py", 165, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_contracts.py", 34, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/httpx_version_observations.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_execution.py", 349, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_material.py", 163, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_material_formats.py", 49, "split-package-ratchet"),

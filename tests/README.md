@@ -182,6 +182,8 @@ Explicit OSV API coverage also pins personal and team-operator access, team-view
 
 Workspace artifact and finalization coverage marks validated Nmap XML intent from separate and attached `-oX` values, rejects extension guesses, unrelated commands, and ambiguous rewritten paths, and pins successful owner-scoped reads, entity-before-inference ordering, count-only events, failed-run abstention, and optional-hook savepoint rollback.
 
+Structured HTTPx coverage pins the maintained JSON/CPE command, exact versioned technology-to-CPE agreement, canonical target and source-run provenance, bounded event serialization, and fail-closed handling for unversioned, conflicting, mismatched, credential-bearing, or malformed rows.
+
 Cross-cycle reconciliation coverage pins exact check, target, and evidence-rule compatibility; one-count-per-remediation rollups; new, persistent, and not-observed derivation; bounded current and earlier observation links; incomparable cleanup; the preferred active-or-latest-completed handoff; selected-finding filtering; package/report references and reasons; and the shared API/OpenAPI read shape.
 
 Assessor-authored finding coverage pins strict fields and references, confirmed-target and owner scope, bounded initial line evidence, CVE risk links, duplicate overrides, stable identity, optimistic edits, safe actor metadata, session migration, cleanup, audit records, OpenAPI, and real SQLite/Postgres behavior.

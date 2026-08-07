@@ -518,6 +518,7 @@ def start_real_command_process(
             original_command,
             cmd_type="real",
             extra_domain_suffixes=output_entity_suffixes,
+            source_run_id=run_id,
         )
         workspace_owner = owner_context or owner_context_for_scope_fn(session_id, team_id=team_id)
         workspace_path_filter = workspace_path_filter_cls(session_id, active_cfg, owner_context=workspace_owner)

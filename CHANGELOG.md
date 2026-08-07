@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **HTTPx runs now retain exact versioned technology evidence.**
+  - **What:** Maintained assessment actions request structured HTTPx JSON and version-enriched CPE output. darklab_shell keeps an observation only when the versioned technology string agrees with the CPE vendor, product, and version, and records its target, source run, observation time, and parser version. Unversioned names, conflicting versions, mismatched identities, unsafe URLs, and malformed timestamps remain ordinary run output and don't create vulnerability findings.
+  - **Tests:** Parser, command-plan, run-event, wire-format, provenance, rejection, and module-ratchet coverage pins the exact-match boundary.
 - **Historical web discovery now has a scope-gated built-in workflow.**
   - **What:** Historical Web Surface Triage collects a bounded set of passive `gau` URLs, normalizes and restricts them to the approved domain, checks that scoped set for live HTTP services, and rechecks scope before Katana crawling and the final HTTPx summary. Its app-owned `urlscope` helper reads and writes only through the active personal or team Files workspace and rejects malformed domains, credentials, fragments, and suffix lookalikes.
   - **Tests:** URL normalization, command routing, Files ownership, feature gating, workflow graph, route payload, and module-ratchet coverage pins the passive-to-active safety boundary.

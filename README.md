@@ -103,6 +103,8 @@ When external OSV mode is enabled, API clients start that one-package lookup wit
 
 When a successful Nmap service scan writes validated XML with `-oX`, exact versioned CPE matches against stored NVD rules can become inferred findings automatically. The inferred row keeps its source and stays separate from a scanner result that actively confirmed vulnerable behavior. Failed scans, ordinary XML files, and rejected inference work don't create one or interfere with the saved run.
 
+Maintained HTTPx assessment actions request structured CPE metadata. When HTTPx reports a versioned technology and the CPE vendor, product, and version agree, darklab_shell keeps that exact observation with the saved run for later review. Plain technology names, conflicts, and fuzzy matches stay as output only, and HTTPx observations don't create vulnerability findings automatically.
+
 ---
 
 ## Architecture At A Glance
