@@ -71,6 +71,7 @@ from . import (
     v0058_finding_verification_dispositions,
     v0059_assessment_finding_reconciliation,
     v0060_project_http_profiles,
+    v0061_workflow_fanout_checkpoints,
 )
 
 _ = baseline
@@ -136,4 +137,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0058_finding_verification_dispositions.MIGRATION,
     v0059_assessment_finding_reconciliation.MIGRATION,
     v0060_project_http_profiles.MIGRATION,
+    v0061_workflow_fanout_checkpoints.MIGRATION,
 )

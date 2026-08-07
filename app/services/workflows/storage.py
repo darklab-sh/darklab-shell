@@ -118,6 +118,7 @@ def _step_from_row(row: Any) -> dict[str, Any]:
     keys = _row_keys(row)
     result = {key: row[key] for key in keys}
     result["capture_names"] = _dialect().decode_json_list(result.get("capture_names"))
+    result["fanout_checkpoint"] = _dialect().decode_json_dict(result.get("fanout_checkpoint"))
     if result.get("run_id"):
         result["stream"] = f"/runs/{result['run_id']}/stream"
     return result
