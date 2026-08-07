@@ -63,6 +63,7 @@ from core.output_structured_signals import (
     _tlsx_json_entities,
 )
 from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_role
+from services.assessments.web_surface import normalize_httpx_screenshot
 from services.nuclei.provenance import nuclei_source_detail, nuclei_template_provenance
 from services.intel.canonical import (
     CanonicalizationError,
@@ -1010,6 +1011,10 @@ class OutputSignalClassifier:
                 metadata["source_detail"] = source_detail
         if scopes:
             metadata["signals"] = scopes
+        if self.root == "httpx" and normalized_text.startswith("{"):
+            screenshot = normalize_httpx_screenshot(_json_object_line(normalized_text))
+            if screenshot:
+                metadata["screenshots"] = [screenshot]
         role = classify_line_role(
             text,
             root=self.root,

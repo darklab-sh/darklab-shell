@@ -6,6 +6,7 @@ from services.assessments.command_plans import command_plan
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.web_surface import normalize_httpx_screenshot
+from core.output_signals import OutputSignalClassifier
 from services.atlas.observations import public_app_port_record
 
 
@@ -82,3 +83,16 @@ def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
     }
     assert normalize_httpx_screenshot({"url": "https://app.example.test", "screenshot_path": "../secret.png"}) is None
     assert normalize_httpx_screenshot({"url": "https://user:pass@app.example.test", "screenshot_path": "ok.png"}) is None
+
+
+def test_httpx_json_output_carries_safe_screenshot_metadata_only():
+    classifier = OutputSignalClassifier("httpx -json -screenshot -srd screenshots")
+    metadata = classifier.classify_line(
+        '{"url":"https://app.example.test","screenshot_path":"screenshots/app.png","status_code":200}'
+    )
+    assert metadata["screenshots"] == [{
+        "url": "https://app.example.test", "artifact_path": "screenshots/app.png",
+        "status_code": 200, "title": "", "technologies": [], "captured_at": "",
+        "visual_hash": "", "source_run_id": "", "profile_role": "",
+    }]
+    assert "html" not in metadata

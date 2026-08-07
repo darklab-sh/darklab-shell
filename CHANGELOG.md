@@ -40,6 +40,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment services now normalize HTTPx screenshot metadata safely.**
   - **What:** HTTP(S) URL, relative screenshot artifact path, status, title, technologies, visual hash, capture time, run, and profile role are bounded for a future Web Surface gallery. Absolute/traversal paths, credential-bearing URLs, and captured markup are rejected or omitted.
   - **Tests:** Metadata, bounds, path-safety, and architecture-ratchet coverage pin the contract.
+- **HTTPx JSON output now carries safe screenshot metadata into run evidence.**
+  - **What:** The existing output classifier records bounded screenshot metadata for later Project Web Surface use while keeping image bytes behind the existing artifact boundary. It never reads captured HTML or emits unsafe paths.
+  - **Tests:** Structured-output propagation and metadata-only coverage pin the boundary.
 
 - **Projects can now save reusable HTTP assessment profiles without storing credentials in the profile.**
   - **Why:** Authenticated and role-aware web testing needs consistent scope, identity, and request limits, but copying credential values into scanner settings would expose them through ordinary Project and history surfaces.
