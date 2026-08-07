@@ -191,6 +191,14 @@ def test_gau_output_carries_historical_url_provenance_only():
     }]
 
 
+def test_gau_command_plan_is_domain_scoped_and_passive():
+    plan = command_plan("gau", "domain", "example.com")
+    assert plan is not None
+    assert plan.command == "gau --subs --threads 2 --timeout 10 example.com"
+    assert "not probed automatically" in plan.boundary
+    assert plan.time_limit_seconds == 120
+
+
 def test_version_correlation_requires_exact_identifier_and_version_matches():
     advisories = [{
         "id": "CVE-2026-1234", "purls": ["pkg:pypi/requests"],

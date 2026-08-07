@@ -18,6 +18,7 @@ _COMMAND_TARGET_TYPES = {
     "ping": frozenset({"domain", "ip"}),
     "nmap": frozenset({"domain", "ip"}),
     "dnsrecon": frozenset({"domain"}),
+    "gau": frozenset({"domain"}),
     "httpx": frozenset({"domain", "ip", "url"}),
     "katana": frozenset({"domain", "url"}),
     "nuclei": frozenset({"domain", "ip", "url"}),
@@ -88,6 +89,12 @@ def command_plan(
             "Standard DNS record checks for one approved domain; no brute force or zone walk.",
             None,
             None,
+        ),
+        "gau": CommandPlan(
+            f"gau --subs --threads 2 --timeout 10 {quoted}",
+            "Passive historical URL discovery for one approved domain; output is metadata only and is not probed automatically.",
+            None,
+            120,
         ),
         **web_command_plans(
             quoted_web,
