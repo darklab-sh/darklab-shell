@@ -3,6 +3,9 @@
 
 """Reviewed service-action metadata kept separate from registry behavior."""
 
+# The catalog is intentionally a compact, reviewed data table.
+# ruff: noqa: E501
+
 from .service_actions import ServiceAction
 
 

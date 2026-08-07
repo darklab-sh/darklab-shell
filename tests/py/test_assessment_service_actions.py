@@ -133,7 +133,14 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
     })
     assert confirmed["state"] == "confirmed"
     assert evaluate_takeover_signal({"hostname": "app.example.test", "resolution_state": "timeout"})["state"] == "uncertain"
-    assert evaluate_takeover_signal({"hostname": "app.example.test", "cname_chain": ["outside.test"], "target_resolved": False, "in_scope": False})["reason"] == "out_of_scope_target"
+    assert evaluate_takeover_signal(
+        {
+            "hostname": "app.example.test",
+            "cname_chain": ["outside.test"],
+            "target_resolved": False,
+            "in_scope": False,
+        }
+    )["reason"] == "out_of_scope_target"
 
 
 def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
@@ -152,10 +159,29 @@ def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
 
 
 def test_web_gallery_filters_metadata_without_exposing_artifact_contents():
-    rows = filter_web_surface_rows([
-        {"url": "https://app.example.test", "status_code": 200, "technologies": ["nginx"], "profile_role": "anonymous", "visual_hash": "abc", "html": "secret"},
-        {"url": "https://admin.example.test", "status_code": 401, "technologies": ["nginx"], "profile_role": "authenticated", "visual_hash": "def"},
-    ], target="app.example", status_code=200, technology="nginx", profile_role="anonymous")
+    rows = filter_web_surface_rows(
+        [
+            {
+                "url": "https://app.example.test",
+                "status_code": 200,
+                "technologies": ["nginx"],
+                "profile_role": "anonymous",
+                "visual_hash": "abc",
+                "html": "secret",
+            },
+            {
+                "url": "https://admin.example.test",
+                "status_code": 401,
+                "technologies": ["nginx"],
+                "profile_role": "authenticated",
+                "visual_hash": "def",
+            },
+        ],
+        target="app.example",
+        status_code=200,
+        technology="nginx",
+        profile_role="anonymous",
+    )
     assert len(rows) == 1
     assert rows[0]["url"] == "https://app.example.test"
     assert "html" not in rows[0]

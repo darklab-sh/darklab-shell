@@ -31172,7 +31172,12 @@ def test_atlas_import_parser_normalizes_bounded_sarif_and_rejects_file_uris():
 def test_atlas_import_parser_normalizes_cyclonedx_vulnerabilities_without_inventing_inventory_findings():
     payload = json.dumps({
         "bomFormat": "CycloneDX", "specVersion": "1.5",
-        "components": [{"bom-ref": "pkg:pypi/requests@2.31.0", "name": "requests", "version": "2.31.0", "purl": "pkg:pypi/requests@2.31.0"}],
+        "components": [{
+            "bom-ref": "pkg:pypi/requests@2.31.0",
+            "name": "requests",
+            "version": "2.31.0",
+            "purl": "pkg:pypi/requests@2.31.0",
+        }],
         "vulnerabilities": [{
             "id": "CVE-2024-9999", "description": "A package issue.", "recommendation": "Upgrade the package.",
             "ratings": [{"severity": "high"}], "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],

@@ -49,7 +49,11 @@ def filter_web_surface_rows(
     technology_key = str(technology or "").strip().casefold()
     role_key = str(profile_role or "").strip().casefold()
     hash_key = str(visual_hash or "").strip().casefold()
-    previous = {str(value).strip().casefold() for value in changed_since} if isinstance(changed_since, (list, tuple, set)) else set()
+    previous = (
+        {str(value).strip().casefold() for value in changed_since}
+        if isinstance(changed_since, (list, tuple, set))
+        else set()
+    )
     result: list[dict[str, object]] = []
     for row in values:
         if not isinstance(row, Mapping):

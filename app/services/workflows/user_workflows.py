@@ -174,7 +174,10 @@ def _clean_payload(data):
                 try:
                     item_limit = int(capture.get("item_limit") or 32)
                 except (TypeError, ValueError) as exc:
-                    raise UserWorkflowError("collection item limit must be an integer", field=f"{capture_path}.item_limit") from exc
+                    raise UserWorkflowError(
+                        "collection item limit must be an integer",
+                        field=f"{capture_path}.item_limit",
+                    ) from exc
                 if not 1 <= item_limit <= 32:
                     raise UserWorkflowError("collection item limit must be between 1 and 32", field=f"{capture_path}.item_limit")
         step = dict(item)
