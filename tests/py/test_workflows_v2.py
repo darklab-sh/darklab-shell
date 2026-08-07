@@ -22,6 +22,7 @@ from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNois
 from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.fanout import expand_collection_step
+from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy
 from services.workflows.compiler import (
     WorkflowDefinitionError,
     compile_execution_definition,
@@ -464,6 +465,17 @@ def test_collection_fanout_renders_bounded_deduplicated_child_commands_without_p
     ]
     with pytest.raises(WorkflowDefinitionError, match="control characters"):
         expand_collection_step({"cmd": "probe {{host}}"}, {}, "host", ["bad\x01host"])
+
+
+def test_collection_fanout_policy_normalizes_retry_parallel_and_failure_modes():
+    assert normalize_fanout_policy({"mode": "continue", "retries": 2, "max_parallel": 4, "max_failures": 5}) == FanoutPolicy(
+        "continue", 2, 4, 5
+    )
+    assert normalize_fanout_policy({}) == FanoutPolicy()
+    with pytest.raises(ValueError, match="fail-fast"):
+        normalize_fanout_policy({"failure_mode": "fail_fast", "max_failures": 2})
+    with pytest.raises(ValueError, match="between 0 and 3"):
+        normalize_fanout_policy({"retries": 4})
 
 
 def test_execution_state_machine_advances_once_and_keeps_snapshot():

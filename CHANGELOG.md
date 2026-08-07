@@ -24,6 +24,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment workflows now expose bounded fan-out command expansion.**
   - **What:** A private launch-layer helper deduplicates collection items, enforces child and value limits, and renders one command per child; each child still requires normal policy and scope checks before launch.
   - **Tests:** Focused workflow coverage pins bounded expansion and control-character rejection.
+- **Assessment fan-out now has a validated execution-policy contract.**
+  - **What:** Policies define fail-fast or continue behavior, bounded retries, parallel children, and failure limits without changing existing workflow launches.
+  - **Tests:** Focused workflow coverage pins normalization and unsafe-policy rejection.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
