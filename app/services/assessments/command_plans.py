@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from services.assessments.command_plan_contracts import CommandPlan
 from services.assessments.command_plans_web import web_command_plans
 from services.assessments.nmap_profiles import nmap_profile_suffix
-from services.assessments.nuclei_profiles import nuclei_profile_args
+from services.assessments.nuclei_profiles import nuclei_profile as get_nuclei_profile, nuclei_profile_args
 
 _COMMAND_TARGET_TYPES = {
     "curl": frozenset({"domain", "ip", "url"}),
@@ -35,9 +35,12 @@ def command_plan(
     protected_display: bool = True,
     nmap_profile: str = "",
     nuclei_profile: str = "safe",
+    allow_intrusive: bool = False,
 ) -> CommandPlan | None:
     """Return one bounded command without resolving any protected values."""
     if target_type not in _COMMAND_TARGET_TYPES.get(action_id, frozenset()):
+        return None
+    if action_id == "nuclei" and get_nuclei_profile(nuclei_profile).requires_confirmation and not allow_intrusive:
         return None
     quoted = shlex.quote(target_value)
     selected_web_target = web_target or target_value

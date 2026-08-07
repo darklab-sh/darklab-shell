@@ -54,6 +54,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Fan-out retry decisions now honor safety boundaries.**
   - **What:** Retries are capped by policy attempts, while scope, cancellation, and permission failures are never retried.
   - **Tests:** Workflow policy coverage pins retry limits and non-retryable failure codes.
+- **Intrusive Nuclei plans now fail closed without confirmation.**
+  - **What:** Command planning returns no intrusive plan unless the caller explicitly confirms the higher-risk profile; safe and standard profiles are unaffected.
+  - **Tests:** Assessment command coverage pins the confirmation gate and headless argument.
 - **Assessment Nuclei plans now use reviewed profiles.**
   - **What:** Safe, standard, and explicitly intrusive profiles have fixed severity/headless arguments; safe remains the default and unknown names fail closed.
   - **Tests:** Command-plan coverage pins profile allowlisting and default behavior.

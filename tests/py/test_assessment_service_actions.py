@@ -71,8 +71,13 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     assert nuclei_profile("safe").template_source == "app-managed"
     safe = command_plan("nuclei", "domain", "example.com")
     standard = command_plan("nuclei", "domain", "example.com", nuclei_profile="standard")
+    assert command_plan("nuclei", "domain", "example.com", nuclei_profile="intrusive") is None
+    intrusive = command_plan(
+        "nuclei", "domain", "example.com", nuclei_profile="intrusive", allow_intrusive=True,
+    )
     assert "-severity high,critical" in safe.command
     assert "-severity medium,high,critical" in standard.command
+    assert "-headless" in intrusive.command
 
 
 def test_historical_urls_are_safe_bounded_and_provenance_only():
