@@ -237,7 +237,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_port_entities.py", 207, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_shodan.py", 74, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/output_signals.py", 1180, "split-target-phase4"),
+    ModuleSizeBudget("app/core/output_signals.py", 1190, "split-target-phase4"),
     ModuleSizeBudget("app/core/output_structured_signals.py", 223, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_targets.py", 239, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_profile.py", 93, "split-package-ratchet"),

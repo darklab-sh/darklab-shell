@@ -39,6 +39,7 @@ from core.output_port_entities import (
     _nmap_target_entities,
     _port_entities_for_host,
 )
+from services.assessments.historical_urls import normalize_historical_url
 from core.output_shodan import (
     _SHODAN_DNS_FINDING_TYPES,
     _SHODAN_LABEL_RE,
@@ -1015,6 +1016,10 @@ class OutputSignalClassifier:
             screenshot = normalize_httpx_screenshot(_json_object_line(normalized_text))
             if screenshot:
                 metadata["screenshots"] = [screenshot]
+        if self.root == "gau":
+            historical = normalize_historical_url(normalized_text, source="gau")
+            if historical:
+                metadata["historical_urls"] = [historical]
         role = classify_line_role(
             text,
             root=self.root,
