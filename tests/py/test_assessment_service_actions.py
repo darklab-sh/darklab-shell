@@ -310,11 +310,25 @@ def test_version_correlation_requires_exact_identifier_and_version_matches():
         {"purl": "pkg:pypi/requests", "version": "2.31.0", "target": "api.example.test", "observation_id": "obs-1"},
         advisories,
         source_run_id="run-1", observed_at="2026-08-07T00:00:00Z", tool_version="nmap 7.96",
+        parser_version="nmap-xml-v2",
     )
     assert records[0]["validation_method"] == "version_inference"
+    assert records[0]["observed_identifier"] == "pkg:pypi/requests"
+    assert records[0]["observed_version"] == "2.31.0"
     assert records[0]["source"] == {
         "run_id": "run-1", "kind": "run", "observation_id": "obs-1",
         "observed_at": "2026-08-07T00:00:00Z", "tool_version": "nmap 7.96",
+        "parser_version": "nmap-xml-v2",
+    }
+    imported = materialize_version_findings(
+        {"purl": "pkg:pypi/requests@2.31.0", "target": "api.example.test", "observation_id": "obs-2"},
+        advisories,
+        source_kind="import", source_batch_id="imp-1", observed_at="2026-08-07T00:01:00Z",
+        tool_version="cyclonedx 1.6", parser_version="cyclonedx-v1",
+    )
+    assert imported[0]["source"] == {
+        "kind": "import", "observation_id": "obs-2", "observed_at": "2026-08-07T00:01:00Z",
+        "tool_version": "cyclonedx 1.6", "batch_id": "imp-1", "parser_version": "cyclonedx-v1",
     }
     ranged_advisory = [{
         "id": "GHSA-range", "source": "osv", "source_version": "2026-08-07",

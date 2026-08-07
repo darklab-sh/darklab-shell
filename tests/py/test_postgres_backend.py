@@ -275,6 +275,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
+    from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
 
     conn = postgres_schema.conn
     pre_comparison_migrations = tuple(
@@ -831,6 +832,22 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     )
     assert postgres_correlation["matches"][0]["vulnerability_id"] == "CVE-2026-62001"
     assert postgres_correlation["matches"][0]["advisory_source_state"] == "current"
+    postgres_candidates = materialize_stored_nvd_cpe_candidate_page(
+        compat,
+        {
+            "cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*",
+            "observation_id": "obs-postgres-62001",
+            "target": "db.example.test",
+        },
+        source_id="import-postgres-1",
+        source_kind="import",
+        observed_at="2026-08-08T11:00:00+00:00",
+        tool_version="cyclonedx 1.6",
+        parser_version="cyclonedx-v1",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_candidates["candidates"][0]["source"]["batch_id"] == "import-postgres-1"
+    assert postgres_candidates["candidates"][0]["advisory_match_criteria_id"].endswith("6201")
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname

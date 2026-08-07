@@ -43,6 +43,7 @@ from services.cve_risk.ranking import (
 from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
+from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
 from services.intel.nvd_applicability import normalize_nvd_cpe_matches
 from services.reports.rendering import (
     render_report_html_from_context,
@@ -979,7 +980,11 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "source_version": "2026-08-05T00:00:00Z",
         "origin": "external",
     }]
-    observation = {"cpe": "cpe:2.3:a:EXAMPLE:SERVER:2.5.1:*:*:*:*:*:*:*"}
+    observation = {
+        "cpe": "cpe:2.3:a:EXAMPLE:SERVER:2.5.1:*:*:*:*:*:*:*",
+        "observation_id": "obs-nvd-1",
+        "target": "api.example.test",
+    }
     changes_before_read = risk_db.total_changes
     correlation = correlate_stored_nvd_cpe_page(
         risk_db,
@@ -1013,6 +1018,59 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "next_offset": None,
     }
     assert risk_db.total_changes == changes_before_read
+    candidate_page = materialize_stored_nvd_cpe_candidate_page(
+        risk_db,
+        observation,
+        source_id="run-nmap-1",
+        source_kind="run",
+        observed_at="2026-08-05T12:30:00+00:00",
+        tool_version="nmap 7.96",
+        parser_version="nmap-xml-v2",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert candidate_page["matched_cve_count"] == 1
+    assert candidate_page["unmaterialized_match_count"] == 0
+    assert candidate_page["candidates"] == [{
+        "kind": "finding",
+        "validation_method": "version_inference",
+        "title": "Version may be affected by CVE-2026-12345",
+        "vulnerability_id": "CVE-2026-12345",
+        "target": "api.example.test",
+        "source": {
+            "kind": "run",
+            "observation_id": "obs-nvd-1",
+            "observed_at": "2026-08-05T12:30:00+00:00",
+            "tool_version": "nmap 7.96",
+            "run_id": "run-nmap-1",
+            "parser_version": "nmap-xml-v2",
+        },
+        "confidence": "high",
+        "match_basis": "exact_cpe_nvd_range",
+        "observed_identifier": observation["cpe"],
+        "observed_version": "2.5.1",
+        "affected_range": "NVD: >= 2.4; < 2.6",
+        "range_type": "CPE_NUMERIC",
+        "advisory_source": "nvd",
+        "advisory_source_version": "2026-08-05T00:00:00Z",
+        "advisory_origin": "external",
+        "advisory_expires_at": "2026-08-05T14:00:00+00:00",
+        "advisory_source_state": "current",
+        "advisory_criteria": "cpe:2.3:a:example:server:*:*:*:*:*:*:*:*",
+        "advisory_match_criteria_id": "00000000-0000-4000-8000-000000000013",
+    }]
+    assert risk_db.total_changes == changes_before_read
+    incomplete_page = materialize_stored_nvd_cpe_candidate_page(
+        risk_db,
+        {**observation, "observation_id": ""},
+        source_id="run-nmap-1",
+        source_kind="run",
+        observed_at="2026-08-05T12:30:00+00:00",
+        tool_version="nmap 7.96",
+        parser_version="nmap-xml-v2",
+    )
+    assert incomplete_page["matched_cve_count"] == 1
+    assert incomplete_page["candidates"] == []
+    assert incomplete_page["unmaterialized_match_count"] == 1
     stale = correlate_stored_nvd_cpe_page(
         risk_db,
         observation,

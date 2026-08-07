@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.assessments.cpe_applicability import match_cpe_applicability, normalize_observed_cpe
+from services.assessments.version_finding_candidates import materialize_version_match_candidates
 from services.assessments.version_ranges import match_cached_semver_range, normalize_purl
 
 
@@ -82,38 +83,25 @@ def materialize_version_findings(
     advisories: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
     source_run_id: str = "",
+    source_batch_id: str = "",
     source_kind: str = "run",
     observed_at: str = "",
     tool_version: str = "",
+    parser_version: str = "",
 ) -> list[dict[str, Any]]:
     """Build provenance-rich inference records from exact advisory matches."""
     item = observation if isinstance(observation, dict) else {}
     matches = correlate_version_observation(item, advisories)
-    observation_id = _text(item.get("observation_id"), 128)
-    target = _text(item.get("target") or item.get("canonical_value"), 512)
-    records = []
-    for match in matches:
-        records.append({
-            "kind": "finding",
-            "validation_method": "version_inference",
-            "title": f"Version may be affected by {match['vulnerability_id']}",
-            "vulnerability_id": match["vulnerability_id"],
-            "confidence": match["confidence"],
-            "match_basis": match["match_basis"],
-            "affected_range": match["affected_range"],
-            "range_type": match["range_type"],
-            "advisory_source": match["advisory_source"],
-            "advisory_source_version": match["advisory_source_version"],
-            "target": target,
-            "source": {
-                "run_id": _text(source_run_id, 128),
-                "kind": _text(source_kind, 32),
-                "observation_id": observation_id,
-                "observed_at": _text(observed_at, 64),
-                "tool_version": _text(tool_version, 128),
-            },
-        })
-    return records
+    normalized_source_kind = _text(source_kind, 32).lower()
+    return materialize_version_match_candidates(
+        item,
+        matches,
+        source_id=source_batch_id if normalized_source_kind == "import" else source_run_id,
+        source_kind=normalized_source_kind,
+        observed_at=observed_at,
+        tool_version=tool_version,
+        parser_version=parser_version,
+    )
 
 
 def _advisory_purls(advisory: dict[str, Any]) -> dict[str, set[str]]:
@@ -134,4 +122,4 @@ def _text(value: Any, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
-__all__ = ["correlate_version_observation"]
+__all__ = ["correlate_version_observation", "materialize_version_findings"]
