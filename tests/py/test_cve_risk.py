@@ -45,6 +45,7 @@ from services.cve_risk.store import accept_feed, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
 from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
 from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
+from services.assessments.version_inference_persistence import persist_version_inference_candidate
 from services.intel.nvd_applicability import normalize_nvd_cpe_matches
 from services.reports.rendering import (
     render_report_html_from_context,
@@ -1042,6 +1043,74 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "parser_version": "nmap-xml-cpe-v1",
     }
     assert risk_db.total_changes == changes_before_read
+    risk_db.execute(
+        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "VALUES ('run-nmap-xml-1', 'version-owner', 'nmap -sV 192.0.2.10', ?, ?, 0)",
+        ("2026-08-05T12:00:00+00:00", "2026-08-05T12:30:00+00:00"),
+    )
+    risk_db.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
+        "('entity-version-port', 'version-owner', 'port', '192.0.2.10:443/tcp', "
+        "'signature-version-port', ?, ?, 1, ?)",
+        ("2026-08-05T12:30:00+00:00",) * 3,
+    )
+    risk_db.execute(
+        "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES ('entity-version-port', 'run-nmap-xml-1', ?, ?, 1)",
+        ("2026-08-05T12:30:00+00:00",) * 2,
+    )
+    assert persist_version_inference_candidate(
+        risk_db, "other-version-owner", nmap_candidate
+    ) is None
+    saved_inference = persist_version_inference_candidate(
+        risk_db, "version-owner", nmap_candidate
+    )
+    repeated_inference = persist_version_inference_candidate(
+        risk_db, "version-owner", nmap_candidate
+    )
+    assert saved_inference is not None
+    assert saved_inference["created"] is True
+    assert saved_inference["source_created"] is True
+    assert repeated_inference == {**saved_inference, "created": False, "source_created": False}
+    saved_row = risk_db.execute(
+        "SELECT origin, validation_method, severity, confidence, cve_ids_json, occurrence_count, "
+        "run_id, entity_id FROM findings WHERE id = ?",
+        (saved_inference["finding_id"],),
+    ).fetchone()
+    assert dict(saved_row) == {
+        "origin": "run",
+        "validation_method": "version_inference",
+        "severity": "info",
+        "confidence": "high",
+        "cve_ids_json": '["CVE-2026-12345"]',
+        "occurrence_count": 1,
+        "run_id": "run-nmap-xml-1",
+        "entity_id": "entity-version-port",
+    }
+    saved_source = risk_db.execute(
+        "SELECT source_kind, source_id, observation_id, observed_identifier, observed_version, "
+        "match_basis, advisory_source_version FROM finding_version_inference_sources"
+    ).fetchone()
+    assert dict(saved_source) == {
+        "source_kind": "run",
+        "source_id": "run-nmap-xml-1",
+        "observation_id": nmap_candidate["source"]["observation_id"],
+        "observed_identifier": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+        "observed_version": "2.5.1",
+        "match_basis": "exact_cpe_nvd_range",
+        "advisory_source_version": "2026-08-05T00:00:00Z",
+    }
+    assert risk_db.execute(
+        "SELECT link_source FROM finding_cve_links WHERE finding_id = ?",
+        (saved_inference["finding_id"],),
+    ).fetchone()["link_source"] == "version_inference"
+    tampered = {**nmap_candidate, "affected_range": "all versions"}
+    assert persist_version_inference_candidate(risk_db, "version-owner", tampered) is None
+    assert risk_db.execute(
+        "SELECT COUNT(*) FROM finding_version_inference_sources"
+    ).fetchone()[0] == 1
+    changes_before_read = risk_db.total_changes
     candidate_page = materialize_stored_nvd_cpe_candidate_page(
         risk_db,
         observation,
@@ -1083,6 +1152,53 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "advisory_match_criteria_id": "00000000-0000-4000-8000-000000000013",
     }]
     assert risk_db.total_changes == changes_before_read
+    risk_db.execute(
+        "INSERT INTO atlas_import_batches "
+        "(id, session_id, source_tool, import_name, created, applied_at, status) "
+        "VALUES ('batch-version-import', 'version-owner', 'cyclonedx', 'Version import', ?, ?, 'applied')",
+        ("2026-08-05T12:30:00+00:00",) * 2,
+    )
+    risk_db.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
+        "('entity-version-import', 'version-owner', 'domain', 'api.example.test', "
+        "'signature-version-import', ?, ?, 1, ?)",
+        ("2026-08-05T12:30:00+00:00",) * 3,
+    )
+    risk_db.execute(
+        "INSERT INTO atlas_entity_import_links "
+        "(entity_id, batch_id, first_observed_at, last_observed_at, occurrence_count, created, updated) "
+        "VALUES ('entity-version-import', 'batch-version-import', ?, ?, 1, ?, ?)",
+        ("2026-08-05T12:30:00+00:00",) * 4,
+    )
+    import_candidate = {
+        **candidate_page["candidates"][0],
+        "source": {
+            **candidate_page["candidates"][0]["source"],
+            "kind": "import",
+            "run_id": "",
+            "batch_id": "batch-version-import",
+            "tool_version": "cyclonedx 1.6",
+            "parser_version": "cyclonedx-v1",
+        },
+    }
+    saved_import_inference = persist_version_inference_candidate(
+        risk_db, "version-owner", import_candidate
+    )
+    assert saved_import_inference is not None
+    assert saved_import_inference["created"] is True
+    import_finding = risk_db.execute(
+        "SELECT origin, validation_method, occurrence_count, run_id, entity_id "
+        "FROM findings WHERE id = ?",
+        (saved_import_inference["finding_id"],),
+    ).fetchone()
+    assert dict(import_finding) == {
+        "origin": "import",
+        "validation_method": "version_inference",
+        "occurrence_count": 1,
+        "run_id": "",
+        "entity_id": "entity-version-import",
+    }
     incomplete_page = materialize_stored_nvd_cpe_candidate_page(
         risk_db,
         {**observation, "observation_id": ""},

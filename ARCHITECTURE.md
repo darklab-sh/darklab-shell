@@ -1411,6 +1411,8 @@ Stored NVD correlation uses the indexed, case-normalized CPE part/vendor/product
 
 Structured Nmap XML is the first run-output source for that candidate boundary. The parser accepts bounded XML for open services with an exact versioned CPE 2.3 identity, plus the simple CPE 2.2 URI form Nmap emits when it can be converted without guessing. It preserves the run, Nmap and parser versions, observation time, and canonical port target. Malformed XML, unsafe entities, ambiguous or unversioned CPEs, closed ports, and over-limit input fail closed. Parsing and stored-NVD correlation make no provider request and do not create or update findings; free-form banners and fuzzy product names remain follow-up hints only.
 
+Saving a version inference is a separate explicit write. The persistence boundary revalidates a successful completed Nmap run or applied import batch in the active owner scope, requires one exact source-linked Atlas entity, and reruns the stored NVD applicability rule rather than trusting candidate text. The saved finding stays at `version_inference`, links to the CVE risk row, and records one immutable source decision. Repeating that same decision doesn't create another finding or occurrence. Read surfaces still never trigger correlation or persistence.
+
 `finding_cve_links` keeps current public signals separate from owner-scoped finding observations. Atlas and Project finding reads enrich linked rows with explicit KEV, EPSS, advisory status, NVD CVSS/CWE, source-version, origin, expiry, and freshness fields. Every finding read also derives an observation reference from owner, exact Atlas entity or stored subject signature, stable rule, normalized CVE or fallback rule, and validation method. Its remediation reference omits the method and, for a CVE, the scanner rule, so active confirmation, version inference, import assertion, and manual assessment can remain separate observations of one exact issue. Editable title, severity, and detail fields are not identity inputs. Missing subjects fall back to the saved finding id so unrelated records cannot merge accidentally. Existing CVE remediation hashes stay stable for escalation history, and reads derive the references without writing database state. The shared worklist builder groups matching CVE and rule-only remediation references, excludes suppressed and false-positive observations, reports distinct observation and typed-evidence counts, and preserves validation methods plus the strongest saved severity and CVSS. Confidence, target exposure, and bounded asset context remain separate explanatory fields; they do not alter the shared KEV, EPSS probability, EPSS percentile, stored CVSS, age, and finding-id order. The UI shows short KEV, EPSS, CVSS, non-active advisory, and source-state labels instead of a composite score; explicit `null` values stay unavailable rather than becoming numeric zero. API v1 exposes the same nested risk objects and observation/remediation references. Report and evidence-package builds use risk snapshot schema version 2 and pin only the selected CVEs together with stored values, source dates, checksums, attribution, and non-endorsement text, so later source changes do not rewrite an existing export.
 
 Accepted feed and advisory changes enqueue only linked CVEs in `cve_risk_work_items`. The worker processes a bounded number of owners through a durable cursor, isolates failures with savepoints and retry state, and creates owner-scoped `risk_escalations` plus observation and Project projection links. A bundled or first accepted NVD baseline cannot enqueue work. KEV additions activate immediately; EPSS uses configurable activation/reset thresholds with an armed/active state so scores around the boundary do not flap. Later NVD data preserves withdrawal, rejection, dispute, reinstatement, and a configurable material CVSS downgrade as explicit transitions with both old/new values and source versions. Reinstatement is actionable; the other NVD changes remain visible history instead of pretending a risk increase occurred. Canonical events deduplicate by owner, remediation identity, source, feed version, and transition. One acknowledgement updates all Project projections, while digest delivery stays opt-in per Project.
@@ -1782,10 +1784,24 @@ erDiagram
     TEXT snippet
     TEXT seen_at
   }
+  FINDING_VERSION_INFERENCE_SOURCES {
+    TEXT id PK
+    TEXT finding_id
+    TEXT source_kind
+    TEXT source_id
+    TEXT observation_id
+    TEXT target
+    TEXT observed_identifier
+    TEXT observed_version
+    TEXT observed_at
+    TEXT advisory_source_version
+    TEXT advisory_match_criteria_id
+  }
   ENTITIES ||--o{ ENTITY_RUN_LINKS : "seen in"
   ENTITIES ||--o{ ENTITY_INTEL_SNAPSHOTS : "caches"
   ENTITIES ||--o{ FINDINGS : "subject of"
   FINDINGS ||--o{ FINDINGS_OCCURRENCES : "seen in runs"
+  FINDINGS ||--o{ FINDING_VERSION_INFERENCE_SOURCES : "inferred from"
 ```
 
 #### Run output and workspace artifacts
@@ -2017,6 +2033,7 @@ erDiagram
 - `cve_risk_sources` and `cve_risk_records` — shared, rebuildable FIRST EPSS, CISA KEV, and optional NVD advisory state plus current per-CVE signals. Feed source rows keep version, publication/retrieval/acceptance times, checksum, origin, conditional-request metadata, attribution, terms, and record count. Record rows keep source-native EPSS/KEV data and normalized NVD status, CVSS, CWE, dates, origin, and expiry without copying mutable values into each owner-scoped finding.
 - `cve_advisory_sources` and `cve_advisory_lookup_cache` — optional NVD acquisition state and hash-keyed positive/negative lookup results. Source rows preserve the last accepted local or explicit-refresh dataset across later failures; cache rows omit the requested CVE text and expire on bounded positive or negative lifetimes.
 - `cve_advisory_cpe_matches` — normalized, independently applicable NVD CPE product identities and version limits. Rows retain source version, origin, and expiry so correlation can explain which accepted advisory snapshot supported a match, and replacement removes obsolete ranges.
+- `finding_version_inference_sources` — immutable source decisions behind persisted version-inferred findings. Each row keeps the successful run or applied import, exact observation and target, CPE/version, tool/parser context, affected range, and stored NVD criteria and source version used to make the inference. Finding occurrence recalculation treats this row as the source instead of manufacturing an active-probe occurrence.
 - `finding_cve_links` — normalized links from owner-scoped findings to CVE ids and remediation identities. Ranking and enrichment join through this table so a feed refresh can change displayed public-risk context without rewriting finding or occurrence history.
 - `cve_risk_refresh_leases` and `cve_risk_work_items` — shared coordination for one accepted feed refresh per source and bounded, resumable processing of changed CVEs. Work items retain owner cursors, retry state, old/new source versions, and completion metadata so a failed owner doesn't replay finished work or starve later owners.
 - `risk_escalation_states`, `risk_escalations`, `risk_escalation_observations`, and `risk_escalation_projects` — owner-scoped EPSS hysteresis state, canonical feed/advisory change history with preserved source versions, contributing findings, and Project projections. Acknowledgement belongs to the canonical event; Project digests opt in separately and deduplicate projections inside each Project.

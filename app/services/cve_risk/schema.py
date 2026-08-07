@@ -12,6 +12,7 @@ SHARED_TABLES: tuple[str, ...] = (
     "cve_risk_sources",
     "cve_risk_work_items",
     "finding_cve_links",
+    "finding_version_inference_sources",
     "package_advisories",
     "package_advisory_ranges",
     "risk_escalation_observations",

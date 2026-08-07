@@ -277,6 +277,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
     from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
     from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
+    from services.assessments.version_inference_persistence import persist_version_inference_candidate
 
     conn = postgres_schema.conn
     pre_comparison_migrations = tuple(
@@ -478,6 +479,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0060",
         "0061",
         "0062",
+        "0063",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -781,7 +783,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             'project_assessment_checks',
             'project_assessment_evidence',
             'project_http_profiles',
-            'finding_evidence_links'
+            'finding_evidence_links',
+            'finding_version_inference_sources'
         )
         """,
         (postgres_schema.schema,),
@@ -804,6 +807,9 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_finding_evidence_owner_finding",
         "idx_finding_evidence_project",
         "idx_finding_evidence_source",
+        "idx_finding_version_inference_identity",
+        "idx_finding_version_inference_finding",
+        "idx_finding_version_inference_source",
     }.issubset({row["indexname"] for row in assessment_index_rows})
     compat = PostgresSqliteCompatConnection(conn)
     compat.execute(
@@ -860,6 +866,75 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     )
     assert postgres_nmap_candidates["candidate_count"] == 1
     assert postgres_nmap_candidates["observations"][0]["target"] == "[2001:db8::10]:5432/tcp"
+    compat.execute(
+        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "VALUES (?, ?, ?, ?, ?, 0)",
+        (
+            "run-postgres-nmap-1",
+            "version-postgres-owner",
+            "nmap -sV 2001:db8::10",
+            "2026-08-08T10:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) "
+        "VALUES (?, ?, 'port', ?, ?, ?, ?, 1, ?)",
+        (
+            "entity-postgres-version-port",
+            "version-postgres-owner",
+            "[2001:db8::10]:5432/tcp",
+            "signature-postgres-version-port",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, ?, ?, ?, 1)",
+        (
+            "entity-postgres-version-port",
+            "run-postgres-nmap-1",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    postgres_candidate = postgres_nmap_candidates["observations"][0]["candidates"][0]
+    postgres_inference = persist_version_inference_candidate(
+        compat,
+        "version-postgres-owner",
+        postgres_candidate,
+    )
+    repeated_postgres_inference = persist_version_inference_candidate(
+        compat,
+        "version-postgres-owner",
+        postgres_candidate,
+    )
+    assert postgres_inference is not None
+    assert postgres_inference["created"] is True
+    assert postgres_inference["source_created"] is True
+    assert repeated_postgres_inference == {
+        **postgres_inference,
+        "created": False,
+        "source_created": False,
+    }
+    postgres_inference_row = compat.execute(
+        "SELECT validation_method, occurrence_count, run_id, cve_ids_json FROM findings WHERE id = ?",
+        (postgres_inference["finding_id"],),
+    ).fetchone()
+    assert dict(postgres_inference_row) == {
+        "validation_method": "version_inference",
+        "occurrence_count": 1,
+        "run_id": "run-postgres-nmap-1",
+        "cve_ids_json": ["CVE-2026-62001"],
+    }
+    assert compat.execute(
+        "SELECT COUNT(*) AS count FROM finding_version_inference_sources WHERE finding_id = ?",
+        (postgres_inference["finding_id"],),
+    ).fetchone()["count"] == 1
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname

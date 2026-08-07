@@ -102,6 +102,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Structured Nmap service evidence now feeds read-only version inference.**
   - **What:** Bounded Nmap XML can supply exact CPE 2.3 product versions, including the simple CPE 2.2 URI form Nmap emits when it converts without guessing. Only open services are accepted, and each unsaved candidate keeps its run, Nmap and parser versions, observation time, and canonical port target. Malformed or unsafe XML, ambiguous CPEs, and unversioned observations fail closed without making a provider request or changing a finding.
   - **Tests:** Service, SQLite, and real Postgres coverage pins IPv4 and IPv6 targets, closed-port exclusion, unsafe-XML rejection, complete candidate provenance, stored-NVD matching, and read-only behavior.
+- **Provenance-complete version matches can now become distinct inferred findings.**
+  - **What:** An explicit persistence step rechecks the successful Nmap run or applied import, its exact owner-scoped Atlas entity, and the stored NVD rule before saving a `version_inference` finding. Repeating the same source decision is idempotent, and the immutable source row keeps the observed CPE/version, tool and parser versions, target, time, affected range, and advisory snapshot separate from actively confirmed findings.
+  - **Tests:** SQLite and real PostgreSQL coverage pins source and owner validation, exact-rule revalidation, idempotent occurrences, CVE linking, and tampered-range rejection.
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.

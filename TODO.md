@@ -86,9 +86,8 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 0 — Add shared CVE risk intelligence and ranking contracts
 
-- [ ] Add exact package and product applicability after the assessment model can supply trustworthy identities:
+- [ ] Add exact package applicability:
   - Add operator-selectable local or bounded external OSV acquisition for exact package ecosystem/PURL and version matches. Keep it disabled by default, disclose which package identifiers leave the instance, and never upload an imported SBOM or discovered package inventory automatically.
-  - Add NVD CPE applicability only when a scanner, SBOM, or reviewed mapping provides a defensible product/version identity. Keep advisory presence separate from applicability and preserve the CPE, affected range, source version, and matching rule used for every inferred observation.
   - Reuse the existing capability, outbound allowlist/proxy/timeout, audit, privacy-safe logging, positive/negative cache, last-good, and source-attribution contracts. Viewing an assessment, finding, report, or Atlas entity must remain read-only.
 
 #### Phase 1 — Define the assessment and evidence data contracts

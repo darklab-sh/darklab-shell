@@ -73,6 +73,7 @@ from . import (
     v0060_project_http_profiles,
     v0061_workflow_fanout_checkpoints,
     v0062_nvd_cpe_applicability,
+    v0063_finding_version_inference_sources,
 )
 
 _ = baseline
@@ -140,4 +141,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0060_project_http_profiles.MIGRATION,
     v0061_workflow_fanout_checkpoints.MIGRATION,
     v0062_nvd_cpe_applicability.MIGRATION,
+    v0063_finding_version_inference_sources.MIGRATION,
 )
