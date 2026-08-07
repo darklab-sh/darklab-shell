@@ -9,6 +9,7 @@ from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
 from services.assessments.historical_urls import filter_historical_urls, normalize_historical_url, normalize_historical_urls
+from services.assessments.web_gallery import filter_web_surface_rows
 from services.intel.epss import normalize_epss_rows
 from services.intel.kev import normalize_kev_catalog
 from core.output_signals import OutputSignalClassifier
@@ -146,6 +147,17 @@ def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
     }
     assert normalize_httpx_screenshot({"url": "https://app.example.test", "screenshot_path": "../secret.png"}) is None
     assert normalize_httpx_screenshot({"url": "https://user:pass@app.example.test", "screenshot_path": "ok.png"}) is None
+
+
+def test_web_gallery_filters_metadata_without_exposing_artifact_contents():
+    rows = filter_web_surface_rows([
+        {"url": "https://app.example.test", "status_code": 200, "technologies": ["nginx"], "profile_role": "anonymous", "visual_hash": "abc", "html": "secret"},
+        {"url": "https://admin.example.test", "status_code": 401, "technologies": ["nginx"], "profile_role": "authenticated", "visual_hash": "def"},
+    ], target="app.example", status_code=200, technology="nginx", profile_role="anonymous")
+    assert len(rows) == 1
+    assert rows[0]["url"] == "https://app.example.test"
+    assert "html" not in rows[0]
+    assert filter_web_surface_rows(rows, visual_hash="abc", changed_since=["abc"]) == []
 
 
 def test_httpx_json_output_carries_safe_screenshot_metadata_only():

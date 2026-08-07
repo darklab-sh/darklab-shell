@@ -78,6 +78,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Exact version correlation now materializes provenance-rich inference records.**
   - **What:** Matching PURL/CPE versions produce distinct `version_inference` finding candidates with target, source run/import, observation, tool version, and observed-time context.
   - **Tests:** Correlation coverage pins provenance fields and keeps active confirmation separate.
+- **Project Web Surface metadata now has bounded gallery filtering.**
+  - **What:** Captures can be filtered by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
+  - **Tests:** Gallery coverage pins metadata-only filtering and bounded results.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
