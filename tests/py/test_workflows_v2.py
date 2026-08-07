@@ -24,6 +24,7 @@ from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.fanout import expand_collection_step
 from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy
 from services.workflows.fanout_checkpoint import checkpoint_from_payload, create_fanout_checkpoint
+from services.workflows.fanout_summary import summarize_fanout_results
 from services.workflows.compiler import (
     WorkflowDefinitionError,
     compile_execution_definition,
@@ -519,6 +520,22 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     assert "fanout_checkpoint" not in public["steps"][0]
     with pytest.raises(ValueError, match="overlap"):
         set_fanout_checkpoint(execution_id, step_id, {"pending": [1], "completed": [1], "failed": [], "cancelled": False})
+
+
+def test_collection_fanout_summary_exposes_counts_and_bounded_error_codes_only():
+    summary = summarize_fanout_results([
+        {"status": "succeeded", "value": "secret.example"},
+        {"status": "failed", "error_code": "scope_rejected", "value": "secret.example"},
+        {"status": "failed", "error_code": "private-value.example"},
+        {"status": "running"},
+        {"status": "unknown", "error_code": "ignored"},
+    ], cancelled=True)
+    assert summary == {
+        "total": 5, "pending": 1, "running": 1, "succeeded": 1,
+        "failed": 2, "skipped": 0, "cancelled": True,
+        "failure_samples": ["scope_rejected", "private-value.example"],
+    }
+    assert "secret.example" not in str(summary)
 
 
 def test_execution_state_machine_advances_once_and_keeps_snapshot():

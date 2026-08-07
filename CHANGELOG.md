@@ -39,6 +39,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Workflow storage now validates fan-out checkpoint updates.**
   - **What:** Internal callers can persist and recover one validated checkpoint per step; malformed or overlapping state is rejected, and public execution payloads remain unchanged.
   - **Tests:** Workflow storage coverage pins persistence, validation, and private serialization boundaries.
+- **Assessment fan-out now has a safe public progress summary.**
+  - **What:** UI-facing summaries expose child counts, cancellation state, and a small set of error codes without returning collection values or raw child error text.
+  - **Tests:** Focused workflow coverage pins count normalization and value redaction.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
