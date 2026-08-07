@@ -1337,6 +1337,120 @@ commands:
           suggest:
             - value: dnsrecon-results.xml
               description: Save XML DNS results
+  - root: gau
+    description: Finds historical URLs for a domain through public passive-data providers.
+    category: Network Reconnaissance
+    knowledge:
+      notes:
+        - gau queries public archives and threat-intelligence indexes; it does not probe the returned URLs.
+        - --config reads a TOML file and --o writes results through the active Files workspace.
+      gotchas:
+        - Historical URLs can be stale or out of scope. Review and live-check them before sending them to an active scanner.
+      safe_defaults:
+        - Use --threads 2 --timeout 10 for one approved domain and save the passive results for review.
+      common_flags:
+        - "--subs — include known subdomains"
+        - "--providers — select passive providers"
+        - "--threads — provider worker count"
+        - "--timeout — provider request timeout"
+        - "--o — write results"
+      artifact_behavior: With Files enabled, --o writes results and --config reads settings through the active workspace; bare paths and custom proxies are denied.
+    help:
+      flags:
+        - -h
+        - --help
+    policy:
+      allow:
+        - gau
+      deny:
+        - gau --o
+        - gau --config
+        - gau --proxy
+    workspace_flags:
+      - flag: --o
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: --config
+        mode: read
+        value: separate_or_attached
+        format: toml
+    autocomplete:
+      examples:
+        - value: gau -h
+          description: Show help and usage
+        - value: gau --subs --threads 2 --timeout 10 darklab.sh
+          description: Find historical URLs for a domain and its subdomains
+        - value: gau --subs --threads 2 --timeout 10 --o historical-urls.txt darklab.sh
+          description: Save historical URLs to a session file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: --version
+          description: Show the installed gau version
+          closes: true
+        - value: --subs
+          description: Include known subdomains
+        - value: --providers
+          description: Comma-separated passive providers
+          takes_value: true
+          suggest:
+            - value: wayback,commoncrawl,otx,urlscan
+              description: Query every supported passive provider
+            - value: wayback,commoncrawl
+              description: Query public web archives only
+        - value: --threads
+          description: Number of provider workers
+          takes_value: true
+          suggest:
+            - value: "2"
+              description: Bounded default worker count
+        - value: --timeout
+          description: Provider request timeout in seconds
+          takes_value: true
+          suggest:
+            - value: "10"
+              description: Bounded default timeout
+        - value: --retries
+          description: Number of provider request retries
+          takes_value: true
+        - value: --from
+          description: Earliest archive month in YYYYMM form
+          takes_value: true
+        - value: --to
+          description: Latest archive month in YYYYMM form
+          takes_value: true
+        - value: --blacklist
+          description: Comma-separated extensions to exclude
+          takes_value: true
+        - value: --fp
+          description: Collapse URLs that differ only by parameter values
+        - value: --json
+          description: Emit provider metadata as JSON
+        - value: --o
+          description: Write discovered URLs to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: historical-urls.txt
+              description: Save historical URLs for later review
+        - value: --config
+          description: Read gau settings from a session TOML file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: gau-config.toml
+              description: Session gau configuration file
+      arguments:
+        - placeholder: <domain>
+          hint_only: true
+          value_type: domain
+          description: Approved domain to query through passive providers
   - root: subfinder
     description: Discovers subdomains from passive sources and optional provider configuration.
     category: Network Reconnaissance

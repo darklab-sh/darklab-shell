@@ -42,6 +42,9 @@ ARG DALFOX_LINUX_AMD64_SHA256=0818b75082bf8527c5c4b6f4ed0f745f393290637328335788
 ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.1.2-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=d21f541038a40d8dd5c4b655fb88159a4b9a75c63f61c3e244647326a5199bc2
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
+ARG GAU_VERSION=v2.2.4
+ARG GAU_LINUX_AMD64_SHA256=10e2e248c37cafb0be3f6d2931125296b95cd4186066d596d47fa417237529a9
+ARG GAU_LINUX_ARM64_SHA256=c194992df360d3a24e021c6dc5a5a0576cfd769be1d19cccb29adc1d3759637d
 ARG SQLMAP_VERSION=1.10.8
 ARG SQLMAP_COMMIT=cb8298d55ae9b8eb4f05b6153c158d23479958a8
 ARG SQLMAP_LICENSE_SHA256=b1bbb62f5b272a6247d442d5e4f644a5bca7138e70776539ec84a5a90433fd13
@@ -385,6 +388,32 @@ RUN gem install wpscan -v "${WPSCAN_VERSION}" && \
     cp -a /var/lib/gems /out/var/lib/ && \
     cp -a /usr/local/bin/wpscan /out/usr/local/bin/
 
+FROM ${PYTHON_BASE_IMAGE} AS gau-asset
+ARG TARGETARCH
+ARG GAU_VERSION
+ARG GAU_LINUX_AMD64_SHA256
+ARG GAU_LINUX_ARM64_SHA256
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /tmp
+RUN case "${TARGETARCH}" in \
+        amd64) gau_sha256="${GAU_LINUX_AMD64_SHA256}" ;; \
+        arm64) gau_sha256="${GAU_LINUX_ARM64_SHA256}" ;; \
+        *) echo "unsupported gau target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    gau_release="${GAU_VERSION#v}" && \
+    curl --fail --location --connect-timeout 15 --max-time 90 \
+        --retry 4 --retry-delay 3 --retry-all-errors \
+        --output gau.tar.gz \
+        "https://github.com/lc/gau/releases/download/${GAU_VERSION}/gau_${gau_release}_linux_${TARGETARCH}.tar.gz" && \
+    printf "%s  gau.tar.gz\n" "${gau_sha256}" > gau.tar.gz.sha256 && \
+    sha256sum -c gau.tar.gz.sha256 && \
+    tar xzf gau.tar.gz && \
+    mkdir -p /out/usr/local/bin /out/usr/share/doc/darklab-shell/licenses && \
+    install -m 0755 gau /out/usr/local/bin/gau && \
+    install -m 0644 LICENSE /out/usr/share/doc/darklab-shell/licenses/gau.txt
+
 FROM ${PYTHON_BASE_IMAGE} AS sqlmap-asset
 ARG SQLMAP_VERSION
 ARG SQLMAP_COMMIT
@@ -450,6 +479,7 @@ COPY --from=wordlist-assets /usr/share/wordlists/seclists/ /usr/share/wordlists/
 COPY --from=script-assets /out/ /
 COPY --from=rustscan-asset /out/ /
 COPY --from=dalfox-asset /out/ /
+COPY --from=gau-asset /out/ /
 COPY --from=sqlmap-asset /out/ /
 COPY --from=ruby-tools /out/ /
 

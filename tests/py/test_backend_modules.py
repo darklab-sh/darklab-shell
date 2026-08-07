@@ -17992,6 +17992,10 @@ class TestDerivedCommandRegistry:
         assert "cdncheck -update" in cdncheck["policy"]["deny"]
         assert is_command_allowed("cdncheck -i ip.darklab.sh -jsonl -silent")[0]
         assert not is_command_allowed("cdncheck -i ip.darklab.sh -update")[0]
+        gau = by_root["gau"]
+        assert {"gau --o", "gau --config", "gau --proxy"}.issubset(set(gau["policy"]["deny"]))
+        assert is_command_allowed("gau --subs --threads 2 --timeout 10 darklab.sh")[0]
+        assert not is_command_allowed("gau --proxy http://proxy.darklab.sh darklab.sh")[0]
         trufflehog = by_root["trufflehog"]
         assert "trufflehog filesystem --directory" in trufflehog["policy"]["allow"]
         assert "trufflehog git" in trufflehog["policy"]["allow"]
@@ -18102,6 +18106,7 @@ class TestDerivedCommandRegistry:
                 "request.txt": "GET / HTTP/1.1\nHost: ip.darklab.sh\n\n",
                 "subfinder-config.yaml": "recursive: false\n",
                 "subfinder-provider-config.yaml": "github: []\n",
+                "gau-config.toml": "threads = 2\n",
                 "ca.pem": "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
                 "nmap-script-args.txt": "http.useragent=darklab\n",
                 "trufflehog-include.txt": ".*\n",
@@ -18147,6 +18152,9 @@ class TestDerivedCommandRegistry:
                 ),
                 "cdncheck -i ip.darklab.sh -jsonl -silent -r resolvers.txt -o cdncheck-results.jsonl": (
                     ["resolvers.txt"], ["cdncheck-results.jsonl"],
+                ),
+                "gau --config gau-config.toml --o historical-urls.txt darklab.sh": (
+                    ["gau-config.toml"], ["historical-urls.txt"],
                 ),
                 "httpx -rr request.txt -status-code -o httpx-raw.txt": (
                     ["request.txt"], ["httpx-raw.txt"],
@@ -22131,6 +22139,9 @@ class TestOutputSignals:
         assert extract_target("tlsx -u ip.darklab.sh -json -silent") == "ip.darklab.sh"
         assert extract_target("cdncheck -i ip.darklab.sh -jsonl -silent") == "ip.darklab.sh"
         assert extract_target(
+            "gau --providers wayback,commoncrawl --threads 2 --timeout 10 darklab.sh"
+        ) == "darklab.sh"
+        assert extract_target(
             "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
             "darklab.sh --resolvers resolvers.txt"
         ) == "darklab.sh"
@@ -24205,6 +24216,7 @@ class TestAutocompleteContextLoading:
         for arg_name, version, smoke_command in (
             ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
             ("CDNCHECK_VERSION", "v1.2.45", "cdncheck -h"),
+            ("GAU_VERSION", "v2.2.4", "gau --version"),
             ("TRUFFLEHOG_VERSION", "v3.95.9", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),

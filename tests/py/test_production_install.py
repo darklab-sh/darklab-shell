@@ -1288,6 +1288,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     )
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
     assert "RUSTSCAN_LINUX_ARM64_SHA256=" in dockerfile
+    assert "GAU_LINUX_AMD64_SHA256=10e2e248c37cafb0be3f6d2931125296b95cd4186066d596d47fa417237529a9" in dockerfile
+    assert "GAU_LINUX_ARM64_SHA256=c194992df360d3a24e021c6dc5a5a0576cfd769be1d19cccb29adc1d3759637d" in dockerfile
+    assert "COPY --from=gau-asset /out/ /" in dockerfile
     assert 'case "${TARGETARCH}" in' in dockerfile
     assert "curl --fail --location" in dockerfile
     assert "--connect-timeout 15" in dockerfile

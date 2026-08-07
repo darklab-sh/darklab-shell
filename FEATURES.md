@@ -393,11 +393,13 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
   - open-port, service, and reverse-DNS rows from scanners such as `nmap`, `naabu`, `rustscan`, and `nc`
   - hit rows from `ffuf`, `gobuster`, and related directory fuzzers, with `ffuf` hits tied back to the full URL produced from the command's `FUZZ` template
   - passive domain and IP rows from `assetfinder`
+  - historical URL rows from `gau`, kept as passive discovery metadata rather than vulnerability findings
   - severity-tagged result rows from `nuclei`
   - JSON rows from `tlsx`, `cdncheck`, TruffleHog, and `puredns`
   - DNS answers and query outcomes from `dig`, `host`, and `nslookup`
   - certificate and TLS verdict lines from `openssl s_client`, `sslscan`, `sslyze`, and `testssl`, including `s_client` certificate subjects, issuers, key details, validity windows, negotiated TLS details, and verification status without treating PEM bodies as findings
 - Structured output from the staged external tools feeds Atlas and saved run metadata directly:
+  - `gau` URL rows retain passive-provider and source-run provenance so archived paths can be reviewed before any live probe.
   - `tlsx -json` rows create TLS findings, domain/IP/certificate-hash entities, and warnings for certificate or probe problems.
   - `cdncheck -jsonl` rows create host/IP entities and summary context; CDN, cloud, and WAF matches are not treated as vulnerabilities.
   - TruffleHog JSON rows create redacted findings from detector, verification, source, repository, file, commit, and line metadata without storing raw secret values as titles or snippets.

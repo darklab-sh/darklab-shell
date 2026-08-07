@@ -133,6 +133,14 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "gau --version",
+      "expected_text": [
+        "gau version: 2.2.4"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "trufflehog --help",
       "expected_text": [
         "TruffleHog is a tool for finding credentials",

@@ -134,7 +134,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 6 — Close the web and API discovery/validation gaps
 
 - [ ] Add `gau` as the historical/passive URL source:
-  - Pin a reviewed release and checksum for AMD64/ARM64, include its license/SBOM/provenance, add it to the command registry, and route Files input/output through declared workspace flags.
   - Capture discovered URLs as Atlas URL entities with provider/source provenance but do not create vulnerability findings merely because a historical URL exists.
   - Add a built-in workflow that combines `gau`, current HTTPx probing, Katana crawling, normalization, deduplication, and bounded output files without sending archived URLs to active scanners until live/scope checks pass.
 - [ ] Add passive product/package-version correlation without presenting inference as confirmation:

@@ -9,6 +9,8 @@ from functools import lru_cache
 import re
 from urllib.parse import urlparse
 
+from core.output_target_recon import passive_recon_target
+
 _URL_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.I)
 _URL_TAIL_RE = re.compile(r"[/?#].*$")
 _FLAG_ASSIGNMENT_RE = re.compile(r"^([^=]+)=(.+)$")
@@ -164,18 +166,9 @@ def extract_target(command: str) -> str | None:
         target = _find_flag_value(tokens, {"-u", "--url", "-target", "--target"})
         return _strip_url_target(_FUZZ_SUFFIX_RE.sub("", target)) if target else None
 
-    if root == "assetfinder":
-        positionals = _positional_targets(tokens)
-        target = next((token for token in positionals if "." in token), "")
-        return _strip_url_target(target) if target else None
-
-    if root == "tlsx":
-        target = _find_flag_value(tokens, {"-u", "-host"})
-        return _strip_url_target(target) if target else None
-
-    if root == "cdncheck":
-        target = _find_flag_value(tokens, {"-i", "-input"})
-        return _strip_url_target(target) if target else None
+    passive_target = passive_recon_target(root, tokens)
+    if passive_target is not None:
+        return _strip_url_target(passive_target) if passive_target else None
 
     if root == "puredns" and len(tokens) > 1 and tokens[1].lower() == "bruteforce":
         positionals = _positional_targets(

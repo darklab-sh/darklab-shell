@@ -42,6 +42,7 @@ Common examples include:
 - `wget -P downloads https://example.test/file.txt`
 - `trufflehog filesystem --directory source --json`
 - `puredns bruteforce domains.txt example.test --resolvers resolvers.txt --write results.txt`
+- `gau --subs --threads 2 --timeout 10 --o historical-urls.txt example.test`
 
 ProjectDiscovery tools such as `nuclei`, `subfinder`, `dnsx`, `httpx`, `tlsx`, `cdncheck`, `katana`, and `naabu` keep useful config, resume, and generated state under the active workspace's `/tools/` folder. Supported secondary response, screenshot, export, log, and auxiliary-file flags also save through Files. Use the Files panel or the built-in `ls`, `cat`, `mkdir`, `mv`, and confirmed `rm` commands to review and manage those results.
 
@@ -110,6 +111,10 @@ Use `mtr --interactive <host>` for the continuously redrawn display when Interac
 ### `wget`
 
 With Files enabled, downloads go to the active Files folder. Use `-P downloads` or `--directory-prefix=downloads` to choose a subfolder.
+
+### `gau`
+
+`gau` searches public archives and indexes for URLs that have been seen for a domain. Its results are passive leads, not proof that a URL is still live or vulnerable. Save them with `--o historical-urls.txt`, review the list in Files, and live-check approved URLs before using an active scanner. Custom proxy arguments stay blocked, while `--config` and `--o` can use owner-scoped Files paths.
 
 ### `nuclei` and ProjectDiscovery state
 

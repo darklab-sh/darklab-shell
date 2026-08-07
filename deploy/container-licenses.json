@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_for_release": "2.8.3",
-  "reviewed_on": "2026-07-29",
+  "reviewed_on": "2026-08-07",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -253,6 +253,13 @@
       "source": "https://github.com/hahwul/dalfox",
       "license": "MIT",
       "notice_location": "/usr/share/doc/darklab-shell/licenses/Dalfox.txt"
+    },
+    {
+      "name": "gau",
+      "version_arg": "GAU_VERSION",
+      "source": "https://github.com/lc/gau",
+      "license": "MIT",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/gau.txt"
     },
     {
       "name": "SQLmap",

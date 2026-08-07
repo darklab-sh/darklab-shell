@@ -68,7 +68,7 @@ Other notice locations
 
 Debian package notices are under /usr/share/doc/*/copyright. Python package
 notices are under their installed *-info metadata directories. Durable notices
-for packaged binaries, including Dalfox, are under
+for packaged binaries, including Dalfox and gau, are under
 /usr/share/doc/darklab-shell/licenses. Source trees retained for SecLists,
 testssl.sh, and Nikto include their upstream license files. Standard GNU
 license texts are under /usr/share/common-licenses.
