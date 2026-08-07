@@ -366,6 +366,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/cpe_applicability.py", 158, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nvd_cpe_correlation.py", 186, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nmap_stored_nvd.py", 60, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/nmap_inference_materialization.py", 90, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/nmap_version_observations.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/stored_nvd_inference.py", 52, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/version_correlation.py", 150, "split-package-ratchet"),

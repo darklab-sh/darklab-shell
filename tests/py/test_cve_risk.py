@@ -43,6 +43,10 @@ from services.cve_risk.ranking import (
 from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
+from services.assessments.nmap_inference_materialization import (
+    NMAP_INFERENCE_MAX_CANDIDATES,
+    materialize_nmap_xml_version_inferences,
+)
 from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
 from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
 from services.assessments.version_inference_persistence import persist_version_inference_candidate
@@ -132,6 +136,77 @@ def _insert_project_finding(
         "VALUES (?, ?, 'finding', ?, ?)",
         (f"link-{finding_id}", project_id, finding_id, now),
     )
+
+
+def test_nmap_version_inference_materialization_counts_created_repeated_and_rejected_candidates():
+    candidates = [{"candidate": index} for index in range(3)]
+    persisted = []
+
+    def correlate(*_args, **_kwargs):
+        return {
+            "observations": [{"candidates": candidates[:2]}, {"candidates": candidates[2:]}],
+            "truncated": False,
+        }
+
+    def persist(_conn, session_id, candidate, *, team_id=""):
+        persisted.append((session_id, team_id, candidate))
+        if candidate == candidates[2]:
+            return None
+        return {
+            "created": candidate == candidates[0],
+            "source_created": candidate == candidates[0],
+        }
+
+    summary = materialize_nmap_xml_version_inferences(
+        object(),
+        "session-version",
+        b"<nmaprun/>",
+        source_run_id="run-version",
+        team_id="team-version",
+        correlate_fn=correlate,
+        persist_fn=persist,
+    )
+
+    assert persisted == [
+        ("session-version", "team-version", candidate) for candidate in candidates
+    ]
+    assert summary == {
+        "observation_count": 2,
+        "candidate_count": 3,
+        "attempted_count": 3,
+        "materialized_count": 2,
+        "finding_created_count": 1,
+        "source_created_count": 1,
+        "rejected_count": 1,
+        "skipped_count": 0,
+        "truncated": False,
+    }
+
+
+def test_nmap_version_inference_materialization_rejects_over_cap_instead_of_evicting():
+    candidates = [{"candidate": index} for index in range(NMAP_INFERENCE_MAX_CANDIDATES + 1)]
+    persisted = []
+
+    summary = materialize_nmap_xml_version_inferences(
+        object(),
+        "session-version",
+        b"<nmaprun/>",
+        source_run_id="run-version",
+        correlate_fn=lambda *_args, **_kwargs: {
+            "observations": [{"candidates": candidates}],
+            "truncated": False,
+        },
+        persist_fn=lambda _conn, _session_id, candidate, **_kwargs: (
+            persisted.append(candidate) or {"created": True, "source_created": True}
+        ),
+    )
+
+    assert persisted == candidates[:NMAP_INFERENCE_MAX_CANDIDATES]
+    assert summary["candidate_count"] == NMAP_INFERENCE_MAX_CANDIDATES + 1
+    assert summary["attempted_count"] == NMAP_INFERENCE_MAX_CANDIDATES
+    assert summary["materialized_count"] == NMAP_INFERENCE_MAX_CANDIDATES
+    assert summary["skipped_count"] == 1
+    assert summary["truncated"] is True
 
 
 def test_public_feed_parsers_require_metadata_ranges_and_unique_cves():
@@ -1073,6 +1148,27 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     assert saved_inference["created"] is True
     assert saved_inference["source_created"] is True
     assert repeated_inference == {**saved_inference, "created": False, "source_created": False}
+    materialized_nmap = materialize_nmap_xml_version_inferences(
+        risk_db,
+        "version-owner",
+        """<nmaprun version="7.96"><host><address addr="192.0.2.10" addrtype="ipv4"/>
+        <ports><port protocol="tcp" portid="443"><state state="open"/><service name="https">
+        <cpe>cpe:/a:example:server:2.5.1</cpe></service></port></ports></host></nmaprun>""",
+        source_run_id="run-nmap-xml-1",
+        observed_at="2026-08-05T12:30:00+00:00",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert materialized_nmap == {
+        "observation_count": 1,
+        "candidate_count": 1,
+        "attempted_count": 1,
+        "materialized_count": 1,
+        "finding_created_count": 0,
+        "source_created_count": 0,
+        "rejected_count": 0,
+        "skipped_count": 0,
+        "truncated": False,
+    }
     saved_row = risk_db.execute(
         "SELECT origin, validation_method, severity, confidence, cve_ids_json, occurrence_count, "
         "run_id, entity_id FROM findings WHERE id = ?",

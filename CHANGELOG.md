@@ -105,6 +105,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Provenance-complete version matches can now become distinct inferred findings.**
   - **What:** An explicit persistence step rechecks the successful Nmap run or applied import, its exact owner-scoped Atlas entity, and the stored NVD rule before saving a `version_inference` finding. Repeating the same source decision is idempotent, and the immutable source row keeps the observed CPE/version, tool and parser versions, target, time, affected range, and advisory snapshot separate from actively confirmed findings.
   - **Tests:** SQLite and real PostgreSQL coverage pins source and owner validation, exact-rule revalidation, idempotent occurrences, CVE linking, and tampered-range rejection.
+- **Structured Nmap version matches now have a bounded materialization step.**
+  - **What:** One Nmap XML result can correlate against stored NVD rules and persist at most 100 revalidated inference candidates in deterministic observation order. Repeated source decisions remain idempotent, rejected candidates don't stop valid siblings, and matches beyond the cap stay unpersisted rather than displacing earlier evidence.
+  - **Tests:** Focused orchestration coverage pins personal/team context, created versus repeated counts, candidate rejection, deterministic caps, and reject-don't-evict behavior.
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.
