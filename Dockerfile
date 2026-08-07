@@ -43,8 +43,7 @@ ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.1.2-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=d21f541038a40d8dd5c4b655fb88159a4b9a75c63f61c3e244647326a5199bc2
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
 ARG GAU_VERSION=v2.2.4
-ARG GAU_LINUX_AMD64_SHA256=10e2e248c37cafb0be3f6d2931125296b95cd4186066d596d47fa417237529a9
-ARG GAU_LINUX_ARM64_SHA256=c194992df360d3a24e021c6dc5a5a0576cfd769be1d19cccb29adc1d3759637d
+ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=
 ARG SQLMAP_VERSION=1.10.8
 ARG SQLMAP_COMMIT=cb8298d55ae9b8eb4f05b6153c158d23479958a8
 ARG SQLMAP_LICENSE_SHA256=b1bbb62f5b272a6247d442d5e4f644a5bca7138e70776539ec84a5a90433fd13
@@ -154,6 +153,8 @@ ARG PUREDNS_VERSION
 ARG VT_CLI_VERSION
 ARG IPINFO_CLI_VERSION
 ARG URLSCAN_CLI_VERSION
+ARG GAU_VERSION
+ARG GAU_MODULE_SUM
 RUN CGO_ENABLED=0 install-go-tool "github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}"
 RUN install-go-tool "github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}"
 RUN install-go-tool "github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}"
@@ -163,6 +164,13 @@ RUN install-go-tool "github.com/d3mondev/puredns/v2@${PUREDNS_VERSION}"
 RUN install-go-tool "github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION}"
 RUN install-go-tool "github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION}"
 RUN install-go-tool "github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION}"
+RUN install-go-tool "github.com/lc/gau/v2/cmd/gau@${GAU_VERSION}" && \
+    go version -m /out/usr/local/bin/gau > /tmp/gau-build-info && \
+    gau_module_sum=$(awk \
+        '$1 == "mod" && $2 == "github.com/lc/gau/v2" {print $4; exit}' \
+        /tmp/gau-build-info) && \
+    test "$gau_module_sum" = "$GAU_MODULE_SUM" && \
+    rm /tmp/gau-build-info
 RUN git clone --depth 1 --branch "${GOSU_VERSION}" \
         https://github.com/tianon/gosu.git /tmp/gosu && \
     go -C /tmp/gosu build -trimpath -o /out/usr/sbin/gosu . && \
@@ -195,11 +203,13 @@ RUN amass_license=$(find "$(go env GOMODCACHE)/github.com/owasp-amass" \
         -iname 'LICENSE*' -type f -print -quit) && \
     urlscan_license=$(find "$(go env GOMODCACHE)/github.com/urlscan" \
         -iname 'LICENSE*' -type f -print -quit) && \
+    gau_license=$(find "$(go env GOMODCACHE)/github.com/lc/gau" \
+        -iname 'LICENSE*' -type f -print -quit) && \
     test -n "$amass_license" && test -n "$assetfinder_license" && \
     test -n "$gobuster_license" && test -n "$ffuf_license" && \
     test -n "$tcping_license" && test -n "$puredns_license" && \
     test -n "$vt_license" && test -n "$ipinfo_license" && \
-    test -n "$urlscan_license" && \
+    test -n "$urlscan_license" && test -n "$gau_license" && \
     install -m 0644 "$amass_license" \
         /out/usr/share/doc/darklab-shell/licenses/go-modules/OWASP-Amass.txt && \
     install -m 0644 "$assetfinder_license" \
@@ -217,7 +227,9 @@ RUN amass_license=$(find "$(go env GOMODCACHE)/github.com/owasp-amass" \
     install -m 0644 "$ipinfo_license" \
         /out/usr/share/doc/darklab-shell/licenses/IPinfo-cli.txt && \
     install -m 0644 "$urlscan_license" \
-        /out/usr/share/doc/darklab-shell/licenses/urlscan-cli.txt
+        /out/usr/share/doc/darklab-shell/licenses/urlscan-cli.txt && \
+    install -m 0644 "$gau_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/gau.txt
 
 FROM ${PYTHON_BASE_IMAGE} AS native-tools
 ARG OPENSSL_VERSION
@@ -388,32 +400,6 @@ RUN gem install wpscan -v "${WPSCAN_VERSION}" && \
     cp -a /var/lib/gems /out/var/lib/ && \
     cp -a /usr/local/bin/wpscan /out/usr/local/bin/
 
-FROM ${PYTHON_BASE_IMAGE} AS gau-asset
-ARG TARGETARCH
-ARG GAU_VERSION
-ARG GAU_LINUX_AMD64_SHA256
-ARG GAU_LINUX_ARM64_SHA256
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl && \
-    rm -rf /var/lib/apt/lists/*
-WORKDIR /tmp
-RUN case "${TARGETARCH}" in \
-        amd64) gau_sha256="${GAU_LINUX_AMD64_SHA256}" ;; \
-        arm64) gau_sha256="${GAU_LINUX_ARM64_SHA256}" ;; \
-        *) echo "unsupported gau target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac && \
-    gau_release="${GAU_VERSION#v}" && \
-    curl --fail --location --connect-timeout 15 --max-time 90 \
-        --retry 4 --retry-delay 3 --retry-all-errors \
-        --output gau.tar.gz \
-        "https://github.com/lc/gau/releases/download/${GAU_VERSION}/gau_${gau_release}_linux_${TARGETARCH}.tar.gz" && \
-    printf "%s  gau.tar.gz\n" "${gau_sha256}" > gau.tar.gz.sha256 && \
-    sha256sum -c gau.tar.gz.sha256 && \
-    tar xzf gau.tar.gz && \
-    mkdir -p /out/usr/local/bin /out/usr/share/doc/darklab-shell/licenses && \
-    install -m 0755 gau /out/usr/local/bin/gau && \
-    install -m 0644 LICENSE /out/usr/share/doc/darklab-shell/licenses/gau.txt
-
 FROM ${PYTHON_BASE_IMAGE} AS sqlmap-asset
 ARG SQLMAP_VERSION
 ARG SQLMAP_COMMIT
@@ -479,7 +465,6 @@ COPY --from=wordlist-assets /usr/share/wordlists/seclists/ /usr/share/wordlists/
 COPY --from=script-assets /out/ /
 COPY --from=rustscan-asset /out/ /
 COPY --from=dalfox-asset /out/ /
-COPY --from=gau-asset /out/ /
 COPY --from=sqlmap-asset /out/ /
 COPY --from=ruby-tools /out/ /
 

@@ -259,7 +259,7 @@
       "version_arg": "GAU_VERSION",
       "source": "https://github.com/lc/gau",
       "license": "MIT",
-      "notice_location": "/usr/share/doc/darklab-shell/licenses/gau.txt"
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/gau.txt"
     },
     {
       "name": "SQLmap",
