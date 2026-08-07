@@ -87,6 +87,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Passive web metadata now survives run-event persistence.**
   - **What:** Bounded screenshot and historical-URL lists are retained in the event's safe source details and wire representation instead of disappearing after line classification.
   - **Tests:** Run-event coverage verifies the metadata through capture and wire round-trip serialization.
+- **Project Web Surface now has a bounded event-metadata extractor.**
+  - **What:** Gallery consumers can collect screenshot metadata from persisted run events without parsing event internals or exposing captured HTML and binary files.
+  - **Tests:** Extraction coverage pins malformed-row handling, safe projection, and the gallery row cap.
 - **Assessment recommendations now include a bounded passive gau plan.**
   - **What:** Operators can generate one-domain historical URL discovery plans with a fixed thread count and timeout; discovered URLs remain passive metadata until separately reviewed.
   - **Tests:** Command-plan coverage pins the domain-only target contract and no-auto-probe description.

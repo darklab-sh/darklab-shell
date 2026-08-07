@@ -9,7 +9,7 @@ from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
 from services.assessments.historical_urls import filter_historical_urls, normalize_historical_url, normalize_historical_urls
-from services.assessments.web_gallery import filter_web_surface_rows
+from services.assessments.web_gallery import filter_web_surface_rows, web_surface_rows_from_events
 from services.runs.finalization import capture_event_with_signals
 from services.runs.output_model import to_wire
 from services.intel.epss import normalize_epss_rows
@@ -170,6 +170,14 @@ def test_web_gallery_paging_is_bounded_and_skips_malformed_rows():
     )
     assert [row["url"] for row in rows] == ["https://two.example"]
     assert filter_web_surface_rows([{"url": "https://one.example"}], offset=-5, limit=0) == []
+
+
+def test_web_gallery_extracts_only_bounded_screenshot_metadata_from_event_wires():
+    rows = web_surface_rows_from_events([
+        {"source_detail": {"screenshots": [{"url": "https://app.example", "artifact_path": "shots/app.png", "html": "secret"}]}},
+        {"source_detail": {"screenshots": [{"url": ""}, None]}},
+    ])
+    assert rows == [{"url": "https://app.example", "artifact_path": "shots/app.png"}]
 
 
 def test_httpx_json_output_carries_safe_screenshot_metadata_only():

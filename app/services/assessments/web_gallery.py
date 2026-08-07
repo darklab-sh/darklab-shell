@@ -75,3 +75,25 @@ def filter_web_surface_rows(
         if len(result) >= page_limit:
             break
     return result
+
+
+def web_surface_rows_from_events(events: object) -> list[dict[str, object]]:
+    """Extract normalized screenshot metadata from persisted run-event wires."""
+    values = events if isinstance(events, list) else []
+    rows: list[dict[str, object]] = []
+    for event in values:
+        if not isinstance(event, Mapping):
+            continue
+        detail = event.get("source_detail")
+        if not isinstance(detail, Mapping):
+            continue
+        captures = detail.get("screenshots")
+        if not isinstance(captures, list):
+            continue
+        for capture in captures:
+            if not isinstance(capture, Mapping) or not capture.get("url"):
+                continue
+            rows.append({key: capture[key] for key in _PUBLIC_FIELDS if key in capture})
+            if len(rows) >= MAX_GALLERY_ROWS:
+                return rows
+    return rows
