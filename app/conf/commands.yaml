@@ -5969,6 +5969,12 @@ commands:
         - value: --version
           description: Show the installed SQLmap version
           closes: true
+        - value: --ignore-redirects
+          description: Do not follow redirects
+        - value: --disable-coloring
+          description: Disable colored output
+        - value: --no-logging
+          description: Disable SQLmap log files
 pipe_helpers:
   - root: grep
     autocomplete:
@@ -6156,6 +6162,12 @@ pipe_helpers:
         - value: --version
           description: Show the installed SQLmap version
           closes: true
+        - value: --ignore-redirects
+          description: Do not follow redirects
+        - value: --disable-coloring
+          description: Disable colored output
+        - value: --no-logging
+          description: Disable SQLmap log files
   - root: uniq
     autocomplete:
       pipe:

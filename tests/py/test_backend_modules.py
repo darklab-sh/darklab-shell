@@ -17909,6 +17909,13 @@ class TestDerivedCommandRegistry:
         assert rewritten.endswith("--only-discovery --skip-mining-dict")
         help_command, _notice = commands.rewrite_command("dalfox --help")
         assert help_command == "dalfox --help"
+        sqlmap = by_root["sqlmap"]
+        assert sqlmap["policy"]["allow"] == ["sqlmap"]
+        assert {"sqlmap --dump", "sqlmap --os-shell", "sqlmap --file-read", "sqlmap --technique"}.issubset(
+            set(sqlmap["policy"]["deny"])
+        )
+        assert is_command_allowed("sqlmap https://darklab.sh/item?id=1")[0]
+        assert not is_command_allowed("sqlmap https://darklab.sh/item?id=1 --dump")[0]
         ipinfo = by_root["ipinfo"]
         assert ipinfo["requires_secrets"] == [{"env": "IPINFO_TOKEN", "optional": True}]
         assert "ipinfo --token" in ipinfo["policy"]["deny"]
@@ -30955,6 +30962,7 @@ class TestAssessmentHttpProfileExecution:
         from services.assessments.http_profile_material_formats import (
             curl_config,
             dalfox_config,
+            sqlmap_config,
         )
         from services.commands.registry import is_command_allowed
 
@@ -31000,6 +31008,19 @@ class TestAssessmentHttpProfileExecution:
         assert dalfox.time_limit_seconds == 60
         allowed, reason = is_command_allowed(dalfox.command.removesuffix(" --config [protected]"))
         assert allowed, reason
+        sqlmap = command_plan(
+            "sqlmap",
+            "url",
+            "https://app.example/item?id=1",
+            http_profile=summary,
+        )
+        assert sqlmap is not None
+        assert sqlmap.command.endswith("--no-logging -c [protected]")
+        assert "--batch --level 1 --risk 1 --technique BEU" in sqlmap.command
+        assert sqlmap.time_limit_seconds == 120
+        assert not is_command_allowed(
+            sqlmap.command.removesuffix(" -c [protected]")
+        )[0]
         profile = {
             "include_paths": ["/admin"],
             "exclude_paths": ["/admin/logout"],
@@ -31040,7 +31061,11 @@ class TestAssessmentHttpProfileExecution:
                 "follow_redirects": False,
                 "headers": ["Authorization: Bearer protected"],
             },
-        }
+        } 
+        assert sqlmap_config([("Authorization", "Bearer protected")]).decode("utf-8") == (
+            "[Target]\n\n[Request]\nheaders = Authorization: Bearer protected\n"
+            "ignoreRedirects = True\n"
+        )
 
     def test_private_runtime_uses_scanner_owned_handoff_in_container_mode(
         self,
