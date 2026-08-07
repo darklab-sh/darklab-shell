@@ -39,13 +39,13 @@ def match_cpe_applicability(
     matches: Any,
 ) -> dict[str, str] | None:
     """Match one exact observation against complete normalized NVD CPE clauses."""
-    if not observed or not isinstance(matches, (list, tuple)):
+    if not observed or not isinstance(matches, (list, tuple)) or len(matches) > 64:
         return None
     observed_fields = observed.get("fields")
     version = str(observed.get("version") or "")
     if not isinstance(observed_fields, tuple) or not version:
         return None
-    for item in matches[:64]:
+    for item in matches:
         if not _eligible_match(item):
             continue
         criteria = parse_cpe23(item.get("criteria") or item.get("cpe23Uri"))

@@ -425,3 +425,7 @@ def test_version_correlation_requires_exact_identifier_and_version_matches():
         }],
     }]
     assert correlate_version_observation(cpe_observation, environment_specific) == []
+    assert correlate_version_observation(cpe_observation, [{
+        **cpe_advisory[0],
+        "cpe_matches": cpe_advisory[0]["cpe_matches"] * 65,
+    }]) == []

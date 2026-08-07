@@ -93,6 +93,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Normalized NVD applicability now survives advisory refreshes.**
   - **What:** Local NVD datasets and explicit NVD lookups store only the accepted CPE product identity and version limits, together with their source version, origin, and expiry. A newer accepted snapshot replaces obsolete matches instead of leaving stale ranges behind.
   - **Tests:** SQLite and Postgres migration checks pin the shared table and indexes, while advisory tests cover local-snapshot cleanup, external replacement, and rejection of incomplete matches.
+- **Stored NVD applicability now produces bounded version-inference candidates.**
+  - **What:** An exact versioned CPE can page matching CVEs through the indexed product identity and the same fail-closed applicability rules used by the pure correlator. Each candidate retains the matching NVD criteria id, affected range, source version, local/external origin, expiry, and current or stale source state without creating a finding or making a network request.
+  - **Tests:** SQLite and Postgres coverage pins exact case-insensitive product lookup, numeric ranges, deterministic CVE paging, stale-source labeling, malformed observations, out-of-range versions, and oversized rule-set rejection.
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.

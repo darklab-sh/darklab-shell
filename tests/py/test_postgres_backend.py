@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import contextmanager
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit
@@ -273,6 +274,7 @@ def test_postgres_backend_smoke_exercises_phase6_contract(postgres_schema):
 def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
 
     conn = postgres_schema.conn
     pre_comparison_migrations = tuple(
@@ -801,6 +803,34 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_finding_evidence_project",
         "idx_finding_evidence_source",
     }.issubset({row["indexname"] for row in assessment_index_rows})
+    compat = PostgresSqliteCompatConnection(conn)
+    compat.execute(
+        "INSERT INTO cve_risk_records (cve_id, updated_at) VALUES (?, ?)",
+        ("CVE-2026-62001", "2026-08-07T12:00:00+00:00"),
+    )
+    compat.execute(
+        "INSERT INTO cve_advisory_cpe_matches ("
+        "source, cve_id, match_criteria_id, criteria, cpe_part, cpe_vendor, cpe_product, "
+        "criteria_version, version_start_including, version_end_excluding, all_versions, "
+        "source_version, origin, fetched_at, expires_at) VALUES ("
+        "'nvd', ?, ?, ?, 'a', 'example', 'postgres', '*', '1.0', '2.0', FALSE, ?, "
+        "'local', ?, ?)",
+        (
+            "CVE-2026-62001",
+            "00000000-0000-4000-8000-000000006201",
+            "cpe:2.3:a:example:postgres:*:*:*:*:*:*:*:*",
+            "2026-08-07",
+            "2026-08-07T12:00:00+00:00",
+            "2026-08-14T12:00:00+00:00",
+        ),
+    )
+    postgres_correlation = correlate_stored_nvd_cpe_page(
+        compat,
+        {"cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*"},
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_correlation["matches"][0]["vulnerability_id"] == "CVE-2026-62001"
+    assert postgres_correlation["matches"][0]["advisory_source_state"] == "current"
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname

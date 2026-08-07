@@ -42,6 +42,7 @@ from services.cve_risk.ranking import (
 )
 from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
+from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
 from services.intel.nvd_applicability import normalize_nvd_cpe_matches
 from services.reports.rendering import (
     render_report_html_from_context,
@@ -978,6 +979,50 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "source_version": "2026-08-05T00:00:00Z",
         "origin": "external",
     }]
+    observation = {"cpe": "cpe:2.3:a:EXAMPLE:SERVER:2.5.1:*:*:*:*:*:*:*"}
+    changes_before_read = risk_db.total_changes
+    correlation = correlate_stored_nvd_cpe_page(
+        risk_db,
+        observation,
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert correlation == {
+        "source": "nvd",
+        "matches": [{
+            "vulnerability_id": "CVE-2026-12345",
+            "confidence": "high",
+            "match_basis": "exact_cpe_nvd_range",
+            "observed_identifier": observation["cpe"],
+            "observed_version": "2.5.1",
+            "affected_range": "NVD: >= 2.4; < 2.6",
+            "range_type": "CPE_NUMERIC",
+            "advisory_source": "nvd",
+            "advisory_source_version": "2026-08-05T00:00:00Z",
+            "validation_method": "version_inference",
+            "advisory_origin": "external",
+            "advisory_expires_at": "2026-08-05T14:00:00+00:00",
+            "advisory_source_state": "current",
+            "advisory_criteria": "cpe:2.3:a:example:server:*:*:*:*:*:*:*:*",
+            "advisory_match_criteria_id": "00000000-0000-4000-8000-000000000013",
+        }],
+        "limit": 25,
+        "offset": 0,
+        "candidate_cve_count": 1,
+        "rejected_candidate_count": 0,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert risk_db.total_changes == changes_before_read
+    stale = correlate_stored_nvd_cpe_page(
+        risk_db,
+        observation,
+        now=datetime.fromisoformat("2026-08-05T15:00:00+00:00"),
+    )
+    assert stale["matches"][0]["advisory_source_state"] == "stale"
+    assert correlate_stored_nvd_cpe_page(risk_db, {
+        "cpe": "cpe:2.3:a:example:server:2.6:*:*:*:*:*:*:*",
+    })["matches"] == []
+    assert correlate_stored_nvd_cpe_page(risk_db, {"cpe": "example server 2.5.1"})["matches"] == []
     cache_rows = risk_db.execute(
         "SELECT result_state, record_count FROM cve_advisory_lookup_cache ORDER BY result_state"
     ).fetchall()
@@ -987,6 +1032,31 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     ]
     assert "CVE-2026-12345" not in caplog.text
     assert "CVE-2026-99999" not in caplog.text
+    risk_db.execute(
+        "INSERT INTO cve_risk_records (cve_id, updated_at) VALUES (?, ?)",
+        ("CVE-2026-12346", "2026-08-05T12:00:00+00:00"),
+    )
+    risk_db.execute(
+        "INSERT INTO cve_advisory_cpe_matches ("
+        "source, cve_id, match_criteria_id, criteria, cpe_part, cpe_vendor, cpe_product, "
+        "criteria_version, version_start_including, version_end_excluding, all_versions, "
+        "source_version, origin, fetched_at, expires_at) "
+        "SELECT source, ?, ?, criteria, cpe_part, cpe_vendor, cpe_product, criteria_version, "
+        "version_start_including, version_end_excluding, all_versions, source_version, origin, "
+        "fetched_at, expires_at FROM cve_advisory_cpe_matches WHERE cve_id = ?",
+        (
+            "CVE-2026-12346",
+            "00000000-0000-4000-8000-000000000016",
+            "CVE-2026-12345",
+        ),
+    )
+    first_page = correlate_stored_nvd_cpe_page(risk_db, observation, limit=1)
+    second_page = correlate_stored_nvd_cpe_page(risk_db, observation, limit=1, offset=1)
+    assert [match["vulnerability_id"] for match in first_page["matches"]] == ["CVE-2026-12345"]
+    assert first_page["has_more"] is True
+    assert first_page["next_offset"] == 1
+    assert [match["vulnerability_id"] for match in second_page["matches"]] == ["CVE-2026-12346"]
+    assert second_page["has_more"] is False
 
 
 def test_local_nvd_dataset_replaces_prior_local_snapshot_and_enriches_ranking(risk_db):
