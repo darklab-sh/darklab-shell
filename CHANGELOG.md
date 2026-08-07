@@ -91,8 +91,8 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **What:** Gallery consumers can collect screenshot metadata from persisted run events without parsing event internals or exposing captured HTML and binary files.
   - **Tests:** Extraction coverage pins malformed-row handling, safe projection, and the gallery row cap.
 - **Workflow executions now show bounded fan-out progress.**
-  - **What:** Recent execution steps display completed and failed child counts without exposing child values or checkpoint internals.
-  - **Tests:** Workflow UI coverage pins the progress text and failure count.
+  - **What:** Recent execution steps display completed and failed child counts plus bounded failure codes without exposing child values or checkpoint internals.
+  - **Tests:** Workflow UI coverage pins the progress text, failure count, and safe failure-code display.
 - **Assessment recommendations now include a bounded passive gau plan.**
   - **What:** Operators can generate one-domain historical URL discovery plans with a fixed thread count and timeout; discovered URLs remain passive metadata until separately reviewed.
   - **Tests:** Command-plan coverage pins the domain-only target contract and no-auto-probe description.

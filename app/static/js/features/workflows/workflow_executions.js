@@ -162,6 +162,15 @@ function renderWorkflowExecutionStep(step, options) {
     const suffix = failed ? `, ${failed} failed` : '';
     progress.textContent = `Fan-out: ${Math.min(fanoutTotal, succeeded)}/${fanoutTotal} complete${suffix}`;
     summary.appendChild(progress);
+    const samples = Array.isArray(fanout?.failure_samples)
+      ? fanout.failure_samples.filter(Boolean).slice(0, 3).map(value => String(value))
+      : [];
+    if (samples.length) {
+      const failures = document.createElement('span');
+      failures.className = 'workflow-execution-fanout-failures';
+      failures.textContent = `Failure codes: ${samples.join(', ')}`;
+      summary.appendChild(failures);
+    }
   }
   row.appendChild(summary);
 
