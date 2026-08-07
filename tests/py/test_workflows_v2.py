@@ -23,6 +23,7 @@ from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.fanout import expand_collection_step
 from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy
+from services.workflows.fanout_checkpoint import create_fanout_checkpoint
 from services.workflows.compiler import (
     WorkflowDefinitionError,
     compile_execution_definition,
@@ -476,6 +477,19 @@ def test_collection_fanout_policy_normalizes_retry_parallel_and_failure_modes():
         normalize_fanout_policy({"failure_mode": "fail_fast", "max_failures": 2})
     with pytest.raises(ValueError, match="between 0 and 3"):
         normalize_fanout_policy({"retries": 4})
+
+
+def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_children():
+    checkpoint = create_fanout_checkpoint(4)
+    assert checkpoint.next_batch(2) == (0, 1)
+    checkpoint = checkpoint.mark_completed([0, 1])
+    assert checkpoint.next_batch(2) == (2, 3)
+    checkpoint = checkpoint.mark_failed([2])
+    assert checkpoint.next_batch(2) == (3,)
+    assert checkpoint.failed == (2,)
+    assert checkpoint.cancel().next_batch(2) == ()
+    with pytest.raises(ValueError, match="between 0 and 32"):
+        create_fanout_checkpoint(33)
 
 
 def test_execution_state_machine_advances_once_and_keeps_snapshot():

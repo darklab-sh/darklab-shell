@@ -27,6 +27,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment fan-out now has a validated execution-policy contract.**
   - **What:** Policies define fail-fast or continue behavior, bounded retries, parallel children, and failure limits without changing existing workflow launches.
   - **Tests:** Focused workflow coverage pins normalization and unsafe-policy rejection.
+- **Assessment fan-out now has bounded resumable checkpoint state.**
+  - **What:** Child ordinals can move from pending to completed or failed state without relaunching completed work, and cancellation prevents further batches.
+  - **Tests:** Focused workflow coverage pins stable resume order, failure tracking, cancellation, and item bounds.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
