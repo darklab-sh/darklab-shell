@@ -30,9 +30,19 @@ def filter_web_surface_rows(
     profile_role: str = "",
     visual_hash: str = "",
     changed_since: object = None,
+    offset: int = 0,
+    limit: int = MAX_GALLERY_ROWS,
 ) -> list[dict[str, object]]:
-    """Filter metadata rows only; binary artifacts remain behind Files routes."""
+    """Filter and page metadata rows; binary artifacts remain behind Files routes."""
     values = rows if isinstance(rows, list) else []
+    try:
+        page_offset = max(0, int(offset))
+    except (TypeError, ValueError):
+        page_offset = 0
+    try:
+        page_limit = min(MAX_GALLERY_ROWS, max(0, int(limit)))
+    except (TypeError, ValueError):
+        page_limit = MAX_GALLERY_ROWS
     target_key = str(target or "").strip().casefold()
     technology_key = str(technology or "").strip().casefold()
     role_key = str(profile_role or "").strip().casefold()
@@ -56,7 +66,10 @@ def filter_web_surface_rows(
             continue
         if previous and row_hash in previous:
             continue
+        if page_offset:
+            page_offset -= 1
+            continue
         result.append({key: row[key] for key in _PUBLIC_FIELDS if key in row})
-        if len(result) >= MAX_GALLERY_ROWS:
+        if len(result) >= page_limit:
             break
     return result

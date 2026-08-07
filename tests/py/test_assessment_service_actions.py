@@ -160,6 +160,16 @@ def test_web_gallery_filters_metadata_without_exposing_artifact_contents():
     assert filter_web_surface_rows(rows, visual_hash="abc", changed_since=["abc"]) == []
 
 
+def test_web_gallery_paging_is_bounded_and_skips_malformed_rows():
+    rows = filter_web_surface_rows(
+        [None, {"url": "https://one.example", "status_code": 200}, {"url": "https://two.example", "status_code": 200}],
+        offset="1",
+        limit=9999,
+    )
+    assert [row["url"] for row in rows] == ["https://two.example"]
+    assert filter_web_surface_rows([], offset=-5, limit=0) == []
+
+
 def test_httpx_json_output_carries_safe_screenshot_metadata_only():
     classifier = OutputSignalClassifier("httpx -json -screenshot -srd screenshots")
     metadata = classifier.classify_line(
