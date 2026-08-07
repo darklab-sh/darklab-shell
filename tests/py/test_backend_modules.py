@@ -31165,3 +31165,21 @@ def test_atlas_import_parser_normalizes_bounded_sarif_and_rejects_file_uris():
     assert result.findings[0].source_detail["rule_id"] == "py/path-traversal"
     assert result.entities[0].canonical_value == "https://app.example.test/api"
     assert all(entity.canonical_value != "file:///src/app.py" for entity in result.entities)
+
+
+def test_atlas_import_parser_normalizes_cyclonedx_vulnerabilities_without_inventing_inventory_findings():
+    payload = json.dumps({
+        "bomFormat": "CycloneDX", "specVersion": "1.5",
+        "components": [{"bom-ref": "pkg:pypi/requests@2.31.0", "name": "requests", "version": "2.31.0", "purl": "pkg:pypi/requests@2.31.0"}],
+        "vulnerabilities": [{
+            "id": "CVE-2024-9999", "description": "A package issue.", "recommendation": "Upgrade the package.",
+            "ratings": [{"severity": "high"}], "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+            "references": [{"url": "https://nvd.nist.gov/vuln/detail/CVE-2024-9999"}, {"url": "file:///tmp/private"}],
+        }, {"id": "CVE-2024-0000", "analysis": {"state": "not_affected"}}],
+    }).encode()
+    result = parse_import_file(payload, format_id="cyclonedx_json")
+    assert result.row_count == 2
+    assert len(result.findings) == 1
+    assert result.findings[0].external_id == "CVE-2024-9999"
+    assert result.findings[0].source_detail["component_purl"] == "pkg:pypi/requests@2.31.0"
+    assert result.findings[0].references == ["https://nvd.nist.gov/vuln/detail/CVE-2024-9999"]

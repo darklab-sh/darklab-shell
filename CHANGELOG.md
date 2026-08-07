@@ -31,6 +31,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Atlas imports now accept bounded SARIF 2.1.0 results.**
   - **What:** SARIF tool, rule, severity, message, help-link, location, and provenance details normalize through the existing preview/apply model. Local file paths and unsafe URIs are never fetched or materialized as entities.
   - **Tests:** SARIF normalization, provenance, unsafe-location, and architecture-ratchet coverage pin the parser boundary.
+- **Atlas imports now normalize CycloneDX vulnerability assertions.**
+  - **What:** Exact component/PURL, vulnerability, rating, analysis-state, recommendation, reference, and SBOM provenance are preserved. Components without vulnerability assertions do not become findings, and `not_affected` assertions remain non-findings.
+  - **Tests:** CycloneDX version, component mapping, safe-reference, VEX-state, and architecture-ratchet coverage pin the parser boundary.
 
 - **Projects can now save reusable HTTP assessment profiles without storing credentials in the profile.**
   - **Why:** Authenticated and role-aware web testing needs consistent scope, identity, and request limits, but copying credential values into scanner settings would expose them through ordinary Project and history surfaces.

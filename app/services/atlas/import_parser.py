@@ -36,6 +36,7 @@ SUPPORTED_FORMATS = frozenset({
     "burp_xml",
     "nuclei_jsonl",
     "sarif_json",
+    "cyclonedx_json",
 })
 
 ENTITY_KINDS = ATLAS_ENTITY_TYPES
@@ -176,6 +177,9 @@ def parse_import_file(
         _parse_nuclei_jsonl(payload, state, entities, findings)
     elif normalized_format == "sarif_json":
         parse_sarif_json(payload, state, entities, findings)
+    elif normalized_format == "cyclonedx_json":
+        from services.atlas.cyclonedx_parser import parse_cyclonedx_json
+        parse_cyclonedx_json(payload, state, entities, findings)
     elif normalized_format == "nessus_xml":
         _parse_nessus_xml(payload, state, entities, findings)
     elif normalized_format == "zap_json":
