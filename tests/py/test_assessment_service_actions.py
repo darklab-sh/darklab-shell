@@ -8,7 +8,7 @@ from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
-from services.assessments.historical_urls import normalize_historical_url, normalize_historical_urls
+from services.assessments.historical_urls import filter_historical_urls, normalize_historical_url, normalize_historical_urls
 from core.output_signals import OutputSignalClassifier
 from services.atlas.observations import public_app_port_record
 
@@ -85,6 +85,15 @@ def test_historical_urls_are_safe_bounded_and_provenance_only():
     assert rows == [{
         "url": "https://example.com/a?x=1", "source": "gau", "source_run_id": "run-1",
     }]
+    assert [row["url"] for row in filter_historical_urls(
+        [
+            {"url": "https://example.com/a", "source": "gau"},
+            {"url": "https://example.com.evil/a", "source": "gau"},
+            {"url": "https://other.example/a", "source": "gau"},
+        ],
+        allowed_hosts=["example.com"],
+        scope_roots=["https://example.com/a"],
+    )] == ["https://example.com/a"]
 
 
 def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirmation():

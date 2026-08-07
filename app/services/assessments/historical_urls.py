@@ -52,3 +52,34 @@ def normalize_historical_urls(values: object, *, source: str = "gau", run_id: st
         if len(result) >= MAX_HISTORICAL_URLS:
             break
     return result
+
+
+def filter_historical_urls(
+    rows: object,
+    *,
+    allowed_hosts: object = (),
+    scope_roots: object = (),
+) -> list[dict[str, str]]:
+    """Keep normalized URLs whose host and path match an explicit scope."""
+    hosts = {str(host).strip().casefold().rstrip(".") for host in allowed_hosts if str(host).strip()}
+    roots = [str(root).strip() for root in scope_roots if str(root).strip()]
+    values = rows if isinstance(rows, list) else []
+    filtered: list[dict[str, str]] = []
+    for row in values:
+        if not isinstance(row, dict):
+            continue
+        url = str(row.get("url") or "")
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            continue
+        host = (parsed.hostname or "").casefold().rstrip(".")
+        if hosts and host not in hosts:
+            continue
+        if roots and not any(
+            url == root or url.startswith(root.rstrip("/") + "/")
+            for root in roots
+        ):
+            continue
+        filtered.append(dict(row))
+    return filtered

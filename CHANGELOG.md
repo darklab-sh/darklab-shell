@@ -51,6 +51,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment discovery now normalizes passive historical URLs safely.**
   - **What:** Historical HTTP(S) URLs retain source/run provenance, are deduplicated and bounded, and are never classified as vulnerability findings by normalization alone.
   - **Tests:** URL coverage pins credential, fragment, scheme, deduplication, and provenance boundaries.
+- **Passive historical URLs now have an explicit scope filter.**
+  - **What:** Archived URLs can be restricted by approved host and path roots before they reach any active probing workflow; host suffix lookalikes are rejected.
+  - **Tests:** Scope coverage pins exact-host and path-root matching.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.
