@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.assessments.cpe_applicability import match_cpe_applicability, normalize_observed_cpe
 from services.assessments.version_ranges import match_cached_semver_range, normalize_purl
 
 
@@ -21,7 +22,10 @@ def correlate_version_observation(
     purl = purl_record[0] if purl_record else ""
     if purl_record:
         version = purl_record[1]
-    cpe = _text(item.get("cpe"), 512)
+    cpe_record = normalize_observed_cpe(item.get("cpe"), explicit_version=version)
+    cpe = str(cpe_record.get("identifier") or "") if cpe_record else ""
+    if cpe_record and not purl:
+        version = str(cpe_record["version"])
     if not version or not (purl or cpe):
         return []
     matches = []
@@ -36,14 +40,16 @@ def correlate_version_observation(
         observed_identifier = purl or cpe
         if purl and purl not in purl_versions:
             continue
-        if not purl and cpe not in cpe_names:
-            continue
         affected_versions = {
             _text(value, 128) for value in advisory.get("affected_versions", []) if _text(value, 128)
         }
         affected_versions.update(purl_versions.get(purl, set()))
         range_match = match_cached_semver_range(version, advisory.get("ranges")) if purl else None
-        if version not in affected_versions and range_match is None:
+        cpe_match = match_cpe_applicability(cpe_record, advisory.get("cpe_matches")) if not purl else None
+        exact_cpe = bool(not purl and cpe in cpe_names and version in affected_versions)
+        if version not in affected_versions and range_match is None and cpe_match is None:
+            continue
+        if not purl and not exact_cpe and cpe_match is None:
             continue
         match_basis = "exact_purl_version" if purl else "exact_cpe_version"
         affected_range = _text(advisory.get("affected_range"), 256)
@@ -52,6 +58,10 @@ def correlate_version_observation(
             match_basis = "exact_purl_semver_range"
             affected_range = range_match["affected_range"]
             range_type = range_match["range_type"]
+        elif cpe_match is not None:
+            match_basis = cpe_match["match_basis"]
+            affected_range = cpe_match["affected_range"]
+            range_type = cpe_match["range_type"]
         matches.append({
             "vulnerability_id": vulnerability_id,
             "confidence": "high",

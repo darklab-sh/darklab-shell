@@ -358,3 +358,70 @@ def test_version_correlation_requires_exact_identifier_and_version_matches():
     )
     assert ranged_records[0]["advisory_source"] == "osv"
     assert ranged_records[0]["advisory_source_version"] == "2026-08-07"
+    cpe_observation = {
+        "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+    }
+    cpe_advisory = [{
+        "id": "CVE-2026-5678", "source": "nvd", "source_version": "2026-08-07T12:00:00Z",
+        "cpe_matches": [{
+            "criteria": "cpe:2.3:a:example:server:*:*:*:*:*:*:*:*",
+            "vulnerable": True,
+            "applicability_complete": True,
+            "versionStartIncluding": "2.4",
+            "versionEndExcluding": "2.6",
+        }],
+    }]
+    cpe_matches = correlate_version_observation(cpe_observation, cpe_advisory)
+    assert cpe_matches[0] == {
+        "vulnerability_id": "CVE-2026-5678", "confidence": "high",
+        "match_basis": "exact_cpe_nvd_range", "observed_identifier": cpe_observation["cpe"],
+        "observed_version": "2.5.1", "affected_range": "NVD: >= 2.4; < 2.6",
+        "range_type": "CPE_NUMERIC", "advisory_source": "nvd",
+        "advisory_source_version": "2026-08-07T12:00:00Z",
+        "validation_method": "version_inference",
+    }
+    assert correlate_version_observation({
+        "cpe": "cpe:2.3:a:example:server:2.6:*:*:*:*:*:*:*",
+    }, cpe_advisory) == []
+    incomplete_cpe = [{
+        **cpe_advisory[0],
+        "cpe_matches": [{
+            **cpe_advisory[0]["cpe_matches"][0], "applicability_complete": False,
+        }],
+    }]
+    assert correlate_version_observation(cpe_observation, incomplete_cpe) == []
+    unbounded_cpe = [{
+        **cpe_advisory[0],
+        "cpe_matches": [{
+            "criteria": "cpe:2.3:a:example:server:*:*:*:*:*:*:*:*",
+            "vulnerable": True, "applicability_complete": True,
+        }],
+    }]
+    assert correlate_version_observation(cpe_observation, unbounded_cpe) == []
+    assert correlate_version_observation(cpe_observation, [{
+        **unbounded_cpe[0],
+        "cpe_matches": [{**unbounded_cpe[0]["cpe_matches"][0], "all_versions": True}],
+    }])[0]["match_basis"] == "exact_cpe_all_versions"
+    nonnumeric_cpe = [{
+        **cpe_advisory[0],
+        "cpe_matches": [{
+            **cpe_advisory[0]["cpe_matches"][0], "versionEndExcluding": "2.6-beta",
+        }],
+    }]
+    assert correlate_version_observation(cpe_observation, nonnumeric_cpe) == []
+    malformed_cpe = [{
+        **cpe_advisory[0],
+        "cpe_matches": [{
+            **cpe_advisory[0]["cpe_matches"][0],
+            "negate": [], "versionEndExcluding": {},
+        }],
+    }]
+    assert correlate_version_observation(cpe_observation, malformed_cpe) == []
+    environment_specific = [{
+        **cpe_advisory[0],
+        "cpe_matches": [{
+            **cpe_advisory[0]["cpe_matches"][0],
+            "criteria": "cpe:2.3:a:example:server:*:*:*:*:*:windows:*:*",
+        }],
+    }]
+    assert correlate_version_observation(cpe_observation, environment_specific) == []
