@@ -35,6 +35,7 @@ from services.cve_risk.nvd_advisory import (
     persist_external_nvd_lookup,
 )
 from services.cve_risk.osv_parser import OsvDatasetError, parse_osv_dataset
+from services.cve_risk.osv_store import accept_local_osv_dataset
 from services.cve_risk.parsers import FeedValidationError, ParsedFeed, parse_epss, parse_kev
 from services.cve_risk.ranking import (
     attach_risk_to_findings,
@@ -389,6 +390,120 @@ def test_osv_parser_requires_at_least_one_exact_supported_package_identity():
 
     with pytest.raises(OsvDatasetError, match="no supported package"):
         parse_osv_dataset(json.dumps([unsupported]).encode())
+
+
+def test_local_osv_acceptance_replaces_complete_package_applicability(risk_db):
+    first = parse_osv_dataset(json.dumps([_osv_record()]).encode())
+
+    result = accept_local_osv_dataset(
+        risk_db,
+        first,
+        checksum="a" * 64,
+        now=datetime.fromisoformat("2026-08-07T12:00:00+00:00"),
+    )
+
+    assert result == {
+        "source": "osv",
+        "outcome": "loaded",
+        "record_count": 1,
+        "exact_version_count": 1,
+        "range_count": 1,
+    }
+    advisory = dict(risk_db.execute(
+        "SELECT * FROM package_advisories WHERE source = 'osv'"
+    ).fetchone())
+    assert advisory["source_advisory_id"] == "GHSA-abcd-1234-efgh"
+    assert advisory["normalized_vulnerability_id"] == "CVE-2026-12345"
+    assert advisory["package_purl"] == "pkg:pypi/requests"
+    assert advisory["schema_version"] == "1.6.0"
+    assert advisory["source_version"] == first.version
+    assert json.loads(advisory["affected_versions_json"]) == ["2.30.0"]
+    stored_range = dict(risk_db.execute(
+        "SELECT range_index, range_type, events_json FROM package_advisory_ranges"
+    ).fetchone())
+    assert stored_range == {
+        "range_index": 0,
+        "range_type": "SEMVER",
+        "events_json": '[{"introduced":"2.0.0"},{"fixed":"2.32.0"}]',
+    }
+    source = dict(risk_db.execute(
+        "SELECT * FROM cve_advisory_sources WHERE source = 'osv'"
+    ).fetchone())
+    assert source["acquisition_mode"] == "local"
+    assert source["origin"] == "local"
+    assert source["status"] == "current"
+    assert source["checksum_sha256"] == "a" * 64
+    assert source["record_count"] == 1
+    assert source["attribution"]
+    assert source["terms_url"].startswith("https://")
+
+    replacement = parse_osv_dataset(json.dumps([_osv_record(
+        id="GHSA-replacement-1234",
+        modified="2026-08-08T12:00:00Z",
+        aliases=["CVE-2026-54321"],
+        affected=[{
+            "package": {
+                "ecosystem": "PyPI",
+                "name": "flask",
+                "purl": "pkg:pypi/flask",
+            },
+            "versions": ["3.1.1"],
+        }],
+    )]).encode())
+    accept_local_osv_dataset(
+        risk_db,
+        replacement,
+        checksum="b" * 64,
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+
+    rows = risk_db.execute(
+        "SELECT source_advisory_id, normalized_vulnerability_id, package_purl "
+        "FROM package_advisories WHERE source = 'osv'"
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [(
+        "GHSA-replacement-1234",
+        "CVE-2026-54321",
+        "pkg:pypi/flask",
+    )]
+    assert risk_db.execute("SELECT COUNT(*) FROM package_advisory_ranges").fetchone()[0] == 0
+
+
+def test_local_osv_acceptance_rolls_back_to_last_good_dataset(risk_db):
+    current = parse_osv_dataset(json.dumps([_osv_record()]).encode())
+    accept_local_osv_dataset(
+        risk_db,
+        current,
+        checksum="c" * 64,
+        now=datetime.fromisoformat("2026-08-07T12:00:00+00:00"),
+    )
+    risk_db.execute(
+        "CREATE TRIGGER reject_osv_replacement BEFORE INSERT ON package_advisories "
+        "WHEN NEW.source_advisory_id = 'GHSA-rejected-1234' "
+        "BEGIN SELECT RAISE(ABORT, 'reject replacement'); END"
+    )
+    replacement = parse_osv_dataset(json.dumps([_osv_record(
+        id="GHSA-rejected-1234",
+        modified="2026-08-08T12:00:00Z",
+    )]).encode())
+
+    with pytest.raises(sqlite3.IntegrityError, match="reject replacement"):
+        accept_local_osv_dataset(
+            risk_db,
+            replacement,
+            checksum="d" * 64,
+            now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+        )
+
+    advisory = risk_db.execute(
+        "SELECT source_advisory_id FROM package_advisories WHERE source = 'osv'"
+    ).fetchone()
+    source = risk_db.execute(
+        "SELECT source_version, checksum_sha256 FROM cve_advisory_sources WHERE source = 'osv'"
+    ).fetchone()
+    assert advisory["source_advisory_id"] == "GHSA-abcd-1234-efgh"
+    assert tuple(source) == (current.version, "c" * 64)
+    assert risk_db.execute("SELECT COUNT(*) FROM package_advisory_ranges").fetchone()[0] == 1
 
 
 def test_kev_parser_requires_catalog_provenance_and_complete_rows():

@@ -480,6 +480,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0061",
         "0062",
         "0063",
+        "0064",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -543,6 +544,11 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             OR (table_name = 'cve_advisory_cpe_matches' AND column_name IN (
                 'all_versions',
                 'source_version'
+            ))
+            OR (table_name = 'package_advisories' AND column_name IN (
+                'source_advisory_id',
+                'schema_version',
+                'affected_versions_json'
             ))
             OR (table_name = 'risk_escalation_states' AND column_name IN (
                 'kev_listed',
@@ -663,6 +669,9 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("cve_advisory_sources", "record_count", "integer"),
         ("cve_advisory_cpe_matches", "all_versions", "boolean"),
         ("cve_advisory_cpe_matches", "source_version", "text"),
+        ("package_advisories", "source_advisory_id", "text"),
+        ("package_advisories", "schema_version", "text"),
+        ("package_advisories", "affected_versions_json", "text"),
         ("risk_escalation_states", "kev_listed", "boolean"),
         ("risk_escalation_states", "epss_active", "boolean"),
         ("risk_escalations", "model_changed", "boolean"),
@@ -752,6 +761,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             'cve_risk_work_items',
             'cve_advisory_lookup_cache',
             'cve_advisory_cpe_matches',
+            'package_advisories',
             'finding_cve_links',
             'risk_escalation_states',
             'risk_escalations',
@@ -766,6 +776,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_cve_advisory_lookup_cache_expiry",
         "idx_cve_advisory_cpe_product",
         "idx_cve_advisory_cpe_source_version",
+        "idx_package_advisories_source_version",
         "idx_cve_risk_work_items_due",
         "idx_finding_cve_links_cve",
         "idx_risk_escalation_states_cve",
@@ -1369,6 +1380,90 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schem
     assert risk["cvss_score"] == 8.8
     assert risk["advisory_status"] == "active"
     assert {source["source"] for source in risk["sources"]} == {"epss", "kev", "nvd"}
+
+
+@pytest.mark.postgres
+def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
+    postgres_schema,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.cve_risk.osv_parser import parse_osv_dataset
+    from services.cve_risk.osv_store import accept_local_osv_dataset
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    payload = json.dumps([{
+        "schema_version": "1.6.0",
+        "id": "GHSA-postgres-osv-test",
+        "modified": "2026-08-07T12:00:00Z",
+        "published": "2026-08-06T12:00:00Z",
+        "aliases": ["CVE-2026-12345"],
+        "summary": "Postgres OSV applicability",
+        "affected": [{
+            "package": {
+                "ecosystem": "PyPI",
+                "name": "requests",
+                "purl": "pkg:pypi/requests",
+            },
+            "versions": ["2.30.0"],
+            "ranges": [{
+                "type": "SEMVER",
+                "events": [{"introduced": "2.0.0"}, {"fixed": "2.32.0"}],
+            }],
+        }],
+    }]).encode()
+    parsed = parse_osv_dataset(payload)
+
+    result = accept_local_osv_dataset(
+        conn,
+        parsed,
+        checksum=hashlib.sha256(payload).hexdigest(),
+        now=datetime.fromisoformat("2026-08-07T13:00:00+00:00"),
+    )
+    raw_conn.commit()
+
+    advisory = dict(conn.execute(
+        "SELECT source_advisory_id, normalized_vulnerability_id, package_purl, "
+        "schema_version, source_version, affected_versions_json "
+        "FROM package_advisories WHERE source = 'osv'"
+    ).fetchone())
+    stored_range = dict(conn.execute(
+        "SELECT range_index, range_type, events_json FROM package_advisory_ranges"
+    ).fetchone())
+    source = dict(conn.execute(
+        "SELECT acquisition_mode, origin, status, checksum_sha256, record_count "
+        "FROM cve_advisory_sources WHERE source = 'osv'"
+    ).fetchone())
+
+    assert result == {
+        "source": "osv",
+        "outcome": "loaded",
+        "record_count": 1,
+        "exact_version_count": 1,
+        "range_count": 1,
+    }
+    assert advisory == {
+        "source_advisory_id": "GHSA-postgres-osv-test",
+        "normalized_vulnerability_id": "CVE-2026-12345",
+        "package_purl": "pkg:pypi/requests",
+        "schema_version": "1.6.0",
+        "source_version": parsed.version,
+        "affected_versions_json": '["2.30.0"]',
+    }
+    assert stored_range == {
+        "range_index": 0,
+        "range_type": "SEMVER",
+        "events_json": '[{"introduced":"2.0.0"},{"fixed":"2.32.0"}]',
+    }
+    assert source == {
+        "acquisition_mode": "local",
+        "origin": "local",
+        "status": "current",
+        "checksum_sha256": hashlib.sha256(payload).hexdigest(),
+        "record_count": 1,
+    }
 
 
 @pytest.mark.postgres

@@ -74,6 +74,7 @@ from . import (
     v0061_workflow_fanout_checkpoints,
     v0062_nvd_cpe_applicability,
     v0063_finding_version_inference_sources,
+    v0064_osv_package_applicability,
 )
 
 _ = baseline
@@ -142,4 +143,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0061_workflow_fanout_checkpoints.MIGRATION,
     v0062_nvd_cpe_applicability.MIGRATION,
     v0063_finding_version_inference_sources.MIGRATION,
+    v0064_osv_package_applicability.MIGRATION,
 )
