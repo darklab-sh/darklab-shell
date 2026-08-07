@@ -482,6 +482,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0063",
         "0064",
         "0065",
+        "0066",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -781,6 +782,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_cve_advisory_cpe_source_version",
         "idx_package_advisories_source_version",
         "idx_package_advisories_lookup",
+        "idx_package_advisories_correlation",
         "idx_cve_risk_work_items_due",
         "idx_finding_cve_links_cve",
         "idx_risk_escalation_states_cve",
@@ -1392,6 +1394,7 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
 ):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.osv_package_correlation import correlate_stored_osv_package_page
     from services.cve_risk.osv_external_store import accept_external_osv_query
     from services.cve_risk.osv_parser import parse_osv_dataset
     from services.cve_risk.osv_store import accept_local_osv_dataset
@@ -1469,6 +1472,26 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
         "checksum_sha256": hashlib.sha256(payload).hexdigest(),
         "record_count": 1,
     }
+    row_counts_before_read = tuple(conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM package_advisories), "
+        "(SELECT COUNT(*) FROM package_advisory_ranges)"
+    ).fetchone())
+    correlation = correlate_stored_osv_package_page(
+        conn,
+        {"purl": "pkg:pypi/requests@2.31.0"},
+        now=datetime.fromisoformat("2026-08-08T13:00:00+00:00"),
+    )
+    assert correlation["candidate_advisory_count"] == 1
+    assert correlation["rejected_candidate_count"] == 0
+    assert correlation["matches"][0]["vulnerability_id"] == "CVE-2026-12345"
+    assert correlation["matches"][0]["match_basis"] == "exact_purl_semver_range"
+    assert correlation["matches"][0]["advisory_origin"] == "local"
+    assert tuple(conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM package_advisories), "
+        "(SELECT COUNT(*) FROM package_advisory_ranges)"
+    ).fetchone()) == row_counts_before_read
 
     external = accept_external_osv_query(
         conn,

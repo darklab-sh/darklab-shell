@@ -50,6 +50,7 @@ from services.cve_risk.ranking import (
 from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
+from services.assessments.osv_package_correlation import correlate_stored_osv_package_page
 from services.assessments.nmap_inference_materialization import (
     NMAP_INFERENCE_MAX_CANDIDATES,
     materialize_nmap_xml_version_inferences,
@@ -516,6 +517,104 @@ def test_local_osv_acceptance_rolls_back_to_last_good_dataset(risk_db):
     assert risk_db.execute("SELECT COUNT(*) FROM package_advisory_ranges").fetchone()[0] == 1
 
 
+def test_stored_osv_package_correlation_is_bounded_read_only_and_fail_closed(risk_db):
+    payload = json.dumps([
+        _osv_record(),
+        _osv_record(
+            id="GHSA-wxyz-5678-abcd",
+            aliases=["CVE-2026-54321"],
+            modified="2026-08-05T12:00:00Z",
+        ),
+    ]).encode()
+    parsed = parse_osv_dataset(payload)
+    accept_local_osv_dataset(
+        risk_db,
+        parsed,
+        checksum=hashlib.sha256(payload).hexdigest(),
+        now=datetime.fromisoformat("2026-08-07T12:00:00+00:00"),
+    )
+    changes_before_read = risk_db.total_changes
+
+    first = correlate_stored_osv_package_page(
+        risk_db,
+        {"purl": "pkg:pypi/requests@2.31.0"},
+        limit=1,
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert first["candidate_advisory_count"] == 1
+    assert first["rejected_candidate_count"] == 0
+    assert first["has_more"] is True
+    assert first["next_offset"] == 1
+    assert first["matches"] == [{
+        "vulnerability_id": "CVE-2026-12345",
+        "confidence": "high",
+        "match_basis": "exact_purl_semver_range",
+        "observed_identifier": "pkg:pypi/requests",
+        "observed_version": "2.31.0",
+        "affected_range": "SEMVER: introduced 2.0.0; fixed 2.32.0",
+        "range_type": "SEMVER",
+        "advisory_source": "osv",
+        "advisory_source_version": parsed.version,
+        "validation_method": "version_inference",
+        "advisory_id": first["matches"][0]["advisory_id"],
+        "advisory_source_id": "GHSA-abcd-1234-efgh",
+        "advisory_schema_version": "1.6.0",
+        "advisory_origin": "local",
+        "advisory_modified_at": "2026-08-04T12:00:00+00:00",
+        "advisory_expires_at": "2026-08-14T12:00:00+00:00",
+        "advisory_source_state": "current",
+    }]
+    assert first["matches"][0]["advisory_id"].startswith("osv_")
+    second = correlate_stored_osv_package_page(
+        risk_db,
+        {"purl": "pkg:pypi/requests", "version": "2.31.0"},
+        limit=1,
+        offset=1,
+        now=datetime.fromisoformat("2026-08-15T12:00:00+00:00"),
+    )
+    assert second["matches"][0]["vulnerability_id"] == "CVE-2026-54321"
+    assert second["matches"][0]["advisory_source_state"] == "stale"
+    assert second["has_more"] is False
+    assert risk_db.total_changes == changes_before_read
+
+    assert correlate_stored_osv_package_page(risk_db, {
+        "purl": "pkg:pypi/requests@2.31.0", "version": "2.32.0",
+    })["matches"] == []
+    rejected_id = risk_db.execute(
+        "SELECT advisory_id FROM package_advisories WHERE normalized_vulnerability_id = ?",
+        ("CVE-2026-54321",),
+    ).fetchone()[0]
+    risk_db.execute(
+        "UPDATE package_advisories SET affected_versions_json = 'not-json' WHERE advisory_id = ?",
+        (rejected_id,),
+    )
+    rejected = correlate_stored_osv_package_page(
+        risk_db, {"purl": "pkg:pypi/requests@2.31.0"}, limit=50,
+    )
+    assert [match["vulnerability_id"] for match in rejected["matches"]] == ["CVE-2026-12345"]
+    assert rejected["rejected_candidate_count"] == 1
+
+
+def test_stored_osv_package_correlation_supports_exact_versions(risk_db):
+    record = _osv_record()
+    record["affected"][0]["versions"] = ["2.30.0"]
+    record["affected"][0]["ranges"] = []
+    payload = json.dumps([record]).encode()
+    parsed = parse_osv_dataset(payload)
+    accept_local_osv_dataset(
+        risk_db,
+        parsed,
+        checksum=hashlib.sha256(payload).hexdigest(),
+        now=datetime.fromisoformat("2026-08-07T12:00:00+00:00"),
+    )
+
+    match = correlate_stored_osv_package_page(
+        risk_db, {"purl": "pkg:pypi/requests", "version": "2.30.0"},
+    )["matches"][0]
+    assert match["match_basis"] == "exact_purl_version"
+    assert match["affected_range"] == "==2.30.0"
+
+
 def test_configured_local_osv_load_reports_status_and_preserves_last_good(
     risk_db,
     tmp_path,
@@ -652,6 +751,15 @@ def test_external_osv_query_uses_hash_cache_and_replaces_one_package(
         "origin": "external",
         "affected_versions_json": '["2.30.0"]',
     }
+    changes_before_read = risk_db.total_changes
+    correlation = correlate_stored_osv_package_page(
+        risk_db,
+        {"purl": "pkg:pypi/requests@2.30.0"},
+        now=datetime.fromisoformat("2026-08-07T13:01:00+00:00"),
+    )
+    assert correlation["matches"][0]["match_basis"] == "exact_purl_semver_range"
+    assert correlation["matches"][0]["advisory_origin"] == "external"
+    assert risk_db.total_changes == changes_before_read
     cache = dict(risk_db.execute(
         "SELECT lookup_kind, lookup_key_hash, result_state, record_count "
         "FROM cve_advisory_lookup_cache WHERE source = 'osv'"

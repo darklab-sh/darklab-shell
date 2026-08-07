@@ -18,6 +18,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **HTTPx runs now retain exact versioned technology evidence.**
   - **What:** Maintained assessment actions request structured HTTPx JSON and version-enriched CPE output. darklab_shell keeps an observation only when the versioned technology string agrees with the CPE vendor, product, and version, and records its target, source run, observation time, and parser version. Unversioned names, conflicting versions, mismatched identities, unsafe URLs, and malformed timestamps remain ordinary run output and don't create vulnerability findings.
   - **Tests:** Parser, command-plan, run-event, wire-format, provenance, rejection, and module-ratchet coverage pins the exact-match boundary.
+- **Stored OSV data now supports bounded exact package-version correlation.**
+  - **What:** A read-only correlation page matches one exact normalized PURL and version against already accepted OSV versions or supported SEMVER ranges. Results retain advisory identity, schema and source versions, origin, source dates, expiry, and current or stale state; malformed stored candidates fail closed without contacting OSV or writing a finding.
+  - **Tests:** SQLite and real Postgres coverage pins exact and ranged matches, deterministic paging, stale labels, malformed-row rejection, conflicting versions, and the no-write boundary.
 - **Historical web discovery now has a scope-gated built-in workflow.**
   - **What:** Historical Web Surface Triage collects a bounded set of passive `gau` URLs, normalizes and restricts them to the approved domain, checks that scoped set for live HTTP services, and rechecks scope before Katana crawling and the final HTTPx summary. Its app-owned `urlscope` helper reads and writes only through the active personal or team Files workspace and rejects malformed domains, credentials, fragments, and suffix lookalikes.
   - **Tests:** URL normalization, command routing, Files ownership, feature gating, workflow graph, route payload, and module-ratchet coverage pins the passive-to-active safety boundary.
@@ -302,6 +305,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **JavaScript transitive dependencies now include current DOMPurify and Nano ID security fixes.** The lockfile uses DOMPurify 3.4.13 and Nano ID 3.3.18, clearing the reported subtree-XSS and zero-size-generator denial-of-service advisories without changing direct dependency ranges.
 - **JavaScript tooling now uses the patched `js-yaml` 4.3.1 compatibility release.** This clears the high-severity ordered-map denial-of-service advisory in Stylelint's configuration loader without forcing a Stylelint downgrade.
 - **Atlas lookup and CVE-risk queries now make their trusted SQL fragments explicit.** Named templates keep generated placeholders and validated scope, owner, and ordering clauses separate from bound values, removing stale Bandit suppressions without changing query behavior.
 - **Fresh Postgres databases load the bundled CVE-risk baseline through a bulk staging merge.** The offline EPSS and CISA KEV baseline remains part of guarded startup maintenance, while clean installations avoid hundreds of thousands of individual upserts before the app becomes ready.
