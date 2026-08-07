@@ -156,3 +156,23 @@ profiles:
         policy_level: standard
         recommended_action: command:dalfox
         completion_guidance: Run the bounded discovery pass and review its saved parameter inventory, including a successful clean result when no parameters are found.
+      - key: sql_injection_detection
+        version: "1.0"
+        category: validation
+        label: SQL injection detection
+        purpose: Check one approved parameterized URL for conservative SQL injection indicators without extracting data.
+        target_types: [url]
+        evidence_rules:
+          - key: completed_sql_injection_detection
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [sqlmap]
+            workflow_actions: []
+            structured_output_kinds: []
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:sqlmap
+        completion_guidance: Run the detection-only pass and review the saved output; no extraction or operating-system actions are part of this check.

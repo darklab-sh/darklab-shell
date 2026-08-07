@@ -5888,6 +5888,87 @@ commands:
           hint_only: true
           value_type: target
           description: Usually provided through -u or -l
+  - root: sqlmap
+    description: Runs detection-only SQL injection checks against one approved URL.
+    category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - darklab_shell forces level 1, risk 1, Boolean/Error/Union techniques, and a bounded time limit.
+      gotchas:
+        - Extraction, enumeration, OS takeover, redirects, and target fan-out are blocked.
+    safe_defaults:
+      - Start with one exact URL containing the parameter you want to assess.
+    common_flags:
+      - "--batch — use non-interactive safe defaults"
+      - "--level 1 --risk 1 — keep detection scope conservative"
+      - "--technique BEU — use Boolean, Error, and Union checks only"
+    artifact_behavior: Detection output is captured in the saved run output; durable SQLmap session and export files are not exposed.
+    help:
+      flags: [--help, --hh, --version]
+    policy:
+      allow: [sqlmap]
+      deny:
+        - sqlmap -c
+        - sqlmap --data
+        - sqlmap --cookie
+        - sqlmap --proxy
+        - sqlmap --headers
+        - sqlmap -H
+        - sqlmap --auth-cred
+        - sqlmap --technique
+        - sqlmap --risk
+        - sqlmap --level
+        - sqlmap --os-cmd
+        - sqlmap --os-shell
+        - sqlmap --dump
+        - sqlmap --dump-all
+        - sqlmap --dbs
+        - sqlmap --tables
+        - sqlmap --schema
+        - sqlmap --file-read
+        - sqlmap --file-write
+        - sqlmap --crawl
+        - sqlmap --forms
+        - sqlmap --tor
+        - sqlmap --api
+        - sqlmap --update
+        - sqlmap --output-dir
+        - sqlmap --session-file
+        - sqlmap --save
+        - sqlmap --offline
+        - sqlmap -r
+        - sqlmap -m
+        - sqlmap -l
+    runtime_adaptations:
+      inject_flags:
+        - flags: [--batch]
+          position: append
+          unless_any: [--batch, --help, --hh, --version]
+        - flags: [--level, "1"]
+          position: append
+          unless_any: [--level, --help, --hh, --version]
+        - flags: [--risk, "1"]
+          position: append
+          unless_any: [--risk, --help, --hh, --version]
+        - flags: [--technique, BEU]
+          position: append
+          unless_any: [--technique, --help, --hh, --version]
+        - flags: [--timeout, "10", --retries, "1", --time-limit, "120"]
+          position: append
+          unless_any: [--help, --hh, --version]
+    autocomplete:
+      examples:
+        - value: sqlmap --help
+          description: Show detection options and usage
+          smoke:
+            profile: unauthenticated
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: --version
+          description: Show the installed SQLmap version
+          closes: true
 pipe_helpers:
   - root: grep
     autocomplete:
@@ -5985,6 +6066,96 @@ pipe_helpers:
           description: Numeric sort and deduplicate
         - value: -rnu
           description: Reverse numeric sort and deduplicate
+  - root: sqlmap
+    description: Runs detection-only SQL injection checks against one approved URL.
+    category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - darklab_shell forces level 1, risk 1, Boolean/Error/Union techniques, and a bounded time limit.
+        - Saved Project HTTP profiles pass headers through a short-lived private INI file.
+      gotchas:
+        - Extraction, enumeration, OS takeover, stacked queries, time-based checks, redirects, and target fan-out are blocked.
+        - This adapter reports detection output only; it does not dump data or execute operating-system commands.
+    safe_defaults:
+      - Start with one exact URL containing the parameter you want to assess.
+    common_flags:
+      - "--batch — use non-interactive safe defaults"
+      - "--level 1 --risk 1 — keep detection scope conservative"
+      - "--technique BEU — use Boolean, Error, and Union checks only"
+    artifact_behavior: Detection output is captured in the saved run output; durable SQLmap session and export files are not exposed.
+    help:
+      flags:
+        - --help
+        - --hh
+        - --version
+    policy:
+      allow:
+        - sqlmap
+      deny:
+        - sqlmap -c
+        - sqlmap --config-file
+        - sqlmap -r
+        - sqlmap --data
+        - sqlmap --cookie
+        - sqlmap --proxy
+        - sqlmap --headers
+        - sqlmap -H
+        - sqlmap --auth-cred
+        - sqlmap --technique
+        - sqlmap --risk
+        - sqlmap --level
+        - sqlmap --os-cmd
+        - sqlmap --os-shell
+        - sqlmap --dump
+        - sqlmap --dump-all
+        - sqlmap --dbs
+        - sqlmap --tables
+        - sqlmap --schema
+        - sqlmap --file-read
+        - sqlmap --file-write
+        - sqlmap --crawl
+        - sqlmap --forms
+        - sqlmap --proxy
+        - sqlmap --tor
+        - sqlmap --api
+        - sqlmap --update
+        - sqlmap --output-dir
+        - sqlmap --session-file
+        - sqlmap --save
+        - sqlmap --offline
+        - sqlmap -r
+        - sqlmap -m
+        - sqlmap -l
+    runtime_adaptations:
+      inject_flags:
+        - flags: [--batch]
+          position: append
+          unless_any: [--batch, --help, --hh, --version]
+        - flags: [--level, "1"]
+          position: append
+          unless_any: [--level, --help, --hh, --version]
+        - flags: [--risk, "1"]
+          position: append
+          unless_any: [--risk, --help, --hh, --version]
+        - flags: [--technique, BEU]
+          position: append
+          unless_any: [--technique, --help, --hh, --version]
+        - flags: [--timeout, "10", --retries, "1", --time-limit, "120"]
+          position: append
+          unless_any: [--help, --hh, --version]
+    autocomplete:
+      examples:
+        - value: sqlmap --help
+          description: Show detection options and usage
+          smoke:
+            profile: unauthenticated
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: --version
+          description: Show the installed SQLmap version
+          closes: true
   - root: uniq
     autocomplete:
       pipe:

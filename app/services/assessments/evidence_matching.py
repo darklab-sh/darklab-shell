@@ -24,7 +24,7 @@ from services.intel.canonical import (
 
 
 _DNS_ROOTS = frozenset({"dig", "dnsrecon", "dnsx"})
-_HTTP_ROOTS = frozenset({"curl", "ffuf", "gobuster", "httpx", "katana", "nuclei"})
+_HTTP_ROOTS = frozenset({"curl", "dalfox", "ffuf", "gobuster", "httpx", "katana", "nuclei", "sqlmap"})
 
 
 @dataclass(frozen=True)

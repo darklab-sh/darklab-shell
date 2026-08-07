@@ -105,6 +105,7 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
         "content_discovery",
         "vulnerability_templates",
         "parameter_discovery",
+        "sql_injection_detection",
     }
     assert by_key["network"]["version"] == "1.0"
     assert by_key["web"]["version"] == "1.1"
@@ -118,6 +119,11 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
     )
     assert parameter_check["recommended_action"] == "command:dalfox"
     assert parameter_check["evidence_rules"][0]["command_roots"] == ["dalfox"]
+    sqlmap_check = next(
+        check for check in by_key["web"]["checks"] if check["key"] == "sql_injection_detection"
+    )
+    assert sqlmap_check["recommended_action"] == "command:sqlmap"
+    assert sqlmap_check["target_types"] == ["url"]
 
 
 def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(tmp_path: Path):

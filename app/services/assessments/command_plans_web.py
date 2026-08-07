@@ -66,4 +66,14 @@ def web_command_plans(
             60,
             credential_use,
         ),
+        "sqlmap": CommandPlan(
+            f"sqlmap -u {target} --batch --level 1 --risk 1 --technique BEU "
+            f"--timeout 10 --retries 1 --threads {concurrency} --time-limit 120 "
+            f"--ignore-redirects --disable-coloring --no-logging{protected_suffix}",
+            "One approved URL, detection-only SQL injection checks using Boolean, "
+            "Error, and Union techniques; no redirects, extraction, or takeover actions.",
+            None,
+            120,
+            credential_use,
+        ),
     }

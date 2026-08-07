@@ -21,6 +21,7 @@ _COMMAND_TARGET_TYPES = {
     "katana": frozenset({"domain", "url"}),
     "nuclei": frozenset({"domain", "ip", "url"}),
     "dalfox": frozenset({"domain", "ip", "url"}),
+    "sqlmap": frozenset({"url"}),
 }
 
 
@@ -56,6 +57,8 @@ def command_plan(
             protected_suffix = " --config [protected]"
         elif action_id == "dalfox" and header_uses:
             protected_suffix = " --config [protected]"
+        elif action_id == "sqlmap" and header_uses:
+            protected_suffix = " -c [protected]"
         elif header_uses:
             protected_suffix = " -H [protected]" if action_id == "katana" else " -sf [protected]"
         if action_id == "nuclei" and "client_certificate" in uses:

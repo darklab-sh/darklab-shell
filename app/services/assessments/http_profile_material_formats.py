@@ -40,3 +40,13 @@ def dalfox_config(headers: list[tuple[str, str]]) -> bytes:
         },
     }
     return (json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+
+
+def sqlmap_config(headers: list[tuple[str, str]]) -> bytes:
+    """Return a minimal SQLmap INI carrying only protected headers."""
+    lines = ["[Target]", "", "[Request]"]
+    if headers:
+        lines.append(f"headers = {headers[0][0]}: {headers[0][1]}")
+        lines.extend(f" {name}: {value}" for name, value in headers[1:])
+    lines.append("ignoreRedirects = True")
+    return ("\n".join(lines) + "\n").encode("utf-8")

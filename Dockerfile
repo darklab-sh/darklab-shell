@@ -42,6 +42,9 @@ ARG DALFOX_LINUX_AMD64_SHA256=0818b75082bf8527c5c4b6f4ed0f745f393290637328335788
 ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.1.2-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=d21f541038a40d8dd5c4b655fb88159a4b9a75c63f61c3e244647326a5199bc2
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
+ARG SQLMAP_VERSION=1.10.8
+ARG SQLMAP_COMMIT=cb8298d55ae9b8eb4f05b6153c158d23479958a8
+ARG SQLMAP_LICENSE_SHA256=b1bbb62f5b272a6247d442d5e4f644a5bca7138e70776539ec84a5a90433fd13
 ARG TCPING_VERSION=v2.8.0
 ARG WPSCAN_VERSION=4.0.1
 ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
@@ -382,6 +385,20 @@ RUN gem install wpscan -v "${WPSCAN_VERSION}" && \
     cp -a /var/lib/gems /out/var/lib/ && \
     cp -a /usr/local/bin/wpscan /out/usr/local/bin/
 
+FROM ${PYTHON_BASE_IMAGE} AS sqlmap-asset
+ARG SQLMAP_VERSION
+ARG SQLMAP_COMMIT
+ARG SQLMAP_LICENSE_SHA256
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "${SQLMAP_VERSION}" https://github.com/sqlmapproject/sqlmap.git /tmp/sqlmap && \
+    test "$(git -C /tmp/sqlmap rev-parse HEAD)" = "${SQLMAP_COMMIT}" && \
+    mkdir -p /out/opt/sqlmap /out/usr/local/bin /out/usr/share/doc/darklab-shell/licenses && \
+    cp -a /tmp/sqlmap/. /out/opt/sqlmap/ && chmod 0755 /out/opt/sqlmap/sqlmap.py && \
+    ln -s /opt/sqlmap/sqlmap.py /out/usr/local/bin/sqlmap && \
+    printf "%s  /tmp/sqlmap/LICENSE\n" "${SQLMAP_LICENSE_SHA256}" > /tmp/sqlmap-license.sha256 && \
+    sha256sum -c /tmp/sqlmap-license.sha256 && \
+    install -m 0644 /tmp/sqlmap/LICENSE /out/usr/share/doc/darklab-shell/licenses/Sqlmap.txt
+
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 ARG TARGETARCH
 ARG PYTHON_BASE_DIGEST
@@ -433,6 +450,7 @@ COPY --from=wordlist-assets /usr/share/wordlists/seclists/ /usr/share/wordlists/
 COPY --from=script-assets /out/ /
 COPY --from=rustscan-asset /out/ /
 COPY --from=dalfox-asset /out/ /
+COPY --from=sqlmap-asset /out/ /
 COPY --from=ruby-tools /out/ /
 
 RUN ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \

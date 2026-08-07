@@ -18,6 +18,7 @@ from services.assessments.http_profile_material_formats import (
     HttpProfileMaterialFormatError,
     curl_config,
     dalfox_config,
+    sqlmap_config,
 )
 from services.teams.scope import owner_context_for_scope
 from services.workspace.files import (
@@ -108,6 +109,10 @@ def materialize_tool_profile(
         elif tool == "dalfox" and headers:
             config_path = material.write_bytes("config.json", dalfox_config(headers))
             trusted_args.extend(["--config", str(config_path)])
+            private_values.append(str(config_path))
+        elif tool == "sqlmap" and headers:
+            config_path = material.write_bytes("sqlmap.conf", sqlmap_config(headers))
+            trusted_args.extend(["-c", str(config_path)])
             private_values.append(str(config_path))
         elif headers:
             if tool in {"httpx", "nuclei"}:
