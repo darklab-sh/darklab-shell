@@ -1110,7 +1110,7 @@ class TestSessionWorkflows:
         }]
 
         unsupported_version = self._payload("Unsupported version")
-        unsupported_version["version"] = 3
+        unsupported_version["version"] = 4
         version_error = client.put(
             f"/session/workflows/{created['id']}",
             json=unsupported_version,
