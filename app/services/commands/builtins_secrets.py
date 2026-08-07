@@ -21,6 +21,7 @@ from services.secrets.storage import InvalidSecretName, delete_secret, list_secr
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
+from services.cve_risk.osv_acquisition import get_osv_source_status
 from services.cve_risk.store import get_feed_status
 from config import resolve_effective_cfg
 
@@ -265,6 +266,29 @@ def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
         lines.append(output_line(
             "Shared NVD CVSS storage is off. Choose local or external cve_risk.advisory_mode "
             "before using explicit CVE enrichment.",
+            "builtin-note",
+        ))
+    try:
+        osv_status = get_osv_source_status()
+    except Exception as exc:
+        log.warning(
+            "OSV_ADVISORY_PROVIDER_STATUS_UNAVAILABLE",
+            extra={"error_type": type(exc).__name__},
+        )
+        osv_status = {"status": "unavailable"}
+    osv_mode = str(risk_settings.get("osv_advisory_mode") or "disabled")
+    lines.append(output_line(
+        format_native_record(
+            "OSV package data",
+            f"{osv_mode} · {str(osv_status.get('status') or 'unavailable')}",
+            22,
+        ),
+        "builtin-kv",
+    ))
+    if osv_mode == "disabled":
+        lines.append(output_line(
+            "Shared OSV package matching is off. Choose local "
+            "cve_risk.osv_advisory_mode before loading package applicability.",
             "builtin-note",
         ))
 

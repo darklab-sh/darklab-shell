@@ -394,11 +394,13 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `cve_risk.epss_reset_probability` | `0.08` | Lower EPSS probability that rearms a later upward event. It must remain below the activation probability |
 | `cve_risk.advisory_mode` | `disabled` | Shared NVD advisory storage mode: `disabled`, `local`, or `external`. `external` only retains NVD results from an explicit Atlas CVE **Refresh intel** action; it doesn't start background CVE lookups |
 | `cve_risk.nvd_local_path` | empty | Path to an operator-managed NVD 2.0 JSON dataset when `advisory_mode` is `local`. The path is required in local mode |
-| `cve_risk.advisory_positive_ttl_seconds` | `604800` | Freshness and cache lifetime for accepted NVD records, from 3600 to 2592000 seconds |
+| `cve_risk.osv_advisory_mode` | `disabled` | Shared OSV package-applicability mode: `disabled` or `local`. This opt-in is separate from NVD advisory storage |
+| `cve_risk.osv_local_path` | empty | Path to an operator-managed full-record OSV JSON array when `osv_advisory_mode` is `local`. The path is required in local mode |
+| `cve_risk.advisory_positive_ttl_seconds` | `604800` | Freshness and cache lifetime for accepted NVD and OSV records, from 3600 to 2592000 seconds |
 | `cve_risk.advisory_negative_ttl_seconds` | `86400` | Cache lifetime for an explicit NVD lookup with no advisory record, from 300 to 604800 seconds |
 | `cve_risk.advisory_cvss_downgrade_delta` | `1.0` | Minimum CVSS score decrease recorded as a material NVD change in Project Monitoring. Values must be greater than 0 and no more than 10 |
-| `cve_risk.advisory_max_local_bytes` | `268435456` | Largest local NVD JSON file accepted, from 1024 to 1073741824 bytes |
-| `cve_risk.advisory_max_records` | `500000` | Largest number of CVE rows accepted from one local NVD dataset, from 1 to 1000000 |
+| `cve_risk.advisory_max_local_bytes` | `268435456` | Largest single local NVD or OSV JSON file accepted, from 1024 to 1073741824 bytes |
+| `cve_risk.advisory_max_records` | `500000` | Largest number of records accepted from one local NVD or OSV dataset, from 1 to 1000000 |
 | `cve_risk.allowed_hosts` | `[epss.cyentia.com, www.cisa.gov]` | Exact HTTPS hostnames allowed for the fixed bulk-feed URLs and redirects. Entries must be hostnames, not URLs |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `workflow_active_execution_limit` | `3` | Maximum active workflow executions for one personal session or team owner |
@@ -441,6 +443,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 Release images include dated FIRST EPSS and CISA KEV snapshots, so saved CVE findings can be ranked without network access. Run `providers` to see each snapshot's source, version, age, and whether live refresh is enabled. When `cve_risk.refresh_enabled` is `true`, the scheduler downloads only the fixed public bulk feeds over allowlisted HTTPS; Python's standard `HTTPS_PROXY` and `NO_PROXY` settings still apply. A rejected, oversized, malformed, or failed download leaves the last accepted snapshot in place.
 
 NVD advisory storage is separate from the EPSS/KEV bulk-feed switch. Use `advisory_mode: local` with `nvd_local_path` to load a bounded NVD 2.0 JSON dataset during startup, or use `advisory_mode: external` to retain the normalized result only when a user with finding-triage permission explicitly refreshes a saved CVE in Atlas. The external mode doesn't create a scheduler job or send scan-derived products, packages, targets, or findings to NVD. A failed local reload keeps the last accepted dataset and reports the failure through `providers`, logs, and metrics. Later accepted data records withdrawal, rejection, dispute, reinstatement, and CVSS decreases of at least `advisory_cvss_downgrade_delta` for linked findings; the first accepted record is a silent baseline. `disabled` keeps shared NVD CVSS storage off; the existing explicit `intel cve` provider lookup remains available under its own cache and rate limits.
+
+OSV package applicability has its own opt-in. Use `osv_advisory_mode: local` with `osv_local_path` to load a bounded full-record OSV JSON array during startup. The app accepts only exact package identities and supported version rules, skips a file whose checksum hasn't changed, and replaces the stored snapshot only after the whole dataset validates. A failed reload keeps the last accepted snapshot. `providers` reports the configured mode and stored-data status, while logs and metrics record only the source, outcome, and bounded counts; they never include the configured file path or advisory payload. This local mode makes no network request, and viewing a finding, Project, report, or Atlas profile never acquires OSV data.
 
 When stored NVD data includes complete CPE applicability, a successful validated Nmap `-oX` run can use those local rules to save an inferred finding. Finalization doesn't contact an advisory provider, and `advisory_mode: disabled` leaves the run with no stored advisory matches.
 

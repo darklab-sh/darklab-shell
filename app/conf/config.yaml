@@ -430,6 +430,9 @@
 # The `providers` built-in shows each feed's version, age, origin, and current
 # refresh setting. HTTPS_PROXY/NO_PROXY are honored by Python's standard HTTP
 # client when a live refresh is enabled.
+# NVD and OSV advisory storage are separate opt-ins. Their local modes load an
+# operator-managed dataset during startup, keep the last accepted snapshot after
+# a bad reload, and never make a network request from a read surface.
 # Server default if unset:
 # cve_risk:
 #   bootstrap_enabled: true
@@ -447,6 +450,8 @@
 #   epss_reset_probability: 0.08
 #   advisory_mode: disabled
 #   nvd_local_path: ""
+#   osv_advisory_mode: disabled
+#   osv_local_path: ""
 #   advisory_positive_ttl_seconds: 604800
 #   advisory_negative_ttl_seconds: 86400
 #   advisory_cvss_downgrade_delta: 1.0

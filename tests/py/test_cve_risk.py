@@ -18,7 +18,7 @@ from config import CveRiskConfig
 from core.database_backend import DatabaseBackend
 from core.migrations import MIGRATIONS
 from core.migrations.runner import run_migrations
-from services.cve_risk import bootstrap, refresh
+from services.cve_risk import bootstrap, maintenance, refresh
 from services.cve_risk import escalation
 from services.cve_risk.escalation import (
     acknowledge_escalation,
@@ -33,6 +33,10 @@ from services.cve_risk.nvd_advisory import (
     load_configured_local_nvd,
     parse_nvd_dataset,
     persist_external_nvd_lookup,
+)
+from services.cve_risk.osv_acquisition import (
+    get_osv_source_status,
+    load_configured_local_osv,
 )
 from services.cve_risk.osv_parser import OsvDatasetError, parse_osv_dataset
 from services.cve_risk.osv_store import accept_local_osv_dataset
@@ -275,6 +279,10 @@ def test_cve_risk_config_bounds_network_and_hysteresis_contracts():
         CveRiskConfig(advisory_mode="automatic")
     with pytest.raises(ValidationError, match="nvd_local_path"):
         CveRiskConfig(advisory_mode="local")
+    with pytest.raises(ValidationError, match="osv_advisory_mode"):
+        CveRiskConfig(osv_advisory_mode="external")
+    with pytest.raises(ValidationError, match="osv_local_path"):
+        CveRiskConfig(osv_advisory_mode="local")
     with pytest.raises(ValidationError, match="advisory_cvss_downgrade_delta"):
         CveRiskConfig(advisory_cvss_downgrade_delta=0)
 
@@ -504,6 +512,105 @@ def test_local_osv_acceptance_rolls_back_to_last_good_dataset(risk_db):
     assert advisory["source_advisory_id"] == "GHSA-abcd-1234-efgh"
     assert tuple(source) == (current.version, "c" * 64)
     assert risk_db.execute("SELECT COUNT(*) FROM package_advisory_ranges").fetchone()[0] == 1
+
+
+def test_configured_local_osv_load_reports_status_and_preserves_last_good(
+    risk_db,
+    tmp_path,
+    caplog,
+):
+    payload = json.dumps([_osv_record()]).encode()
+    path = tmp_path / "osv.json"
+    path.write_bytes(payload)
+    cfg = {"cve_risk": {
+        "osv_advisory_mode": "local",
+        "osv_local_path": str(path),
+    }}
+
+    loaded = load_configured_local_osv(risk_db, cfg=cfg)
+    status = get_osv_source_status(risk_db, cfg=cfg)
+
+    assert loaded == {
+        "source": "osv",
+        "outcome": "loaded",
+        "record_count": 1,
+        "exact_version_count": 1,
+        "range_count": 1,
+    }
+    assert status["acquisition_mode"] == "local"
+    assert status["origin"] == "local"
+    assert status["status"] == "current"
+    assert status["record_count"] == 1
+    assert status["checksum_sha256"] == hashlib.sha256(payload).hexdigest()
+
+    path.write_text("not json", encoding="utf-8")
+    failed = load_configured_local_osv(risk_db, cfg=cfg)
+    failed_status = get_osv_source_status(risk_db, cfg=cfg)
+
+    assert failed == {"source": "osv", "outcome": "failed", "error": "OsvDatasetError"}
+    assert failed_status["status"] == "failed"
+    assert failed_status["source_version"] == status["source_version"]
+    assert failed_status["checksum_sha256"] == status["checksum_sha256"]
+    assert risk_db.execute(
+        "SELECT COUNT(*) FROM package_advisories WHERE source = 'osv'"
+    ).fetchone()[0] == 1
+    failure_log = next(
+        record for record in caplog.records
+        if record.getMessage() == "OSV_ADVISORY_LOCAL_LOAD_FAILED"
+    )
+    assert failure_log.source == "osv"
+    assert failure_log.error_type == "OsvDatasetError"
+    assert str(path) not in caplog.text
+
+    path.write_bytes(payload)
+    assert load_configured_local_osv(risk_db, cfg=cfg) == {
+        "source": "osv",
+        "outcome": "unchanged",
+    }
+    assert get_osv_source_status(risk_db, cfg=cfg)["status"] == "current"
+
+
+def test_cve_risk_maintenance_runs_independent_local_advisory_loaders(monkeypatch):
+    executed = []
+    monkeypatch.setattr(
+        maintenance,
+        "load_configured_local_nvd",
+        lambda conn, *, cfg: executed.append("nvd"),
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "load_configured_local_osv",
+        lambda conn, *, cfg: executed.append("osv"),
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "sync_finding_cve_links",
+        lambda conn: executed.append("links"),
+    )
+    steps = []
+
+    def run_step(name, callback):
+        steps.append(name)
+        callback()
+
+    maintenance.run_cve_risk_maintenance(
+        object(),
+        run_step,
+        {"cve_risk": {
+            "bootstrap_enabled": False,
+            "advisory_mode": "local",
+            "nvd_local_path": "/configured/nvd.json",
+            "osv_advisory_mode": "local",
+            "osv_local_path": "/configured/osv.json",
+        }},
+    )
+
+    assert steps == [
+        "cve_advisory_local_nvd",
+        "cve_advisory_local_osv",
+        "finding_cve_link_backfill",
+    ]
+    assert executed == ["nvd", "osv", "links"]
 
 
 def test_kev_parser_requires_catalog_provenance_and_complete_rows():

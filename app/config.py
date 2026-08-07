@@ -490,6 +490,8 @@ class CveRiskConfig(_ConfigModel):
     epss_reset_probability: StrictFloat = Field(default=0.08, ge=0, le=1)
     advisory_mode: StrictStr = "disabled"
     nvd_local_path: StrictStr = ""
+    osv_advisory_mode: StrictStr = "disabled"
+    osv_local_path: StrictStr = ""
     advisory_positive_ttl_seconds: StrictInt = Field(default=604800, ge=3600, le=2592000)
     advisory_negative_ttl_seconds: StrictInt = Field(default=86400, ge=300, le=604800)
     advisory_cvss_downgrade_delta: StrictFloat = Field(default=1.0, gt=0, le=10)
@@ -511,6 +513,14 @@ class CveRiskConfig(_ConfigModel):
         self.nvd_local_path = self.nvd_local_path.strip()
         if self.advisory_mode == "local" and not self.nvd_local_path:
             raise ValueError("cve_risk.nvd_local_path is required when advisory_mode is local")
+        self.osv_advisory_mode = self.osv_advisory_mode.strip().lower()
+        if self.osv_advisory_mode not in {"disabled", "local"}:
+            raise ValueError("cve_risk.osv_advisory_mode must be disabled or local")
+        self.osv_local_path = self.osv_local_path.strip()
+        if self.osv_advisory_mode == "local" and not self.osv_local_path:
+            raise ValueError(
+                "cve_risk.osv_local_path is required when osv_advisory_mode is local"
+            )
         normalized_hosts: list[str] = []
         for value in self.allowed_hosts:
             host = value.strip().lower()

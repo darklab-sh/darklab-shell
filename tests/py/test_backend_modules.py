@@ -17453,6 +17453,10 @@ class TestDerivedCommandRegistry:
                 },
             ]),
             mock.patch("services.commands.builtins_secrets.list_secret_metadata", return_value=stored_secrets),
+            mock.patch(
+                "services.commands.builtins_secrets.get_osv_source_status",
+                return_value={"status": "unavailable"},
+            ),
         ):
             lines, exit_code = builtin_commands.execute_builtin_command("secret show-consumers", "secret-session")
             alias_lines, alias_exit_code = builtin_commands.execute_builtin_command("providers", "secret-session")
@@ -17484,6 +17488,8 @@ class TestDerivedCommandRegistry:
         assert "configured · GITHUB_TOKEN" in text
         assert "trufflehog gitlab" in text
         assert "not configured · GITLAB_TOKEN" in text
+        assert "OSV package data" in text
+        assert "disabled · unavailable" in text
         assert [line.get("text") for line in alias_lines] == [line.get("text") for line in lines]
 
     def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
