@@ -24,6 +24,10 @@ from services.assessments.dns_takeover_observations import (
     DNSX_TAKEOVER_PARSER_VERSION,
     normalize_dnsx_takeover_observation,
 )
+from services.assessments.dns_takeover_correlation import (
+    DNSX_TARGET_CORRELATION_VERSION,
+    correlate_dnsx_target_observation,
+)
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.takeover_detection import evaluate_takeover_signal
@@ -312,6 +316,85 @@ def test_dnsx_json_takeover_evidence_survives_event_wire_without_resolver_entiti
     observation = event.source_detail["takeover_observations"][0]
     assert observation["source_run_id"] == "run-dnsx"
     assert to_wire(capture.events[0])["source_detail"]["takeover_observations"] == [observation]
+
+
+def test_dnsx_target_correlation_joins_exact_owner_scoped_evidence_without_network_work():
+    source = normalize_dnsx_takeover_observation({
+        "host": "app.example.test", "cname": ["tenant.vendor.test"],
+        "status_code": "NOERROR", "timestamp": "2026-08-07T20:00:00Z",
+        "cdn-name": "Vendor",
+    }, command="dnsx -d example.test -cname -json -auto-wildcard", source_run_id="run-source")
+    target = normalize_dnsx_takeover_observation({
+        "host": "tenant.vendor.test", "cname": ["terminal.vendor.test"],
+        "status_code": "NXDOMAIN",
+        "timestamp": "2026-08-07T20:05:00Z",
+    }, command="dnsx -d tenant.vendor.test -a -aaaa -json", source_run_id="run-target")
+    correlated = correlate_dnsx_target_observation(
+        source, target, allowed_source_run_ids={"run-source", "run-target"},
+    )
+    assert correlated is not None
+    assert correlated["cname_chain"] == ["tenant.vendor.test", "terminal.vendor.test"]
+    assert correlated["target_resolution_state"] == "negative"
+    assert correlated["correlation_version"] == DNSX_TARGET_CORRELATION_VERSION
+    assert correlated["target_observation"] == {
+        "observation_id": target["observation_id"],
+        "source_run_id": "run-target",
+        "hostname": "tenant.vendor.test",
+        "resolution_state": "negative",
+        "status_code": "NXDOMAIN",
+        "scope_decision": "in_scope",
+        "observed_at": "2026-08-07T20:05:00Z",
+        "parser_version": DNSX_TAKEOVER_PARSER_VERSION,
+    }
+    potential = evaluate_takeover_signal(correlated)
+    assert potential["state"] == "potential"
+    assert potential["target_observation"] == correlated["target_observation"]
+    assert "secret" not in evaluate_takeover_signal({
+        **correlated, "target_observation": {**correlated["target_observation"], "secret": "no"},
+    })["target_observation"]
+
+
+def test_dnsx_target_correlation_rejects_incompatible_or_untrusted_evidence():
+    source = normalize_dnsx_takeover_observation({
+        "host": "app.example.test", "cname": ["tenant.vendor.test"],
+        "status_code": "NOERROR", "timestamp": "2026-08-07T20:00:00Z",
+    }, command="dnsx -d example.test -cname -json", source_run_id="run-source")
+    mismatch = normalize_dnsx_takeover_observation({
+        "host": "other.vendor.test", "status_code": "SERVFAIL",
+        "timestamp": "2026-08-07T20:05:00Z",
+    }, command="dnsx -d other.vendor.test -a -json", source_run_id="run-target")
+    allowed = {"run-source", "run-target"}
+    assert correlate_dnsx_target_observation(source, mismatch, allowed_source_run_ids=allowed) is None
+    matching = normalize_dnsx_takeover_observation({
+        "host": "tenant.vendor.test", "status_code": "SERVFAIL",
+        "timestamp": "2026-08-07T20:05:00Z",
+    }, command="dnsx -d tenant.vendor.test -a -json", source_run_id="run-target")
+    assert correlate_dnsx_target_observation(
+        source, matching, allowed_source_run_ids={"run-source"},
+    ) is None
+    assert correlate_dnsx_target_observation(
+        source, {**matching, "hostname": "changed.vendor.test"}, allowed_source_run_ids=allowed,
+    ) is None
+    stale = normalize_dnsx_takeover_observation({
+        "host": "tenant.vendor.test", "status_code": "SERVFAIL",
+        "timestamp": "2026-08-09T20:05:00Z",
+    }, command="dnsx -d tenant.vendor.test -a -json", source_run_id="run-target")
+    assert correlate_dnsx_target_observation(source, stale, allowed_source_run_ids=allowed) is None
+    tampered = {**matching, "parser_version": "dnsx-json-takeover-v1"}
+    assert correlate_dnsx_target_observation(source, tampered, allowed_source_run_ids=allowed) is None
+    assert correlate_dnsx_target_observation(
+        source, {**matching, "resolution_state": "negative"}, allowed_source_run_ids=allowed,
+    ) is None
+    truncated = normalize_dnsx_takeover_observation({
+        "host": "app.example.test", "cname": [f"hop-{index}.vendor.test" for index in range(17)],
+        "status_code": "NOERROR", "timestamp": "2026-08-07T20:00:00Z",
+    }, command="dnsx -d example.test -cname -json", source_run_id="run-source")
+    assert correlate_dnsx_target_observation(truncated, matching, allowed_source_run_ids=allowed) is None
+    uncertain = correlate_dnsx_target_observation(source, matching, allowed_source_run_ids=allowed)
+    assert uncertain is not None
+    assert evaluate_takeover_signal(uncertain) == {
+        "state": "uncertain", "reason": "transient_dns_result", "hostname": "app.example.test",
+    }
 
 
 def test_httpx_screenshot_metadata_is_bounded_and_path_safe():

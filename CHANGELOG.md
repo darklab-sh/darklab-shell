@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Separate DNSx runs can now support one conservative dangling-record review.**
+  - **What:** A read-only correlation helper pairs a CNAME observation with an exact DNS result for its ultimate target only when both observations have intact deterministic identities, come from an explicitly allowed set of runs, fit the complete bounded chain, and were captured within 24 hours. Negative target evidence can produce a potential signal, while resolved, transient, truncated, stale, unscoped, mismatched, or tampered evidence stays non-confirming. The join doesn't perform a lookup, write a finding, or claim a provider resource.
+  - **Tests:** Focused coverage pins exact-host matching, owner-scoped run allowlists, deterministic-id verification, the time window, parser provenance, target references, and uncertain DNS handling.
 - **Structured DNSx runs now retain bounded dangling-record evidence.**
   - **What:** DNSx JSON rows keep the queried hostname, CNAME chain, returned addresses, response code, resolver names, provider fingerprint, wildcard-filter mode, explicit domain-scope decision, observation time, source run, and parser version. The stored row says when the CNAME target wasn't checked, omits raw DNS payloads and credential-bearing resolver URLs, and doesn't label a CNAME as a takeover finding. Structured entity extraction also excludes resolver addresses from Atlas.
   - **Tests:** Focused parser, scope, bounds, uncertainty, entity, event-wire, and module-size coverage pins the evidence-only boundary.

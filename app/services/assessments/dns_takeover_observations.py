@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-import hashlib
 from typing import Any
 
+from services.assessments.dns_takeover_identity import (
+    DNSX_TAKEOVER_PARSER_VERSION,
+    dnsx_observation_id,
+)
 from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_ip
 from services.assessments.dns_takeover_context import (
     dnsx_command_scope_domain,
@@ -17,7 +20,6 @@ from services.assessments.dns_takeover_context import (
 )
 
 
-DNSX_TAKEOVER_PARSER_VERSION = "dnsx-json-takeover-v1"
 DNSX_MAX_CNAME_CHAIN = 16
 DNSX_MAX_ADDRESSES = 32
 DNSX_MAX_RESOLVERS = 8
@@ -59,22 +61,28 @@ def normalize_dnsx_takeover_observation(
     scope_root = dnsx_command_scope_domain(command)
     provider_name = _text(item.get("cdn-name"), 128).casefold()
     provider_type = _text(item.get("cdn-type"), 64).casefold()
+    resolution_state = _resolution_state(status_code, addresses, cnames)
+    wildcard_filter = dnsx_wildcard_filter(command)
+    scope_decision = dnsx_scope_decision(hostname, scope_root)
     return {
-        "observation_id": _observation_id(run_id, hostname, observed_at, cnames),
+        "observation_id": dnsx_observation_id(
+            run_id, hostname, observed_at, cnames, status_code,
+            resolution_state, scope_decision, wildcard_filter,
+        ),
         "hostname": hostname,
         "cname_chain": cnames,
         "addresses": addresses,
         "status_code": status_code,
-        "resolution_state": _resolution_state(status_code, addresses, cnames),
+        "resolution_state": resolution_state,
         "target_resolution_state": "not_checked",
         "provider_fingerprint": {
             "name": provider_name,
             "type": provider_type,
         } if provider_name or provider_type else {},
         "resolvers": resolvers,
-        "wildcard_filter": dnsx_wildcard_filter(command),
+        "wildcard_filter": wildcard_filter,
         "scope_root": scope_root,
-        "scope_decision": dnsx_scope_decision(hostname, scope_root),
+        "scope_decision": scope_decision,
         "source_run_id": run_id,
         "observed_at": observed_at,
         "parser_version": DNSX_TAKEOVER_PARSER_VERSION,
@@ -144,11 +152,6 @@ def _timestamp(value: Any) -> str:
     return text if parsed.tzinfo is not None else ""
 
 
-def _observation_id(run_id: str, hostname: str, observed_at: str, cnames: list[str]) -> str:
-    source = "\x1f".join((run_id, hostname, observed_at, *cnames))
-    return "dnsobs_" + hashlib.sha256(source.encode()).hexdigest()[:32]
-
-
 def _text(value: Any, limit: int) -> str:
     raw = str(value or "")
     text = " ".join(raw.split())
@@ -158,6 +161,7 @@ def _text(value: Any, limit: int) -> str:
 __all__ = [
     "DNSX_MAX_CNAME_CHAIN",
     "DNSX_TAKEOVER_PARSER_VERSION",
+    "dnsx_observation_id",
     "dnsx_json_metadata",
     "normalize_dnsx_takeover_observation",
 ]

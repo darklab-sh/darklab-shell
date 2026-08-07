@@ -375,6 +375,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/cyclonedx_parser.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/takeover_detection.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/dns_takeover_context.py", 65, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/dns_takeover_correlation.py", 180, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/dns_takeover_identity.py", 60, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/dns_takeover_observations.py", 170, "split-package-ratchet"
     ),
