@@ -518,6 +518,10 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     }
     public = public_execution(stored)
     assert "fanout_checkpoint" not in public["steps"][0]
+    assert public["steps"][0]["fanout_summary"] == {
+        "total": 2, "pending": 2, "running": 0, "succeeded": 0,
+        "failed": 0, "skipped": 0, "cancelled": False, "failure_samples": [],
+    }
     with pytest.raises(ValueError, match="overlap"):
         set_fanout_checkpoint(execution_id, step_id, {"pending": [1], "completed": [1], "failed": [], "cancelled": False})
 

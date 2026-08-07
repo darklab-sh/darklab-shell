@@ -23,6 +23,7 @@ from services.workflows.captures import MAX_CAPTURE_TOTAL_BYTES
 from services.workflows.compiler import workflow_private_values
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
 from services.workflows.fanout_checkpoint import checkpoint_from_payload
+from services.workflows.fanout_summary import summarize_fanout_results
 
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running", "canceling")
@@ -156,6 +157,17 @@ def public_execution(execution: Mapping[str, Any] | None) -> dict[str, Any]:
             for field in PUBLIC_EXECUTION_STEP_FIELDS
             if field in step
         }
+        checkpoint = step.get("fanout_checkpoint")
+        if isinstance(checkpoint, Mapping):
+            rows = [
+                *({"status": "pending"} for _ in checkpoint.get("pending", [])),
+                *({"status": "succeeded"} for _ in checkpoint.get("completed", [])),
+                *({"status": "failed", "error_code": "child_failed"} for _ in checkpoint.get("failed", [])),
+            ]
+            public_step["fanout_summary"] = summarize_fanout_results(
+                rows,
+                cancelled=bool(checkpoint.get("cancelled")),
+            )
         if "error_detail" in public_step:
             public_step["error_detail"] = redact_private_values(
                 public_step["error_detail"],

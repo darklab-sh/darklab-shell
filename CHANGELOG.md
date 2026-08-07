@@ -42,6 +42,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment fan-out now has a safe public progress summary.**
   - **What:** UI-facing summaries expose child counts, cancellation state, and a small set of error codes without returning collection values or raw child error text.
   - **Tests:** Focused workflow coverage pins count normalization and value redaction.
+- **Workflow execution payloads now expose checkpoint-derived fan-out progress.**
+  - **What:** Steps with private checkpoint state expose only bounded totals and cancellation status; raw ordinals and collection values stay private.
+  - **Tests:** Public execution coverage pins summary projection and checkpoint redaction.
 - **Assessment Nuclei plans now use reviewed profiles.**
   - **What:** Safe, standard, and explicitly intrusive profiles have fixed severity/headless arguments; safe remains the default and unknown names fail closed.
   - **Tests:** Command-plan coverage pins profile allowlisting and default behavior.
