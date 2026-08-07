@@ -4,6 +4,7 @@
 from services.assessments.service_actions import service_actions, service_evidence_state
 from services.assessments.command_plans import command_plan
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
+from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.atlas.observations import public_app_port_record
 
 
@@ -49,3 +50,19 @@ def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
     plan = command_plan("nmap", "ip", "192.0.2.10", nmap_profile="ssh")
     assert plan is not None
     assert "--script ssh2-enum-algos,ssh-hostkey" in plan.command
+
+
+def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirmation():
+    potential = evaluate_takeover_signal({
+        "hostname": "app.example.test", "cname_chain": ["app.vendor.test."],
+        "provider": "vendor", "target_resolved": False, "in_scope": True,
+    })
+    assert potential["state"] == "potential"
+    confirmed = evaluate_takeover_signal({
+        "hostname": "app.example.test", "cname_chain": ["app.vendor.test"],
+        "provider": "vendor", "target_resolved": False, "in_scope": True,
+        "reviewed_takeover_template_match": True,
+    })
+    assert confirmed["state"] == "confirmed"
+    assert evaluate_takeover_signal({"hostname": "app.example.test", "resolution_state": "timeout"})["state"] == "uncertain"
+    assert evaluate_takeover_signal({"hostname": "app.example.test", "cname_chain": ["outside.test"], "target_resolved": False, "in_scope": False})["reason"] == "out_of_scope_target"
