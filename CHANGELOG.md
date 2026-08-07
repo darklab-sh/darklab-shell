@@ -83,7 +83,7 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.
 - **Assessment output now preserves source-run provenance for web captures.**
   - **What:** Completed runs attach their run ID to HTTPx screenshot and gau historical-URL metadata when tool output does not provide one.
-  - **Tests:** Passive URL provenance coverage verifies the run link remains available to downstream gallery and review surfaces.
+  - **Tests:** Screenshot and passive URL provenance coverage verifies the run link remains available to downstream gallery and review surfaces.
 - **Assessment recommendations now include a bounded passive gau plan.**
   - **What:** Operators can generate one-domain historical URL discovery plans with a fixed thread count and timeout; discovered URLs remain passive metadata until separately reviewed.
   - **Tests:** Command-plan coverage pins the domain-only target contract and no-auto-probe description.

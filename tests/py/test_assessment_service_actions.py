@@ -171,14 +171,18 @@ def test_web_gallery_paging_is_bounded_and_skips_malformed_rows():
 
 
 def test_httpx_json_output_carries_safe_screenshot_metadata_only():
-    classifier = OutputSignalClassifier("httpx -json -screenshot -srd screenshots")
+    classifier = OutputSignalClassifier(
+        "httpx -json -screenshot -srd screenshots",
+        source_run_id="run-httpx",
+        profile_role="anonymous",
+    )
     metadata = classifier.classify_line(
         '{"url":"https://app.example.test","screenshot_path":"screenshots/app.png","status_code":200}'
     )
     assert metadata["screenshots"] == [{
         "url": "https://app.example.test", "artifact_path": "screenshots/app.png",
         "status_code": 200, "title": "", "technologies": [], "captured_at": "",
-        "visual_hash": "", "source_run_id": "", "profile_role": "",
+        "visual_hash": "", "source_run_id": "run-httpx", "profile_role": "anonymous",
     }]
     assert "html" not in metadata
 
