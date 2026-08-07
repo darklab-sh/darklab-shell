@@ -275,6 +275,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
+    from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
     from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
     from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
     from services.assessments.version_inference_persistence import persist_version_inference_candidate
@@ -883,6 +884,31 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     )
     assert postgres_nmap_candidates["candidate_count"] == 1
     assert postgres_nmap_candidates["observations"][0]["target"] == "[2001:db8::10]:5432/tcp"
+    postgres_httpx_candidates = correlate_httpx_json_with_stored_nvd(
+        compat,
+        {
+            "url": "https://db.example.test",
+            "timestamp": "2026-08-08T11:00:00Z",
+            "tech": ["Postgres:1.5"],
+            "cpe": [{
+                "product": "postgres",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-postgres-httpx-1",
+        tool_version="httpx 1.10.0",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_httpx_candidates["candidate_count"] == 1
+    assert postgres_httpx_candidates["observations"][0]["candidates"][0]["source"] == {
+        "kind": "run",
+        "observation_id": postgres_httpx_candidates["observations"][0]["observation_id"],
+        "observed_at": "2026-08-08T11:00:00Z",
+        "tool_version": "httpx 1.10.0",
+        "run_id": "run-postgres-httpx-1",
+        "parser_version": "httpx-json-cpe-v1",
+    }
     compat.execute(
         "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
         "VALUES (?, ?, ?, ?, ?, 0)",

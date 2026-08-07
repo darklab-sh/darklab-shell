@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Exact HTTPx CPE evidence can now be checked against stored NVD data.**
+  - **What:** A bounded, read-only correlation step checks one structured HTTPx result against already accepted NVD applicability rules. Matches keep the source run, HTTPx and parser versions, target, observation time, exact CPE, affected range, matching NVD rule, advisory version, origin, expiry, and freshness. Incomplete provenance produces no candidate, and correlation doesn't contact a provider or save a finding.
+  - **Tests:** SQLite and real Postgres coverage pins exact matches, complete provenance, missing-tool-version rejection, and the no-write boundary.
 - **HTTPx runs now retain exact versioned technology evidence.**
   - **What:** Maintained assessment actions request structured HTTPx JSON and version-enriched CPE output. darklab_shell keeps an observation only when the versioned technology string agrees with the CPE vendor, product, and version, and records its target, source run, observation time, and parser version. Unversioned names, conflicting versions, mismatched identities, unsafe URLs, and malformed timestamps remain ordinary run output and don't create vulnerability findings.
   - **Tests:** Parser, command-plan, run-event, wire-format, provenance, rejection, and module-ratchet coverage pins the exact-match boundary.

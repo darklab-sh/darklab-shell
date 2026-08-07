@@ -51,6 +51,7 @@ from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
 from services.assessments.osv_package_correlation import correlate_stored_osv_package_page
+from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
 from services.assessments.nmap_inference_materialization import (
     NMAP_INFERENCE_MAX_CANDIDATES,
     materialize_nmap_xml_version_inferences,
@@ -1843,6 +1844,54 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "run_id": "run-nmap-xml-1",
         "parser_version": "nmap-xml-cpe-v1",
     }
+    assert risk_db.total_changes == changes_before_read
+    httpx_candidate_result = correlate_httpx_json_with_stored_nvd(
+        risk_db,
+        {
+            "url": "https://api.example.test",
+            "timestamp": "2026-08-05T12:30:00Z",
+            "tech": ["Server:2.5.1"],
+            "cpe": [{
+                "product": "server",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-httpx-json-1",
+        tool_version="httpx 1.10.0",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert httpx_candidate_result["observation_count"] == 1
+    assert httpx_candidate_result["candidate_count"] == 1
+    httpx_candidate = httpx_candidate_result["observations"][0]["candidates"][0]
+    assert httpx_candidate["target"] == "https://api.example.test"
+    assert httpx_candidate["vulnerability_id"] == "CVE-2026-12345"
+    assert httpx_candidate["source"] == {
+        "kind": "run",
+        "observation_id": httpx_candidate_result["observations"][0]["observation_id"],
+        "observed_at": "2026-08-05T12:30:00Z",
+        "tool_version": "httpx 1.10.0",
+        "run_id": "run-httpx-json-1",
+        "parser_version": "httpx-json-cpe-v1",
+    }
+    incomplete_httpx = correlate_httpx_json_with_stored_nvd(
+        risk_db,
+        {
+            "url": "https://api.example.test",
+            "timestamp": "2026-08-05T12:30:00Z",
+            "tech": ["Server:2.5.1"],
+            "cpe": [{
+                "product": "server",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-httpx-json-1",
+        tool_version="",
+    )
+    assert incomplete_httpx["candidate_count"] == 0
+    assert incomplete_httpx["observations"][0]["matched_cve_count"] == 1
+    assert incomplete_httpx["observations"][0]["unmaterialized_match_count"] == 1
     assert risk_db.total_changes == changes_before_read
     risk_db.execute(
         "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
