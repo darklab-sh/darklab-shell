@@ -43,9 +43,10 @@ def service_actions(
 def service_evidence_state(service: str | None, *, port: int | None = None) -> str:
     """Classify service evidence without inferring a service from a port number."""
     normalized = str(service or "").strip().casefold()
-    if not normalized or normalized in {"unknown", "ambiguous", "review"}:
+    resolved = ALIASES.get(normalized, normalized)
+    if not normalized or resolved in {"unknown", "ambiguous", "review"}:
         return "needs_review"
-    return "identified" if normalized in ACTIONS or normalized in ALIASES else "unsupported"
+    return "identified" if resolved in ACTIONS else "unsupported"
 
 
 __all__ = ["ServiceAction", "service_actions", "service_evidence_state"]

@@ -17,6 +17,7 @@ def test_service_evidence_does_not_infer_from_port_numbers():
     assert service_evidence_state(None, port=22) == "needs_review"
     assert service_evidence_state("ssh", port=22) == "identified"
     assert service_evidence_state("telnet", port=22) == "unsupported"
+    assert service_evidence_state("ssh?", port=22) == "needs_review"
 
 
 def test_common_protocol_aliases_are_bounded_safe_recommendations():
