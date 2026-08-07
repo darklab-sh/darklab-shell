@@ -275,6 +275,9 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.assessments.cyclonedx_stored_nvd import correlate_cyclonedx_json_with_stored_nvd
+    from services.assessments.httpx_inference_materialization import (
+        materialize_httpx_json_version_inferences,
+    )
     from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
     from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
     from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
@@ -1010,6 +1013,64 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "SELECT COUNT(*) AS count FROM finding_version_inference_sources WHERE finding_id = ?",
         (postgres_inference["finding_id"],),
     ).fetchone()["count"] == 1
+    compat.execute(
+        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "VALUES (?, ?, ?, ?, ?, 0)",
+        (
+            "run-postgres-httpx-1",
+            "version-postgres-owner",
+            "httpx -u https://db.example.test -json",
+            "2026-08-08T10:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) "
+        "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, ?)",
+        (
+            "entity-postgres-version-url",
+            "version-postgres-owner",
+            "https://db.example.test",
+            "signature-postgres-version-url",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, ?, ?, ?, 1)",
+        (
+            "entity-postgres-version-url",
+            "run-postgres-httpx-1",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    postgres_httpx_inference = materialize_httpx_json_version_inferences(
+        compat,
+        "version-postgres-owner",
+        {
+            "url": "https://db.example.test",
+            "timestamp": "2026-08-08T11:00:00Z",
+            "tech": ["Postgres:1.5"],
+            "cpe": [{
+                "product": "postgres",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-postgres-httpx-1",
+        tool_version="httpx 1.10.0",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_httpx_inference["materialized_count"] == 1
+    assert postgres_httpx_inference["finding_created_count"] == 1
+    assert compat.execute(
+        "SELECT tool_root FROM findings WHERE entity_id = 'entity-postgres-version-url'"
+    ).fetchone()["tool_root"] == "httpx"
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname

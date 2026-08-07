@@ -10,9 +10,12 @@ from typing import Any
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
-from core.output_targets import command_root
 from services.assessments.cpe_applicability import match_cpe_applicability, normalize_observed_cpe
 from services.assessments.version_inference_inputs import normalize_version_inference_candidate
+from services.assessments.version_inference_source_validation import (
+    resolve_version_inference_entity,
+    resolve_version_inference_source,
+)
 from services.atlas.recalculation import recalculate_atlas_findings
 from services.projects.utils import now
 
@@ -30,11 +33,19 @@ def persist_version_inference_candidate(
     owner_team = str(team_id or "").strip()
     if record is None or not (owner_session or owner_team):
         return None
-    source = _source_record(conn, owner_session, owner_team, record)
-    entity = _source_entity(conn, owner_session, owner_team, record)
+    source = resolve_version_inference_source(conn, owner_session, owner_team, record)
+    entity = resolve_version_inference_entity(conn, owner_session, owner_team, record)
     if source is None or entity is None or not _advisory_rule_matches(conn, record):
         return None
-    finding = _upsert_finding(conn, owner_session, owner_team, record, entity)
+    _, source_tool_root = source
+    finding = _upsert_finding(
+        conn,
+        owner_session,
+        owner_team,
+        record,
+        entity,
+        source_tool_root=source_tool_root,
+    )
     if finding is None:
         return None
     finding_id, created = finding
@@ -74,45 +85,6 @@ def persist_version_inference_candidate(
     }
 
 
-def _source_record(conn: Any, session_id: str, team_id: str, record: dict[str, str]) -> Any:
-    query = "SELECT s.* FROM runs s " if record["source_kind"] == "run" else (
-        "SELECT s.* FROM atlas_import_batches s "
-    )
-    row = conn.execute(
-        query + "WHERE ((? != '' AND s.team_id = ?) OR "
-        "(? = '' AND s.session_id = ? AND s.team_id = '')) AND s.id = ?",
-        (team_id, team_id, team_id, session_id, record["source_id"]),
-    ).fetchone()
-    if not row:
-        return None
-    if record["source_kind"] == "run":
-        if row["finished"] is None or row["exit_code"] != 0 or command_root(row["command"]) != "nmap":
-            return None
-    elif str(row["status"] or "") != "applied":
-        return None
-    return row
-
-
-def _source_entity(conn: Any, session_id: str, team_id: str, record: dict[str, str]) -> Any:
-    query = (
-        "SELECT e.id, e.type, e.canonical_value FROM entities e "
-        "WHERE ((? != '' AND e.team_id = ?) OR "
-        "(? = '' AND e.session_id = ? AND e.team_id = '')) "
-        "AND e.canonical_value = ? AND "
-    )
-    source_query = (
-        "EXISTS (SELECT 1 FROM entity_run_links l WHERE l.entity_id = e.id AND l.run_id = ?) "
-        if record["source_kind"] == "run" else
-        "EXISTS (SELECT 1 FROM atlas_entity_import_links l WHERE l.entity_id = e.id AND l.batch_id = ?) "
-    )
-    query += source_query + "ORDER BY e.id LIMIT 2"
-    rows = conn.execute(
-        query,
-        (team_id, team_id, team_id, session_id, record["target"], record["source_id"]),
-    ).fetchall()
-    return rows[0] if len(rows) == 1 else None
-
-
 def _advisory_rule_matches(conn: Any, record: dict[str, str]) -> bool:
     row = conn.execute(
         "SELECT * FROM cve_advisory_cpe_matches WHERE source = 'nvd' AND cve_id = ? "
@@ -150,6 +122,8 @@ def _upsert_finding(
     team_id: str,
     record: dict[str, str],
     entity: Any,
+    *,
+    source_tool_root: str,
 ) -> tuple[str, bool] | None:
     signature = hashlib.sha256(
         f"version_cve_correlation\x1f{entity['id']}\x1f{record['vulnerability_id']}".encode()
@@ -174,7 +148,7 @@ def _upsert_finding(
         "'high', ?) ON CONFLICT DO NOTHING",
         (
             finding_id, session_id, team_id, run_id, entity["id"], entity["id"], subject_key,
-            signature, "nmap" if origin == "run" else "import", run_id, run_id,
+            signature, source_tool_root, run_id, run_id,
             record["observed_at"], record["observed_at"], signature, title, title, now(), origin,
             "An exact observed product version matches a stored NVD applicability rule; "
             "this is an inference, not confirmation of vulnerable behavior.",

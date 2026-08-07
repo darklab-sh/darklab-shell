@@ -54,6 +54,10 @@ from services.assessments.osv_package_correlation import correlate_stored_osv_pa
 from services.assessments.cyclonedx_stored_nvd import correlate_cyclonedx_json_with_stored_nvd
 from services.assessments.cyclonedx_stored_osv import correlate_cyclonedx_json_with_stored_osv
 from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
+from services.assessments.httpx_inference_materialization import (
+    HTTPX_INFERENCE_MAX_CANDIDATES,
+    materialize_httpx_json_version_inferences,
+)
 from services.assessments.nmap_inference_materialization import (
     NMAP_INFERENCE_MAX_CANDIDATES,
     materialize_nmap_xml_version_inferences,
@@ -243,6 +247,44 @@ def test_nmap_version_inference_materialization_rejects_over_cap_instead_of_evic
     assert summary["materialized_count"] == NMAP_INFERENCE_MAX_CANDIDATES
     assert summary["skipped_count"] == 1
     assert summary["truncated"] is True
+
+
+def test_httpx_version_inference_materialization_counts_and_caps_candidates():
+    candidates = [{"candidate": index} for index in range(HTTPX_INFERENCE_MAX_CANDIDATES + 1)]
+    persisted = []
+
+    summary = materialize_httpx_json_version_inferences(
+        object(),
+        "session-version",
+        {"url": "https://example.test"},
+        source_run_id="run-httpx-version",
+        tool_version="httpx 1.10.0",
+        team_id="team-version",
+        correlate_fn=lambda *_args, **_kwargs: {
+            "observations": [{"candidates": candidates}],
+            "truncated": False,
+        },
+        persist_fn=lambda _conn, session_id, candidate, *, team_id="": (
+            persisted.append((session_id, team_id, candidate))
+            or {"created": True, "source_created": True}
+        ),
+    )
+
+    assert persisted == [
+        ("session-version", "team-version", candidate)
+        for candidate in candidates[:HTTPX_INFERENCE_MAX_CANDIDATES]
+    ]
+    assert summary == {
+        "observation_count": 1,
+        "candidate_count": HTTPX_INFERENCE_MAX_CANDIDATES + 1,
+        "attempted_count": HTTPX_INFERENCE_MAX_CANDIDATES,
+        "materialized_count": HTTPX_INFERENCE_MAX_CANDIDATES,
+        "finding_created_count": HTTPX_INFERENCE_MAX_CANDIDATES,
+        "source_created_count": HTTPX_INFERENCE_MAX_CANDIDATES,
+        "rejected_count": 0,
+        "skipped_count": 1,
+        "truncated": True,
+    }
 
 
 def test_public_feed_parsers_require_metadata_ranges_and_unique_cves():
@@ -2021,6 +2063,111 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "skipped_count": 0,
         "truncated": False,
     }
+    risk_db.execute(
+        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "VALUES ('run-httpx-json-1', 'version-owner', 'httpx -u https://api.example.test -json', ?, ?, 0)",
+        ("2026-08-05T12:00:00+00:00", "2026-08-05T12:30:00+00:00"),
+    )
+    risk_db.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
+        "('entity-version-url', 'version-owner', 'url', 'https://api.example.test', "
+        "'signature-version-url', ?, ?, 1, ?)",
+        ("2026-08-05T12:30:00+00:00",) * 3,
+    )
+    risk_db.execute(
+        "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES ('entity-version-url', 'run-httpx-json-1', ?, ?, 1)",
+        ("2026-08-05T12:30:00+00:00",) * 2,
+    )
+    materialized_httpx = materialize_httpx_json_version_inferences(
+        risk_db,
+        "version-owner",
+        {
+            "url": "https://api.example.test",
+            "timestamp": "2026-08-05T12:30:00Z",
+            "tech": ["Server:2.5.1"],
+            "cpe": [{
+                "product": "server",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-httpx-json-1",
+        tool_version="httpx 1.10.0",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert materialized_httpx == {
+        "observation_count": 1,
+        "candidate_count": 1,
+        "attempted_count": 1,
+        "materialized_count": 1,
+        "finding_created_count": 1,
+        "source_created_count": 1,
+        "rejected_count": 0,
+        "skipped_count": 0,
+        "truncated": False,
+    }
+    httpx_finding = risk_db.execute(
+        "SELECT origin, validation_method, tool_root, entity_id FROM findings "
+        "WHERE entity_id = 'entity-version-url'"
+    ).fetchone()
+    assert dict(httpx_finding) == {
+        "origin": "run",
+        "validation_method": "version_inference",
+        "tool_root": "httpx",
+        "entity_id": "entity-version-url",
+    }
+    repeated_httpx = materialize_httpx_json_version_inferences(
+        risk_db,
+        "version-owner",
+        {
+            "url": "https://api.example.test",
+            "timestamp": "2026-08-05T12:30:00Z",
+            "tech": ["Server:2.5.1"],
+            "cpe": [{
+                "product": "server",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-httpx-json-1",
+        tool_version="httpx 1.10.0",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert repeated_httpx["materialized_count"] == 1
+    assert repeated_httpx["finding_created_count"] == 0
+    assert repeated_httpx["source_created_count"] == 0
+    risk_db.execute("UPDATE runs SET exit_code = 1 WHERE id = 'run-httpx-json-1'")
+    failed_httpx = materialize_httpx_json_version_inferences(
+        risk_db,
+        "version-owner",
+        {
+            "url": "https://api.example.test",
+            "timestamp": "2026-08-05T12:30:00Z",
+            "tech": ["Server:2.5.1"],
+            "cpe": [{
+                "product": "server",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-httpx-json-1",
+        tool_version="httpx 1.10.0",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert failed_httpx["materialized_count"] == 0
+    assert failed_httpx["rejected_count"] == 1
+    mismatched_httpx = {
+        **httpx_candidate,
+        "source": {
+            **httpx_candidate["source"],
+            "run_id": "run-nmap-xml-1",
+        },
+    }
+    assert persist_version_inference_candidate(
+        risk_db, "version-owner", mismatched_httpx
+    ) is None
     saved_row = risk_db.execute(
         "SELECT origin, validation_method, severity, confidence, cve_ids_json, occurrence_count, "
         "run_id, entity_id FROM findings WHERE id = ?",
@@ -2038,7 +2185,9 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     }
     saved_source = risk_db.execute(
         "SELECT source_kind, source_id, observation_id, observed_identifier, observed_version, "
-        "match_basis, advisory_source_version FROM finding_version_inference_sources"
+        "match_basis, advisory_source_version FROM finding_version_inference_sources "
+        "WHERE finding_id = ?",
+        (saved_inference["finding_id"],),
     ).fetchone()
     assert dict(saved_source) == {
         "source_kind": "run",
@@ -2057,7 +2206,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     assert persist_version_inference_candidate(risk_db, "version-owner", tampered) is None
     assert risk_db.execute(
         "SELECT COUNT(*) FROM finding_version_inference_sources"
-    ).fetchone()[0] == 1
+    ).fetchone()[0] == 2
     changes_before_read = risk_db.total_changes
     candidate_page = materialize_stored_nvd_cpe_candidate_page(
         risk_db,

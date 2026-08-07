@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Exact HTTPx version matches now have a guarded persistence boundary.**
+  - **What:** A bounded materializer can save at most 100 exact stored-NVD matches from one structured HTTPx row. Before writing, it rechecks the successful owner-scoped HTTPx run, its exact linked URL entity, the HTTPx parser family, and the stored advisory rule. Cross-tool, failed, ambiguous, stale, or tampered provenance is rejected; repeating the same source decision is idempotent, and read surfaces still never trigger the write.
+  - **Tests:** SQLite and real Postgres coverage pins caps, idempotency, completed-run and linked-entity requirements, parser-to-command agreement, cross-tool rejection, immutable source decisions, and the shared module-size boundary.
 - **Exact CycloneDX product CPEs can now be checked against stored NVD data.**
   - **What:** A separate bounded adapter accepts versioned CPEs from CycloneDX JSON components and checks them through the read-only stored-NVD candidate boundary. Results preserve the component, CPE, import batch, format, parser, observation time, affected range, and matching NVD rule. PURL/OSV and CPE/NVD evidence stay distinct, conflicting versions fail closed, and the check doesn't contact NVD, change inventory, or save a finding.
   - **Tests:** SQLite and real Postgres coverage pins exact matches, shared document and observation limits, conflicting-version rejection, complete import provenance, and the no-write boundary.

@@ -379,7 +379,10 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/nvd_cpe_correlation.py", 186, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nmap_stored_nvd.py", 60, "split-package-ratchet"),
     ModuleSizeBudget(
-        "app/services/assessments/nmap_inference_materialization.py", 90, "split-package-ratchet"
+        "app/services/assessments/nmap_inference_materialization.py", 55, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/httpx_inference_materialization.py", 55, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/nmap_version_observations.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/stored_nvd_inference.py", 52, "split-package-ratchet"),
@@ -387,7 +390,13 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/version_correlation.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/version_finding_candidates.py", 105, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/version_inference_inputs.py", 100, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/version_inference_persistence.py", 205, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/version_inference_materialization.py", 65, "split-package-ratchet"
+    ),
+    ModuleSizeBudget("app/services/assessments/version_inference_persistence.py", 185, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/version_inference_source_validation.py", 80, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/version_ranges.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/web_gallery.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/collections.py", 180, "split-package-ratchet"),
