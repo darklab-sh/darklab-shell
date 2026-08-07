@@ -14,6 +14,7 @@ def web_command_plans(
     protected_suffix: str,
     *,
     profiled: bool,
+    nuclei_args: tuple[str, ...] = ("-severity", "high,critical"),
 ) -> dict[str, CommandPlan]:
     """Return the maintained web command-plan family for one target."""
     httpx_bounds = f" -rl {rate} -threads {concurrency}" if profiled else ""
@@ -46,7 +47,7 @@ def web_command_plans(
             credential_use,
         ),
         "nuclei": CommandPlan(
-            f"nuclei -u {target} -severity high,critical -rl {rate} "
+            f"nuclei -u {target} {' '.join(nuclei_args)} -rl {rate} "
             f"-c {concurrency} -timeout 10 -retries 1 -silent{protected_suffix}",
             f"One approved target, high/critical templates, {rate} requests per second, "
             f"concurrency {concurrency}, and one retry.",

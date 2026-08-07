@@ -7,6 +7,7 @@ from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_k
 from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation
+from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
 from core.output_signals import OutputSignalClassifier
 from services.atlas.observations import public_app_port_record
 
@@ -53,6 +54,19 @@ def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
     plan = command_plan("nmap", "ip", "192.0.2.10", nmap_profile="ssh")
     assert plan is not None
     assert "--script ssh2-enum-algos,ssh-hostkey" in plan.command
+
+
+def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
+    assert nuclei_profile_keys() == ("safe", "standard", "intrusive")
+    assert nuclei_profile("unknown").key == "safe"
+    assert nuclei_profile_args("safe") == ("-severity", "high,critical")
+    assert nuclei_profile_args("intrusive") == (
+        "-severity", "low,medium,high,critical", "-headless"
+    )
+    safe = command_plan("nuclei", "domain", "example.com")
+    standard = command_plan("nuclei", "domain", "example.com", nuclei_profile="standard")
+    assert "-severity high,critical" in safe.command
+    assert "-severity medium,high,critical" in standard.command
 
 
 def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirmation():
