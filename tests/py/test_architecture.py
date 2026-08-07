@@ -359,6 +359,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/sarif_parser.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/cyclonedx_parser.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/takeover_detection.py", 100, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/web_surface.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_sources.py", 226, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/capture.py", 422, "split-package-ratchet"),

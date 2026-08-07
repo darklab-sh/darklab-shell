@@ -5,6 +5,7 @@ from services.assessments.service_actions import service_actions, service_eviden
 from services.assessments.command_plans import command_plan
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.takeover_detection import evaluate_takeover_signal
+from services.assessments.web_surface import normalize_httpx_screenshot
 from services.atlas.observations import public_app_port_record
 
 
@@ -66,3 +67,18 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
     assert confirmed["state"] == "confirmed"
     assert evaluate_takeover_signal({"hostname": "app.example.test", "resolution_state": "timeout"})["state"] == "uncertain"
     assert evaluate_takeover_signal({"hostname": "app.example.test", "cname_chain": ["outside.test"], "target_resolved": False, "in_scope": False})["reason"] == "out_of_scope_target"
+
+
+def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
+    record = normalize_httpx_screenshot({
+        "url": "https://app.example.test/login", "screenshot_path": "screenshots/app.png",
+        "status_code": "200", "title": "  Login   page ", "technologies": ["nginx", "nginx"],
+        "run_id": "run-1", "profile_role": "authenticated",
+    })
+    assert record == {
+        "url": "https://app.example.test/login", "artifact_path": "screenshots/app.png",
+        "status_code": 200, "title": "Login page", "technologies": ["nginx", "nginx"],
+        "captured_at": "", "visual_hash": "", "source_run_id": "run-1", "profile_role": "authenticated",
+    }
+    assert normalize_httpx_screenshot({"url": "https://app.example.test", "screenshot_path": "../secret.png"}) is None
+    assert normalize_httpx_screenshot({"url": "https://user:pass@app.example.test", "screenshot_path": "ok.png"}) is None

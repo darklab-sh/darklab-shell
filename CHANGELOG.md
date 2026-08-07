@@ -37,6 +37,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment services now classify dangling DNS records without performing takeover actions.**
   - **What:** Normalized CNAME observations can be labeled `potential`, `confirmed`, `uncertain`, or `not_indicated`; confirmation requires an in-scope reviewed provider/template match. The evaluator never contacts providers, claims resources, or follows out-of-scope tenants.
   - **Tests:** Potential/confirmed, transient-DNS, scope, and architecture-ratchet coverage pin the safety boundary.
+- **Assessment services now normalize HTTPx screenshot metadata safely.**
+  - **What:** HTTP(S) URL, relative screenshot artifact path, status, title, technologies, visual hash, capture time, run, and profile role are bounded for a future Web Surface gallery. Absolute/traversal paths, credential-bearing URLs, and captured markup are rejected or omitted.
+  - **Tests:** Metadata, bounds, path-safety, and architecture-ratchet coverage pin the contract.
 
 - **Projects can now save reusable HTTP assessment profiles without storing credentials in the profile.**
   - **Why:** Authenticated and role-aware web testing needs consistent scope, identity, and request limits, but copying credential values into scanner settings would expose them through ordinary Project and history surfaces.
