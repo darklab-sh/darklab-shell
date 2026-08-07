@@ -184,10 +184,10 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
 
 
 def test_gau_output_carries_historical_url_provenance_only():
-    classifier = OutputSignalClassifier("gau example.com")
+    classifier = OutputSignalClassifier("gau example.com", source_run_id="run-gau")
     metadata = classifier.classify_line("https://example.com/archive?a=1")
     assert metadata["historical_urls"] == [{
-        "url": "https://example.com/archive?a=1", "source": "gau", "source_run_id": "",
+        "url": "https://example.com/archive?a=1", "source": "gau", "source_run_id": "run-gau",
     }]
 
 

@@ -81,6 +81,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.
+- **Assessment output now preserves source-run provenance for web captures.**
+  - **What:** Completed runs attach their run ID to HTTPx screenshot and gau historical-URL metadata when tool output does not provide one.
+  - **Tests:** Passive URL provenance coverage verifies the run link remains available to downstream gallery and review surfaces.
 
 - **Assessment logic now has a conservative service-action recommendation contract.**
   - **Why:** Service-specific next steps need a shared vocabulary without treating a port number or uncertain fingerprint as proof.

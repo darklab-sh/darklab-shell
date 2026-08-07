@@ -960,6 +960,7 @@ def persist_completed_pty_run(
         execution_command,
         cmd_type="real",
         extra_domain_suffixes=active_cfg.get("output_entity_extra_domain_suffixes", []),
+        source_run_id=str(run.run_id),
     )
     for item in shape_completed_pty_entries(synthesized_lines, transcript_mode):
         text = str(item.get("text", ""))

@@ -949,6 +949,8 @@ class OutputSignalClassifier:
     command: str
     cmd_type: str = "real"
     extra_domain_suffixes: Sequence[str] = ()
+    source_run_id: str = ""
+    profile_role: str = ""
 
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
@@ -1015,9 +1017,13 @@ class OutputSignalClassifier:
         if self.root == "httpx" and normalized_text.startswith("{"):
             screenshot = normalize_httpx_screenshot(_json_object_line(normalized_text))
             if screenshot:
+                if not screenshot.get("source_run_id"):
+                    screenshot["source_run_id"] = self.source_run_id
+                if not screenshot.get("profile_role"):
+                    screenshot["profile_role"] = self.profile_role
                 metadata["screenshots"] = [screenshot]
         if self.root == "gau":
-            historical = normalize_historical_url(normalized_text, source="gau")
+            historical = normalize_historical_url(normalized_text, source="gau", run_id=self.source_run_id)
             if historical:
                 metadata["historical_urls"] = [historical]
         role = classify_line_role(
