@@ -376,6 +376,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/historical_urls.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/intel/epss.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/intel/kev.py", 110, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/intel/nvd_applicability.py", 188, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_sources.py", 226, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/capture.py", 422, "split-package-ratchet"),

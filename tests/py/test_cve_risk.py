@@ -42,6 +42,7 @@ from services.cve_risk.ranking import (
 )
 from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.cve_risk.store import accept_feed, get_feed_status
+from services.intel.nvd_applicability import normalize_nvd_cpe_matches
 from services.reports.rendering import (
     render_report_html_from_context,
     render_report_markdown_from_context,
@@ -738,7 +739,7 @@ def test_risk_order_sql_rejects_untrusted_identifier_fragments():
         cve_risk_order_sql("f", age_expression="f.created DESC; DROP TABLE findings")
 
 
-def test_nvd_dataset_normalizes_cvss_cwe_and_disputed_status():
+def test_nvd_dataset_normalizes_cvss_cwe_disputed_status_and_safe_cpe_applicability():
     parsed = parse_nvd_dataset(json.dumps({
         "formatVersion": "NVD_CVE",
         "timestamp": "2026-08-04T12:00:00Z",
@@ -761,6 +762,64 @@ def test_nvd_dataset_normalizes_cvss_cwe_and_disputed_status():
                     {"lang": "en", "value": "CWE-787"},
                     {"lang": "en", "value": "NVD-CWE-noinfo"},
                 ]}],
+                "configurations": [{"nodes": [{
+                    "operator": "OR",
+                    "negate": False,
+                    "cpeMatch": [{
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000001",
+                    }, {
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:a:example:server:*:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000002",
+                        "versionStartIncluding": "2.4",
+                        "versionEndExcluding": "2.6",
+                    }, {
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:o:example:device:*:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000003",
+                    }, {
+                        "vulnerable": False,
+                        "criteria": "cpe:2.3:h:example:device:*:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000004",
+                    }, {
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:a:example:invalid:*:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000005",
+                        "versionEndExcluding": "2.6-beta",
+                    }],
+                }]}, {"nodes": [{
+                    "operator": "AND",
+                    "cpeMatch": [{
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:a:example:conditional:*:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000006",
+                    }],
+                }]}, {"nodes": [{
+                    "operator": "OR",
+                    "negate": True,
+                    "cpeMatch": [{
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:a:example:negated:*:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000007",
+                    }],
+                }]}, {"nodes": [{
+                    "operator": "OR",
+                    "children": [{"operator": "OR", "cpeMatch": []}],
+                    "cpeMatch": [{
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:a:example:nested:*:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000009",
+                    }],
+                }]}, {"operator": "AND", "nodes": [{
+                    "operator": "OR",
+                    "cpeMatch": [{
+                        "vulnerable": True,
+                        "criteria": "cpe:2.3:a:example:wrapped:*:*:*:*:*:*:*:*",
+                        "matchCriteriaId": "00000000-0000-4000-8000-000000000008",
+                    }],
+                }]}],
             },
         }],
     }).encode())
@@ -772,6 +831,47 @@ def test_nvd_dataset_normalizes_cvss_cwe_and_disputed_status():
     assert payload["score"] == 9.8
     assert payload["cvss_version"] == "3.1"
     assert payload["cwes"] == ["CWE-787"]
+    assert payload["cpe_matches"] == [{
+        "criteria": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+        "matchCriteriaId": "00000000-0000-4000-8000-000000000001",
+        "vulnerable": True,
+        "applicability_complete": True,
+        "negate": False,
+    }, {
+        "criteria": "cpe:2.3:a:example:server:*:*:*:*:*:*:*:*",
+        "matchCriteriaId": "00000000-0000-4000-8000-000000000002",
+        "vulnerable": True,
+        "applicability_complete": True,
+        "negate": False,
+        "versionStartIncluding": "2.4",
+        "versionEndExcluding": "2.6",
+    }, {
+        "criteria": "cpe:2.3:o:example:device:*:*:*:*:*:*:*:*",
+        "matchCriteriaId": "00000000-0000-4000-8000-000000000003",
+        "vulnerable": True,
+        "applicability_complete": True,
+        "negate": False,
+        "all_versions": True,
+    }]
+    assert normalize_nvd_cpe_matches([{"nodes": []}] * 129) == []
+    match = {
+        "vulnerable": True,
+        "criteria": "cpe:2.3:a:example:oversized:*:*:*:*:*:*:*:*",
+        "matchCriteriaId": "00000000-0000-4000-8000-000000000011",
+    }
+    assert normalize_nvd_cpe_matches([{
+        "nodes": [{"operator": "OR", "cpeMatch": [match] * 129}],
+    }]) == []
+    assert normalize_nvd_cpe_matches([{"nodes": [{
+        "operator": "OR",
+        "cpeMatch": [{
+            "vulnerable": True,
+            "criteria": "cpe:2.3:a:example:empty_range:*:*:*:*:*:*:*:*",
+            "matchCriteriaId": "00000000-0000-4000-8000-000000000010",
+            "versionStartExcluding": "2.4",
+            "versionEndIncluding": "2.4.0",
+        }],
+    }]}]) == []
 
 
 def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identifiers_in_logs(

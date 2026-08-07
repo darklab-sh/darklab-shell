@@ -9,6 +9,7 @@ from typing import Any
 
 from services.intel.base import IntelResult, Provider, ProviderClientUnavailable
 from services.intel.canonical import canonical_cve
+from services.intel.nvd_applicability import normalize_nvd_cpe_matches
 from services.intel.registry import provider_definition
 from services.intel.schema import response_with_provider
 
@@ -27,6 +28,7 @@ def normalize_cve_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "cvss_version": cvss[2],
         "cvss_vector": cvss[3],
         "cwes": _cwe_ids(cve.get("weaknesses")),
+        "cpe_matches": normalize_nvd_cpe_matches(cve.get("configurations")),
         "description": _english_description(cve.get("descriptions")),
         "references": _reference_urls(cve.get("references")),
     }

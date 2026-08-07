@@ -87,6 +87,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Exact version correlation now materializes provenance-rich inference records.**
   - **What:** Matching PURL/CPE versions produce distinct `version_inference` finding candidates with target, source run/import, observation, tool version, and observed-time context. Package matching accepts a version carried inside the PURL and strict cached SEMVER event ranges. CPE matching accepts exact CPE 2.3 product identities only from complete, non-negated applicability clauses and supports bounded numeric NVD version limits. Conflicting versions, unsupported ranges, incomplete clauses, and environment requirements absent from the observation fail closed. Every match records the advisory source and data version used for the decision.
   - **Tests:** Correlation coverage pins exact and ranged PURL/CPE matches, inclusive and exclusive boundaries, malformed-event and incomplete-clause rejection, provenance fields, and the separation from active confirmation.
+- **NVD applicability trees now fail closed before version correlation.**
+  - **What:** NVD 2.0 CVE normalization keeps only vulnerable CPE criteria from bounded, standalone, non-negated `OR` roots. `AND`, nested, negated, malformed, and over-quota branches stay unavailable rather than being flattened into unsafe product matches.
+  - **Tests:** NVD dataset coverage pins exact-version, numeric-range, and all-version output plus conditional, negated, malformed, non-vulnerable, and oversized input rejection.
 - **Project Web Surface metadata now has bounded gallery filtering.**
   - **What:** Captures can be filtered and paged by target, status, technology, authentication role, visual hash, and changed-since state without loading image bytes or captured HTML.
   - **Tests:** Gallery coverage pins metadata-only filtering, bounded results, and defensive paging.
