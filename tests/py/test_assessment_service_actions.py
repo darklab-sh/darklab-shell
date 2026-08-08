@@ -32,6 +32,10 @@ from services.assessments.dns_takeover_event_review import build_dnsx_takeover_e
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.takeover_detection import evaluate_takeover_signal
+from services.assessments.takeover_confirmation import (
+    NUCLEI_TAKEOVER_CONFIRMATION_VERSION,
+    confirm_takeover_with_nuclei,
+)
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
 from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
@@ -181,17 +185,137 @@ def test_epss_and_kev_feeds_normalize_risk_signals_without_network_access():
 
 
 def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirmation():
-    potential = evaluate_takeover_signal({
+    direct_potential = evaluate_takeover_signal({
         "hostname": "app.example.test", "cname_chain": ["app.vendor.test."],
         "provider": "vendor", "target_resolved": False, "in_scope": True,
     })
-    assert potential["state"] == "potential"
-    confirmed = evaluate_takeover_signal({
+    assert direct_potential["state"] == "potential"
+    assert evaluate_takeover_signal({
         "hostname": "app.example.test", "cname_chain": ["app.vendor.test"],
         "provider": "vendor", "target_resolved": False, "in_scope": True,
         "reviewed_takeover_template_match": True,
-    })
-    assert confirmed["state"] == "confirmed"
+    })["state"] == "potential"
+    source = normalize_dnsx_takeover_observation(
+        {
+            "host": "app.example.test",
+            "cname": ["app.vendor.test"],
+            "status_code": "NOERROR",
+            "timestamp": "2026-08-07T21:59:00Z",
+        },
+        command="dnsx -d example.test -cname -json",
+        source_run_id="run-dnsx-source",
+    )
+    target = normalize_dnsx_takeover_observation(
+        {
+            "host": "app.vendor.test",
+            "status_code": "NXDOMAIN",
+            "timestamp": "2026-08-07T21:59:30Z",
+        },
+        command="dnsx -d vendor.test -a -aaaa -cname -json",
+        source_run_id="run-dnsx-target",
+    )
+    assert source is not None and target is not None
+    event_review = build_dnsx_takeover_event_review(
+        [
+            {"source_detail": {"takeover_observations": [source]}},
+            {"source_detail": {"takeover_observations": [target]}},
+        ],
+        allowed_source_run_ids={"run-dnsx-source", "run-dnsx-target"},
+    )
+    potential = event_review["reviews"][0]
+    assert potential["state"] == "potential"
+    reviewed_templates = {
+        "http-takeover-reviewed": {
+            "template_version": "2026.08.1",
+            "template_digest": "sha256:" + ("a" * 64),
+            "policy_level": "safe",
+        },
+    }
+    evidence = {
+        "adapter": "nuclei",
+        "match_state": "matched",
+        "template_id": "http-takeover-reviewed",
+        "template_version": "2026.08.1",
+        "template_digest": "sha256:" + ("a" * 64),
+        "source_run_id": "run-nuclei-owned",
+        "matched_at": "https://App.Example.Test:443/login",
+        "observed_at": "2026-08-07T22:00:00Z",
+    }
+    confirmed = confirm_takeover_with_nuclei(
+        potential,
+        evidence,
+        dns_source_observation=source,
+        dns_target_observation=target,
+        reviewed_templates=reviewed_templates,
+        allowed_source_run_ids={"run-dnsx-source", "run-dnsx-target", "run-nuclei-owned"},
+    )
+    assert potential["state"] == "potential"
+    assert confirmed == {
+        **potential,
+        "state": "confirmed",
+        "reason": "reviewed_nuclei_template_match",
+        "confirmation_status": "confirmed",
+        "confirmation": {
+            "confirmation_id": confirmed["confirmation"]["confirmation_id"],
+            "confirmation_version": NUCLEI_TAKEOVER_CONFIRMATION_VERSION,
+            "method": "nuclei_template",
+            "template_id": "http-takeover-reviewed",
+            "template_version": "2026.08.1",
+            "template_digest": "sha256:" + ("a" * 64),
+            "source_run_id": "run-nuclei-owned",
+            "matched_hostname": "app.example.test",
+            "observed_at": "2026-08-07T22:00:00Z",
+            "policy_level": "safe",
+        },
+    }
+    assert confirmed["confirmation"]["confirmation_id"].startswith("ntc_")
+    rejected_cases = (
+        ({**evidence, "source_run_id": "run-other-owner"}, reviewed_templates, "source_run_not_allowed"),
+        ({**evidence, "matched_at": "https://app.example.test.evil.test"}, reviewed_templates,
+         "matched_target_mismatch"),
+        ({**evidence, "matched_at": "https://user:secret@app.example.test"}, reviewed_templates,
+         "matched_target_mismatch"),
+        ({**evidence, "template_version": "2026.08.2"}, reviewed_templates,
+         "template_version_mismatch"),
+        ({**evidence, "template_digest": "sha256:" + ("b" * 64)}, reviewed_templates,
+         "template_digest_mismatch"),
+        (evidence, {
+            "http-takeover-reviewed": {
+                **reviewed_templates["http-takeover-reviewed"], "policy_level": "intrusive",
+            },
+        }, "template_policy_not_allowed"),
+    )
+    for candidate, registry, reason in rejected_cases:
+        rejected = confirm_takeover_with_nuclei(
+            potential,
+            candidate,
+            dns_source_observation=source,
+            dns_target_observation=target,
+            reviewed_templates=registry,
+            allowed_source_run_ids={"run-dnsx-source", "run-dnsx-target", "run-nuclei-owned"},
+        )
+        assert rejected["state"] == "potential"
+        assert rejected["confirmation_status"] == "rejected"
+        assert rejected["confirmation_reason"] == reason
+        assert "confirmation" not in rejected
+    forged_review = confirm_takeover_with_nuclei(
+        direct_potential,
+        evidence,
+        dns_source_observation=source,
+        dns_target_observation=target,
+        reviewed_templates=reviewed_templates,
+        allowed_source_run_ids={"run-nuclei-owned"},
+    )
+    assert forged_review["confirmation_reason"] == "invalid_dns_review"
+    tampered_review = confirm_takeover_with_nuclei(
+        potential,
+        evidence,
+        dns_source_observation={**source, "hostname": "other.example.test"},
+        dns_target_observation=target,
+        reviewed_templates=reviewed_templates,
+        allowed_source_run_ids={"run-dnsx-source", "run-dnsx-target", "run-nuclei-owned"},
+    )
+    assert tampered_review["confirmation_reason"] == "invalid_dns_review"
     assert evaluate_takeover_signal({"hostname": "app.example.test", "resolution_state": "timeout"})["state"] == "uncertain"
     assert evaluate_takeover_signal(
         {

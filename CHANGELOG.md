@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Potential DNS takeovers now require pinned, reviewed Nuclei evidence before confirmation.**
+  - **What:** The read-only confirmation boundary first revalidates the paired DNSx source and target observations, their deterministic identities, and their correlation against the caller's owner-scoped run set. It then accepts only an exact safe or standard Nuclei template registered with an immutable version and SHA-256 digest. The supplied match must name the same canonical hostname, come from that approved run set, and carry a timezone-aware observation time. A caller-made potential object, legacy boolean, intrusive template, different target, or mismatched provenance leaves the signal unconfirmed and records a bounded rejection reason.
+  - **Tests:** Focused coverage pins DNS review revalidation, the valid confirmation shape, deterministic confirmation identity, legacy-boolean rejection, owner and hostname isolation, credential-bearing target rejection, exact version/digest matching, allowed policy levels, and input immutability.
 - **Persisted DNSx event reviews now resolve repeated target checks conservatively.**
   - **What:** A bounded read-only review builder extracts normalized takeover observations from saved run-event wires and evaluates at most 100 source records. The newest compatible target result wins, so a later successful resolution replaces an older negative answer. Different results recorded at the same newest time become an explicit conflict instead. Event, observation, join, result, and run-allowlist limits reject the review without returning a partial answer.
   - **Tests:** Focused coverage pins newest-result selection, same-time conflict handling, safe target references, strict run ids, and whole-review rejection for oversized event or observation sets.

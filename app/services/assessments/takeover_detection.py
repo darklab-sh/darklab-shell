@@ -32,7 +32,6 @@ def evaluate_takeover_signal(observation: dict[str, Any] | None) -> dict[str, An
         if scope_decision
         else item.get("in_scope") is not False
     )
-    template_match = bool(item.get("reviewed_takeover_template_match"))
     target_resolution = _text(item.get("target_resolution_state")).casefold()
     if target_resolution in {"transient", "uncertain", "unknown"}:
         return {"state": "uncertain", "reason": "transient_dns_result", "hostname": hostname}
@@ -43,8 +42,8 @@ def evaluate_takeover_signal(observation: dict[str, Any] | None) -> dict[str, An
     if not dangling:
         return {"state": "not_indicated", "hostname": hostname}
     result = {
-        "state": "confirmed" if template_match and in_scope else "potential",
-        "reason": "reviewed_provider_match" if template_match and in_scope else "dangling_cname",
+        "state": "potential",
+        "reason": "dangling_cname",
         "hostname": hostname,
         "cname_chain": cname_chain[:16],
         "provider": provider,
