@@ -27600,16 +27600,24 @@ class TestDatabaseInit:
         assert result.warnings == []
 
     def test_atlas_import_parser_streams_nessus_xml_and_extracts_cves(self):
+        from services.intel.canonical import entity_signature
+
         payload = """
         <NessusClientData_v2>
           <Report name="example">
             <ReportHost name="graph.darklab.sh">
+              <HostProperties>
+                <tag name="HOST_START">Fri Aug 07 10:00:00 2026</tag>
+                <tag name="HOST_END">Fri Aug 07 10:30:00 2026</tag>
+                <tag name="Nessus Server version">10.9.1</tag>
+              </HostProperties>
               <ReportItem port="443" protocol="tcp" svc_name="https" pluginID="1234"
                           pluginName="Example vulnerable service" severity="3">
                 <description>Service is vulnerable.</description>
                 <solution>Upgrade the affected HTTPS service.</solution>
                 <plugin_output>Banner evidence</plugin_output>
                 <cve>CVE-2026-12345</cve>
+                <cpe>cpe:/a:example:server:2.5.1</cpe>
                 <see_also>https://example.com/advisory</see_also>
               </ReportItem>
             </ReportHost>
@@ -27617,6 +27625,7 @@ class TestDatabaseInit:
               <ReportItem port="22" protocol="tcp" svc_name="ssh" pluginID="5678"
                           pluginName="SSH service detected" severity="0">
                 <description>SSH is reachable.</description>
+                <cpe>cpe:/a:example:ssh:*</cpe>
               </ReportItem>
             </ReportHost>
           </Report>
@@ -27636,6 +27645,49 @@ class TestDatabaseInit:
         assert result.findings[0].affected_entity.canonical_value == "graph.darklab.sh"
         assert result.findings[0].remediation == "Upgrade the affected HTTPS service."
         assert result.findings[0].source_detail["plugin_id"] == "1234"
+        assert [item.evidence_type for item in result.evidence] == ["nessus_service_version"]
+        target_key = entity_signature("domain", "graph.darklab.sh")
+        assert result.evidence[0].subject_key == (
+            f"{target_key}\x1fcpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*"
+        )
+        assert result.evidence[0].observed_at == ""
+        assert result.evidence[0].source_detail == {
+            "adapter": "nessus",
+            "target_kind": "domain",
+            "target_value": "graph.darklab.sh",
+            "target_key": target_key,
+            "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            "version": "2.5.1",
+            "port": "443",
+            "protocol": "tcp",
+            "service": "https",
+            "tool_version": "Nessus 10.9.1",
+            "parser_version": "nessus-xml-cpe-v1",
+            "source_observed_at": "Fri Aug 07 10:30:00 2026",
+            "source_observed_at_timezone": "unspecified",
+        }
+
+    def test_atlas_import_parser_bounds_nessus_service_version_evidence(self):
+        cpes = "".join(
+            f"<cpe>cpe:/a:example:service{index}:1.0</cpe>"
+            for index in range(17)
+        )
+        result = parse_import_file(
+            (
+                "<NessusClientData_v2><Report><ReportHost name='bounded.example.test'>"
+                "<ReportItem port='443' protocol='tcp' svc_name='https' pluginID='1' "
+                f"pluginName='Inventory' severity='0'>{cpes}</ReportItem>"
+                "</ReportHost></Report></NessusClientData_v2>"
+            ),
+            format_id="nessus_xml",
+            limits=ImportParserLimits(max_rows=20),
+        )
+
+        assert len(result.evidence) == 16
+        assert [warning.code for warning in result.warnings] == [
+            "nessus_service_version_limit_reached"
+        ]
+        assert result.skipped_count == 0
 
     def test_atlas_import_parser_normalizes_zap_json_and_xml_reports(self):
         json_payload = json.dumps({

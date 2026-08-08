@@ -459,8 +459,8 @@ and `apply_options`. Preview `counts` include `rows`, `valid`, `skipped`,
 `warnings`, `new`, `updated`, `duplicate`, `entity_valid`, `entity_new`,
 `entity_duplicate`, `finding_valid`, `finding_new`, `finding_duplicate`,
 `finding_subject_entities_to_create`, and `project_target_candidates`.
-CycloneDX previews also include `evidence_valid` and `evidence_new`, and their
-bounded samples can include typed evidence records. `apply_options` has
+Previews with typed CycloneDX or Nessus evidence also include `evidence_valid`
+and `evidence_new`, and their bounded samples can include those evidence records. `apply_options` has
 `import_entities`, `import_findings`, `import_evidence`, `link_to_project`, and
 `create_project_targets`; each option reports whether it is available and which
 team capability names it requires.
@@ -489,6 +489,15 @@ typed import evidence rather than findings. A vulnerability assertion becomes
 an imported finding only when its VEX state is affected or exploitable; not
 affected, resolved, and under-investigation assertions remain evidence and
 never change an existing finding's review or verification state.
+Nessus parsing separately retains only exact versioned service CPEs as typed
+evidence. Each accepted row binds the normalized CPE to the canonical imported
+host and preserves its port, protocol, service, plugin id, scanner or report
+format version, parser version, and the available raw `HOST_END` or `HOST_START`
+value. A source timestamp becomes the normalized scan time only when it includes
+a timezone; timezone-free legacy values remain raw provenance, and the import
+time orders the stored row. Wildcard and malformed CPEs fail closed. Per-item and whole-import
+limits reject extra evidence without evicting earlier rows, and a retained
+service version never becomes a confirmed vulnerability by itself.
 
 `POST /atlas/imports/apply` accepts JSON with `draft_id`, `row_set_digest`,
 `options`, and optional `project_id`. `options` uses the same five boolean keys
@@ -507,10 +516,10 @@ Apply count keys include `entities_created`, `entities_updated`,
 entity needed to represent each target, so entity counts can increase even when
 only `create_project_targets` is selected.
 
-Applied CycloneDX evidence is stored against the immutable import batch and,
+Applied CycloneDX and Nessus evidence is stored against the immutable import batch and,
 when supplied, its Project. The evidence ledger preserves component,
 dependency, and VEX source detail without creating History runs or treating an
-SBOM inventory row as proof of a vulnerability.
+SBOM inventory row or service version as proof of a vulnerability.
 
 Both routes return the standard safe error envelope
 `{"error": "<code>", "message": "<message>"}` for import workflow failures.

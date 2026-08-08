@@ -7,13 +7,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
-import re
 from typing import Any
 
 from defusedxml import ElementTree as SafeElementTree
 from defusedxml.common import DefusedXmlException
 
 from services.assessments.cpe_applicability import normalize_observed_cpe
+from services.assessments.versioned_cpe import normalize_versioned_cpe
 from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_ip, canonical_port
 
 
@@ -21,7 +21,6 @@ NMAP_XML_PARSER_VERSION = "nmap-xml-cpe-v1"
 NMAP_XML_MAX_BYTES = 5 * 1024 * 1024
 NMAP_XML_MAX_ELEMENTS = 50_000
 NMAP_XML_MAX_OBSERVATIONS = 50
-_CPE_COMPONENT_RE = re.compile(r"^[a-z0-9._-]{1,128}$", re.I)
 
 
 def parse_nmap_xml_cpe_observations(
@@ -59,7 +58,7 @@ def parse_nmap_xml_cpe_observations(
             if not target or service is None or state is None or state.get("state") != "open":
                 continue
             for cpe_node in service.findall("cpe"):
-                cpe = _normalize_nmap_cpe(cpe_node.text)
+                cpe = normalize_versioned_cpe(cpe_node.text)
                 if not cpe or (target, cpe) in seen:
                     continue
                 if len(observations) >= NMAP_XML_MAX_OBSERVATIONS:
@@ -114,25 +113,6 @@ def _port_target(host: str, port: Any) -> str:
         return canonical_port(f"{host_part}:{port_id}/{protocol}")
     except CanonicalizationError:
         return ""
-
-
-def _normalize_nmap_cpe(value: Any) -> str:
-    raw = str(value or "").strip()
-    if normalize_observed_cpe(raw) is not None:
-        return raw
-    if not raw.startswith("cpe:/"):
-        return ""
-    components = raw[5:].split(":")
-    if not 4 <= len(components) <= 7 or components[0] not in {"a", "h", "o"}:
-        return ""
-    if any(not _CPE_COMPONENT_RE.fullmatch(component) for component in components[:4]):
-        return ""
-    if any(component and not _CPE_COMPONENT_RE.fullmatch(component) for component in components[4:]):
-        return ""
-    legacy = components + ["*"] * (7 - len(components))
-    fields = [*legacy, "*", "*", "*", "*"]
-    candidate = "cpe:2.3:" + ":".join(component or "*" for component in fields)
-    return candidate if normalize_observed_cpe(candidate) is not None else ""
 
 
 def _observed_at(root: Any, explicit: str) -> str:

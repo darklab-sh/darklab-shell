@@ -190,6 +190,8 @@ Structured CycloneDX component coverage pins shared document bounds, separate ex
 
 Atlas CycloneDX import coverage separately pins bounded nested components, dependency edges, document provenance, vulnerability ratings and references, affected component links, every supported VEX category, durable batch evidence, team permissions, and the rule that imported dispositions don't update existing triage or verification state.
 
+Nessus import coverage pins exact service CPE normalization, host and port context, scan-time and scanner-version provenance, malformed and wildcard rejection, bounded typed evidence, and durable preview/apply storage without treating an observed version as a confirmed vulnerability.
+
 SARIF import coverage pins bounded tool and automation identity, rule metadata, full and partial fingerprints, direct and artifact-index locations, source regions, safe web and repository-relative provenance, and warning-backed rejection of file URIs, traversal, credentials, backslashes, and invalid references. Atlas browser coverage keeps SARIF and CycloneDX available through the existing import picker with format-appropriate file hints, evidence counts and samples, and permission-aware apply controls.
 
 Compressed Atlas import coverage pins bounded gzip and single-report ZIP expansion, the original-upload digest, file-picker hints, and fail-closed rejection of oversized, malformed, nested, multi-report, and unsafe-path archives.

@@ -14,8 +14,8 @@ _EVIDENCE_TYPES = frozenset({
     "cyclonedx_component",
     "cyclonedx_dependency",
     "cyclonedx_vulnerability",
+    "nessus_service_version",
 })
-
 
 def normalized_row_set(parse_payload: dict[str, Any]) -> dict[str, Any]:
     """Keep only list-backed parser collections in the signed preview payload."""

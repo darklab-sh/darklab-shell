@@ -1238,6 +1238,85 @@ class TestAtlasImportRoutes:
             for patcher in reversed(patchers):
                 patcher.stop()
 
+    def test_nessus_import_applies_exact_service_version_evidence(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_nessus_versions"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_nessus_versions"
+            now = datetime.now(timezone.utc).isoformat()
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Nessus Versions', 'nessus-versions', ?, ?)",
+                    (project_id, session_id, now, now),
+                )
+                conn.commit()
+            payload = b"""
+            <NessusClientData_v2><Report name="example"><ReportHost name="api.example.test">
+              <HostProperties>
+                <tag name="HOST_END">2026-08-07T10:30:00-05:00</tag>
+                <tag name="Nessus Server version">10.9.1</tag>
+              </HostProperties>
+              <ReportItem port="443" protocol="tcp" svc_name="https" pluginID="1234"
+                          pluginName="Example service" severity="0">
+                <description>Service inventory.</description>
+                <cpe>cpe:/a:example:server:2.5.1</cpe>
+              </ReportItem>
+            </ReportHost></Report></NessusClientData_v2>
+            """
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "nessus_xml",
+                    "source_tool": "Nessus",
+                    "import_name": "Versioned services",
+                    "file": (io.BytesIO(payload), "services.nessus"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["evidence_valid"] == 1
+            assert preview_payload["samples"]["evidence"][0]["evidence_type"] == (
+                "nessus_service_version"
+            )
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "project_id": project_id,
+                    "options": {"import_entities": True, "import_evidence": True},
+                },
+            )
+
+            assert applied.status_code == 200
+            assert applied.get_json()["counts"]["evidence_imported"] == 1
+            with db_connect() as conn:
+                row = conn.execute(
+                    "SELECT e.evidence_type, e.project_id, e.observed_at, e.source_detail_json, "
+                    "b.format_id, b.status FROM atlas_import_evidence e "
+                    "JOIN atlas_import_batches b ON b.id = e.batch_id"
+                ).fetchone()
+            assert row["evidence_type"] == "nessus_service_version"
+            assert row["project_id"] == project_id
+            assert row["observed_at"] == "2026-08-07T15:30:00Z"
+            assert row["format_id"] == "nessus_xml"
+            assert row["status"] == "applied"
+            source_detail = json.loads(row["source_detail_json"])
+            assert source_detail["cpe"] == (
+                "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*"
+            )
+            assert source_detail["source_observed_at"] == "2026-08-07T10:30:00-05:00"
+            assert source_detail["source_observed_at_timezone"] == "source"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
     def test_create_project_targets_only_reports_target_entity_side_effects(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:

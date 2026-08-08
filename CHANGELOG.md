@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Nessus imports now keep exact service-version observations as typed evidence.**
+  - **What:** Versioned CPEs in Nessus report items are normalized and stored with the affected host, port, protocol, service, plugin id, scanner or report-format version, parser version, and source scan time. Timezone-qualified values are normalized; timezone-free legacy values remain raw provenance instead of being mislabeled as UTC. Wildcard, malformed, unscoped, and over-limit CPE rows stay out, and retaining the observation doesn't create or confirm a vulnerability finding.
+  - **Tests:** Parser and preview/apply route coverage pins legacy-to-CPE-2.3 normalization, scan-time and scanner-version provenance, durable import-batch evidence, invalid-version rejection, and the evidence limit.
 - **Atlas imports now accept bounded compressed reports.**
   - **What:** Every supported import format can arrive as gzip or in a ZIP containing exactly one report. Separate upload and expanded-size limits reject compression bombs without evicting earlier data, while malformed, encrypted, nested, multi-report, symlink, and unsafe-path archives fail before parsing. Draft provenance continues to hash the exact uploaded bytes.
   - **Tests:** Parser, route, browser, configuration, documentation, and architecture-ratchet coverage pin successful compressed previews and each fail-closed archive boundary.

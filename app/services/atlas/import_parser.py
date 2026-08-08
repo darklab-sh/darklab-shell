@@ -154,7 +154,7 @@ def parse_prepared_import(
         from services.atlas.cyclonedx_parser import parse_cyclonedx_json
         parse_cyclonedx_json(payload, state, entities, findings, evidence)
     elif normalized_format == "nessus_xml":
-        _parse_nessus_xml(payload, state, entities, findings)
+        _parse_nessus_xml(payload, state, entities, findings, evidence)
     elif normalized_format == "zap_json":
         _parse_zap_json(payload, state, entities, findings)
     elif normalized_format == "zap_xml":
@@ -608,8 +608,11 @@ def _parse_nessus_xml(
     state: _ParseState,
     entities: list[ImportEntity],
     findings: list[ImportFinding],
+    evidence: list[ImportEvidence],
 ) -> None:
-    host_stack: list[str] = []
+    from services.atlas.nessus_versions import nessus_host_property
+
+    host_stack: list[dict[str, Any]] = []
     active_report_item_depth = 0
     try:
         iterator = SafeElementTree.iterparse(
@@ -624,7 +627,7 @@ def _parse_nessus_xml(
             element_name = _local_name(elem.tag)
             if event == "start":
                 if element_name == "reporthost":
-                    host_stack.append(_safe_text(elem.attrib.get("name")))
+                    host_stack.append({"host": _safe_text(elem.attrib.get("name")), "properties": {}})
                 if active_report_item_depth or element_name == "reportitem":
                     active_report_item_depth += 1
                 continue
@@ -633,11 +636,19 @@ def _parse_nessus_xml(
                 raise ImportParseError(f"XML element limit exceeded ({state.limits.max_xml_elements}).")
             if active_report_item_depth:
                 if element_name == "reportitem" and active_report_item_depth == 1:
-                    _append_nessus_report_item(elem, host_stack[-1] if host_stack else "", state, entities, findings)
+                    context = host_stack[-1] if host_stack else {}
+                    _append_nessus_report_item(
+                        elem, str(context.get("host") or ""), state, entities, findings, evidence,
+                        context.get("properties") if isinstance(context.get("properties"), dict) else {},
+                    )
                     elem.clear()
                     active_report_item_depth = 0
                     continue
                 active_report_item_depth -= 1
+                continue
+            if element_name == "tag" and host_stack:
+                nessus_host_property(host_stack[-1]["properties"], elem.attrib.get("name"), elem.text)
+                elem.clear()
                 continue
             if element_name != "reporthost":
                 elem.clear()
@@ -657,12 +668,30 @@ def _append_nessus_report_item(
     state: _ParseState,
     entities: list[ImportEntity],
     findings: list[ImportFinding],
+    evidence: list[ImportEvidence],
+    host_properties: dict[str, str],
 ) -> None:
+    from services.atlas.nessus_versions import append_nessus_version_evidence
+
     row_number = state.next_row()
     host = elem.attrib.get("host") or elem.attrib.get("hostname") or parent_host
     entity = _entity_from_target(host, row_number, state, {"adapter": "nessus"}) if host else None
     if entity:
         entities.append(entity)
+    if append_nessus_version_evidence(
+        elem,
+        entity,
+        row_number=row_number,
+        properties=host_properties,
+        evidence=evidence,
+        evidence_limit=state.limits.max_rows,
+    ):
+        state.warn(
+            row_number,
+            "nessus_service_version_limit_reached",
+            "Nessus service-version evidence was truncated at the configured limit.",
+            skipped=False,
+        )
     severity = _nessus_severity(elem.attrib.get("severity"))
     plugin_id = elem.attrib.get("pluginID") or elem.attrib.get("plugin_id")
     plugin_name = elem.attrib.get("pluginName") or elem.attrib.get("plugin_name")

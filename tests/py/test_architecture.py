@@ -352,6 +352,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/import_helpers.py", 131, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_limits.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_logging.py", 48, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/nessus_versions.py", 118, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_types.py", 85, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_workflow.py", 956, "split-target-phase4"),
     ModuleSizeBudget("app/blueprints/assets.py", 403, "split-target-phase4"),
@@ -440,6 +441,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/output_nuclei.py", 60, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/web_surface.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/cpe_applicability.py", 158, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/versioned_cpe.py", 34, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nvd_cpe_correlation.py", 186, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nmap_stored_nvd.py", 60, "split-package-ratchet"),
     ModuleSizeBudget(
