@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Confirmed subdomain takeovers now become evidence-backed findings automatically.**
+  - **What:** A successful dedicated takeover check creates one high-severity finding only when the same Project has compatible saved DNS source and negative-target observations from the preceding 24 hours. The finding keeps exact links to both DNS lines and the reviewed Nuclei match. Partial, stale, conflicting, cross-scope, or command-drifted evidence fails closed without leaving a partial finding.
+  - **Tests:** Focused finalization and persistence coverage pins owner and Project isolation, the three-source evidence chain, deterministic idempotency, the 24-hour window, failed-run and command-drift rejection, and savepoint-safe run completion.
 - **Web assessments now include a non-destructive subdomain takeover confirmation.**
   - **What:** The Web 1.2 profile checks one approved domain with the app-owned reviewed provider fingerprint. The visible plan shows the reviewed-template placeholder, while launch injects only the digest-pinned template through trusted arguments. It makes one request, follows no redirects, sends no saved credentials, disables Interactsh, and never claims a provider resource. Generic Nuclei recommendations keep their existing profile and severity behavior.
   - **Tests:** Focused profile, command-plan, service, browser/API route, module-size, and security coverage pins the exact domain, command, bounds, credential isolation, trusted arguments, and reviewed output context.

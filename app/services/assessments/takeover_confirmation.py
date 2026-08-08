@@ -26,6 +26,7 @@ from services.assessments.takeover_detection import evaluate_takeover_signal
 NUCLEI_TAKEOVER_CONFIRMATION_VERSION = "nuclei-takeover-confirmation-v1"
 NUCLEI_TAKEOVER_MAX_ALLOWED_RUNS = 512
 NUCLEI_TAKEOVER_MAX_REVIEWED_TEMPLATES = 64
+NUCLEI_TAKEOVER_MAX_DNS_SKEW_SECONDS = 86_400
 _DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _TEMPLATE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,159}\Z")
 _VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}\Z")
@@ -101,6 +102,8 @@ def _validate_boundary(
         return "invalid_run_allowlist"
     if not _valid_dns_review(review, dns_source_observation, dns_target_observation, runs):
         return "invalid_dns_review"
+    if not _compatible_observation_times(evidence, dns_source_observation, dns_target_observation):
+        return "stale_dns_review"
     hostname = canonical_nuclei_matched_hostname(review.get("hostname"))
     if not isinstance(templates, Mapping) or not 0 < len(templates) <= NUCLEI_TAKEOVER_MAX_REVIEWED_TEMPLATES:
         return "invalid_template_registry"
@@ -188,11 +191,31 @@ def _allowed_runs(values: Collection[str]) -> set[str] | None:
 
 
 def _aware_timestamp(value: object) -> bool:
+    return _timestamp(value) is not None
+
+
+def _timestamp(value: object) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
     except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
+
+
+def _compatible_observation_times(
+    evidence: Mapping[str, Any] | None,
+    source: Mapping[str, Any] | None,
+    target: Mapping[str, Any] | None,
+) -> bool:
+    values = (
+        _timestamp(evidence.get("observed_at")) if isinstance(evidence, Mapping) else None,
+        _timestamp(source.get("observed_at")) if isinstance(source, Mapping) else None,
+        _timestamp(target.get("observed_at")) if isinstance(target, Mapping) else None,
+    )
+    if any(value is None for value in values):
         return False
-    return parsed.tzinfo is not None and parsed.utcoffset() is not None
+    timestamps = [value for value in values if value is not None]
+    return (max(timestamps) - min(timestamps)).total_seconds() <= NUCLEI_TAKEOVER_MAX_DNS_SKEW_SECONDS
 
 
 def _confirmation_id(*parts: str) -> str:
@@ -201,6 +224,7 @@ def _confirmation_id(*parts: str) -> str:
 
 __all__ = [
     "NUCLEI_TAKEOVER_CONFIRMATION_VERSION",
+    "NUCLEI_TAKEOVER_MAX_DNS_SKEW_SECONDS",
     "NUCLEI_TAKEOVER_MAX_ALLOWED_RUNS",
     "NUCLEI_TAKEOVER_MAX_REVIEWED_TEMPLATES",
     "confirm_takeover_with_nuclei",

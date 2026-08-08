@@ -107,7 +107,7 @@ Maintained HTTPx assessment actions request structured CPE metadata. When HTTPx 
 
 Structured DNSx output can also keep the CNAME chain, DNS result, returned addresses, provider hint, wildcard-filter mode, and scope decision with the saved run. This gives assessors the evidence needed to review a possible dangling record without treating the CNAME alone as proof or following and claiming the provider resource.
 
-Web assessment cycles include a separate **Subdomain takeover confirmation** for one approved hostname. It uses the app's reviewed provider fingerprint, makes one request without redirects or saved credentials, and never claims the provider resource. Compare any match with the saved DNS evidence before treating it as confirmed.
+Web assessment cycles include a separate **Subdomain takeover confirmation** for one approved hostname. It uses the app's reviewed provider fingerprint, makes one request without redirects or saved credentials, and never claims the provider resource. A successful match becomes a high-severity finding only when the same Project has compatible saved DNS source and negative-target results from the preceding 24 hours. The finding links the exact two DNS lines and reviewed web match, while incomplete or stale evidence stays unconfirmed.
 
 Exact versioned PURLs and CPEs in a CycloneDX JSON document can be checked in the same read-only way: PURLs use stored OSV rules, while CPEs use stored NVD rules. The results keep their component, import batch, format, parser, observation time, affected range, and advisory context. An inventory component isn't treated as a vulnerability by itself, PURL and CPE evidence stays distinct, and malformed or conflicting versions don't produce a candidate.
 

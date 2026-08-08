@@ -356,6 +356,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/finalization_assessment_findings.py", 57, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_assessments.py", 77, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_summaries.py", 38, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/finalization_takeover.py", 70, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_version_inference.py", 160, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
@@ -375,6 +376,19 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/cyclonedx_parser.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/takeover_detection.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/takeover_confirmation.py", 230, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/takeover_finding_evidence.py", 140, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/takeover_finding_materialization.py",
+        110,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/takeover_finding_persistence.py",
+        170,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/nuclei_takeover_identity.py", 70, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/nuclei_takeover_observations.py", 130, "split-package-ratchet"

@@ -40,6 +40,7 @@ from services.runs.finalization_version_inference import (
     materialize_nmap_inferences_for_finalize,
     materialize_run_entities_for_finalize,
 )
+from services.runs.finalization_takeover import materialize_takeover_confirmation_for_finalize
 from services.runs.finalization_summaries import (
     AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT,
     auto_promote_summary_ids,
@@ -835,6 +836,11 @@ def save_completed_run(
                 records.active_project_link,
                 records.recorded_entities,
                 link_active_project_run_entities_fn=link_active_project_run_entities_fn,
+            )
+            materialize_takeover_confirmation_for_finalize(
+                conn, session_id, team_id, run_id, command, exit_code,
+                output_state.persisted_entries, records.active_project_link,
+                records.recorded_findings,
             )
             reconcile_assessment_evidence_for_finalize(
                 conn,
