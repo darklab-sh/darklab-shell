@@ -8,17 +8,19 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable
 
-from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected, attach_started_run  # noqa: E501,F401
+from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
 from services.runs import private_data
+from services.runs.completion_policy import completion_policy_for_signal_context
+from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected, attach_started_run  # noqa: E501,F401
 from services.runs.start_context import (
     cleanup_started_run_material,
     display_missing_runtime,
     real_start_kwargs,
 )
 from services.runs.start_contracts import BrokeredRunStartResult, RunStartHandlers
-from services.runs.completion_policy import completion_policy_for_signal_context
 from services.runs.signal_context import RunOutputSignalContext, validated_run_output_signal_context
 from services.teams.scope import OwnerContext, owner_context_for_scope
+
 
 def start_brokered_run(
     *,
@@ -35,6 +37,7 @@ def start_brokered_run(
     link_project_id: str = "",
     private_values: tuple[str, ...] = (),
     trusted_execution_args: tuple[str, ...] = (),
+    reviewed_execution: ReviewedDalfoxXssExecution | None = None,
     output_signal_context: RunOutputSignalContext | None = None,
     thread_name_prefix: str = "run-broker",
     run_created_hook: Callable[[str, object | None], None] | None = None,
@@ -129,6 +132,8 @@ def start_brokered_run(
         team_id=team_id,
         owner_context=owner_context,
         trusted_execution_args=trusted_execution_args,
+        reviewed_execution=reviewed_execution,
+        output_signal_context=output_signal_context,
     )
     if prepared_real.missing_runtime:
         cleanup_started_run_material(run_cleanup_hook)

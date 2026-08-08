@@ -15,6 +15,7 @@ from services.commands.registry import (
     required_secrets_for_command,
 )
 from services.runs.contracts import RunPreparationError
+from services.runs.execution_override import apply_reviewed_execution
 from services.runs.start_context import append_trusted_execution_args
 from services.secrets.storage import InvalidSecretName, get_secret_value_for_env
 from services.secrets.vault import MasterKeyError, SecretDecryptError
@@ -82,6 +83,8 @@ def prepare_real_command(
     team_id: str,
     owner_context: object,
     trusted_execution_args: tuple[str, ...] = (),
+    reviewed_execution: object | None = None,
+    output_signal_context: object | None = None,
 ) -> Any:
     kwargs: dict[str, object] = {"display_command": display_command}
     if private_values:
@@ -95,6 +98,11 @@ def prepare_real_command(
         client_ip,
         workspace_cwd,
         **kwargs,
+    )
+    prepared = apply_reviewed_execution(
+        prepared,
+        reviewed_execution,
+        output_signal_context=output_signal_context,
     )
     return append_trusted_execution_args(prepared, trusted_execution_args)
 

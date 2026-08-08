@@ -43,6 +43,7 @@ from services.assessments.dalfox_xss_command import (
     reviewed_dalfox_xss_command_matches,
     reviewed_dalfox_xss_command_plan,
 )
+from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
 from services.assessments.dalfox_xss_observations import (
     DALFOX_XSS_JSON_MAX_LINE_BYTES,
     DALFOX_XSS_MAX_OBSERVATIONS,
@@ -106,6 +107,8 @@ from services.runs.completion_policy import (
     completion_policy_for_signal_context,
     effective_run_exit_code,
 )
+from services.runs.contracts import RunPreparationError
+from services.runs.execution_override import apply_reviewed_execution
 from services.runs.output_model import to_wire
 from services.runs.signal_context import RunOutputSignalContext, output_signal_classifier_kwargs
 from services.runs.start import start_brokered_run
@@ -1299,6 +1302,73 @@ def test_reviewed_dalfox_xss_command_rejects_unbound_or_unsupported_evidence():
     assert "--param" not in discovery.command
 
 
+def test_reviewed_dalfox_execution_replaces_only_its_exact_validated_carrier():
+    evidence = _reviewed_dalfox_parameter_evidence()
+    reviewed = ReviewedDalfoxXssExecution(evidence)
+    output_context = RunOutputSignalContext(
+        dalfox_xss_context=reviewed.output_context,
+    )
+    discovery = command_plan("dalfox", "url", evidence.target, protected_display=False)
+    active = reviewed_dalfox_xss_command_plan(evidence)
+
+    assert discovery is not None
+    assert active is not None
+    assert reviewed.validation_command == discovery.command
+    assert "--only-discovery" in reviewed.validation_command
+    assert reviewed.execution_command == active.command
+    assert "--skip-discovery" in reviewed.execution_command
+    assert reviewed.output_context == evidence.xss_context(
+        request_limit=DALFOX_XSS_REQUEST_LIMIT,
+    )
+    prepared = PreparedRealCommand(
+        registry_command=reviewed.validation_command,
+        execution_command=reviewed.validation_command,
+        command=reviewed.validation_command + " --only-discovery --skip-mining-dict",
+        rewrite_notice="Added bounded discovery flags.",
+        validation=object(),
+        missing_runtime=None,
+        display_missing_runtime=None,
+        env_overrides={},
+        secret_env_names=[],
+    )
+    replaced = apply_reviewed_execution(
+        prepared,
+        reviewed,
+        output_signal_context=output_context,
+    )
+
+    assert replaced.registry_command == reviewed.validation_command
+    assert replaced.execution_command == reviewed.execution_command
+    assert replaced.command == reviewed.execution_command
+    assert replaced.rewrite_notice is None
+    with pytest.raises(RunPreparationError, match="carrier no longer matches"):
+        apply_reviewed_execution(
+            SimpleNamespace(registry_command="dalfox https://other.example.test"),
+            reviewed,
+            output_signal_context=output_context,
+        )
+    with pytest.raises(RunPreparationError, match="output context no longer matches"):
+        apply_reviewed_execution(prepared, reviewed)
+    with pytest.raises(RunPreparationError, match="output context no longer matches"):
+        apply_reviewed_execution(
+            prepared,
+            reviewed,
+            output_signal_context=RunOutputSignalContext(
+                dalfox_xss_context=_dalfox_xss_context(parameter="other"),
+            ),
+        )
+    with pytest.raises(RunPreparationError, match="context is invalid"):
+        apply_reviewed_execution(
+            prepared,
+            "caller-made",
+            output_signal_context=output_context,
+        )
+    with pytest.raises(ValueError, match="execution is unavailable"):
+        ReviewedDalfoxXssExecution(
+            _reviewed_dalfox_parameter_evidence(location="Header"),
+        )
+
+
 def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
     classifier = _dalfox_xss_classifier()
     summary = classifier.classify_line(json.dumps({"meta": {
@@ -1738,6 +1808,35 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
     assert broker_call["kwargs"]["output_signal_context"] is context
     assert Thread.created["kwargs"]["completion_policy"] == RunCompletionPolicy(
         context.dalfox_xss_context,
+    )
+    reviewed_execution = ReviewedDalfoxXssExecution(
+        _reviewed_dalfox_parameter_evidence(),
+    )
+    prepare_call = {}
+
+    def prepare_with_reviewed_execution(*args, **kwargs):
+        prepare_call.update({"args": args, "kwargs": kwargs})
+        return prepared
+
+    monkeypatch.setattr(
+        "services.runs.start.private_data.prepare_real_command",
+        prepare_with_reviewed_execution,
+    )
+    start_brokered_run(
+        original_command=reviewed_execution.validation_command,
+        display_command=reviewed_execution.execution_command,
+        session_id="session-httpx",
+        client_ip="192.0.2.1",
+        handlers=handlers,
+        reviewed_execution=reviewed_execution,
+        output_signal_context=RunOutputSignalContext(
+            dalfox_xss_context=reviewed_execution.output_context,
+        ),
+    )
+    assert prepare_call["kwargs"]["reviewed_execution"] is reviewed_execution
+    assert (
+        prepare_call["kwargs"]["output_signal_context"].dalfox_xss_context
+        == reviewed_execution.output_context
     )
     with pytest.raises(ValueError, match="invalid run output signal context"):
         start_brokered_run(
