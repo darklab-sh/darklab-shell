@@ -4046,6 +4046,27 @@ def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
     )
     assert any(event.get("type") == "exit" and event.get("event_id") for event in events)
 
+    public_started = SimpleNamespace(
+        run_id="run-public-context",
+        status="running",
+        cmd_type="real",
+    )
+    with mock.patch.object(
+        api_blueprint,
+        "_start_brokered_run_service",
+        return_value=public_started,
+    ) as public_start:
+        public_response = client.post(
+            "/api/v1/runs",
+            json={
+                "command": "echo public",
+                "output_signal_context": {"nuclei_takeover_template": "caller-made"},
+            },
+            headers=_headers(token),
+        )
+    assert public_response.status_code == 202
+    assert "output_signal_context" not in public_start.call_args.kwargs
+
     def broken_stream():
         yield 'id: 1-0\nevent: output\ndata: {"type":"output","text":"before"}\n\n'
         raise RuntimeError("stream broke")

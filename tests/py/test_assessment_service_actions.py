@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 import json
+from types import SimpleNamespace
+
+import pytest
 
 from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES
 from services.assessments.service_actions import service_actions, service_evidence_state
@@ -53,6 +56,9 @@ from services.assessments.web_gallery import filter_web_surface_rows, web_surfac
 from services.runs.finalization import capture_event_with_signals
 from services.runs.lifecycle import PreparedRealCommand, start_real_command_process
 from services.runs.output_model import to_wire
+from services.runs.signal_context import RunOutputSignalContext, output_signal_classifier_kwargs
+from services.runs.start import start_brokered_run
+from services.runs.start_contracts import RunStartHandlers
 from services.intel.epss import normalize_epss_rows
 from services.intel.kev import normalize_kev_catalog
 from core.output_signals import OutputSignalClassifier
@@ -818,7 +824,7 @@ def test_httpx_json_version_observations_survive_run_event_wire_round_trip():
     assert to_wire(capture.events[0])["source_detail"]["version_observations"] == [observation]
 
 
-def test_real_command_classifier_receives_generated_run_id():
+def test_real_command_classifier_receives_generated_run_id(monkeypatch):
     classifier_call = {}
 
     class Classifier:
@@ -844,6 +850,11 @@ def test_real_command_classifier_receives_generated_run_id():
         "session-httpx",
         "192.0.2.1",
         prepared,
+        output_signal_context=RunOutputSignalContext(
+            nuclei_takeover_template=ReviewedNucleiTakeoverTemplate(
+                "http-takeover-reviewed", "2026.08.1", "sha256:" + ("a" * 64), "safe",
+            ),
+        ),
         cfg={"output_entity_extra_domain_suffixes": []},
         run_output_capture_fn=lambda run_id: {"run_id": run_id},
         popen_fn=lambda *args, **kwargs: Process(),
@@ -861,7 +872,78 @@ def test_real_command_classifier_receives_generated_run_id():
         "cmd_type": "real",
         "extra_domain_suffixes": [],
         "source_run_id": started.run_id,
+        "nuclei_takeover_template": ReviewedNucleiTakeoverTemplate(
+            "http-takeover-reviewed", "2026.08.1", "sha256:" + ("a" * 64), "safe",
+        ),
     }
+    assert output_signal_classifier_kwargs(None) == {}
+    with pytest.raises(ValueError, match="invalid run output signal context"):
+        output_signal_classifier_kwargs({"nuclei_takeover_template": "caller-made"})
+
+    context = RunOutputSignalContext(
+        nuclei_takeover_template=ReviewedNucleiTakeoverTemplate(
+            "http-takeover-reviewed", "2026.08.1", "sha256:" + ("a" * 64), "safe",
+        ),
+    )
+    broker_call = {}
+
+    def start_real(*args, **kwargs):
+        broker_call.update({"args": args, "kwargs": kwargs})
+        return SimpleNamespace(
+            run_id="run-context",
+            run_started="2026-08-07T20:00:00+00:00",
+            proc=Process(),
+            capture=object(),
+            signal_classifier=object(),
+            workspace_path_filter=object(),
+        )
+
+    class Thread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def start(self):
+            return None
+
+    handlers = RunStartHandlers(
+        resolves_exact_special_builtin_command=lambda _command: False,
+        execute_builtin_command=lambda *_args, **_kwargs: ([], 0),
+        history_safe_command_for_storage=str,
+        brokered_synthetic_run=lambda *_args, **_kwargs: "run-synthetic",
+        prepare_command_input=lambda command, *_args, **_kwargs: SimpleNamespace(
+            execution_command=command,
+            variable_notice="",
+            postfilter=SimpleNamespace(output_sink_error=False),
+        ),
+        resolve_builtin_command=lambda _command: None,
+        filter_builtin_command_events=lambda events, *_args: events,
+        prepare_real_command=lambda *_args, **_kwargs: prepared,
+        runtime_missing_command_message=str,
+        start_real_command_process=start_real,
+        publish_run_event=lambda *_args: None,
+        brokered_real_run_worker=lambda **_kwargs: None,
+        workspace_notice_lines=lambda _validation: [],
+        workspace_artifacts_from_validation=lambda *_args: [],
+    )
+    monkeypatch.setattr("services.runs.start.owner_context_for_scope", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr("services.runs.start.threading.Thread", Thread)
+    brokered = start_brokered_run(
+        original_command=prepared.command,
+        session_id="session-httpx",
+        client_ip="192.0.2.1",
+        handlers=handlers,
+        output_signal_context=context,
+    )
+    assert brokered.run_id == "run-context"
+    assert broker_call["kwargs"]["output_signal_context"] is context
+    with pytest.raises(ValueError, match="invalid run output signal context"):
+        start_brokered_run(
+            original_command=prepared.command,
+            session_id="session-httpx",
+            client_ip="192.0.2.1",
+            handlers=handlers,
+            output_signal_context={"nuclei_takeover_template": "caller-made"},
+        )
 
 
 def test_httpx_assessment_plan_requests_structured_versioned_cpe_output():

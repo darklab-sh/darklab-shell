@@ -16,6 +16,7 @@ from services.runs.start_context import (
     real_start_kwargs,
 )
 from services.runs.start_contracts import BrokeredRunStartResult, RunStartHandlers
+from services.runs.signal_context import RunOutputSignalContext, validated_run_output_signal_context
 from services.teams.scope import OwnerContext, owner_context_for_scope
 
 def start_brokered_run(
@@ -33,11 +34,13 @@ def start_brokered_run(
     link_project_id: str = "",
     private_values: tuple[str, ...] = (),
     trusted_execution_args: tuple[str, ...] = (),
+    output_signal_context: RunOutputSignalContext | None = None,
     thread_name_prefix: str = "run-broker",
     run_created_hook: Callable[[str, object | None], None] | None = None,
     run_finalized_hook: Callable[[str, dict[str, Any]], None] | None = None,
     run_cleanup_hook: Callable[[], None] | None = None,
 ) -> BrokeredRunStartResult:
+    output_signal_context = validated_run_output_signal_context(output_signal_context)
     safe_command = str(display_command or original_command)
     safe_private_values = private_data.normalized_private_values(private_values)
     owner_context: OwnerContext = owner_context_for_scope(session_id, team_id=team_id)
@@ -152,18 +155,21 @@ def start_brokered_run(
             exit_code=127,
         )
 
+    start_kwargs = real_start_kwargs(
+        owner_client_id=owner_client_id,
+        owner_tab_id=owner_tab_id,
+        team_id=team_id,
+        owner_context=owner_context,
+        private_values=safe_private_values,
+    )
+    if output_signal_context is not None:
+        start_kwargs["output_signal_context"] = output_signal_context
     started = handlers.start_real_command_process(
         safe_command,
         session_id,
         client_ip,
         prepared_real,
-        **real_start_kwargs(
-            owner_client_id=owner_client_id,
-            owner_tab_id=owner_tab_id,
-            team_id=team_id,
-            owner_context=owner_context,
-            private_values=safe_private_values,
-        ),
+        **start_kwargs,
     )
     attach_started_run(started, run_created_hook)
     handlers.publish_run_event(

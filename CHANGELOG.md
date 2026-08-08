@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Reviewed scanner evidence now crosses the run broker through an internal-only context.**
+  - **What:** App-owned assessment launches can attach typed, immutable output-classification context to an external run. The broker carries that context to the classifier created with the generated run id, while ordinary browser and API run bodies can't supply or override it. Invalid internal context fails before command preparation.
+  - **Tests:** Focused service and route coverage pins the generated run id, exact reviewed Nuclei template metadata, fail-closed type checks, and omission of caller-provided context at both public run routes.
 - **App-owned Nuclei takeover matches now retain tamper-evident event evidence.**
   - **What:** A bounded JSONL adapter accepts takeover matches only when the launch supplies an exact reviewed template id, version, SHA-256 digest, and safe or standard policy. Tool output can identify the matched template and hostname but can't assert its own version, digest, or policy. Saved run events keep the canonical hostname, source run, aware timestamp, parser version, and deterministic observation id; the confirmation boundary recomputes that identity before promoting a potential DNS signal.
   - **Tests:** Focused coverage pins trusted launch metadata, JSON bounds, event-wire preservation, ignored output assertions, parser and observation identity checks, and rejection of mismatched templates, owners, hosts, versions, digests, policies, or timestamps.

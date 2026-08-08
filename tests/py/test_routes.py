@@ -20028,11 +20028,23 @@ class TestRunRoute:
 
     def test_brokered_run_rejects_invalid_command_payloads(self):
         client = get_client()
-        with mock.patch("blueprints.run.broker_available", return_value=True):
+        public_started = mock.Mock(run_id="run-public-context", status="running")
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch(
+                 "blueprints.run._start_brokered_run_service",
+                 return_value=public_started,
+             ) as public_start:
             non_object = client.post("/runs", json=["hostname"])
             missing = client.post("/runs", json={})
             non_string = client.post("/runs", json={"command": 42})
             blank = client.post("/runs", json={"command": "   "})
+            caller_context = client.post(
+                "/runs",
+                json={
+                    "command": "echo public",
+                    "output_signal_context": {"nuclei_takeover_template": "caller-made"},
+                },
+            )
 
         assert non_object.status_code == 400
         assert json.loads(non_object.data) == {"error": "Request body must be a JSON object"}
@@ -20042,6 +20054,8 @@ class TestRunRoute:
         assert json.loads(non_string.data) == {"error": "Command must be a string"}
         assert blank.status_code == 400
         assert json.loads(blank.data) == {"error": "No command provided"}
+        assert caller_context.status_code == 202
+        assert "output_signal_context" not in public_start.call_args.kwargs
 
     def test_brokered_run_disallowed_command_returns_403_before_spawning(self):
         client = get_client()

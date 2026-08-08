@@ -65,6 +65,7 @@ from services.runs.private_data import (
     redact_private_values,
     resolve_secret_environment,
 )
+from services.runs.signal_context import RunOutputSignalContext, output_signal_classifier_kwargs
 from services.secrets.audit import emit_secret_event
 from services.session.variables import SessionVariableError, expand_session_variables
 from services.teams.scope import OwnerContext, owner_context_for_scope, personal_owner_context
@@ -489,6 +490,7 @@ def start_real_command_process(
     owner_tab_id: str = "",
     team_id: str = "",
     owner_context: OwnerContext | None = None,
+    output_signal_context: RunOutputSignalContext | None = None,
     cfg: Mapping[str, Any] | None = None,
     run_output_capture_fn: Callable[[str], RunOutputCapture],
     popen_fn: Callable[..., subprocess.Popen] = subprocess.Popen,
@@ -519,6 +521,7 @@ def start_real_command_process(
             cmd_type="real",
             extra_domain_suffixes=output_entity_suffixes,
             source_run_id=run_id,
+            **output_signal_classifier_kwargs(output_signal_context),
         )
         workspace_owner = owner_context or owner_context_for_scope_fn(session_id, team_id=team_id)
         workspace_path_filter = workspace_path_filter_cls(session_id, active_cfg, owner_context=workspace_owner)
