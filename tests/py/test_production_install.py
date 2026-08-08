@@ -1117,6 +1117,9 @@ def test_development_source_staging_normalizes_private_files_and_fails_closed(
 def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    schemathesis_constraints = (
+        ROOT / "deploy" / "schemathesis-constraints.txt"
+    ).read_text(encoding="utf-8")
     entrypoint = (ROOT / "entrypoint.sh").read_text(encoding="utf-8")
     go_installer = (ROOT / "scripts" / "container" / "install_go_tool.sh").read_text(
         encoding="utf-8"
@@ -1225,6 +1228,24 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG KIN_OPENAPI_VERSION=v0.144.0" in dockerfile
     assert "ARG GOSU_VERSION=1.19" in dockerfile
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
+    assert "ARG SCHEMATHESIS_VERSION=4.24.3" in dockerfile
+    dependency_pins = [
+        line
+        for line in schemathesis_constraints.splitlines()
+        if line and not line.startswith("#")
+    ]
+    assert "schemathesis==4.24.3" in dependency_pins
+    assert len({pin.partition("==")[0].lower() for pin in dependency_pins}) == len(
+        dependency_pins
+    )
+    assert all(re.fullmatch(r"[A-Za-z0-9_.-]+==[^=\s]+", pin) for pin in dependency_pins)
+    assert "FROM ${PYTHON_BASE_IMAGE} AS schemathesis-asset" in dockerfile
+    assert "COPY deploy/schemathesis-constraints.txt" in dockerfile
+    assert "schemathesis==${SCHEMATHESIS_VERSION}" in dockerfile
+    assert 'test "$(/opt/schemathesis/bin/schemathesis --version)"' in dockerfile
+    assert "/opt/schemathesis/bin/pip uninstall --yes pip" in dockerfile
+    assert "mv /opt/schemathesis /out/opt/schemathesis" in dockerfile
+    assert "COPY --from=schemathesis-asset /out/ /" in dockerfile
     assert 'install-go-tool "github.com/projectdiscovery/chaos-client' in dockerfile
     crypto_floor = 'go get "golang.org/x/crypto@${GO_X_CRYPTO_VERSION}"'
     tool_selection = 'go get "$tool_spec"'
@@ -1352,7 +1373,15 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "probe openssl-legacy-provider openssl list -providers -provider legacy" in (
         bundled_tool_smoke
     )
-    for tool in ("rustscan", "dalfox", "nuclei", "massdns", "pg_restore", "openssl"):
+    for tool in (
+        "rustscan",
+        "dalfox",
+        "schemathesis",
+        "nuclei",
+        "massdns",
+        "pg_restore",
+        "openssl",
+    ):
         assert f"probe {tool} " in bundled_tool_smoke
 
     bin_dir, runtime_log = _fake_image_runtime(tmp_path)
@@ -1732,6 +1761,17 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     assert "COPY --from=dalfox-asset /out/ /" in dockerfile
     assert "sha256sum -c dalfox.tar.gz.sha256" in dockerfile
     assert "sha256sum -c LICENSE.txt.sha256" in dockerfile
+    schemathesis_component = next(
+        item
+        for item in inventory["components"]
+        if item["name"] == "Schemathesis and isolated Python dependencies"
+    )
+    assert schemathesis_component["version_arg"] == "SCHEMATHESIS_VERSION"
+    assert schemathesis_component["license"] == "mixed-open-source"
+    assert schemathesis_component["notice_location"].endswith("/*-info/licenses")
+    assert inventory["dockerfile_install_coverage"]["pip:schemathesis"] == (
+        "Schemathesis and isolated Python dependencies"
+    )
     publisher = (ROOT / "scripts" / "release" / "publish_release_artifacts.sh").read_text(
         encoding="utf-8"
     )

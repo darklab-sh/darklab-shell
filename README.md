@@ -177,6 +177,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `wpscan` | WordPress vulnerability scanning |
 | `nuclei` | Template-based exposure, misconfiguration, and vulnerability checks |
 | `dalfox` | Bounded parameter discovery plus separately enabled and confirmed validation for one reviewed query parameter |
+| `schemathesis` | OpenAPI and GraphQL contract tester; direct terminal use is limited to local help and version output |
 | `sqlmap` | Detection-only SQL injection checks for one approved URL; extraction and takeover actions are blocked |
 | `gau` | Passive historical URL discovery from public archives and indexes; the built-in Historical Web Surface Triage workflow can scope and verify those results before crawling |
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |

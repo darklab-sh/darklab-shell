@@ -55,6 +55,7 @@
     "git:https://github.com/trufflesecurity/trufflehog.git": "TruffleHog",
     "pip:greynoise": "Python application and intelligence dependencies",
     "pip:pip": "Python application and intelligence dependencies",
+    "pip:schemathesis": "Schemathesis and isolated Python dependencies",
     "pip:setuptools": "Python application and intelligence dependencies",
     "pip:shodan": "Python application and intelligence dependencies",
     "pip:sslyze": "SSLyze",
@@ -267,6 +268,13 @@
       "source": "https://github.com/sqlmapproject/sqlmap",
       "license": "GPL-2.0-only",
       "notice_location": "/usr/share/doc/darklab-shell/licenses/Sqlmap.txt"
+    },
+    {
+      "name": "Schemathesis and isolated Python dependencies",
+      "version_arg": "SCHEMATHESIS_VERSION",
+      "source": "https://github.com/schemathesis/schemathesis",
+      "license": "mixed-open-source",
+      "notice_location": "/opt/schemathesis/lib/python3.14/site-packages/*-info/licenses"
     },
     {
       "name": "WPScan",

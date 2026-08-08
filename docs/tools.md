@@ -126,6 +126,10 @@ Saved output records whether a finding used the managed cache, a workspace templ
 
 darklab_shell uses Dalfox for bounded parameter discovery. Normal commands and the Project Assessment action add discovery-only mode and disable remote mining dictionaries, so Dalfox doesn't send XSS payloads. Server, callback, file/pipe input, proxy, redirect, custom payload, and remote-wordlist modes remain blocked. A protected Project HTTP profile can supply request headers through a short-lived private config without placing their values in the command or saved history.
 
+### `schemathesis`
+
+The image includes an exact-pinned Schemathesis runtime in a virtual environment separate from the app. The terminal allows `schemathesis --help` and `schemathesis --version`, but blocks direct schema runs because generated API traffic can call mutating operations. Network testing must go through an app-owned Assessment action that can review and enforce its scope and request limits.
+
 ### `wpscan`
 
 `wpscan` works without a token. Save `WPSCAN_API_TOKEN` for API-backed vulnerability data. Inline `--api-token` values are blocked so they cannot enter saved history or output.

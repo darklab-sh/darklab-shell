@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **The release image now carries an isolated Schemathesis runtime.**
+  - **What:** Schemathesis and every transitive Python dependency are exact-pinned in a dedicated virtual environment, verified during the image build, and copied into the runtime without its package installer or bytecode caches. The normal terminal exposes only local help and version output. Schema execution has no direct-command path; app-owned Assessment actions are required to enforce target, operation, request, redirect, and credential bounds.
+  - **Tests:** Production-install, command-registry, license-inventory, and bundled-tool smoke contracts pin the isolated layout, dependency lock, installed version, runtime probe, notice coverage, and unchanged denial of direct schema runs.
 - **Nessus imports now keep exact service-version observations as typed evidence.**
   - **What:** Versioned CPEs in Nessus report items are normalized and stored with the affected host, port, protocol, service, plugin id, scanner or report-format version, parser version, and source scan time. Timezone-qualified values are normalized; timezone-free legacy values remain raw provenance instead of being mislabeled as UTC. Wildcard, malformed, unscoped, and over-limit CPE rows stay out, and retaining the observation doesn't create or confirm a vulnerability finding.
   - **Tests:** Parser and preview/apply route coverage pins legacy-to-CPE-2.3 normalization, scan-time and scanner-version provenance, durable import-batch evidence, invalid-version rejection, and the evidence limit.

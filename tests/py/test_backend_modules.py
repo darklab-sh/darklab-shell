@@ -17960,6 +17960,16 @@ class TestDerivedCommandRegistry:
         assert rewritten.endswith("--only-discovery --skip-mining-dict")
         help_command, _notice = commands.rewrite_command("dalfox --help")
         assert help_command == "dalfox --help"
+        schemathesis = by_root["schemathesis"]
+        assert schemathesis["policy"]["allow"] == [
+            "schemathesis --help",
+            "schemathesis --version",
+        ]
+        assert is_command_allowed("schemathesis --help")[0]
+        assert is_command_allowed("schemathesis --version")[0]
+        assert not is_command_allowed(
+            "schemathesis run https://api.darklab.sh/openapi.json"
+        )[0]
         sqlmap = by_root["sqlmap"]
         assert sqlmap["policy"]["allow"] == ["sqlmap"]
         assert {"sqlmap --dump", "sqlmap --os-shell", "sqlmap --file-read", "sqlmap --technique"}.issubset(

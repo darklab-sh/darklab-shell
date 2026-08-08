@@ -5543,6 +5543,42 @@ commands:
           suggest:
             - value: wpscan-results.txt
               description: Save WPScan output
+  - root: schemathesis
+    description: Shows local help for the bundled OpenAPI and GraphQL contract-testing engine.
+    category: Vulnerability Scanning
+    knowledge:
+      notes:
+        - The scanner runs from an isolated, version-pinned Python environment so its dependencies don't alter the application runtime.
+        - Interactive terminal use is limited to local help and version output; network testing requires an app-owned Assessment action.
+      gotchas:
+        - API testing can create, update, or delete data when a schema describes mutating operations.
+        - A schema URL and every resolved reference need separate scope validation before requests are allowed.
+      safe_defaults:
+        - Review the schema, operation set, target base URL, request limits, and HTTP profile before launching a test.
+      common_flags:
+        - "--help — show local CLI help"
+        - "--version — show the installed version"
+      artifact_behavior: Help and version output are available in the terminal. Structured API-test evidence is owned by the Assessment action that launches the scanner.
+    help:
+      flags:
+        - --help
+    policy:
+      allow:
+        - schemathesis --help
+        - schemathesis --version
+    autocomplete:
+      examples:
+        - value: schemathesis --help
+          description: Show help and usage
+        - value: schemathesis --version
+          description: Show the installed Schemathesis version
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: --version
+          description: Show the installed version
+          closes: true
   - root: dalfox
     description: Discovers web parameters with a bounded, payload-free Dalfox pass.
     category: Vulnerability Scanning

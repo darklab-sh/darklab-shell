@@ -42,6 +42,7 @@ ARG DALFOX_LINUX_AMD64_SHA256=0818b75082bf8527c5c4b6f4ed0f745f393290637328335788
 ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.1.2-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=d21f541038a40d8dd5c4b655fb88159a4b9a75c63f61c3e244647326a5199bc2
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
+ARG SCHEMATHESIS_VERSION=4.24.3
 ARG GAU_VERSION=v2.2.4
 ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=
 ARG SQLMAP_VERSION=1.10.8
@@ -414,6 +415,23 @@ RUN git clone --depth 1 --branch "${SQLMAP_VERSION}" https://github.com/sqlmappr
     sha256sum -c /tmp/sqlmap-license.sha256 && \
     install -m 0644 /tmp/sqlmap/LICENSE /out/usr/share/doc/darklab-shell/licenses/Sqlmap.txt
 
+FROM ${PYTHON_BASE_IMAGE} AS schemathesis-asset
+ARG SCHEMATHESIS_VERSION
+COPY deploy/schemathesis-constraints.txt /tmp/schemathesis-constraints.txt
+RUN grep -qx "schemathesis==${SCHEMATHESIS_VERSION}" /tmp/schemathesis-constraints.txt && \
+    python -m venv /opt/schemathesis && \
+    /opt/schemathesis/bin/pip install --no-cache-dir \
+        schemathesis==${SCHEMATHESIS_VERSION} \
+        --constraint=/tmp/schemathesis-constraints.txt && \
+    /opt/schemathesis/bin/pip check && \
+    test "$(/opt/schemathesis/bin/schemathesis --version)" = \
+        "schemathesis, version ${SCHEMATHESIS_VERSION}" && \
+    /opt/schemathesis/bin/pip uninstall --yes pip && \
+    find /opt/schemathesis -type d -name __pycache__ -prune -exec rm -rf '{}' + && \
+    mkdir -p /out/opt /out/usr/local/bin && \
+    mv /opt/schemathesis /out/opt/schemathesis && \
+    ln -s /opt/schemathesis/bin/schemathesis /out/usr/local/bin/schemathesis
+
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 ARG TARGETARCH
 ARG PYTHON_BASE_DIGEST
@@ -466,6 +484,7 @@ COPY --from=script-assets /out/ /
 COPY --from=rustscan-asset /out/ /
 COPY --from=dalfox-asset /out/ /
 COPY --from=sqlmap-asset /out/ /
+COPY --from=schemathesis-asset /out/ /
 COPY --from=ruby-tools /out/ /
 
 RUN ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \

@@ -49,7 +49,7 @@ verification_failed() {
 for tool in \
     openssl sslscan nuclei subfinder httpx dnsx naabu katana tlsx cdncheck gau \
     amass assetfinder gobuster ffuf tcping trufflehog massdns puredns testssl \
-    nikto sslyze wafw00f rustscan dalfox wpscan vt ipinfo urlscan-cli chaos nmap \
+    nikto sslyze wafw00f rustscan dalfox schemathesis wpscan vt ipinfo urlscan-cli chaos nmap \
     masscan pg_dump pg_restore python ruby perl; do
     command -v "$tool" >/dev/null 2>&1 \
         || verification_failed "$tool" "executable missing"
@@ -98,6 +98,7 @@ probe sslyze sslyze --version
 probe wafw00f wafw00f --version
 probe rustscan rustscan --version
 probe dalfox dalfox --version
+probe schemathesis schemathesis --version
 probe wpscan wpscan --version
 probe vt vt version
 probe ipinfo ipinfo version
