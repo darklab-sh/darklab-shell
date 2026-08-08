@@ -42,6 +42,7 @@ class ReviewedDalfoxParameterEvidence:
             target=self.target,
             parameter=self.parameter,
             location=self.location,
+            source_parameter_run_id=self.source_run_id,
             source_parameter_observation_id=self.observation_id,
             request_limit=request_limit,
         )
@@ -176,6 +177,7 @@ def review_dalfox_parameter_events(
             target=target,
             parameter=str(selected.get("parameter") or ""),
             location=str(selected.get("location") or ""),
+            source_parameter_run_id=run_id,
             source_parameter_observation_id=observation_id,
             request_limit=1,
         )

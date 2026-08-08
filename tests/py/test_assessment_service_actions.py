@@ -1211,6 +1211,7 @@ def _dalfox_xss_context(**overrides):
         "target": "https://app.example.test/search?q=one",
         "parameter": "q",
         "location": "Query",
+        "source_parameter_run_id": "run-dalfox-discovery",
         "source_parameter_observation_id": "obs_" + ("a" * 32),
         "request_limit": 120,
     }
@@ -1475,6 +1476,7 @@ def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
         "target": "https://app.example.test/search?q=one",
         "parameter": "q",
         "location": "Query",
+        "source_parameter_run_id": "run-dalfox-discovery",
         "source_parameter_observation_id": "obs_" + ("a" * 32),
         "source_run_id": "run-dalfox-xss",
         "tool_version": "v3.1.2",
@@ -1495,6 +1497,7 @@ def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
         "dalfox_dom_execution", "dalfox_ast_analysis", "dalfox_reflection",
     ]
     assert all(item["source_parameter_observation_id"] == "obs_" + ("a" * 32) for item in rows)
+    assert all(item["source_parameter_run_id"] == "run-dalfox-discovery" for item in rows)
     assert all(item["proof_digest"].startswith("sha256:") for item in rows)
     assert all(item["cwe_ids"] == ["CWE-79"] for item in rows)
     assert "dalfox_xss_observations" not in duplicate.get("source_detail", {})

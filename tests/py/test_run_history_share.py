@@ -794,6 +794,7 @@ class TestRunStreaming:
             target="https://app.example.test/search?q=one",
             parameter="q",
             location="Query",
+            source_parameter_run_id="run-dalfox-discovery",
             source_parameter_observation_id="obs_" + ("a" * 32),
             request_limit=120,
         )

@@ -1185,7 +1185,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
 
 
 @pytest.mark.postgres
-def test_postgres_resolves_exact_project_dalfox_parameter_evidence(postgres_schema):
+def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
+    postgres_schema,
+    monkeypatch,
+):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.assessments.dalfox_parameter_evidence import (
@@ -1194,11 +1197,17 @@ def test_postgres_resolves_exact_project_dalfox_parameter_evidence(postgres_sche
     from services.assessments.dalfox_parameter_observations import (
         DalfoxParameterObservationState,
     )
-    from services.runs.output_model import LineEvent, to_wire
+    from services.assessments.dalfox_xss_command import reviewed_dalfox_xss_command_plan
+    from services.assessments.dalfox_xss_finding_materialization import (
+        materialize_dalfox_xss_findings,
+    )
+    from services.assessments.dalfox_xss_observations import DalfoxXssObservationState
+    from services.runs.output_model import LineEvent, LineSignal, to_wire
 
     raw_conn = postgres_schema.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     timestamp = "2026-08-08T10:00:00+00:00"
     target = "https://app.example.test/search?q=one"
     run_id = "run-dalfox-parameter-pg"
@@ -1263,6 +1272,83 @@ def test_postgres_resolves_exact_project_dalfox_parameter_evidence(postgres_sche
         str(observation_id),
         expected_target=target,
     ) is None
+
+    plan = reviewed_dalfox_xss_command_plan(evidence)
+    assert plan is not None
+    active_run_id = "run-dalfox-xss-pg"
+    xss_state = DalfoxXssObservationState(
+        plan.command,
+        active_run_id,
+        evidence.xss_context(request_limit=int(plan.request_limit or 0)),
+    )
+    xss_lines = [
+        json.dumps({"meta": {
+            "dalfox_version": "v3.1.2",
+            "targets": [target],
+            "findings_count": 1,
+            "total_requests": 64,
+            "scan_duration_ms": 1000,
+        }}),
+        json.dumps({
+            "type": "V",
+            "method": "GET",
+            "param": "q",
+            "payload": "reviewed-postgres-payload",
+            "evidence": "reviewed browser execution",
+            "cwe": "CWE-79",
+        }),
+    ]
+    xss_entries = [
+        to_wire(LineEvent(
+            text=line,
+            line_index=index,
+            signals=(LineSignal.findings,) if index else (),
+            source_detail=xss_state.metadata(line).get("source_detail", {}),
+        ))
+        for index, line in enumerate(xss_lines)
+    ]
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, output_line_count) VALUES (?, 'dalfox-parameter-pg', '', "
+        "'external', ?, ?, ?, 0, ?, 2)",
+        (active_run_id, plan.command, timestamp, timestamp, json.dumps(xss_entries)),
+    )
+    conn.execute(
+        "INSERT INTO project_links "
+        "(id, project_id, entity_type, entity_id, created) VALUES "
+        "('pl-dalfox-xss-pg', 'prj-dalfox-parameter-pg', 'run', ?, ?)",
+        (active_run_id, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO entities "
+        "(id, session_id, team_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
+        "('ent-dalfox-xss-pg', 'dalfox-parameter-pg', '', 'url', ?, "
+        "'sig-dalfox-xss-pg', ?, ?, 1, ?)",
+        (target, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES ('ent-dalfox-xss-pg', ?, ?, ?, 1)",
+        (active_run_id, timestamp, timestamp),
+    )
+
+    findings = materialize_dalfox_xss_findings(
+        conn,
+        "dalfox-parameter-pg",
+        "",
+        "prj-dalfox-parameter-pg",
+        active_run_id,
+        plan.command,
+        0,
+        xss_entries,
+    )
+
+    assert len(findings) == 1
+    assert findings[0]["validation_method"] == "active_confirmation"
+    assert findings[0]["cwe_ids"] == ["CWE-79"]
 
 
 @pytest.mark.postgres

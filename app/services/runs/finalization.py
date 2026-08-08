@@ -36,6 +36,7 @@ from services.pty.transcript import shape_completed_pty_entries
 from services.runs.kinds import RUN_KIND_EXTERNAL, run_kind_for_cmd_type
 from services.runs.finalization_artifacts import save_run_file_artifacts_for_finalize
 from services.runs.finalization_assessments import reconcile_assessment_evidence_for_finalize
+from services.runs.finalization_dalfox_xss import materialize_dalfox_xss_findings_for_finalize
 from services.runs.finalization_version_inference import (
     materialize_nmap_inferences_for_finalize,
     materialize_run_entities_for_finalize,
@@ -797,6 +798,11 @@ def save_completed_run(
                 records.active_project_link,
                 records.recorded_entities,
                 link_active_project_run_entities_fn=link_active_project_run_entities_fn,
+            )
+            materialize_dalfox_xss_findings_for_finalize(
+                conn, session_id, team_id, run_id, command, exit_code,
+                output_state.persisted_entries, records.active_project_link,
+                records.recorded_findings,
             )
             materialize_takeover_confirmation_for_finalize(
                 conn, session_id, team_id, run_id, command, exit_code,

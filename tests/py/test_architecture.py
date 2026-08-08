@@ -377,6 +377,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/finalization_artifacts.py", 85, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_assessment_findings.py", 57, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_assessments.py", 77, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/runs/finalization_dalfox_xss.py", 75, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/runs/finalization_summaries.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_takeover.py", 70, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_version_inference.py", 160, "split-package-ratchet"),
@@ -471,7 +474,7 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/dalfox_parameter_observations.py", 173, "split-package-ratchet"
     ),
     ModuleSizeBudget(
-        "app/services/assessments/dalfox_parameter_evidence.py", 236, "split-package-ratchet"
+        "app/services/assessments/dalfox_parameter_evidence.py", 239, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/assessments/dalfox_parameter_options.py", 160, "split-package-ratchet"
@@ -492,7 +495,17 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/dalfox_xss_launch.py", 124, "split-package-ratchet"
     ),
     ModuleSizeBudget(
-        "app/services/assessments/dalfox_xss_observations.py", 333, "split-package-ratchet"
+        "app/services/assessments/dalfox_xss_finding_materialization.py",
+        220,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_xss_finding_persistence.py",
+        240,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_xss_observations.py", 346, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/assessments/recommended_action_builder.py", 77, "split-package-ratchet"

@@ -1294,6 +1294,12 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
     for fallback_index, entry in enumerate(entry_items):
         if not isinstance(entry, dict):
             continue
+        source_detail = entry.get("source_detail")
+        if (
+            isinstance(source_detail, dict)
+            and isinstance(source_detail.get("dalfox_xss_observations"), list)
+        ):
+            continue
         role = str(entry.get("role") or "")
         if role in {"section-header", "kv", "help-row", "progress", "status-line", "pty-marker"}:
             continue

@@ -47,6 +47,7 @@ class ReviewedDalfoxXssContext:
     target: str
     parameter: str
     location: str
+    source_parameter_run_id: str
     source_parameter_observation_id: str
     request_limit: int
     policy_level: str = "intrusive"
@@ -56,6 +57,7 @@ class ReviewedDalfoxXssContext:
             _url(self.target) != self.target
             or _parameter(self.parameter) != self.parameter
             or self.location not in _ALLOWED_LOCATIONS
+            or not _RUN_ID_RE.fullmatch(self.source_parameter_run_id)
             or not _OBSERVATION_ID_RE.fullmatch(self.source_parameter_observation_id)
             or not isinstance(self.request_limit, int)
             or isinstance(self.request_limit, bool)
@@ -112,6 +114,14 @@ class DalfoxXssObservationState:
             and bool(self._seen)
         )
 
+    def complete_findings_stream(self, context: ReviewedDalfoxXssContext) -> bool:
+        """Return whether every reported result row was present within the fixed cap."""
+        return bool(
+            self.accepts_findings_exit(context)
+            and self.reported_finding_count <= DALFOX_XSS_MAX_OBSERVATIONS
+            and self._result_rows == self.reported_finding_count
+        )
+
     def _summary_metadata(self, meta: dict[str, Any]) -> dict[str, dict[str, Any]]:
         context = self.context
         if context is None or self.tool_version or self._result_rows:
@@ -138,6 +148,7 @@ class DalfoxXssObservationState:
             "target": context.target,
             "parameter": context.parameter,
             "location": context.location,
+            "source_parameter_run_id": context.source_parameter_run_id,
             "source_parameter_observation_id": context.source_parameter_observation_id,
             "source_run_id": self.source_run_id,
             "tool_version": version,
@@ -193,6 +204,7 @@ class DalfoxXssObservationState:
             "target": context.target,
             "parameter": context.parameter,
             "location": context.location,
+            "source_parameter_run_id": context.source_parameter_run_id,
             "result_type": result_type,
             "validation_state": validation_state,
             "validation_method": validation_method,
