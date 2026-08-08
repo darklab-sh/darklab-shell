@@ -4044,6 +4044,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert web_capture["source_run"]["id"] == run_id
     assert web_capture["url_entity_id"]
     assert web_capture["host_entity_id"]
+    assert web_capture["comparison"] == {
+        "state": "no_baseline",
+        "basis": "exact_url_and_profile_role",
+    }
     assert filtered_web_surface_resp.status_code == 200
     filtered_web_surface = json.loads(filtered_web_surface_resp.data)
     assert filtered_web_surface["total"] == 1

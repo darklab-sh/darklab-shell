@@ -83,6 +83,11 @@ from services.intel.epss import normalize_epss_rows
 from services.intel.kev import normalize_kev_catalog
 from core.output_signals import OutputSignalClassifier
 from services.atlas.observations import public_app_port_record
+from services.projects.web_surface_comparison import (
+    attach_capture_comparisons,
+    capture_matches_change_state,
+    normalize_change_state,
+)
 
 
 def test_service_actions_require_explicit_service_evidence_and_target_compatibility():
@@ -942,6 +947,55 @@ def test_web_gallery_normalizes_collection_filters_and_matches_enriched_rows():
         "artifact": {"id": "kept-outside-public-metadata"},
     }, filters) is True
     assert normalize_web_surface_filters({"status_code": "99"})["status_code"] is None
+
+
+def test_web_surface_comparison_uses_exact_url_role_and_prior_run_evidence():
+    def capture(artifact_id, run_id, captured_at, visual_hash, *, role="anonymous", url="https://app.example/login"):
+        return {
+            "url": url,
+            "captured_at": captured_at,
+            "visual_hash": visual_hash,
+            "profile_role": role,
+            "artifact": {"id": artifact_id, "created": captured_at},
+            "source_run": {"id": run_id},
+        }
+
+    previous = capture("artifact-1", "run-1", "2026-08-06T00:00:00Z", "hash-old")
+    current = capture("artifact-2", "run-2", "2026-08-07T00:00:00Z", "hash-new")
+    other_role = capture(
+        "artifact-3", "run-3", "2026-08-06T12:00:00Z", "hash-new", role="authenticated",
+    )
+    same_run = capture("artifact-same-run", "run-2", "2026-08-06T18:00:00Z", "hash-same-run")
+    attach_capture_comparisons([current], [previous, current, other_role, same_run])
+
+    assert current["comparison"] == {
+        "state": "changed",
+        "basis": "exact_url_and_profile_role",
+        "previous_capture": {
+            "artifact_id": "artifact-1",
+            "source_run_id": "run-1",
+            "captured_at": "2026-08-06T00:00:00Z",
+            "visual_hash": "hash-old",
+        },
+    }
+    assert capture_matches_change_state(current, "changed") is True
+    assert capture_matches_change_state(current, "unchanged") is False
+    assert normalize_change_state(" CHANGED ") == "changed"
+    assert normalize_change_state("invented") == ""
+
+    unchanged = capture("artifact-4", "run-4", "2026-08-08T00:00:00Z", "hash-new")
+    attach_capture_comparisons([unchanged], [current, unchanged])
+    assert unchanged["comparison"]["state"] == "unchanged"
+
+    no_hash = capture("artifact-5", "run-5", "2026-08-09T00:00:00Z", "")
+    attach_capture_comparisons([no_hash], [unchanged, no_hash])
+    assert no_hash["comparison"]["state"] == "incomparable"
+
+    oldest = capture("artifact-0", "run-0", "2026-08-05T00:00:00Z", "hash-oldest")
+    attach_capture_comparisons([oldest], [oldest], history_truncated=False)
+    assert oldest["comparison"]["state"] == "no_baseline"
+    attach_capture_comparisons([oldest], [oldest], history_truncated=True)
+    assert oldest["comparison"]["state"] == "unknown"
 
 
 def test_web_gallery_paging_is_bounded_and_skips_malformed_rows():

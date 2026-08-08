@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from urllib.parse import urlsplit
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
@@ -17,19 +16,19 @@ from services.assessments.web_gallery import (
     web_surface_row_matches,
     web_surface_rows_from_events,
 )
-from services.intel.canonical import (
-    CanonicalizationError,
-    canonical_domain,
-    canonical_ip,
-    canonical_url,
-)
 from services.projects.artifacts import (
     artifact_availability,
     artifact_owner_context,
     row_to_run_file_artifact,
 )
-from services.projects.scope import shared_owner_where
 from services.projects.utils import normalize_page_window, page_payload
+from services.projects.web_surface_comparison import (
+    attach_capture_comparisons,
+    capture_matches_change_state,
+    normalize_change_state,
+)
+from services.projects.web_surface_entities import attach_capture_entity_ids
+from services.projects.web_surface_history_query import load_project_web_surface_history_rows
 from services.projects.web_surface_query import load_project_web_surface_rows
 
 
@@ -40,6 +39,9 @@ def list_project_web_surface(session_id, project_id, filters=None, *, limit=50, 
     """Return a bounded capture page backed by verified project image artifacts."""
     safe_limit, safe_offset = normalize_page_window(limit, offset)
     normalized_filters = normalize_web_surface_filters(filters)
+    normalized_filters["change_state"] = normalize_change_state(
+        filters.get("change_state") if isinstance(filters, Mapping) else ""
+    )
     filtered = web_surface_filters_active(normalized_filters)
     query_limit = MAX_GALLERY_ROWS if filtered else safe_limit
     query_offset = 0 if filtered else safe_offset
@@ -51,13 +53,26 @@ def list_project_web_surface(session_id, project_id, filters=None, *, limit=50, 
             return None
         rows, candidate_total = result
         captures = _capture_items(session_id, rows)
+        history_rows = load_project_web_surface_history_rows(
+            conn, session_id, project_id, limit=MAX_GALLERY_ROWS, team_id=team_id,
+        )
+        history_captures = _capture_items(session_id, history_rows)
+        attach_capture_comparisons(
+            captures,
+            [*history_captures, *captures],
+            history_truncated=candidate_total > MAX_GALLERY_ROWS,
+        )
         if filtered:
-            captures = [item for item in captures if web_surface_row_matches(item, normalized_filters)]
+            captures = [
+                item for item in captures
+                if web_surface_row_matches(item, normalized_filters)
+                and capture_matches_change_state(item, normalized_filters["change_state"])
+            ]
             filtered_total = len(captures)
             captures = captures[safe_offset:safe_offset + safe_limit]
         else:
             filtered_total = candidate_total
-        _attach_capture_entity_ids(conn, session_id, captures, team_id=team_id)
+        attach_capture_entity_ids(conn, session_id, captures, team_id=team_id)
     return page_payload(
         "captures", captures, filtered_total, safe_limit, safe_offset,
         extra={
@@ -65,6 +80,8 @@ def list_project_web_surface(session_id, project_id, filters=None, *, limit=50, 
             "candidate_total": candidate_total,
             "candidate_limit": MAX_GALLERY_ROWS,
             "candidate_truncated": bool(filtered and candidate_total > MAX_GALLERY_ROWS),
+            "comparison_candidate_limit": MAX_GALLERY_ROWS,
+            "comparison_candidate_truncated": candidate_total > MAX_GALLERY_ROWS,
         },
     )
 
@@ -150,75 +167,6 @@ def _capture_state(metadata_state: str, availability: Mapping[str, object]) -> s
     if file_status == "changed":
         return "changed"
     return "unavailable"
-
-
-def _attach_capture_entity_ids(conn, session_id: str, captures: list[dict[str, object]], *, team_id="") -> None:
-    run_ids = sorted({str(item["source_run"]["id"]) for item in captures if item.get("url")})
-    url_values = sorted({_canonical_capture_url(item.get("url")) for item in captures} - {""})
-    host_values = sorted({_capture_host(item.get("url")) for item in captures} - {""})
-    if not run_ids or not url_values:
-        return
-    run_placeholders = ",".join("?" for _ in run_ids)
-    value_placeholders = ",".join("?" for _ in (*url_values, *host_values))
-    entity_owner_sql, entity_owner_params = shared_owner_where(
-        session_id, team_id=team_id, table_alias="e",
-    )
-    entity_filter_sql = (
-        f"erl.run_id IN ({run_placeholders}) AND "
-        + entity_owner_sql
-        + " AND e.type IN ('url', 'domain', 'ip') "
-        + f"AND e.canonical_value IN ({value_placeholders})"
-    )
-    rows = conn.execute(
-        "SELECT erl.run_id, e.id, e.type, e.canonical_value, e.host_entity_id "  # nosec B608
-        "FROM entity_run_links erl JOIN entities e ON e.id = erl.entity_id "
-        "WHERE "
-        + entity_filter_sql,
-        (*run_ids, *entity_owner_params, *url_values, *host_values),
-    ).fetchall()
-    linked = {(str(row["run_id"]), str(row["type"]), str(row["canonical_value"])): row for row in rows}
-    linked_ids = {(str(row["run_id"]), str(row["id"])) for row in rows}
-    for capture in captures:
-        run_id = str(capture["source_run"]["id"])
-        url_row = linked.get((run_id, "url", _canonical_capture_url(capture.get("url"))))
-        host_value = _capture_host(capture.get("url"))
-        host_type = _host_type(host_value)
-        host_row = linked.get((run_id, host_type, host_value)) if host_type else None
-        if url_row:
-            capture["url_entity_id"] = str(url_row["id"] or "")
-            url_host_id = str(url_row["host_entity_id"] or "")
-            if url_host_id and (run_id, url_host_id) in linked_ids:
-                capture["host_entity_id"] = url_host_id
-        if not capture["host_entity_id"] and host_row:
-            capture["host_entity_id"] = str(host_row["id"] or "")
-
-
-def _canonical_capture_url(value: object) -> str:
-    try:
-        return canonical_url(str(value or ""))
-    except CanonicalizationError:
-        return ""
-
-
-def _capture_host(value: object) -> str:
-    host = str(urlsplit(str(value or "")).hostname or "")
-    try:
-        return canonical_ip(host)
-    except CanonicalizationError:
-        try:
-            return canonical_domain(host)
-        except CanonicalizationError:
-            return ""
-
-
-def _host_type(value: str) -> str:
-    if not value:
-        return ""
-    try:
-        canonical_ip(value)
-    except CanonicalizationError:
-        return "domain"
-    return "ip"
 
 
 __all__ = ["list_project_web_surface"]

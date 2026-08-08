@@ -32,6 +32,16 @@ function capture(overrides = {}) {
     profile_role: 'anonymous',
     metadata_state: 'available',
     capture_state: 'current',
+    comparison: {
+      state: 'changed',
+      basis: 'exact_url_and_profile_role',
+      previous_capture: {
+        artifact_id: 'artifact-previous',
+        source_run_id: 'run-previous',
+        captured_at: '2026-08-06T00:00:00+00:00',
+        visual_hash: 'visual-previous',
+      },
+    },
     artifact: {
       id: 'artifact-1',
       display_name: 'app-darklab-sh.png',
@@ -175,6 +185,7 @@ describe('Project Web Surface gallery', () => {
     )
     expect(test.container.textContent).toContain('Darklab sign in')
     expect(test.container.textContent).toContain('HTTP 200 · nginx, Flask · role: anonymous')
+    expect(test.container.textContent).toContain('Visual hash changed since date:2026-08-06T00:00:00+00:00.')
     expect(test.container.textContent).toContain('metadata conflict')
     expect(test.container.textContent).toContain('Conflicting capture metadata was rejected.')
     expect(test.container.querySelectorAll('.project-web-surface-image')).toHaveLength(2)
@@ -220,6 +231,7 @@ describe('Project Web Surface gallery', () => {
         content_sha256: 'sha-two',
       },
       source_run: { id: 'run-two', command: 'httpx -screenshot https://admin.darklab.sh' },
+      comparison: { state: 'no_baseline', basis: 'exact_url_and_profile_role' },
     })
     const test = harness(() => ({
       captures: [capture(), second],
@@ -317,6 +329,7 @@ describe('Project Web Surface gallery', () => {
         file_available: false,
       },
       source_run: { id: 'run-two', command: 'httpx -screenshot https://admin.darklab.sh' },
+      comparison: { state: 'no_baseline', basis: 'exact_url_and_profile_role' },
     })
     const test = harness((url) => {
       const params = new URL(`https://example.test${url}`).searchParams
@@ -329,6 +342,8 @@ describe('Project Web Surface gallery', () => {
         candidate_total: filtered ? 500 : 2,
         candidate_limit: 200,
         candidate_truncated: filtered,
+        comparison_candidate_limit: 200,
+        comparison_candidate_truncated: filtered,
         has_more: false,
       }
     })
@@ -341,6 +356,10 @@ describe('Project Web Surface gallery', () => {
     group.dispatchEvent(new Event('change', { bubbles: true }))
     expect(test.container.textContent).toContain('HTTP 200 (1)')
     expect(test.container.textContent).toContain('HTTP 401 (1)')
+    group.value = 'change_state'
+    group.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(test.container.textContent).toContain('Visual changed (1)')
+    expect(test.container.textContent).toContain('No baseline (1)')
 
     const values = {
       target: 'app.darklab.sh',
@@ -348,6 +367,7 @@ describe('Project Web Surface gallery', () => {
       technology: 'nginx',
       profile_role: 'anonymous',
       visual_hash: 'visual-one',
+      change_state: 'changed',
     }
     Object.entries(values).forEach(([name, value]) => {
       test.container.querySelector(`[name="${name}"]`).value = value
@@ -358,11 +378,12 @@ describe('Project Web Surface gallery', () => {
 
     await vi.waitFor(() => expect(test.container.textContent).not.toContain('Admin'))
     expect(test.apiFetch).toHaveBeenCalledWith(
-      '/projects/project-1/web-surface?limit=24&offset=0&target=app.darklab.sh&status_code=200&technology=nginx&profile_role=anonymous&visual_hash=visual-one',
+      '/projects/project-1/web-surface?limit=24&offset=0&target=app.darklab.sh&status_code=200&technology=nginx&profile_role=anonymous&visual_hash=visual-one&change_state=changed',
       { cache: 'no-store' },
     )
     expect(test.container.textContent).toContain("Filters searched the newest 200 of 500 captures. Older captures weren't included.")
-    expect(test.container.textContent).toContain('HTTP 200 (1)')
+    expect(test.container.textContent).toContain('Change comparisons use the newest 200 of 500 captures.')
+    expect(test.container.textContent).toContain('Visual changed (1)')
 
     const clear = [...test.container.querySelectorAll('.project-web-surface-control-actions button')]
       .find(button => button.textContent === 'Clear filters')
@@ -374,6 +395,7 @@ describe('Project Web Surface gallery', () => {
       technology: '',
       profile_role: '',
       visual_hash: '',
+      change_state: '',
     })
   })
 

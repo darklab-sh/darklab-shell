@@ -12573,13 +12573,21 @@ class TestProjectRoutes:
             session_id,
             "httpx -ss -srd captures -u https://app.example.test/login",
         )
+        previous_run_id = self._seed_run(
+            session_id,
+            "httpx -ss -srd previous-captures -u https://app.example.test/login",
+            started="'2026-08-06T00:00:00+00:00'",
+        )
         self._link_run(client, session_id, project["id"], run_id)
+        self._link_run(client, session_id, project["id"], previous_run_id)
         host_entity_id = "ent_" + uuid.uuid4().hex[:16]
         url_entity_id = "ent_" + uuid.uuid4().hex[:16]
         good_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
         conflict_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+        previous_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
         good_path = "captures/app.png"
         conflict_path = "captures/conflict.png"
+        previous_path = "previous-captures/app.png"
         preview = [{
             "text": "https://app.example.test/login [200]",
             "source_detail": {
@@ -12609,13 +12617,28 @@ class TestProjectRoutes:
                 ],
             },
         }]
+        previous_preview = [{
+            "source_detail": {
+                "screenshots": [{
+                    "url": "https://app.example.test/login",
+                    "artifact_path": previous_path,
+                    "status_code": 200,
+                    "title": "Sign in",
+                    "technologies": ["nginx"],
+                    "captured_at": "2026-08-06T00:00:02Z",
+                    "visual_hash": "visual-previous",
+                    "source_run_id": previous_run_id,
+                    "profile_role": "authenticated",
+                }],
+            },
+        }]
         workspace_cfg = {
             "workspace_enabled": True,
             "workspace_root": str(tmp_path / "workspaces"),
         }
         image = b"\x89PNG\r\n\x1a\nverified-image"
         with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
-            for path in (good_path, conflict_path):
+            for path in (good_path, conflict_path, previous_path):
                 resolved = resolve_workspace_path(
                     session_id,
                     path,
@@ -12627,6 +12650,10 @@ class TestProjectRoutes:
                 conn.execute(
                     "UPDATE runs SET output_preview = ?, finished = ? WHERE id = ?",
                     (json.dumps(preview), "2026-08-07T00:00:03+00:00", run_id),
+                )
+                conn.execute(
+                    "UPDATE runs SET output_preview = ?, finished = ? WHERE id = ?",
+                    (json.dumps(previous_preview), "2026-08-06T00:00:03+00:00", previous_run_id),
                 )
                 conn.execute(
                     "INSERT INTO entities "
@@ -12693,6 +12720,16 @@ class TestProjectRoutes:
                             hashlib.sha256(image).hexdigest(),
                             "2026-08-07T00:00:02+00:00",
                         ),
+                        (
+                            previous_artifact_id,
+                            session_id,
+                            previous_run_id,
+                            previous_path,
+                            "previous-app.png",
+                            len(image),
+                            hashlib.sha256(image).hexdigest(),
+                            "2026-08-06T00:00:02+00:00",
+                        ),
                     ],
                 )
                 conn.execute(
@@ -12725,6 +12762,7 @@ class TestProjectRoutes:
                     "technology": "NGINX",
                     "profile_role": "AUTHENTICATED",
                     "visual_hash": "VISUAL-GOOD",
+                    "change_state": "CHANGED",
                     "limit": "1",
                 }),
                 headers={"X-Session-ID": session_id},
@@ -12742,7 +12780,7 @@ class TestProjectRoutes:
         assert first.status_code == 200
         first_payload = first.get_json()
         assert {key: first_payload[key] for key in ("total", "limit", "offset", "has_more")} == {
-            "total": 2,
+            "total": 3,
             "limit": 1,
             "offset": 0,
             "has_more": True,
@@ -12758,6 +12796,16 @@ class TestProjectRoutes:
         assert capture["source_run"]["id"] == run_id
         assert capture["artifact"]["id"] == good_artifact_id
         assert capture["artifact"]["file_available"] is True
+        assert capture["comparison"] == {
+            "state": "changed",
+            "basis": "exact_url_and_profile_role",
+            "previous_capture": {
+                "artifact_id": previous_artifact_id,
+                "source_run_id": previous_run_id,
+                "captured_at": "2026-08-06T00:00:02Z",
+                "visual_hash": "visual-previous",
+            },
+        }
         assert "captured_html" not in json.dumps(first_payload)
         assert second.status_code == 200
         conflicting = second.get_json()["captures"][0]
@@ -12768,7 +12816,7 @@ class TestProjectRoutes:
         assert filtered.status_code == 200
         filtered_payload = filtered.get_json()
         assert filtered_payload["total"] == 1
-        assert filtered_payload["candidate_total"] == 2
+        assert filtered_payload["candidate_total"] == 3
         assert filtered_payload["candidate_limit"] == 200
         assert filtered_payload["candidate_truncated"] is False
         assert filtered_payload["filters"] == {
@@ -12777,12 +12825,13 @@ class TestProjectRoutes:
             "technology": "NGINX",
             "profile_role": "AUTHENTICATED",
             "visual_hash": "VISUAL-GOOD",
+            "change_state": "changed",
         }
         assert filtered_payload["captures"][0]["artifact"]["id"] == good_artifact_id
         assert capped_filtered.status_code == 200
         capped_payload = capped_filtered.get_json()
         assert capped_payload["total"] == 1
-        assert capped_payload["candidate_total"] == 2
+        assert capped_payload["candidate_total"] == 3
         assert capped_payload["candidate_limit"] == 1
         assert capped_payload["candidate_truncated"] is True
         assert foreign.status_code == 404

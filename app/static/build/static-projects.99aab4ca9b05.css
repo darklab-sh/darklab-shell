@@ -7096,6 +7096,15 @@ body.mobile-terminal-mode .project-target-editor-form .form-select {
   flex: 0 0 auto;
 }
 
+.project-web-surface-badges {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
 .project-web-surface-status.is-current {
   color: var(--green);
 }

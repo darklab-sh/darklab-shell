@@ -23,6 +23,18 @@ let exportedDarklabProjectWebSurface = null;
     { name: 'technology', label: 'Technology', placeholder: 'nginx' },
     { name: 'profile_role', label: 'HTTP role', placeholder: 'authenticated' },
     { name: 'visual_hash', label: 'Visual hash', placeholder: 'Exact hash' },
+    {
+      name: 'change_state',
+      label: 'Change',
+      options: [
+        ['', 'Any comparison'],
+        ['changed', 'Visual changed'],
+        ['unchanged', 'Visual unchanged'],
+        ['no_baseline', 'No baseline'],
+        ['incomparable', 'Could not compare'],
+        ['unknown', 'Outside comparison window'],
+      ],
+    },
   ];
   const GROUP_OPTIONS = [
     ['none', 'No grouping'],
@@ -31,6 +43,7 @@ let exportedDarklabProjectWebSurface = null;
     ['technology', 'Group by technology'],
     ['profile_role', 'Group by HTTP role'],
     ['visual_hash', 'Group by visual hash'],
+    ['change_state', 'Group by change'],
   ];
 
   function emptyFilters() {
@@ -76,6 +89,8 @@ let exportedDarklabProjectWebSurface = null;
           candidateTotal: 0,
           candidateLimit: 200,
           candidateTruncated: false,
+          comparisonCandidateLimit: 200,
+          comparisonCandidateTruncated: false,
         });
       }
       return pages.get(key);
@@ -122,6 +137,8 @@ let exportedDarklabProjectWebSurface = null;
         state.candidateTotal = Math.max(0, Number(data.candidate_total || state.total));
         state.candidateLimit = Math.max(1, Number(data.candidate_limit || 200));
         state.candidateTruncated = Boolean(data.candidate_truncated);
+        state.comparisonCandidateLimit = Math.max(1, Number(data.comparison_candidate_limit || 200));
+        state.comparisonCandidateTruncated = Boolean(data.comparison_candidate_truncated);
         state.loaded = true;
       } catch (err) {
         if (state.offset === offset) {
@@ -240,7 +257,37 @@ let exportedDarklabProjectWebSurface = null;
       }
       if (groupBy === 'profile_role') return String(capture?.profile_role || 'No HTTP role');
       if (groupBy === 'visual_hash') return String(capture?.visual_hash || 'No visual hash');
+      if (groupBy === 'change_state') return changeLabel(capture);
       return '';
+    }
+
+    function changeLabel(capture) {
+      const state = String(capture?.comparison?.state || 'incomparable');
+      if (state === 'changed') return 'Visual changed';
+      if (state === 'unchanged') return 'Visual unchanged';
+      if (state === 'no_baseline') return 'No baseline';
+      if (state === 'unknown') return 'Outside comparison window';
+      return 'Could not compare';
+    }
+
+    function changeTone(capture) {
+      const state = String(capture?.comparison?.state || 'incomparable');
+      if (state === 'changed') return 'is-warning';
+      if (state === 'unchanged') return 'is-current';
+      return 'is-unavailable';
+    }
+
+    function changeDetail(capture) {
+      const comparison = capture?.comparison || {};
+      const previous = comparison.previous_capture || {};
+      const previousTime = previous.captured_at
+        ? (ctx.formatDate?.(previous.captured_at) || previous.captured_at)
+        : '';
+      if (comparison.state === 'changed') return `Visual hash changed since ${previousTime || 'the previous capture'}.`;
+      if (comparison.state === 'unchanged') return `Visual hash unchanged since ${previousTime || 'the previous capture'}.`;
+      if (comparison.state === 'no_baseline') return 'No earlier capture has the same exact URL and HTTP role.';
+      if (comparison.state === 'unknown') return 'An earlier baseline may fall outside the bounded comparison window.';
+      return 'A compatible visual hash was not available for comparison.';
     }
 
     function metaLine(capture) {
@@ -493,7 +540,13 @@ let exportedDarklabProjectWebSurface = null;
       const status = document.createElement('span');
       status.className = `badge project-web-surface-status ${statusTone(capture)}`;
       status.textContent = statusLabel(capture);
-      head.append(title, status);
+      const badges = document.createElement('div');
+      badges.className = 'project-web-surface-badges';
+      const comparison = document.createElement('span');
+      comparison.className = `badge project-web-surface-status ${changeTone(capture)}`;
+      comparison.textContent = changeLabel(capture);
+      badges.append(status, comparison);
+      head.append(title, badges);
       body.appendChild(head);
       if (capture?.url) {
         const url = document.createElement('div');
@@ -515,6 +568,10 @@ let exportedDarklabProjectWebSurface = null;
         capture?.source_run?.id ? `run ${ctx.shortProjectRunId?.(capture.source_run.id) || capture.source_run.id}` : '',
       ].filter(Boolean).join(ctx.metaSeparator || ' · ');
       if (source.textContent) body.appendChild(source);
+      const change = document.createElement('div');
+      change.className = 'project-web-surface-meta';
+      change.textContent = changeDetail(capture);
+      body.appendChild(change);
       const actions = document.createElement('div');
       actions.className = 'project-web-surface-actions';
       if (captureIsViewable(capture)) {
@@ -580,17 +637,27 @@ let exportedDarklabProjectWebSurface = null;
         label.className = 'project-web-surface-control';
         const text = document.createElement('span');
         text.textContent = field.label;
-        const input = document.createElement('input');
-        input.type = field.type || 'text';
-        input.name = field.name;
-        input.className = 'form-control form-control-compact';
-        input.value = String(state.filters?.[field.name] || '');
-        input.placeholder = field.placeholder;
-        input.setAttribute('aria-label', `Filter Web Surface by ${field.label.toLowerCase()}`);
-        if (field.inputMode) input.inputMode = field.inputMode;
-        if (field.maxLength) input.maxLength = field.maxLength;
-        if (field.pattern) input.pattern = field.pattern;
-        label.append(text, input);
+        const control = field.options ? document.createElement('select') : document.createElement('input');
+        control.name = field.name;
+        control.className = field.options ? 'form-select form-control-compact' : 'form-control form-control-compact';
+        control.setAttribute('aria-label', `Filter Web Surface by ${field.label.toLowerCase()}`);
+        if (field.options) {
+          field.options.forEach(([value, optionLabel]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = optionLabel;
+            option.selected = value === String(state.filters?.[field.name] || '');
+            control.appendChild(option);
+          });
+        } else {
+          control.type = field.type || 'text';
+          control.value = String(state.filters?.[field.name] || '');
+          control.placeholder = field.placeholder;
+          if (field.inputMode) control.inputMode = field.inputMode;
+          if (field.maxLength) control.maxLength = field.maxLength;
+          if (field.pattern) control.pattern = field.pattern;
+        }
+        label.append(text, control);
         form.appendChild(label);
       });
       const groupLabelNode = document.createElement('label');
@@ -689,6 +756,13 @@ let exportedDarklabProjectWebSurface = null;
         limited.className = 'project-web-surface-limited';
         limited.setAttribute('role', 'status');
         limited.textContent = `Filters searched the newest ${state.candidateLimit} of ${state.candidateTotal} captures. Older captures weren't included.`;
+        container.appendChild(limited);
+      }
+      if (state.comparisonCandidateTruncated) {
+        const limited = document.createElement('div');
+        limited.className = 'project-web-surface-limited';
+        limited.setAttribute('role', 'status');
+        limited.textContent = `Change comparisons use the newest ${state.comparisonCandidateLimit} of ${state.candidateTotal} captures. Older baselines may show as outside the comparison window.`;
         container.appendChild(limited);
       }
       if (state.loaded && !state.total) {

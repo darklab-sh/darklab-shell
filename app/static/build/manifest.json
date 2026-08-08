@@ -516,8 +516,8 @@
       "hash": "e4ea1d069d07ab099d6529bd52d9e5b1ee901b13f7b7ad0bed7fa959b5cfb5e2"
     },
     "/static/js/features/projects/project_web_surface.js": {
-      "path": "/static/build/static-project-web-surface.8cc18967f8f8.js",
-      "hash": "a7fc7ebdb1fe0b62f410cb53031e4a6490414e322c30dc74479e8e0eabd7d957"
+      "path": "/static/build/static-project-web-surface.5cf4809a635d.js",
+      "hash": "cf34e21931982878825b894bca9c6504a3f993a445679f8c4577c448692674c1"
     },
     "/static/js/features/projects/project_workspace_actions.js": {
       "path": "/static/build/static-project-workspace-actions.1b017a7e8e97.js",
@@ -648,8 +648,8 @@
       "hash": "616ca74b5862c3e4c773d11a5a0af826dce63cf3cfb7d780c062dcb68df3f256"
     },
     "/static/css/features/projects.css": {
-      "path": "/static/build/static-projects.eff0bda4cca9.css",
-      "hash": "eff0bda4cca9ee37d0938ed8928aaa2f60ad59c5b134c336e868f2048a3166ce"
+      "path": "/static/build/static-projects.99aab4ca9b05.css",
+      "hash": "99aab4ca9b052cc41c9a1bf00d8f9d5e331f84c499226219bff3ab4eaa08318b"
     },
     "/static/css/features/run-comparison.css": {
       "path": "/static/build/static-run-comparison.9b96fd2915e8.css",

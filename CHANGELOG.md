@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Web Surface captures now explain visual changes against a compatible baseline.**
+  - **What:** Each capture compares its saved visual hash with the nearest earlier capture from a different run when the exact URL and HTTP role match. Cards distinguish changed, unchanged, no-baseline, incomparable, and bounded-window states; users can filter or group by that result. A visual difference remains review evidence and never creates a finding.
+  - **Tests:** Focused comparison, SQLite, Postgres-compatible query, and browser coverage pins exact URL/role/run compatibility, prior-capture provenance, bounded-history honesty, filtering, grouping, readable explanations, and the no-finding contract.
 - **Web Surface screenshots now have a focused full-image viewer.**
   - **What:** Available captures can open in a modal viewer on desktop or mobile without leaving the Project. Previous and next buttons, left and right arrow keys, and horizontal swipes move through the viewable captures on the current page. Position and boundary states stay visible, Escape/backdrop/close dismissal uses the shared modal behavior, and focus returns to the opening card.
   - **Tests:** Focused browser coverage pins authenticated image reuse, modal state, focus restoration, arrow-key and touch navigation, position text, and disabled boundaries. Shared dismissible, focus-trap, pressable, asset, lint, style, and documentation contracts cover the surrounding behavior.
