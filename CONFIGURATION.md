@@ -323,7 +323,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `atlas_import_max_findings` | `5000` | Server-side only. Maximum normalized findings accepted for one Atlas import |
 | `atlas_import_max_warnings` | `100` | Server-side only. Maximum row warnings retained while parsing one Atlas import |
 | `atlas_import_max_xml_elements` | `100000` | Server-side only. Maximum XML elements streamed by one XML Atlas import parser before rejection |
-| `atlas_import_preview_sample_limit` | `20` | Server-side only. Maximum entity and finding sample rows returned in one Atlas import preview response |
+| `atlas_import_preview_sample_limit` | `20` | Server-side only. Maximum entity, finding, and typed-evidence sample rows returned in one Atlas import preview response |
 | `atlas_import_warning_sample_limit` | `50` | Server-side only. Maximum warning samples returned in one Atlas import preview and stored on draft/batch metadata |
 | `atlas_import_draft_ttl_minutes` | `30` | Server-side only. Time window in minutes before an unapplied Atlas import draft is treated as abandoned and cleaned up |
 | `max_project_targets_per_project` | `200` | Server-side only. Maximum manual or discovered project targets per project, separate from bulk-linked Atlas entities |

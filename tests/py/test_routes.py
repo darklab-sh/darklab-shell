@@ -1105,6 +1105,7 @@ class TestAtlasImportRoutes:
             assert audit_rows[0]["details"]["options"] == {
                 "import_entities": False,
                 "import_findings": True,
+                "import_evidence": False,
                 "link_to_project": True,
                 "create_project_targets": True,
             }
@@ -1113,6 +1114,126 @@ class TestAtlasImportRoutes:
             assert audit_rows[0]["details"]["counts"]["project_links_added"] == 1
             assert audit_rows[0]["details"]["counts"]["project_targets_created"] == 1
             assert csv_payload.decode() not in json.dumps(audit_rows)
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_cyclonedx_import_applies_typed_batch_evidence_without_trusting_vex_triage(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_cyclonedx_import"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_cyclonedx_import"
+            now = datetime.now(timezone.utc).isoformat()
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'CycloneDX Import', 'cyclonedx-import', ?, ?)",
+                    (project_id, session_id, now, now),
+                )
+                conn.commit()
+            payload = json.dumps({
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.5",
+                "metadata": {"timestamp": "2026-08-07T12:00:00Z"},
+                "components": [{
+                    "bom-ref": "pkg:pypi/requests@2.31.0",
+                    "type": "library",
+                    "name": "requests",
+                    "version": "2.31.0",
+                    "purl": "pkg:pypi/requests@2.31.0",
+                }, {
+                    "bom-ref": "pkg:pypi/urllib3@2.0.7",
+                    "type": "library",
+                    "name": "urllib3",
+                    "version": "2.0.7",
+                    "purl": "pkg:pypi/urllib3@2.0.7",
+                }],
+                "dependencies": [{
+                    "ref": "pkg:pypi/requests@2.31.0",
+                    "dependsOn": ["pkg:pypi/urllib3@2.0.7"],
+                }],
+                "vulnerabilities": [{
+                    "id": "CVE-2026-4242",
+                    "source": {"name": "Upstream advisory"},
+                    "ratings": [{"severity": "high"}],
+                    "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+                }, {
+                    "id": "CVE-2026-4242",
+                    "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+                    "analysis": {
+                        "state": "not_affected",
+                        "justification": "code_not_reachable",
+                    },
+                }],
+            }).encode()
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "cyclonedx_json",
+                    "source_tool": "CycloneDX",
+                    "import_name": "Application SBOM",
+                    "file": (io.BytesIO(payload), "application.cdx.json"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["rows"] == 5
+            assert preview_payload["counts"]["finding_valid"] == 1
+            assert preview_payload["counts"]["evidence_valid"] == 5
+            assert preview_payload["counts"]["evidence_new"] == 5
+            assert preview_payload["apply_options"]["import_evidence"] == {
+                "available": True,
+                "requires": ["mutate_projects"],
+            }
+            assert [item["evidence_type"] for item in preview_payload["samples"]["evidence"]] == [
+                "cyclonedx_component",
+                "cyclonedx_component",
+                "cyclonedx_dependency",
+                "cyclonedx_vulnerability",
+                "cyclonedx_vulnerability",
+            ]
+
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "project_id": project_id,
+                    "options": {"import_findings": True, "import_evidence": True},
+                },
+            )
+
+            assert applied.status_code == 200
+            applied_payload = applied.get_json()
+            assert applied_payload["counts"]["findings_created"] == 1
+            assert applied_payload["counts"]["evidence_imported"] == 5
+            with db_connect() as conn:
+                rows = conn.execute(
+                    "SELECT project_id, evidence_type, subject_key, source_detail_json "
+                    "FROM atlas_import_evidence ORDER BY row_number, id"
+                ).fetchall()
+                finding = conn.execute(
+                    "SELECT f.status, f.origin, f.validation_method, o.external_id "
+                    "FROM findings f JOIN atlas_finding_import_occurrences o ON o.finding_id = f.id"
+                ).fetchone()
+            assert len(rows) == 5
+            assert {row["project_id"] for row in rows} == {project_id}
+            assert json.loads(rows[2]["source_detail_json"])["depends_on"] == [
+                "pkg:pypi/urllib3@2.0.7"
+            ]
+            not_affected = json.loads(rows[-1]["source_detail_json"])
+            assert not_affected["analysis"]["category"] == "not_affected"
+            assert dict(finding) == {
+                "status": "new",
+                "origin": "import",
+                "validation_method": "imported_assertion",
+                "external_id": "CVE-2026-4242",
+            }
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -2232,6 +2353,49 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
                 assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 0
+
+            cyclonedx_payload = json.dumps({
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.5",
+                "metadata": {"timestamp": "2026-08-07T12:00:00Z"},
+                "components": [{
+                    "bom-ref": "pkg:pypi/example@1.0.0",
+                    "type": "library",
+                    "name": "example",
+                    "version": "1.0.0",
+                    "purl": "pkg:pypi/example@1.0.0",
+                }],
+            }).encode()
+            evidence_preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "cyclonedx_json",
+                    "source_tool": "CycloneDX",
+                    "import_name": "Team SBOM import",
+                    "file": (io.BytesIO(cyclonedx_payload), "team.cdx.json"),
+                },
+                headers=operator_headers,
+                content_type="multipart/form-data",
+            )
+            assert evidence_preview.status_code == 200
+            evidence_payload = evidence_preview.get_json()
+            assert evidence_payload["apply_options"]["import_evidence"] == {
+                "available": False,
+                "requires": ["mutate_projects"],
+            }
+            evidence_rejected = client.post(
+                "/atlas/imports/apply",
+                headers=operator_headers,
+                json={
+                    "draft_id": evidence_payload["draft_id"],
+                    "row_set_digest": evidence_payload["row_set_digest"],
+                    "options": {"import_evidence": True},
+                },
+            )
+            assert evidence_rejected.status_code == 403
+            assert evidence_rejected.get_json()["error"] == "team_forbidden"
+            with db_connect() as conn:
+                assert conn.execute("SELECT COUNT(*) AS count FROM atlas_import_evidence").fetchone()["count"] == 0
 
             subject_only_payload = (
                 b"row_type,subject,title,severity,evidence\n"

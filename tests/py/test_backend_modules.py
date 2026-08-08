@@ -6594,6 +6594,7 @@ class TestPostgresMigrations:
         "findings_occurrences",
         "atlas_import_drafts",
         "atlas_import_batches",
+        "atlas_import_evidence",
         "atlas_entity_import_links",
         "atlas_finding_import_occurrences",
         "entity_labels",
@@ -6743,6 +6744,7 @@ class TestPostgresMigrations:
             "0064",
             "0065",
             "0066",
+            "0067",
         ]
         for table_name in (
             "runs",
@@ -6782,6 +6784,7 @@ class TestPostgresMigrations:
             "findings_occurrences",
             "atlas_import_drafts",
             "atlas_import_batches",
+            "atlas_import_evidence",
             "atlas_entity_import_links",
             "atlas_finding_import_occurrences",
             "entity_labels",
@@ -7743,7 +7746,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0066"
+        assert rows[-1]["version"] == "0067"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8200,7 +8203,7 @@ class TestPostgresMigrations:
         assert applied == [
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
             "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056", "0057", "0058",
-            "0059", "0060", "0061", "0062", "0063", "0064", "0065", "0066",
+            "0059", "0060", "0061", "0062", "0063", "0064", "0065", "0066", "0067",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8231,7 +8234,8 @@ class TestPostgresMigrations:
         assert "0064" in conn.applied_versions
         assert "0065" in conn.applied_versions
         assert "0066" in conn.applied_versions
-        assert conn.commit_count == 28
+        assert "0067" in conn.applied_versions
+        assert conn.commit_count == 29
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -26682,6 +26686,9 @@ class TestDatabaseInit:
             import_batch_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('atlas_import_batches')").fetchall()
             }
+            import_evidence_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_import_evidence')").fetchall()
+            }
             entity_import_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('atlas_entity_import_links')").fetchall()
             }
@@ -26724,6 +26731,7 @@ class TestDatabaseInit:
             "findings_occurrences",
             "atlas_import_drafts",
             "atlas_import_batches",
+            "atlas_import_evidence",
             "atlas_entity_import_links",
             "atlas_finding_import_occurrences",
             "entity_labels",
@@ -26773,6 +26781,16 @@ class TestDatabaseInit:
         assert {"finding_id", "run_id", "line_number", "snippet", "seen_at"}.issubset(occurrence_columns)
         assert {"id", "normalized_rows_json", "preview_counts_json", "warning_summary_json"}.issubset(import_draft_columns)
         assert {"id", "counts_json", "warning_summary_json", "applied_at"}.issubset(import_batch_columns)
+        assert {
+            "id",
+            "batch_id",
+            "project_id",
+            "evidence_type",
+            "subject_key",
+            "row_number",
+            "source_detail_json",
+            "observed_at",
+        }.issubset(import_evidence_columns)
         assert {"entity_id", "batch_id", "source_detail_json", "created_entity"}.issubset(entity_import_columns)
         assert {"finding_id", "batch_id", "row_number", "source_detail_json"}.issubset(finding_import_columns)
         assert "team_id" in label_columns
@@ -27058,6 +27076,7 @@ class TestDatabaseInit:
                     "entity_intel_snapshots",
                     "atlas_import_drafts",
                     "atlas_import_batches",
+                    "atlas_import_evidence",
                     "atlas_entity_import_links",
                     "atlas_finding_import_occurrences",
                     "evidence_packages",
@@ -27078,6 +27097,7 @@ class TestDatabaseInit:
         assert column_types["atlas_import_drafts"]["warning_summary_json"] == "TEXT"
         assert column_types["atlas_import_batches"]["counts_json"] == "TEXT"
         assert column_types["atlas_import_batches"]["warning_summary_json"] == "TEXT"
+        assert column_types["atlas_import_evidence"]["source_detail_json"] == "TEXT"
         assert column_types["atlas_entity_import_links"]["source_detail_json"] == "TEXT"
         assert column_types["atlas_finding_import_occurrences"]["source_detail_json"] == "TEXT"
         assert column_types["evidence_packages"]["manifest"] == "TEXT"
@@ -30145,6 +30165,9 @@ SQL syntax error near q</response>
             import_batch_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('atlas_import_batches')").fetchall()
             }
+            import_evidence_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_import_evidence')").fetchall()
+            }
             entity_import_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('atlas_entity_import_links')").fetchall()
             }
@@ -30193,6 +30216,8 @@ SQL syntax error near q</response>
         assert "idx_atlas_import_drafts_scope_created" in import_draft_indexes
         assert "idx_atlas_import_drafts_expires" in import_draft_indexes
         assert "idx_atlas_import_batches_scope_applied" in import_batch_indexes
+        assert "idx_atlas_import_evidence_batch" in import_evidence_indexes
+        assert "idx_atlas_import_evidence_project_type" in import_evidence_indexes
         assert "idx_atlas_entity_import_links_batch" in entity_import_indexes
         assert "idx_atlas_entity_import_links_entity_seen" in entity_import_indexes
         assert "idx_atlas_finding_import_occurrences_batch" in finding_import_indexes
@@ -31416,24 +31441,86 @@ def test_atlas_sarif_import_bounds_locations_fingerprints_and_rule_metadata():
     assert len(detail["partial_fingerprints"]) == 16
 
 
-def test_atlas_import_parser_normalizes_cyclonedx_vulnerabilities_without_inventing_inventory_findings():
+def test_atlas_import_parser_retains_cyclonedx_inventory_dependencies_and_vex_without_inventing_findings():
     payload = json.dumps({
         "bomFormat": "CycloneDX", "specVersion": "1.5",
+        "serialNumber": "urn:uuid:11111111-2222-3333-4444-555555555555",
+        "metadata": {
+            "timestamp": "2026-08-07T12:00:00Z",
+            "tools": [{"vendor": "Acme", "name": "SBOM Builder", "version": "2.1"}],
+        },
         "components": [{
             "bom-ref": "pkg:pypi/requests@2.31.0",
+            "type": "library",
             "name": "requests",
             "version": "2.31.0",
             "purl": "pkg:pypi/requests@2.31.0",
+            "components": [{
+                "bom-ref": "pkg:pypi/urllib3@2.0.7",
+                "type": "library",
+                "name": "urllib3",
+                "version": "2.0.7",
+                "purl": "pkg:pypi/urllib3@2.0.7",
+                "cpe": "cpe:2.3:a:urllib3:urllib3:2.0.7:*:*:*:*:*:*:*",
+            }],
+        }],
+        "dependencies": [{
+            "ref": "pkg:pypi/requests@2.31.0",
+            "dependsOn": ["pkg:pypi/urllib3@2.0.7", "missing-component"],
         }],
         "vulnerabilities": [{
-            "id": "CVE-2024-9999", "description": "A package issue.", "recommendation": "Upgrade the package.",
-            "ratings": [{"severity": "high"}], "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+            "id": "CVE-2024-9999", "source": {"name": "Vendor advisory"},
+            "description": "A package issue.", "recommendation": "Upgrade the package.",
+            "ratings": [{"severity": "high", "score": 8.1, "method": "CVSSv31"}],
+            "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
             "references": [{"url": "https://nvd.nist.gov/vuln/detail/CVE-2024-9999"}, {"url": "file:///tmp/private"}],
-        }, {"id": "CVE-2024-0000", "analysis": {"state": "not_affected"}}],
+        }, {
+            "id": "CVE-2024-0000",
+            "affects": [{"ref": "pkg:pypi/urllib3@2.0.7"}],
+            "analysis": {
+                "state": "not_affected",
+                "justification": "code_not_reachable",
+                "response": ["will_not_fix"],
+                "detail": "The vulnerable path isn't reachable.",
+            },
+        }, {
+            "id": "CVE-2024-0001",
+            "analysis": {"state": "resolved", "response": ["update"]},
+        }, {
+            "id": "CVE-2024-0002",
+            "affects": [{"ref": "missing-component"}],
+        }],
     }).encode()
     result = parse_import_file(payload, format_id="cyclonedx_json")
-    assert result.row_count == 2
+    assert result.row_count == 7
+    assert result.skipped_count == 1
+    assert [item.evidence_type for item in result.evidence] == [
+        "cyclonedx_component",
+        "cyclonedx_component",
+        "cyclonedx_dependency",
+        "cyclonedx_vulnerability",
+        "cyclonedx_vulnerability",
+        "cyclonedx_vulnerability",
+        "cyclonedx_vulnerability",
+    ]
+    assert result.evidence[1].source_detail["parent_ref"] == "pkg:pypi/requests@2.31.0"
+    assert result.evidence[2].source_detail["depends_on"] == ["pkg:pypi/urllib3@2.0.7"]
+    assert result.evidence[2].source_detail["unknown_dependency_count"] == 1
+    assert result.evidence[4].source_detail["analysis"] == {
+        "state": "not_affected",
+        "category": "not_affected",
+        "justification": "code_not_reachable",
+        "responses": ["will_not_fix"],
+        "detail": "The vulnerable path isn't reachable.",
+    }
     assert len(result.findings) == 1
     assert result.findings[0].external_id == "CVE-2024-9999"
-    assert result.findings[0].source_detail["component_purl"] == "pkg:pypi/requests@2.31.0"
+    assert result.findings[0].title == "Vendor advisory"
+    assert result.findings[0].source_detail["component"]["purl"] == "pkg:pypi/requests@2.31.0"
     assert result.findings[0].references == ["https://nvd.nist.gov/vuln/detail/CVE-2024-9999"]
+    assert [warning.code for warning in result.warnings] == [
+        "unknown_cyclonedx_dependency_target",
+        "cyclonedx_vex_disposition_recorded",
+        "cyclonedx_vex_disposition_recorded",
+        "invalid_cyclonedx_subject",
+    ]

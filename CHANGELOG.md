@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **CycloneDX imports now keep SBOM inventory, dependency, and VEX evidence without trusting imported dispositions.**
+  - **What:** Atlas preview/apply preserves bounded document provenance, nested components, dependency edges, exact PURL/CPE identifiers, vulnerability ratings and references, affected component links, and VEX analysis as typed import evidence. Inventory alone doesn't create a finding. Only affected or exploitable assertions can create imported findings; not-affected, resolved, and under-investigation assertions never change existing review or verification state.
+  - **Tests:** Parser, route, team-capability, SQLite/Postgres schema, Atlas browser, style, lint, and architecture-ratchet coverage pin the evidence ledger, preview/apply controls, VEX boundary, and responsive UI.
 - **SARIF imports now keep review-ready provenance without trusting source paths.**
   - **What:** Atlas exposes SARIF 2.1 JSON and CycloneDX JSON in the existing import picker. SARIF results retain bounded tool and automation identity, rule details, stable fingerprints, safe web or repository-relative locations, source regions, and artifact-index provenance. File URIs, traversal, credential-bearing URLs, backslashes, and invalid artifact references are omitted with preview warnings and are never fetched.
   - **Tests:** Parser coverage pins safe indexed and web locations, source regions, automation ids, full and partial fingerprints, unsafe-location warnings, and retained findings without leaked paths. Browser coverage pins both formats and their file-picker hints.
@@ -242,9 +245,6 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Atlas imports now accept bounded SARIF 2.1.0 results.**
   - **What:** SARIF tool, rule, severity, message, help-link, location, and provenance details normalize through the existing preview/apply model. Local file paths and unsafe URIs are never fetched or materialized as entities.
   - **Tests:** SARIF normalization, provenance, unsafe-location, and architecture-ratchet coverage pin the parser boundary.
-- **Atlas imports now normalize CycloneDX vulnerability assertions.**
-  - **What:** Exact component/PURL, vulnerability, rating, analysis-state, recommendation, reference, and SBOM provenance are preserved. Components without vulnerability assertions do not become findings, and `not_affected` assertions remain non-findings.
-  - **Tests:** CycloneDX version, component mapping, safe-reference, VEX-state, and architecture-ratchet coverage pin the parser boundary.
 - **Assessment services now classify dangling DNS records without performing takeover actions.**
   - **What:** Normalized CNAME observations can be labeled `potential`, `confirmed`, `uncertain`, or `not_indicated`; confirmation requires an in-scope reviewed provider/template match. The evaluator never contacts providers, claims resources, or follows out-of-scope tenants.
   - **Tests:** Potential/confirmed, transient-DNS, scope, and architecture-ratchet coverage pin the safety boundary.

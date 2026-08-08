@@ -130,10 +130,8 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Add exact product or package observations from other reviewed structured scanner output. Preserve the original observation together with its source run/import, target, parser/tool version, and observed time.
   - Route later exact version observations through the existing `version_cve_correlation` finding contract only when they satisfy a recorded matching rule. Preserve the advisory/data version, match basis, affected range, confidence, and source observation so review can reproduce the inference.
   - Keep inferred version/package findings distinct from Nuclei or another active probe that confirmed vulnerable behavior. Link or deduplicate related observations without discarding their different evidence methods or allowing an inference to upgrade itself to confirmed.
-- [ ] Extend the Atlas import parser with SARIF and CycloneDX:
-  - Import CycloneDX components, dependencies, PURL/CPE identifiers, included vulnerability records, and VEX analysis as typed inventory/evidence. An SBOM component alone is not a vulnerability finding; correlate only exact identifiers and versions through the cached OSV/NVD rules above.
-  - Respect CycloneDX affected/not-affected/resolved/under-investigation assertions without letting an untrusted import silently close an existing app finding. Keep component-to-advisory-to-finding provenance and require normal review before applying imported triage or verification state.
-  - Add format/version detection, quotas, archive/compression limits, duplicate handling, target/Project mapping, redacted previews, parser warnings, and small fixtures consistent with the existing Nuclei, Nessus, ZAP, Burp, CSV, and JSONL import contracts.
+- [ ] Finish Atlas import hardening for structured formats:
+  - Add archive/compression limits and any remaining duplicate, target/Project mapping, redacted-preview, parser-warning, and fixture coverage consistent with the existing Nuclei, Nessus, ZAP, Burp, CSV, and JSONL import contracts.
 - [ ] Add focused parameter and application testing tools:
   - Extend the bounded Dalfox parameter-discovery foundation with separately confirmed reflected/DOM XSS validation, structured confidence-aware findings, and proof/evidence fields.
   - Add SQLmap behind a detection-only default policy. Deny data dumping, filesystem access, OS command execution, registry access, database takeover, destructive statements, and other takeover options in normal and intrusive profiles.

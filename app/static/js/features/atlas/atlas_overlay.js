@@ -1678,8 +1678,10 @@ let exportedCycleAtlasTab = null;
       ['Rows', counts.rows],
       ['Entities', counts.entity_valid],
       ['Findings', counts.finding_valid],
+      ['Evidence', counts.evidence_valid],
       ['New', counts.new],
       ['Updated', counts.updated],
+      ['Skipped', counts.skipped],
       ['Warnings', counts.warnings],
     ].forEach(([label, value]) => {
       const item = document.createElement('div');
@@ -1781,6 +1783,10 @@ let exportedCycleAtlasTab = null;
           checked: importOptionAvailable(options, 'import_findings'),
           disabled: !importOptionAvailable(options, 'import_findings'),
         }),
+        importOptionControl('import_evidence', 'Import evidence', 'Keep SBOM components, dependency edges, and VEX dispositions with this import batch.', options, {
+          checked: importOptionAvailable(options, 'import_evidence'),
+          disabled: !importOptionAvailable(options, 'import_evidence'),
+        }),
         importOptionControl('link_to_project', 'Link imported entities to this project', hasProject ? state.projectName || 'Project context' : 'Open Atlas from a project to link rows.', options, {
           checked: false,
           disabled: !hasProject || !importOptionAvailable(options, 'link_to_project'),
@@ -1803,6 +1809,10 @@ let exportedCycleAtlasTab = null;
           text(row.severity),
           text(row.title, row.signature_hash || 'finding'),
         ].filter(Boolean).join(' · ')),
+        importSampleRows('Evidence sample', samples.evidence, row => [
+          text(row.evidence_type, 'evidence'),
+          text(row.label, row.subject_key || ''),
+        ].filter(Boolean).join(' · ')),
         importWarningRows(preview.warnings),
       );
       importPreviewHost.append(sampleGrid);
@@ -1818,6 +1828,7 @@ let exportedCycleAtlasTab = null;
           countLabel(counts.entities_updated, 'entity updated', 'entities updated'),
           countLabel(counts.findings_created, 'finding created', 'findings created'),
           countLabel(counts.findings_updated, 'finding updated', 'findings updated'),
+          countLabel(counts.evidence_imported, 'evidence record imported', 'evidence records imported'),
           countLabel(counts.project_links_added, 'project link added', 'project links added'),
           countLabel(counts.project_links_existing, 'project link already existed', 'project links already existed'),
           countLabel(counts.project_targets_created, 'project target created', 'project targets created'),

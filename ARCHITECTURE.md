@@ -459,7 +459,9 @@ and `apply_options`. Preview `counts` include `rows`, `valid`, `skipped`,
 `warnings`, `new`, `updated`, `duplicate`, `entity_valid`, `entity_new`,
 `entity_duplicate`, `finding_valid`, `finding_new`, `finding_duplicate`,
 `finding_subject_entities_to_create`, and `project_target_candidates`.
-`apply_options` has `import_entities`, `import_findings`, `link_to_project`, and
+CycloneDX previews also include `evidence_valid` and `evidence_new`, and their
+bounded samples can include typed evidence records. `apply_options` has
+`import_entities`, `import_findings`, `import_evidence`, `link_to_project`, and
 `create_project_targets`; each option reports whether it is available and which
 team capability names it requires.
 
@@ -472,9 +474,16 @@ locations can become Atlas URL entities; repository-relative locations remain
 finding provenance. File schemes, absolute or traversal paths, credentialed
 URLs, backslashes, control characters, and invalid indexes are rejected with a
 bounded warning. The parser doesn't resolve URI bases or fetch source content.
+CycloneDX parsing keeps bounded document provenance, nested components,
+dependency edges, exact PURL/CPE identifiers, vulnerability ratings and safe
+references, and affected component links. Components and dependencies are
+typed import evidence rather than findings. A vulnerability assertion becomes
+an imported finding only when its VEX state is affected or exploitable; not
+affected, resolved, and under-investigation assertions remain evidence and
+never change an existing finding's review or verification state.
 
 `POST /atlas/imports/apply` accepts JSON with `draft_id`, `row_set_digest`,
-`options`, and optional `project_id`. `options` uses the same four boolean keys
+`options`, and optional `project_id`. `options` uses the same five boolean keys
 returned by preview. `project_id` is required when `link_to_project` or
 `create_project_targets` is true. Apply reloads the persisted draft, recomputes
 current counts, rechecks configured limits, verifies the row-set digest, checks
@@ -484,11 +493,16 @@ accessible before writing. Successful apply returns `ok`, `batch_id`, and
 `already_applied: true` and the existing batch id instead of duplicating rows.
 Apply count keys include `entities_created`, `entities_updated`,
 `findings_created`, `findings_updated`, `entity_links`,
-`finding_occurrences`, `project_links_added`, `project_links_existing`,
+`finding_occurrences`, `evidence_imported`, `project_links_added`, `project_links_existing`,
 `project_targets_created`, `project_targets_existing`, and
 `required_capabilities`. The Project target option creates or reuses the Atlas
 entity needed to represent each target, so entity counts can increase even when
 only `create_project_targets` is selected.
+
+Applied CycloneDX evidence is stored against the immutable import batch and,
+when supplied, its Project. The evidence ledger preserves component,
+dependency, and VEX source detail without creating History runs or treating an
+SBOM inventory row as proof of a vulnerability.
 
 Both routes return the standard safe error envelope
 `{"error": "<code>", "message": "<message>"}` for import workflow failures.

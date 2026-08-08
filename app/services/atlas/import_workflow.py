@@ -17,18 +17,20 @@ from core.helpers import get_log_session_id
 from services.atlas.import_analysis import (
     analysis_counts as _analysis_counts,
     available_options as _available_options,
-    current_apply_counts as _current_apply_counts,
     entity_id_for as _entity_id_for,
     entity_key as _entity_key,
     entity_occurrence_stats as _entity_occurrence_stats,
     finding_id_for as _finding_id_for,
     normalize_options as _normalize_options,
-    preview_counts as _preview_counts,
     project_accessible as _project_accessible,
     project_target_exists as _project_target_exists,
     required_capabilities as _required_capabilities,
     required_capabilities_for_apply as _required_capabilities_for_apply,
     target_entity_candidates as _target_entity_candidates,
+)
+from services.atlas.import_counts import (
+    current_apply_counts as _current_apply_counts,
+    preview_counts as _preview_counts,
 )
 from services.atlas.import_helpers import (
     MAX_SOURCE_TOOL_LEN,
@@ -37,13 +39,14 @@ from services.atlas.import_helpers import (
     option_log_fields as _option_log_fields,
     required_capability_values as _required_capability_values,
     row_set_digest as _row_set_digest,
-    safe_count_fields as _safe_count_fields,
     safe_filename as _safe_filename,
     safe_label as _safe_label,
     safe_text as _safe_text,
     source_tool_key as _source_tool_key,
     update_apply_log_context as _update_apply_log_context,
 )
+from services.atlas.import_logging import safe_count_fields as _safe_count_fields
+from services.atlas.import_evidence import insert_evidence_rows, normalized_row_set, preview_samples
 from services.atlas.import_limits import (
     AtlasImportError,
     _INVALID_CFG_LIMIT_WARNED as _INVALID_CFG_LIMIT_WARNED,
@@ -109,15 +112,6 @@ def required_capabilities_for_apply(options: dict[str, Any], preview_counts: dic
     return _required_capabilities_for_apply(options, preview_counts)
 
 
-def _normalized_row_set(parse_payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "format_id": parse_payload.get("format_id") or "",
-        "entities": parse_payload.get("entities") if isinstance(parse_payload.get("entities"), list) else [],
-        "findings": parse_payload.get("findings") if isinstance(parse_payload.get("findings"), list) else [],
-        "warnings": parse_payload.get("warnings") if isinstance(parse_payload.get("warnings"), list) else [],
-    }
-
-
 def preview_atlas_import(
     *,
     session_id: str,
@@ -142,7 +136,7 @@ def preview_atlas_import(
         stage = "parse"
         parsed = parse_import_file(source_bytes, format_id=format_id, limits=limits)
         parse_payload = parsed.to_dict()
-        normalized_rows = _normalized_row_set(parse_payload)
+        normalized_rows = normalized_row_set(parse_payload)
         row_digest = _row_set_digest(normalized_rows)
         draft_id = "impd_" + uuid.uuid4().hex
         created_dt = _utc_now()
@@ -206,10 +200,7 @@ def preview_atlas_import(
             "row_set_digest": row_digest,
             "expires_at": _timestamp(expires_dt),
             "counts": counts,
-            "samples": {
-                "entities": normalized_rows["entities"][:_preview_sample_limit()],
-                "findings": normalized_rows["findings"][:_preview_sample_limit()],
-            },
+            "samples": preview_samples(normalized_rows, _preview_sample_limit()),
             "warnings": normalized_rows["warnings"][:_warning_sample_limit()],
             "apply_options": _available_options(
                 role=role,
@@ -592,9 +583,9 @@ def _apply_atlas_import_impl(
                         status_code=403,
                     )
         _update_apply_log_context(log_context, stage="check_project")
-        if (
-            clean_options["link_to_project"] or clean_options["create_project_targets"]
-        ) and not _project_accessible(conn, session_id, project_id, team_id=team_id):
+        project_must_exist = any((clean_options["link_to_project"], clean_options["create_project_targets"],
+                                  clean_options["import_evidence"] and bool(project_id)))
+        if project_must_exist and not _project_accessible(conn, session_id, project_id, team_id=team_id):
             raise AtlasImportError("project_not_found", "Project was not found.", status_code=404)
         _update_apply_log_context(log_context, stage="claim_draft")
         if not _claim_draft_for_apply(conn, draft_id):
@@ -645,6 +636,7 @@ def _apply_atlas_import_impl(
             "finding_remediations_imported": 0,
             "entity_links": 0,
             "finding_occurrences": 0,
+            "evidence_imported": 0,
             "project_links_added": 0,
             "project_links_existing": 0,
             "project_targets_created": 0,
@@ -794,6 +786,12 @@ def _apply_atlas_import_impl(
                 counts["finding_occurrences"] += 1
                 counts["findings_created" if created else "findings_updated"] += 1
                 finding_ids.add(finding_id)
+        if clean_options["import_evidence"]:
+            _update_apply_log_context(log_context, stage="write_evidence")
+            counts["evidence_imported"] = insert_evidence_rows(
+                conn, normalized_rows.get("evidence"), batch_id=batch_id,
+                project_id=project_id, created=now,
+            )
         try:
             if clean_options["link_to_project"]:
                 _update_apply_log_context(log_context, stage="link_project")

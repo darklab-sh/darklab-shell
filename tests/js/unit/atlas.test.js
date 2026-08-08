@@ -452,19 +452,23 @@ function loadAtlas({
           rows: 2,
           entity_valid: 1,
           finding_valid: 1,
-          new: 2,
+          evidence_valid: 1,
+          new: 3,
           updated: 0,
+          skipped: 0,
           warnings: 1,
           project_target_candidates: 1,
         },
         samples: {
           entities: [{ kind: 'domain', canonical_value: 'example.com' }],
           findings: [{ severity: 'high', title: 'Missing security header' }],
+          evidence: [{ evidence_type: 'cyclonedx_component', label: 'pkg:npm/example@1.0.0' }],
         },
         warnings: [{ row_number: 2, code: 'missing_field', message: 'Skipped empty value' }],
         apply_options: {
           import_entities: { available: true, requires: ['mutate_projects'] },
           import_findings: { available: true, requires: ['triage_findings'] },
+          import_evidence: { available: true, requires: ['mutate_projects'] },
           link_to_project: { available: true, requires: ['mutate_projects'] },
           create_project_targets: { available: true, requires: ['mutate_projects'] },
         },
@@ -479,6 +483,7 @@ function loadAtlas({
           entities_updated: 0,
           findings_created: 1,
           findings_updated: 0,
+          evidence_imported: 1,
           project_links_added: 1,
           project_links_existing: 0,
           project_targets_created: 1,
@@ -2773,9 +2778,12 @@ describe('Atlas overlay', () => {
       expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
     })
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Skipped empty value')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('cyclonedx_component')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('pkg:npm/example@1.0.0')
     expect(document.querySelector('.atlas-import-warning-row')?.textContent).toContain('Row 2')
     expect(document.querySelector('[data-atlas-import-option="import_entities"]')?.disabled).toBe(false)
     expect(document.querySelector('[data-atlas-import-option="import_findings"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="import_evidence"]')?.disabled).toBe(false)
     expect(document.querySelector('[data-atlas-import-option="link_to_project"]')?.disabled).toBe(false)
     expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.disabled).toBe(false)
     expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.checked).toBe(false)
@@ -2801,6 +2809,7 @@ describe('Atlas overlay', () => {
       options: {
         import_entities: true,
         import_findings: true,
+        import_evidence: true,
         link_to_project: true,
       },
     })
@@ -2808,6 +2817,7 @@ describe('Atlas overlay', () => {
       expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 entity created')
     })
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project link added')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 evidence record imported')
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project target created')
     expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success')
     expect(projectEvents.some(event => event.name === 'app:project-workspace-changed')).toBe(true)
@@ -2833,12 +2843,13 @@ describe('Atlas overlay', () => {
             ok: true,
             draft_id: 'impd_disabled',
             row_set_digest: 'digest_disabled',
-            counts: { rows: 1, entity_valid: 0, finding_valid: 0, new: 0, updated: 0, warnings: 0 },
-            samples: { entities: [], findings: [] },
+            counts: { rows: 1, entity_valid: 0, finding_valid: 0, evidence_valid: 0, new: 0, updated: 0, skipped: 1, warnings: 0 },
+            samples: { entities: [], findings: [], evidence: [] },
             warnings: [],
             apply_options: {
               import_entities: { available: false, requires: ['mutate_projects'] },
               import_findings: { available: false, requires: ['triage_findings'] },
+              import_evidence: { available: false, requires: ['mutate_projects'] },
               link_to_project: { available: false, requires: ['mutate_projects'] },
               create_project_targets: { available: false, requires: ['mutate_projects'] },
             },
@@ -2856,7 +2867,7 @@ describe('Atlas overlay', () => {
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-import-status')?.textContent).toContain('Preview ready')
     })
-    ;['import_entities', 'import_findings', 'link_to_project', 'create_project_targets'].forEach((key) => {
+    ;['import_entities', 'import_findings', 'import_evidence', 'link_to_project', 'create_project_targets'].forEach((key) => {
       const checkbox = document.querySelector(`[data-atlas-import-option="${key}"]`)
       expect(checkbox?.disabled).toBe(true)
       expect(checkbox?.checked).toBe(false)

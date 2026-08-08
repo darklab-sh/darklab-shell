@@ -488,6 +488,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0064",
         "0065",
         "0066",
+        "0067",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -522,6 +523,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             OR (table_name = 'atlas_import_batches' AND column_name IN (
                 'counts_json',
                 'warning_summary_json'
+            ))
+            OR (table_name = 'atlas_import_evidence' AND column_name IN (
+                'row_number',
+                'source_detail_json'
             ))
             OR (table_name = 'atlas_entity_import_links' AND column_name IN (
                 'occurrence_count',
@@ -619,6 +624,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "project_auto_promote_rules",
         "atlas_import_drafts",
         "atlas_import_batches",
+        "atlas_import_evidence",
         "atlas_entity_import_links",
         "atlas_finding_import_occurrences",
         "run_output_summary_status",
@@ -660,6 +666,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("atlas_import_drafts", "warning_summary_json", "jsonb"),
         ("atlas_import_batches", "counts_json", "jsonb"),
         ("atlas_import_batches", "warning_summary_json", "jsonb"),
+        ("atlas_import_evidence", "row_number", "bigint"),
+        ("atlas_import_evidence", "source_detail_json", "jsonb"),
         ("atlas_entity_import_links", "occurrence_count", "bigint"),
         ("atlas_entity_import_links", "source_detail_json", "jsonb"),
         ("atlas_entity_import_links", "created_entity", "boolean"),
@@ -1079,6 +1087,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         AND tablename IN (
             'atlas_import_drafts',
             'atlas_import_batches',
+            'atlas_import_evidence',
             'atlas_entity_import_links',
             'atlas_finding_import_occurrences'
         )
@@ -1089,6 +1098,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_atlas_import_drafts_scope_created",
         "idx_atlas_import_drafts_expires",
         "idx_atlas_import_batches_scope_applied",
+        "idx_atlas_import_evidence_batch",
+        "idx_atlas_import_evidence_project_type",
         "idx_atlas_entity_import_links_batch",
         "idx_atlas_entity_import_links_entity_seen",
         "idx_atlas_finding_import_occurrences_batch",

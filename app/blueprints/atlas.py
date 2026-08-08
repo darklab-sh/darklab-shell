@@ -17,6 +17,7 @@ from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
+from services.atlas.import_logging import route_count_log_fields as _atlas_import_count_log_fields
 from services.atlas.import_workflow import AtlasImportError, apply_atlas_import, preview_atlas_import
 from services.atlas.lookup import (
     atlas_summary,
@@ -123,6 +124,7 @@ def _atlas_import_option_flags(options):
     return {
         "import_entities": bool(raw.get("import_entities")),
         "import_findings": bool(raw.get("import_findings")),
+        "import_evidence": bool(raw.get("import_evidence")),
         "link_to_project": bool(raw.get("link_to_project")),
         "create_project_targets": bool(raw.get("create_project_targets")),
     }
@@ -161,43 +163,6 @@ def _atlas_import_preview_log_fields(session_id, scope, member):
         "filename_present": bool(upload and upload.filename),
         "content_length": int(request.content_length or 0),
     }
-
-
-def _atlas_import_count_log_fields(counts):
-    raw = counts if isinstance(counts, dict) else {}
-    fields = {}
-    for key in (
-        "rows",
-        "valid",
-        "skipped",
-        "warnings",
-        "new",
-        "updated",
-        "entity_valid",
-        "entity_new",
-        "entity_duplicate",
-        "finding_valid",
-        "finding_new",
-        "finding_duplicate",
-        "finding_subject_entities_to_create",
-        "project_target_candidates",
-        "entities_created",
-        "entities_updated",
-        "findings_created",
-        "findings_updated",
-        "entity_links",
-        "finding_occurrences",
-        "project_links_added",
-        "project_links_existing",
-        "project_targets_created",
-        "project_targets_existing",
-    ):
-        if key in raw:
-            try:
-                fields[key] = int(raw.get(key) or 0)
-            except (TypeError, ValueError):
-                fields[key] = 0
-    return fields
 
 
 def _log_atlas_import_preview_rejected(exc, *, session_id, scope, member):

@@ -348,12 +348,12 @@
       "hash": "e6fad381ac8c5292af81407d7800120997865201fa88bfa7a471cc159acaf705"
     },
     "/static/js/features/atlas/atlas_mobile.js": {
-      "path": "/static/build/static-atlas-mobile.30f7e1fa4224.js",
-      "hash": "36aaea54dfac77857bc290fc5319720ce1d701661636b16f9d187bb1777909b1"
+      "path": "/static/build/static-atlas-mobile.de8799cfadb8.js",
+      "hash": "a19fc7f2d5d2fd533478091573b7b23eae5c9d8e8db1d9cf0da544b1d8bcd6eb"
     },
     "/static/js/features/atlas/atlas_overlay.js": {
-      "path": "/static/build/static-atlas-overlay.e53ff38bb33c.js",
-      "hash": "7e7473fa3e6bad388dddc6627c282897d4f5e968b85cd8627fbe868517a799e0"
+      "path": "/static/build/static-atlas-overlay.b27d5ff3d005.js",
+      "hash": "73d8626b31c1cdbba7e00fe9f4ca31eae0e652148fe65be8d9798e90759004de"
     },
     "/static/js/features/atlas/atlas_tabs.js": {
       "path": "/static/build/static-atlas-tabs.52299aa50e40.js",
@@ -636,8 +636,8 @@
       "hash": "00670dcd22b36f40b5e619c02003c9d25af20cedfc66c7af2dcd15d3846c39bd"
     },
     "/static/css/features/atlas.css": {
-      "path": "/static/build/static-atlas.8b35e7b2a793.css",
-      "hash": "8b35e7b2a793b57c04e64f74f343ff2ee4ba1f531136ab2f5163899f35039c9f"
+      "path": "/static/build/static-atlas.75282318c383.css",
+      "hash": "75282318c383b392383505c432f4a6f0fd8e4d0c95eedaf1f5602679b68f6ebf"
     },
     "/static/css/features/command-registry.css": {
       "path": "/static/build/static-command-registry.4158003c0ddd.css",

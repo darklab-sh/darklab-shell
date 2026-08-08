@@ -188,7 +188,9 @@ Structured DNSx coverage pins bounded CNAME, address, response, resolver, provid
 
 Structured CycloneDX component coverage pins shared document bounds, separate exact PURL/version and CPE/version observations, component and import provenance, conflicting-version rejection, read-only stored-OSV and stored-NVD candidates on SQLite and Postgres, and the no-network, no-inventory-write, no-finding boundary.
 
-SARIF import coverage pins bounded tool and automation identity, rule metadata, full and partial fingerprints, direct and artifact-index locations, source regions, safe web and repository-relative provenance, and warning-backed rejection of file URIs, traversal, credentials, backslashes, and invalid references. Atlas browser coverage keeps SARIF and CycloneDX available through the existing import picker with format-appropriate file hints.
+Atlas CycloneDX import coverage separately pins bounded nested components, dependency edges, document provenance, vulnerability ratings and references, affected component links, every supported VEX category, durable batch evidence, team permissions, and the rule that imported dispositions don't update existing triage or verification state.
+
+SARIF import coverage pins bounded tool and automation identity, rule metadata, full and partial fingerprints, direct and artifact-index locations, source regions, safe web and repository-relative provenance, and warning-backed rejection of file URIs, traversal, credentials, backslashes, and invalid references. Atlas browser coverage keeps SARIF and CycloneDX available through the existing import picker with format-appropriate file hints, evidence counts and samples, and permission-aware apply controls.
 
 Cross-cycle reconciliation coverage pins exact check, target, and evidence-rule compatibility; one-count-per-remediation rollups; new, persistent, and not-observed derivation; bounded current and earlier observation links; incomparable cleanup; the preferred active-or-latest-completed handoff; selected-finding filtering; package/report references and reasons; and the shared API/OpenAPI read shape.
 
