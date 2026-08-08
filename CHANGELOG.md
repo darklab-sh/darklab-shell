@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **The Web Surface gallery can now filter and group captures on desktop and mobile.**
+  - **What:** Users can narrow the Project collection by target, exact HTTP status, technology, HTTP role, or visual hash, clear those filters without leaving the tab, and group the visible page by the same capture details. Filtered empty states remain recoverable, and a bounded-search notice names the evaluated and total candidate counts when older captures weren't searched.
+  - **Tests:** Focused browser coverage pins query construction, filter persistence and clearing, grouping, bounded-search messaging, existing gallery actions, paging, empty states, and object-URL behavior. Asset, lint, style, and documentation contracts cover the shared desktop/mobile module and responsive controls.
 - **Web Surface reads now support bounded collection filters.**
   - **What:** Project readers can narrow verified captures by target text, exact HTTP status, technology, HTTP profile role, or visual hash before paging. Filtered reads inspect only the newest 200 eligible captures and say when that candidate window was truncated, so a large Project never presents a partial match set as exhaustive.
   - **Tests:** Focused metadata, SQLite route, real Postgres route, owner-scope, paging, candidate-limit, and module-size coverage pins normalization, case-insensitive matching, exact status matching, enriched artifact preservation, and honest truncation metadata.

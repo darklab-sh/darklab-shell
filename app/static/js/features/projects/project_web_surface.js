@@ -10,6 +10,32 @@ let exportedDarklabProjectWebSurface = null;
   'use strict';
 
   const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+  const FILTER_FIELDS = [
+    { name: 'target', label: 'Target', placeholder: 'Hostname or URL', type: 'search' },
+    {
+      name: 'status_code',
+      label: 'HTTP status',
+      placeholder: '200',
+      inputMode: 'numeric',
+      maxLength: 3,
+      pattern: '[1-5][0-9]{2}',
+    },
+    { name: 'technology', label: 'Technology', placeholder: 'nginx' },
+    { name: 'profile_role', label: 'HTTP role', placeholder: 'authenticated' },
+    { name: 'visual_hash', label: 'Visual hash', placeholder: 'Exact hash' },
+  ];
+  const GROUP_OPTIONS = [
+    ['none', 'No grouping'],
+    ['target', 'Group by target'],
+    ['status', 'Group by HTTP status'],
+    ['technology', 'Group by technology'],
+    ['profile_role', 'Group by HTTP role'],
+    ['visual_hash', 'Group by visual hash'],
+  ];
+
+  function emptyFilters() {
+    return Object.fromEntries(FILTER_FIELDS.map(({ name }) => [name, '']));
+  }
 
   function createProjectWebSurfaceController(context) {
     const ctx = context || {};
@@ -29,6 +55,11 @@ let exportedDarklabProjectWebSurface = null;
           loading: false,
           loaded: false,
           error: '',
+          filters: emptyFilters(),
+          groupBy: 'none',
+          candidateTotal: 0,
+          candidateLimit: 200,
+          candidateTruncated: false,
         });
       }
       return pages.get(key);
@@ -58,6 +89,10 @@ let exportedDarklabProjectWebSurface = null;
           limit: String(state.limit),
           offset: String(offset),
         });
+        FILTER_FIELDS.forEach(({ name }) => {
+          const value = String(state.filters?.[name] || '').trim();
+          if (value) params.set(name, value);
+        });
         const resp = await ctx.apiFetch(
           `/projects/${encodeURIComponent(normalizedProjectId)}/web-surface?${params.toString()}`,
           { cache: 'no-store' },
@@ -68,6 +103,9 @@ let exportedDarklabProjectWebSurface = null;
         state.captures = Array.isArray(data.captures) ? data.captures : [];
         state.total = Math.max(0, Number(data.total || 0));
         state.limit = Math.max(1, Number(data.limit || state.limit));
+        state.candidateTotal = Math.max(0, Number(data.candidate_total || state.total));
+        state.candidateLimit = Math.max(1, Number(data.candidate_limit || 200));
+        state.candidateTruncated = Boolean(data.candidate_truncated);
         state.loaded = true;
       } catch (err) {
         if (state.offset === offset) {
@@ -155,6 +193,31 @@ let exportedDarklabProjectWebSurface = null;
 
     function captureTitle(capture) {
       return String(capture?.title || capture?.url || capture?.artifact?.display_name || 'Web capture');
+    }
+
+    function filtersActive(state) {
+      return FILTER_FIELDS.some(({ name }) => String(state.filters?.[name] || '').trim());
+    }
+
+    function groupLabel(capture, groupBy) {
+      if (groupBy === 'target') {
+        try {
+          return new URL(String(capture?.url || '')).hostname || 'Unknown target';
+        } catch (_err) {
+          return String(capture?.url || 'Unknown target');
+        }
+      }
+      if (groupBy === 'status') {
+        const statusCode = Number(capture?.status_code);
+        return Number.isInteger(statusCode) && statusCode > 0 ? `HTTP ${statusCode}` : 'Unknown HTTP status';
+      }
+      if (groupBy === 'technology') {
+        const technologies = Array.isArray(capture?.technologies) ? capture.technologies.filter(Boolean) : [];
+        return technologies.length ? technologies.join(', ') : 'No detected technology';
+      }
+      if (groupBy === 'profile_role') return String(capture?.profile_role || 'No HTTP role');
+      if (groupBy === 'visual_hash') return String(capture?.visual_hash || 'No visual hash');
+      return '';
     }
 
     function metaLine(capture) {
@@ -307,6 +370,103 @@ let exportedDarklabProjectWebSurface = null;
       await load(projectId, { offset: page(projectId).offset });
     }
 
+    function renderControls(projectId, state) {
+      const form = document.createElement('form');
+      form.className = 'project-web-surface-controls';
+      form.setAttribute('aria-label', 'Filter and group Web Surface captures');
+      FILTER_FIELDS.forEach((field) => {
+        const label = document.createElement('label');
+        label.className = 'project-web-surface-control';
+        const text = document.createElement('span');
+        text.textContent = field.label;
+        const input = document.createElement('input');
+        input.type = field.type || 'text';
+        input.name = field.name;
+        input.className = 'form-control form-control-compact';
+        input.value = String(state.filters?.[field.name] || '');
+        input.placeholder = field.placeholder;
+        input.setAttribute('aria-label', `Filter Web Surface by ${field.label.toLowerCase()}`);
+        if (field.inputMode) input.inputMode = field.inputMode;
+        if (field.maxLength) input.maxLength = field.maxLength;
+        if (field.pattern) input.pattern = field.pattern;
+        label.append(text, input);
+        form.appendChild(label);
+      });
+      const groupLabelNode = document.createElement('label');
+      groupLabelNode.className = 'project-web-surface-control';
+      const groupText = document.createElement('span');
+      groupText.textContent = 'Grouping';
+      const group = document.createElement('select');
+      group.className = 'form-select form-control-compact';
+      group.setAttribute('aria-label', 'Group Web Surface captures');
+      GROUP_OPTIONS.forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        option.selected = value === state.groupBy;
+        group.appendChild(option);
+      });
+      group.addEventListener('change', () => {
+        state.groupBy = GROUP_OPTIONS.some(([value]) => value === group.value) ? group.value : 'none';
+        rerender();
+      });
+      groupLabelNode.append(groupText, group);
+      form.appendChild(groupLabelNode);
+      const actions = document.createElement('div');
+      actions.className = 'project-web-surface-control-actions';
+      const apply = makeAction('Apply filters', () => {});
+      apply.type = 'submit';
+      apply.classList.replace('btn-ghost', 'btn-primary');
+      apply.disabled = state.loading;
+      const clear = makeAction('Clear filters', () => {
+        state.filters = emptyFilters();
+        state.offset = 0;
+        load(projectId, { offset: 0 }).catch(() => {});
+      });
+      clear.disabled = state.loading || !filtersActive(state);
+      actions.append(apply, clear);
+      form.appendChild(actions);
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        state.filters = Object.fromEntries(FILTER_FIELDS.map(({ name }) => [
+          name,
+          String(form.elements.namedItem(name)?.value || '').trim(),
+        ]));
+        state.offset = 0;
+        load(projectId, { offset: 0 }).catch(() => {});
+      });
+      return form;
+    }
+
+    function renderGallery(projectId, state) {
+      if (state.groupBy === 'none') {
+        const gallery = document.createElement('div');
+        gallery.className = 'project-web-surface-grid';
+        state.captures.forEach(capture => gallery.appendChild(renderCard(projectId, capture)));
+        return gallery;
+      }
+      const groups = new Map();
+      state.captures.forEach((capture) => {
+        const label = groupLabel(capture, state.groupBy);
+        if (!groups.has(label)) groups.set(label, []);
+        groups.get(label).push(capture);
+      });
+      const collection = document.createElement('div');
+      collection.className = 'project-web-surface-groups';
+      groups.forEach((captures, label) => {
+        const section = document.createElement('section');
+        section.className = 'project-web-surface-group';
+        const heading = document.createElement('h3');
+        heading.textContent = `${label} (${captures.length})`;
+        const gallery = document.createElement('div');
+        gallery.className = 'project-web-surface-grid';
+        captures.forEach(capture => gallery.appendChild(renderCard(projectId, capture)));
+        section.append(heading, gallery);
+        collection.appendChild(section);
+      });
+      return collection;
+    }
+
     function render(container, projectId) {
       const state = page(projectId);
       if (!state.loaded && !state.loading) load(projectId).catch(() => {});
@@ -318,22 +478,27 @@ let exportedDarklabProjectWebSurface = null;
         container.appendChild(ctx.emptyProjectPanel(state.error));
         return;
       }
-      if (state.loaded && !state.total) {
-        container.appendChild(ctx.emptyProjectPanel(
-          'No HTTPx screenshots are linked to this project yet. Run a screenshot-enabled HTTP assessment to build the gallery.',
-        ));
-        return;
-      }
       const intro = document.createElement('div');
       intro.className = 'project-web-surface-intro';
       intro.textContent = 'Review saved HTTP screenshots without loading captured pages in the app origin.';
       container.appendChild(intro);
+      container.appendChild(renderControls(projectId, state));
+      if (state.candidateTruncated && filtersActive(state)) {
+        const limited = document.createElement('div');
+        limited.className = 'project-web-surface-limited';
+        limited.setAttribute('role', 'status');
+        limited.textContent = `Filters searched the newest ${state.candidateLimit} of ${state.candidateTotal} captures. Older captures weren't included.`;
+        container.appendChild(limited);
+      }
+      if (state.loaded && !state.total) {
+        container.appendChild(ctx.emptyProjectPanel(filtersActive(state)
+          ? 'No captures match the current Web Surface filters.'
+          : 'No HTTPx screenshots are linked to this project yet. Run a screenshot-enabled HTTP assessment to build the gallery.'));
+        return;
+      }
       const topPager = renderPagination(projectId, state, 'top');
       if (topPager) container.appendChild(topPager);
-      const gallery = document.createElement('div');
-      gallery.className = 'project-web-surface-grid';
-      state.captures.forEach(capture => gallery.appendChild(renderCard(projectId, capture)));
-      container.appendChild(gallery);
+      container.appendChild(renderGallery(projectId, state));
       const bottomPager = renderPagination(projectId, state, 'bottom');
       if (bottomPager) container.appendChild(bottomPager);
     }

@@ -95,7 +95,7 @@ Quick Lookup reads evidence and Intel snapshots the app has already saved. It do
 
 A Project assessment's **Fix first** section ranks the current cycle's saved issues, while Overview shows a compact version that opens the same cycle and priority filter. Risk stays separate from coverage, so a high-priority finding never makes an untested check look complete.
 
-Projects also include a **Web Surface** tab for reviewing saved HTTPx screenshots on desktop or mobile. It shows the URL, page title, response details, capture role, and source run beside each image; unavailable or changed files stay visible with a clear explanation. Screenshots load through the signed-in artifact path, and captured HTML is never opened inside darklab_shell.
+Projects also include a **Web Surface** tab for reviewing saved HTTPx screenshots on desktop or mobile. It shows the URL, page title, response details, capture role, and source run beside each image; unavailable or changed files stay visible with a clear explanation. You can filter captures by target, HTTP status, technology, role, or exact visual hash, then group the visible page by the same details. Screenshots load through the signed-in artifact path, and captured HTML is never opened inside darklab_shell.
 
 The Assessment tab also manages reusable HTTP profiles on desktop and mobile. It shows each saved role, scope, request bounds, enabled state, and whether its referenced Secrets are available. **Manage Secrets** opens the existing Options panel for add-or-replace values, while viewers see redacted counts. Supported Curl, HTTPx, Katana, Nuclei, and Dalfox actions ask which available role to use before showing the redacted launch plan.
 

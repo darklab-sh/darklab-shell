@@ -159,7 +159,7 @@ describe('Project Web Surface gallery', () => {
     expect(preview.getAttribute('aria-expanded')).toBe('true')
     expect(preview.closest('.project-web-surface-card').classList.contains('is-expanded')).toBe(true)
 
-    test.container.querySelector('.project-web-surface-action')?.click()
+    test.container.querySelector('.project-web-surface-card .project-web-surface-action')?.click()
     expect(test.openEntityInAtlas).toHaveBeenCalledWith('project-1', {
       id: 'entity-url-1',
       type: 'url',
@@ -212,6 +212,81 @@ describe('Project Web Surface gallery', () => {
     )
     expect(test.container.textContent).toContain('25-25 of 25 captures')
     expect(test.container.textContent).toContain('Page 2')
+  })
+
+  it('applies collection filters, reports bounded searches, and groups the visible page', async () => {
+    const second = capture({
+      url: 'https://admin.darklab.sh/',
+      title: 'Admin',
+      status_code: 401,
+      technologies: ['Caddy'],
+      profile_role: 'authenticated',
+      visual_hash: 'visual-two',
+      capture_state: 'unavailable',
+      artifact: {
+        ...capture().artifact,
+        id: 'artifact-2',
+        file_available: false,
+      },
+      source_run: { id: 'run-two', command: 'httpx -screenshot https://admin.darklab.sh' },
+    })
+    const test = harness((url) => {
+      const params = new URL(`https://example.test${url}`).searchParams
+      const filtered = Boolean(params.get('target'))
+      return {
+        captures: filtered ? [capture()] : [capture(), second],
+        total: filtered ? 1 : 2,
+        limit: 24,
+        offset: 0,
+        candidate_total: filtered ? 500 : 2,
+        candidate_limit: 200,
+        candidate_truncated: filtered,
+        has_more: false,
+      }
+    })
+
+    test.controller.render(test.container, 'project-1')
+    await vi.waitFor(() => expect(test.container.textContent).toContain('Admin'))
+
+    const group = test.container.querySelector('select[aria-label="Group Web Surface captures"]')
+    group.value = 'status'
+    group.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(test.container.textContent).toContain('HTTP 200 (1)')
+    expect(test.container.textContent).toContain('HTTP 401 (1)')
+
+    const values = {
+      target: 'app.darklab.sh',
+      status_code: '200',
+      technology: 'nginx',
+      profile_role: 'anonymous',
+      visual_hash: 'visual-one',
+    }
+    Object.entries(values).forEach(([name, value]) => {
+      test.container.querySelector(`[name="${name}"]`).value = value
+    })
+    test.container.querySelector('.project-web-surface-controls').dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    )
+
+    await vi.waitFor(() => expect(test.container.textContent).not.toContain('Admin'))
+    expect(test.apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/web-surface?limit=24&offset=0&target=app.darklab.sh&status_code=200&technology=nginx&profile_role=anonymous&visual_hash=visual-one',
+      { cache: 'no-store' },
+    )
+    expect(test.container.textContent).toContain("Filters searched the newest 200 of 500 captures. Older captures weren't included.")
+    expect(test.container.textContent).toContain('HTTP 200 (1)')
+
+    const clear = [...test.container.querySelectorAll('.project-web-surface-control-actions button')]
+      .find(button => button.textContent === 'Clear filters')
+    clear.click()
+    await vi.waitFor(() => expect(test.container.textContent).toContain('Admin'))
+    expect(test.controller.page('project-1').filters).toEqual({
+      target: '',
+      status_code: '',
+      technology: '',
+      profile_role: '',
+      visual_hash: '',
+    })
   })
 
   it('shows a useful empty state without requesting image bytes', async () => {
