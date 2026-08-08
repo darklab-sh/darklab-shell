@@ -514,6 +514,9 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/schemathesis_command.py", 131, "split-package-ratchet"
     ),
     ModuleSizeBudget(
+        "app/services/assessments/schemathesis_artifact.py", 182, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/recommended_action_builder.py", 77, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/stored_nvd_inference.py", 52, "split-package-ratchet"),

@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
+import hashlib
+import io
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -79,6 +82,12 @@ from services.assessments.schemathesis_command import (
     SCHEMATHESIS_TIME_LIMIT_SECONDS,
     reviewed_schemathesis_command_matches,
     reviewed_schemathesis_command_plan,
+)
+from services.assessments import schemathesis_artifact
+from services.assessments.schemathesis_artifact import (
+    SchemathesisArtifactError,
+    materialize_reviewed_schemathesis_schema,
+    review_project_openapi_artifact,
 )
 from services.assessments.schemathesis_schema import (
     SCHEMATHESIS_READ_OPERATION_LIMIT,
@@ -161,6 +170,24 @@ def _openapi_json(paths=None, **extra):
         **extra,
     }
     return json.dumps(document, separators=(",", ":")).encode()
+
+
+def _openapi_artifact(content):
+    return {
+        "id": "rfa_0123456789abcdef",
+        "session_id": "artifact-owner",
+        "run_team_id": "",
+        "workspace_path": "reports/openapi.json",
+        "byte_size": len(content),
+        "content_sha256": hashlib.sha256(content).hexdigest(),
+        "file_status": "available",
+        "file_available": True,
+    }
+
+
+class _ArtifactStream(io.BytesIO):
+    def fileno(self):
+        return 42
 
 
 def test_service_actions_require_explicit_service_evidence_and_target_compatibility():
@@ -349,6 +376,209 @@ def test_local_openapi_review_rejects_byte_depth_and_decoded_node_limit_expansio
             )
 
         assert exc_info.value.code == error_code
+
+
+def test_project_openapi_artifact_review_rechecks_owner_file_size_and_digest(monkeypatch):
+    content = _openapi_json()
+    artifact = _openapi_artifact(content)
+    calls = {}
+    owner = object()
+
+    def get_artifact(session_id, project_id, artifact_id, *, team_id=""):
+        calls["query"] = (session_id, project_id, artifact_id, team_id)
+        return artifact
+
+    def open_artifact(owner_context, workspace_path):
+        calls["open"] = (owner_context, workspace_path)
+        return _ArtifactStream(content)
+
+    monkeypatch.setattr(schemathesis_artifact, "get_project_run_file_artifact", get_artifact)
+    monkeypatch.setattr(schemathesis_artifact, "artifact_owner_context", lambda *_args: owner)
+    monkeypatch.setattr(schemathesis_artifact, "open_owner_workspace_file_for_download", open_artifact)
+    monkeypatch.setattr(schemathesis_artifact.os, "fstat", lambda _fd: SimpleNamespace(st_size=len(content)))
+
+    reviewed = review_project_openapi_artifact(
+        "viewer-session",
+        "prj_reviewed",
+        artifact["id"],
+        base_url="https://api.example.test/v1",
+        team_id="team_reviewed",
+    )
+
+    assert calls["query"] == (
+        "viewer-session",
+        "prj_reviewed",
+        artifact["id"],
+        "team_reviewed",
+    )
+    assert calls["open"] == (owner, "reports/openapi.json")
+    assert reviewed.source_artifact_id == artifact["id"]
+    assert reviewed.source_sha256 == artifact["content_sha256"]
+    assert reviewed.operations == ("GET /items", "HEAD /health")
+
+
+@pytest.mark.parametrize(
+    ("artifact_update", "descriptor_size_delta", "error_code"),
+    [
+        ({"file_status": "changed"}, 0, "schema_artifact_unavailable"),
+        ({"content_sha256": ""}, 0, "schema_artifact_digest_missing"),
+        ({"byte_size": 0}, 0, "schema_artifact_size_invalid"),
+        ({"byte_size": SCHEMATHESIS_SCHEMA_MAX_BYTES + 1}, 0, "schema_artifact_size_invalid"),
+        ({}, 1, "schema_artifact_changed"),
+        ({"content_sha256": "0" * 64}, 0, "schema_artifact_changed"),
+    ],
+)
+def test_project_openapi_artifact_review_rejects_unavailable_or_changed_files(
+    monkeypatch,
+    artifact_update,
+    descriptor_size_delta,
+    error_code,
+):
+    content = _openapi_json()
+    artifact = {**_openapi_artifact(content), **artifact_update}
+    monkeypatch.setattr(schemathesis_artifact, "get_project_run_file_artifact", lambda *_args, **_kwargs: artifact)
+    monkeypatch.setattr(schemathesis_artifact, "artifact_owner_context", lambda *_args: object())
+    monkeypatch.setattr(
+        schemathesis_artifact,
+        "open_owner_workspace_file_for_download",
+        lambda *_args: _ArtifactStream(content),
+    )
+    monkeypatch.setattr(
+        schemathesis_artifact.os,
+        "fstat",
+        lambda _fd: SimpleNamespace(st_size=len(content) + descriptor_size_delta),
+    )
+
+    with pytest.raises(SchemathesisArtifactError) as exc_info:
+        review_project_openapi_artifact(
+            "viewer-session",
+            "prj_reviewed",
+            artifact["id"],
+            base_url="https://api.example.test/v1",
+        )
+
+    assert exc_info.value.code == error_code
+
+
+def test_project_openapi_artifact_review_hides_cross_project_and_read_failures(monkeypatch):
+    monkeypatch.setattr(schemathesis_artifact, "get_project_run_file_artifact", lambda *_args, **_kwargs: None)
+    with pytest.raises(SchemathesisArtifactError) as not_found:
+        review_project_openapi_artifact(
+            "viewer-session",
+            "prj_other",
+            "rfa_0123456789abcdef",
+            base_url="https://api.example.test",
+        )
+    assert not_found.value.code == "schema_artifact_not_found"
+
+    content = _openapi_json()
+    wrong_artifact = {**_openapi_artifact(content), "id": "rfa_fedcba9876543210"}
+    monkeypatch.setattr(
+        schemathesis_artifact,
+        "get_project_run_file_artifact",
+        lambda *_args, **_kwargs: wrong_artifact,
+    )
+    with pytest.raises(SchemathesisArtifactError) as mismatched:
+        review_project_openapi_artifact(
+            "viewer-session",
+            "prj_reviewed",
+            "rfa_0123456789abcdef",
+            base_url="https://api.example.test",
+        )
+    assert mismatched.value.code == "schema_artifact_not_found"
+
+    monkeypatch.setattr(
+        schemathesis_artifact,
+        "get_project_run_file_artifact",
+        lambda *_args, **_kwargs: _openapi_artifact(content),
+    )
+    monkeypatch.setattr(schemathesis_artifact, "artifact_owner_context", lambda *_args: object())
+    monkeypatch.setattr(
+        schemathesis_artifact,
+        "open_owner_workspace_file_for_download",
+        lambda *_args: (_ for _ in ()).throw(OSError("unavailable")),
+    )
+    with pytest.raises(SchemathesisArtifactError) as unavailable:
+        review_project_openapi_artifact(
+            "viewer-session",
+            "prj_reviewed",
+            "rfa_0123456789abcdef",
+            base_url="https://api.example.test",
+        )
+    assert unavailable.value.code == "schema_artifact_unavailable"
+
+
+def test_reviewed_schemathesis_schema_materializes_private_schema_and_report(monkeypatch):
+    reviewed = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test",
+    )
+    writes = []
+
+    class FakeMaterial:
+        path = Path("/tmp/private-http-runs/run-0123456789abcdef")
+
+        def __init__(self, *, cfg=None):
+            self.cfg = cfg
+
+        def write_bytes(self, name, content):
+            writes.append((name, content))
+            return self.path / name
+
+        def cleanup(self):
+            writes.append(("cleanup", b""))
+
+    monkeypatch.setattr(schemathesis_artifact, "PrivateHttpRunMaterial", FakeMaterial)
+
+    material = materialize_reviewed_schemathesis_schema(reviewed, cfg={"data_dir": "/private"})
+
+    assert material.schema == reviewed
+    assert writes == [("schema.json", reviewed.content), ("events.ndjson", b"")]
+    assert material.schema_path == FakeMaterial.path / "schema.json"
+    assert material.report_path == FakeMaterial.path / "events.ndjson"
+    assert material.private_values == (str(material.schema_path), str(material.report_path))
+    assert reviewed_schemathesis_command_plan(
+        material.schema,
+        schema_path=material.schema_path,
+        report_path=material.report_path,
+    ) is not None
+    material.cleanup()
+    assert writes[-1] == ("cleanup", b"")
+
+
+def test_schemathesis_materialization_requires_review_and_cleans_partial_files(monkeypatch):
+    with pytest.raises(SchemathesisArtifactError) as unreviewed:
+        materialize_reviewed_schemathesis_schema(SimpleNamespace(content=_openapi_json()))
+    assert unreviewed.value.code == "schema_review_required"
+
+    reviewed = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test",
+    )
+    cleaned = []
+
+    class FailingMaterial:
+        path = Path("/tmp/private-http-runs/run-0123456789abcdef")
+
+        def __init__(self, *, cfg=None):
+            self.write_count = 0
+
+        def write_bytes(self, name, content):
+            self.write_count += 1
+            if self.write_count == 2:
+                raise OSError("full")
+            return self.path / name
+
+        def cleanup(self):
+            cleaned.append(True)
+
+    monkeypatch.setattr(schemathesis_artifact, "PrivateHttpRunMaterial", FailingMaterial)
+    with pytest.raises(SchemathesisArtifactError) as failed:
+        materialize_reviewed_schemathesis_schema(reviewed)
+    assert failed.value.code == "schemathesis_materialization_failed"
+    assert cleaned == [True]
 
 
 def test_reviewed_schemathesis_command_is_exact_read_only_and_request_bounded():
