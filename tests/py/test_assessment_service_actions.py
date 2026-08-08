@@ -37,6 +37,13 @@ from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_k
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_PARSER_VERSION
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
+from services.assessments import nuclei_takeover_templates
+from services.assessments.nuclei_takeover_templates import (
+    NUCLEI_TAKEOVER_TEMPLATE_ID,
+    NUCLEI_TAKEOVER_TEMPLATE_VERSION,
+    NucleiTakeoverTemplateError,
+    reviewed_nuclei_takeover_launch,
+)
 from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.takeover_confirmation import (
     NUCLEI_TAKEOVER_CONFIRMATION_VERSION,
@@ -128,6 +135,57 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     assert "-severity high,critical" in safe.command
     assert "-severity medium,high,critical" in standard.command
     assert "-headless" in intrusive.command
+
+
+def test_app_owned_nuclei_takeover_template_is_digest_pinned_and_non_destructive():
+    launch = reviewed_nuclei_takeover_launch()
+
+    assert launch.template.template_id == NUCLEI_TAKEOVER_TEMPLATE_ID
+    assert launch.template.template_version == NUCLEI_TAKEOVER_TEMPLATE_VERSION
+    assert launch.template.template_digest.startswith("sha256:")
+    assert launch.template.policy_level == "safe"
+    assert launch.template_path.name == "github-pages-dangling-domain.yaml"
+    assert launch.trusted_execution_args == (
+        "-t", str(launch.template_path), "-jsonl", "-dr",
+    )
+    source = launch.template_path.read_text(encoding="utf-8")
+    assert 'path:\n      - "{{BaseURL}}"' in source
+    assert "redirects: false" in source
+    assert "max-request: 1" in source
+    assert "payloads:" not in source
+    assert "extractors:" not in source
+    assert "interactsh" not in source.lower()
+
+
+def test_app_owned_nuclei_takeover_template_rejects_tampering_and_symlinks(
+    monkeypatch, tmp_path,
+):
+    shipped_path = reviewed_nuclei_takeover_launch().template_path
+    shipped = shipped_path.read_bytes()
+    root = tmp_path / "takeovers"
+    root.mkdir()
+    candidate = root / "github-pages-dangling-domain.yaml"
+    candidate.write_bytes(shipped + b"\n")
+    monkeypatch.setattr(nuclei_takeover_templates, "_TEMPLATE_ROOT", root)
+    monkeypatch.setattr(nuclei_takeover_templates, "_TEMPLATE_PATH", candidate)
+
+    with pytest.raises(NucleiTakeoverTemplateError, match="digest mismatch"):
+        reviewed_nuclei_takeover_launch()
+
+    unsafe = shipped.replace(b"redirects: false", b"redirects: true ")
+    candidate.write_bytes(unsafe)
+    monkeypatch.setattr(
+        nuclei_takeover_templates,
+        "_TEMPLATE_DIGEST",
+        "sha256:" + nuclei_takeover_templates.hashlib.sha256(unsafe).hexdigest(),
+    )
+    with pytest.raises(NucleiTakeoverTemplateError, match="request is not safe"):
+        reviewed_nuclei_takeover_launch()
+
+    candidate.unlink()
+    candidate.symlink_to(shipped_path)
+    with pytest.raises(NucleiTakeoverTemplateError, match="unavailable"):
+        reviewed_nuclei_takeover_launch()
 
 
 def test_historical_urls_are_safe_bounded_and_provenance_only():

@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **The first app-owned takeover fingerprint is pinned to its reviewed content and request shape.**
+  - **What:** The shipped GitHub Pages dangling-domain template makes one GET request, doesn't follow redirects, and emits structured output only after an exact status and body fingerprint match. Its loader rejects symlinks, special or oversized files, digest drift, malformed YAML, extra request features, redirects, payloads, and matcher changes, so changing the template requires an explicit code review and digest update.
+  - **Tests:** Focused service coverage pins the immutable id, version, digest, safe policy, one-target arguments, request bounds, and fail-closed behavior for tampered content, an unsafe shape with a matching digest, and a symlinked template.
 - **Reviewed scanner evidence now crosses the run broker through an internal-only context.**
   - **What:** App-owned assessment launches can attach typed, immutable output-classification context to an external run. The broker carries that context to the classifier created with the generated run id, while ordinary browser and API run bodies can't supply or override it. Invalid internal context fails before command preparation.
   - **Tests:** Focused service and route coverage pins the generated run id, exact reviewed Nuclei template metadata, fail-closed type checks, and omission of caller-provided context at both public run routes.

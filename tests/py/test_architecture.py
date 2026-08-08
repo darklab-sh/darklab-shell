@@ -379,6 +379,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/assessments/nuclei_takeover_observations.py", 130, "split-package-ratchet"
     ),
+    ModuleSizeBudget(
+        "app/services/assessments/nuclei_takeover_templates.py", 150, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/dns_takeover_context.py", 65, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/dns_takeover_correlation.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/dns_takeover_event_review.py", 180, "split-package-ratchet"),
