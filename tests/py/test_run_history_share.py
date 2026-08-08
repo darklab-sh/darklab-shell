@@ -35,6 +35,9 @@ import services.secrets.vault as secrets_vault
 import services.workspace.files as shell_workspace
 from config import PROJECT_SOURCE
 from core.database import db_connect
+from core.output_signals import OutputSignalClassifier
+from services.assessments.dalfox_xss_observations import ReviewedDalfoxXssContext
+from services.runs.completion_policy import RunCompletionPolicy
 from services.runs.output_model import line_event_from_legacy, to_wire
 from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
@@ -781,6 +784,79 @@ class TestRunStreaming:
         assert fake_proc.stdout.closed is True
         pid_pop.assert_called_once_with("run-broker-worker")
         active_remove.assert_called_once_with("run-broker-worker")
+
+    def test_broker_accepts_reviewed_dalfox_findings_exit_and_preserves_tool_code(self):
+        command = (
+            "dalfox https://app.example.test/search?q=one -p q:query "
+            "--skip-discovery --skip-mining --format jsonl"
+        )
+        context = ReviewedDalfoxXssContext(
+            target="https://app.example.test/search?q=one",
+            parameter="q",
+            location="Query",
+            source_parameter_observation_id="obs_" + ("a" * 32),
+            request_limit=120,
+        )
+        rows = [
+            json.dumps({"meta": {
+                "dalfox_version": "v3.1.2",
+                "targets": [context.target],
+                "findings_count": 1,
+                "total_requests": 80,
+                "scan_duration_ms": 2500,
+            }}) + "\n",
+            json.dumps({
+                "type": "V",
+                "method": "GET",
+                "param": "q",
+                "payload": "<svg onload=alert(1)>",
+                "evidence": "executed in the reviewed DOM sink",
+                "cwe": "CWE-79",
+            }) + "\n",
+            "",
+        ]
+        fake_proc = _FakeProc(lines=rows, returncode=1)
+        published = []
+        capture = run_routes._run_output_capture("run-dalfox-findings")
+        classifier = OutputSignalClassifier(
+            command,
+            source_run_id="run-dalfox-findings",
+            dalfox_xss_context=context,
+        )
+
+        with mock.patch("blueprints.run.publish_run_event", side_effect=lambda *args: published.append(args)), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.active_run_remove"), \
+             mock.patch(
+                 "blueprints.run._finalize_completed_run",
+                 return_value={"elapsed": 0.2, "active_project_link": None},
+             ) as finalize:
+            run_routes._brokered_real_run_worker(
+                run_id="run-dalfox-findings",
+                proc=fake_proc,
+                session_id="session-worker",
+                team_id="",
+                client_ip="203.0.113.10",
+                original_command=command,
+                run_started=datetime.now(timezone.utc).isoformat(),
+                capture=capture,
+                signal_classifier=classifier,
+                completion_policy=RunCompletionPolicy(context),
+                postfilter=run_routes._SyntheticPostFilterProcessor(None),
+                workspace_path_filter=_PassthroughWorkspaceFilter(),
+                variable_notice="",
+                rewrite_notice="",
+                workspace_notices=[],
+                workspace_artifacts=[],
+                owner_tab_id="",
+            )
+        capture.finalize()
+
+        assert finalize.call_args.args[6] == 0
+        assert published[-1][1] == "exit"
+        assert published[-1][2]["code"] == 0
+        assert published[-1][2]["tool_exit_code"] == 1
 
     def test_synthetic_sort_and_uniq_postfilters_cap_buffer_and_emit_notice(self):
         with mock.patch.dict("blueprints.run.CFG", {"max_output_lines": 3}):

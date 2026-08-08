@@ -364,6 +364,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/broker_worker.py", 496, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/broker_batcher.py", 130, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/broker_capture.py", 46, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/completion_policy.py", 70, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization.py", 1000, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_artifacts.py", 85, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_assessment_findings.py", 57, "split-package-ratchet"),
@@ -468,7 +469,7 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/dalfox_xss_command.py", 99, "split-package-ratchet"
     ),
     ModuleSizeBudget(
-        "app/services/assessments/dalfox_xss_observations.py", 322, "split-package-ratchet"
+        "app/services/assessments/dalfox_xss_observations.py", 333, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/stored_nvd_inference.py", 52, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/stored_osv_inference.py", 60, "split-package-ratchet"),

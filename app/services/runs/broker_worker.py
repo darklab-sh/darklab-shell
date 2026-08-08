@@ -18,6 +18,7 @@ from core.helpers import get_log_session_id
 from services.runs.broker_batcher import BrokerOutputBatcher  # noqa: F401 - compatibility re-export
 from services.runs.broker_capture import publish_broker_captured_line as publish_broker_captured_line
 from services.runs.contracts import create_run_capture
+from services.runs.completion_policy import RunCompletionPolicy, effective_run_exit_code
 from services.runs.kinds import run_kind_for_cmd_type
 from services.runs.output_model import LineKind
 from services.runs.worker_cleanup import cleanup_broker_worker
@@ -139,6 +140,7 @@ def brokered_real_run_worker(
     workspace_artifacts,
     owner_tab_id,
     link_project_id="",
+    completion_policy: RunCompletionPolicy | None = None,
     run_finalized_hook=None,
     run_cleanup_hook=None,
     cfg: Mapping[str, Any] | None = None,
@@ -325,9 +327,24 @@ def brokered_real_run_worker(
                 publish=postfilter.should_publish_output_line(filtered_line),
             )
         output_batcher.flush()
-        exit_code = wait_for_proc_exit_code_fn(proc)
-        if postfilter.output_sink_error and exit_code == 0:
-            exit_code = 1
+        tool_exit_code = wait_for_proc_exit_code_fn(proc)
+        exit_code = effective_run_exit_code(
+            tool_exit_code,
+            completion_policy=completion_policy,
+            signal_classifier=signal_classifier,
+            output_sink_error=bool(postfilter.output_sink_error),
+        )
+        if exit_code != tool_exit_code:
+            log.info("RUN_EXIT_CODE_ACCEPTED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "ip": client_ip,
+                "cmd": original_command,
+                "tool_exit_code": tool_exit_code,
+                "exit_code": exit_code,
+                "completion_policy": completion_policy.name if completion_policy else "",
+            })
         finalize_info = finalize_completed_run_fn(
             run_id,
             session_id,
@@ -347,13 +364,16 @@ def brokered_real_run_worker(
         active_project_link = finalize_info.get("active_project_link")
         finalize_summary = finalize_info.get("finalize_summary") if isinstance(finalize_info, dict) else {}
         publish_project_finalize_notices_fn(run_id, active_project_link, finalize_summary)
-        publish_run_event_fn(run_id, "exit", {
+        exit_payload = {
             "code": exit_code,
             "elapsed": elapsed,
             "preview_truncated": capture.preview_truncated,
             "output_line_count": capture.output_line_count,
             "full_output_available": capture.full_output_available,
-        })
+        }
+        if exit_code != tool_exit_code:
+            exit_payload["tool_exit_code"] = tool_exit_code
+        publish_run_event_fn(run_id, "exit", exit_payload)
     except Exception as exc:
         log.error("RUN_BROKER_STREAM_ERROR", exc_info=True, extra={
             "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,

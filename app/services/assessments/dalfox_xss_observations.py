@@ -101,6 +101,17 @@ class DalfoxXssObservationState:
             return {}
         return {"source_detail": {"dalfox_xss_observations": [observation]}}
 
+    def accepts_findings_exit(self, context: ReviewedDalfoxXssContext) -> bool:
+        """Return whether exit 1 is backed by one accepted reviewed observation."""
+        return (
+            type(context) is ReviewedDalfoxXssContext
+            and self.enabled
+            and self.context == context
+            and bool(self.tool_version)
+            and self.reported_finding_count > 0
+            and bool(self._seen)
+        )
+
     def _summary_metadata(self, meta: dict[str, Any]) -> dict[str, dict[str, Any]]:
         context = self.context
         if context is None or self.tool_version or self._result_rows:

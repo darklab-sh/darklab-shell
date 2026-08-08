@@ -101,6 +101,11 @@ from services.assessments.web_gallery import (
 )
 from services.runs.finalization import capture_event_with_signals
 from services.runs.lifecycle import PreparedRealCommand, start_real_command_process
+from services.runs.completion_policy import (
+    RunCompletionPolicy,
+    completion_policy_for_signal_context,
+    effective_run_exit_code,
+)
 from services.runs.output_model import to_wire
 from services.runs.signal_context import RunOutputSignalContext, output_signal_classifier_kwargs
 from services.runs.start import start_brokered_run
@@ -1358,6 +1363,52 @@ def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
     assert "dalfox_xss_observations" not in informational.get("source_detail", {})
 
 
+def test_reviewed_dalfox_findings_exit_requires_accepted_bound_evidence():
+    context = _dalfox_xss_context()
+    signal_context = RunOutputSignalContext(dalfox_xss_context=context)
+    policy = completion_policy_for_signal_context(signal_context)
+    classifier = _dalfox_xss_classifier(context)
+
+    assert policy == RunCompletionPolicy(context)
+    assert completion_policy_for_signal_context(None) is None
+    assert effective_run_exit_code(
+        1, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
+    ) == 1
+    classifier.classify_line(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "targets": [context.target],
+        "findings_count": 1,
+        "total_requests": 80,
+        "scan_duration_ms": 2500,
+    }}))
+    assert effective_run_exit_code(
+        1, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
+    ) == 1
+    classifier.classify_line(json.dumps({
+        "type": "V",
+        "method": "GET",
+        "param": context.parameter,
+        "payload": "<svg onload=alert(1)>",
+        "evidence": "executed in the reviewed DOM sink",
+        "cwe": "CWE-79",
+    }))
+
+    assert effective_run_exit_code(
+        1, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
+    ) == 0
+    assert effective_run_exit_code(
+        1, completion_policy=policy, signal_classifier=classifier, output_sink_error=True,
+    ) == 1
+    assert effective_run_exit_code(
+        2, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
+    ) == 2
+    assert effective_run_exit_code(
+        1, completion_policy=None, signal_classifier=classifier, output_sink_error=False,
+    ) == 1
+    with pytest.raises(ValueError, match="invalid Dalfox completion context"):
+        RunCompletionPolicy("caller-made")
+
+
 def test_reviewed_dalfox_xss_context_and_rows_fail_closed():
     with pytest.raises(ValueError, match="invalid reviewed Dalfox XSS context"):
         _dalfox_xss_context(target="https://user:secret@app.example.test/search?q=one")
@@ -1645,8 +1696,11 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
         )
 
     class Thread:
+        created = {}
+
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            type(self).created = kwargs
 
         def start(self):
             return None
@@ -1682,6 +1736,9 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
     )
     assert brokered.run_id == "run-context"
     assert broker_call["kwargs"]["output_signal_context"] is context
+    assert Thread.created["kwargs"]["completion_policy"] == RunCompletionPolicy(
+        context.dalfox_xss_context,
+    )
     with pytest.raises(ValueError, match="invalid run output signal context"):
         start_brokered_run(
             original_command=prepared.command,

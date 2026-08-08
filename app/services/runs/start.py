@@ -16,6 +16,7 @@ from services.runs.start_context import (
     real_start_kwargs,
 )
 from services.runs.start_contracts import BrokeredRunStartResult, RunStartHandlers
+from services.runs.completion_policy import completion_policy_for_signal_context
 from services.runs.signal_context import RunOutputSignalContext, validated_run_output_signal_context
 from services.teams.scope import OwnerContext, owner_context_for_scope
 
@@ -41,6 +42,7 @@ def start_brokered_run(
     run_cleanup_hook: Callable[[], None] | None = None,
 ) -> BrokeredRunStartResult:
     output_signal_context = validated_run_output_signal_context(output_signal_context)
+    completion_policy = completion_policy_for_signal_context(output_signal_context)
     safe_command = str(display_command or original_command)
     safe_private_values = private_data.normalized_private_values(private_values)
     owner_context: OwnerContext = owner_context_for_scope(session_id, team_id=team_id)
@@ -204,6 +206,7 @@ def start_brokered_run(
             "owner_tab_id": owner_tab_id,
             "link_project_id": link_project_id,
             "run_finalized_hook": run_finalized_hook,
+            **({"completion_policy": completion_policy} if completion_policy else {}),
             **({"run_cleanup_hook": run_cleanup_hook} if run_cleanup_hook else {}),
         },
         name=f"{thread_name_prefix}-{started.run_id[:8]}",
