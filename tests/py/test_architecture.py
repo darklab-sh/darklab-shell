@@ -459,7 +459,10 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget("app/services/assessments/nmap_version_observations.py", 180, "split-package-ratchet"),
     ModuleSizeBudget(
-        "app/services/assessments/dalfox_parameter_observations.py", 161, "split-package-ratchet"
+        "app/services/assessments/dalfox_parameter_observations.py", 173, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_parameter_evidence.py", 236, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/assessments/dalfox_xss_observations.py", 311, "split-package-ratchet"

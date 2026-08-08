@@ -1185,6 +1185,87 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
 
 
 @pytest.mark.postgres
+def test_postgres_resolves_exact_project_dalfox_parameter_evidence(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.dalfox_parameter_evidence import (
+        resolve_project_dalfox_parameter_evidence,
+    )
+    from services.assessments.dalfox_parameter_observations import (
+        DalfoxParameterObservationState,
+    )
+    from services.runs.output_model import LineEvent, to_wire
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    timestamp = "2026-08-08T10:00:00+00:00"
+    target = "https://app.example.test/search?q=one"
+    run_id = "run-dalfox-parameter-pg"
+    command = (
+        f"dalfox {target} --only-discovery --skip-mining-dict "
+        "--format jsonl --no-color"
+    )
+    state = DalfoxParameterObservationState(command, run_id)
+    summary_line = json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "mode": "only_discovery",
+        "params_discovered": 1,
+    }})
+    observation_line = json.dumps({"url": target, "param": "q", "location": "Query"})
+    summary = state.metadata(summary_line)["source_detail"]
+    observation = state.metadata(observation_line)["source_detail"]
+    observation_id = observation["parameter_observations"][0]["observation_id"]
+    preview = json.dumps([
+        to_wire(LineEvent(text=summary_line, source_detail=summary)),
+        to_wire(LineEvent(text=observation_line, source_detail=observation)),
+    ])
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, status, created, updated) "
+        "VALUES ('prj-dalfox-parameter-pg', 'dalfox-parameter-pg', '', "
+        "'Dalfox parameter', 'dalfox-parameter', 'active', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, output_line_count) VALUES (?, 'dalfox-parameter-pg', '', "
+        "'external', ?, ?, ?, 0, ?, 2)",
+        (run_id, command, timestamp, timestamp, preview),
+    )
+    conn.execute(
+        "INSERT INTO project_links "
+        "(id, project_id, entity_type, entity_id, created) VALUES "
+        "('pl-dalfox-parameter-pg', 'prj-dalfox-parameter-pg', 'run', ?, ?)",
+        (run_id, timestamp),
+    )
+
+    evidence = resolve_project_dalfox_parameter_evidence(
+        conn,
+        "dalfox-parameter-pg",
+        "",
+        "prj-dalfox-parameter-pg",
+        run_id,
+        str(observation_id),
+        expected_target=target,
+    )
+
+    assert evidence is not None
+    assert evidence.parameter == "q"
+    assert evidence.location == "Query"
+    assert resolve_project_dalfox_parameter_evidence(
+        conn,
+        "another-owner",
+        "",
+        "prj-dalfox-parameter-pg",
+        run_id,
+        str(observation_id),
+        expected_target=target,
+    ) is None
+
+
+@pytest.mark.postgres
 def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock

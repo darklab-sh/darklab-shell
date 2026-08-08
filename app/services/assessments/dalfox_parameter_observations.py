@@ -70,7 +70,9 @@ class DalfoxParameterObservationState:
         location = _text(record.get("location"), 32)
         if target != self.target or not parameter or location not in _ALLOWED_LOCATIONS:
             return None
-        observation_id = _observation_id(self.source_run_id, target, location, parameter)
+        observation_id = dalfox_parameter_observation_id(
+            self.source_run_id, target, location, parameter,
+        )
         if observation_id in self._seen:
             return None
         self._seen.add(observation_id)
@@ -151,7 +153,13 @@ def _text(value: Any, limit: int) -> str:
     return text if text and len(text) <= limit and not any(ord(char) < 32 for char in raw) else ""
 
 
-def _observation_id(run_id: str, target: str, location: str, parameter: str) -> str:
+def dalfox_parameter_observation_id(
+    run_id: str,
+    target: str,
+    location: str,
+    parameter: str,
+) -> str:
+    """Return the stable identity for one normalized discovery observation."""
     digest = hashlib.sha256(f"{run_id}\x1f{target}\x1f{location}\x1f{parameter}".encode()).hexdigest()
     return "obs_" + digest[:32]
 
@@ -161,4 +169,5 @@ __all__ = [
     "DALFOX_JSON_MAX_LINE_BYTES",
     "DALFOX_MAX_PARAMETER_OBSERVATIONS",
     "DalfoxParameterObservationState",
+    "dalfox_parameter_observation_id",
 ]

@@ -21,6 +21,13 @@ from services.assessments.cleanup import (
 )
 from services.assessments.contracts import AssessmentError
 from services.assessments.coverage import reconcile_run_evidence_on_conn
+from services.assessments.dalfox_parameter_evidence import (
+    resolve_project_dalfox_parameter_evidence,
+)
+from services.assessments.dalfox_parameter_observations import (
+    DALFOX_DISCOVERY_PARSER_VERSION,
+    DalfoxParameterObservationState,
+)
 from services.assessments.evidence_matching import (
     EvidenceIdentity,
     RunEvidenceFacts,
@@ -44,6 +51,7 @@ from services.projects.crud import create_project, delete_project
 from services.projects.links import link_run_to_project_on_conn
 from services.projects.targets import add_project_target
 from services.runs.finalization import save_completed_run
+from services.runs.output_model import LineEvent, to_wire
 from services.history.mutations import (
     bulk_delete_runs,
     clear_history_runs,
@@ -182,6 +190,181 @@ def _seed_linked_run(
             item[3].append(run_id)
             break
     return run_id
+
+
+def _save_dalfox_parameter_evidence(
+    run_id: str,
+    target: str,
+) -> tuple[str, list[dict[str, object]]]:
+    command = (
+        f"dalfox {target} --only-discovery --skip-mining-dict "
+        "--format jsonl --no-color"
+    )
+    state = DalfoxParameterObservationState(command, run_id)
+    summary_line = json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "mode": "only_discovery",
+        "params_discovered": 1,
+    }})
+    observation_line = json.dumps({
+        "url": target,
+        "param": "q",
+        "location": "Query",
+    })
+    summary = state.metadata(summary_line)["source_detail"]
+    observation = state.metadata(observation_line)["source_detail"]
+    observation_id = observation["parameter_observations"][0]["observation_id"]
+    preview = [
+        to_wire(LineEvent(text=summary_line, source_detail=summary)),
+        to_wire(LineEvent(text=observation_line, source_detail=observation)),
+    ]
+    with db_connect() as conn:
+        conn.execute(
+            "UPDATE runs SET output_preview = ?, output_line_count = ? WHERE id = ?",
+            (json.dumps(preview), len(preview), run_id),
+        )
+        conn.commit()
+    return str(observation_id), preview
+
+
+def test_saved_dalfox_parameter_evidence_resolves_one_exact_project_observation(
+    assessment_factory,
+):
+    factory, cleanup = assessment_factory
+    target = "https://app.example.test/search?q=one"
+    session_id, project_id, _assessment_id = factory([("url", target)])
+    run_id = _seed_linked_run(
+        cleanup,
+        session_id,
+        project_id,
+        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl --no-color",
+    )
+    observation_id, _preview = _save_dalfox_parameter_evidence(run_id, target)
+
+    with db_connect() as conn:
+        evidence = resolve_project_dalfox_parameter_evidence(
+            conn,
+            session_id,
+            "",
+            project_id,
+            run_id,
+            observation_id,
+            expected_target=target,
+        )
+
+    assert evidence is not None
+    assert evidence.source_run_id == run_id
+    assert evidence.observation_id == observation_id
+    assert evidence.target == target
+    assert evidence.parameter == "q"
+    assert evidence.location == "Query"
+    assert evidence.tool_version == "v3.1.2"
+    assert evidence.parser_version == DALFOX_DISCOVERY_PARSER_VERSION
+    assert evidence.xss_context(request_limit=64).source_parameter_observation_id == observation_id
+
+
+def test_saved_dalfox_parameter_evidence_rejects_scope_partial_and_provenance_drift(
+    assessment_factory,
+):
+    factory, cleanup = assessment_factory
+    target = "https://app.example.test/search?q=one"
+    session_id, project_id, _assessment_id = factory([("url", target)])
+    run_id = _seed_linked_run(
+        cleanup,
+        session_id,
+        project_id,
+        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl --no-color",
+    )
+    observation_id, preview = _save_dalfox_parameter_evidence(run_id, target)
+
+    with db_connect() as conn:
+        def resolve(
+            *,
+            owner_session_id: str = session_id,
+            owner_project_id: str = project_id,
+            expected_target: str = target,
+        ):
+            return resolve_project_dalfox_parameter_evidence(
+                conn,
+                owner_session_id,
+                "",
+                owner_project_id,
+                run_id,
+                observation_id,
+                expected_target=expected_target,
+            )
+
+        assert resolve(owner_session_id="another-owner") is None
+        assert resolve(owner_project_id="prj_unrelated") is None
+        assert resolve(expected_target="https://other.example.test/") is None
+
+        conn.execute("UPDATE runs SET preview_truncated = 1 WHERE id = ?", (run_id,))
+        assert resolve() is None
+        conn.execute(
+            "UPDATE runs SET preview_truncated = 0, exit_code = 1 WHERE id = ?",
+            (run_id,),
+        )
+        assert resolve() is None
+        conn.execute("UPDATE runs SET exit_code = 0 WHERE id = ?", (run_id,))
+        conn.commit()
+
+        drift_run_id = _seed_linked_run(
+            cleanup,
+            session_id,
+            project_id,
+            f"dalfox {target} --skip-discovery --format jsonl",
+        )
+        drift_observation_id, _drift_preview = _save_dalfox_parameter_evidence(
+            drift_run_id,
+            target,
+        )
+        assert resolve_project_dalfox_parameter_evidence(
+            conn,
+            session_id,
+            "",
+            project_id,
+            drift_run_id,
+            drift_observation_id,
+            expected_target=target,
+        ) is None
+
+        duplicate_preview = [*preview, preview[1]]
+        conn.execute(
+            "UPDATE runs SET output_preview = ?, output_line_count = ? WHERE id = ?",
+            (
+                json.dumps(duplicate_preview),
+                len(duplicate_preview),
+                run_id,
+            ),
+        )
+        assert resolve() is None
+
+        tampered_preview = json.loads(json.dumps(preview))
+        tampered_preview[0]["source_detail"]["parameter_discovery"]["tool_version"] = "v9"
+        conn.execute(
+            "UPDATE runs SET output_preview = ?, output_line_count = 2 WHERE id = ?",
+            (json.dumps(tampered_preview), run_id),
+        )
+        assert resolve() is None
+
+        tampered_id = "obs_" + ("0" * 32)
+        tampered_preview = json.loads(json.dumps(preview))
+        tampered_preview[1]["source_detail"]["parameter_observations"][0][
+            "observation_id"
+        ] = tampered_id
+        conn.execute(
+            "UPDATE runs SET output_preview = ? WHERE id = ?",
+            (json.dumps(tampered_preview), run_id),
+        )
+        assert resolve_project_dalfox_parameter_evidence(
+            conn,
+            session_id,
+            "",
+            project_id,
+            run_id,
+            tampered_id,
+            expected_target=target,
+        ) is None
 
 
 def _target_inputs(*values: str):
