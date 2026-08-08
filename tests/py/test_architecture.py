@@ -508,6 +508,12 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/dalfox_xss_observations.py", 346, "split-package-ratchet"
     ),
     ModuleSizeBudget(
+        "app/services/assessments/schemathesis_schema.py", 269, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_command.py", 131, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/recommended_action_builder.py", 77, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/stored_nvd_inference.py", 52, "split-package-ratchet"),

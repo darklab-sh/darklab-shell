@@ -73,6 +73,19 @@ from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_ob
 from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_PARSER_VERSION
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
+from services.assessments.schemathesis_command import (
+    SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION,
+    SCHEMATHESIS_RATE_LIMIT,
+    SCHEMATHESIS_TIME_LIMIT_SECONDS,
+    reviewed_schemathesis_command_matches,
+    reviewed_schemathesis_command_plan,
+)
+from services.assessments.schemathesis_schema import (
+    SCHEMATHESIS_READ_OPERATION_LIMIT,
+    SCHEMATHESIS_SCHEMA_MAX_BYTES,
+    SchemathesisSchemaError,
+    review_local_openapi_json,
+)
 from services.assessments import nuclei_takeover_launch
 from services.assessments.nuclei_takeover_launch import (
     NUCLEI_TAKEOVER_CHECK_KEY,
@@ -130,6 +143,24 @@ from services.projects.web_surface_comparison import (
     capture_matches_change_state,
     normalize_change_state,
 )
+
+
+def _openapi_json(paths=None, **extra):
+    document = {
+        "openapi": "3.1.0",
+        "info": {"title": "Reviewed API", "version": "1.0.0"},
+        "paths": paths or {
+            "/items": {
+                "get": {"responses": {"200": {"description": "OK"}}},
+                "post": {"responses": {"201": {"description": "Created"}}},
+            },
+            "/health": {
+                "head": {"responses": {"200": {"description": "OK"}}},
+            },
+        },
+        **extra,
+    }
+    return json.dumps(document, separators=(",", ":")).encode()
 
 
 def test_service_actions_require_explicit_service_evidence_and_target_compatibility():
@@ -195,6 +226,206 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     assert "-severity high,critical" in safe.command
     assert "-severity medium,high,critical" in standard.command
     assert "-headless" in intrusive.command
+
+
+def test_local_openapi_review_keeps_only_bounded_read_operations_and_internal_refs():
+    content = _openapi_json(
+        servers=[{"url": "/v1"}],
+        components={
+            "schemas": {
+                "Item": {"type": "object"},
+                "Envelope": {"$ref": "#/components/schemas/Item"},
+                "ServerList": {
+                    "type": "object",
+                    "properties": {"servers": {"type": "array"}},
+                },
+            },
+        },
+    )
+
+    reviewed = review_local_openapi_json(
+        content,
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1/",
+    )
+
+    assert reviewed.base_url == "https://api.example.test/v1"
+    assert reviewed.schema_version == "3.1.0"
+    assert reviewed.operations == ("GET /items", "HEAD /health")
+    assert reviewed.operation_count == 2
+    assert len(reviewed.source_sha256) == 64
+    assert reviewed.content == content
+
+
+@pytest.mark.parametrize(
+    ("content", "error_code"),
+    [
+        (
+            _openapi_json(components={
+                "schemas": {"Item": {"$ref": "https://schemas.example.test/item.json"}},
+            }),
+            "external_schema_reference",
+        ),
+        (
+            _openapi_json(servers=[{"url": "https://other.example.test/v1"}]),
+            "schema_server_out_of_scope",
+        ),
+        (
+            _openapi_json(paths={
+                "/items": {
+                    "get": {
+                        "servers": [{"url": "https://other.example.test/v1"}],
+                        "responses": {"200": {"description": "OK"}},
+                    },
+                },
+            }),
+            "schema_server_out_of_scope",
+        ),
+        (
+            _openapi_json(components={
+                "schemas": {"Item": {"$id": "https://other.example.test/"}},
+            }),
+            "schema_base_override",
+        ),
+        (
+            _openapi_json(paths={
+                "/items": {"post": {"responses": {"201": {"description": "Created"}}}},
+            }),
+            "no_read_operations",
+        ),
+        (
+            _openapi_json(paths={
+                f"/item/{index}": {
+                    "get": {"responses": {"200": {"description": "OK"}}},
+                }
+                for index in range(SCHEMATHESIS_READ_OPERATION_LIMIT + 1)
+            }),
+            "operation_limit_exceeded",
+        ),
+        (
+            b'{"openapi":"3.1.0","info":{},"paths":{},"paths":{}}',
+            "duplicate_schema_key",
+        ),
+        (
+            b'{"openapi":"3.1.0","info":{"x":NaN},"paths":{}}',
+            "invalid_openapi_json",
+        ),
+        (
+            _openapi_json(servers=[{"url": "/v1/%2e%2e/admin"}]),
+            "invalid_schema_server",
+        ),
+    ],
+)
+def test_local_openapi_review_rejects_fetch_and_execution_scope_expansion(content, error_code):
+    with pytest.raises(SchemathesisSchemaError) as exc_info:
+        review_local_openapi_json(
+            content,
+            source_artifact_id="rfa_0123456789abcdef",
+            base_url="https://api.example.test/v1",
+        )
+
+    assert exc_info.value.code == error_code
+
+
+def test_local_openapi_review_rejects_byte_depth_and_decoded_node_limit_expansion():
+    too_deep = {"leaf": True}
+    for _ in range(70):
+        too_deep = {"nested": too_deep}
+
+    rejected = (
+        (b" " * (SCHEMATHESIS_SCHEMA_MAX_BYTES + 1), "invalid_schema_size"),
+        (_openapi_json(components=too_deep), "schema_complexity_exceeded"),
+        (
+            _openapi_json(components={"schemas": {"Many": {"enum": list(range(50_001))}}}),
+            "schema_complexity_exceeded",
+        ),
+    )
+    for content, error_code in rejected:
+        with pytest.raises(SchemathesisSchemaError) as exc_info:
+            review_local_openapi_json(
+                content,
+                source_artifact_id="rfa_0123456789abcdef",
+                base_url="https://api.example.test/v1",
+            )
+
+        assert exc_info.value.code == error_code
+
+
+def test_reviewed_schemathesis_command_is_exact_read_only_and_request_bounded():
+    reviewed = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+
+    display = reviewed_schemathesis_command_plan(reviewed)
+    assert display is not None
+    assert display.request_limit == 2 * SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION == 20
+    assert display.time_limit_seconds == SCHEMATHESIS_TIME_LIMIT_SECONDS == 300
+    assert "schemathesis run [protected-schema]" in display.command
+    assert "--include-method GET --include-method HEAD" in display.command
+    assert "--phases fuzzing" in display.command
+    assert "--mode negative" in display.command
+    assert f"--rate-limit {SCHEMATHESIS_RATE_LIMIT}" in display.command
+    assert "--max-redirects 0 --request-timeout 10 --request-retries 0" in display.command
+    assert "--workers 1" in display.command
+    assert "--max-failures 10" in display.command
+    assert "--report ndjson --report-ndjson-path [protected-report]" in display.command
+    assert "--generation-deterministic --no-color" in display.command
+    assert "POST" not in display.command
+
+    schema_path = "/tmp/private-http-runs/run-0123456789abcdef/schema.json"
+    report_path = "/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"
+    execution = reviewed_schemathesis_command_plan(
+        reviewed,
+        schema_path=schema_path,
+        report_path=report_path,
+    )
+    assert execution is not None
+    assert schema_path in execution.command
+    assert report_path in execution.command
+    assert reviewed_schemathesis_command_matches(
+        execution.command,
+        reviewed,
+        schema_path=schema_path,
+        report_path=report_path,
+    )
+    assert not reviewed_schemathesis_command_matches(
+        execution.command + " --include-method POST",
+        reviewed,
+        schema_path=schema_path,
+        report_path=report_path,
+    )
+
+
+def test_reviewed_schemathesis_command_rejects_unreviewed_or_unprotected_material_paths():
+    reviewed = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test",
+    )
+
+    assert reviewed_schemathesis_command_plan(SimpleNamespace(**reviewed.__dict__)) is None
+    assert reviewed_schemathesis_command_plan(
+        reviewed,
+        schema_path="/tmp/schema.json",
+        report_path="/tmp/events.ndjson",
+    ) is None
+    assert reviewed_schemathesis_command_plan(
+        reviewed,
+        schema_path="/tmp/run-a/schema.json",
+        report_path="/tmp/run-a/events.ndjson",
+    ) is None
+    assert reviewed_schemathesis_command_plan(
+        reviewed,
+        schema_path="/tmp/private-http-runs/run-a/schema.json",
+        report_path="/tmp/private-http-runs/run-b/events.ndjson",
+    ) is None
+    assert reviewed_schemathesis_command_plan(
+        reviewed,
+        schema_path="/tmp/private-http-runs/run-a/other.json",
+        report_path="/tmp/private-http-runs/run-a/events.ndjson",
+    ) is None
 
 
 def test_app_owned_nuclei_takeover_template_is_digest_pinned_and_non_destructive():
