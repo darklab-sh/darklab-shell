@@ -442,6 +442,13 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/web_surface.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/cpe_applicability.py", 158, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/versioned_cpe.py", 34, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/nessus_import_observations.py", 155, "split-package-ratchet"
+    ),
+    ModuleSizeBudget("app/services/assessments/nessus_stored_nvd.py", 49, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/nessus_inference_materialization.py", 44, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/nvd_cpe_correlation.py", 186, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nmap_stored_nvd.py", 60, "split-package-ratchet"),
     ModuleSizeBudget(

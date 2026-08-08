@@ -127,7 +127,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 6 — Close the web and API discovery/validation gaps
 
 - [ ] Finish passive product/package-version correlation without presenting inference as confirmation:
-  - Route later exact version observations through the existing `version_cve_correlation` finding contract only when they satisfy a recorded matching rule. Preserve the advisory/data version, match basis, affected range, confidence, and source observation so review can reproduce the inference.
   - Keep inferred version/package findings distinct from Nuclei or another active probe that confirmed vulnerable behavior. Link or deduplicate related observations without discarding their different evidence methods or allowing an inference to upgrade itself to confirmed.
 - [ ] Add focused parameter and application testing tools:
   - Extend the bounded Dalfox parameter-discovery foundation with separately confirmed reflected/DOM XSS validation, structured confidence-aware findings, and proof/evidence fields.

@@ -62,9 +62,14 @@ from services.assessments.nmap_inference_materialization import (
     NMAP_INFERENCE_MAX_CANDIDATES,
     materialize_nmap_xml_version_inferences,
 )
+from services.assessments.nessus_inference_materialization import (
+    materialize_nessus_import_version_inferences,
+)
+from services.assessments.nessus_stored_nvd import correlate_nessus_import_with_stored_nvd
 from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
 from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
 from services.assessments.version_inference_persistence import persist_version_inference_candidate
+from services.intel.canonical import entity_signature
 from services.intel.nvd_applicability import normalize_nvd_cpe_matches
 from services.reports.rendering import (
     render_report_html_from_context,
@@ -81,6 +86,67 @@ def risk_db():
         yield conn
     finally:
         conn.close()
+
+
+def test_nessus_import_observation_loader_is_bounded_and_fails_closed(risk_db, monkeypatch):
+    from services.assessments import nessus_import_observations
+
+    observed_at = "2026-08-07T12:00:00+00:00"
+    target = "bounded.example.test"
+    target_key = entity_signature("domain", target)
+    risk_db.execute(
+        "INSERT INTO atlas_import_batches "
+        "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
+        "VALUES ('batch-nessus-bounded', 'nessus-owner', 'Nessus', 'nessus_xml', "
+        "'Bounded', ?, ?, 'applied')",
+        (observed_at, observed_at),
+    )
+    for index in range(2):
+        cpe = f"cpe:2.3:a:example:server{index}:1.0:*:*:*:*:*:*:*"
+        risk_db.execute(
+            "INSERT INTO atlas_import_evidence "
+            "(id, batch_id, evidence_type, subject_key, label, row_number, observed_at, "
+            "source_detail_json, created, updated) VALUES (?, 'batch-nessus-bounded', "
+            "'nessus_service_version', ?, 'Server 1.0', ?, ?, ?, ?, ?)",
+            (
+                f"impe-nessus-bounded-{index}",
+                f"{target_key}\x1f{cpe}",
+                index,
+                observed_at,
+                json.dumps({
+                    "adapter": "nessus",
+                    "target_kind": "domain",
+                    "target_value": target,
+                    "target_key": target_key,
+                    "cpe": cpe,
+                    "version": "1.0",
+                    "tool_version": "Nessus 10.9.1",
+                    "parser_version": "nessus-xml-cpe-v1",
+                }),
+                observed_at,
+                observed_at,
+            ),
+        )
+    monkeypatch.setattr(nessus_import_observations, "NESSUS_IMPORT_OBSERVATION_LIMIT", 1)
+
+    result = nessus_import_observations.load_nessus_import_version_observations(
+        risk_db, "nessus-owner", "batch-nessus-bounded"
+    )
+
+    assert [item["observation_id"] for item in result["observations"]] == [
+        "impe-nessus-bounded-0"
+    ]
+    assert result["truncated"] is True
+    risk_db.execute(
+        "UPDATE atlas_import_evidence SET source_detail_json = '{}' "
+        "WHERE id = 'impe-nessus-bounded-0'"
+    )
+    assert nessus_import_observations.load_nessus_import_version_observations(
+        risk_db,
+        "nessus-owner",
+        "batch-nessus-bounded",
+        observation_id="impe-nessus-bounded-0",
+    )["observations"] == []
 
 
 def _epss_feed(version: str, score_date: str, *rows: tuple[str, float, float]) -> ParsedFeed:
@@ -2251,8 +2317,9 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     assert risk_db.total_changes == changes_before_read
     risk_db.execute(
         "INSERT INTO atlas_import_batches "
-        "(id, session_id, source_tool, import_name, created, applied_at, status) "
-        "VALUES ('batch-version-import', 'version-owner', 'cyclonedx', 'Version import', ?, ?, 'applied')",
+        "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
+        "VALUES ('batch-version-import', 'version-owner', 'Nessus', 'nessus_xml', "
+        "'Version import', ?, ?, 'applied')",
         ("2026-08-05T12:30:00+00:00",) * 2,
     )
     risk_db.execute(
@@ -2268,17 +2335,75 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "VALUES ('entity-version-import', 'batch-version-import', ?, ?, 1, ?, ?)",
         ("2026-08-05T12:30:00+00:00",) * 4,
     )
-    import_candidate = {
-        **candidate_page["candidates"][0],
-        "source": {
-            **candidate_page["candidates"][0]["source"],
-            "kind": "import",
-            "run_id": "",
-            "batch_id": "batch-version-import",
-            "tool_version": "cyclonedx 1.6",
-            "parser_version": "cyclonedx-v1",
-        },
+    cpe = "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*"
+    target_key = entity_signature("domain", "api.example.test")
+    risk_db.execute(
+        "INSERT INTO atlas_import_evidence "
+        "(id, batch_id, evidence_type, subject_key, label, row_number, external_id, "
+        "observed_at, source_detail_json, created, updated) "
+        "VALUES ('impe-version-import', 'batch-version-import', 'nessus_service_version', "
+        "?, 'api.example.test https 2.5.1', 1, '1234', ?, ?, ?, ?)",
+        (
+            f"{target_key}\x1f{cpe}",
+            "2026-08-05T12:30:00+00:00",
+            json.dumps({
+                "adapter": "nessus",
+                "target_kind": "domain",
+                "target_value": "api.example.test",
+                "target_key": target_key,
+                "cpe": cpe,
+                "version": "2.5.1",
+                "port": "443",
+                "protocol": "tcp",
+                "service": "https",
+                "tool_version": "Nessus 10.9.1",
+                "parser_version": "nessus-xml-cpe-v1",
+            }),
+            "2026-08-05T12:30:00+00:00",
+            "2026-08-05T12:30:00+00:00",
+        ),
+    )
+    nessus_correlation = correlate_nessus_import_with_stored_nvd(
+        risk_db,
+        "version-owner",
+        source_batch_id="batch-version-import",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert nessus_correlation["observation_count"] == 1
+    assert nessus_correlation["candidate_count"] == 1
+    assert correlate_nessus_import_with_stored_nvd(
+        risk_db,
+        "other-version-owner",
+        source_batch_id="batch-version-import",
+    )["candidate_count"] == 0
+    import_candidate = nessus_correlation["observations"][0]["candidates"][0]
+    assert import_candidate["source"] == {
+        "kind": "import",
+        "observation_id": "impe-version-import",
+        "observed_at": "2026-08-05T12:30:00+00:00",
+        "tool_version": "Nessus 10.9.1",
+        "batch_id": "batch-version-import",
+        "parser_version": "nessus-xml-cpe-v1",
     }
+    assert persist_version_inference_candidate(
+        risk_db,
+        "version-owner",
+        {**import_candidate, "observed_version": "2.5.2"},
+    ) is None
+    for source_key, value in (
+        ("observation_id", "impe-forged"),
+        ("observed_at", "2026-08-05T12:31:00+00:00"),
+        ("tool_version", "Nessus 99.0"),
+        ("parser_version", "nessus-xml-cpe-v2"),
+    ):
+        assert persist_version_inference_candidate(
+            risk_db,
+            "version-owner",
+            {
+                **import_candidate,
+                "source": {**import_candidate["source"], source_key: value},
+            },
+        ) is None
     saved_import_inference = persist_version_inference_candidate(
         risk_db, "version-owner", import_candidate
     )
@@ -2296,6 +2421,46 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "run_id": "",
         "entity_id": "entity-version-import",
     }
+    repeated_nessus = materialize_nessus_import_version_inferences(
+        risk_db,
+        "version-owner",
+        source_batch_id="batch-version-import",
+        now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
+    )
+    assert repeated_nessus["materialized_count"] == 1
+    assert repeated_nessus["finding_created_count"] == 0
+    assert repeated_nessus["source_created_count"] == 0
+    risk_db.execute(
+        "UPDATE atlas_import_batches SET status = 'applying' WHERE id = 'batch-version-import'"
+    )
+    rejected_unapplied_nessus = materialize_nessus_import_version_inferences(
+        risk_db,
+        "version-owner",
+        source_batch_id="batch-version-import",
+    )
+    assert rejected_unapplied_nessus["candidate_count"] == 0
+    assert rejected_unapplied_nessus["materialized_count"] == 0
+    risk_db.execute(
+        "UPDATE atlas_import_batches SET status = 'applied' WHERE id = 'batch-version-import'"
+    )
+    risk_db.execute(
+        "UPDATE atlas_import_batches SET team_id = 'team-version-owner' "
+        "WHERE id = 'batch-version-import'"
+    )
+    assert correlate_nessus_import_with_stored_nvd(
+        risk_db,
+        "team-member-session",
+        source_batch_id="batch-version-import",
+        team_id="team-version-owner",
+    )["candidate_count"] == 1
+    assert correlate_nessus_import_with_stored_nvd(
+        risk_db,
+        "version-owner",
+        source_batch_id="batch-version-import",
+    )["candidate_count"] == 0
+    risk_db.execute(
+        "UPDATE atlas_import_batches SET team_id = '' WHERE id = 'batch-version-import'"
+    )
     incomplete_page = materialize_stored_nvd_cpe_candidate_page(
         risk_db,
         {**observation, "observation_id": ""},

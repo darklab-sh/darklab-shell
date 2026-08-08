@@ -192,6 +192,8 @@ Atlas CycloneDX import coverage separately pins bounded nested components, depen
 
 Nessus import coverage pins exact service CPE normalization, host and port context, scan-time and scanner-version provenance, malformed and wildcard rejection, bounded typed evidence, and durable preview/apply storage without treating an observed version as a confirmed vulnerability.
 
+Nessus inference coverage re-reads owner-scoped typed evidence from an applied batch before saving. SQLite and real Postgres tests pin exact observation, target, subject signature, CPE/version, tool/parser, and timestamp matching; tampered candidates, unrelated owners, and incomplete batches fail closed, while repeated valid materialization stays idempotent.
+
 SARIF import coverage pins bounded tool and automation identity, rule metadata, full and partial fingerprints, direct and artifact-index locations, source regions, safe web and repository-relative provenance, and warning-backed rejection of file URIs, traversal, credentials, backslashes, and invalid references. Atlas browser coverage keeps SARIF and CycloneDX available through the existing import picker with format-appropriate file hints, evidence counts and samples, and permission-aware apply controls.
 
 Compressed Atlas import coverage pins bounded gzip and single-report ZIP expansion, the original-upload digest, file-picker hints, and fail-closed rejection of oversized, malformed, nested, multi-report, and unsafe-path archives.

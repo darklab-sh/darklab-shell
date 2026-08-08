@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.output_targets import command_root
+from services.assessments.nessus_import_observations import persisted_nessus_import_observation_matches
 
 
 _RUN_PARSER_PREFIXES = {"httpx": "httpx-", "nmap": "nmap-"}
@@ -41,7 +42,11 @@ def resolve_version_inference_source(
         ):
             return None
         return row, source_root
-    return (row, "import") if str(row["status"] or "") == "applied" else None
+    if str(row["status"] or "") != "applied":
+        return None
+    return (row, "import") if persisted_nessus_import_observation_matches(
+        conn, session_id, team_id, record
+    ) else None
 
 
 def resolve_version_inference_entity(

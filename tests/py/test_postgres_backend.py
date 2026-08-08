@@ -278,11 +278,17 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from services.assessments.httpx_inference_materialization import (
         materialize_httpx_json_version_inferences,
     )
+    from services.assessments.nessus_inference_materialization import (
+        materialize_nessus_import_version_inferences,
+    )
+    from services.assessments.nessus_stored_nvd import correlate_nessus_import_with_stored_nvd
     from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
     from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
     from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
     from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
     from services.assessments.version_inference_persistence import persist_version_inference_candidate
+    from services.intel.canonical import entity_signature
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
 
     conn = postgres_schema.conn
     pre_comparison_migrations = tuple(
@@ -1079,6 +1085,77 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     assert compat.execute(
         "SELECT tool_root FROM findings WHERE entity_id = 'entity-postgres-version-url'"
     ).fetchone()["tool_root"] == "httpx"
+    nessus_target = "db-import.example.test"
+    nessus_cpe = "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*"
+    nessus_target_key = entity_signature("domain", nessus_target)
+    compat.execute(
+        "INSERT INTO atlas_import_batches "
+        "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
+        "VALUES ('import-postgres-nessus-1', 'version-postgres-owner', 'Nessus', "
+        "'nessus_xml', 'Postgres Nessus', ?, ?, 'applied')",
+        ("2026-08-08T11:00:00+00:00", "2026-08-08T11:00:00+00:00"),
+    )
+    compat.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) "
+        "VALUES ('entity-postgres-nessus', 'version-postgres-owner', 'domain', ?, ?, ?, ?, 1, ?)",
+        (
+            nessus_target,
+            "signature-postgres-nessus",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO atlas_entity_import_links "
+        "(entity_id, batch_id, first_observed_at, last_observed_at, occurrence_count, created, updated) "
+        "VALUES ('entity-postgres-nessus', 'import-postgres-nessus-1', ?, ?, 1, ?, ?)",
+        ("2026-08-08T11:00:00+00:00",) * 4,
+    )
+    compat.execute(
+        "INSERT INTO atlas_import_evidence "
+        "(id, batch_id, evidence_type, subject_key, label, row_number, external_id, observed_at, "
+        "source_detail_json, created, updated) VALUES ('impe-postgres-nessus-1', "
+        "'import-postgres-nessus-1', 'nessus_service_version', ?, 'Postgres 1.5', 1, '1234', "
+        "?, ?, ?, ?)",
+        (
+            f"{nessus_target_key}\x1f{nessus_cpe}",
+            "2026-08-08T11:00:00+00:00",
+            Jsonb({
+                "adapter": "nessus",
+                "target_kind": "domain",
+                "target_value": nessus_target,
+                "target_key": nessus_target_key,
+                "cpe": nessus_cpe,
+                "version": "1.5",
+                "tool_version": "Nessus 10.9.1",
+                "parser_version": "nessus-xml-cpe-v1",
+            }),
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    postgres_nessus_candidates = correlate_nessus_import_with_stored_nvd(
+        compat,
+        "version-postgres-owner",
+        source_batch_id="import-postgres-nessus-1",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_nessus_candidates["candidate_count"] == 1
+    assert postgres_nessus_candidates["observations"][0]["observation_id"] == (
+        "impe-postgres-nessus-1"
+    )
+    postgres_nessus_inference = materialize_nessus_import_version_inferences(
+        compat,
+        "version-postgres-owner",
+        source_batch_id="import-postgres-nessus-1",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_nessus_inference["materialized_count"] == 1
+    assert dict(compat.execute(
+        "SELECT validation_method, origin FROM findings WHERE entity_id = 'entity-postgres-nessus'"
+    ).fetchone()) == {"validation_method": "version_inference", "origin": "import"}
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname
