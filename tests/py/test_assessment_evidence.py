@@ -12,9 +12,11 @@ import uuid
 
 import pytest
 
+import config as app_config
 from conftest import build_test_config, make_test_app
 from core.database import db_connect, db_init
 from core.database_backend import DatabaseBackend
+from services.assessments import dalfox_parameter_options
 from services.assessments.cleanup import (
     RUN_EVIDENCE_UNAVAILABLE_REASON,
     mark_run_evidence_unavailable_on_conn,
@@ -28,6 +30,9 @@ from services.assessments.command_modes import (
 )
 from services.assessments.dalfox_parameter_evidence import (
     resolve_project_dalfox_parameter_evidence,
+)
+from services.assessments.dalfox_parameter_options import (
+    list_project_dalfox_parameter_options,
 )
 from services.assessments.dalfox_parameter_observations import (
     DALFOX_DISCOVERY_PARSER_VERSION,
@@ -43,6 +48,7 @@ from services.assessments.evidence_matching import (
 from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
 from services.assessments.handoff import get_project_assessment_finding_changes
 from services.assessments.lifecycle import update_assessment_cycle
+from services.assessments.nuclei_takeover_launch import materialize_assessment_run_launch
 from services.assessments.mutations import update_manual_check_state_on_conn
 from services.assessments.reconciliation import reconcile_assessment_findings_on_conn
 from services.assessments.reconciliation_cleanup import (
@@ -50,6 +56,10 @@ from services.assessments.reconciliation_cleanup import (
     reconciliation_deletion_counts,
 )
 from services.assessments.reconciliation_read import assessment_finding_delta_read_model
+from services.assessments.recommended_actions import (
+    confirm_recommended_action_plan,
+    get_recommended_action_plan,
+)
 from services.assessments.storage import create_assessment_cycle
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.crud import create_project, delete_project
@@ -234,6 +244,7 @@ def _save_dalfox_parameter_evidence(
 
 def test_saved_dalfox_parameter_evidence_resolves_one_exact_project_observation(
     assessment_factory,
+    monkeypatch,
 ):
     factory, cleanup = assessment_factory
     target = "https://app.example.test/search?q=one"
@@ -259,6 +270,12 @@ def test_saved_dalfox_parameter_evidence_resolves_one_exact_project_observation(
             observation_id,
             expected_target=target,
         )
+        options = list_project_dalfox_parameter_options(
+            conn, session_id, "", project_id, target,
+        )
+        cross_project = list_project_dalfox_parameter_options(
+            conn, session_id, "", "prj_missing", target,
+        )
 
     assert facts is not None
     assert facts.command_mode == DALFOX_PARAMETER_DISCOVERY_MODE
@@ -271,6 +288,24 @@ def test_saved_dalfox_parameter_evidence_resolves_one_exact_project_observation(
     assert evidence.tool_version == "v3.1.2"
     assert evidence.parser_version == DALFOX_DISCOVERY_PARSER_VERSION
     assert evidence.xss_context(request_limit=64).source_parameter_observation_id == observation_id
+    assert options.overflow is False
+    assert options.items == (evidence,)
+    assert options.selected(run_id, observation_id) == evidence
+    assert options.public_items() == [{
+        "source_run_id": run_id,
+        "observation_id": observation_id,
+        "parameter": "q",
+        "location": "Query",
+        "tool_version": "v3.1.2",
+    }]
+    assert cross_project.items == ()
+    monkeypatch.setattr(dalfox_parameter_options, "DALFOX_PARAMETER_OPTION_MAX_RUNS", 0)
+    with db_connect() as conn:
+        overflow = list_project_dalfox_parameter_options(
+            conn, session_id, "", project_id, target,
+        )
+    assert overflow.items == ()
+    assert overflow.overflow is True
 
 
 def test_saved_dalfox_parameter_evidence_rejects_scope_partial_and_provenance_drift(
@@ -338,6 +373,7 @@ def test_saved_dalfox_parameter_evidence_rejects_scope_partial_and_provenance_dr
             expected_target=target,
         ) is None
 
+
         duplicate_preview = [*preview, preview[1]]
         conn.execute(
             "UPDATE runs SET output_preview = ?, output_line_count = ? WHERE id = ?",
@@ -375,6 +411,115 @@ def test_saved_dalfox_parameter_evidence_rejects_scope_partial_and_provenance_dr
             tampered_id,
             expected_target=target,
         ) is None
+
+
+def test_assessment_xss_preview_confirms_and_materializes_only_selected_saved_evidence(
+    assessment_factory,
+    monkeypatch,
+):
+    factory, cleanup = assessment_factory
+    target = "https://app.example.test/search?q=one"
+    profile = _profile(rule=_rule(
+        command_roots=["dalfox"],
+        command_modes=[DALFOX_XSS_VALIDATION_MODE],
+        structured_output_kinds=["findings"],
+    ))
+    profile["version"] = "1.4"
+    check = profile["checks"][0]
+    check.update({
+        "key": "xss_validation",
+        "category": "validation",
+        "label": "XSS validation",
+        "purpose": "Validate one reviewed query parameter.",
+        "target_types": ["url"],
+        "policy_level": "intrusive",
+        "recommended_action": "command:dalfox",
+    })
+    session_id, project_id, assessment_id = factory(
+        [("url", target)],
+        profile=profile,
+    )
+    run_id = _seed_linked_run(
+        cleanup,
+        session_id,
+        project_id,
+        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl "
+        "--no-color --timeout 10 --scan-timeout 60 --rate-limit 10 --workers 5 "
+        "--max-concurrent-targets 1 --max-targets-per-host 1",
+    )
+    observation_id, _preview = _save_dalfox_parameter_evidence(run_id, target)
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM project_assessment_checks "
+            "WHERE assessment_id = ? AND check_key = 'xss_validation'",
+            (assessment_id,),
+        ).fetchone()
+    check_id = str(row["id"])
+    monkeypatch.setitem(app_config.CFG, "assessment_intrusive_actions_enabled", True)
+
+    chooser = get_recommended_action_plan(
+        session_id, project_id, assessment_id, check_id,
+    )
+    assert chooser["launchable"] is False
+    assert chooser["evidence_selection"]["options"] == [{
+        "source_run_id": run_id,
+        "observation_id": observation_id,
+        "parameter": "q",
+        "location": "Query",
+        "tool_version": "v3.1.2",
+    }]
+    selected = get_recommended_action_plan(
+        session_id,
+        project_id,
+        assessment_id,
+        check_id,
+        evidence_selection={
+            "source_run_id": run_id,
+            "parameter_observation_id": observation_id,
+        },
+    )
+    assert selected["launchable"] is True
+    assert selected["display_command"].startswith("dalfox ")
+    assert "--input-type url --param q:query" in selected["display_command"]
+    assert selected["evidence_selection"]["selected"]["observation_id"] == observation_id
+    confirmed = confirm_recommended_action_plan(
+        session_id,
+        project_id,
+        assessment_id,
+        check_id,
+        {
+            "confirmed": True,
+            "plan_digest": selected["plan_digest"],
+            "source_run_id": run_id,
+            "parameter_observation_id": observation_id,
+        },
+    )
+    assert confirmed == selected
+    protected, context = materialize_assessment_run_launch(
+        session_id, project_id, confirmed,
+    )
+    assert "--only-discovery" in protected.execution_command
+    assert context.reviewed_execution is not None
+    assert context.reviewed_execution.execution_command == selected["display_command"]
+    assert context.output_signal_context is not None
+    assert context.broker_kwargs()["reviewed_execution"] is context.reviewed_execution
+    assert protected.audit_summary == {
+        "parameter_source_run_id": run_id,
+        "parameter_observation_id": observation_id,
+    }
+
+    unavailable = get_recommended_action_plan(
+        session_id,
+        project_id,
+        assessment_id,
+        check_id,
+        evidence_selection={
+            "source_run_id": run_id,
+            "parameter_observation_id": "obs_" + ("0" * 32),
+        },
+    )
+    assert unavailable["launchable"] is False
+    assert "unavailable" in unavailable["unavailable_reason"]
 
 
 def _target_inputs(*values: str):

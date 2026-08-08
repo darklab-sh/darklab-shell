@@ -10,6 +10,8 @@ import logging
 from typing import Any, Mapping
 
 from services.assessments.action_plans import AssessmentActionError
+from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
+from services.assessments.dalfox_xss_launch import materialize_reviewed_dalfox_xss_launch
 from services.assessments.http_profile_execution import (
     ProtectedHttpLaunch,
     materialize_http_profile_launch,
@@ -31,6 +33,7 @@ log = logging.getLogger("shell")
 class AssessmentRunLaunchContext:
     trusted_execution_args: tuple[str, ...]
     output_signal_context: RunOutputSignalContext | None = None
+    reviewed_execution: ReviewedDalfoxXssExecution | None = None
 
     def broker_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
@@ -38,6 +41,8 @@ class AssessmentRunLaunchContext:
         }
         if self.output_signal_context is not None:
             kwargs["output_signal_context"] = self.output_signal_context
+        if self.reviewed_execution is not None:
+            kwargs["reviewed_execution"] = self.reviewed_execution
         return kwargs
 
 
@@ -101,6 +106,19 @@ def materialize_assessment_run_launch(
     actor_member_id: str = "",
 ) -> tuple[ProtectedHttpLaunch, AssessmentRunLaunchContext]:
     """Compose protected HTTP material with app-owned evidence context."""
+    xss_launch = materialize_reviewed_dalfox_xss_launch(
+        session_id,
+        project_id,
+        plan,
+        team_id=team_id,
+        actor_member_id=actor_member_id,
+    )
+    if xss_launch is not None:
+        return xss_launch.protected, AssessmentRunLaunchContext(
+            trusted_execution_args=xss_launch.protected.trusted_execution_args,
+            output_signal_context=xss_launch.output_signal_context,
+            reviewed_execution=xss_launch.reviewed_execution,
+        )
     if str(plan.get("check_key") or "") == NUCLEI_TAKEOVER_CHECK_KEY:
         target = plan.get("target")
         execution_plan = reviewed_takeover_command_plan(

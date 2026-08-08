@@ -36,6 +36,10 @@ def api_project_assessment_action_preview(project_id, assessment_id, check_id):
         session_id = api_routes._require_session_id()
         owner_scope = api_routes._api_request_scope()
         http_profile_id = str(request.args.get("http_profile_id") or "").strip()
+        evidence_selection = {
+            key: str(request.args.get(key) or "").strip()
+            for key in ("source_run_id", "parameter_observation_id")
+        }
         if http_profile_id:
             api_routes._require_api_team_capability(
                 owner_scope,
@@ -49,6 +53,7 @@ def api_project_assessment_action_preview(project_id, assessment_id, check_id):
             team_id=owner_scope.team_id,
             actor_member_id=str((owner_scope.member or {}).get("id") or ""),
             http_profile_id=http_profile_id,
+            evidence_selection=evidence_selection,
         )
     except (
         ProjectWorkspaceError,

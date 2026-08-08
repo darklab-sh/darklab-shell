@@ -2193,7 +2193,7 @@ def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context()
     preview = client.get(action_path, headers=_headers(token))
     assert preview.status_code == 200
     plan = preview.get_json()["plan"]
-    assert plan["profile_version"] == "1.3"
+    assert plan["profile_version"] == "1.4"
     assert plan["policy_level"] == "safe"
     assert plan["target"]["type"] == "domain"
     assert plan["bounds"] == {
@@ -6240,16 +6240,21 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     ] == {"$ref": "#/components/schemas/AssessmentEvidenceLinkResponse"}
     assert paths[action_path]["get"]["responses"]["200"]["content"]["application/json"][
         "schema"
-    ] == {"$ref": "#/components/schemas/FindingVerificationActionPreview"}
+    ] == {"$ref": "#/components/schemas/AssessmentActionPreview"}
     action_preview_params = {
         parameter["name"]: parameter
         for parameter in paths[action_path]["get"]["parameters"]
     }
     assert "http_profile_id" in action_preview_params
+    assert "source_run_id" in action_preview_params
+    assert "parameter_observation_id" in action_preview_params
     assert paths[action_path]["post"]["requestBody"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/AssessmentActionLaunchRequest"}
     assert "http_profile_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
+    assert "source_run_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
+    assert "parameter_observation_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
+    assert "evidence_selection" in schemas["AssessmentActionPlan"]["properties"]
     assert schemas["FindingVerificationActionPlan"]["properties"]["bounds"]["properties"][
         "credential_use"
     ]["enum"] == ["none", "protected_http_profile"]

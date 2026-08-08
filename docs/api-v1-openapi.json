@@ -279,8 +279,14 @@
           "http_profile_id": {
             "type": "string"
           },
+          "parameter_observation_id": {
+            "type": "string"
+          },
           "plan_digest": {
             "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "source_run_id": {
             "type": "string"
           },
           "workspace_cwd": {
@@ -290,6 +296,280 @@
         "required": [
           "confirmed",
           "plan_digest"
+        ],
+        "type": "object"
+      },
+      "AssessmentActionPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "",
+                  "command",
+                  "workflow"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          },
+          "assessment_id": {
+            "type": "string"
+          },
+          "bounds": {
+            "additionalProperties": false,
+            "properties": {
+              "credential_use": {
+                "enum": [
+                  "none",
+                  "protected_http_profile"
+                ],
+                "type": "string"
+              },
+              "fan_out": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              },
+              "request_limit": {
+                "nullable": true,
+                "type": "integer"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "target_count": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              },
+              "time_limit_seconds": {
+                "nullable": true,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "target_count",
+              "fan_out",
+              "request_limit",
+              "time_limit_seconds",
+              "credential_use",
+              "summary"
+            ],
+            "type": "object"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "check_key": {
+            "type": "string"
+          },
+          "display_command": {
+            "type": "string"
+          },
+          "evidence_selection": {
+            "$ref": "#/components/schemas/AssessmentParameterEvidenceSelection"
+          },
+          "finding_id": {
+            "type": "string"
+          },
+          "http_profile": {
+            "additionalProperties": false,
+            "properties": {
+              "concurrency": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "credential_use": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "rate_limit_per_second": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "credential_use"
+            ],
+            "type": "object"
+          },
+          "launchable": {
+            "type": "boolean"
+          },
+          "plan_digest": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "profile_key": {
+            "type": "string"
+          },
+          "profile_version": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "scope": {
+            "additionalProperties": false,
+            "properties": {
+              "fan_out": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              },
+              "kind": {
+                "enum": [
+                  "project_target"
+                ],
+                "type": "string"
+              },
+              "project_id": {
+                "type": "string"
+              },
+              "target_count": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "project_id",
+              "target_count",
+              "fan_out"
+            ],
+            "type": "object"
+          },
+          "target": {
+            "additionalProperties": false,
+            "properties": {
+              "entity_id": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "domain",
+                  "ip",
+                  "url"
+                ],
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entity_id",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          },
+          "unavailable_reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "project_id",
+          "finding_id",
+          "assessment_id",
+          "check_id",
+          "check_key",
+          "profile_key",
+          "profile_version",
+          "action",
+          "target",
+          "policy_level",
+          "http_profile",
+          "scope",
+          "bounds",
+          "display_command",
+          "launchable",
+          "unavailable_reason",
+          "requires_confirmation",
+          "plan_digest"
+        ],
+        "type": "object"
+      },
+      "AssessmentActionPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/AssessmentActionPlan"
+          }
+        },
+        "required": [
+          "plan"
         ],
         "type": "object"
       },
@@ -1777,6 +2057,80 @@
         },
         "required": [
           "state"
+        ],
+        "type": "object"
+      },
+      "AssessmentParameterEvidenceOption": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "enum": [
+              "Query"
+            ],
+            "type": "string"
+          },
+          "observation_id": {
+            "type": "string"
+          },
+          "parameter": {
+            "type": "string"
+          },
+          "source_run_id": {
+            "type": "string"
+          },
+          "tool_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_run_id",
+          "observation_id",
+          "parameter",
+          "location",
+          "tool_version"
+        ],
+        "type": "object"
+      },
+      "AssessmentParameterEvidenceSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "dalfox_parameter_observation"
+            ],
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentParameterEvidenceOption"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "overflow": {
+            "type": "boolean"
+          },
+          "required": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "selected": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssessmentParameterEvidenceOption"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "kind",
+          "required",
+          "overflow",
+          "options",
+          "selected"
         ],
         "type": "object"
       },
@@ -11443,6 +11797,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Saved Project-linked Dalfox discovery run id.",
+            "in": "query",
+            "name": "source_run_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Reviewed parameter observation from the selected run.",
+            "in": "query",
+            "name": "parameter_observation_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11450,7 +11822,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FindingVerificationActionPreview"
+                  "$ref": "#/components/schemas/AssessmentActionPreview"
                 }
               }
             },

@@ -108,6 +108,51 @@ async function chooseHttpProfile(confirm, profiles) {
   return { cancelled: choice !== 'continue', profileId: select.value };
 }
 
+async function chooseParameterEvidence(confirm, selection) {
+  const candidates = Array.isArray(selection?.options) ? selection.options : [];
+  if (!candidates.length) return { cancelled: false, evidence: null };
+  const content = document.createElement('label');
+  content.className = 'project-assessment-action-profile-field';
+  const label = document.createElement('span');
+  label.textContent = 'Saved parameter evidence';
+  const select = document.createElement('select');
+  select.className = 'form-select';
+  select.setAttribute('aria-label', 'Saved parameter evidence for XSS validation');
+  candidates.forEach((item, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = `${text(item?.parameter, 'parameter')} · ${text(item?.location, 'location')} · ${text(item?.tool_version, 'Dalfox')}`;
+    select.appendChild(option);
+  });
+  content.append(label, select);
+  const choice = await confirm({
+    body: {
+      text: 'Choose the saved parameter to validate.',
+      note: 'Only the selected query parameter is used. The next screen shows the exact bounded command before anything runs.',
+    },
+    content,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'continue', label: 'Review run', role: 'primary' },
+    ],
+    defaultFocus: select,
+    refocusOnResolve: false,
+  });
+  const evidence = candidates[Number(select.value) || 0] || null;
+  return { cancelled: choice !== 'continue', evidence };
+}
+
+function previewPath(path, httpProfileId, evidence = null) {
+  const params = new URLSearchParams();
+  if (httpProfileId) params.set('http_profile_id', httpProfileId);
+  if (evidence?.source_run_id) params.set('source_run_id', evidence.source_run_id);
+  if (evidence?.observation_id) {
+    params.set('parameter_observation_id', evidence.observation_id);
+  }
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
 async function launchAssessmentAction(context, options = {}) {
   const ctx = context || {};
   const projectId = text(options.projectId);
@@ -133,15 +178,33 @@ async function launchAssessmentAction(context, options = {}) {
       httpProfileId = selected.profileId;
       trigger?.setAttribute('aria-busy', 'true');
     }
-    const previewPath = httpProfileId
-      ? `${path}?${new URLSearchParams({ http_profile_id: httpProfileId }).toString()}`
-      : path;
-    const previewResp = await request(previewPath, { cache: 'no-store' });
-    const previewData = await previewResp.json().catch(() => ({}));
+    let evidence = null;
+    let selectedPreviewPath = previewPath(path, httpProfileId);
+    let previewResp = await request(selectedPreviewPath, { cache: 'no-store' });
+    let previewData = await previewResp.json().catch(() => ({}));
     if (!previewResp.ok) {
       throw responseError(previewData, previewResp.status, 'Could not load this assessment action.');
     }
-    const plan = previewData?.plan || {};
+    let plan = previewData?.plan || {};
+    if (plan.evidence_selection?.required && !plan.evidence_selection?.selected) {
+      if (typeof confirm !== 'function') {
+        throw new Error('Assessment launch confirmation is unavailable.');
+      }
+      trigger?.removeAttribute('aria-busy');
+      const selected = await chooseParameterEvidence(confirm, plan.evidence_selection);
+      if (selected.cancelled) return false;
+      evidence = selected.evidence;
+      if (evidence) {
+        trigger?.setAttribute('aria-busy', 'true');
+        selectedPreviewPath = previewPath(path, httpProfileId, evidence);
+        previewResp = await request(selectedPreviewPath, { cache: 'no-store' });
+        previewData = await previewResp.json().catch(() => ({}));
+        if (!previewResp.ok) {
+          throw responseError(previewData, previewResp.status, 'Could not load this assessment action.');
+        }
+        plan = previewData?.plan || {};
+      }
+    }
     if (!plan.launchable) {
       ctx.setProjectWorkspaceMessage?.(
         text(plan.unavailable_reason, 'This assessment action is unavailable.'),
@@ -159,7 +222,7 @@ async function launchAssessmentAction(context, options = {}) {
         note: 'The run will be linked to this Project. Compatible saved output can update this check, but it will not create or close a finding automatically.',
       },
       content: planContent(plan),
-      tone: plan.policy_level === 'standard' ? 'warning' : null,
+      tone: ['standard', 'intrusive'].includes(plan.policy_level) ? 'warning' : null,
       actions: [
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         { id: 'run', label: 'Start run', role: 'primary' },
@@ -175,6 +238,10 @@ async function launchAssessmentAction(context, options = {}) {
         confirmed: true,
         plan_digest: text(plan.plan_digest),
         ...(httpProfileId ? { http_profile_id: httpProfileId } : {}),
+        ...(evidence ? {
+          source_run_id: text(evidence.source_run_id),
+          parameter_observation_id: text(evidence.observation_id),
+        } : {}),
       }),
     });
     const launchData = await launchResp.json().catch(() => ({}));

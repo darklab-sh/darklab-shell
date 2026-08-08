@@ -470,6 +470,96 @@ describe('project assessment controller', () => {
     expect(controller.stateFor('prj_1').category).toBe('discovery')
   })
 
+  it('chooses reviewed saved parameter evidence before launching XSS validation', async () => {
+    const xssDetail = {
+      ...detail,
+      checks: {
+        ...detail.checks,
+        checks: [{ ...detail.checks.checks[0], recommended_action_key: 'command:dalfox' }],
+        total: 1,
+      },
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(xssDetail)
+      return responseFor(url, options)
+    })
+    const actionPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_1/recommended-action'
+    const evidence = {
+      source_run_id: 'run_discovery',
+      observation_id: 'obs_reviewed',
+      parameter: 'q',
+      location: 'Query',
+      tool_version: 'v3.1.2',
+    }
+    const chooser = {
+      launchable: false,
+      unavailable_reason: 'Choose one saved query-parameter observation.',
+      evidence_selection: {
+        required: true,
+        selected: null,
+        options: [evidence],
+      },
+    }
+    const plan = {
+      action: { id: 'dalfox', key: 'command:dalfox', kind: 'command' },
+      target: { entity_id: 'ent_1', type: 'url', value: 'https://example.com/?q=one' },
+      http_profile: { name: '', credential_use: 'none' },
+      policy_level: 'intrusive',
+      scope: { target_count: 1, fan_out: 1 },
+      bounds: { summary: 'One reviewed query parameter.', credential_use: 'none' },
+      display_command: 'dalfox https://example.com/?q=one --param q:query --skip-discovery',
+      launchable: true,
+      evidence_selection: { required: true, selected: evidence, options: [evidence] },
+      plan_digest: 'c'.repeat(64),
+    }
+    const selectedPath = `${actionPath}?source_run_id=run_discovery&parameter_observation_id=obs_reviewed`
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (options.method === 'POST') {
+        return apiResponse({ run: { run_id: 'run_xss' }, plan })
+      }
+      return apiResponse({ plan: url === selectedPath ? plan : chooser })
+    })
+    const showConfirm = vi.fn(async (options) => {
+      if (options.body?.text === 'Choose the saved parameter to validate.') {
+        expect(options.content.querySelector('select').getAttribute('aria-label'))
+          .toBe('Saved parameter evidence for XSS validation')
+        expect(options.content.textContent).toContain('q · Query · v3.1.2')
+        return 'continue'
+      }
+      expect(options.tone).toBe('warning')
+      expect(options.content.textContent).toContain('--param q:query')
+      return 'run'
+    })
+    const attachActiveRunFromMonitor = vi.fn(async () => true)
+    const ctx = makeContext(projectWorkspaceRequest, {
+      apiFetch,
+      showConfirm,
+      attachActiveRunFromMonitor,
+    })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle').click()
+    ;[...container.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'Run Dalfox').click()
+
+    await vi.waitFor(() => expect(attachActiveRunFromMonitor).toHaveBeenCalled())
+    expect(apiFetch).toHaveBeenNthCalledWith(1, actionPath, { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenNthCalledWith(2, selectedPath, { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenNthCalledWith(3, actionPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        confirmed: true,
+        plan_digest: 'c'.repeat(64),
+        source_run_id: 'run_discovery',
+        parameter_observation_id: 'obs_reviewed',
+      }),
+    })
+  })
+
   it('selects an available HTTP role before previewing and launching a protected assessment action', async () => {
     const protectedDetail = {
       ...detail,

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES
+from services.assessments.action_plans import build_assessment_action_plan
 from services.assessments.service_actions import service_actions, service_evidence_state
 from services.assessments.command_plans import command_plan
 from services.assessments.cyclonedx_package_observations import (
@@ -38,6 +39,7 @@ from services.assessments.dalfox_parameter_observations import (
 from services.assessments.dalfox_parameter_evidence import (
     ReviewedDalfoxParameterEvidence,
 )
+from services.assessments.dalfox_parameter_options import DalfoxParameterOptions
 from services.assessments.dalfox_xss_command import (
     DALFOX_XSS_MAX_PAYLOADS_PER_PARAMETER,
     DALFOX_XSS_RATE_LIMIT_PER_SECOND,
@@ -49,6 +51,7 @@ from services.assessments.dalfox_xss_command import (
     reviewed_dalfox_xss_command_plan,
 )
 from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
+from services.assessments.dalfox_xss_actions import DalfoxXssActionContext
 from services.assessments.dalfox_xss_observations import (
     DALFOX_XSS_JSON_MAX_LINE_BYTES,
     DALFOX_XSS_MAX_OBSERVATIONS,
@@ -1276,6 +1279,64 @@ def test_reviewed_dalfox_xss_command_is_exact_bounded_and_evidence_derived():
         "total_requests": DALFOX_XSS_REQUEST_LIMIT,
         "scan_duration_ms": 60_000,
     }}))["source_detail"]["dalfox_xss_scan"]["reported_finding_count"] == 0
+
+
+def test_reviewed_dalfox_xss_action_requires_enabled_saved_parameter_selection():
+    evidence = _reviewed_dalfox_parameter_evidence()
+    options = DalfoxParameterOptions((evidence,))
+    row = {
+        "check_id": "ach_xss",
+        "assessment_id": "asm_xss",
+        "check_key": "xss_validation",
+        "target_entity_id": "ent_xss",
+        "target_type": "url",
+        "target_value": evidence.target,
+        "policy_level": "intrusive",
+        "recommended_action_key": "command:dalfox",
+        "profile_key": "web",
+        "profile_version": "1.4",
+        "profile_snapshot": json.dumps({"checks": [{
+            "key": "xss_validation",
+            "policy_level": "intrusive",
+            "recommended_action": "command:dalfox",
+        }]}),
+        "assessment_status": "active",
+        "project_status": "active",
+    }
+    target = {"entity_id": "ent_xss", "type": "url", "value": evidence.target}
+    choose = build_assessment_action_plan(
+        row, target, "prj_xss",
+        dalfox_xss=DalfoxXssActionContext(options, None, False, False, True),
+    )
+    assert choose["launchable"] is False
+    assert choose["unavailable_reason"].startswith("Choose one saved query-parameter")
+    assert choose["evidence_selection"]["options"] == options.public_items()
+    assert choose["evidence_selection"]["selected"] is None
+
+    selected = DalfoxXssActionContext(options, evidence, True, False, True)
+    plan = build_assessment_action_plan(row, target, "prj_xss", dalfox_xss=selected)
+    assert plan["launchable"] is True
+    assert plan["policy_level"] == "intrusive"
+    assert plan["display_command"] == reviewed_dalfox_xss_command_plan(evidence).command
+    assert plan["bounds"]["request_limit"] == DALFOX_XSS_REQUEST_LIMIT
+    assert plan["bounds"]["time_limit_seconds"] == DALFOX_XSS_TIME_LIMIT_SECONDS
+    assert plan["evidence_selection"]["selected"] == options.public_items()[0]
+
+    protected = build_assessment_action_plan(
+        row, target, "prj_xss",
+        http_profile={"credential_use": ["headers"]},
+        dalfox_xss=selected,
+    )
+    assert protected["display_command"].endswith("--config [protected]")
+    assert protected["bounds"]["credential_use"] == "protected_http_profile"
+    disabled = build_assessment_action_plan(
+        row, target, "prj_xss",
+        dalfox_xss=DalfoxXssActionContext(options, evidence, True, False, False),
+    )
+    assert disabled["launchable"] is False
+    assert disabled["unavailable_reason"] == (
+        "Intrusive Assessment actions are disabled on this deployment."
+    )
 
 
 def test_reviewed_dalfox_xss_command_rejects_unbound_or_unsupported_evidence():

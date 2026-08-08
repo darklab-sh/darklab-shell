@@ -89,7 +89,7 @@ def resolve_project_dalfox_parameter_evidence(
     )
     if loaded.partial or not loaded.events or len(loaded.events) > DALFOX_PARAMETER_EVIDENCE_MAX_EVENTS:
         return None
-    return _review_events(
+    return review_dalfox_parameter_events(
         loaded.events,
         run_id,
         wanted_id,
@@ -132,7 +132,7 @@ def _project_run_row(
     return rows[0] if len(rows) == 1 else None
 
 
-def _review_events(
+def review_dalfox_parameter_events(
     events: list[Any],
     run_id: str,
     observation_id: str,
@@ -232,5 +232,6 @@ def _valid_observation(
 __all__ = [
     "DALFOX_PARAMETER_EVIDENCE_MAX_EVENTS",
     "ReviewedDalfoxParameterEvidence",
+    "review_dalfox_parameter_events",
     "resolve_project_dalfox_parameter_evidence",
 ]

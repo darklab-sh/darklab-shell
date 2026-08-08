@@ -106,10 +106,11 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
         "vulnerability_templates",
         "subdomain_takeover_confirmation",
         "parameter_discovery",
+        "xss_validation",
         "sql_injection_detection",
     }
     assert by_key["network"]["version"] == "1.0"
-    assert by_key["web"]["version"] == "1.3"
+    assert by_key["web"]["version"] == "1.4"
     for profile in catalog.profiles:
         for check in profile["checks"]:
             assert check["recommended_action"].startswith("command:")
@@ -123,6 +124,15 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
     assert parameter_check["evidence_rules"][0]["command_modes"] == [
         "dalfox_parameter_discovery"
     ]
+    xss_check = next(
+        check for check in by_key["web"]["checks"] if check["key"] == "xss_validation"
+    )
+    assert xss_check["target_types"] == ["url"]
+    assert xss_check["policy_level"] == "intrusive"
+    assert xss_check["evidence_rules"][0]["command_modes"] == [
+        "dalfox_xss_validation"
+    ]
+    assert xss_check["evidence_rules"][0]["negative_evidence"] is True
     sqlmap_check = next(
         check for check in by_key["web"]["checks"] if check["key"] == "sql_injection_detection"
     )

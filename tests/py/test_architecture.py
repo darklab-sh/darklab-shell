@@ -25,6 +25,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "auth.py",
     "openapi.py",
     "openapi_assessment_action_profile.py",
+    "openapi_assessment_action_schemas.py",
     "openapi_atlas_profile.py",
     "openapi_assessment_actions.py",
     "openapi_assessment_deltas.py",
@@ -223,6 +224,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/history.py", 1417, "already-resolved-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi.py", 2556, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_action_profile.py", 49, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_assessment_action_schemas.py",
+        100,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_actions.py", 89, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_deltas.py", 277, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_worklist.py", 195, "split-package-ratchet"),
@@ -468,13 +474,28 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/dalfox_parameter_evidence.py", 236, "split-package-ratchet"
     ),
     ModuleSizeBudget(
+        "app/services/assessments/dalfox_parameter_options.py", 160, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_xss_actions.py", 114, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_xss_contracts.py", 5, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/dalfox_xss_command.py", 99, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/assessments/dalfox_xss_execution.py", 53, "split-package-ratchet"
     ),
     ModuleSizeBudget(
+        "app/services/assessments/dalfox_xss_launch.py", 124, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/dalfox_xss_observations.py", 333, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/recommended_action_builder.py", 77, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/stored_nvd_inference.py", 52, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/stored_osv_inference.py", 60, "split-package-ratchet"),

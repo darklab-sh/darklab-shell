@@ -29,6 +29,10 @@ def _error(exc: Exception):
 )
 def project_assessment_action_preview(project_id, assessment_id, check_id):
     http_profile_id = str(request.args.get("http_profile_id") or "").strip()
+    evidence_selection = {
+        key: str(request.args.get(key) or "").strip()
+        for key in ("source_run_id", "parameter_observation_id")
+    }
     required_capability = Capability.MANAGE_SECRETS if http_profile_id else None
     session_id, team_id, error_response = project_routes._project_owner(
         required_capability
@@ -46,6 +50,7 @@ def project_assessment_action_preview(project_id, assessment_id, check_id):
                 session_id, team_id
             ),
             http_profile_id=http_profile_id,
+            evidence_selection=evidence_selection,
         )
     except (
         ProjectWorkspaceError,

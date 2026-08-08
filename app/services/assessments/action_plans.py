@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.assessments.command_plans import command_plan
+from services.assessments.dalfox_xss_actions import DalfoxXssActionContext
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
 from services.projects.scope import shared_owner_where
@@ -100,6 +101,7 @@ def build_assessment_action_plan(
     http_profile: Mapping[str, Any] | None = None,
     http_profile_web_target: str = "",
     http_profile_unavailable_reason: str = "",
+    dalfox_xss: DalfoxXssActionContext | None = None,
 ) -> dict[str, Any]:
     """Build one bounded plan from a persisted check and its frozen profile."""
     frozen = _frozen_check(row)
@@ -142,24 +144,32 @@ def build_assessment_action_plan(
     elif policy_level == "destructive":
         launchable = False
         unavailable_reason = "Destructive assessment actions cannot launch from Projects."
-    elif policy_level == "intrusive":
+    elif policy_level == "intrusive" and dalfox_xss is None:
         launchable = False
         unavailable_reason = (
             "Intrusive assessment actions require a separate operator opt-in that is "
             "not enabled here."
         )
-    elif policy_level not in _SUPPORTED_POLICIES:
+    elif policy_level not in _SUPPORTED_POLICIES and policy_level != "intrusive":
         launchable = False
         unavailable_reason = "The saved action has an unsupported execution policy."
+    elif dalfox_xss and (action_id != "dalfox" or not target or target["type"] != "url"):
+        launchable = False
+        unavailable_reason = "The reviewed XSS action no longer matches its saved URL contract."
     elif http_profile_unavailable_reason:
         launchable = False
         unavailable_reason = http_profile_unavailable_reason
+    elif dalfox_xss and dalfox_xss.unavailable_reason():
+        launchable = False
+        unavailable_reason = dalfox_xss.unavailable_reason()
     elif check_key == NUCLEI_TAKEOVER_CHECK_KEY and http_profile:
         launchable = False
         unavailable_reason = "The reviewed takeover check does not send saved credentials."
     elif target:
         selected_command = (
-            reviewed_takeover_command_plan(target["type"], target["value"])
+            dalfox_xss.command_plan(http_profile)
+            if dalfox_xss
+            else reviewed_takeover_command_plan(target["type"], target["value"])
             if check_key == NUCLEI_TAKEOVER_CHECK_KEY
             else command_plan(
                 action_id,
@@ -221,6 +231,8 @@ def build_assessment_action_plan(
         "unavailable_reason": unavailable_reason,
         "requires_confirmation": True,
     }
+    if dalfox_xss:
+        payload["evidence_selection"] = dalfox_xss.public_selection()
     payload["plan_digest"] = _digest(payload)
     return payload
 
@@ -235,7 +247,10 @@ def confirm_assessment_action_plan(
             "invalid_body",
             "Request body must be a JSON object.",
         )
-    allowed = {"confirmed", "http_profile_id", "plan_digest", "workspace_cwd"}
+    allowed = {
+        "confirmed", "http_profile_id", "parameter_observation_id",
+        "plan_digest", "source_run_id", "workspace_cwd",
+    }
     if set(data) - allowed:
         raise AssessmentActionError(
             "unsupported_fields",
