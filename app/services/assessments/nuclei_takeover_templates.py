@@ -40,7 +40,7 @@ class ReviewedNucleiTakeoverLaunch:
 
     @property
     def trusted_execution_args(self) -> tuple[str, ...]:
-        return ("-t", str(self.template_path), "-jsonl", "-dr")
+        return ("-t", str(self.template_path), "-jsonl", "-dr", "-ni")
 
 
 def reviewed_nuclei_takeover_launch() -> ReviewedNucleiTakeoverLaunch:

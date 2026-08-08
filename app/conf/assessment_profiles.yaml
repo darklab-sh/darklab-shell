@@ -71,7 +71,7 @@ profiles:
         completion_guidance: Collect the domain's current DNS records and review resolved hosts, delegation, and an explicit clean result when a record type is absent.
 
   - key: web
-    version: "1.1"
+    version: "1.2"
     label: Web assessment
     purpose: Map reachable web applications, discover their exposed content, and review structured vulnerability checks.
     target_types: [domain, ip, url]
@@ -136,6 +136,30 @@ profiles:
         policy_level: standard
         recommended_action: command:nuclei
         completion_guidance: Run the approved template set, review every saved finding, and retain a successful clean run when no template matches.
+      - key: subdomain_takeover_confirmation
+        version: "1.0"
+        category: validation
+        label: Subdomain takeover confirmation
+        purpose: >-
+          Check one approved domain for a reviewed dangling-provider fingerprint without
+          claiming the resource.
+        target_types: [domain]
+        evidence_rules:
+          - key: completed_takeover_confirmation
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [nuclei]
+            workflow_actions: []
+            structured_output_kinds: []
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:nuclei
+        completion_guidance: >-
+          Run the reviewed provider fingerprint and compare any match with saved DNS evidence
+          for the exact hostname. The check never claims a resource or performs a takeover.
       - key: parameter_discovery
         version: "1.0"
         category: enumeration

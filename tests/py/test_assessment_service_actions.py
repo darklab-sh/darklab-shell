@@ -37,6 +37,7 @@ from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_k
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_PARSER_VERSION
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
+from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
 from services.assessments import nuclei_takeover_launch
 from services.assessments.nuclei_takeover_launch import (
     NUCLEI_TAKEOVER_CHECK_KEY,
@@ -152,7 +153,7 @@ def test_app_owned_nuclei_takeover_template_is_digest_pinned_and_non_destructive
     assert launch.template.policy_level == "safe"
     assert launch.template_path.name == "github-pages-dangling-domain.yaml"
     assert launch.trusted_execution_args == (
-        "-t", str(launch.template_path), "-jsonl", "-dr",
+        "-t", str(launch.template_path), "-jsonl", "-dr", "-ni",
     )
     source = launch.template_path.read_text(encoding="utf-8")
     assert 'path:\n      - "{{BaseURL}}"' in source
@@ -213,7 +214,11 @@ def _takeover_launch_plan(**overrides):
             "type": "domain",
             "value": "dangling.example.com",
         },
-        "display_command": "nuclei -u dangling.example.com -severity high,critical",
+        "http_profile": {"name": "", "credential_use": "none"},
+        "display_command": (
+            "nuclei -u https://dangling.example.com -rl 2 -c 1 -timeout 10 "
+            "-retries 0 -silent -t [reviewed-takeover-template] -jsonl -dr -ni"
+        ),
     }
     plan.update(overrides)
     return plan
@@ -253,6 +258,7 @@ def test_assessment_launch_context_binds_reviewed_template_only_to_takeover_chec
         ({"action": {"key": "command:httpx", "kind": "command", "id": "httpx"}}, "httpx"),
         ({"target": {"type": "url", "value": "https://dangling.example.com"}}, "nuclei"),
         ({"display_command": "httpx dangling.example.com"}, "nuclei"),
+        ({"http_profile": {"id": "ahp_credentials"}}, "nuclei"),
     ],
 )
 def test_takeover_launch_context_rejects_contract_drift(
@@ -301,22 +307,13 @@ def test_takeover_launch_context_fails_closed_when_template_validation_fails(
     assert record.reason == "reviewed template unavailable"
 
 
-def test_assessment_launch_materialization_cleans_protected_files_on_contract_error(
+def test_takeover_launch_materialization_never_creates_protected_http_files(
     monkeypatch,
 ):
-    cleanup_calls = []
-
-    def _cleanup():
-        cleanup_calls.append(True)
-
-    protected = SimpleNamespace(
-        trusted_execution_args=("-sf", "/tmp/protected"),
-        cleanup=_cleanup,
-    )
     monkeypatch.setattr(
         nuclei_takeover_launch,
         "materialize_http_profile_launch",
-        lambda *_args, **_kwargs: protected,
+        lambda *_args, **_kwargs: pytest.fail("takeover launch requested HTTP material"),
     )
     with pytest.raises(
         nuclei_takeover_launch.AssessmentActionError,
@@ -328,7 +325,30 @@ def test_assessment_launch_materialization_cleans_protected_files_on_contract_er
             _takeover_launch_plan(policy_level="standard"),
         )
 
-    assert cleanup_calls == [True]
+def test_reviewed_takeover_command_is_one_domain_one_request_and_not_generic_nuclei():
+    display = reviewed_takeover_command_plan("domain", "dangling.example.com")
+    execution = reviewed_takeover_command_plan(
+        "domain",
+        "dangling.example.com",
+        protected_display=False,
+    )
+
+    assert display is not None and execution is not None
+    assert display.command == (
+        "nuclei -u https://dangling.example.com -rl 2 -c 1 -timeout 10 "
+        "-retries 0 -silent -t [reviewed-takeover-template] -jsonl -dr -ni"
+    )
+    assert execution.command == (
+        "nuclei -u https://dangling.example.com -rl 2 -c 1 -timeout 10 "
+        "-retries 0 -silent"
+    )
+    assert display.request_limit == 1
+    assert display.time_limit_seconds == 30
+    assert display.credential_use == "none"
+    assert "no resource claim" in display.boundary
+    assert "-severity" not in display.command
+    assert reviewed_takeover_command_plan("url", "https://dangling.example.com") is None
+    assert reviewed_takeover_command_plan("domain", "dangling.example.com;whoami") is None
 
 
 def test_historical_urls_are_safe_bounded_and_provenance_only():

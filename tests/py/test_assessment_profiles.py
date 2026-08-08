@@ -104,11 +104,12 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
         "http_profile",
         "content_discovery",
         "vulnerability_templates",
+        "subdomain_takeover_confirmation",
         "parameter_discovery",
         "sql_injection_detection",
     }
     assert by_key["network"]["version"] == "1.0"
-    assert by_key["web"]["version"] == "1.1"
+    assert by_key["web"]["version"] == "1.2"
     for profile in catalog.profiles:
         for check in profile["checks"]:
             assert check["recommended_action"].startswith("command:")
@@ -124,6 +125,41 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
     )
     assert sqlmap_check["recommended_action"] == "command:sqlmap"
     assert sqlmap_check["target_types"] == ["url"]
+    takeover_check = next(
+        check
+        for check in by_key["web"]["checks"]
+        if check["key"] == "subdomain_takeover_confirmation"
+    )
+    assert takeover_check == {
+        "key": "subdomain_takeover_confirmation",
+        "version": "1.0",
+        "category": "validation",
+        "label": "Subdomain takeover confirmation",
+        "purpose": (
+            "Check one approved domain for a reviewed dangling-provider fingerprint "
+            "without claiming the resource."
+        ),
+        "target_types": ["domain"],
+        "evidence_rules": [{
+            "key": "completed_takeover_confirmation",
+            "version": "1.0",
+            "evidence_types": ["run"],
+            "command_roots": ["nuclei"],
+            "workflow_actions": [],
+            "structured_output_kinds": [],
+            "target_match": "exact",
+            "completion": "succeeded",
+            "compatible_versions": ["*"],
+            "negative_evidence": True,
+        }],
+        "policy_level": "safe",
+        "recommended_action": "command:nuclei",
+        "completion_guidance": (
+            "Run the reviewed provider fingerprint and compare any match with saved DNS "
+            "evidence for the exact hostname. The check never claims a resource or "
+            "performs a takeover."
+        ),
+    }
 
 
 def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(tmp_path: Path):

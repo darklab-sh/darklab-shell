@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Web assessments now include a non-destructive subdomain takeover confirmation.**
+  - **What:** The Web 1.2 profile checks one approved domain with the app-owned reviewed provider fingerprint. The visible plan shows the reviewed-template placeholder, while launch injects only the digest-pinned template through trusted arguments. It makes one request, follows no redirects, sends no saved credentials, disables Interactsh, and never claims a provider resource. Generic Nuclei recommendations keep their existing profile and severity behavior.
+  - **Tests:** Focused profile, command-plan, service, browser/API route, module-size, and security coverage pins the exact domain, command, bounds, credential isolation, trusted arguments, and reviewed output context.
 - **Reviewed takeover evidence is bound to one exact Assessment launch contract.**
   - **What:** Only the dedicated safe web takeover check can add the app-owned Nuclei template and its immutable output-classification context to a run. Generic Nuclei recommendations keep their existing arguments and classification behavior. A changed profile, action, policy, target type, or display command fails closed, and protected HTTP material is cleaned up before either launch route returns an error.
   - **Tests:** Focused service and browser/API route coverage pins the dedicated binding, generic-action isolation, protected-argument composition, template-validation failure, contract-drift rejection, safe error logging, and cleanup-compatible route behavior.

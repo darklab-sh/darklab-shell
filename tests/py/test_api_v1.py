@@ -2168,6 +2168,75 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     assert not dalfox_config_path.parent.exists()
 
 
+def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context():
+    from services.assessments.nuclei_takeover_templates import reviewed_nuclei_takeover_launch
+    from services.runs.signal_context import RunOutputSignalContext
+
+    client = get_client()
+    token = _token(client)
+    project = _create_project(client, token, name="Reviewed takeover action")
+    _entity_id, _run_id = _seed_assessment_target(token, project["id"])
+    assessment = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(token),
+        json={"profile_key": "web", "title": "Takeover confirmation"},
+    ).get_json()
+    check = next(
+        item
+        for item in assessment["checks"]["checks"]
+        if item["check_key"] == "subdomain_takeover_confirmation"
+    )
+    action_path = (
+        f"/api/v1/projects/{project['id']}/assessments/"
+        f"{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
+    )
+    preview = client.get(action_path, headers=_headers(token))
+    assert preview.status_code == 200
+    plan = preview.get_json()["plan"]
+    assert plan["profile_version"] == "1.2"
+    assert plan["policy_level"] == "safe"
+    assert plan["target"]["type"] == "domain"
+    assert plan["bounds"] == {
+        "target_count": 1,
+        "fan_out": 1,
+        "request_limit": 1,
+        "time_limit_seconds": 30,
+        "credential_use": "none",
+        "summary": (
+            "One approved domain and one app-owned reviewed provider fingerprint; one "
+            "request, no redirects, no resource claim, and no takeover action."
+        ),
+    }
+    assert plan["display_command"].endswith(
+        "-t [reviewed-takeover-template] -jsonl -dr -ni"
+    )
+    assert "-severity" not in plan["display_command"]
+
+    started = SimpleNamespace(run_id="run_reviewed_takeover", status="running")
+    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
+         mock.patch(
+             "blueprints.api_v1._start_brokered_run_service",
+             return_value=started,
+         ) as start_run:
+        launched = client.post(
+            action_path,
+            headers=_headers(token),
+            json={"confirmed": True, "plan_digest": plan["plan_digest"]},
+        )
+
+    assert launched.status_code == 202
+    start_kwargs = start_run.call_args.kwargs
+    reviewed = reviewed_nuclei_takeover_launch()
+    assert start_kwargs["display_command"] == plan["display_command"]
+    assert start_kwargs["original_command"].endswith("-retries 0 -silent")
+    assert "[reviewed-takeover-template]" not in start_kwargs["original_command"]
+    assert "-severity" not in start_kwargs["original_command"]
+    assert start_kwargs["trusted_execution_args"] == reviewed.trusted_execution_args
+    assert start_kwargs["output_signal_context"] == RunOutputSignalContext(
+        nuclei_takeover_template=reviewed.template,
+    )
+
+
 def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
     client = get_client()
     token = _token(client)

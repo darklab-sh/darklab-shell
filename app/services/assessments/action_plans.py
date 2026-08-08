@@ -12,6 +12,8 @@ from typing import Any, Callable, Mapping
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.assessments.command_plans import command_plan
+from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
+from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
 from services.projects.scope import shared_owner_where
 
 
@@ -101,6 +103,7 @@ def build_assessment_action_plan(
 ) -> dict[str, Any]:
     """Build one bounded plan from a persisted check and its frozen profile."""
     frozen = _frozen_check(row)
+    check_key = str(row["check_key"] or "")
     action_key = str(row["recommended_action_key"] or "")
     action_kind, separator, action_id = action_key.partition(":")
     policy_level = str(row["policy_level"] or "")
@@ -151,13 +154,20 @@ def build_assessment_action_plan(
     elif http_profile_unavailable_reason:
         launchable = False
         unavailable_reason = http_profile_unavailable_reason
+    elif check_key == NUCLEI_TAKEOVER_CHECK_KEY and http_profile:
+        launchable = False
+        unavailable_reason = "The reviewed takeover check does not send saved credentials."
     elif target:
-        selected_command = command_plan(
-            action_id,
-            target["type"],
-            target["value"],
-            web_target=http_profile_web_target,
-            http_profile=http_profile,
+        selected_command = (
+            reviewed_takeover_command_plan(target["type"], target["value"])
+            if check_key == NUCLEI_TAKEOVER_CHECK_KEY
+            else command_plan(
+                action_id,
+                target["type"],
+                target["value"],
+                web_target=http_profile_web_target,
+                http_profile=http_profile,
+            )
         )
         if selected_command is None:
             launchable = False
@@ -176,7 +186,7 @@ def build_assessment_action_plan(
         "finding_id": finding_id,
         "assessment_id": str(row["assessment_id"] or ""),
         "check_id": str(row["check_id"] or ""),
-        "check_key": str(row["check_key"] or ""),
+        "check_key": check_key,
         "profile_key": str(row["profile_key"] or ""),
         "profile_version": str(row["profile_version"] or ""),
         "action": {

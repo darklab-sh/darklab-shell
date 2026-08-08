@@ -14,6 +14,11 @@ from services.assessments.http_profile_execution import (
     ProtectedHttpLaunch,
     materialize_http_profile_launch,
 )
+from services.assessments.nuclei_takeover_command import (
+    reviewed_takeover_command_plan,
+    reviewed_takeover_launch_plan_matches,
+)
+from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_templates import (
     NucleiTakeoverTemplateError,
     reviewed_nuclei_takeover_launch,
@@ -22,9 +27,6 @@ from services.runs.signal_context import RunOutputSignalContext
 
 
 log = logging.getLogger("shell")
-NUCLEI_TAKEOVER_CHECK_KEY = "subdomain_takeover_confirmation"
-
-
 @dataclass(frozen=True)
 class AssessmentRunLaunchContext:
     trusted_execution_args: tuple[str, ...]
@@ -47,21 +49,8 @@ def assessment_run_launch_context(
     """Add takeover evidence context only for the exact frozen check contract."""
     if str(plan.get("check_key") or "") != NUCLEI_TAKEOVER_CHECK_KEY:
         return AssessmentRunLaunchContext(tuple(trusted_execution_args))
-    action = plan.get("action")
-    target = plan.get("target")
-    valid_contract = (
-        plan.get("launchable") is True
-        and str(plan.get("profile_key") or "") == "web"
-        and str(plan.get("policy_level") or "") == "safe"
-        and isinstance(action, Mapping)
-        and action.get("key") == "command:nuclei"
-        and action.get("kind") == "command"
-        and action.get("id") == "nuclei"
-        and isinstance(target, Mapping)
-        and target.get("type") == "domain"
-        and str(plan.get("display_command") or "").startswith("nuclei ")
-    )
-    if not valid_contract:
+    if not reviewed_takeover_launch_plan_matches(plan):
+        action = plan.get("action")
         log.error("ASSESSMENT_TAKEOVER_LAUNCH_CONTRACT_REJECTED", extra={
             "project_id": str(plan.get("project_id") or "")[:64],
             "assessment_id": str(plan.get("assessment_id") or "")[:64],
@@ -112,13 +101,28 @@ def materialize_assessment_run_launch(
     actor_member_id: str = "",
 ) -> tuple[ProtectedHttpLaunch, AssessmentRunLaunchContext]:
     """Compose protected HTTP material with app-owned evidence context."""
-    protected = materialize_http_profile_launch(
-        session_id,
-        project_id,
-        plan,
-        team_id=team_id,
-        actor_member_id=actor_member_id,
-    )
+    if str(plan.get("check_key") or "") == NUCLEI_TAKEOVER_CHECK_KEY:
+        target = plan.get("target")
+        execution_plan = reviewed_takeover_command_plan(
+            str(target.get("type") or "") if isinstance(target, Mapping) else "",
+            str(target.get("value") or "") if isinstance(target, Mapping) else "",
+            protected_display=False,
+        )
+        protected = ProtectedHttpLaunch(
+            execution_plan.command if execution_plan else "",
+            (),
+            (),
+            None,
+            {},
+        )
+    else:
+        protected = materialize_http_profile_launch(
+            session_id,
+            project_id,
+            plan,
+            team_id=team_id,
+            actor_member_id=actor_member_id,
+        )
     try:
         context = assessment_run_launch_context(
             plan,
@@ -129,11 +133,3 @@ def materialize_assessment_run_launch(
             protected.cleanup()
         raise
     return protected, context
-
-
-__all__ = [
-    "AssessmentRunLaunchContext",
-    "NUCLEI_TAKEOVER_CHECK_KEY",
-    "assessment_run_launch_context",
-    "materialize_assessment_run_launch",
-]
