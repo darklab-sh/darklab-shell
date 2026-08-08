@@ -109,7 +109,7 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
         "sql_injection_detection",
     }
     assert by_key["network"]["version"] == "1.0"
-    assert by_key["web"]["version"] == "1.2"
+    assert by_key["web"]["version"] == "1.3"
     for profile in catalog.profiles:
         for check in profile["checks"]:
             assert check["recommended_action"].startswith("command:")
@@ -120,6 +120,9 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
     )
     assert parameter_check["recommended_action"] == "command:dalfox"
     assert parameter_check["evidence_rules"][0]["command_roots"] == ["dalfox"]
+    assert parameter_check["evidence_rules"][0]["command_modes"] == [
+        "dalfox_parameter_discovery"
+    ]
     sqlmap_check = next(
         check for check in by_key["web"]["checks"] if check["key"] == "sql_injection_detection"
     )
@@ -290,6 +293,12 @@ def test_invalid_local_yaml_keeps_the_last_valid_catalog(
                 {"negative_evidence": "yes"}
             ),
             "must be true or false",
+        ),
+        (
+            lambda data: data["profiles"][0]["checks"][0]["evidence_rules"][0].update(
+                {"command_modes": ["dalfox_shell"]}
+            ),
+            "unsupported value: dalfox_shell",
         ),
         (
             lambda data: data["profiles"][0].update(

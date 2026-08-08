@@ -18,6 +18,7 @@ import yaml
 
 import config as app_config
 import config_paths
+from services.assessments.command_modes import ASSESSMENT_COMMAND_MODES
 from services.projects.contracts import ProjectWorkspaceError
 
 
@@ -80,6 +81,7 @@ _EVIDENCE_RULE_FIELDS = frozenset({
     "version",
     "evidence_types",
     "command_roots",
+    "command_modes",
     "workflow_actions",
     "structured_output_kinds",
     "target_match",
@@ -218,10 +220,7 @@ def _known_action_references() -> tuple[frozenset[str], frozenset[str]]:
 
 
 def _recommended_action(
-    value: object,
-    *,
-    known_command_roots: frozenset[str],
-    known_workflow_ids: frozenset[str],
+    value: object, *, known_command_roots: frozenset[str], known_workflow_ids: frozenset[str]
 ) -> str:
     action = _required_text(value, "recommended_action", ASSESSMENT_PROFILE_ACTION_MAX_LEN)
     kind, separator, identifier = action.partition(":")
@@ -235,10 +234,7 @@ def _recommended_action(
 
 
 def _normalize_evidence_rule(
-    value: object,
-    *,
-    known_command_roots: frozenset[str],
-    known_workflow_ids: frozenset[str],
+    value: object, *, known_command_roots: frozenset[str], known_workflow_ids: frozenset[str]
 ) -> dict[str, Any]:
     rule = _mapping(value, "evidence rule")
     _reject_unknown_fields(rule, _EVIDENCE_RULE_FIELDS, "evidence rule")
@@ -263,15 +259,19 @@ def _normalize_evidence_rule(
             f"evidence rule workflow_actions contains unknown workflows: {', '.join(unknown_workflows)}"
         )
     compatible_versions = _string_list(
-        rule.get("compatible_versions", ["*"]),
-        "evidence rule compatible_versions",
+        rule.get("compatible_versions", ["*"]), "evidence rule compatible_versions"
     )
     if any(not ASSESSMENT_COMPATIBLE_VERSION_RE.fullmatch(item) for item in compatible_versions):
         raise _catalog_error("evidence rule compatible_versions contains an invalid constraint")
+    command_modes = _string_list(
+        rule.get("command_modes", []), "evidence rule command_modes",
+        allowed=ASSESSMENT_COMMAND_MODES,
+        allow_empty=True,
+    )
     negative_evidence = rule.get("negative_evidence", False)
     if not isinstance(negative_evidence, bool):
         raise _catalog_error("evidence rule negative_evidence must be true or false")
-    return {
+    normalized = {
         "key": _stable_key(rule.get("key"), "evidence rule key"),
         "version": _version(rule.get("version"), "evidence rule version"),
         "evidence_types": _string_list(
@@ -292,6 +292,9 @@ def _normalize_evidence_rule(
         "compatible_versions": compatible_versions,
         "negative_evidence": negative_evidence,
     }
+    if command_modes:
+        normalized["command_modes"] = command_modes
+    return normalized
 
 
 def _validate_evidence_rule_choices(rule: dict[str, Any]) -> None:

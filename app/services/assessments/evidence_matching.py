@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from core.output_targets import command_root, extract_target
+from services.assessments.command_modes import assessment_command_mode
 from services.commands.registry import command_project_target_inputs
 from services.intel.canonical import (
     CanonicalizationError,
@@ -43,6 +44,7 @@ class RunEvidenceFacts:
     structured_output_kinds: frozenset[str]
     workflow_actions: frozenset[str]
     finding_count: int
+    command_mode: str = ""
 
 
 def _canonical_identity(value: object, value_type: object = "target") -> EvidenceIdentity | None:
@@ -66,17 +68,13 @@ def _canonical_identity(value: object, value_type: object = "target") -> Evidenc
     return None
 
 
-def canonical_evidence_identity(
-    value: object,
-    value_type: object = "target",
-) -> EvidenceIdentity | None:
+def canonical_evidence_identity(value: object, value_type: object = "target") -> EvidenceIdentity | None:
     """Return the canonical identity used by assessment evidence matching."""
     return _canonical_identity(value, value_type)
 
 
 def _command_identities(
-    command: str,
-    command_target_inputs_fn: Callable[[str], list[dict[str, str]]],
+    command: str, command_target_inputs_fn: Callable[[str], list[dict[str, str]]]
 ) -> set[EvidenceIdentity]:
     identities: set[EvidenceIdentity] = set()
     try:
@@ -152,9 +150,7 @@ def _workflow_actions(conn: Any, run_id: str) -> set[str]:
 
 
 def load_run_evidence_facts(
-    conn: Any,
-    run_id: str,
-    *,
+    conn: Any, run_id: str, *,
     command_target_inputs_fn: Callable[[str], list[dict[str, str]]] = command_project_target_inputs,
 ) -> RunEvidenceFacts | None:
     """Load bounded facts used to test one saved run against profile rules."""
@@ -199,6 +195,7 @@ def load_run_evidence_facts(
         structured_output_kinds=frozenset(structured_kinds),
         workflow_actions=frozenset(_workflow_actions(conn, str(row["id"]))),
         finding_count=finding_count,
+        command_mode=assessment_command_mode(command),
     )
 
 
@@ -300,6 +297,8 @@ def matching_evidence_rule(
         roots = {str(value or "").strip().lower() for value in rule.get("command_roots", [])}
         actions = {str(value or "").strip() for value in rule.get("workflow_actions", [])}
         if facts.command_root not in roots and not actions.intersection(facts.workflow_actions):
+            continue
+        if rule.get("command_modes") and facts.command_mode not in rule["command_modes"]:
             continue
         versions = {str(value or "").strip() for value in rule.get("compatible_versions", [])}
         if "*" not in versions:

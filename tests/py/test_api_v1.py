@@ -2193,7 +2193,7 @@ def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context()
     preview = client.get(action_path, headers=_headers(token))
     assert preview.status_code == 200
     plan = preview.get_json()["plan"]
-    assert plan["profile_version"] == "1.2"
+    assert plan["profile_version"] == "1.3"
     assert plan["policy_level"] == "safe"
     assert plan["target"]["type"] == "domain"
     assert plan["bounds"] == {

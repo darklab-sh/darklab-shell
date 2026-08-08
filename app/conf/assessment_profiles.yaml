@@ -71,7 +71,7 @@ profiles:
         completion_guidance: Collect the domain's current DNS records and review resolved hosts, delegation, and an explicit clean result when a record type is absent.
 
   - key: web
-    version: "1.2"
+    version: "1.3"
     label: Web assessment
     purpose: Map reachable web applications, discover their exposed content, and review structured vulnerability checks.
     target_types: [domain, ip, url]
@@ -171,6 +171,7 @@ profiles:
             version: "1.0"
             evidence_types: [run]
             command_roots: [dalfox]
+            command_modes: [dalfox_parameter_discovery]
             workflow_actions: []
             structured_output_kinds: []
             target_match: exact

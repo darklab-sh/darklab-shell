@@ -23,6 +23,11 @@ from services.assessments.httpx_version_observations import (
     HTTPX_JSON_CPE_PARSER_VERSION,
     normalize_httpx_version_observations,
 )
+from services.assessments.command_modes import (
+    DALFOX_PARAMETER_DISCOVERY_MODE,
+    DALFOX_XSS_VALIDATION_MODE,
+    assessment_command_mode,
+)
 from services.assessments.dalfox_parameter_observations import (
     DALFOX_DISCOVERY_PARSER_VERSION,
     DALFOX_JSON_MAX_LINE_BYTES,
@@ -1255,6 +1260,7 @@ def test_reviewed_dalfox_xss_command_is_exact_bounded_and_evidence_derived():
         "--blind", "--blind-oob", "--include-request", "--include-response",
     ))
     assert reviewed_dalfox_xss_command_matches(plan.command, evidence)
+    assert assessment_command_mode(plan.command) == DALFOX_XSS_VALIDATION_MODE
     assert not reviewed_dalfox_xss_command_matches(plan.command + " --deep-scan", evidence)
     context = evidence.xss_context(request_limit=plan.request_limit)
     assert context.request_limit == DALFOX_XSS_REQUEST_LIMIT
@@ -1300,6 +1306,7 @@ def test_reviewed_dalfox_xss_command_rejects_unbound_or_unsupported_evidence():
     assert discovery is not None
     assert "--only-discovery" in discovery.command
     assert "--param" not in discovery.command
+    assert assessment_command_mode(discovery.command) == DALFOX_PARAMETER_DISCOVERY_MODE
 
 
 def test_reviewed_dalfox_execution_replaces_only_its_exact_validated_carrier():

@@ -262,6 +262,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/__init__.py", 4, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/action_plans.py", 318, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plan_contracts.py", 12, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/command_modes.py", 83, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plans.py", 110, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plans_web.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/cyclonedx_component_document.py", 80, "split-package-ratchet"),

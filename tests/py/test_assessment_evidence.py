@@ -21,6 +21,11 @@ from services.assessments.cleanup import (
 )
 from services.assessments.contracts import AssessmentError
 from services.assessments.coverage import reconcile_run_evidence_on_conn
+from services.assessments.command_modes import (
+    DALFOX_PARAMETER_DISCOVERY_MODE,
+    DALFOX_XSS_VALIDATION_MODE,
+    assessment_command_mode,
+)
 from services.assessments.dalfox_parameter_evidence import (
     resolve_project_dalfox_parameter_evidence,
 )
@@ -237,11 +242,14 @@ def test_saved_dalfox_parameter_evidence_resolves_one_exact_project_observation(
         cleanup,
         session_id,
         project_id,
-        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl --no-color",
+        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl "
+        "--no-color --timeout 10 --scan-timeout 60 --rate-limit 10 --workers 5 "
+        "--max-concurrent-targets 1 --max-targets-per-host 1",
     )
     observation_id, _preview = _save_dalfox_parameter_evidence(run_id, target)
 
     with db_connect() as conn:
+        facts = load_run_evidence_facts(conn, run_id)
         evidence = resolve_project_dalfox_parameter_evidence(
             conn,
             session_id,
@@ -252,6 +260,8 @@ def test_saved_dalfox_parameter_evidence_resolves_one_exact_project_observation(
             expected_target=target,
         )
 
+    assert facts is not None
+    assert facts.command_mode == DALFOX_PARAMETER_DISCOVERY_MODE
     assert evidence is not None
     assert evidence.source_run_id == run_id
     assert evidence.observation_id == observation_id
@@ -521,6 +531,66 @@ def test_rule_matching_requires_root_completion_version_target_and_structured_ev
         facts,
         target_type="domain",
         target_value="example.com",
+    ) is None
+
+
+def test_dalfox_evidence_modes_keep_discovery_and_active_clean_runs_distinct():
+    discovery_command = (
+        "dalfox https://example.com/search?q=one --only-discovery --skip-mining-dict "
+        "--format jsonl --no-color --timeout 10 --scan-timeout 60 --rate-limit 10 "
+        "--workers 5 --max-concurrent-targets 1 --max-targets-per-host 1"
+    )
+    active_command = (
+        "dalfox https://example.com/search?q=one --input-type url --param q:query "
+        "--skip-discovery --skip-mining --format jsonl --no-color --timeout 10 "
+        "--scan-timeout 60 --retries 0 --rate-limit 2 --workers 1 "
+        "--max-concurrent-targets 1 --max-targets-per-host 1 "
+        "--max-payloads-per-param 64 --limit 64 --limit-result-type all "
+        "--skip-waf-probe --waf-bypass off --insecure=false"
+    )
+    assert assessment_command_mode(discovery_command) == DALFOX_PARAMETER_DISCOVERY_MODE
+    assert assessment_command_mode(active_command) == DALFOX_XSS_VALIDATION_MODE
+    assert assessment_command_mode(
+        discovery_command + " --config [protected]"
+    ) == DALFOX_PARAMETER_DISCOVERY_MODE
+    assert assessment_command_mode(
+        active_command + " --config [protected]"
+    ) == DALFOX_XSS_VALIDATION_MODE
+    assert assessment_command_mode(discovery_command + " --deep-scan") == ""
+    assert assessment_command_mode(active_command + " --deep-scan") == ""
+    assert assessment_command_mode(active_command + " --only-discovery") == ""
+    facts = RunEvidenceFacts(
+        run_id="run-dalfox",
+        command_root="dalfox",
+        finished_at="2026-08-08 12:00:00",
+        exit_code=0,
+        target_identities=(EvidenceIdentity("url", "https://example.com/search?q=one"),),
+        structured_output_kinds=frozenset(),
+        workflow_actions=frozenset(),
+        finding_count=0,
+        command_mode=DALFOX_PARAMETER_DISCOVERY_MODE,
+    )
+    discovery = _profile(rule=_rule(
+        command_roots=["dalfox"],
+        command_modes=[DALFOX_PARAMETER_DISCOVERY_MODE],
+        structured_output_kinds=[],
+    ))["checks"][0]
+    active = _profile(rule=_rule(
+        command_roots=["dalfox"],
+        command_modes=[DALFOX_XSS_VALIDATION_MODE],
+        structured_output_kinds=["findings"],
+    ))["checks"][0]
+    assert matching_run_rule(
+        discovery, facts, target_type="url", target_value="https://example.com/search?q=one"
+    )
+    assert matching_run_rule(
+        active, facts, target_type="url", target_value="https://example.com/search?q=one"
+    ) is None
+    assert matching_run_rule(
+        discovery,
+        RunEvidenceFacts(**{**facts.__dict__, "command_mode": DALFOX_XSS_VALIDATION_MODE}),
+        target_type="url",
+        target_value="https://example.com/search?q=one",
     ) is None
 
 
