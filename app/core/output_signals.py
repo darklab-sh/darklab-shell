@@ -40,6 +40,7 @@ from core.output_port_entities import (
     _nmap_target_entities,
     _port_entities_for_host,
 )
+from core.output_nuclei import nuclei_output_metadata
 from core.output_shodan import (
     _SHODAN_DNS_FINDING_TYPES,
     _SHODAN_LABEL_RE,
@@ -67,7 +68,7 @@ from core.output_structured_signals import (
 )
 from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_role
 from services.assessments.httpx_version_observations import httpx_json_metadata
-from services.nuclei.provenance import nuclei_source_detail, nuclei_template_provenance
+from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
 from services.intel.canonical import (
     CanonicalizationError,
     canonical_domain,
@@ -952,16 +953,14 @@ class OutputSignalClassifier:
     extra_domain_suffixes: Sequence[str] = ()
     source_run_id: str = ""
     profile_role: str = ""
+    nuclei_takeover_template: ReviewedNucleiTakeoverTemplate | None = None
 
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
         self.url_template = ""
-        self.nuclei_template_provenance = {}
         if self.root == "ffuf":
             self.url_template = _find_flag_value(tokenize_command(self.command), {"-u", "--url"})
-        elif self.root == "nuclei":
-            self.nuclei_template_provenance = nuclei_template_provenance(self.command)
         self.is_help_output = _is_help_output_command(self.command, self.root)
         self.current_target: str | None = None
         self.current_nmap_service_target: str | None = None
@@ -1008,11 +1007,11 @@ class OutputSignalClassifier:
         }
         if target:
             metadata["target"] = target
-        if self.root == "nuclei" and self.nuclei_template_provenance:
-            metadata["template_provenance"] = dict(self.nuclei_template_provenance)
-            source_detail = nuclei_source_detail(self.command, line_text=normalized_text)
-            if source_detail:
-                metadata["source_detail"] = source_detail
+        if self.root == "nuclei":
+            metadata.update(nuclei_output_metadata(
+                self.command, normalized_text, source_run_id=self.source_run_id,
+                takeover_template=self.nuclei_takeover_template,
+            ))
         if scopes:
             metadata["signals"] = scopes
         if self.root == "httpx" and normalized_text.startswith("{"):

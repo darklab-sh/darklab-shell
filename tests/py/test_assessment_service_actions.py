@@ -3,6 +3,7 @@
 
 import json
 
+from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES
 from services.assessments.service_actions import service_actions, service_evidence_state
 from services.assessments.command_plans import command_plan
 from services.assessments.cyclonedx_package_observations import (
@@ -31,6 +32,8 @@ from services.assessments.dns_takeover_correlation import (
 from services.assessments.dns_takeover_event_review import build_dnsx_takeover_event_review
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
+from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_PARSER_VERSION
+from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
 from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.takeover_confirmation import (
     NUCLEI_TAKEOVER_CONFIRMATION_VERSION,
@@ -185,6 +188,13 @@ def test_epss_and_kev_feeds_normalize_risk_signals_without_network_access():
 
 
 def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirmation():
+    class Capture:
+        def __init__(self):
+            self.events = []
+
+        def add_event(self, event):
+            self.events.append(event)
+
     direct_potential = evaluate_takeover_signal({
         "hostname": "app.example.test", "cname_chain": ["app.vendor.test."],
         "provider": "vendor", "target_resolved": False, "in_scope": True,
@@ -224,23 +234,47 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
     )
     potential = event_review["reviews"][0]
     assert potential["state"] == "potential"
-    reviewed_templates = {
-        "http-takeover-reviewed": {
-            "template_version": "2026.08.1",
-            "template_digest": "sha256:" + ("a" * 64),
-            "policy_level": "safe",
-        },
-    }
-    evidence = {
+    reviewed_template = ReviewedNucleiTakeoverTemplate(
+        template_id="http-takeover-reviewed",
+        template_version="2026.08.1",
+        template_digest="sha256:" + ("a" * 64),
+        policy_level="safe",
+    )
+    reviewed_templates = {reviewed_template.template_id: reviewed_template.registry_entry()}
+    nuclei_line = json.dumps({
+        "template-id": "http-takeover-reviewed",
+        "matched-at": "https://App.Example.Test:443/login",
+        "timestamp": "2026-08-07T22:00:00Z",
+        "template-version": "untrusted-output-version",
+        "template-digest": "sha256:" + ("b" * 64),
+        "policy-level": "intrusive",
+    })
+    capture = Capture()
+    metadata, event = capture_event_with_signals(
+        capture,
+        OutputSignalClassifier(
+            "nuclei -u https://app.example.test -jsonl",
+            source_run_id="run-nuclei-owned",
+            nuclei_takeover_template=reviewed_template,
+        ),
+        nuclei_line,
+    )
+    evidence = event.source_detail["nuclei_takeover_observations"][0]
+    assert evidence == {
+        "observation_id": evidence["observation_id"],
+        "parser_version": NUCLEI_TAKEOVER_JSON_PARSER_VERSION,
         "adapter": "nuclei",
         "match_state": "matched",
         "template_id": "http-takeover-reviewed",
         "template_version": "2026.08.1",
         "template_digest": "sha256:" + ("a" * 64),
+        "policy_level": "safe",
         "source_run_id": "run-nuclei-owned",
-        "matched_at": "https://App.Example.Test:443/login",
+        "matched_hostname": "app.example.test",
         "observed_at": "2026-08-07T22:00:00Z",
     }
+    assert metadata["source_detail"]["nuclei_takeover_observations"] == [evidence]
+    assert to_wire(capture.events[0])["source_detail"]["nuclei_takeover_observations"] == [evidence]
     confirmed = confirm_takeover_with_nuclei(
         potential,
         evidence,
@@ -263,6 +297,8 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
             "template_version": "2026.08.1",
             "template_digest": "sha256:" + ("a" * 64),
             "source_run_id": "run-nuclei-owned",
+            "source_observation_id": evidence["observation_id"],
+            "parser_version": NUCLEI_TAKEOVER_JSON_PARSER_VERSION,
             "matched_hostname": "app.example.test",
             "observed_at": "2026-08-07T22:00:00Z",
             "policy_level": "safe",
@@ -271,14 +307,20 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
     assert confirmed["confirmation"]["confirmation_id"].startswith("ntc_")
     rejected_cases = (
         ({**evidence, "source_run_id": "run-other-owner"}, reviewed_templates, "source_run_not_allowed"),
-        ({**evidence, "matched_at": "https://app.example.test.evil.test"}, reviewed_templates,
+        ({**evidence, "matched_hostname": "app.example.test.evil.test"}, reviewed_templates,
          "matched_target_mismatch"),
-        ({**evidence, "matched_at": "https://user:secret@app.example.test"}, reviewed_templates,
+        ({**evidence, "matched_hostname": "https://user:secret@app.example.test"}, reviewed_templates,
          "matched_target_mismatch"),
         ({**evidence, "template_version": "2026.08.2"}, reviewed_templates,
          "template_version_mismatch"),
         ({**evidence, "template_digest": "sha256:" + ("b" * 64)}, reviewed_templates,
          "template_digest_mismatch"),
+        ({**evidence, "policy_level": "standard"}, reviewed_templates,
+         "template_policy_mismatch"),
+        ({**evidence, "observation_id": "nucobs_" + ("0" * 32)}, reviewed_templates,
+         "invalid_observation_identity"),
+        ({**evidence, "parser_version": "nuclei-takeover-json-v0"}, reviewed_templates,
+         "invalid_nuclei_evidence"),
         (evidence, {
             "http-takeover-reviewed": {
                 **reviewed_templates["http-takeover-reviewed"], "policy_level": "intrusive",
@@ -316,6 +358,19 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
         allowed_source_run_ids={"run-dnsx-source", "run-dnsx-target", "run-nuclei-owned"},
     )
     assert tampered_review["confirmation_reason"] == "invalid_dns_review"
+    untrusted_classifier = OutputSignalClassifier(
+        "nuclei -u https://app.example.test -jsonl",
+        source_run_id="run-nuclei-owned",
+        nuclei_takeover_template=reviewed_template,
+    )
+    assert "nuclei_takeover_observations" not in untrusted_classifier.classify_line(json.dumps({
+        "template-id": "other-template",
+        "matched-at": "https://app.example.test",
+        "timestamp": "2026-08-07T22:00:00Z",
+    }))["source_detail"]
+    assert "nuclei_takeover_observations" not in untrusted_classifier.classify_line(
+        "{" + (" " * NUCLEI_JSON_MAX_LINE_BYTES)
+    )["source_detail"]
     assert evaluate_takeover_signal({"hostname": "app.example.test", "resolution_state": "timeout"})["state"] == "uncertain"
     assert evaluate_takeover_signal(
         {

@@ -375,6 +375,10 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/cyclonedx_parser.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/takeover_detection.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/takeover_confirmation.py", 230, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/nuclei_takeover_identity.py", 70, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/nuclei_takeover_observations.py", 130, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/dns_takeover_context.py", 65, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/dns_takeover_correlation.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/dns_takeover_event_review.py", 180, "split-package-ratchet"),
@@ -383,6 +387,7 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/dns_takeover_observations.py", 170, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/core/output_dnsx.py", 85, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_nuclei.py", 60, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/web_surface.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/cpe_applicability.py", 158, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nvd_cpe_correlation.py", 186, "split-package-ratchet"),

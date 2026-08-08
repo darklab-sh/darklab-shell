@@ -10,11 +10,15 @@ from datetime import datetime
 import hashlib
 import re
 from typing import Any
-from urllib.parse import urlsplit
 
 from services.assessments.dns_takeover_correlation import (
     DNSX_TARGET_CORRELATION_VERSION,
     correlate_dnsx_target_observation,
+)
+from services.assessments.nuclei_takeover_identity import (
+    NUCLEI_TAKEOVER_JSON_PARSER_VERSION,
+    canonical_nuclei_matched_hostname,
+    nuclei_takeover_observation_id,
 )
 from services.assessments.takeover_detection import evaluate_takeover_signal
 
@@ -54,7 +58,7 @@ def confirm_takeover_with_nuclei(
 
     template_id = str(item["template_id"])
     template = reviewed_templates[template_id]
-    hostname = _canonical_hostname(result["hostname"])
+    hostname = canonical_nuclei_matched_hostname(result["hostname"])
     source_run_id = str(item["source_run_id"])
     version = str(template["template_version"])
     digest = str(template["template_digest"])
@@ -74,6 +78,8 @@ def confirm_takeover_with_nuclei(
             "template_version": version,
             "template_digest": digest,
             "source_run_id": source_run_id,
+            "source_observation_id": str(item["observation_id"]),
+            "parser_version": NUCLEI_TAKEOVER_JSON_PARSER_VERSION,
             "matched_hostname": hostname,
             "observed_at": observed_at,
             "policy_level": str(template["policy_level"]),
@@ -95,10 +101,14 @@ def _validate_boundary(
         return "invalid_run_allowlist"
     if not _valid_dns_review(review, dns_source_observation, dns_target_observation, runs):
         return "invalid_dns_review"
-    hostname = _canonical_hostname(review.get("hostname"))
+    hostname = canonical_nuclei_matched_hostname(review.get("hostname"))
     if not isinstance(templates, Mapping) or not 0 < len(templates) <= NUCLEI_TAKEOVER_MAX_REVIEWED_TEMPLATES:
         return "invalid_template_registry"
-    if not isinstance(evidence, Mapping) or evidence.get("adapter") != "nuclei":
+    if (
+        not isinstance(evidence, Mapping)
+        or evidence.get("adapter") != "nuclei"
+        or evidence.get("parser_version") != NUCLEI_TAKEOVER_JSON_PARSER_VERSION
+    ):
         return "invalid_nuclei_evidence"
     template_id = str(evidence.get("template_id") or "")
     template = templates.get(template_id)
@@ -117,13 +127,22 @@ def _validate_boundary(
         return "template_version_mismatch"
     if str(evidence.get("template_digest") or "") != digest:
         return "template_digest_mismatch"
+    if str(evidence.get("policy_level") or "") != policy:
+        return "template_policy_mismatch"
     source_run_id = str(evidence.get("source_run_id") or "")
     if source_run_id not in runs:
         return "source_run_not_allowed"
-    if _matched_hostname(evidence.get("matched_at")) != hostname:
+    matched_hostname = canonical_nuclei_matched_hostname(evidence.get("matched_hostname"))
+    if matched_hostname != hostname:
         return "matched_target_mismatch"
-    if not _aware_timestamp(evidence.get("observed_at")):
+    observed_at = str(evidence.get("observed_at") or "")
+    if not _aware_timestamp(observed_at):
         return "invalid_observation_time"
+    expected_id = nuclei_takeover_observation_id(
+        source_run_id, matched_hostname, observed_at, template_id, version, digest, policy,
+    )
+    if evidence.get("observation_id") != expected_id:
+        return "invalid_observation_identity"
     return ""
 
 
@@ -149,7 +168,7 @@ def _valid_dns_review(
         review.get("state") == "potential"
         and review.get("reason") == "dangling_cname"
         and derived.get("state") == "potential"
-        and _canonical_hostname(review.get("hostname")) == derived.get("hostname")
+        and canonical_nuclei_matched_hostname(review.get("hostname")) == derived.get("hostname")
         and review.get("source_observation") == joined.get("source_observation")
         and review.get("target_observation") == joined.get("target_observation")
     )
@@ -168,38 +187,7 @@ def _allowed_runs(values: Collection[str]) -> set[str] | None:
     return runs
 
 
-def _matched_hostname(value: Any) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    if "://" not in text:
-        return _canonical_hostname(text)
-    try:
-        parsed = urlsplit(text)
-    except ValueError:
-        return ""
-    if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or parsed.fragment:
-        return ""
-    return _canonical_hostname(parsed.hostname)
-
-
-def _canonical_hostname(value: Any) -> str:
-    text = str(value or "").strip().casefold().rstrip(".")
-    if not text or len(text) > 253 or any(char in text for char in "/:@?#\\"):
-        return ""
-    try:
-        encoded = text.encode("idna").decode("ascii")
-    except UnicodeError:
-        return ""
-    labels = encoded.split(".")
-    if len(labels) < 2 or any(not label or len(label) > 63 or label.startswith("-") or label.endswith("-") for label in labels):
-        return ""
-    if any(not re.fullmatch(r"[a-z0-9-]+", label) for label in labels):
-        return ""
-    return encoded
-
-
-def _aware_timestamp(value: Any) -> bool:
+def _aware_timestamp(value: object) -> bool:
     try:
         parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
     except ValueError:
