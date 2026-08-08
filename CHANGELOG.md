@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Web Surface screenshots now have a focused full-image viewer.**
+  - **What:** Available captures can open in a modal viewer on desktop or mobile without leaving the Project. Previous and next buttons, left and right arrow keys, and horizontal swipes move through the viewable captures on the current page. Position and boundary states stay visible, Escape/backdrop/close dismissal uses the shared modal behavior, and focus returns to the opening card.
+  - **Tests:** Focused browser coverage pins authenticated image reuse, modal state, focus restoration, arrow-key and touch navigation, position text, and disabled boundaries. Shared dismissible, focus-trap, pressable, asset, lint, style, and documentation contracts cover the surrounding behavior.
 - **The Web Surface gallery can now filter and group captures on desktop and mobile.**
   - **What:** Users can narrow the Project collection by target, exact HTTP status, technology, HTTP role, or visual hash, clear those filters without leaving the tab, and group the visible page by the same capture details. Filtered empty states remain recoverable, and a bounded-search notice names the evaluated and total candidate counts when older captures weren't searched.
   - **Tests:** Focused browser coverage pins query construction, filter persistence and clearing, grouping, bounded-search messaging, existing gallery actions, paging, empty states, and object-URL behavior. Asset, lint, style, and documentation contracts cover the shared desktop/mobile module and responsive controls.

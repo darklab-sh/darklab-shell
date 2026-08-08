@@ -43,6 +43,22 @@ let exportedDarklabProjectWebSurface = null;
     const thumbnailUrls = new Map();
     const thumbnailPromises = new Map();
     const pageLimit = Math.max(1, Number(ctx.pageLimit || 24));
+    let viewerOverlay = null;
+    let viewerCard = null;
+    let viewerTitle = null;
+    let viewerMeta = null;
+    let viewerBody = null;
+    let viewerImage = null;
+    let viewerPlaceholder = null;
+    let viewerPrevious = null;
+    let viewerNext = null;
+    let viewerPosition = null;
+    let viewerState = null;
+    let viewerReturnFocus = null;
+    let viewerRequestId = 0;
+    let viewerDismissible = null;
+    let viewerFocusTrap = null;
+    let viewerTouchStart = null;
 
     function page(projectId) {
       const key = String(projectId || '');
@@ -137,6 +153,9 @@ let exportedDarklabProjectWebSurface = null;
 
     function invalidate(projectId = '') {
       const normalizedProjectId = String(projectId || '');
+      if (!normalizedProjectId || viewerState?.projectId === normalizedProjectId) {
+        closeViewer({ restoreFocus: false });
+      }
       if (normalizedProjectId) pages.delete(normalizedProjectId);
       else pages.clear();
       [...thumbnailUrls.keys()].forEach((key) => {
@@ -189,6 +208,10 @@ let exportedDarklabProjectWebSurface = null;
       if (state === 'metadata_conflict') return 'Conflicting capture metadata was rejected.';
       if (state === 'metadata_missing') return 'Capture metadata is no longer available.';
       return capture?.artifact?.file_status_detail || 'Screenshot file is unavailable.';
+    }
+
+    function captureIsViewable(capture) {
+      return String(capture?.capture_state || '') === 'current' && Boolean(capture?.artifact?.file_available);
     }
 
     function captureTitle(capture) {
@@ -282,6 +305,180 @@ let exportedDarklabProjectWebSurface = null;
       return preview;
     }
 
+    function closeViewer({ restoreFocus = true } = {}) {
+      if (!viewerOverlay) return;
+      viewerRequestId += 1;
+      viewerState = null;
+      viewerOverlay.setAttribute('aria-hidden', 'true');
+      if (typeof ctx.hideModalOverlay === 'function') ctx.hideModalOverlay(viewerOverlay);
+      else viewerOverlay.style.display = 'none';
+      if (
+        restoreFocus
+        && viewerReturnFocus
+        && viewerReturnFocus.isConnected
+        && typeof ctx.focusElement === 'function'
+      ) {
+        const focusTarget = viewerReturnFocus;
+        window.setTimeout(() => ctx.focusElement(focusTarget, { preventScroll: true }), 0);
+      }
+      viewerReturnFocus = null;
+    }
+
+    function moveViewer(delta) {
+      if (!viewerState) return;
+      const nextIndex = viewerState.index + Number(delta || 0);
+      if (nextIndex < 0 || nextIndex >= viewerState.captures.length) return;
+      viewerState.index = nextIndex;
+      renderViewer();
+    }
+
+    function bindViewerTouch(body) {
+      body.addEventListener('touchstart', (event) => {
+        const touch = event.touches?.[0];
+        viewerTouchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
+      }, { passive: true });
+      body.addEventListener('touchend', (event) => {
+        const touch = event.changedTouches?.[0];
+        const start = viewerTouchStart;
+        viewerTouchStart = null;
+        if (!touch || !start) return;
+        const deltaX = touch.clientX - start.x;
+        const deltaY = touch.clientY - start.y;
+        if (Math.abs(deltaX) < 48 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return;
+        moveViewer(deltaX < 0 ? 1 : -1);
+      }, { passive: true });
+      body.addEventListener('touchcancel', () => { viewerTouchStart = null; }, { passive: true });
+    }
+
+    function ensureViewer() {
+      if (viewerOverlay) return viewerOverlay;
+      viewerOverlay = document.createElement('div');
+      viewerOverlay.id = 'project-web-surface-viewer-overlay';
+      viewerOverlay.className = 'modal-overlay project-web-surface-viewer-overlay';
+      viewerOverlay.setAttribute('aria-hidden', 'true');
+      viewerCard = document.createElement('section');
+      viewerCard.className = 'modal-card project-web-surface-viewer';
+      viewerCard.setAttribute('role', 'dialog');
+      viewerCard.setAttribute('aria-modal', 'true');
+      viewerCard.setAttribute('aria-labelledby', 'project-web-surface-viewer-title');
+      viewerCard.setAttribute('aria-describedby', 'project-web-surface-viewer-meta');
+      const header = document.createElement('div');
+      header.className = 'project-web-surface-viewer-header';
+      viewerTitle = document.createElement('h2');
+      viewerTitle.id = 'project-web-surface-viewer-title';
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'btn btn-ghost btn-icon-only btn-compact project-web-surface-viewer-close';
+      close.setAttribute('aria-label', 'Close full screenshot view');
+      close.title = 'Close full screenshot view';
+      close.textContent = '×';
+      header.append(viewerTitle, close);
+      viewerBody = document.createElement('div');
+      viewerBody.className = 'project-web-surface-viewer-body nice-scroll';
+      viewerImage = document.createElement('img');
+      viewerImage.className = 'project-web-surface-viewer-image u-hidden';
+      viewerPlaceholder = document.createElement('div');
+      viewerPlaceholder.className = 'project-web-surface-viewer-placeholder';
+      viewerBody.append(viewerImage, viewerPlaceholder);
+      bindViewerTouch(viewerBody);
+      const footer = document.createElement('div');
+      footer.className = 'project-web-surface-viewer-footer';
+      viewerPrevious = makeAction('Previous', () => moveViewer(-1));
+      viewerPrevious.classList.add('project-web-surface-viewer-previous');
+      viewerPosition = document.createElement('span');
+      viewerPosition.className = 'project-web-surface-viewer-position';
+      viewerPosition.setAttribute('aria-live', 'polite');
+      viewerNext = makeAction('Next', () => moveViewer(1));
+      viewerNext.classList.add('project-web-surface-viewer-next');
+      viewerMeta = document.createElement('div');
+      viewerMeta.id = 'project-web-surface-viewer-meta';
+      viewerMeta.className = 'project-web-surface-viewer-meta';
+      footer.append(viewerPrevious, viewerPosition, viewerNext, viewerMeta);
+      viewerCard.append(header, viewerBody, footer);
+      viewerOverlay.appendChild(viewerCard);
+      document.body.appendChild(viewerOverlay);
+      viewerCard.addEventListener('keydown', (event) => {
+        if (!viewerState || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        moveViewer(event.key === 'ArrowRight' ? 1 : -1);
+      });
+      if (typeof ctx.bindDismissible === 'function') {
+        viewerDismissible = ctx.bindDismissible(viewerOverlay, {
+          level: 'modal',
+          isOpen: () => Boolean(viewerState),
+          onClose: () => closeViewer(),
+          backdropEl: viewerOverlay,
+          closeButtons: close,
+        });
+      } else {
+        close.addEventListener('click', () => closeViewer());
+        viewerOverlay.addEventListener('click', (event) => {
+          if (event.target === viewerOverlay) closeViewer();
+        });
+      }
+      if (typeof ctx.bindFocusTrap === 'function') viewerFocusTrap = ctx.bindFocusTrap(viewerCard);
+      return viewerOverlay;
+    }
+
+    function renderViewer() {
+      if (!viewerState || !viewerTitle || !viewerImage || !viewerPlaceholder) return;
+      const capture = viewerState.captures[viewerState.index];
+      if (!capture) return;
+      const requestId = ++viewerRequestId;
+      viewerTitle.textContent = captureTitle(capture);
+      viewerMeta.textContent = [
+        String(capture?.url || ''),
+        metaLine(capture),
+        capture?.captured_at ? `captured ${ctx.formatDate?.(capture.captured_at) || capture.captured_at}` : '',
+      ].filter(Boolean).join(ctx.metaSeparator || ' · ');
+      viewerPosition.textContent = `${viewerState.index + 1} of ${viewerState.captures.length}`;
+      viewerPrevious.disabled = viewerState.index === 0;
+      viewerNext.disabled = viewerState.index === viewerState.captures.length - 1;
+      if (viewerBody) {
+        viewerBody.scrollTop = 0;
+        viewerBody.scrollLeft = 0;
+      }
+      viewerImage.classList.add('u-hidden');
+      viewerImage.removeAttribute('src');
+      viewerImage.alt = `Full screenshot of ${String(capture?.url || captureTitle(capture))}`;
+      viewerPlaceholder.classList.remove('u-hidden');
+      viewerPlaceholder.textContent = 'Loading full screenshot...';
+      fetchThumbnail(viewerState.projectId, capture).then((url) => {
+        if (!viewerState || requestId !== viewerRequestId || !viewerImage?.isConnected) return;
+        viewerImage.src = url;
+        viewerImage.classList.remove('u-hidden');
+        viewerPlaceholder.classList.add('u-hidden');
+      }).catch((err) => {
+        if (!viewerState || requestId !== viewerRequestId) return;
+        viewerPlaceholder.textContent = 'Full screenshot is unavailable.';
+        ctx.logClientError?.('failed to load Web Surface full image', err, {
+          project_id: String(viewerState.projectId || ''),
+          artifact_id: String(capture?.artifact?.id || ''),
+        });
+      });
+    }
+
+    function openViewer(projectId, capture, returnFocus) {
+      const captures = page(projectId).captures.filter(captureIsViewable);
+      const artifactId = String(capture?.artifact?.id || '');
+      const index = captures.findIndex(item => String(item?.artifact?.id || '') === artifactId);
+      if (index < 0) return;
+      const overlay = ensureViewer();
+      viewerState = { projectId: String(projectId || ''), captures, index };
+      viewerReturnFocus = returnFocus || document.activeElement;
+      overlay.setAttribute('aria-hidden', 'false');
+      if (typeof ctx.showModalOverlay === 'function') ctx.showModalOverlay(overlay);
+      else overlay.style.display = 'flex';
+      renderViewer();
+      window.setTimeout(() => {
+        if (!viewerState) return;
+        const close = viewerCard?.querySelector('.project-web-surface-viewer-close');
+        ctx.focusElement?.(close, { preventScroll: true });
+        ctx.markInteractionSurfaceReady?.('project-web-surface-viewer', overlay, viewerCard);
+      }, 0);
+    }
+
     function renderCard(projectId, capture) {
       const card = document.createElement('article');
       card.className = 'project-web-surface-card panel-row';
@@ -320,6 +517,10 @@ let exportedDarklabProjectWebSurface = null;
       if (source.textContent) body.appendChild(source);
       const actions = document.createElement('div');
       actions.className = 'project-web-surface-actions';
+      if (captureIsViewable(capture)) {
+        const fullView = makeAction('Full view', () => openViewer(projectId, capture, fullView));
+        actions.appendChild(fullView);
+      }
       if (capture?.url_entity_id && capture?.url) {
         actions.appendChild(makeAction('Open URL in Atlas', () => {
           ctx.openEntityInAtlas?.(projectId, {
@@ -504,6 +705,13 @@ let exportedDarklabProjectWebSurface = null;
     }
 
     function dispose() {
+      closeViewer({ restoreFocus: false });
+      viewerDismissible?.dispose?.();
+      viewerFocusTrap?.dispose?.();
+      viewerOverlay?.remove();
+      viewerOverlay = null;
+      viewerDismissible = null;
+      viewerFocusTrap = null;
       invalidate();
     }
 

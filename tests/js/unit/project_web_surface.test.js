@@ -14,6 +14,13 @@ function jsonResponse(payload, { ok = true } = {}) {
   }
 }
 
+function touchEvent(type, touches = [], changedTouches = []) {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'touches', { value: touches })
+  Object.defineProperty(event, 'changedTouches', { value: changedTouches })
+  return event
+}
+
 function capture(overrides = {}) {
   return {
     url: 'https://app.darklab.sh/login',
@@ -48,7 +55,7 @@ function capture(overrides = {}) {
 function harness(responses) {
   const apiFetch = vi.fn(async (url) => {
     if (String(url).includes('/web-surface?')) return jsonResponse(responses(url))
-    if (String(url).endsWith('/artifacts/artifact-1/download')) {
+    if (/\/artifacts\/artifact-[^/]+\/download$/.test(String(url))) {
       return {
         ok: true,
         blob: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
@@ -79,6 +86,25 @@ function harness(responses) {
     formatDate: value => `date:${value}`,
     shortProjectRunId: value => String(value).slice(0, 8),
     bindProjectRuntimePressable: (button) => { button.dataset.pressableBound = '1' },
+    bindDismissible: (overlay, options) => {
+      const backdrop = (event) => {
+        if (event.target === overlay && options.isOpen()) options.onClose()
+      }
+      const close = () => { if (options.isOpen()) options.onClose() }
+      overlay.addEventListener('click', backdrop)
+      options.closeButtons.addEventListener('click', close)
+      return {
+        dispose: () => {
+          overlay.removeEventListener('click', backdrop)
+          options.closeButtons.removeEventListener('click', close)
+        },
+      }
+    },
+    bindFocusTrap: vi.fn(() => ({ dispose: vi.fn() })),
+    focusElement: (element) => { element?.focus(); return Boolean(element) },
+    showModalOverlay: (overlay) => { overlay.style.display = 'flex' },
+    hideModalOverlay: (overlay) => { overlay.style.display = 'none' },
+    markInteractionSurfaceReady: vi.fn(),
     renderProjectExplorer: render,
     renderProjectMobileDetail: vi.fn(),
     mobileView: () => 'list',
@@ -159,7 +185,9 @@ describe('Project Web Surface gallery', () => {
     expect(preview.getAttribute('aria-expanded')).toBe('true')
     expect(preview.closest('.project-web-surface-card').classList.contains('is-expanded')).toBe(true)
 
-    test.container.querySelector('.project-web-surface-card .project-web-surface-action')?.click()
+    const atlasButton = [...test.container.querySelectorAll('.project-web-surface-card .project-web-surface-action')]
+      .find(button => button.textContent === 'Open URL in Atlas')
+    atlasButton.click()
     expect(test.openEntityInAtlas).toHaveBeenCalledWith('project-1', {
       id: 'entity-url-1',
       type: 'url',
@@ -177,6 +205,66 @@ describe('Project Web Surface gallery', () => {
     test.controller.invalidate('project-1')
     expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:web-surface-one')
     expect(test.logClientError).not.toHaveBeenCalled()
+  })
+
+  it('opens a full screenshot viewer with keyboard and touch navigation', async () => {
+    const second = capture({
+      url: 'https://admin.darklab.sh/',
+      title: 'Darklab admin',
+      status_code: 401,
+      profile_role: 'authenticated',
+      artifact: {
+        ...capture().artifact,
+        id: 'artifact-2',
+        display_name: 'admin-darklab-sh.png',
+        content_sha256: 'sha-two',
+      },
+      source_run: { id: 'run-two', command: 'httpx -screenshot https://admin.darklab.sh' },
+    })
+    const test = harness(() => ({
+      captures: [capture(), second],
+      total: 2,
+      limit: 24,
+      offset: 0,
+      has_more: false,
+    }))
+
+    test.controller.render(test.container, 'project-1')
+    await vi.waitFor(() => expect(test.container.querySelectorAll('.project-web-surface-card')).toHaveLength(2))
+    const fullView = [...test.container.querySelectorAll('.project-web-surface-action')]
+      .find(button => button.textContent === 'Full view')
+    fullView.focus()
+    fullView.click()
+
+    const overlay = document.getElementById('project-web-surface-viewer-overlay')
+    await vi.waitFor(() => expect(overlay.style.display).toBe('flex'))
+    await vi.waitFor(() => expect(overlay.querySelector('.project-web-surface-viewer-image')?.src).toBe('blob:web-surface-one'))
+    const artifactOneDownloads = test.apiFetch.mock.calls
+      .filter(([url]) => String(url).endsWith('/artifacts/artifact-1/download'))
+    expect(artifactOneDownloads).toHaveLength(1)
+    expect(overlay.getAttribute('aria-hidden')).toBe('false')
+    expect(overlay.querySelector('#project-web-surface-viewer-title')?.textContent).toBe('Darklab sign in')
+    expect(overlay.querySelector('.project-web-surface-viewer-position')?.textContent).toBe('1 of 2')
+    expect(overlay.querySelector('.project-web-surface-viewer-previous')?.disabled).toBe(true)
+
+    const body = overlay.querySelector('.project-web-surface-viewer-body')
+    body.scrollTop = 120
+    overlay.querySelector('.project-web-surface-viewer').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
+    )
+    expect(overlay.querySelector('#project-web-surface-viewer-title')?.textContent).toBe('Darklab admin')
+    expect(overlay.querySelector('.project-web-surface-viewer-position')?.textContent).toBe('2 of 2')
+    expect(overlay.querySelector('.project-web-surface-viewer-next')?.disabled).toBe(true)
+    expect(body.scrollTop).toBe(0)
+
+    body.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]))
+    body.dispatchEvent(touchEvent('touchend', [], [{ clientX: 100, clientY: 34 }]))
+    expect(overlay.querySelector('#project-web-surface-viewer-title')?.textContent).toBe('Darklab sign in')
+
+    overlay.querySelector('.project-web-surface-viewer-close').click()
+    expect(overlay.style.display).toBe('none')
+    expect(overlay.getAttribute('aria-hidden')).toBe('true')
+    await vi.waitFor(() => expect(document.activeElement).toBe(fullView))
   })
 
   it('pages captures without losing the bounded server window', async () => {

@@ -97,9 +97,12 @@ import { showConfirm as importedShowConfirm } from './ui/ui_confirm.js';
 import {
   blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
   enhanceAppSelects as importedEnhanceAppSelects,
+  focusElement as importedFocusElement,
+  hideModalOverlay as importedHideModalOverlay,
   markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,
+  showModalOverlay as importedShowModalOverlay,
   showWorkflowsOverlay as importedShowWorkflowsOverlay,
 } from './ui/ui_helpers.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
@@ -2616,6 +2619,12 @@ let importedProjectWorkspaceShell;
       formatDate: _formatProjectDate,
       shortProjectRunId: _shortProjectRunId,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      bindDismissible: importedBindDismissible,
+      bindFocusTrap: importedBindFocusTrap,
+      focusElement: importedFocusElement,
+      showModalOverlay: importedShowModalOverlay,
+      hideModalOverlay: importedHideModalOverlay,
+      markInteractionSurfaceReady: importedMarkInteractionSurfaceReady,
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       mobileView: _projectMobileView,

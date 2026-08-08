@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.ee5728a08eb5.js",
-      "hash": "982f54fd29acb3f1131110796bb65ca86d354a582f5a4f16c533282c7100e568",
+      "path": "/static/build/shell-bootstrap.7c2a24a4a0c3.js",
+      "hash": "79fb5904fe8847cfc1777de349c1d40a627c8041afb585cc392a1568290b99a7",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -258,7 +258,7 @@
         "/static/js/search_bridge.js": "8a774d59113b3c7aa2393065b3e13f05ac3e5daf6fe9f3352a2a7138be5beba2",
         "/static/js/session.js": "36096e9f07d4243858c606286536e468ae4df543696a4d66647ca17765f17578",
         "/static/js/shell_bootstrap.entry.js": "3eac50c34a8e11eddc8a42a323d52308b417c777c6d05e66f16b9d40e84448f3",
-        "/static/js/shell_chrome.js": "6a6e91c4cd4dbab032d49c1587931b5d9367f8dc5cae39d24e678ded9352e283",
+        "/static/js/shell_chrome.js": "a471672cf76cef5a0514df7434e5011f038374454132dd8a976331645ca78142",
         "/static/js/tabs.js": "b44467a6a422a6e66c04c927a5204cd3b77256c7973cd166d8e10f9170c6c3fc",
         "/static/js/tabs_bridge.js": "5bccc06d44264563ae9e8737da2fa08786f3449383b627e2be047832c08b5609",
         "/static/js/ui/cleanup_reasons.js": "51a7d0c8cd780bc72234b7d4bf0b0ad69f1cf9bdd143a157fa0cccd719d54d4c",
@@ -516,8 +516,8 @@
       "hash": "e4ea1d069d07ab099d6529bd52d9e5b1ee901b13f7b7ad0bed7fa959b5cfb5e2"
     },
     "/static/js/features/projects/project_web_surface.js": {
-      "path": "/static/build/static-project-web-surface.033a8d990217.js",
-      "hash": "351114baf9964cf74ae8dfbdb03ae8e1049f7b29a54167e084a7ba628e3075a4"
+      "path": "/static/build/static-project-web-surface.8cc18967f8f8.js",
+      "hash": "a7fc7ebdb1fe0b62f410cb53031e4a6490414e322c30dc74479e8e0eabd7d957"
     },
     "/static/js/features/projects/project_workspace_actions.js": {
       "path": "/static/build/static-project-workspace-actions.1b017a7e8e97.js",
@@ -648,8 +648,8 @@
       "hash": "616ca74b5862c3e4c773d11a5a0af826dce63cf3cfb7d780c062dcb68df3f256"
     },
     "/static/css/features/projects.css": {
-      "path": "/static/build/static-projects.33db60d96a04.css",
-      "hash": "33db60d96a04af390895fa40c3d158f05c69846e4e3b1e20000caf805da199e7"
+      "path": "/static/build/static-projects.eff0bda4cca9.css",
+      "hash": "eff0bda4cca9ee37d0938ed8928aaa2f60ad59c5b134c336e868f2048a3166ce"
     },
     "/static/css/features/run-comparison.css": {
       "path": "/static/build/static-run-comparison.9b96fd2915e8.css",
