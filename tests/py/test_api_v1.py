@@ -1786,6 +1786,7 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     assert browser_start_kwargs["original_command"] == plan["display_command"]
     assert browser_start_kwargs["link_project_id"] == project["id"]
     assert "run_finalized_hook" not in browser_start_kwargs
+    assert "output_signal_context" not in browser_start_kwargs
     browser_launch_log = next(
         call for call in browser_info_log.call_args_list
         if call.args == ("PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
@@ -1817,6 +1818,7 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     assert start_kwargs["display_command"] == plan["display_command"]
     assert start_kwargs["link_project_id"] == project["id"]
     assert "run_finalized_hook" not in start_kwargs
+    assert "output_signal_context" not in start_kwargs
     launch_log = next(
         call for call in info_log.call_args_list
         if call.args == ("API_PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
@@ -1847,6 +1849,59 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     assert all("finding_id" not in row["details"] for row in audit)
     assert check["target_value"] not in json.dumps(audit)
     assert plan["display_command"] not in json.dumps(audit)
+
+    from services.assessments.action_plans import AssessmentActionError
+
+    cleanup = mock.Mock()
+    protected = SimpleNamespace(
+        execution_command=plan["display_command"],
+        trusted_execution_args=(),
+        private_values=(),
+        cleanup=cleanup,
+    )
+    launch_error = AssessmentActionError(
+        "takeover_template_unavailable",
+        "The reviewed takeover template is unavailable.",
+        status_code=503,
+    )
+    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
+         mock.patch(
+             "services.assessments.nuclei_takeover_launch.materialize_http_profile_launch",
+             return_value=protected,
+         ), \
+         mock.patch(
+             "services.assessments.nuclei_takeover_launch.assessment_run_launch_context",
+             side_effect=launch_error,
+         ):
+        failed_api_launch = client.post(
+            path,
+            headers=_headers(token),
+            json={"confirmed": True, "plan_digest": plan["plan_digest"]},
+        )
+    assert failed_api_launch.status_code == 503
+    assert failed_api_launch.get_json()["error"]["code"] == (
+        "takeover_template_unavailable"
+    )
+    cleanup.assert_called_once_with()
+
+    cleanup.reset_mock()
+    with mock.patch("blueprints.run.broker_available", return_value=True), \
+         mock.patch(
+             "services.assessments.nuclei_takeover_launch.materialize_http_profile_launch",
+             return_value=protected,
+         ), \
+         mock.patch(
+             "services.assessments.nuclei_takeover_launch.assessment_run_launch_context",
+             side_effect=launch_error,
+         ):
+        failed_browser_launch = client.post(
+            browser_path,
+            headers={"X-Session-ID": token},
+            json={"confirmed": True, "plan_digest": plan["plan_digest"]},
+        )
+    assert failed_browser_launch.status_code == 503
+    assert failed_browser_launch.get_json()["code"] == "takeover_template_unavailable"
+    cleanup.assert_called_once_with()
 
 
 def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(

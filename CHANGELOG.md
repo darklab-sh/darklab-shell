@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Reviewed takeover evidence is bound to one exact Assessment launch contract.**
+  - **What:** Only the dedicated safe web takeover check can add the app-owned Nuclei template and its immutable output-classification context to a run. Generic Nuclei recommendations keep their existing arguments and classification behavior. A changed profile, action, policy, target type, or display command fails closed, and protected HTTP material is cleaned up before either launch route returns an error.
+  - **Tests:** Focused service and browser/API route coverage pins the dedicated binding, generic-action isolation, protected-argument composition, template-validation failure, contract-drift rejection, safe error logging, and cleanup-compatible route behavior.
 - **The first app-owned takeover fingerprint is pinned to its reviewed content and request shape.**
   - **What:** The shipped GitHub Pages dangling-domain template makes one GET request, doesn't follow redirects, and emits structured output only after an exact status and body fingerprint match. Its loader rejects symlinks, special or oversized files, digest drift, malformed YAML, extra request features, redirects, payloads, and matcher changes, so changing the template requires an explicit code review and digest update.
   - **Tests:** Focused service coverage pins the immutable id, version, digest, safe policy, one-target arguments, request bounds, and fail-closed behavior for tampered content, an unsafe shape with a matching digest, and a symlinked template.

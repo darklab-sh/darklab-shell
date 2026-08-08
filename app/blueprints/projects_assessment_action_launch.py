@@ -10,7 +10,7 @@ from flask import jsonify, request
 from blueprints import projects as project_routes
 from blueprints.projects_assessment_actions import _error
 from extensions import limiter
-from services.assessments.http_profile_execution import materialize_http_profile_launch
+from services.assessments.nuclei_takeover_launch import materialize_assessment_run_launch
 from services.assessments.recommended_actions import (
     AssessmentActionError,
     HttpProfileExecutionError,
@@ -77,7 +77,7 @@ def project_assessment_action_launch(project_id, assessment_id, check_id):
     started_at = datetime.now(timezone.utc).isoformat()
     protected = None
     try:
-        protected = materialize_http_profile_launch(
+        protected, launch_context = materialize_assessment_run_launch(
             session_id,
             project_id,
             plan,
@@ -97,11 +97,11 @@ def project_assessment_action_launch(project_id, assessment_id, check_id):
             workspace_cwd=run_routes._workspace_cwd_value(body.get("workspace_cwd", "")),
             link_project_id=project_id,
             private_values=protected.private_values,
-            trusted_execution_args=protected.trusted_execution_args,
             run_cleanup_hook=protected.cleanup,
             thread_name_prefix="assessment-action-run-broker",
+            **launch_context.broker_kwargs(),
         )
-    except HttpProfileExecutionError as exc:
+    except (AssessmentActionError, HttpProfileExecutionError) as exc:
         return _error(exc)
     except RunStartRejected as exc:
         _cleanup(protected)

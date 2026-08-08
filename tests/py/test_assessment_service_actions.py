@@ -37,6 +37,12 @@ from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_k
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_PARSER_VERSION
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
+from services.assessments import nuclei_takeover_launch
+from services.assessments.nuclei_takeover_launch import (
+    NUCLEI_TAKEOVER_CHECK_KEY,
+    assessment_run_launch_context,
+    materialize_assessment_run_launch,
+)
 from services.assessments import nuclei_takeover_templates
 from services.assessments.nuclei_takeover_templates import (
     NUCLEI_TAKEOVER_TEMPLATE_ID,
@@ -186,6 +192,143 @@ def test_app_owned_nuclei_takeover_template_rejects_tampering_and_symlinks(
     candidate.symlink_to(shipped_path)
     with pytest.raises(NucleiTakeoverTemplateError, match="unavailable"):
         reviewed_nuclei_takeover_launch()
+
+
+def _takeover_launch_plan(**overrides):
+    plan = {
+        "project_id": "prj_takeover",
+        "assessment_id": "asm_takeover",
+        "check_id": "ach_takeover",
+        "check_key": NUCLEI_TAKEOVER_CHECK_KEY,
+        "profile_key": "web",
+        "policy_level": "safe",
+        "launchable": True,
+        "action": {
+            "key": "command:nuclei",
+            "kind": "command",
+            "id": "nuclei",
+        },
+        "target": {
+            "entity_id": "ent_takeover",
+            "type": "domain",
+            "value": "dangling.example.com",
+        },
+        "display_command": "nuclei -u dangling.example.com -severity high,critical",
+    }
+    plan.update(overrides)
+    return plan
+
+
+def test_assessment_launch_context_binds_reviewed_template_only_to_takeover_check():
+    generic = assessment_run_launch_context(
+        {"check_key": "vulnerability_templates"},
+        trusted_execution_args=("-H", "X-Test: value"),
+    )
+    assert generic.broker_kwargs() == {
+        "trusted_execution_args": ("-H", "X-Test: value"),
+    }
+
+    context = assessment_run_launch_context(
+        _takeover_launch_plan(),
+        trusted_execution_args=("-H", "X-Test: value"),
+    )
+    reviewed = reviewed_nuclei_takeover_launch()
+    assert context.trusted_execution_args == (
+        "-H",
+        "X-Test: value",
+        *reviewed.trusted_execution_args,
+    )
+    assert context.output_signal_context == RunOutputSignalContext(
+        nuclei_takeover_template=reviewed.template,
+    )
+    assert context.broker_kwargs()["output_signal_context"] is context.output_signal_context
+
+
+@pytest.mark.parametrize(
+    ("override", "expected_action_id"),
+    [
+        ({"launchable": False}, "nuclei"),
+        ({"profile_key": "network"}, "nuclei"),
+        ({"policy_level": "standard"}, "nuclei"),
+        ({"action": {"key": "command:httpx", "kind": "command", "id": "httpx"}}, "httpx"),
+        ({"target": {"type": "url", "value": "https://dangling.example.com"}}, "nuclei"),
+        ({"display_command": "httpx dangling.example.com"}, "nuclei"),
+    ],
+)
+def test_takeover_launch_context_rejects_contract_drift(
+    caplog, override, expected_action_id,
+):
+    with caplog.at_level("ERROR", logger="shell"), pytest.raises(
+        nuclei_takeover_launch.AssessmentActionError,
+        match="expected safe launch contract",
+    ) as exc_info:
+        assessment_run_launch_context(_takeover_launch_plan(**override))
+
+    assert exc_info.value.code == "takeover_launch_contract_invalid"
+    assert exc_info.value.status_code == 409
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "ASSESSMENT_TAKEOVER_LAUNCH_CONTRACT_REJECTED"
+    )
+    assert record.project_id == "prj_takeover"
+    assert record.assessment_id == "asm_takeover"
+    assert record.check_id == "ach_takeover"
+    assert record.action_id == expected_action_id
+
+
+def test_takeover_launch_context_fails_closed_when_template_validation_fails(
+    caplog, monkeypatch,
+):
+    def _unavailable():
+        raise NucleiTakeoverTemplateError("reviewed template unavailable")
+
+    monkeypatch.setattr(nuclei_takeover_launch, "reviewed_nuclei_takeover_launch", _unavailable)
+    with caplog.at_level("ERROR", logger="shell"), pytest.raises(
+        nuclei_takeover_launch.AssessmentActionError,
+        match="reviewed takeover template is unavailable",
+    ) as exc_info:
+        assessment_run_launch_context(_takeover_launch_plan())
+
+    assert exc_info.value.code == "takeover_template_unavailable"
+    assert exc_info.value.status_code == 503
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "ASSESSMENT_TAKEOVER_TEMPLATE_VALIDATION_FAILED"
+    )
+    assert record.project_id == "prj_takeover"
+    assert record.reason == "reviewed template unavailable"
+
+
+def test_assessment_launch_materialization_cleans_protected_files_on_contract_error(
+    monkeypatch,
+):
+    cleanup_calls = []
+
+    def _cleanup():
+        cleanup_calls.append(True)
+
+    protected = SimpleNamespace(
+        trusted_execution_args=("-sf", "/tmp/protected"),
+        cleanup=_cleanup,
+    )
+    monkeypatch.setattr(
+        nuclei_takeover_launch,
+        "materialize_http_profile_launch",
+        lambda *_args, **_kwargs: protected,
+    )
+    with pytest.raises(
+        nuclei_takeover_launch.AssessmentActionError,
+        match="expected safe launch contract",
+    ):
+        materialize_assessment_run_launch(
+            "session",
+            "prj_takeover",
+            _takeover_launch_plan(policy_level="standard"),
+        )
+
+    assert cleanup_calls == [True]
 
 
 def test_historical_urls_are_safe_bounded_and_provenance_only():
