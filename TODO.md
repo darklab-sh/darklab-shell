@@ -135,8 +135,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Import CycloneDX components, dependencies, PURL/CPE identifiers, included vulnerability records, and VEX analysis as typed inventory/evidence. An SBOM component alone is not a vulnerability finding; correlate only exact identifiers and versions through the cached OSV/NVD rules above.
   - Respect CycloneDX affected/not-affected/resolved/under-investigation assertions without letting an untrusted import silently close an existing app finding. Keep component-to-advisory-to-finding provenance and require normal review before applying imported triage or verification state.
   - Add format/version detection, quotas, archive/compression limits, duplicate handling, target/Project mapping, redacted previews, parser warnings, and small fixtures consistent with the existing Nuclei, Nessus, ZAP, Burp, CSV, and JSONL import contracts.
-- [ ] Finish the Project Web Surface storage lifecycle:
-  - Add cleanup and storage quotas for saved HTTPx screenshots without weakening authenticated artifact access or the gallery's explicit unavailable states.
 - [ ] Add focused parameter and application testing tools:
   - Extend the bounded Dalfox parameter-discovery foundation with separately confirmed reflected/DOM XSS validation, structured confidence-aware findings, and proof/evidence fields.
   - Add SQLmap behind a detection-only default policy. Deny data dumping, filesystem access, OS command execution, registry access, database takeover, destructive statements, and other takeover options in normal and intrusive profiles.

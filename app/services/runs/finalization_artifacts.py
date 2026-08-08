@@ -37,18 +37,23 @@ def save_run_file_artifacts_for_finalize(
     if not workspace_artifacts:
         return []
     artifact_candidates = workspace_artifacts
-    if int(exit_code) == 0:
-        try:
-            artifact_candidates = append_httpx_screenshot_artifacts(
-                workspace_artifacts, persisted_entries, workspace_owner, cfg=cfg,
-            )
-        except Exception:
-            app_metrics.record_run_finalize_error("httpx_screenshot_artifacts")
-            log.error("HTTPX_SCREENSHOT_ARTIFACT_CAPTURE_ERROR", exc_info=True, extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "team_id": team_id,
-            })
+    try:
+        artifact_candidates = append_httpx_screenshot_artifacts(
+            workspace_artifacts, persisted_entries, workspace_owner,
+            cfg=cfg,
+            retain=int(exit_code) == 0,
+            run_id=run_id,
+            session_id=session_id,
+            team_id=team_id,
+            conn=conn,
+        )
+    except Exception:
+        app_metrics.record_run_finalize_error("httpx_screenshot_artifacts")
+        log.error("HTTPX_SCREENSHOT_ARTIFACT_CAPTURE_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "team_id": team_id,
+        })
     try:
         if team_id:
             sized = workspace_artifacts_with_sizes_fn(

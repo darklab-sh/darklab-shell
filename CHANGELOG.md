@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **HTTPx screenshot runs now stay inside the Files storage budget.**
+  - **What:** Run finalization measures event-named screenshot output against the owner's existing Files count, total-byte quota, and per-file size limit before registering images. It keeps earlier files, retains only the new captures that fit, and cleans up invalid, over-limit, or failed-run screenshot files without touching paths outside the validated HTTPx output directory. Limit and cleanup failures are logged without exposing target paths, and previously registered gallery evidence keeps its existing authenticated and unavailable-state behavior.
+  - **Tests:** Focused finalization coverage pins aggregate byte and file-count enforcement, earlier-file preservation, invalid and over-limit cleanup, failed-run cleanup, safe outside-path handling, symlink cleanup, quota metrics, and successful artifact capture.
 - **Web Surface screenshots can now move into packages and reports without hiding the redaction boundary.**
   - **What:** Available capture cards hand one exact screenshot to the existing package wizard or current report draft on desktop and mobile. Package handoff opens at the Include step in Raw mode because binary images can't be safely text-redacted; choosing Redacted omits the image bytes and keeps package metadata. Report handoff preserves the draft's other selections and lists screenshot metadata while the image stays behind authenticated artifact storage. View-only team members don't see mutation actions.
   - **Tests:** Focused browser coverage pins exact artifact selection across asynchronous package-wizard refreshes, the Raw default and redaction explanation, report-selection merging, authenticated-storage messaging, existing navigation actions, and view-only behavior.

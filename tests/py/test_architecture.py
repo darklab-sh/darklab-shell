@@ -367,6 +367,12 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/finalization_version_inference.py", 160, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_web_surface.py", 140, "split-package-ratchet"),
     ModuleSizeBudget(
+        "app/services/runs/finalization_web_surface_query.py", 60, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/runs/finalization_web_surface_storage.py", 220, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
         "app/services/runs/httpx_workspace_artifact_metadata.py", 70, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),

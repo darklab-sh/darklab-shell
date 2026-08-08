@@ -16,6 +16,8 @@ Public CVE risk and advisory events log source names, feed versions, acquisition
 
 Assessment evidence matching logs bounded run, Project, team, and result counts after a completed run. Quota skips record the fixed quota reason, and unexpected failures record the exception through the normal error logger. These events don't include commands, target values, finding text, output, profile snapshots, or evidence payloads. History deletion and automatic retention record only how many assessment evidence links became unavailable; the preserved evidence ids and reasons stay in the database and audit boundary rather than application logs.
 
+HTTPx screenshot finalization logs only owner/run ids, counts, limits, and fixed failure classes. Storage-limit and cleanup events never include workspace paths, URLs, page titles, technologies, captured bytes, or target values.
+
 ## Level Semantics
 
 | Level | Use |
@@ -246,6 +248,7 @@ The current event inventory is:
 | DEBUG | `AI_CONTEXT_BUILT` | AI context assembly | run_id, session, variant, output_source, output_truncated, max_input_chars, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes, useful, omitted_sections, section_count, context_hash |
 | DEBUG | `AI_SUGGESTION_VALIDATION_COMPLETED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
 | DEBUG | `AI_WORKER_BUSY` | AI worker coordination | max_concurrent |
+| DEBUG | `HTTPX_SCREENSHOT_OUTPUT_CLEANED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
 | INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
 | INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, team_id, source, schedule_id, removed |
@@ -392,6 +395,10 @@ The current event inventory is:
 | WARN | `CLIENT_RUN_OUTPUT_TRUNCATED` | client-side run persistence | ip, session, cmd, raw_line_count, stored_line_count, limit |
 | WARN | `RUN_OUTPUT_ARTIFACT_TRUNCATED` | full-output artifact capture | run_id, rel_path, artifact_bytes, limit, reason |
 | WARN | `RUN_OUTPUT_ARTIFACT_PARSE_FALLBACK` | full-output artifact loading | rel_path, row_index, reason, error |
+| WARN | `HTTPX_SCREENSHOT_PROTECTED_PATH_LOOKUP_FAILED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
+| WARN | `HTTPX_SCREENSHOT_STORAGE_LIMIT_REACHED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated, quota_rejected_count, available_file_slots, available_bytes, usage_unavailable |
+| WARN | `HTTPX_SCREENSHOT_CLEANUP_INCOMPLETE` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
+| WARN | `HTTPX_SCREENSHOT_CLEANUP_SKIPPED_PROTECTED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
 | WARN | `COMMAND_REGISTRY_LOCAL_OVERLAY_INVALID` | command registry loading | path, error |
 | WARN | `THEME_OVERLAY_LOAD_FAILED` | theme loading | path, source, error_type |
 | WARN | `BODY_STORE_LOAD_FALLBACK` | large body storage | rel_path, kind, error |

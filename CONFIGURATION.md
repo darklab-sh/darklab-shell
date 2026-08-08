@@ -303,9 +303,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped database preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
 | `full_output_max_bytes` | derived from `full_output_max_mb` | Server-side only. Effective byte value used by artifact storage after startup. Operators should set `full_output_max_mb`; legacy byte-based config is still accepted only when the MB setting is left at its built-in default |
-| `workspace_quota_mb` | `50 MB` | Server-side only. Per-owner workspace quota for each personal or team workspace |
-| `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
-| `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
+| `workspace_quota_mb` | `50 MB` | Server-side only. Per-owner workspace quota for each personal or team workspace. HTTPx screenshot finalization also applies the remaining byte budget to new captures and removes excess event-named screenshot output instead of evicting earlier files |
+| `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed file size, including a saved HTTPx screenshot |
+| `workspace_max_files` | `100` | Server-side only. Maximum file count per owner workspace. HTTPx screenshot finalization retains only the new captures that fit after counting earlier files |
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
 | `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
 | `max_project_links_per_project` | `5000` | Server-side only. Maximum linked source records per project |
