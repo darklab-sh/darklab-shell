@@ -29,6 +29,12 @@ from services.assessments.dalfox_parameter_observations import (
     DALFOX_MAX_PARAMETER_OBSERVATIONS,
     DalfoxParameterObservationState,
 )
+from services.assessments.dalfox_xss_observations import (
+    DALFOX_XSS_JSON_MAX_LINE_BYTES,
+    DALFOX_XSS_MAX_OBSERVATIONS,
+    DALFOX_XSS_PARSER_VERSION,
+    ReviewedDalfoxXssContext,
+)
 from services.assessments.dns_takeover_observations import (
     DNSX_MAX_CNAME_CHAIN,
     DNSX_TAKEOVER_PARSER_VERSION,
@@ -1170,6 +1176,198 @@ def test_dalfox_parameter_observations_survive_run_event_wire_round_trip():
     assert to_wire(capture.events[1])["source_detail"]["parameter_observations"] == [observation]
 
 
+def _dalfox_xss_context(**overrides):
+    values = {
+        "target": "https://app.example.test/search?q=one",
+        "parameter": "q",
+        "location": "Query",
+        "source_parameter_observation_id": "obs_" + ("a" * 32),
+        "request_limit": 120,
+    }
+    values.update(overrides)
+    return ReviewedDalfoxXssContext(**values)
+
+
+def _dalfox_xss_classifier(context=None):
+    return OutputSignalClassifier(
+        "dalfox https://app.example.test/search?q=one -p q --skip-discovery "
+        "--skip-mining --format jsonl",
+        source_run_id="run-dalfox-xss",
+        dalfox_xss_context=context or _dalfox_xss_context(),
+    )
+
+
+def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
+    classifier = _dalfox_xss_classifier()
+    summary = classifier.classify_line(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "targets": ["https://app.example.test/search?q=one"],
+        "findings_count": 5,
+        "total_requests": 80,
+        "scan_duration_ms": 2500,
+    }}))
+    rows = []
+    for result_type, suffix in (("V", "executed"), ("A", "ast"), ("R", "reflected")):
+        rows.append(classifier.classify_line(json.dumps({
+            "type": result_type,
+            "type_description": f"{result_type} result",
+            "inject_type": "inHTML-double",
+            "method": "GET",
+            "param": "q",
+            "payload": f"<svg id={suffix} onload=alert(1)>",
+            "evidence": f"proof-{suffix}",
+            "cwe": "CWE-79",
+            "severity": "High",
+            "message_id": f"{result_type}01",
+            "message_str": f"Dalfox {suffix} result",
+        }))["source_detail"]["dalfox_xss_observations"][0])
+    duplicate = classifier.classify_line(json.dumps({
+        "type": "V", "type_description": "V result", "inject_type": "inHTML-double",
+        "method": "GET", "param": "q", "payload": "<svg id=executed onload=alert(1)>",
+        "evidence": "proof-executed", "cwe": "CWE-79", "severity": "High",
+        "message_id": "V01", "message_str": "Dalfox executed result",
+    }))
+    informational = classifier.classify_line(json.dumps({
+        "type": "I", "param": "q", "message_str": "informational component",
+    }))
+
+    assert summary["source_detail"]["dalfox_xss_scan"] == {
+        "target": "https://app.example.test/search?q=one",
+        "parameter": "q",
+        "location": "Query",
+        "source_parameter_observation_id": "obs_" + ("a" * 32),
+        "source_run_id": "run-dalfox-xss",
+        "tool_version": "v3.1.2",
+        "parser_version": DALFOX_XSS_PARSER_VERSION,
+        "policy_level": "intrusive",
+        "reported_finding_count": 5,
+        "total_requests": 80,
+        "scan_duration_ms": 2500,
+        "truncated": False,
+    }
+    assert [(item["result_type"], item["validation_state"], item["confidence"])
+            for item in rows] == [
+        ("V", "confirmed", "high"),
+        ("A", "needs_runtime_confirmation", "medium"),
+        ("R", "reflected_unconfirmed", "low"),
+    ]
+    assert [item["validation_method"] for item in rows] == [
+        "dalfox_dom_execution", "dalfox_ast_analysis", "dalfox_reflection",
+    ]
+    assert all(item["source_parameter_observation_id"] == "obs_" + ("a" * 32) for item in rows)
+    assert all(item["proof_digest"].startswith("sha256:") for item in rows)
+    assert all(item["cwe_ids"] == ["CWE-79"] for item in rows)
+    assert "dalfox_xss_observations" not in duplicate.get("source_detail", {})
+    assert "dalfox_xss_observations" not in informational.get("source_detail", {})
+
+
+def test_reviewed_dalfox_xss_context_and_rows_fail_closed():
+    with pytest.raises(ValueError, match="invalid reviewed Dalfox XSS context"):
+        _dalfox_xss_context(target="https://user:secret@app.example.test/search?q=one")
+    with pytest.raises(ValueError, match="invalid reviewed Dalfox XSS context"):
+        _dalfox_xss_context(policy_level="standard")
+    with pytest.raises(ValueError, match="invalid reviewed Dalfox XSS context"):
+        _dalfox_xss_context(source_parameter_observation_id="caller-made")
+
+    meta = json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "targets": ["https://app.example.test/search?q=one"],
+        "findings_count": 5,
+        "total_requests": 80,
+        "scan_duration_ms": 2500,
+    }})
+    commands = (
+        "dalfox https://app.example.test/search?q=one -p q --skip-mining --format jsonl",
+        "dalfox https://app.example.test/search?q=one -p q --skip-discovery --format jsonl",
+        "dalfox https://app.example.test/search?q=one -p other --skip-discovery --skip-mining --format jsonl",
+        "dalfox https://other.example.test/search?q=one -p q --skip-discovery --skip-mining --format jsonl",
+    )
+    assert all("dalfox_xss_scan" not in OutputSignalClassifier(
+        command,
+        source_run_id="run-dalfox-xss",
+        dalfox_xss_context=_dalfox_xss_context(),
+    ).classify_line(meta).get("source_detail", {}) for command in commands)
+    assert "dalfox_xss_scan" not in OutputSignalClassifier(
+        commands[0] + " --skip-discovery",
+        source_run_id="run-dalfox-xss",
+    ).classify_line(meta).get("source_detail", {})
+    assert "dalfox_xss_scan" not in OutputSignalClassifier(
+        commands[0] + " --skip-discovery",
+        source_run_id="run-dalfox-xss",
+        dalfox_xss_context={"target": "https://app.example.test/search?q=one"},
+    ).classify_line(meta).get("source_detail", {})
+
+    classifier = _dalfox_xss_classifier()
+    assert "dalfox_xss_scan" not in classifier.classify_line(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "targets": ["https://other.example.test/search?q=one"],
+        "findings_count": 1,
+        "total_requests": 80,
+        "scan_duration_ms": 2500,
+    }})).get("source_detail", {})
+    assert "dalfox_xss_scan" not in classifier.classify_line(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "targets": ["https://app.example.test/search?q=one"],
+        "findings_count": 1,
+        "total_requests": 121,
+        "scan_duration_ms": 2500,
+    }})).get("source_detail", {})
+    assert classifier.classify_line(meta)["source_detail"]["dalfox_xss_scan"]
+    invalid_rows = (
+        {"type": "V", "param": "other", "method": "GET", "payload": "<svg>",
+         "evidence": "proof", "cwe": "CWE-79"},
+        {"type": "V", "param": "q", "method": "GET", "payload": "<svg>",
+         "evidence": "proof", "cwe": "CWE-89"},
+        {"type": "V", "param": "q", "method": "GET", "payload": "<svg>",
+         "evidence": "proof", "cwe": "CWE-79", "request": "GET /private"},
+        {"type": "V", "param": "q", "method": "GET", "payload": "<svg>\n",
+         "evidence": "proof", "cwe": "CWE-79"},
+        {"type": "X", "param": "q", "method": "GET", "payload": "<svg>",
+         "evidence": "proof", "cwe": "CWE-79"},
+    )
+    assert all("dalfox_xss_observations" not in classifier.classify_line(
+        json.dumps(row),
+    ).get("source_detail", {}) for row in invalid_rows)
+
+
+def test_dalfox_xss_observations_are_bounded_and_survive_event_wire_round_trip():
+    class Capture:
+        def __init__(self):
+            self.events = []
+
+        def add_event(self, event):
+            self.events.append(event)
+
+    capture = Capture()
+    classifier = _dalfox_xss_classifier(_dalfox_xss_context(request_limit=10_000))
+    capture_event_with_signals(capture, classifier, json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "targets": ["https://app.example.test/search?q=one"],
+        "findings_count": DALFOX_XSS_MAX_OBSERVATIONS + 1,
+        "total_requests": 1000,
+        "scan_duration_ms": 2500,
+    }}))
+    for index in range(DALFOX_XSS_MAX_OBSERVATIONS + 1):
+        capture_event_with_signals(capture, classifier, json.dumps({
+            "type": "R",
+            "method": "GET",
+            "param": "q",
+            "payload": f"payload-{index}",
+            "evidence": f"evidence-{index}",
+            "cwe": "79",
+        }))
+
+    summary = capture.events[0].source_detail["dalfox_xss_scan"]
+    observations = [event.source_detail["dalfox_xss_observations"][0]
+                    for event in capture.events[1:] if "dalfox_xss_observations" in event.source_detail]
+    assert summary["truncated"] is True
+    assert len(observations) == DALFOX_XSS_MAX_OBSERVATIONS
+    assert to_wire(capture.events[1])["source_detail"]["dalfox_xss_observations"] == [observations[0]]
+    assert _dalfox_xss_classifier().classify_line(
+        "{" + (" " * DALFOX_XSS_JSON_MAX_LINE_BYTES) + "}",
+    ).get("source_detail", {}) == {}
+
+
 def test_httpx_json_preserves_only_exact_versioned_technology_cpe_observations():
     record = {
         "url": "https://App.Example.test:443/",
@@ -1300,6 +1498,7 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
             nuclei_takeover_template=ReviewedNucleiTakeoverTemplate(
                 "http-takeover-reviewed", "2026.08.1", "sha256:" + ("a" * 64), "safe",
             ),
+            dalfox_xss_context=_dalfox_xss_context(),
         ),
         cfg={"output_entity_extra_domain_suffixes": []},
         run_output_capture_fn=lambda run_id: {"run_id": run_id},
@@ -1321,15 +1520,19 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
         "nuclei_takeover_template": ReviewedNucleiTakeoverTemplate(
             "http-takeover-reviewed", "2026.08.1", "sha256:" + ("a" * 64), "safe",
         ),
+        "dalfox_xss_context": _dalfox_xss_context(),
     }
     assert output_signal_classifier_kwargs(None) == {}
     with pytest.raises(ValueError, match="invalid run output signal context"):
         output_signal_classifier_kwargs({"nuclei_takeover_template": "caller-made"})
+    with pytest.raises(ValueError, match="invalid Dalfox XSS signal context"):
+        RunOutputSignalContext(dalfox_xss_context="caller-made")
 
     context = RunOutputSignalContext(
         nuclei_takeover_template=ReviewedNucleiTakeoverTemplate(
             "http-takeover-reviewed", "2026.08.1", "sha256:" + ("a" * 64), "safe",
         ),
+        dalfox_xss_context=_dalfox_xss_context(),
     )
     broker_call = {}
 

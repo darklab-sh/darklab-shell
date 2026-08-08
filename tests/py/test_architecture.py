@@ -461,6 +461,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/assessments/dalfox_parameter_observations.py", 161, "split-package-ratchet"
     ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_xss_observations.py", 311, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/stored_nvd_inference.py", 52, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/stored_osv_inference.py", 60, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/version_correlation.py", 150, "split-package-ratchet"),

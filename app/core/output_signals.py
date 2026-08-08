@@ -51,6 +51,7 @@ from core.output_shodan import (
     _parse_shodan_dns_row,
 )
 from services.assessments.dalfox_parameter_observations import DalfoxParameterObservationState
+from services.assessments.dalfox_xss_observations import DalfoxXssObservationState, ReviewedDalfoxXssContext
 from services.assessments.dns_takeover_observations import dnsx_json_metadata
 from services.assessments.historical_urls import historical_url_entity_attributes, normalize_historical_url
 from core.output_structured_signals import (
@@ -428,8 +429,6 @@ def _looks_like_clean_url(value: str) -> bool:
     if not _CLEAN_HTTP_URL_RE.match(raw):
         return False
     return not _SHELL_TEMPLATE_URL_NOISE_RE.search(raw)
-
-
 
 
 def _nmap_report_entities(stripped: str, source_line: int | None) -> list[dict[str, object]]:
@@ -950,6 +949,7 @@ class OutputSignalClassifier:
     source_run_id: str = ""
     profile_role: str = ""
     nuclei_takeover_template: ReviewedNucleiTakeoverTemplate | None = None
+    dalfox_xss_context: ReviewedDalfoxXssContext | None = None
 
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
@@ -961,6 +961,7 @@ class OutputSignalClassifier:
         self.current_target: str | None = None
         self.current_nmap_service_target: str | None = None
         self.dalfox_discovery = DalfoxParameterObservationState(self.command, self.source_run_id)
+        self.dalfox_xss = DalfoxXssObservationState(self.command, self.source_run_id, self.dalfox_xss_context)
         self.line_index = 0
         self.previous_text = ""
 
@@ -1021,6 +1022,7 @@ class OutputSignalClassifier:
                                                source_run_id=self.source_run_id))
         if self.root == "dalfox" and normalized_text.startswith("{"):
             metadata.update(self.dalfox_discovery.metadata(normalized_text))
+            metadata.update(self.dalfox_xss.metadata(normalized_text))
         historical = None
         if self.root == "gau":
             historical = normalize_historical_url(normalized_text, source="gau", run_id=self.source_run_id)

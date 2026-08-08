@@ -5,17 +5,21 @@
 
 from dataclasses import dataclass
 
+from services.assessments.dalfox_xss_observations import ReviewedDalfoxXssContext
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
 
 
 @dataclass(frozen=True)
 class RunOutputSignalContext:
     nuclei_takeover_template: ReviewedNucleiTakeoverTemplate | None = None
+    dalfox_xss_context: ReviewedDalfoxXssContext | None = None
 
     def __post_init__(self) -> None:
-        template = self.nuclei_takeover_template
-        if template is not None and type(template) is not ReviewedNucleiTakeoverTemplate:
+        if (self.nuclei_takeover_template is not None
+                and type(self.nuclei_takeover_template) is not ReviewedNucleiTakeoverTemplate):
             raise ValueError("invalid Nuclei takeover signal context")
+        if self.dalfox_xss_context is not None and type(self.dalfox_xss_context) is not ReviewedDalfoxXssContext:
+            raise ValueError("invalid Dalfox XSS signal context")
 
 
 def output_signal_classifier_kwargs(
@@ -24,9 +28,12 @@ def output_signal_classifier_kwargs(
     context = validated_run_output_signal_context(context)
     if context is None:
         return {}
-    if context.nuclei_takeover_template is None:
-        return {}
-    return {"nuclei_takeover_template": context.nuclei_takeover_template}
+    values: dict[str, object] = {}
+    if context.nuclei_takeover_template is not None:
+        values["nuclei_takeover_template"] = context.nuclei_takeover_template
+    if context.dalfox_xss_context is not None:
+        values["dalfox_xss_context"] = context.dalfox_xss_context
+    return values
 
 
 def validated_run_output_signal_context(
@@ -37,8 +44,4 @@ def validated_run_output_signal_context(
     return context
 
 
-__all__ = [
-    "RunOutputSignalContext",
-    "output_signal_classifier_kwargs",
-    "validated_run_output_signal_context",
-]
+__all__ = ["RunOutputSignalContext", "output_signal_classifier_kwargs", "validated_run_output_signal_context"]
