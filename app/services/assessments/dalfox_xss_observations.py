@@ -32,6 +32,12 @@ _OBSERVATION_ID_RE = re.compile(r"obs_[0-9a-f]{32}\Z")
 _METHOD_RE = re.compile(r"[A-Z]{3,10}\Z")
 _MESSAGE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
+_PARAMETER_LOCATIONS = {
+    "Body": "body",
+    "Header": "header",
+    "JsonBody": "json",
+    "Query": "query",
+}
 
 
 @dataclass(frozen=True)
@@ -205,10 +211,12 @@ def _active_command_matches(command: str, context: ReviewedDalfoxXssContext) -> 
     tokens = tokenize_command(str(command or ""))
     if len(tokens) < 2 or tokens[0].casefold() != "dalfox":
         return False
+    location = _PARAMETER_LOCATIONS.get(context.location, "")
     return (
         _url(tokens[1]) == context.target
         and _flag_value(tokens, "--format").casefold() == "jsonl"
-        and _flag_value(tokens, "-p", "--param") == context.parameter
+        and _flag_value(tokens, "-p", "--param") == f"{context.parameter}:{location}"
+        and bool(location)
         and "--skip-discovery" in tokens
         and "--skip-mining" in tokens
         and "--only-discovery" not in tokens

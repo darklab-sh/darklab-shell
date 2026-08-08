@@ -28,6 +28,20 @@ from services.assessments.dalfox_parameter_observations import (
     DALFOX_JSON_MAX_LINE_BYTES,
     DALFOX_MAX_PARAMETER_OBSERVATIONS,
     DalfoxParameterObservationState,
+    dalfox_parameter_observation_id,
+)
+from services.assessments.dalfox_parameter_evidence import (
+    ReviewedDalfoxParameterEvidence,
+)
+from services.assessments.dalfox_xss_command import (
+    DALFOX_XSS_MAX_PAYLOADS_PER_PARAMETER,
+    DALFOX_XSS_RATE_LIMIT_PER_SECOND,
+    DALFOX_XSS_REQUEST_LIMIT,
+    DALFOX_XSS_SCAN_TIMEOUT_SECONDS,
+    DALFOX_XSS_TIME_LIMIT_SECONDS,
+    DALFOX_XSS_WORKERS,
+    reviewed_dalfox_xss_command_matches,
+    reviewed_dalfox_xss_command_plan,
 )
 from services.assessments.dalfox_xss_observations import (
     DALFOX_XSS_JSON_MAX_LINE_BYTES,
@@ -1190,11 +1204,94 @@ def _dalfox_xss_context(**overrides):
 
 def _dalfox_xss_classifier(context=None):
     return OutputSignalClassifier(
-        "dalfox https://app.example.test/search?q=one -p q --skip-discovery "
+        "dalfox https://app.example.test/search?q=one -p q:query --skip-discovery "
         "--skip-mining --format jsonl",
         source_run_id="run-dalfox-xss",
         dalfox_xss_context=context or _dalfox_xss_context(),
     )
+
+
+def _reviewed_dalfox_parameter_evidence(**overrides):
+    values = {
+        "source_run_id": "run-dalfox-discovery",
+        "target": "https://app.example.test/search?q=one",
+        "parameter": "q",
+        "location": "Query",
+        "tool_version": "v3.1.2",
+        "parser_version": DALFOX_DISCOVERY_PARSER_VERSION,
+    }
+    values.update(overrides)
+    values.setdefault("observation_id", dalfox_parameter_observation_id(
+        values["source_run_id"], values["target"], values["location"], values["parameter"],
+    ))
+    return ReviewedDalfoxParameterEvidence(**values)
+
+
+def test_reviewed_dalfox_xss_command_is_exact_bounded_and_evidence_derived():
+    evidence = _reviewed_dalfox_parameter_evidence()
+    plan = reviewed_dalfox_xss_command_plan(evidence)
+
+    assert plan is not None
+    assert plan.request_limit == DALFOX_XSS_REQUEST_LIMIT == 256
+    assert plan.time_limit_seconds == DALFOX_XSS_TIME_LIMIT_SECONDS == 90
+    assert f"--max-payloads-per-param {DALFOX_XSS_MAX_PAYLOADS_PER_PARAMETER}" in plan.command
+    assert f"--rate-limit {DALFOX_XSS_RATE_LIMIT_PER_SECOND}" in plan.command
+    assert f"--scan-timeout {DALFOX_XSS_SCAN_TIMEOUT_SECONDS}" in plan.command
+    assert f"--workers {DALFOX_XSS_WORKERS}" in plan.command
+    assert "--param q:query" in plan.command
+    assert "--skip-discovery --skip-mining" in plan.command
+    assert "--max-concurrent-targets 1 --max-targets-per-host 1" in plan.command
+    assert "--skip-waf-probe --waf-bypass off --insecure=false" in plan.command
+    assert all(flag not in plan.command for flag in (
+        "--follow-redirects", "--remote-payloads", "--custom-payload",
+        "--blind", "--blind-oob", "--include-request", "--include-response",
+    ))
+    assert reviewed_dalfox_xss_command_matches(plan.command, evidence)
+    assert not reviewed_dalfox_xss_command_matches(plan.command + " --deep-scan", evidence)
+    context = evidence.xss_context(request_limit=plan.request_limit)
+    assert context.request_limit == DALFOX_XSS_REQUEST_LIMIT
+    classifier = OutputSignalClassifier(
+        plan.command,
+        source_run_id="run-dalfox-xss",
+        dalfox_xss_context=context,
+    )
+    assert classifier.classify_line(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "targets": [evidence.target],
+        "findings_count": 0,
+        "total_requests": DALFOX_XSS_REQUEST_LIMIT,
+        "scan_duration_ms": 60_000,
+    }}))["source_detail"]["dalfox_xss_scan"]["reported_finding_count"] == 0
+
+
+def test_reviewed_dalfox_xss_command_rejects_unbound_or_unsupported_evidence():
+    assert reviewed_dalfox_xss_command_plan(
+        _reviewed_dalfox_parameter_evidence(location="Header"),
+    ) is None
+    assert reviewed_dalfox_xss_command_plan(
+        _reviewed_dalfox_parameter_evidence(parameter="missing"),
+    ) is None
+    assert reviewed_dalfox_xss_command_plan(
+        _reviewed_dalfox_parameter_evidence(
+            target="https://app.example.test/search?q%3Aquery=one",
+            parameter="q:query",
+        ),
+    ) is None
+    assert reviewed_dalfox_xss_command_plan(
+        _reviewed_dalfox_parameter_evidence(parser_version="caller-made"),
+    ) is None
+    assert reviewed_dalfox_xss_command_plan(
+        _reviewed_dalfox_parameter_evidence(observation_id="obs_" + ("f" * 32)),
+    ) is None
+    assert reviewed_dalfox_xss_command_plan(SimpleNamespace(
+        target="https://app.example.test/search?q=one",
+        parameter="q",
+        location="Query",
+    )) is None
+    discovery = command_plan("dalfox", "url", "https://app.example.test/search?q=one")
+    assert discovery is not None
+    assert "--only-discovery" in discovery.command
+    assert "--param" not in discovery.command
 
 
 def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
@@ -1277,10 +1374,10 @@ def test_reviewed_dalfox_xss_context_and_rows_fail_closed():
         "scan_duration_ms": 2500,
     }})
     commands = (
-        "dalfox https://app.example.test/search?q=one -p q --skip-mining --format jsonl",
-        "dalfox https://app.example.test/search?q=one -p q --skip-discovery --format jsonl",
-        "dalfox https://app.example.test/search?q=one -p other --skip-discovery --skip-mining --format jsonl",
-        "dalfox https://other.example.test/search?q=one -p q --skip-discovery --skip-mining --format jsonl",
+        "dalfox https://app.example.test/search?q=one -p q:query --skip-mining --format jsonl",
+        "dalfox https://app.example.test/search?q=one -p q:query --skip-discovery --format jsonl",
+        "dalfox https://app.example.test/search?q=one -p other:query --skip-discovery --skip-mining --format jsonl",
+        "dalfox https://other.example.test/search?q=one -p q:query --skip-discovery --skip-mining --format jsonl",
     )
     assert all("dalfox_xss_scan" not in OutputSignalClassifier(
         command,
