@@ -10,7 +10,13 @@ from urllib.parse import urlsplit
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
-from services.assessments.web_gallery import web_surface_rows_from_events
+from services.assessments.web_gallery import (
+    MAX_GALLERY_ROWS,
+    normalize_web_surface_filters,
+    web_surface_filters_active,
+    web_surface_row_matches,
+    web_surface_rows_from_events,
+)
 from services.intel.canonical import (
     CanonicalizationError,
     canonical_domain,
@@ -24,60 +30,43 @@ from services.projects.artifacts import (
 )
 from services.projects.scope import shared_owner_where
 from services.projects.utils import normalize_page_window, page_payload
-from services.runs.kinds import RUN_KIND_EXTERNAL
+from services.projects.web_surface_query import load_project_web_surface_rows
 
 
 _IMAGE_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp")
 
 
-def list_project_web_surface(session_id, project_id, *, limit=50, offset=0, team_id=""):
+def list_project_web_surface(session_id, project_id, filters=None, *, limit=50, offset=0, team_id=""):
     """Return a bounded capture page backed by verified project image artifacts."""
     safe_limit, safe_offset = normalize_page_window(limit, offset)
+    normalized_filters = normalize_web_surface_filters(filters)
+    filtered = web_surface_filters_active(normalized_filters)
+    query_limit = MAX_GALLERY_ROWS if filtered else safe_limit
+    query_offset = 0 if filtered else safe_offset
     with get_db_connect()() as conn:
-        project_owner_sql, project_owner_params = shared_owner_where(
-            session_id, team_id=team_id, table_alias="p",
+        result = load_project_web_surface_rows(
+            conn, session_id, project_id, limit=query_limit, offset=query_offset, team_id=team_id,
         )
-        run_owner_sql, run_owner_params = shared_owner_where(
-            session_id, team_id=team_id, table_alias="r",
-        )
-        where_sql = (
-            "p.id = ? AND " + project_owner_sql + " AND " + run_owner_sql
-            + " AND r.run_kind = ? AND a.kind = 'screenshot' "
-            "AND a.detected_by = 'httpx_screenshot' AND a.preview_type = 'image' "
-            "AND a.content_type IN ('image/jpeg', 'image/png', 'image/webp')"
-        )
-        params = (project_id, *project_owner_params, *run_owner_params, RUN_KIND_EXTERNAL)
-        total_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM run_file_artifacts a "
-            "JOIN runs r ON r.id = a.run_id "
-            "JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = r.id "
-            "JOIN projects p ON p.id = l.project_id WHERE " + where_sql,  # nosec B608
-            params,
-        ).fetchone()
-        if total_row is None:
+        if result is None:
             return None
-        project_row = conn.execute(
-            "SELECT 1 FROM projects p WHERE p.id = ? AND " + project_owner_sql,  # nosec B608
-            (project_id, *project_owner_params),
-        ).fetchone()
-        if not project_row:
-            return None
-        total = int(total_row["count"] or 0)
-        capture_filter_sql = where_sql + " ORDER BY a.created DESC, a.id DESC LIMIT ? OFFSET ?"
-        rows = conn.execute(
-            "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, "  # nosec B608
-            "a.kind, a.byte_size, a.detected_by, a.content_type, a.preview_type, "
-            "a.content_sha256, a.created, r.team_id AS run_team_id, r.command, "
-            "r.started, r.finished, r.output_preview "
-            "FROM run_file_artifacts a JOIN runs r ON r.id = a.run_id "
-            "JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = r.id "
-            "JOIN projects p ON p.id = l.project_id WHERE "
-            + capture_filter_sql,
-            (*params, safe_limit, safe_offset),
-        ).fetchall()
+        rows, candidate_total = result
         captures = _capture_items(session_id, rows)
+        if filtered:
+            captures = [item for item in captures if web_surface_row_matches(item, normalized_filters)]
+            filtered_total = len(captures)
+            captures = captures[safe_offset:safe_offset + safe_limit]
+        else:
+            filtered_total = candidate_total
         _attach_capture_entity_ids(conn, session_id, captures, team_id=team_id)
-    return page_payload("captures", captures, total, safe_limit, safe_offset)
+    return page_payload(
+        "captures", captures, filtered_total, safe_limit, safe_offset,
+        extra={
+            "filters": normalized_filters,
+            "candidate_total": candidate_total,
+            "candidate_limit": MAX_GALLERY_ROWS,
+            "candidate_truncated": bool(filtered and candidate_total > MAX_GALLERY_ROWS),
+        },
+    )
 
 
 def _capture_items(session_id: str, rows: list[object]) -> list[dict[str, object]]:

@@ -66,7 +66,13 @@ from services.assessments.historical_urls import (
     normalize_historical_urls,
     normalize_scope_domain,
 )
-from services.assessments.web_gallery import filter_web_surface_rows, web_surface_rows_from_events
+from services.assessments.web_gallery import (
+    filter_web_surface_rows,
+    normalize_web_surface_filters,
+    web_surface_filters_active,
+    web_surface_row_matches,
+    web_surface_rows_from_events,
+)
 from services.runs.finalization import capture_event_with_signals
 from services.runs.lifecycle import PreparedRealCommand, start_real_command_process
 from services.runs.output_model import to_wire
@@ -909,6 +915,33 @@ def test_web_gallery_filters_metadata_without_exposing_artifact_contents():
     assert rows[0]["url"] == "https://app.example.test"
     assert "html" not in rows[0]
     assert filter_web_surface_rows(rows, visual_hash="abc", changed_since=["abc"]) == []
+
+
+def test_web_gallery_normalizes_collection_filters_and_matches_enriched_rows():
+    filters = normalize_web_surface_filters({
+        "target": "  APP.EXAMPLE  ",
+        "status_code": "200",
+        "technology": " NGINX ",
+        "profile_role": "Authenticated",
+        "visual_hash": "ABC",
+    })
+    assert filters == {
+        "target": "APP.EXAMPLE",
+        "status_code": 200,
+        "technology": "NGINX",
+        "profile_role": "Authenticated",
+        "visual_hash": "ABC",
+    }
+    assert web_surface_filters_active(filters) is True
+    assert web_surface_row_matches({
+        "url": "https://app.example/login",
+        "status_code": 200,
+        "technologies": ["nginx"],
+        "profile_role": "authenticated",
+        "visual_hash": "abc",
+        "artifact": {"id": "kept-outside-public-metadata"},
+    }, filters) is True
+    assert normalize_web_surface_filters({"status_code": "99"})["status_code"] is None
 
 
 def test_web_gallery_paging_is_bounded_and_skips_malformed_rows():

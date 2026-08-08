@@ -21,6 +21,51 @@ _PUBLIC_FIELDS = (
 )
 
 
+def normalize_web_surface_filters(values: object) -> dict[str, object]:
+    """Normalize bounded collection filters shared by browser and API readers."""
+    source = values if isinstance(values, Mapping) else {}
+    status_value = source.get("status_code")
+    try:
+        status_code = int(status_value) if str(status_value or "").strip() else None
+    except (TypeError, ValueError):
+        status_code = None
+    if status_code is not None and not 100 <= status_code <= 599:
+        status_code = None
+    return {
+        "target": str(source.get("target") or "").strip()[:512],
+        "status_code": status_code,
+        "technology": str(source.get("technology") or "").strip()[:80],
+        "profile_role": str(source.get("profile_role") or "").strip()[:80],
+        "visual_hash": str(source.get("visual_hash") or "").strip()[:256],
+    }
+
+
+def web_surface_filters_active(filters: Mapping[str, object]) -> bool:
+    """Return whether a normalized filter set narrows the collection."""
+    return any(value is not None and value != "" for value in filters.values())
+
+
+def web_surface_row_matches(row: object, filters: Mapping[str, object]) -> bool:
+    """Match one metadata row without exposing non-public capture fields."""
+    if not isinstance(row, Mapping):
+        return False
+    target = str(filters.get("target") or "").casefold()
+    if target and target not in str(row.get("url") or "").casefold():
+        return False
+    status_code = filters.get("status_code")
+    if status_code is not None and row.get("status_code") != status_code:
+        return False
+    technology = str(filters.get("technology") or "").casefold()
+    role = str(filters.get("profile_role") or "").casefold()
+    visual_hash = str(filters.get("visual_hash") or "").casefold()
+    technologies = {str(item).strip().casefold() for item in row.get("technologies", []) if str(item).strip()}
+    return not (
+        (technology and technology not in technologies)
+        or (role and str(row.get("profile_role") or "").casefold() != role)
+        or (visual_hash and str(row.get("visual_hash") or "").casefold() != visual_hash)
+    )
+
+
 def filter_web_surface_rows(
     rows: object,
     *,
@@ -45,10 +90,13 @@ def filter_web_surface_rows(
         page_limit = MAX_GALLERY_ROWS
     if page_limit == 0:
         return []
-    target_key = str(target or "").strip().casefold()
-    technology_key = str(technology or "").strip().casefold()
-    role_key = str(profile_role or "").strip().casefold()
-    hash_key = str(visual_hash or "").strip().casefold()
+    filters = normalize_web_surface_filters({
+        "target": target,
+        "status_code": status_code,
+        "technology": technology,
+        "profile_role": profile_role,
+        "visual_hash": visual_hash,
+    })
     previous = (
         {str(value).strip().casefold() for value in changed_since}
         if isinstance(changed_since, (list, tuple, set))
@@ -56,20 +104,9 @@ def filter_web_surface_rows(
     )
     result: list[dict[str, object]] = []
     for row in values:
-        if not isinstance(row, Mapping):
-            continue
-        if target_key and target_key not in str(row.get("url") or "").casefold():
-            continue
-        if status_code is not None and row.get("status_code") != status_code:
-            continue
-        technologies = {str(item).strip().casefold() for item in row.get("technologies", []) if str(item).strip()}
-        if technology_key and technology_key not in technologies:
-            continue
-        if role_key and str(row.get("profile_role") or "").casefold() != role_key:
+        if not web_surface_row_matches(row, filters):
             continue
         row_hash = str(row.get("visual_hash") or "").casefold()
-        if hash_key and row_hash != hash_key:
-            continue
         if previous and row_hash in previous:
             continue
         if page_offset:

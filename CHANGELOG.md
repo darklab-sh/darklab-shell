@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Web Surface reads now support bounded collection filters.**
+  - **What:** Project readers can narrow verified captures by target text, exact HTTP status, technology, HTTP profile role, or visual hash before paging. Filtered reads inspect only the newest 200 eligible captures and say when that candidate window was truncated, so a large Project never presents a partial match set as exhaustive.
+  - **Tests:** Focused metadata, SQLite route, real Postgres route, owner-scope, paging, candidate-limit, and module-size coverage pins normalization, case-insensitive matching, exact status matching, enriched artifact preservation, and honest truncation metadata.
 - **Projects now include a responsive Web Surface screenshot gallery.**
   - **What:** The Web Surface tab shows verified HTTPx captures as paged desktop and mobile cards with the saved URL, title, response status, technologies, HTTP role, capture time, and source run. Images load through the authenticated artifact route, captured HTML never runs in the app, and missing, changed, unavailable, or conflicting captures stay visible with an honest state. Users can expand an available screenshot, open its saved URL in Atlas, or return to the source run without leaving the Project workflow.
   - **Tests:** Focused browser coverage pins authenticated image loading, safe unavailable states, metadata rendering, paging, Atlas and Run Details navigation, expansion state, object-URL cleanup, the lazy asset boundary, and matching desktop/mobile tab placement.

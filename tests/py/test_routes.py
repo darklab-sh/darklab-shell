@@ -12718,6 +12718,22 @@ class TestProjectRoutes:
                 f"/projects/{project['id']}/web-surface?limit=1&offset=1",
                 headers={"X-Session-ID": session_id},
             )
+            filtered = client.get(
+                f"/projects/{project['id']}/web-surface?" + urlencode({
+                    "target": "APP.EXAMPLE",
+                    "status_code": "200",
+                    "technology": "NGINX",
+                    "profile_role": "AUTHENTICATED",
+                    "visual_hash": "VISUAL-GOOD",
+                    "limit": "1",
+                }),
+                headers={"X-Session-ID": session_id},
+            )
+            with mock.patch("services.projects.web_surface.MAX_GALLERY_ROWS", 1):
+                capped_filtered = client.get(
+                    f"/projects/{project['id']}/web-surface?target=app.example",
+                    headers={"X-Session-ID": session_id},
+                )
             foreign = client.get(
                 f"/projects/{project['id']}/web-surface",
                 headers={"X-Session-ID": other_session},
@@ -12749,6 +12765,26 @@ class TestProjectRoutes:
         assert conflicting["metadata_state"] == "conflict"
         assert conflicting["capture_state"] == "metadata_conflict"
         assert "url" not in conflicting
+        assert filtered.status_code == 200
+        filtered_payload = filtered.get_json()
+        assert filtered_payload["total"] == 1
+        assert filtered_payload["candidate_total"] == 2
+        assert filtered_payload["candidate_limit"] == 200
+        assert filtered_payload["candidate_truncated"] is False
+        assert filtered_payload["filters"] == {
+            "target": "APP.EXAMPLE",
+            "status_code": 200,
+            "technology": "NGINX",
+            "profile_role": "AUTHENTICATED",
+            "visual_hash": "VISUAL-GOOD",
+        }
+        assert filtered_payload["captures"][0]["artifact"]["id"] == good_artifact_id
+        assert capped_filtered.status_code == 200
+        capped_payload = capped_filtered.get_json()
+        assert capped_payload["total"] == 1
+        assert capped_payload["candidate_total"] == 2
+        assert capped_payload["candidate_limit"] == 1
+        assert capped_payload["candidate_truncated"] is True
         assert foreign.status_code == 404
 
     def test_rejects_cross_session_or_unsupported_project_links(self):
