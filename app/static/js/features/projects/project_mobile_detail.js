@@ -722,6 +722,12 @@ let exportedDarklabProjectMobileDetail = null;
       const projectId = String(project.id || ctx.selectedProjectId() || '');
       if (ctx.projectWorkspaceTab() === 'overview') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileOverviewTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'assessment') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileAssessmentTab(projectId, summary));
+      else if (ctx.projectWorkspaceTab() === 'web-surface') {
+        const webSurface = document.createElement('div');
+        webSurface.className = 'project-web-surface-root is-mobile';
+        ctx.projectMobileDetailBody.appendChild(webSurface);
+        ctx.renderProjectWebSurface(webSurface, projectId, summary);
+      }
       else if (ctx.projectWorkspaceTab() === 'runs') ctx.projectMobileDetailBody.appendChild(renderRunsTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'entities') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileEntitiesTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'findings') ctx.projectMobileDetailBody.appendChild(renderFindingsTab(projectId, summary));

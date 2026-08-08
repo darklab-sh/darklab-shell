@@ -43,7 +43,7 @@ describe('frontend browser global boundary inventory', () => {
   const EXPECTED_BOUNDARY_BUDGETS = Object.freeze({
     window_publish_purposes: Object.freeze({
       intentional_bootstrap: 4,
-      lazy_placeholder: 102,
+      lazy_placeholder: 103,
       module_api_bridge: 61,
       bridge_internal: 10,
       test_hook: 3,
@@ -73,14 +73,14 @@ describe('frontend browser global boundary inventory', () => {
     resolver_helper_calls_by_class: Object.freeze({
       bridge_dispatch: 95,
       global_only: 546,
-      import_first: 589,
+      import_first: 592,
     }),
     resolver_helper_calls_by_final_resolution: Object.freeze({
       allowlisted_global: 54,
       bridge_dispatch_report_only: 91,
       dynamic_or_non_literal: 27,
-      fallback_imported_binding: 376,
-      fallback_local_binding: 12,
+      fallback_imported_binding: 377,
+      fallback_local_binding: 14,
       global_publish: 77,
       guarded_compatibility_fallback: 506,
       same_file_import_source: 87,

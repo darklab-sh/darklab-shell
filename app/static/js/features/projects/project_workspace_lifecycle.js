@@ -252,6 +252,7 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
         ctx.invalidateProjectRuns?.();
         ctx.invalidateProjectEntities?.();
         ctx.invalidateProjectArtifacts?.();
+        ctx.invalidateProjectWebSurface?.();
         ctx.invalidateProjectAssessment?.();
         ctx.invalidateProjectOverview?.();
         ctx.invalidateProjectMonitoring?.();

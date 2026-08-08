@@ -194,6 +194,10 @@ describe('frontend config bootstrap', () => {
                 url: '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
                 type: 'module',
               },
+              project_web_surface: {
+                url: '/static/js/features/projects/project_web_surface.js?v=web-surface-hash',
+                type: 'module',
+              },
               project_details: '/static/js/features/projects/project_details.js?v=details-hash',
               project_list: '/static/js/features/projects/project_list.js?v=list-hash',
               project_navigation: '/static/js/features/projects/project_navigation.js?v=navigation-hash',
@@ -359,6 +363,11 @@ describe('frontend config bootstrap', () => {
           const DarklabProjectArtifacts = { createProjectArtifactsController: vi.fn() }
           window.DarklabProjectArtifacts = DarklabProjectArtifacts
           return { DarklabProjectArtifacts }
+        }
+        if (url.includes('/project_web_surface.js')) {
+          const DarklabProjectWebSurface = { createProjectWebSurfaceController: vi.fn() }
+          window.DarklabProjectWebSurface = DarklabProjectWebSurface
+          return { DarklabProjectWebSurface }
         }
         if (url.includes('/project_packages.js')) {
           const DarklabProjectPackages = { createProjectPackagesController: vi.fn() }
@@ -593,6 +602,7 @@ describe('frontend config bootstrap', () => {
       ['project_entities', 'DarklabProjectEntities', 'createProjectEntitiesController'],
       ['project_findings', 'DarklabProjectFindings', 'createProjectFindingsController'],
       ['project_findings_board', 'DarklabProjectFindingsBoard', 'createProjectFindingsBoardController'],
+      ['project_web_surface', 'DarklabProjectWebSurface', 'createProjectWebSurfaceController'],
     ]
     const projectWorkspaceCoreNames = [
       'project_details',
@@ -696,20 +706,25 @@ describe('frontend config bootstrap', () => {
     expect(workspaceApi).not.toHaveProperty('DarklabProjectRuns')
     expect(workspaceApi).not.toHaveProperty('DarklabProjectEntities')
 
-    const deferredPromise = window.loadProjectWorkspace({ modules: ['project_runs', 'project_entities'] })
+    const deferredPromise = window.loadProjectWorkspace({
+      modules: ['project_runs', 'project_entities', 'project_web_surface'],
+    })
     await vi.waitFor(() => {
       expect(imported).toEqual([
         ...projectWorkspaceCoreScripts.map(([name]) => `/static/js/features/projects/${name}.js?v=${name}-hash`),
         '/static/js/features/projects/project_runs.js?v=project_runs-hash',
         '/static/js/features/projects/project_entities.js?v=project_entities-hash',
+        '/static/js/features/projects/project_web_surface.js?v=project_web_surface-hash',
       ])
     })
     pendingProjectImports.get('project_runs')?.()
     pendingProjectImports.get('project_entities')?.()
+    pendingProjectImports.get('project_web_surface')?.()
     const deferredApi = await deferredPromise
     expect(deferredApi).toEqual(expect.objectContaining({
       DarklabProjectRuns: window.DarklabProjectRuns,
       DarklabProjectEntities: window.DarklabProjectEntities,
+      DarklabProjectWebSurface: window.DarklabProjectWebSurface,
     }))
     expect(appended).toEqual([])
 

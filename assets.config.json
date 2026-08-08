@@ -94,6 +94,7 @@
     "/static/js/features/projects/project_overview.js",
     "/static/js/features/projects/project_monitoring.js",
     "/static/js/features/projects/project_artifacts.js",
+    "/static/js/features/projects/project_web_surface.js",
     "/static/js/features/projects/project_details.js",
     "/static/js/features/projects/project_list.js",
     "/static/js/features/projects/project_navigation.js",

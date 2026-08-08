@@ -46,6 +46,7 @@ const PROJECT_FINDINGS_BOARD_SRC = readScriptSource('app/static/js/features/proj
 const FINDING_TRIAGE_EDITOR_SRC = readScriptSource('app/static/js/features/findings/finding_triage_editor.js')
 const FINDINGS_BOARD_MODAL_SRC = readScriptSource('app/static/js/features/findings/findings_board_modal.js')
 const PROJECT_ARTIFACTS_SRC = readScriptSource('app/static/js/features/projects/project_artifacts.js')
+const PROJECT_WEB_SURFACE_SRC = readScriptSource('app/static/js/features/projects/project_web_surface.js')
 const PROJECT_PACKAGES_SRC = readScriptSource('app/static/js/features/projects/project_packages.js')
 const PROJECT_REPORT_SRC = readScriptSource('app/static/js/features/projects/project_report.js')
 const PROJECT_ACTIVITY_SRC = readScriptSource('app/static/js/features/projects/project_activity.js')
@@ -511,6 +512,9 @@ function loadShellChrome({
       ${PROJECT_ARTIFACTS_SRC}
       global.DarklabProjectArtifacts = exportedDarklabProjectArtifacts;
       window.DarklabProjectArtifacts = exportedDarklabProjectArtifacts;
+      ${PROJECT_WEB_SURFACE_SRC}
+      global.DarklabProjectWebSurface = exportedDarklabProjectWebSurface;
+      window.DarklabProjectWebSurface = exportedDarklabProjectWebSurface;
       ${PROJECT_PACKAGES_SRC}
       global.DarklabProjectPackages = exportedDarklabProjectPackages;
       window.DarklabProjectPackages = exportedDarklabProjectPackages;
@@ -1110,6 +1114,8 @@ describe('shell chrome project workspace', () => {
       .map(tab => tab.dataset.projectTab)
     expect(desktopTabIds.indexOf('assessment')).toBe(desktopTabIds.indexOf('overview') + 1)
     expect(desktopTabs.querySelector('[data-project-tab="assessment"]')?.textContent).toBe('Assessment')
+    expect(desktopTabIds.indexOf('web-surface')).toBe(desktopTabIds.indexOf('assessment') + 1)
+    expect(desktopTabs.querySelector('[data-project-tab="web-surface"]')?.textContent).toBe('Web Surface')
     expect(desktopTabsWrap?.classList.contains('tab-strip-wrap')).toBe(true)
     expect(desktopTabsWrap?.contains(desktopTabs)).toBe(true)
     const projectTabsScrollLeft = desktopTabsWrap.querySelector('[data-project-tabs-scroll="left"]')

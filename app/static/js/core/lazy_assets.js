@@ -126,6 +126,9 @@ let exportedLoadWatchersModal = null;
     if (name === 'project_overview') return { url: '/static/js/features/projects/project_overview.js', type: 'module' };
     if (name === 'project_monitoring') return { url: '/static/js/features/projects/project_monitoring.js', type: 'module' };
     if (name === 'project_artifacts') return { url: '/static/js/features/projects/project_artifacts.js', type: 'module' };
+    if (name === 'project_web_surface') {
+      return { url: '/static/js/features/projects/project_web_surface.js', type: 'module' };
+    }
     if (name === 'project_details') return { url: '/static/js/features/projects/project_details.js', type: 'module' };
     if (name === 'project_list') return { url: '/static/js/features/projects/project_list.js', type: 'module' };
     if (name === 'project_navigation') return { url: '/static/js/features/projects/project_navigation.js', type: 'module' };
@@ -1089,6 +1092,11 @@ let exportedLoadWatchersModal = null;
       'DarklabProjectFindingsBoard',
       'createProjectFindingsBoardController',
     ),
+    project_web_surface: () => loadProjectNamespace(
+      'project_web_surface',
+      'DarklabProjectWebSurface',
+      'createProjectWebSurfaceController',
+    ),
   });
   const PROJECT_WORKSPACE_MODULE_GLOBALS = Object.freeze({
     project_details: 'DarklabProjectDetails',
@@ -1112,6 +1120,7 @@ let exportedLoadWatchersModal = null;
     project_entities: 'DarklabProjectEntities',
     project_findings: 'DarklabProjectFindings',
     project_findings_board: 'DarklabProjectFindingsBoard',
+    project_web_surface: 'DarklabProjectWebSurface',
   });
   const PROJECT_WORKSPACE_CORE_MODULES = Object.freeze([
     'project_details',

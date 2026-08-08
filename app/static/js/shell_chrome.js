@@ -108,6 +108,7 @@ let importedOpenStatusMonitor = importedRuntimeOpenStatusMonitor;
 let importedProjectActivity;
 let importedProjectAssessment;
 let importedProjectArtifacts;
+let importedProjectWebSurface;
 let importedProjectDetails;
 let importedProjectEntities;
 let importedProjectEntityEditor;
@@ -2591,6 +2592,59 @@ let importedProjectWorkspaceShell;
     return projectArtifactsControllerPromise;
   }
 
+  let projectWebSurfaceController = null;
+  let projectWebSurfaceControllerPromise = null;
+
+  function _projectWebSurfaceControllerIfReady() {
+    return projectWebSurfaceController;
+  }
+
+  function _projectWebSurfaceFactoryReady() {
+    const namespace = _projectModule('DarklabProjectWebSurface', importedProjectWebSurface);
+    return !!(namespace && typeof namespace.createProjectWebSurfaceController === 'function');
+  }
+
+  function _projectWebSurfaceController() {
+    if (projectWebSurfaceController) return projectWebSurfaceController;
+    const namespace = _projectModule('DarklabProjectWebSurface', importedProjectWebSurface);
+    const factory = namespace && namespace.createProjectWebSurfaceController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectWebSurface is unavailable');
+    projectWebSurfaceController = factory({
+      apiFetch: _shellApiFetch,
+      projectResponseError: _projectResponseError,
+      emptyProjectPanel: _emptyProjectPanel,
+      formatDate: _formatProjectDate,
+      shortProjectRunId: _shortProjectRunId,
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      mobileView: _projectMobileView,
+      closeProjectWorkspace,
+      openEntityInAtlas: (projectId, entity) => (
+        _openProjectEntityInAtlas(projectId, _projectSummary(projectId), entity)
+      ),
+      openHistoryRunDetails: _shellFn('openHistoryRunDetails', importedOpenHistoryRunDetails),
+      logClientError: (message, err, details) => _shellLogClientError(message, err, details),
+      metaSeparator: ' · ',
+    });
+    return projectWebSurfaceController;
+  }
+
+  function _loadProjectWebSurfaceController() {
+    if (projectWebSurfaceController) return Promise.resolve(projectWebSurfaceController);
+    if (projectWebSurfaceControllerPromise) return projectWebSurfaceControllerPromise;
+    if (_projectWebSurfaceFactoryReady()) return Promise.resolve(_projectWebSurfaceController());
+    projectWebSurfaceControllerPromise = _loadProjectWorkspaceDeferredModules(['project_web_surface'])
+      .then((modules) => {
+        if (modules?.DarklabProjectWebSurface) importedProjectWebSurface = modules.DarklabProjectWebSurface;
+        return _projectWebSurfaceController();
+      })
+      .finally(() => {
+        projectWebSurfaceControllerPromise = null;
+      });
+    return projectWebSurfaceControllerPromise;
+  }
+
   let projectDetailsController = null;
 
   function _projectDetailsController() {
@@ -2780,6 +2834,7 @@ let importedProjectWorkspaceShell;
       projectWorkspaceLoading: projectWorkspaceState.loading,
       projectWorkspaceSubtitle,
       renderProjectArtifacts: _renderProjectArtifacts,
+      renderProjectWebSurface: _renderProjectWebSurface,
       renderProjectDetails: _renderProjectDetails,
       renderProjectEntities: _renderProjectEntities,
       renderProjectFilterBar: _renderProjectFilterBar,
@@ -3128,6 +3183,7 @@ let importedProjectWorkspaceShell;
       renderProjectMobileTabs: _renderProjectMobileTabs,
       renderProjectMobileEntitiesTab: _renderProjectMobileEntitiesTab,
       renderProjectMobileAssessmentTab: _renderProjectMobileAssessmentTab,
+      renderProjectWebSurface: _renderProjectWebSurface,
       renderProjectMobileOverviewTab: _renderProjectMobileOverviewTab,
       renderProjectMobilePackagesTab: _renderProjectMobilePackagesTab,
       renderProjectMobileReportTab: _renderProjectMobileReportTab,
@@ -3277,6 +3333,7 @@ let importedProjectWorkspaceShell;
       invalidateProjectTargetPage: projectId => _projectDetailsController().invalidateTargetPage(projectId),
       invalidateProjectEntities: (projectId = '') => _projectEntitiesControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectArtifacts: (projectId = '') => _projectArtifactsControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectWebSurface: (projectId = '') => _projectWebSurfaceControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectAssessment: (projectId = '') => _projectAssessmentControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectOverview: (projectId = '') => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectMonitoring: (projectId = '') => _projectMonitoringControllerIfReady()?.invalidate?.(projectId),
@@ -4448,6 +4505,25 @@ let importedProjectWorkspaceShell;
         _shellLogClientError('failed to load project artifacts', err);
         if (!container.isConnected) return;
         container.replaceChildren(_emptyProjectPanel('Could not load project artifacts.'));
+      });
+  }
+
+  function _renderProjectWebSurface(container, projectId) {
+    if (projectWebSurfaceController) {
+      projectWebSurfaceController.render(container, projectId);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading Web Surface captures...'));
+    _loadProjectWebSurfaceController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'web-surface') return;
+        container.replaceChildren();
+        controller.render(container, projectId);
+      })
+      .catch((err) => {
+        _shellLogClientError('failed to load project Web Surface', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load the Web Surface.'));
       });
   }
 
