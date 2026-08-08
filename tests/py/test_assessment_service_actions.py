@@ -23,6 +23,12 @@ from services.assessments.httpx_version_observations import (
     HTTPX_JSON_CPE_PARSER_VERSION,
     normalize_httpx_version_observations,
 )
+from services.assessments.dalfox_parameter_observations import (
+    DALFOX_DISCOVERY_PARSER_VERSION,
+    DALFOX_JSON_MAX_LINE_BYTES,
+    DALFOX_MAX_PARAMETER_OBSERVATIONS,
+    DalfoxParameterObservationState,
+)
 from services.assessments.dns_takeover_observations import (
     DNSX_MAX_CNAME_CHAIN,
     DNSX_TAKEOVER_PARSER_VERSION,
@@ -1032,6 +1038,136 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
         "visual_hash": "", "source_run_id": "run-httpx", "profile_role": "anonymous",
     }]
     assert "html" not in metadata
+
+
+def test_dalfox_discovery_jsonl_preserves_bounded_parameter_evidence():
+    state = DalfoxParameterObservationState(
+        "dalfox https://App.Example.test/search?q=one --only-discovery "
+        "--skip-mining-dict --format jsonl",
+        "run-dalfox",
+    )
+    summary = state.metadata(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "mode": "only_discovery",
+        "params_discovered": 2,
+    }}))
+    first = state.metadata(json.dumps({
+        "url": "https://app.example.test/search?q=one",
+        "param": "q",
+        "location": "Query",
+    }))
+    second = state.metadata(json.dumps({
+        "url": "https://app.example.test/search?q=one",
+        "param": "X-Search-Mode",
+        "location": "Header",
+    }))
+
+    assert summary["source_detail"]["parameter_discovery"] == {
+        "target": "https://app.example.test/search?q=one",
+        "mode": "only_discovery",
+        "reported_parameter_count": 2,
+        "source_run_id": "run-dalfox",
+        "tool_version": "v3.1.2",
+        "parser_version": DALFOX_DISCOVERY_PARSER_VERSION,
+        "truncated": False,
+    }
+    assert first["source_detail"]["parameter_observations"] == [{
+        "observation_id": first["source_detail"]["parameter_observations"][0]["observation_id"],
+        "target": "https://app.example.test/search?q=one",
+        "parameter": "q",
+        "location": "Query",
+        "source_run_id": "run-dalfox",
+        "tool_version": "v3.1.2",
+        "parser_version": DALFOX_DISCOVERY_PARSER_VERSION,
+    }]
+    assert first["source_detail"]["parameter_observations"][0]["observation_id"].startswith("obs_")
+    assert second["source_detail"]["parameter_observations"][0]["location"] == "Header"
+    assert state.metadata(json.dumps({
+        "url": "https://app.example.test/search?q=one", "param": "q", "location": "Query",
+    })) == {}
+
+
+def test_dalfox_discovery_jsonl_fails_closed_on_untrusted_or_malformed_rows():
+    command = (
+        "dalfox https://app.example.test/search?q=one --only-discovery "
+        "--skip-mining-dict --format jsonl"
+    )
+    invalid_commands = (
+        command.replace(" --only-discovery", ""),
+        command.replace(" --skip-mining-dict", ""),
+        command.replace("jsonl", "plain"),
+        command + " --skip-discovery",
+    )
+    meta = json.dumps({"meta": {
+        "dalfox_version": "v3.1.2", "mode": "only_discovery", "params_discovered": 1,
+    }})
+    assert all(not DalfoxParameterObservationState(value, "run-1").metadata(meta)
+               for value in invalid_commands)
+    assert not DalfoxParameterObservationState(command, "").metadata(meta)
+
+    state = DalfoxParameterObservationState(command, "run-1")
+    assert state.metadata("{not-json") == {}
+    assert state.metadata("{" + " " * DALFOX_JSON_MAX_LINE_BYTES + "}") == {}
+    assert state.metadata(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2", "mode": "scan", "params_discovered": 1,
+    }})) == {}
+    assert state.metadata(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2", "mode": "only_discovery", "params_discovered": True,
+    }})) == {}
+    assert state.metadata(meta)
+    invalid_rows = (
+        {"url": "https://other.example.test/search?q=one", "param": "q", "location": "Query"},
+        {"url": "https://user:secret@app.example.test/search?q=one", "param": "q", "location": "Query"},
+        {"url": "https://app.example.test/search?q=one", "param": "q\nsecret", "location": "Query"},
+        {"url": "https://app.example.test/search?q=one", "param": "q", "location": "Cookie"},
+    )
+    assert all(state.metadata(json.dumps(value)) == {} for value in invalid_rows)
+
+
+def test_dalfox_discovery_jsonl_rejects_new_rows_after_the_fixed_cap():
+    state = DalfoxParameterObservationState(
+        "dalfox https://app.example.test --only-discovery --skip-mining-dict --format=jsonl",
+        "run-dalfox",
+    )
+    assert state.metadata(json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "mode": "only_discovery",
+        "params_discovered": DALFOX_MAX_PARAMETER_OBSERVATIONS + 1,
+    }}))["source_detail"]["parameter_discovery"]["truncated"] is True
+    observations = [state.metadata(json.dumps({
+        "url": "https://app.example.test",
+        "param": f"parameter_{index}",
+        "location": "Query",
+    })) for index in range(DALFOX_MAX_PARAMETER_OBSERVATIONS + 1)]
+    assert all(observations[:DALFOX_MAX_PARAMETER_OBSERVATIONS])
+    assert observations[-1] == {}
+
+
+def test_dalfox_parameter_observations_survive_run_event_wire_round_trip():
+    class Capture:
+        def __init__(self):
+            self.events = []
+
+        def add_event(self, event):
+            self.events.append(event)
+
+    capture = Capture()
+    classifier = OutputSignalClassifier(
+        "dalfox https://app.example.test --only-discovery --skip-mining-dict --format jsonl",
+        source_run_id="run-dalfox",
+    )
+    capture_event_with_signals(capture, classifier, json.dumps({"meta": {
+        "dalfox_version": "v3.1.2", "mode": "only_discovery", "params_discovered": 1,
+    }}))
+    capture_event_with_signals(capture, classifier, json.dumps({
+        "url": "https://app.example.test", "param": "view", "location": "Query",
+    }))
+
+    summary = capture.events[0].source_detail["parameter_discovery"]
+    observation = capture.events[1].source_detail["parameter_observations"][0]
+    assert summary["source_run_id"] == "run-dalfox"
+    assert observation["parameter"] == "view"
+    assert to_wire(capture.events[1])["source_detail"]["parameter_observations"] == [observation]
 
 
 def test_httpx_json_preserves_only_exact_versioned_technology_cpe_observations():

@@ -50,6 +50,7 @@ from core.output_shodan import (
     _is_shodan_warning,
     _parse_shodan_dns_row,
 )
+from services.assessments.dalfox_parameter_observations import DalfoxParameterObservationState
 from services.assessments.dns_takeover_observations import dnsx_json_metadata
 from services.assessments.historical_urls import historical_url_entity_attributes, normalize_historical_url
 from core.output_structured_signals import (
@@ -69,12 +70,7 @@ from core.output_structured_signals import (
 from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_role
 from services.assessments.httpx_version_observations import httpx_json_metadata
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
-from services.intel.canonical import (
-    CanonicalizationError,
-    canonical_domain,
-    canonical_ip,
-    canonical_url,
-)
+from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_ip, canonical_url
 
 
 log = logging.getLogger("shell")
@@ -964,6 +960,7 @@ class OutputSignalClassifier:
         self.is_help_output = _is_help_output_command(self.command, self.root)
         self.current_target: str | None = None
         self.current_nmap_service_target: str | None = None
+        self.dalfox_discovery = DalfoxParameterObservationState(self.command, self.source_run_id)
         self.line_index = 0
         self.previous_text = ""
 
@@ -1022,6 +1019,8 @@ class OutputSignalClassifier:
         if self.root == "dnsx" and normalized_text.startswith("{"):
             metadata.update(dnsx_json_metadata(_json_object_line(normalized_text), command=self.command,
                                                source_run_id=self.source_run_id))
+        if self.root == "dalfox" and normalized_text.startswith("{"):
+            metadata.update(self.dalfox_discovery.metadata(normalized_text))
         historical = None
         if self.root == "gau":
             historical = normalize_historical_url(normalized_text, source="gau", run_id=self.source_run_id)
@@ -1076,7 +1075,7 @@ class OutputSignalClassifier:
                             entity["attributes"] = attributes
                 metadata["entities"] = entities
         if (
-            self.root in {"dnsx", "tlsx", "cdncheck", "trufflehog"}
+            self.root in {"dalfox", "dnsx", "tlsx", "cdncheck", "trufflehog"}
             and normalized_text
             and normalized_text.lstrip().startswith("{")
             and _json_object_line(normalized_text) is None

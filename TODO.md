@@ -127,8 +127,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 6 — Close the web and API discovery/validation gaps
 
 - [ ] Add focused parameter and application testing tools:
-  - Extend the bounded Dalfox parameter-discovery foundation with separately confirmed reflected/DOM XSS validation, structured confidence-aware findings, and proof/evidence fields.
-  - Add SQLmap behind a detection-only default policy. Deny data dumping, filesystem access, OS command execution, registry access, database takeover, destructive statements, and other takeover options in normal and intrusive profiles.
+  - Add separately confirmed reflected/DOM XSS validation on top of the bounded Dalfox parameter observations, with structured confidence-aware findings and proof/evidence fields.
   - Add Schemathesis for OpenAPI/GraphQL operation coverage, bounded negative testing, minimized failure examples, and per-operation evidence. Schema fetches and `$ref` resolution must obey the same scope and private-network rules as the target.
   - Prefer version-pinned multi-arch binaries or isolated Python environments that keep the runtime dependency graph reproducible. Update licenses, hashes, SBOM/provenance, image-size budgets, and container smoke checks for every addition.
   - Add structured parsers/adapters under focused modules rather than more broad regexes in `output_signals.py`. Preserve raw output, normalize stable findings/entities, carry tool/profile versions, and make parser failure visible without failing the underlying run.
