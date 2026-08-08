@@ -28,6 +28,7 @@ from services.assessments.dns_takeover_correlation import (
     DNSX_TARGET_CORRELATION_VERSION,
     correlate_dnsx_target_observation,
 )
+from services.assessments.dns_takeover_event_review import build_dnsx_takeover_event_review
 from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.takeover_detection import evaluate_takeover_signal
@@ -395,6 +396,67 @@ def test_dnsx_target_correlation_rejects_incompatible_or_untrusted_evidence():
     assert evaluate_takeover_signal(uncertain) == {
         "state": "uncertain", "reason": "transient_dns_result", "hostname": "app.example.test",
     }
+
+
+def test_dnsx_event_review_uses_newest_target_result_and_reports_same_time_conflicts():
+    source = normalize_dnsx_takeover_observation({
+        "host": "app.example.test", "cname": ["tenant.vendor.test"],
+        "status_code": "NOERROR", "timestamp": "2026-08-07T20:00:00Z",
+    }, command="dnsx -d example.test -cname -json", source_run_id="run-source")
+    negative = normalize_dnsx_takeover_observation({
+        "host": "tenant.vendor.test", "status_code": "NXDOMAIN",
+        "timestamp": "2026-08-07T20:05:00Z",
+    }, command="dnsx -d tenant.vendor.test -a -json", source_run_id="run-negative")
+    resolved = normalize_dnsx_takeover_observation({
+        "host": "tenant.vendor.test", "a": ["93.184.216.34"], "status_code": "NOERROR",
+        "timestamp": "2026-08-07T20:10:00Z",
+    }, command="dnsx -d tenant.vendor.test -a -json", source_run_id="run-resolved")
+    def event(row):
+        return {"source_detail": {"takeover_observations": [row]}}
+    allowed = {"run-source", "run-negative", "run-resolved"}
+    review = build_dnsx_takeover_event_review(
+        [event(source), event(negative), event(resolved)], allowed_source_run_ids=allowed,
+    )
+    assert review["status"] == "ready"
+    assert review["reviews"][0]["state"] == "not_indicated"
+    assert review["reviews"][0]["target_observation"]["source_run_id"] == "run-resolved"
+
+    conflicting = normalize_dnsx_takeover_observation({
+        "host": "tenant.vendor.test", "status_code": "NXDOMAIN",
+        "timestamp": "2026-08-07T20:10:00Z",
+    }, command="dnsx -d tenant.vendor.test -a -json", source_run_id="run-conflict")
+    conflict_review = build_dnsx_takeover_event_review(
+        [event(source), event(resolved), event(conflicting)],
+        allowed_source_run_ids={"run-source", "run-resolved", "run-conflict"},
+    )
+    assert conflict_review["reviews"][0]["state"] == "uncertain"
+    assert conflict_review["reviews"][0]["reason"] == "conflicting_target_results"
+    assert len(conflict_review["reviews"][0]["target_observations"]) == 2
+    assert conflict_review["reviews"][0]["target_observation_count"] == 2
+    assert conflict_review["reviews"][0]["target_observations_truncated"] is False
+
+
+def test_dnsx_event_review_rejects_limits_and_never_returns_partial_rows():
+    assert build_dnsx_takeover_event_review(
+        [{}] * 1001, allowed_source_run_ids={"run-1"},
+    ) == {
+        "status": "rejected",
+        "reason": "event_or_observation_limit_exceeded",
+        "observation_count": 0,
+        "review_count": 0,
+        "reviews": [],
+    }
+    oversized_observations = [{"source_run_id": "run-1"}] * 257
+    assert build_dnsx_takeover_event_review(
+        [{"source_detail": {"takeover_observations": oversized_observations}}],
+        allowed_source_run_ids={"run-1"},
+    )["reason"] == "event_or_observation_limit_exceeded"
+    assert build_dnsx_takeover_event_review([], allowed_source_run_ids=set())["reason"] == (
+        "invalid_run_allowlist"
+    )
+    assert build_dnsx_takeover_event_review(
+        [], allowed_source_run_ids={"x" * 129},
+    )["reason"] == "invalid_run_allowlist"
 
 
 def test_httpx_screenshot_metadata_is_bounded_and_path_safe():

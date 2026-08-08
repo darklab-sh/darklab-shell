@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Persisted DNSx event reviews now resolve repeated target checks conservatively.**
+  - **What:** A bounded read-only review builder extracts normalized takeover observations from saved run-event wires and evaluates at most 100 source records. The newest compatible target result wins, so a later successful resolution replaces an older negative answer. Different results recorded at the same newest time become an explicit conflict instead. Event, observation, join, result, and run-allowlist limits reject the review without returning a partial answer.
+  - **Tests:** Focused coverage pins newest-result selection, same-time conflict handling, safe target references, strict run ids, and whole-review rejection for oversized event or observation sets.
 - **Separate DNSx runs can now support one conservative dangling-record review.**
   - **What:** A read-only correlation helper pairs a CNAME observation with an exact DNS result for its ultimate target only when both observations have intact deterministic identities, come from an explicitly allowed set of runs, fit the complete bounded chain, and were captured within 24 hours. Negative target evidence can produce a potential signal, while resolved, transient, truncated, stale, unscoped, mismatched, or tampered evidence stays non-confirming. The join doesn't perform a lookup, write a finding, or claim a provider resource.
   - **Tests:** Focused coverage pins exact-host matching, owner-scoped run allowlists, deterministic-id verification, the time window, parser provenance, target references, and uncertain DNS handling.
