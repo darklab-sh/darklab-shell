@@ -23,7 +23,6 @@ from services.assessments.nmap_inference_materialization import materialize_nmap
 from services.commands.registry import command_project_target_inputs
 from services.metrics_lazy import app_metrics
 from services.notifications.hooks import enqueue_run_complete
-from services.projects.artifacts import record_run_file_artifacts
 from services.projects.auto_promote import apply_run_rules_on_conn as apply_auto_promote_rules_for_run
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.findings import record_run_findings
@@ -35,6 +34,7 @@ from services.projects.links import (
 from services.projects.targets import record_project_target_discoveries
 from services.pty.transcript import shape_completed_pty_entries
 from services.runs.kinds import RUN_KIND_EXTERNAL, run_kind_for_cmd_type
+from services.runs.finalization_artifacts import save_run_file_artifacts_for_finalize
 from services.runs.finalization_assessments import reconcile_assessment_evidence_for_finalize
 from services.runs.finalization_version_inference import (
     materialize_nmap_inferences_for_finalize,
@@ -424,48 +424,6 @@ def _save_run_project_link_for_finalize(
     return None
 
 
-def _save_run_file_artifacts_for_finalize(
-    conn,
-    session_id,
-    team_id,
-    run_id,
-    command,
-    workspace_artifacts,
-    workspace_owner,
-    *,
-    workspace_artifacts_with_sizes_fn: Callable = workspace_artifacts_with_sizes,
-) -> list:
-    if not workspace_artifacts:
-        return []
-    try:
-        if team_id:
-            sized_workspace_artifacts = workspace_artifacts_with_sizes_fn(
-                session_id,
-                workspace_artifacts,
-                owner_context=workspace_owner,
-            )
-        else:
-            sized_workspace_artifacts = workspace_artifacts_with_sizes_fn(session_id, workspace_artifacts)
-        return run_finalize_savepoint(
-            conn,
-            "run_file_artifacts",
-            lambda: record_run_file_artifacts(
-                conn,
-                session_id,
-                run_id,
-                sized_workspace_artifacts,
-                **({"owner_context": workspace_owner} if team_id else {}),
-            ),
-        )
-    except Exception:
-        log.error("PROJECT_RUN_ARTIFACT_CAPTURE_ERROR", exc_info=True, extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "cmd": command,
-        })
-    return []
-
-
 def _discover_project_targets_for_finalize(
     conn,
     session_id,
@@ -765,7 +723,7 @@ def save_completed_run(
                 link_project_id=link_project_id,
                 link_active_project=link_active_project,
             )
-            records.recorded_artifacts = _save_run_file_artifacts_for_finalize(
+            records.recorded_artifacts = save_run_file_artifacts_for_finalize(
                 conn,
                 session_id,
                 team_id,
@@ -773,6 +731,9 @@ def save_completed_run(
                 command,
                 workspace_artifacts,
                 workspace_owner,
+                persisted_entries=output_state.persisted_entries,
+                exit_code=exit_code,
+                cfg=cfg,
                 workspace_artifacts_with_sizes_fn=workspace_artifacts_with_sizes_fn,
             )
             records.recorded_findings = _record_run_findings_for_finalize(

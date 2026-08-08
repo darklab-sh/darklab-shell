@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **HTTPx screenshots now survive as verified run artifacts.**
+  - **What:** Screenshot-enabled HTTPx runs keep the safe relative image path from structured output, bind it to the one validated screenshot directory, and register verified PNG, JPEG, or WebP files through the existing authenticated run-artifact routes. Files outside that directory, symlinks, traversal paths, ambiguous output directories, oversized files, and extension-only image claims are ignored. Screenshot discovery failure doesn't roll back the completed run or its other validated artifacts.
+  - **Tests:** Focused metadata and finalization coverage pins the relative-path contract, validated directory, image signatures, workspace quotas, duplicate handling, traversal and symlink rejection, ambiguous output rejection, failed-run abstention, and save-path fallback.
 - **Confirmed subdomain takeovers now become evidence-backed findings automatically.**
   - **What:** A successful dedicated takeover check creates one high-severity finding only when the same Project has compatible saved DNS source and negative-target observations from the preceding 24 hours. The finding keeps exact links to both DNS lines and the reviewed Nuclei match. Partial, stale, conflicting, cross-scope, or command-drifted evidence fails closed without leaving a partial finding.
   - **Tests:** Focused finalization and persistence coverage pins owner and Project isolation, the three-source evidence chain, deterministic idempotency, the 24-hour window, failed-run and command-drift rejection, and savepoint-safe run completion.

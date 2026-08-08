@@ -353,11 +353,16 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/broker_batcher.py", 130, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/broker_capture.py", 46, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization.py", 1000, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/finalization_artifacts.py", 85, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_assessment_findings.py", 57, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_assessments.py", 77, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_summaries.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_takeover.py", 70, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_version_inference.py", 160, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/finalization_web_surface.py", 140, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/runs/httpx_workspace_artifact_metadata.py", 70, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/scope.py", 188, "split-package-ratchet"),

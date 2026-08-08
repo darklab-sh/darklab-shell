@@ -6,15 +6,25 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
+import shlex
 from typing import Any
 from urllib.parse import urlsplit
 
 
-def normalize_httpx_screenshot(record: dict[str, Any] | None) -> dict[str, Any] | None:
+def normalize_httpx_screenshot(
+    record: dict[str, Any] | None,
+    *,
+    output_directory: str = "",
+) -> dict[str, Any] | None:
     """Return bounded screenshot metadata, never captured markup or unsafe paths."""
     item = record if isinstance(record, dict) else {}
     url = _safe_url(item.get("url") or item.get("input"))
-    artifact = _safe_artifact_path(item.get("screenshot") or item.get("screenshot_path"))
+    relative_artifact = _safe_artifact_path(item.get("screenshot_path_rel"))
+    artifact = (
+        _join_artifact_path(output_directory, relative_artifact)
+        if relative_artifact
+        else _safe_artifact_path(item.get("screenshot") or item.get("screenshot_path"))
+    )
     if not url or not artifact:
         return None
     technologies = item.get("technologies") or item.get("tech") or []
@@ -55,8 +65,27 @@ def _safe_artifact_path(value: Any) -> str:
     return str(candidate)
 
 
+def _join_artifact_path(output_directory: Any, artifact_path: Any) -> str:
+    directory = _safe_artifact_path(output_directory)
+    artifact = _safe_artifact_path(artifact_path)
+    if not directory or not artifact:
+        return ""
+    return _safe_artifact_path(str(PurePosixPath(directory) / PurePosixPath(artifact)))
+
+
+def screenshot_output_directory(command: str) -> str:
+    try:
+        tokens = shlex.split(str(command or ""))
+    except ValueError:
+        return ""
+    for index, argument in enumerate(tokens[:-1]):
+        if argument in {"-srd", "-store-response-dir"} and not tokens[index + 1].startswith("-"):
+            return tokens[index + 1]
+    return ""
+
+
 def _text(value: Any, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
-__all__ = ["normalize_httpx_screenshot"]
+__all__ = ["normalize_httpx_screenshot", "screenshot_output_directory"]

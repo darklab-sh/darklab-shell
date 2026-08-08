@@ -7,10 +7,9 @@ from __future__ import annotations
 
 from services.commands.registry import AMASS_DEFAULT_WORKSPACE_DIR, CommandValidationResult
 from services.commands.registry_validation import split_command_argv
+from services.runs.httpx_workspace_artifact_metadata import httpx_screenshot_artifact_metadata
 
-APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES = (
-    AMASS_DEFAULT_WORKSPACE_DIR.strip("/"),
-)
+APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES = (AMASS_DEFAULT_WORKSPACE_DIR.strip("/"),)
 NMAP_XML_SOURCE_FLAG = "-oX"
 NMAP_XML_STRUCTURED_OUTPUT = "nmap_xml"
 
@@ -57,20 +56,21 @@ def _matching_workspace_write(resolved_path: str, writes: list[str]) -> str:
 
 
 def workspace_artifact_metadata(validation: CommandValidationResult) -> dict[str, dict[str, str]]:
-    """Return metadata only for unambiguous, validated Nmap XML writes."""
+    """Return metadata only for unambiguous validated structured outputs."""
     if not validation.allowed:
         return {}
     writes = list(dict.fromkeys(validation.workspace_writes))
+    metadata: dict[str, dict[str, str]] = {}
     resolved_paths = _nmap_xml_exec_paths(validation)
-    if len(resolved_paths) != 1:
-        return {}
-    workspace_path = _matching_workspace_write(resolved_paths[0], writes)
-    if not workspace_path:
-        return {}
-    return {workspace_path: {
-        "structured_output": NMAP_XML_STRUCTURED_OUTPUT,
-        "source_flag": NMAP_XML_SOURCE_FLAG,
-    }}
+    if len(resolved_paths) == 1:
+        workspace_path = _matching_workspace_write(resolved_paths[0], writes)
+        if workspace_path:
+            metadata[workspace_path] = {
+                "structured_output": NMAP_XML_STRUCTURED_OUTPUT,
+                "source_flag": NMAP_XML_SOURCE_FLAG,
+            }
+    metadata.update(httpx_screenshot_artifact_metadata(validation, writes))
+    return metadata
 
 
 def is_app_managed_workspace_artifact_path(workspace_path: str) -> bool:

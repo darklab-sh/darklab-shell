@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from services.assessments.cpe_applicability import normalize_observed_cpe
-from services.assessments.web_surface import normalize_httpx_screenshot
+from services.assessments.web_surface import normalize_httpx_screenshot, screenshot_output_directory
 from services.intel.canonical import CanonicalizationError, canonical_url
 
 
@@ -27,10 +27,14 @@ def httpx_json_metadata(
     *,
     source_run_id: str = "",
     profile_role: str = "",
+    command: str = "",
 ) -> dict[str, list[dict[str, Any]]]:
     """Return only safe screenshot and exact-version metadata from one JSON row."""
     metadata: dict[str, list[dict[str, Any]]] = {}
-    screenshot = normalize_httpx_screenshot(record)
+    screenshot = normalize_httpx_screenshot(
+        record,
+        output_directory=screenshot_output_directory(command),
+    )
     if screenshot:
         screenshot["source_run_id"] = screenshot.get("source_run_id") or _text(source_run_id, 128)
         screenshot["profile_role"] = screenshot.get("profile_role") or _text(profile_role, 64)

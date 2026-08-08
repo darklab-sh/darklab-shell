@@ -867,10 +867,11 @@ def test_dnsx_event_review_rejects_limits_and_never_returns_partial_rows():
 
 def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
     record = normalize_httpx_screenshot({
-        "url": "https://app.example.test/login", "screenshot_path": "screenshots/app.png",
+        "url": "https://app.example.test/login", "screenshot_path": "/scanner/output/app.png",
+        "screenshot_path_rel": "app.png",
         "status_code": "200", "title": "  Login   page ", "technologies": ["nginx", "nginx"],
         "run_id": "run-1", "profile_role": "authenticated",
-    })
+    }, output_directory="screenshots")
     assert record == {
         "url": "https://app.example.test/login", "artifact_path": "screenshots/app.png",
         "status_code": 200, "title": "Login page", "technologies": ["nginx", "nginx"],
@@ -935,7 +936,8 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
         profile_role="anonymous",
     )
     metadata = classifier.classify_line(
-        '{"url":"https://app.example.test","screenshot_path":"screenshots/app.png","status_code":200}'
+        '{"url":"https://app.example.test","screenshot_path":"/scanner/output/app.png",'
+        '"screenshot_path_rel":"app.png","status_code":200}'
     )
     assert metadata["screenshots"] == [{
         "url": "https://app.example.test", "artifact_path": "screenshots/app.png",

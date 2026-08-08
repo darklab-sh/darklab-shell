@@ -1017,7 +1017,7 @@ class OutputSignalClassifier:
         if self.root == "httpx" and normalized_text.startswith("{"):
             metadata.update(httpx_json_metadata(
                 _json_object_line(normalized_text), source_run_id=self.source_run_id,
-                profile_role=self.profile_role,
+                profile_role=self.profile_role, command=self.command,
             ))
         if self.root == "dnsx" and normalized_text.startswith("{"):
             metadata.update(dnsx_json_metadata(_json_object_line(normalized_text), command=self.command,
