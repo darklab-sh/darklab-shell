@@ -188,6 +188,8 @@ Structured DNSx coverage pins bounded CNAME, address, response, resolver, provid
 
 Structured CycloneDX component coverage pins shared document bounds, separate exact PURL/version and CPE/version observations, component and import provenance, conflicting-version rejection, read-only stored-OSV and stored-NVD candidates on SQLite and Postgres, and the no-network, no-inventory-write, no-finding boundary.
 
+SARIF import coverage pins bounded tool and automation identity, rule metadata, full and partial fingerprints, direct and artifact-index locations, source regions, safe web and repository-relative provenance, and warning-backed rejection of file URIs, traversal, credentials, backslashes, and invalid references. Atlas browser coverage keeps SARIF and CycloneDX available through the existing import picker with format-appropriate file hints.
+
 Cross-cycle reconciliation coverage pins exact check, target, and evidence-rule compatibility; one-count-per-remediation rollups; new, persistent, and not-observed derivation; bounded current and earlier observation links; incomparable cleanup; the preferred active-or-latest-completed handoff; selected-finding filtering; package/report references and reasons; and the shared API/OpenAPI read shape.
 
 Assessor-authored finding coverage pins strict fields and references, confirmed-target and owner scope, bounded initial line evidence, CVE risk links, duplicate overrides, stable identity, optimistic edits, safe actor metadata, session migration, cleanup, audit records, OpenAPI, and real SQLite/Postgres behavior.

@@ -463,6 +463,16 @@ and `apply_options`. Preview `counts` include `rows`, `valid`, `skipped`,
 `create_project_targets`; each option reports whether it is available and which
 team capability names it requires.
 
+The declared parser formats include Nuclei JSONL, Nessus XML, ZAP JSON/XML,
+Burp Suite XML, SARIF 2.1 JSON, CycloneDX JSON, Generic CSV, and Generic JSONL.
+SARIF parsing keeps bounded driver and automation identity, rule metadata, full
+and partial fingerprints, and up to eight safe artifact locations with source
+regions and optional artifact-index provenance. Only credential-free HTTP(S)
+locations can become Atlas URL entities; repository-relative locations remain
+finding provenance. File schemes, absolute or traversal paths, credentialed
+URLs, backslashes, control characters, and invalid indexes are rejected with a
+bounded warning. The parser doesn't resolve URI bases or fetch source content.
+
 `POST /atlas/imports/apply` accepts JSON with `draft_id`, `row_set_digest`,
 `options`, and optional `project_id`. `options` uses the same four boolean keys
 returned by preview. `project_id` is required when `link_to_project` or

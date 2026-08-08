@@ -348,12 +348,12 @@
       "hash": "e6fad381ac8c5292af81407d7800120997865201fa88bfa7a471cc159acaf705"
     },
     "/static/js/features/atlas/atlas_mobile.js": {
-      "path": "/static/build/static-atlas-mobile.b9be1e6e37f6.js",
-      "hash": "e28c236e61a240dfca754afad5a0bd2f7b1620f409643c3db2e52b38654f106e"
+      "path": "/static/build/static-atlas-mobile.30f7e1fa4224.js",
+      "hash": "36aaea54dfac77857bc290fc5319720ce1d701661636b16f9d187bb1777909b1"
     },
     "/static/js/features/atlas/atlas_overlay.js": {
-      "path": "/static/build/static-atlas-overlay.c9c8bbb02245.js",
-      "hash": "6001fb96227829b92176a355dbae2aa9b7bdc98350e655420f2a18479519aca0"
+      "path": "/static/build/static-atlas-overlay.e53ff38bb33c.js",
+      "hash": "7e7473fa3e6bad388dddc6627c282897d4f5e968b85cd8627fbe868517a799e0"
     },
     "/static/js/features/atlas/atlas_tabs.js": {
       "path": "/static/build/static-atlas-tabs.52299aa50e40.js",

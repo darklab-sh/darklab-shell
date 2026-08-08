@@ -131,8 +131,8 @@ class _ParseState:
             raise ImportParseError(f"Import row limit exceeded ({self.limits.max_rows}).")
         return self.row_count
 
-    def warn(self, row_number: int, code: str, message: str) -> None:
-        self.skipped_count += 1
+    def warn(self, row_number: int, code: str, message: str, *, skipped: bool = True) -> None:
+        self.skipped_count += int(bool(skipped))
         if len(self.warnings) >= self.limits.max_warnings:
             self.suppressed_warning_count += 1
             return

@@ -31263,13 +31263,34 @@ def test_atlas_import_parser_normalizes_bounded_sarif_and_rejects_file_uris():
     payload = json.dumps({
         "version": "2.1.0",
         "runs": [{
-            "tool": {"driver": {"name": "Semgrep", "version": "1.2", "rules": [{
-                "id": "py/path-traversal", "name": "Path traversal", "helpUri": "https://example.test/rule"
-            }]}},
+            "automationDetails": {
+                "id": "nightly/security",
+                "guid": "11111111-1111-1111-1111-111111111111",
+                "correlationGuid": "22222222-2222-2222-2222-222222222222",
+            },
+            "tool": {"driver": {
+                "name": "Semgrep",
+                "version": "1.2",
+                "semanticVersion": "1.2.0",
+                "informationUri": "https://example.test/semgrep",
+                "rules": [{
+                    "id": "py/path-traversal",
+                    "name": "Path traversal",
+                    "helpUri": "https://example.test/rule",
+                }],
+            }},
+            "artifacts": [{"location": {"uri": "src/app.py"}}],
             "results": [{
                 "ruleId": "py/path-traversal", "level": "error",
                 "message": {"text": "User input reaches a file path."},
-                "locations": [{"physicalLocation": {"artifactLocation": {"uri": "https://app.example.test/api"}}}],
+                "guid": "33333333-3333-3333-3333-333333333333",
+                "correlationGuid": "44444444-4444-4444-4444-444444444444",
+                "fingerprints": {"matchBasedId/v1": "stable-match"},
+                "partialFingerprints": {"primaryLocationLineHash": "stable-line"},
+                "locations": [{"physicalLocation": {
+                    "artifactLocation": {"uri": "https://app.example.test/api"},
+                    "region": {"startLine": 12, "startColumn": 4, "endLine": 12, "endColumn": 18},
+                }}, {"physicalLocation": {"artifactLocation": {"index": 0}}}],
             }, {
                 "ruleId": "py/path-traversal", "level": "warning",
                 "message": {"text": "Local source path only."},
@@ -31281,9 +31302,118 @@ def test_atlas_import_parser_normalizes_bounded_sarif_and_rejects_file_uris():
     assert result.row_count == 2
     assert len(result.findings) == 2
     assert result.findings[0].source_detail["tool"] == "Semgrep"
+    assert result.findings[0].source_detail["tool_semantic_version"] == "1.2.0"
+    assert result.findings[0].source_detail["tool_information_uri"] == "https://example.test/semgrep"
     assert result.findings[0].source_detail["rule_id"] == "py/path-traversal"
+    assert result.findings[0].source_detail["automation_details"] == {
+        "id": "nightly/security",
+        "guid": "11111111-1111-1111-1111-111111111111",
+        "correlation_guid": "22222222-2222-2222-2222-222222222222",
+    }
+    assert result.findings[0].source_detail["fingerprints"] == {
+        "matchBasedId/v1": "stable-match",
+    }
+    assert result.findings[0].source_detail["partial_fingerprints"] == {
+        "primaryLocationLineHash": "stable-line",
+    }
+    assert result.findings[0].source_detail["locations"] == [{
+        "uri": "https://app.example.test/api",
+        "kind": "web",
+        "region": {"start_line": 12, "start_column": 4, "end_line": 12, "end_column": 18},
+    }, {
+        "uri": "src/app.py",
+        "kind": "relative",
+        "artifact_index": 0,
+        "resolved_from_index": True,
+    }]
+    assert result.findings[0].evidence == "https://app.example.test/api:12:4; src/app.py"
     assert result.entities[0].canonical_value == "https://app.example.test/api"
     assert all(entity.canonical_value != "file:///src/app.py" for entity in result.entities)
+    assert result.findings[1].evidence == ""
+    assert result.findings[1].source_detail["rejected_location_count"] == 1
+    assert result.warnings[-1].code == "unsafe_sarif_location"
+    assert result.skipped_count == 0
+
+
+def test_atlas_sarif_import_rejects_traversal_credentials_and_backslash_locations():
+    payload = json.dumps({
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "Scanner"}},
+            "results": [{
+                "ruleId": "unsafe/location",
+                "message": {"text": "Unsafe source locations."},
+                "locations": [
+                    {"physicalLocation": {"artifactLocation": {"uri": "../../private.txt"}}},
+                    {"physicalLocation": {"artifactLocation": {
+                        "uri": "https://user:secret@example.test/private"
+                    }}},
+                    {"physicalLocation": {"artifactLocation": {"uri": "src\\private.py"}}},
+                    {"physicalLocation": {"artifactLocation": {"uri": "src%5Cprivate.py"}}},
+                    {"physicalLocation": {"artifactLocation": {"uri": "https://example.test/%0Aprivate"}}},
+                    {"physicalLocation": {"artifactLocation": {"uri": "https://["}}},
+                    {"physicalLocation": {"artifactLocation": {"index": 99}}},
+                ],
+            }],
+        }],
+    }).encode()
+
+    result = parse_import_file(payload, format_id="sarif_json")
+
+    assert result.row_count == 1
+    assert len(result.findings) == 1
+    assert result.entities == []
+    assert result.findings[0].evidence == ""
+    assert result.findings[0].source_detail["locations"] == []
+    assert result.findings[0].source_detail["rejected_location_count"] == 7
+    assert [warning.code for warning in result.warnings] == ["unsafe_sarif_location"] * 7
+    assert result.skipped_count == 0
+
+
+def test_atlas_sarif_import_bounds_locations_fingerprints_and_rule_metadata():
+    payload = json.dumps({
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "Scanner",
+                "rules": [
+                    {"id": f"rule-{index}", "name": f"Rule {index}"}
+                    for index in range(4)
+                ],
+            }},
+            "results": [{
+                "ruleId": "rule-0",
+                "message": {"text": "Bounded result."},
+                "fingerprints": {
+                    f"fingerprint-{index}": f"value-{index}"
+                    for index in range(20)
+                },
+                "partialFingerprints": {
+                    f"partial-{index}": f"value-{index}"
+                    for index in range(20)
+                },
+                "locations": [
+                    {"physicalLocation": {"artifactLocation": {
+                        "uri": f"src/module-{index}.py",
+                    }}}
+                    for index in range(10)
+                ],
+            }],
+        }],
+    }).encode()
+
+    result = parse_import_file(
+        payload,
+        format_id="sarif_json",
+        limits=ImportParserLimits(max_rows=2),
+    )
+
+    detail = result.findings[0].source_detail
+    assert detail["rule_name"] == "Rule 0"
+    assert detail["location_count"] == 8
+    assert detail["locations_truncated"] is True
+    assert len(detail["fingerprints"]) == 16
+    assert len(detail["partial_fingerprints"]) == 16
 
 
 def test_atlas_import_parser_normalizes_cyclonedx_vulnerabilities_without_inventing_inventory_findings():

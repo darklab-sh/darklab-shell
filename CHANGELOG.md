@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **SARIF imports now keep review-ready provenance without trusting source paths.**
+  - **What:** Atlas exposes SARIF 2.1 JSON and CycloneDX JSON in the existing import picker. SARIF results retain bounded tool and automation identity, rule details, stable fingerprints, safe web or repository-relative locations, source regions, and artifact-index provenance. File URIs, traversal, credential-bearing URLs, backslashes, and invalid artifact references are omitted with preview warnings and are never fetched.
+  - **Tests:** Parser coverage pins safe indexed and web locations, source regions, automation ids, full and partial fingerprints, unsafe-location warnings, and retained findings without leaked paths. Browser coverage pins both formats and their file-picker hints.
 - **HTTPx screenshot runs now stay inside the Files storage budget.**
   - **What:** Run finalization measures event-named screenshot output against the owner's existing Files count, total-byte quota, and per-file size limit before registering images. It keeps earlier files, retains only the new captures that fit, and cleans up invalid, over-limit, or failed-run screenshot files without touching paths outside the validated HTTPx output directory. Limit and cleanup failures are logged without exposing target paths, and previously registered gallery evidence keeps its existing authenticated and unavailable-state behavior.
   - **Tests:** Focused finalization coverage pins aggregate byte and file-count enforcement, earlier-file preservation, invalid and over-limit cleanup, failed-run cleanup, safe outside-path handling, symlink cleanup, quota metrics, and successful artifact capture.

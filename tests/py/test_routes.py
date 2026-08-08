@@ -13600,6 +13600,8 @@ class TestVendorAssets:
             if fragment_path.endswith("atlas_overlay.html"):
                 assert 'id="atlas-overlay"' in fragment_body
                 assert 'id="atlas-surface"' in fragment_body
+                assert '<option value="sarif_json">SARIF 2.1 JSON</option>' in fragment_body
+                assert '<option value="cyclonedx_json">CycloneDX JSON</option>' in fragment_body
             else:
                 assert 'id="project-workspace-overlay"' in fragment_body
                 assert 'id="project-workspace-body"' in fragment_body

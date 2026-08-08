@@ -183,6 +183,8 @@ let exportedCycleAtlasTab = null;
     generic_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
     nessus_xml: '.nessus,.xml,application/xml,text/xml',
     nuclei_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
+    sarif_json: '.sarif,.json,application/sarif+json,application/json',
+    cyclonedx_json: '.json,application/vnd.cyclonedx+json,application/json',
     zap_json: '.json,application/json',
     zap_xml: '.xml,application/xml,text/xml',
   };
