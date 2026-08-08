@@ -2194,6 +2194,60 @@ SQL syntax error near q</response>
             for patcher in reversed(patchers):
                 patcher.stop()
 
+    def test_preview_accepts_bounded_compressed_report_and_hashes_the_upload(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_compressed"
+            self._register_session_token(session_id)
+            report = (
+                b"row_type,entity_kind,entity_value\n"
+                b"entity,domain,compressed-preview.darklab.sh\n"
+            )
+            uploaded = gzip.compress(report)
+
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "Compressed CSV",
+                    "import_name": "Compressed preview",
+                    "file": (io.BytesIO(uploaded), "report.csv.gz"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            payload = preview.get_json()
+            assert payload["counts"]["entity_new"] == 1
+            with db_connect() as conn:
+                draft = conn.execute(
+                    "SELECT original_file_sha256 FROM atlas_import_drafts WHERE id = ?",
+                    (payload["draft_id"],),
+                ).fetchone()
+            assert draft["original_file_sha256"] == hashlib.sha256(uploaded).hexdigest()
+
+            with mock.patch.dict(config.CFG, {"atlas_import_max_expanded_mb": 1}, clear=False):
+                oversized = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "generic_csv",
+                        "source_tool": "Compressed CSV",
+                        "import_name": "Oversized expansion",
+                        "file": (io.BytesIO(gzip.compress(report + b"#" * (1024 * 1024))), "large.csv.gz"),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+            assert oversized.status_code == 400
+            assert "Expanded import" in oversized.get_json()["message"]
+            with db_connect() as conn:
+                draft_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_drafts").fetchone()["count"]
+            assert draft_count == 1
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
 
 class TestTeamRoutes:
     def _team_client(self, tmp_path):

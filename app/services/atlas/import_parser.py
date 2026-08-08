@@ -22,6 +22,11 @@ from defusedxml.common import DefusedXmlException
 
 from services.atlas.materializer import canonicalize_entity_record
 from services.atlas.schema import ATLAS_ENTITY_TYPES
+from services.atlas.import_archive import (
+    ImportSourceError,
+    PreparedImportSource,
+    prepare_import_source,
+)
 from services.atlas.import_types import (
     ImportEntity,
     ImportEvidence,
@@ -49,6 +54,7 @@ SUPPORTED_FORMATS = frozenset({
 ENTITY_KINDS = ATLAS_ENTITY_TYPES
 SEVERITIES = frozenset({"info", "low", "medium", "high", "critical"})
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_EXPANDED_BYTES = 50 * 1024 * 1024
 DEFAULT_MAX_ROWS = 5000
 DEFAULT_MAX_WARNINGS = 100
 DEFAULT_MAX_XML_ELEMENTS = 100000
@@ -62,6 +68,7 @@ class ImportParseError(ValueError):
 @dataclass(frozen=True)
 class ImportParserLimits:
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    max_expanded_bytes: int = DEFAULT_MAX_EXPANDED_BYTES
     max_rows: int = DEFAULT_MAX_ROWS
     max_warnings: int = DEFAULT_MAX_WARNINGS
     max_xml_elements: int = DEFAULT_MAX_XML_ELEMENTS
@@ -107,15 +114,30 @@ def parse_import_file(
     if normalized_format not in SUPPORTED_FORMATS:
         raise ImportParseError(f"Unsupported import format: {format_id!r}.")
     active_limits = limits or ImportParserLimits()
-    payload = read_import_source_bytes(source, active_limits)
+    prepared = read_import_source(source, active_limits)
+    return parse_prepared_import(prepared, format_id=normalized_format, limits=active_limits)
+
+
+def parse_prepared_import(
+    prepared: PreparedImportSource,
+    *,
+    format_id: str,
+    limits: ImportParserLimits,
+) -> ImportParseResult:
+    normalized_format = str(format_id or "").strip().lower()
+    if normalized_format not in SUPPORTED_FORMATS:
+        raise ImportParseError(f"Unsupported import format: {format_id!r}.")
+    payload = prepared.payload
     log.debug("ATLAS_IMPORT_PARSE_STARTED", extra={
         "format_id": normalized_format,
-        "upload_bytes": len(payload),
-        "max_rows": active_limits.max_rows,
-        "max_warnings": active_limits.max_warnings,
-        "max_xml_elements": active_limits.max_xml_elements,
+        "upload_bytes": prepared.upload_bytes,
+        "expanded_bytes": prepared.expanded_bytes,
+        "compression": prepared.compression,
+        "max_rows": limits.max_rows,
+        "max_warnings": limits.max_warnings,
+        "max_xml_elements": limits.max_xml_elements,
     })
-    state = _ParseState(active_limits)
+    state = _ParseState(limits)
     entities: list[ImportEntity] = []
     findings: list[ImportFinding] = []
     evidence: list[ImportEvidence] = []
@@ -149,7 +171,7 @@ def parse_import_file(
             "skipped": state.skipped_count,
             "warning_count": len(state.warnings),
             "suppressed_warning_count": state.suppressed_warning_count,
-            "max_warnings": active_limits.max_warnings,
+            "max_warnings": limits.max_warnings,
             "warning_codes": warning_codes,
         })
     log.debug("ATLAS_IMPORT_PARSE_COMPLETED", extra={
@@ -175,16 +197,18 @@ def parse_import_file(
     )
 
 
-def read_import_source_bytes(source: bytes | str | BinaryIO | IO[bytes], limits: ImportParserLimits) -> bytes:
-    if isinstance(source, bytes):
-        payload = source
-    elif isinstance(source, str):
-        payload = source.encode("utf-8")
-    else:
-        payload = source.read(limits.max_upload_bytes + 1)
-    if len(payload) > limits.max_upload_bytes:
-        raise ImportParseError(f"Import file exceeds the configured {limits.max_upload_bytes} byte limit.")
-    return payload
+def read_import_source(
+    source: bytes | str | BinaryIO | IO[bytes],
+    limits: ImportParserLimits,
+) -> PreparedImportSource:
+    try:
+        return prepare_import_source(
+            source,
+            max_upload_bytes=limits.max_upload_bytes,
+            max_expanded_bytes=limits.max_expanded_bytes,
+        )
+    except ImportSourceError as exc:
+        raise ImportParseError(str(exc)) from exc
 
 
 def _safe_text(value: Any, *, limit: int = MAX_TEXT_CHARS) -> str:

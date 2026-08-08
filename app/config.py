@@ -1222,6 +1222,7 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "project_auto_promote_preview_rate_limit_per_minute": 30,
         "project_auto_promote_preview_rate_limit_per_second": 2,
         "atlas_import_max_upload_mb": 10,
+        "atlas_import_max_expanded_mb": 50,
         "atlas_import_max_rows": 5000,
         "atlas_import_max_findings": 5000,
         "atlas_import_max_warnings": 100,

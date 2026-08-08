@@ -467,6 +467,14 @@ team capability names it requires.
 
 The declared parser formats include Nuclei JSONL, Nessus XML, ZAP JSON/XML,
 Burp Suite XML, SARIF 2.1 JSON, CycloneDX JSON, Generic CSV, and Generic JSONL.
+The source reader recognizes gzip and ZIP by file signature rather than trusting
+the filename. It applies one limit to the uploaded bytes and a separate limit to
+the expanded report. ZIP input caps archive entries and must contain exactly one
+unencrypted regular file with a safe relative path; nested compression, multiple reports, malformed
+archives, traversal paths, and oversized expansion fail before parsing. Archives
+are read in memory and never extracted to the filesystem. Draft provenance hashes
+the bytes the operator uploaded, while parser logs record bounded byte counts and
+the low-cardinality compression kind without recording an archive member name.
 SARIF parsing keeps bounded driver and automation identity, rule metadata, full
 and partial fingerprints, and up to eight safe artifact locations with source
 regions and optional artifact-index provenance. Only credential-free HTTP(S)

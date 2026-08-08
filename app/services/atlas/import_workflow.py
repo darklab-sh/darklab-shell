@@ -58,8 +58,8 @@ from services.atlas.import_limits import (
 )
 from services.atlas.import_parser import (
     ImportParseError,
-    parse_import_file,
-    read_import_source_bytes,
+    parse_prepared_import,
+    read_import_source,
 )
 from services.atlas.import_sources import (
     insert_import_batch,
@@ -128,20 +128,20 @@ def preview_atlas_import(
     import_name = _safe_label(import_name or source_tool or "Atlas import", MAX_IMPORT_NAME_LEN)
     filename = _safe_filename(filename)
     limits = _parser_limits()
-    source_bytes = b""
+    prepared_source = None
     stage = "read_source"
     try:
         source_tool_key = _source_tool_key(source_tool)
-        source_bytes = read_import_source_bytes(file_content, limits)
+        prepared_source = read_import_source(file_content, limits)
         stage = "parse"
-        parsed = parse_import_file(source_bytes, format_id=format_id, limits=limits)
+        parsed = parse_prepared_import(prepared_source, format_id=format_id, limits=limits)
         parse_payload = parsed.to_dict()
         normalized_rows = normalized_row_set(parse_payload)
         row_digest = _row_set_digest(normalized_rows)
         draft_id = "impd_" + uuid.uuid4().hex
         created_dt = _utc_now()
         expires_dt = created_dt + timedelta(minutes=_draft_ttl_minutes())
-        original_digest = hashlib.sha256(source_bytes).hexdigest()
+        original_digest = prepared_source.upload_sha256
         with get_db_connect()() as conn:
             stage = "cleanup_expired_drafts"
             cleanup_expired_import_drafts(conn=conn, now=_timestamp(created_dt))
@@ -188,7 +188,7 @@ def preview_atlas_import(
                 "team_id": team_id,
                 "actor_member_id": actor_member_id,
                 "actor_role": role,
-                "upload_bytes": len(source_bytes),
+                "upload_bytes": prepared_source.upload_bytes,
                 "expires_at": _timestamp(expires_dt),
                 **_filename_log_fields(filename),
                 **_safe_count_fields(counts),
@@ -217,7 +217,7 @@ def preview_atlas_import(
                 "source_tool_key": _source_tool_key(source_tool),
                 "team_id": team_id,
                 "stage": stage,
-                "upload_bytes": len(source_bytes),
+                "upload_bytes": prepared_source.upload_bytes if prepared_source else 0,
                 **_filename_log_fields(filename),
             },
         )
@@ -233,7 +233,7 @@ def preview_atlas_import(
             "format_id": str(format_id or ""),
             "source_tool_key": _source_tool_key(source_tool),
             "stage": stage,
-            "upload_bytes": len(source_bytes),
+            "upload_bytes": prepared_source.upload_bytes if prepared_source else 0,
             **_filename_log_fields(filename),
         })
         raise

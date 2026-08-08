@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Atlas imports now accept bounded compressed reports.**
+  - **What:** Every supported import format can arrive as gzip or in a ZIP containing exactly one report. Separate upload and expanded-size limits reject compression bombs without evicting earlier data, while malformed, encrypted, nested, multi-report, symlink, and unsafe-path archives fail before parsing. Draft provenance continues to hash the exact uploaded bytes.
+  - **Tests:** Parser, route, browser, configuration, documentation, and architecture-ratchet coverage pin successful compressed previews and each fail-closed archive boundary.
 - **CycloneDX imports now keep SBOM inventory, dependency, and VEX evidence without trusting imported dispositions.**
   - **What:** Atlas preview/apply preserves bounded document provenance, nested components, dependency edges, exact PURL/CPE identifiers, vulnerability ratings and references, affected component links, and VEX analysis as typed import evidence. Inventory alone doesn't create a finding. Only affected or exploitable assertions can create imported findings; not-affected, resolved, and under-investigation assertions never change existing review or verification state.
   - **Tests:** Parser, route, team-capability, SQLite/Postgres schema, Atlas browser, style, lint, and architecture-ratchet coverage pin the evidence ledger, preview/apply controls, VEX boundary, and responsive UI.

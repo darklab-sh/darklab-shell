@@ -13,7 +13,6 @@ from services.atlas.import_helpers import safe_label as _safe_label
 from services.atlas.import_parser import ImportParserLimits
 
 log = logging.getLogger("shell")
-
 DRAFT_TTL_MINUTES = 30
 PREVIEW_SAMPLE_LIMIT = 20
 WARNING_SAMPLE_LIMIT = 50
@@ -72,6 +71,7 @@ def warning_sample_limit() -> int:
 def parser_limits() -> ImportParserLimits:
     return ImportParserLimits(
         max_upload_bytes=cfg_limit("atlas_import_max_upload_mb", DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024,
+        max_expanded_bytes=cfg_limit("atlas_import_max_expanded_mb", 50) * 1024 * 1024,
         max_rows=cfg_limit("atlas_import_max_rows", DEFAULT_MAX_ROWS),
         max_warnings=cfg_limit("atlas_import_max_warnings", DEFAULT_MAX_WARNINGS),
         max_xml_elements=cfg_limit("atlas_import_max_xml_elements", DEFAULT_MAX_XML_ELEMENTS),

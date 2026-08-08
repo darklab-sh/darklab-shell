@@ -192,6 +192,8 @@ Atlas CycloneDX import coverage separately pins bounded nested components, depen
 
 SARIF import coverage pins bounded tool and automation identity, rule metadata, full and partial fingerprints, direct and artifact-index locations, source regions, safe web and repository-relative provenance, and warning-backed rejection of file URIs, traversal, credentials, backslashes, and invalid references. Atlas browser coverage keeps SARIF and CycloneDX available through the existing import picker with format-appropriate file hints, evidence counts and samples, and permission-aware apply controls.
 
+Compressed Atlas import coverage pins bounded gzip and single-report ZIP expansion, the original-upload digest, file-picker hints, and fail-closed rejection of oversized, malformed, nested, multi-report, and unsafe-path archives.
+
 Cross-cycle reconciliation coverage pins exact check, target, and evidence-rule compatibility; one-count-per-remediation rollups; new, persistent, and not-observed derivation; bounded current and earlier observation links; incomparable cleanup; the preferred active-or-latest-completed handoff; selected-finding filtering; package/report references and reasons; and the shared API/OpenAPI read shape.
 
 Assessor-authored finding coverage pins strict fields and references, confirmed-target and owner scope, bounded initial line evidence, CVE risk links, duplicate overrides, stable identity, optimistic edits, safe actor metadata, session migration, cleanup, audit records, OpenAPI, and real SQLite/Postgres behavior.

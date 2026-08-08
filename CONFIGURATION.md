@@ -319,6 +319,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `project_auto_promote_preview_rate_limit_per_minute` | `30` | Server-side only. Per-session rate limit for auto-promote preview requests |
 | `project_auto_promote_preview_rate_limit_per_second` | `2` | Server-side only. Per-session burst limit for auto-promote preview requests |
 | `atlas_import_max_upload_mb` | `10 MB` | Server-side only. Maximum uploaded file size for one Atlas import preview |
+| `atlas_import_max_expanded_mb` | `50 MB` | Server-side only. Maximum report size after a gzip or ZIP import is expanded |
 | `atlas_import_max_rows` | `5000` | Server-side only. Maximum parsed rows accepted for one Atlas import preview or apply |
 | `atlas_import_max_findings` | `5000` | Server-side only. Maximum normalized findings accepted for one Atlas import |
 | `atlas_import_max_warnings` | `100` | Server-side only. Maximum row warnings retained while parsing one Atlas import |
@@ -1394,6 +1395,7 @@ Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-session AI as
 ```yaml
 # conf/config.local.yaml
 atlas_import_max_upload_mb: 10
+atlas_import_max_expanded_mb: 50
 atlas_import_max_rows: 5000
 atlas_import_max_findings: 5000
 atlas_import_max_warnings: 100

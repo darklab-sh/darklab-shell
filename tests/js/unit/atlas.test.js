@@ -2750,6 +2750,8 @@ describe('Atlas overlay', () => {
     const fileInput = document.getElementById('atlas-import-file')
     const formatSelect = document.getElementById('atlas-import-format')
     expect(fileInput?.getAttribute('accept')).toContain('.jsonl')
+    expect(fileInput?.getAttribute('accept')).toContain('.gz')
+    expect(fileInput?.getAttribute('accept')).toContain('.zip')
     formatSelect.value = 'nessus_xml'
     formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
     expect(fileInput?.getAttribute('accept')).toContain('.nessus')

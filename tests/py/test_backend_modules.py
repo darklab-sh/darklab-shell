@@ -37,6 +37,7 @@ import textwrap
 import time
 import unittest.mock as mock
 import uuid
+import zipfile
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -27808,6 +27809,8 @@ SQL syntax error near q</response>
         completed_extra = mock_debug.call_args_list[1].kwargs["extra"]
         assert started_extra["format_id"] == "generic_jsonl"
         assert started_extra["upload_bytes"] == len(warning_payload.encode("utf-8"))
+        assert started_extra["expanded_bytes"] == len(warning_payload.encode("utf-8"))
+        assert started_extra["compression"] == "none"
         assert started_extra["max_warnings"] == 1
         assert completed_extra["rows"] == 2
         assert completed_extra["warning_count"] == 1
@@ -27840,6 +27843,91 @@ SQL syntax error near q</response>
         with pytest.raises(ImportParseError, match="byte limit"):
             parse_import_file(cast(IO[bytes], source), format_id="generic_csv", limits=ImportParserLimits(max_upload_bytes=4))
         assert source.read_sizes == [5]
+
+    def test_atlas_import_parser_accepts_bounded_gzip_and_single_report_zip(self):
+        payload = (
+            b"row_type,entity_kind,entity_value\n"
+            b"entity,domain,compressed.darklab.sh\n"
+        )
+        gzip_payload = gzip.compress(payload)
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("reports/atlas.csv", payload)
+
+        with mock.patch("services.atlas.import_parser.log.debug") as mock_debug:
+            gzip_result = parse_import_file(gzip_payload, format_id="generic_csv")
+        zip_result = parse_import_file(zip_buffer.getvalue(), format_id="generic_csv")
+
+        assert [entity.canonical_value for entity in gzip_result.entities] == ["compressed.darklab.sh"]
+        assert [entity.canonical_value for entity in zip_result.entities] == ["compressed.darklab.sh"]
+        started_extra = mock_debug.call_args_list[0].kwargs["extra"]
+        assert started_extra["upload_bytes"] == len(gzip_payload)
+        assert started_extra["expanded_bytes"] == len(payload)
+        assert started_extra["compression"] == "gzip"
+
+    def test_atlas_import_parser_rejects_unsafe_or_ambiguous_archives(self):
+        payload = b"row_type,entity_kind,entity_value\nentity,domain,archive.darklab.sh\n"
+
+        def zipped(*members):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for name, content in members:
+                    archive.writestr(name, content)
+            return buffer.getvalue()
+
+        with pytest.raises(ImportParseError, match="exactly one"):
+            parse_import_file(
+                zipped(("first.csv", payload), ("second.csv", payload)),
+                format_id="generic_csv",
+            )
+        many_entries = [(f"directory-{index}/", b"") for index in range(16)]
+        with pytest.raises(ImportParseError, match="entry limit"):
+            parse_import_file(zipped(*many_entries, ("report.csv", payload)), format_id="generic_csv")
+        with pytest.raises(ImportParseError, match="unsafe report path"):
+            parse_import_file(zipped(("../report.csv", payload)), format_id="generic_csv")
+        symlink_buffer = io.BytesIO()
+        symlink_info = zipfile.ZipInfo("report.csv")
+        symlink_info.create_system = 3
+        symlink_info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(symlink_buffer, mode="w") as archive:
+            archive.writestr(symlink_info, "target.csv")
+        with pytest.raises(ImportParseError, match="regular file"):
+            parse_import_file(symlink_buffer.getvalue(), format_id="generic_csv")
+        encrypted = bytearray(zipped(("report.csv", payload)))
+        for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+            header_offset = encrypted.find(signature)
+            flags = int.from_bytes(encrypted[header_offset + flag_offset:header_offset + flag_offset + 2], "little")
+            encrypted[header_offset + flag_offset:header_offset + flag_offset + 2] = (flags | 1).to_bytes(2, "little")
+        with pytest.raises(ImportParseError, match="Encrypted ZIP"):
+            parse_import_file(bytes(encrypted), format_id="generic_csv")
+        with pytest.raises(ImportParseError, match="Nested compressed"):
+            parse_import_file(gzip.compress(gzip.compress(payload)), format_id="generic_csv")
+        with pytest.raises(ImportParseError, match="malformed or incomplete"):
+            parse_import_file(b"\x1f\x8btruncated", format_id="generic_csv")
+
+    def test_atlas_import_parser_rejects_expansion_over_configured_limit(self):
+        payload = (
+            b"row_type,entity_kind,entity_value\n"
+            b"entity,domain,expanded.darklab.sh\n"
+        )
+        limit = len(payload) - 1
+
+        with pytest.raises(ImportParseError, match="Expanded import"):
+            parse_import_file(
+                gzip.compress(payload),
+                format_id="generic_csv",
+                limits=ImportParserLimits(max_expanded_bytes=limit),
+            )
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("report.csv", payload)
+        with pytest.raises(ImportParseError, match="Expanded import"):
+            parse_import_file(
+                zip_buffer.getvalue(),
+                format_id="generic_csv",
+                limits=ImportParserLimits(max_expanded_bytes=limit),
+            )
 
     def test_materializes_run_entities_from_output_entries(self):
         from core.helpers import get_log_session_id

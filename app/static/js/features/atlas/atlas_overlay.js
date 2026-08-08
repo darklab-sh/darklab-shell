@@ -177,16 +177,17 @@ let exportedCycleAtlasTab = null;
   const paginationSummary = document.getElementById('atlas-pagination-summary');
   const prevBtn = document.getElementById('atlas-prev-btn');
   const nextBtn = document.getElementById('atlas-next-btn');
+  const compressedImportAccept = '.gz,.zip,application/gzip,application/zip';
   const importAcceptByFormat = {
-    burp_xml: '.xml,application/xml,text/xml',
-    generic_csv: '.csv,text/csv',
-    generic_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
-    nessus_xml: '.nessus,.xml,application/xml,text/xml',
-    nuclei_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
-    sarif_json: '.sarif,.json,application/sarif+json,application/json',
-    cyclonedx_json: '.json,application/vnd.cyclonedx+json,application/json',
-    zap_json: '.json,application/json',
-    zap_xml: '.xml,application/xml,text/xml',
+    burp_xml: `.xml,application/xml,text/xml,${compressedImportAccept}`,
+    generic_csv: `.csv,text/csv,${compressedImportAccept}`,
+    generic_jsonl: `.jsonl,application/x-ndjson,application/jsonl,application/json,${compressedImportAccept}`,
+    nessus_xml: `.nessus,.xml,application/xml,text/xml,${compressedImportAccept}`,
+    nuclei_jsonl: `.jsonl,application/x-ndjson,application/jsonl,application/json,${compressedImportAccept}`,
+    sarif_json: `.sarif,.json,application/sarif+json,application/json,${compressedImportAccept}`,
+    cyclonedx_json: `.json,application/vnd.cyclonedx+json,application/json,${compressedImportAccept}`,
+    zap_json: `.json,application/json,${compressedImportAccept}`,
+    zap_xml: `.xml,application/xml,text/xml,${compressedImportAccept}`,
   };
 
   function ensureBulkActionLayout() {

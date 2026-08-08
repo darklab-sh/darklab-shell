@@ -241,6 +241,10 @@
 # Server default if unset: 10
 # atlas_import_max_upload_mb: 10
 #
+# Maximum size of the report after gzip or ZIP expansion.
+# Server default if unset: 50
+# atlas_import_max_expanded_mb: 50
+#
 # Server default if unset: 5000
 # atlas_import_max_rows: 5000
 #
