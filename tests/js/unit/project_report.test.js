@@ -183,6 +183,58 @@ describe('project report controller', () => {
     expect(renderedChips[1].title).toContain('older package')
   })
 
+  it('adds a Web Surface screenshot to the existing report selection without embedding image bytes', async () => {
+    const { reportApi } = loadReportModule()
+    const apiFetch = vi.fn(async () => apiResponse({
+      report: {
+        updated: '2026-08-07T12:00:00Z',
+        draft: {
+          selection: { artifact_ids: ['artifact_existing'] },
+          selection_modes: { artifact_ids: 'manual' },
+          export: { redaction_mode: 'redacted' },
+        },
+      },
+      templates: [],
+    }))
+    const context = makeContext(apiFetch)
+    const controller = reportApi.createProjectReportController(context)
+
+    const st = await controller.includeArtifact('proj_1', 'artifact_screenshot')
+
+    expect(st.draft.selection.artifact_ids).toEqual(['artifact_existing', 'artifact_screenshot'])
+    expect(st.draft.selection_modes.artifact_ids).toBe('manual')
+    expect(st.draft.export.redaction_mode).toBe('redacted')
+    expect(st.dirty).toBe(true)
+    expect(st.notice).toContain('image stays behind authenticated artifact storage')
+    expect(context.renderProjectExplorer).toHaveBeenCalled()
+  })
+
+  it('clears a conflicting all-artifacts filter so the handed-off screenshot stays selected', async () => {
+    const { reportApi } = loadReportModule()
+    const apiFetch = vi.fn(async () => apiResponse({
+      report: {
+        draft: {
+          selection_modes: { artifact_ids: 'all' },
+          selection_filters: { artifact_ids: { q: 'text evidence' } },
+          selection_exclude_ids: { artifact_ids: ['artifact_screenshot'] },
+        },
+      },
+      templates: [],
+    }))
+    const controller = reportApi.createProjectReportController(makeContext(apiFetch))
+
+    const st = await controller.includeArtifact('proj_1', {
+      id: 'artifact_screenshot',
+      display_name: 'login-page.png',
+      workspace_path: 'captures/login-page.png',
+    })
+
+    expect(st.draft.selection_modes.artifact_ids).toBe('all')
+    expect(st.draft.selection_exclude_ids.artifact_ids).toEqual([])
+    expect(st.draft.selection_filters.artifact_ids).toEqual({ q: '' })
+    expect(st.notice).toContain('artifact filter was cleared')
+  })
+
   it('shows template choices only when more than one template is configured', async () => {
     const { reportApi } = loadReportModule()
     const apiFetch = vi.fn(async () => apiResponse({

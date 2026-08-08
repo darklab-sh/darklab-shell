@@ -577,6 +577,14 @@ let exportedDarklabProjectWebSurface = null;
       if (captureIsViewable(capture)) {
         const fullView = makeAction('Full view', () => openViewer(projectId, capture, fullView));
         actions.appendChild(fullView);
+        if (ctx.canMutateProjects?.() !== false) {
+          actions.appendChild(makeAction('Add to package', () => {
+            ctx.openPackageWithArtifact?.(projectId, String(capture?.artifact?.id || ''));
+          }));
+          actions.appendChild(makeAction('Add to report', () => {
+            ctx.openReportWithArtifact?.(projectId, capture?.artifact || {});
+          }));
+        }
       }
       if (capture?.url_entity_id && capture?.url) {
         actions.appendChild(makeAction('Open URL in Atlas', () => {
@@ -750,6 +758,12 @@ let exportedDarklabProjectWebSurface = null;
       intro.className = 'project-web-surface-intro';
       intro.textContent = 'Review saved HTTP screenshots without loading captured pages in the app origin.';
       container.appendChild(intro);
+      if (ctx.canMutateProjects?.() !== false) {
+        const handoff = document.createElement('div');
+        handoff.className = 'project-web-surface-handoff-note';
+        handoff.textContent = "Screenshot handoffs keep redaction explicit: package handoff starts in Raw because images can't be redacted automatically; choosing Redacted omits the image bytes. Reports include screenshot metadata, not the binary image.";
+        container.appendChild(handoff);
+      }
       container.appendChild(renderControls(projectId, state));
       if (state.candidateTruncated && filtersActive(state)) {
         const limited = document.createElement('div');

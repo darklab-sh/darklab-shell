@@ -628,6 +628,46 @@ let exportedDarklabProjectReport = null;
       return st;
     }
 
+    async function includeArtifact(projectId, artifact) {
+      const artifactRecord = artifact && typeof artifact === 'object' ? artifact : { id: artifact };
+      const normalizedArtifactId = String(artifactRecord.id || '').trim();
+      if (!normalizedArtifactId) throw new Error('Screenshot artifact is unavailable.');
+      if (!canMutateProjects()) throw new Error(deniedMessage());
+      const st = await load(projectId, { render: false });
+      if (!st.loaded) throw new Error(st.error || 'Unable to load report draft.');
+      syncEditableFields(st);
+      ensureSelectionKey(st, 'artifact_ids');
+      let clearedFilter = false;
+      if (selectionMode(st, 'artifact_ids') === 'all') {
+        const excluded = selectionExclusionSet(st, 'artifact_ids');
+        excluded.delete(normalizedArtifactId);
+        st.draft.selection_exclude_ids.artifact_ids = Array.from(excluded);
+        const filter = selectionFilter(st, 'artifact_ids');
+        const query = String(filter.q || '').trim().toLowerCase();
+        const searchable = [
+          artifactRecord.id,
+          artifactRecord.display_name,
+          artifactRecord.workspace_path,
+        ].map(value => String(value || '').toLowerCase()).join('\n');
+        if (query && !searchable.includes(query)) {
+          st.draft.selection_filters.artifact_ids = { q: '' };
+          st.selectionPages.artifact_ids = null;
+          clearedFilter = true;
+        }
+      } else {
+        const selected = selectionSet(st, 'artifact_ids');
+        selected.add(normalizedArtifactId);
+        st.draft.selection.artifact_ids = Array.from(selected);
+      }
+      st.preview = null;
+      st.dirty = true;
+      st.error = '';
+      st.notice = 'Screenshot selected. Reports include its metadata while the image stays behind authenticated artifact storage.'
+        + (clearedFilter ? ' The artifact filter was cleared so this screenshot remains included.' : '');
+      renderProjectSurfaces();
+      return st;
+    }
+
     function visibleRoot(projectId) {
       return Array.from(document.querySelectorAll('[data-project-report-root]'))
         .find(root => String(root.dataset.projectReportRoot || '') === String(projectId || '')) || null;
@@ -1455,6 +1495,7 @@ let exportedDarklabProjectReport = null;
       handleInput,
       handleChange,
       handleClick,
+      includeArtifact,
       stateFor,
       normalizeDraft,
     };

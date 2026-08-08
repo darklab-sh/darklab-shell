@@ -6943,6 +6943,16 @@ body.mobile-terminal-mode .project-target-editor-form .form-select {
   line-height: 1.45;
 }
 
+.project-web-surface-handoff-note {
+  padding: 9px 11px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--theme-surface) 88%, var(--theme-bg));
+  color: var(--theme-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .project-web-surface-controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));

@@ -2629,6 +2629,28 @@ let importedProjectWorkspaceShell;
       renderProjectMobileDetail: _renderProjectMobileDetail,
       mobileView: _projectMobileView,
       closeProjectWorkspace,
+      canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),
+      openPackageWithArtifact: (projectId, artifactId) => {
+        _loadProjectPackagesController()
+          .then(controller => controller.openWizardForArtifacts(projectId, [artifactId]))
+          .catch((err) => {
+            _shellLogClientError('failed to hand Web Surface screenshot to package builder', err);
+            _setProjectWorkspaceMessage('Could not open the screenshot in the package builder.', { error: true });
+          });
+      },
+      openReportWithArtifact: (projectId, artifact) => {
+        _loadProjectReportController()
+          .then(controller => controller.includeArtifact(projectId, artifact))
+          .then(() => {
+            projectWorkspaceState.setTab('report');
+            _renderProjectExplorer();
+            if (_projectMobileView() === 'detail') _renderProjectMobileDetail();
+          })
+          .catch((err) => {
+            _shellLogClientError('failed to hand Web Surface screenshot to report builder', err);
+            _setProjectWorkspaceMessage('Could not add the screenshot to the report.', { error: true });
+          });
+      },
       openEntityInAtlas: (projectId, entity) => (
         _openProjectEntityInAtlas(projectId, _projectSummary(projectId), entity)
       ),

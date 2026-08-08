@@ -490,6 +490,7 @@ let exportedDarklabProjectPackages = null;
       refreshed.redactionTouched = !!previous.redactionTouched;
       refreshed.includeArtifactsTouched = !!previous.includeArtifactsTouched;
       refreshed.privateNotesTouched = !!previous.privateNotesTouched;
+      refreshed.artifactSelectionTouched = !!previous.artifactSelectionTouched;
       if (preserveTouched && previous.nameTouched) {
         refreshed.name = previous.name || '';
       } else {
@@ -501,6 +502,9 @@ let exportedDarklabProjectPackages = null;
       if (preserveTouched && previous.redactionTouched) refreshed.redactionMode = previous.redactionMode || refreshed.redactionMode;
       if (preserveTouched && previous.includeArtifactsTouched) refreshed.includeArtifacts = !!previous.includeArtifacts;
       if (preserveTouched && previous.privateNotesTouched) refreshed.includePrivateNotes = !!previous.includePrivateNotes;
+      if (preserveTouched && previous.artifactSelectionTouched) {
+        refreshed.selection.artifactIds = new Set(previous.selection?.artifactIds || []);
+      }
       wizard = { projectId: String(projectId || ''), ...refreshed };
     }
 
@@ -524,6 +528,7 @@ let exportedDarklabProjectPackages = null;
         redactionTouched: false,
         includeArtifactsTouched: false,
         privateNotesTouched: false,
+        artifactSelectionTouched: false,
       };
       wizard.name = suggestedName(ctx.selectedProject?.(), wizard.preset);
       ctx.setProjectWorkspaceMessage?.('');
@@ -541,6 +546,27 @@ let exportedDarklabProjectPackages = null;
         }).catch(() => {});
       }
       ctx.renderProjectExplorer?.();
+      renderWizardModal({ focus: true });
+    }
+
+    function openWizardForArtifacts(projectId, artifactIds) {
+      const selectedIds = Array.from(new Set(
+        (Array.isArray(artifactIds) ? artifactIds : [artifactIds])
+          .map(value => String(value || '').trim())
+          .filter(Boolean),
+      ));
+      if (!selectedIds.length) return;
+      openWizard(projectId, 'evidence');
+      if (!wizard) return;
+      wizard.step = 2;
+      wizard.includeArtifacts = true;
+      wizard.includeArtifactsTouched = true;
+      wizard.redactionMode = 'raw';
+      wizard.redactionTouched = true;
+      wizard.selection.artifactIds = new Set(selectedIds);
+      wizard.artifactSelectionTouched = true;
+      wizard.notice = "Screenshot files are binary and can't be redacted automatically. Raw includes the selected image; Redacted omits its bytes and keeps the package metadata.";
+      wizard.noticeError = false;
       renderWizardModal({ focus: true });
     }
 
@@ -1750,6 +1776,7 @@ let exportedDarklabProjectPackages = null;
         const value = String(packageSelection.value || '');
         if (packageSelection.checked) selected.add(value);
         else selected.delete(value);
+        if (kind === 'artifact') wizard.artifactSelectionTouched = true;
         if (kind === 'run') {
           const transcriptRuns = setFor('transcript');
           const childIds = runChildIds(value, wizard.projectId, summaryFor(wizard.projectId));
@@ -1764,6 +1791,7 @@ let exportedDarklabProjectPackages = null;
             childIds.findingIds.forEach(id => findingIds.delete(id));
             childIds.artifactIds.forEach(id => artifactIds.delete(id));
           }
+          wizard.artifactSelectionTouched = true;
         } else if (packageSelection.checked && ['transcript', 'finding', 'artifact'].includes(kind)) {
           const runId = String(packageSelection.dataset.runId || (kind === 'transcript' ? value : ''));
           if (runId) setFor('run').add(runId);
@@ -1918,6 +1946,7 @@ let exportedDarklabProjectPackages = null;
       isWizardActive,
       isWizardOpen,
       openWizard,
+      openWizardForArtifacts,
       openWizardFromPackage,
       closeWizard,
       renderWizardModal,

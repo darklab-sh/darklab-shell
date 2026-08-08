@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DarklabProjectWebSurface } from '../../../app/static/js/features/projects/project_web_surface.js'
+import { DarklabProjectPackages } from '../../../app/static/js/features/projects/project_packages.js'
 
 function jsonResponse(payload, { ok = true } = {}) {
   return {
@@ -62,7 +63,7 @@ function capture(overrides = {}) {
   }
 }
 
-function harness(responses) {
+function harness(responses, contextOverrides = {}) {
   const apiFetch = vi.fn(async (url) => {
     if (String(url).includes('/web-surface?')) return jsonResponse(responses(url))
     if (/\/artifacts\/artifact-[^/]+\/download$/.test(String(url))) {
@@ -77,6 +78,8 @@ function harness(responses) {
   document.body.appendChild(container)
   const openEntityInAtlas = vi.fn()
   const openHistoryRunDetails = vi.fn()
+  const openPackageWithArtifact = vi.fn()
+  const openReportWithArtifact = vi.fn()
   const closeProjectWorkspace = vi.fn()
   const logClientError = vi.fn()
   let controller
@@ -119,10 +122,14 @@ function harness(responses) {
     renderProjectMobileDetail: vi.fn(),
     mobileView: () => 'list',
     closeProjectWorkspace,
+    canMutateProjects: vi.fn(() => true),
+    openPackageWithArtifact,
+    openReportWithArtifact,
     openEntityInAtlas,
     openHistoryRunDetails,
     logClientError,
     metaSeparator: ' · ',
+    ...contextOverrides,
   })
   return {
     apiFetch,
@@ -132,6 +139,8 @@ function harness(responses) {
     logClientError,
     openEntityInAtlas,
     openHistoryRunDetails,
+    openPackageWithArtifact,
+    openReportWithArtifact,
   }
 }
 
@@ -188,6 +197,7 @@ describe('Project Web Surface gallery', () => {
     expect(test.container.textContent).toContain('Visual hash changed since date:2026-08-06T00:00:00+00:00.')
     expect(test.container.textContent).toContain('metadata conflict')
     expect(test.container.textContent).toContain('Conflicting capture metadata was rejected.')
+    expect(test.container.textContent).toContain("package handoff starts in Raw because images can't be redacted automatically")
     expect(test.container.querySelectorAll('.project-web-surface-image')).toHaveLength(2)
     expect(globalThis.URL.createObjectURL).toHaveBeenCalledOnce()
 
@@ -204,6 +214,17 @@ describe('Project Web Surface gallery', () => {
       type: 'url',
       canonical_value: 'https://app.darklab.sh/login',
     })
+    const packageButton = [...test.container.querySelectorAll('.project-web-surface-card .project-web-surface-action')]
+      .find(button => button.textContent === 'Add to package')
+    packageButton.click()
+    expect(test.openPackageWithArtifact).toHaveBeenCalledWith('project-1', 'artifact-1')
+    const reportButton = [...test.container.querySelectorAll('.project-web-surface-card .project-web-surface-action')]
+      .find(button => button.textContent === 'Add to report')
+    reportButton.click()
+    expect(test.openReportWithArtifact).toHaveBeenCalledWith('project-1', expect.objectContaining({
+      id: 'artifact-1',
+      display_name: 'app-darklab-sh.png',
+    }))
     const runButton = [...test.container.querySelectorAll('.project-web-surface-action')]
       .find(button => button.textContent === 'Run details')
     runButton.click()
@@ -407,5 +428,85 @@ describe('Project Web Surface gallery', () => {
     await vi.waitFor(() => expect(test.container.textContent).toContain('No HTTPx screenshots are linked'))
     expect(test.apiFetch).toHaveBeenCalledOnce()
     expect(globalThis.URL.createObjectURL).not.toHaveBeenCalled()
+  })
+
+  it('keeps package and report handoffs out of view-only project scopes', async () => {
+    const test = harness(
+      () => ({ captures: [capture()], total: 1, limit: 24, offset: 0, has_more: false }),
+      { canMutateProjects: vi.fn(() => false) },
+    )
+
+    test.controller.render(test.container, 'project-1')
+
+    await vi.waitFor(() => expect(test.container.textContent).toContain('Darklab sign in'))
+    expect(test.container.textContent).not.toContain('Screenshot handoffs keep redaction explicit')
+    expect(test.container.textContent).not.toContain('Add to package')
+    expect(test.container.textContent).not.toContain('Add to report')
+  })
+
+  it('opens the package builder with only the handed-off screenshot selected and an explicit raw default', async () => {
+    const overlay = document.createElement('div')
+    const body = document.createElement('div')
+    overlay.appendChild(body)
+    document.body.appendChild(overlay)
+    const artifacts = [
+      { id: 'artifact-1', run_id: 'run-1', display_name: 'capture.png', file_status: 'available' },
+      { id: 'artifact-2', run_id: 'run-1', display_name: 'other.png', file_status: 'available' },
+    ]
+    const summary = {
+      project: { id: 'project-1', name: 'Web Surface' },
+      runs: [{ id: 'run-1', command: 'httpx -screenshot https://app.darklab.sh', started: '' }],
+      findings: [],
+      targets: [],
+      artifacts,
+      counts: {},
+    }
+    const controller = DarklabProjectPackages.createProjectPackagesController({
+      apiFetch: vi.fn(async () => jsonResponse({ presets: [] })),
+      wizardOverlay: overlay,
+      wizardBody: body,
+      getSelectedProjectId: () => 'project-1',
+      selectedProject: () => summary.project,
+      projectSummary: () => summary,
+      projectRunItems: value => value?.runs || [],
+      projectArtifactItems: value => value?.artifacts || [],
+      projectTargetItems: value => value?.targets || [],
+      projectFindingItems: () => [],
+      projectFindingsLoaded: () => true,
+      projectFilesEnabled: () => true,
+      projectArtifactStatus: artifact => artifact.file_status,
+      projectArtifactDetail: artifact => artifact.display_name,
+      formatDate: value => value,
+      formatBytes: value => String(value),
+      makeProjectButton: (label, action, projectId) => {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.textContent = label
+        button.dataset.projectAction = action
+        button.dataset.projectId = projectId
+        return button
+      },
+      bindProjectRuntimePressable: vi.fn(),
+      emptyProjectPanel: (text) => {
+        const panel = document.createElement('div')
+        panel.textContent = text
+        return panel
+      },
+      renderProjectExplorer: vi.fn(),
+      setProjectWorkspaceMessage: vi.fn(),
+      syncProjectWorkspaceNestedSuppression: vi.fn(),
+      focusProjectNestedSheet: vi.fn(),
+      installProjectMobileKeyboardGuards: vi.fn(),
+    })
+
+    controller.openWizardForArtifacts('project-1', ['artifact-1'])
+
+    await vi.waitFor(() => expect(body.textContent).toContain("Screenshot files are binary and can't be redacted automatically"))
+    expect(body.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
+    expect(body.querySelector('[data-project-package-selection="artifact"][value="artifact-1"]')?.checked).toBe(true)
+    expect(body.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]')?.checked).toBe(false)
+    await controller.handleAction(body.querySelector('[data-project-action="package-wizard-next"]'))
+    expect(body.querySelector('[data-project-package-field="redaction_mode"]')?.value).toBe('raw')
+    expect(body.textContent).toContain('Include selected raw artifacts')
   })
 })
