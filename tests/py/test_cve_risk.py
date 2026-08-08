@@ -1479,6 +1479,58 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
     assert merged["vulnerability_ids"] == ["CVE-2026-12345"]
 
 
+def test_imported_inference_and_active_confirmation_share_only_remediation_identity(risk_db):
+    findings = [{
+        "id": "finding-nessus-inferred",
+        "session_id": "session-one",
+        "entity_id": "ent_shared_service",
+        "origin": "import",
+        "validation_method": "version_inference",
+        "signature_hash": "nessus-version-correlation",
+        "title": "Version may be affected by CVE-2026-12345",
+        "severity": "info",
+        "confidence": "high",
+        "import_sources": [{"batch_id": "batch-nessus-one"}],
+        "first_seen_at": "2026-08-06T12:00:00+00:00",
+    }, {
+        "id": "finding-nuclei-confirmed",
+        "session_id": "session-one",
+        "entity_id": "ent_shared_service",
+        "origin": "run",
+        "validation_method": "active_confirmation",
+        "signature_hash": "nuclei-cve-template",
+        "title": "CVE-2026-12345 confirmed",
+        "severity": "high",
+        "confidence": "confirmed",
+        "run_id": "run-nuclei-one",
+        "first_seen_at": "2026-08-07T12:00:00+00:00",
+    }]
+
+    worklist = build_remediation_worklist(findings, conn=risk_db)
+
+    inferred_reference = findings[0]["observation_references"][0]
+    confirmed_reference = findings[1]["observation_references"][0]
+    assert inferred_reference["remediation_id"] == confirmed_reference["remediation_id"]
+    assert inferred_reference["observation_id"] != confirmed_reference["observation_id"]
+    assert inferred_reference["validation_method"] == "version_inference"
+    assert confirmed_reference["validation_method"] == "active_confirmation"
+    assert inferred_reference["rule_identity"] == "signature:nessus-version-correlation"
+    assert confirmed_reference["rule_identity"] == "signature:nuclei-cve-template"
+    assert len(worklist) == 1
+    assert worklist[0]["representative_finding_id"] == "finding-nuclei-confirmed"
+    assert worklist[0]["observation_count"] == 2
+    assert worklist[0]["evidence_count"] == 2
+    assert worklist[0]["validation_methods"] == [
+        "active_confirmation",
+        "version_inference",
+    ]
+    assert worklist[0]["strongest_validation_method"] == "active_confirmation"
+    assert [item["id"] for item in worklist[0]["observation_summaries"]] == [
+        "finding-nuclei-confirmed",
+        "finding-nessus-inferred",
+    ]
+
+
 def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     findings = [{
         "id": "personal-one",

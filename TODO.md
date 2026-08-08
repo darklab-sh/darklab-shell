@@ -126,8 +126,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 6 — Close the web and API discovery/validation gaps
 
-- [ ] Finish passive product/package-version correlation without presenting inference as confirmation:
-  - Keep inferred version/package findings distinct from Nuclei or another active probe that confirmed vulnerable behavior. Link or deduplicate related observations without discarding their different evidence methods or allowing an inference to upgrade itself to confirmed.
 - [ ] Add focused parameter and application testing tools:
   - Extend the bounded Dalfox parameter-discovery foundation with separately confirmed reflected/DOM XSS validation, structured confidence-aware findings, and proof/evidence fields.
   - Add SQLmap behind a detection-only default policy. Deny data dumping, filesystem access, OS command execution, registry access, database takeover, destructive statements, and other takeover options in normal and intrusive profiles.
