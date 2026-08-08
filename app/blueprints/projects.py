@@ -561,6 +561,7 @@ from blueprints.projects_artifacts import (  # noqa: E402,F401
     projects_artifacts_list,
     projects_artifacts_preview,
 )
+from blueprints.projects_web_surface import projects_web_surface_list  # noqa: E402,F401
 from blueprints.projects_findings import (  # noqa: E402,F401
     findings_review_update,
     projects_findings_bulk_review_update,

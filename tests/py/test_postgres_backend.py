@@ -3920,6 +3920,21 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             seen_at="2026-05-17T00:00:02Z",
             command="nmap darklab.sh",
         )
+        materialize_run_entities(
+            compat_conn,
+            session_id,
+            run_id,
+            [{
+                "text": "https://darklab.sh/login [200]",
+                "entities": [{
+                    "type": "url",
+                    "value": "https://darklab.sh/login",
+                    "canonical_value": "https://darklab.sh/login",
+                }],
+            }],
+            seen_at="2026-05-17T00:00:03Z",
+            command="httpx -ss -srd captures -u https://darklab.sh/login",
+        )
         recorded_findings = project_findings.record_run_findings(
             compat_conn,
             session_id,
@@ -3930,6 +3945,31 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
                 "signals": ["findings"],
                 "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
             }],
+        )
+        compat_conn.execute(
+            "UPDATE runs SET output_preview = ? WHERE id = ?",
+            (
+                json.dumps([{
+                    "source_detail": {
+                        "screenshots": [{
+                            "url": "https://darklab.sh/login",
+                            "artifact_path": "captures/darklab.png",
+                            "status_code": 200,
+                            "title": "Darklab",
+                            "source_run_id": run_id,
+                        }],
+                    },
+                }]),
+                run_id,
+            ),
+        )
+        compat_conn.execute(
+            "INSERT INTO run_file_artifacts "
+            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "detected_by, content_type, preview_type, created) "
+            "VALUES (?, ?, ?, 'captures/darklab.png', 'darklab.png', 'screenshot', 16, "
+            "'httpx_screenshot', 'image/png', 'image', ?)",
+            ("rfa_" + uuid.uuid4().hex[:16], session_id, run_id, "2026-05-17T00:00:03Z"),
         )
     conn.commit()
     run_entity_preview_resp = client.post(
@@ -3948,6 +3988,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         f"/projects/{project['id']}/findings/review",
         headers={"X-Session-ID": session_id},
         json={"finding_ids": [recorded_findings[0]["id"], "missing-finding"], "review_state": "important"},
+    )
+    web_surface_resp = client.get(
+        f"/projects/{project['id']}/web-surface",
+        headers={"X-Session-ID": session_id},
     )
     prefs_row = conn.execute(
         "SELECT preferences FROM session_preferences WHERE session_id = %s",
@@ -3982,6 +4026,16 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert json.loads(targets_resp.data)["targets"][0]["source_detail"] == {"source": "manual"}
     assert json.loads(links_resp.data)["links"][0]["entity_id"] == run_id
     assert findings_review_resp.status_code == 200
+    assert web_surface_resp.status_code == 200
+    web_capture = json.loads(web_surface_resp.data)["captures"][0]
+    assert web_capture["url"] == "https://darklab.sh/login"
+    assert web_capture["title"] == "Darklab"
+    assert web_capture["metadata_state"] == "available"
+    assert web_capture["capture_state"] == "unavailable"
+    assert web_capture["artifact"]["content_type"] == "image/png"
+    assert web_capture["source_run"]["id"] == run_id
+    assert web_capture["url_entity_id"]
+    assert web_capture["host_entity_id"]
     assert [item["id"] for item in json.loads(findings_resp.data)["findings"]] == [
         recorded_findings[0]["id"]
     ]

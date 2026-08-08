@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Projects can now read their verified Web Surface captures as a paged collection.**
+  - **What:** The Project-scoped read model joins verified HTTPx screenshot artifacts to their safe page metadata, source run, and exact same-run URL and host entities. It reports missing, changed, unavailable, or conflicting capture state explicitly, ignores unrelated files, and never includes captured HTML or image bytes in the JSON response.
+  - **Tests:** Focused route coverage pins paging, personal-scope isolation, image-only selection, artifact availability, source-run provenance, exact entity links, duplicate-metadata conflicts, and omission of captured markup. Architecture coverage pins the new route and module boundaries.
 - **HTTPx screenshots now survive as verified run artifacts.**
   - **What:** Screenshot-enabled HTTPx runs keep the safe relative image path from structured output, bind it to the one validated screenshot directory, and register verified PNG, JPEG, or WebP files through the existing authenticated run-artifact routes. Files outside that directory, symlinks, traversal paths, ambiguous output directories, oversized files, and extension-only image claims are ignored. Screenshot discovery failure doesn't roll back the completed run or its other validated artifacts.
   - **Tests:** Focused metadata and finalization coverage pins the relative-path contract, validated directory, image signatures, workspace quotas, duplicate handling, traversal and symlink rejection, ambiguous output rejection, failed-run abstention, and save-path fallback.

@@ -12564,6 +12564,193 @@ class TestProjectRoutes:
         assert package["manifest"]["options"]["raw_artifacts"] is False
         assert package["manifest"]["artifacts"][0]["file_status"] == "disabled"
 
+    def test_project_web_surface_pages_verified_images_with_exact_run_entities(self, tmp_path):
+        client = get_client()
+        session_id = self._session_id("project-web-surface")
+        other_session = self._session_id("project-web-surface-other")
+        project = self._create_project(client, session_id, name="Web Surface")
+        run_id = self._seed_run(
+            session_id,
+            "httpx -ss -srd captures -u https://app.example.test/login",
+        )
+        self._link_run(client, session_id, project["id"], run_id)
+        host_entity_id = "ent_" + uuid.uuid4().hex[:16]
+        url_entity_id = "ent_" + uuid.uuid4().hex[:16]
+        good_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+        conflict_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+        good_path = "captures/app.png"
+        conflict_path = "captures/conflict.png"
+        preview = [{
+            "text": "https://app.example.test/login [200]",
+            "source_detail": {
+                "screenshots": [
+                    {
+                        "url": "https://app.example.test/login",
+                        "artifact_path": good_path,
+                        "status_code": 200,
+                        "title": "Sign in",
+                        "technologies": ["nginx"],
+                        "captured_at": "2026-08-07T00:00:02Z",
+                        "visual_hash": "visual-good",
+                        "source_run_id": run_id,
+                        "profile_role": "authenticated",
+                        "captured_html": "<script>must not leave the run</script>",
+                    },
+                    {
+                        "url": "https://app.example.test/one",
+                        "artifact_path": conflict_path,
+                        "source_run_id": run_id,
+                    },
+                    {
+                        "url": "https://app.example.test/two",
+                        "artifact_path": conflict_path,
+                        "source_run_id": run_id,
+                    },
+                ],
+            },
+        }]
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_root": str(tmp_path / "workspaces"),
+        }
+        image = b"\x89PNG\r\n\x1a\nverified-image"
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
+            for path in (good_path, conflict_path):
+                resolved = resolve_workspace_path(
+                    session_id,
+                    path,
+                    shell_app_module.CFG,
+                    ensure_parent=True,
+                )
+                resolved.write_bytes(image)
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "UPDATE runs SET output_preview = ?, finished = ? WHERE id = ?",
+                    (json.dumps(preview), "2026-08-07T00:00:03+00:00", run_id),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                    "last_seen_at, occurrence_count, created) "
+                    "VALUES (?, ?, 'domain', 'app.example.test', ?, ?, ?, 1, ?)",
+                    (
+                        host_entity_id,
+                        session_id,
+                        "sig_" + uuid.uuid4().hex,
+                        "2026-08-07T00:00:02+00:00",
+                        "2026-08-07T00:00:02+00:00",
+                        "2026-08-07T00:00:02+00:00",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                    "first_seen_at, last_seen_at, occurrence_count, created) "
+                    "VALUES (?, ?, 'url', 'https://app.example.test/login', ?, ?, ?, ?, 1, ?)",
+                    (
+                        url_entity_id,
+                        session_id,
+                        "sig_" + uuid.uuid4().hex,
+                        host_entity_id,
+                        "2026-08-07T00:00:02+00:00",
+                        "2026-08-07T00:00:02+00:00",
+                        "2026-08-07T00:00:02+00:00",
+                    ),
+                )
+                conn.executemany(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    [
+                        (host_entity_id, run_id, "2026-08-07T00:00:02+00:00", "2026-08-07T00:00:02+00:00"),
+                        (url_entity_id, run_id, "2026-08-07T00:00:02+00:00", "2026-08-07T00:00:02+00:00"),
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO run_file_artifacts "
+                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                    "detected_by, content_type, preview_type, content_sha256, created) "
+                    "VALUES (?, ?, ?, ?, ?, 'screenshot', ?, 'httpx_screenshot', "
+                    "'image/png', 'image', ?, ?)",
+                    [
+                        (
+                            conflict_artifact_id,
+                            session_id,
+                            run_id,
+                            conflict_path,
+                            "conflict.png",
+                            len(image),
+                            hashlib.sha256(image).hexdigest(),
+                            "2026-08-07T00:00:01+00:00",
+                        ),
+                        (
+                            good_artifact_id,
+                            session_id,
+                            run_id,
+                            good_path,
+                            "app.png",
+                            len(image),
+                            hashlib.sha256(image).hexdigest(),
+                            "2026-08-07T00:00:02+00:00",
+                        ),
+                    ],
+                )
+                conn.execute(
+                    "INSERT INTO run_file_artifacts "
+                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                    "detected_by, content_type, preview_type, created) "
+                    "VALUES (?, ?, ?, 'captures/readme.txt', 'readme.txt', 'output', 1, "
+                    "'workspace_flag', 'text/plain', 'text', ?)",
+                    (
+                        "rfa_" + uuid.uuid4().hex[:16],
+                        session_id,
+                        run_id,
+                        "2026-08-07T00:00:03+00:00",
+                    ),
+                )
+                conn.commit()
+
+            first = client.get(
+                f"/projects/{project['id']}/web-surface?limit=1&offset=0",
+                headers={"X-Session-ID": session_id},
+            )
+            second = client.get(
+                f"/projects/{project['id']}/web-surface?limit=1&offset=1",
+                headers={"X-Session-ID": session_id},
+            )
+            foreign = client.get(
+                f"/projects/{project['id']}/web-surface",
+                headers={"X-Session-ID": other_session},
+            )
+
+        assert first.status_code == 200
+        first_payload = first.get_json()
+        assert {key: first_payload[key] for key in ("total", "limit", "offset", "has_more")} == {
+            "total": 2,
+            "limit": 1,
+            "offset": 0,
+            "has_more": True,
+        }
+        capture = first_payload["captures"][0]
+        assert capture["url"] == "https://app.example.test/login"
+        assert capture["title"] == "Sign in"
+        assert capture["technologies"] == ["nginx"]
+        assert capture["metadata_state"] == "available"
+        assert capture["capture_state"] == "current"
+        assert capture["url_entity_id"] == url_entity_id
+        assert capture["host_entity_id"] == host_entity_id
+        assert capture["source_run"]["id"] == run_id
+        assert capture["artifact"]["id"] == good_artifact_id
+        assert capture["artifact"]["file_available"] is True
+        assert "captured_html" not in json.dumps(first_payload)
+        assert second.status_code == 200
+        conflicting = second.get_json()["captures"][0]
+        assert conflicting["artifact"]["id"] == conflict_artifact_id
+        assert conflicting["metadata_state"] == "conflict"
+        assert conflicting["capture_state"] == "metadata_conflict"
+        assert "url" not in conflicting
+        assert foreign.status_code == 404
+
     def test_rejects_cross_session_or_unsupported_project_links(self):
         client = get_client()
         session_id = self._session_id("project-link")
