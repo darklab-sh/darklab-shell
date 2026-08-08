@@ -88,6 +88,9 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
             ),
             "database_backend": str(active_cfg.get("database_backend") or ""),
             "workspace_enabled": bool(active_cfg.get("workspace_enabled")),
+            "assessment_intrusive_actions_enabled": bool(
+                active_cfg.get("assessment_intrusive_actions_enabled")
+            ),
             "raw_packet_scanning_configured": raw_packet_configured,
             "raw_packet_scanning_state": raw_packet_state,
             "raw_packet_scanning_active_tools": ",".join(active_tools),

@@ -13581,12 +13581,14 @@ class TestConfigRoute:
             "high_volume_output_status_interval_lines", "evidence_package_max_mb",
             "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
             "workspace_enabled", "interactive_pty_commands",
+            "assessment_intrusive_actions_enabled",
             "scheduler_default_timezone",
             "tour_chapters",
         ):
             assert key in data
         assert "share_redaction_enabled" in data
         assert "share_redaction_rules" in data
+        assert data["assessment_intrusive_actions_enabled"] is False
 
     def test_interactive_pty_commands_reflect_registry(self):
         client = get_client()
@@ -14341,6 +14343,7 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         emitted = set(data["config"].keys())
+        assert data["config"]["assessment_intrusive_actions_enabled"] is False
         assert data["raw_packets"]["configured"] is False
         assert data["raw_packets"]["active"] is False
         assert data["raw_packets"]["reason"] == "disabled"

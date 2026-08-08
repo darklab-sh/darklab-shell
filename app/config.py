@@ -547,6 +547,7 @@ class CveRiskConfig(_ConfigModel):
 _FORGIVING_BOOL_KEYS = {
     "workspace_enabled",
     "interactive_pty_enabled",
+    "assessment_intrusive_actions_enabled",
     "raw_packet_scanning_enabled",
     "database_postgres_jit",
     "audit_log_enabled",
@@ -560,6 +561,7 @@ _FORGIVING_BOOL_KEYS = {
 _FORGIVING_BOOL_DEFAULTS = {
     "workspace_enabled": False,
     "interactive_pty_enabled": False,
+    "assessment_intrusive_actions_enabled": False,
     "raw_packet_scanning_enabled": False,
     "database_postgres_jit": False,
     "audit_log_enabled": True,
@@ -1094,6 +1096,7 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "ai_feature_next_commands":   False,
         "ai_feature_run_suggestions": False,
         "restricted_command_input_cidrs": [],
+        "assessment_intrusive_actions_enabled": False,
         "raw_packet_scanning_enabled": False,
         "workflow_active_execution_limit": 3,
         "workflow_execution_max_runtime_seconds": 14400,
@@ -1540,6 +1543,18 @@ def load_config(conf_dir=None, local_conf_dir=None):
             "RAW_PACKET_SCANNING_ENABLED",
         )
         applied_env_names.append("RAW_PACKET_SCANNING_ENABLED")
+    env_assessment_intrusive_actions_enabled = str(
+        os.environ.get("ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED") or ""
+    ).strip()
+    if env_assessment_intrusive_actions_enabled:
+        _set_config_value(
+            defaults,
+            provenance,
+            "assessment_intrusive_actions_enabled",
+            env_assessment_intrusive_actions_enabled,
+            "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED",
+        )
+        applied_env_names.append("ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED")
     env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
     if env_database_backend:
         _set_config_value(defaults, provenance, "database_backend", env_database_backend, "DATABASE_BACKEND")

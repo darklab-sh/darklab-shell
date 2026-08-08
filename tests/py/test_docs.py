@@ -56,6 +56,7 @@ _ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
     "interactive_pty_enabled",
     "prometheus_multiproc_dir",
     "raw_packet_scanning_enabled",
+    "assessment_intrusive_actions_enabled",
     "restricted_command_input_cidrs",
     "workspace_backend",
     "workspace_enabled",

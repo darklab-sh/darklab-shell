@@ -832,6 +832,7 @@ cp .env.example .env
 # INTERACTIVE_PTY_ENABLED=false
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # RAW_PACKET_SCANNING_ENABLED=false
+# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=false
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -890,6 +891,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `INTERACTIVE_PTY_ENABLED` | Docker Compose, Flask app | Enables guarded terminal sessions for approved interactive tools; detailed PTY limits remain in YAML |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. The same value drives app validation and scanner-user OUTPUT deny rules |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
+| `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions. It doesn't bypass the per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; destructive actions remain unavailable |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
@@ -919,6 +921,22 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production stack keeps those defaults unless `.env` changes them. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
 
 The optional database and AI tuning variables are escape hatches for process-managed deployments. Leave them unset in the shipped Compose stacks to use `config.local.yaml`; their Compose entries intentionally pass empty values, which the app ignores.
+
+---
+
+## Intrusive Assessment Actions
+
+Intrusive Assessment actions are off by default because they send active validation payloads rather than only collecting or comparing evidence. Enable them only for Projects whose scope and authorization you've reviewed:
+
+```env
+ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true
+```
+
+```bash
+docker compose up -d --force-recreate shell
+```
+
+The setting only makes maintained intrusive actions available. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project evidence immediately before starting the command. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
 
 ---
 

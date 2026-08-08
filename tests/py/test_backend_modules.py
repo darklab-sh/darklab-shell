@@ -2460,6 +2460,7 @@ class TestLoadConfig:
             "INTERACTIVE_PTY_ENABLED": "true",
             "PROMETHEUS_MULTIPROC_DIR": "/env/prometheus",
             "RAW_PACKET_SCANNING_ENABLED": "true",
+            "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED": "true",
             "AI_BASE_URL_ALLOWED_CIDRS": "192.0.2.0/24,not-a-cidr",
         }):
             with open(os.path.join(tmp, "config.yaml"), "w") as f:
@@ -2484,6 +2485,7 @@ class TestLoadConfig:
         assert cfg["interactive_pty_enabled"] is True
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
         assert cfg["raw_packet_scanning_enabled"] is True
+        assert cfg["assessment_intrusive_actions_enabled"] is True
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
         assert app_config.get_config_load_summary()["warning_count"] == 1
         warning.assert_has_calls([
@@ -2866,6 +2868,7 @@ class TestLoadConfig:
                     output_preview_max_mb: 2MB
                     ai_enabled: yes
                     raw_packet_scanning_enabled: invalid
+                    assessment_intrusive_actions_enabled: invalid
                     database_postgres_jit: "true"
                     ai_max_concurrent: "4"
                     audit_export_max_rows: 999999
@@ -2881,10 +2884,11 @@ class TestLoadConfig:
         assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
         assert cfg["ai_enabled"] is True
         assert cfg["raw_packet_scanning_enabled"] is False
+        assert cfg["assessment_intrusive_actions_enabled"] is False
         assert cfg["database_postgres_jit"] is True
         assert cfg["ai_max_concurrent"] == 4
         assert cfg["audit_export_max_rows"] == 200000
-        assert app_config.get_config_load_summary()["warning_count"] == 2
+        assert app_config.get_config_load_summary()["warning_count"] == 3
         warning.assert_has_calls([
             mock.call(
                 "CONFIG_VALUE_CLAMPED",
@@ -2899,6 +2903,15 @@ class TestLoadConfig:
                 "CONFIG_VALUE_DEFAULTED",
                 extra={
                     "key": "raw_packet_scanning_enabled",
+                    "source": os.path.join(tmp, "config.yaml"),
+                    "reason": "invalid_bool",
+                    "fallback": False,
+                },
+            ),
+            mock.call(
+                "CONFIG_VALUE_DEFAULTED",
+                extra={
+                    "key": "assessment_intrusive_actions_enabled",
                     "source": os.path.join(tmp, "config.yaml"),
                     "reason": "invalid_bool",
                     "fallback": False,
@@ -3266,6 +3279,7 @@ class TestLoadConfig:
         )
         assert "present_local_overlays" in inventory_call.kwargs["extra"]
         assert info.call_args.kwargs["extra"]["workspace_enabled"] is True
+        assert info.call_args.kwargs["extra"]["assessment_intrusive_actions_enabled"] is False
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_configured"] is False
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_state"] == "disabled"
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_active_tools"] == ""

@@ -996,6 +996,9 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["RAW_PACKET_SCANNING_ENABLED"] == (
         "${RAW_PACKET_SCANNING_ENABLED:-false}"
     )
+    assert shell["environment"]["ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED"] == (
+        "${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}"
+    )
     assert shell["environment"]["WORKSPACE_ENABLED"] == "${WORKSPACE_ENABLED:-false}"
     assert shell["environment"]["WORKSPACE_BACKEND"] == "${WORKSPACE_BACKEND:-tmpfs}"
     assert shell["environment"]["WORKSPACE_ROOT"] == (
@@ -1022,6 +1025,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "# WORKSPACE_ROOT=/workspaces" in env_example
     assert "# INTERACTIVE_PTY_ENABLED=true" in env_example
     assert "# RAW_PACKET_SCANNING_ENABLED=true" in env_example
+    assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in env_example
     assert services["postgres"]["profiles"] == ["postgres"]
     assert services["llama"]["profiles"] == ["llama"]
     assert all("container_name" not in service for service in services.values())
@@ -1042,12 +1046,17 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "WORKSPACE_ENABLED=${WORKSPACE_ENABLED:-false}" in development_environment
     assert "WORKSPACE_BACKEND=${WORKSPACE_BACKEND:-tmpfs}" in development_environment
     assert "INTERACTIVE_PTY_ENABLED=${INTERACTIVE_PTY_ENABLED:-false}" in development_environment
+    assert (
+        "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}"
+        in development_environment
+    )
     assert "DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-}" in development_environment
     assert "DATABASE_POSTGRES_JIT=${DATABASE_POSTGRES_JIT:-}" in development_environment
     assert "AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-}" in development_environment
     development_env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "DEV_HOST_BIND_ADDRESS=127.0.0.1" in development_env_example
     assert "DARKLAB_IMAGE=" not in development_env_example
+    assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in development_env_example
     assert not (ROOT / "examples" / "docker-compose.prod.yml").exists()
 
 

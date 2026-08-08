@@ -149,6 +149,9 @@ def _frontend_config_payload():
         "permalink_retention_days": cfg["permalink_retention_days"],
         "workspace_enabled":       bool(cfg.get("workspace_enabled", False)),
         "interactive_pty_enabled": bool(cfg.get("interactive_pty_enabled", False)),
+        "assessment_intrusive_actions_enabled": bool(
+            cfg.get("assessment_intrusive_actions_enabled", False)
+        ),
         "ai_enabled":              bool(cfg.get("ai_enabled", False)),
         "ai_feature_summary":      bool(cfg.get("ai_feature_summary", False)),
         "ai_feature_next_commands": bool(cfg.get("ai_feature_next_commands", False)),
