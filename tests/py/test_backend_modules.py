@@ -31240,6 +31240,14 @@ class TestAssessmentHttpProfileExecution:
         assert stat.S_IMODE(old_material.path.stat().st_mode) == 0o700
         assert stat.S_IMODE(old_file.stat().st_mode) == 0o600
         assert stat.S_IMODE(recent_file.stat().st_mode) == 0o600
+        assert recent_material.read_bytes("secrets.yaml", max_bytes=64) == b"static: []\n"
+        with pytest.raises(runtime.PrivateHttpMaterialError, match="exceeds its limit"):
+            recent_material.read_bytes("secrets.yaml", max_bytes=4)
+        outside = tmp_path / "outside-report"
+        outside.write_bytes(b"outside")
+        (recent_material.path / "linked-report").symlink_to(outside)
+        with pytest.raises(runtime.PrivateHttpMaterialError, match="could not be read"):
+            recent_material.read_bytes("linked-report", max_bytes=64)
         assert runtime.cleanup_stale_http_profile_runtime(
             cfg=cfg,
             now_timestamp=now,
@@ -31389,8 +31397,10 @@ class TestAssessmentHttpProfileExecution:
         tmp_path,
     ):
         from services.assessments import http_profile_runtime as runtime
+        from services.assessments import http_profile_runtime_read as runtime_read
 
         calls = []
+        reads = []
 
         def scanner_run(arguments, *, input_bytes=None):
             calls.append((list(arguments), input_bytes))
@@ -31408,6 +31418,13 @@ class TestAssessmentHttpProfileExecution:
 
         monkeypatch.setattr(runtime, "_scanner_user_exists", lambda: True)
         monkeypatch.setattr(runtime, "_scanner_run", scanner_run)
+        monkeypatch.setattr(
+            runtime_read,
+            "read_private_material_file",
+            lambda path, *, max_bytes, scanner_owned: (
+                reads.append((path, max_bytes, scanner_owned)) or path.read_bytes()
+            ),
+        )
         monkeypatch.setattr(runtime, "_SCANNER_RUNTIME_PARENT", tmp_path)
         material = runtime.PrivateHttpRunMaterial(cfg=build_test_config())
         protected_file = material.write_bytes("secrets.yaml", b"static: []\n")
@@ -31416,9 +31433,50 @@ class TestAssessmentHttpProfileExecution:
         assert calls[0][0][:3] == ["mkdir", "-m", "700"]
         assert calls[1] == (["tee", str(protected_file)], b"static: []\n")
         assert calls[2][0][:2] == ["chmod", "600"]
+        assert material.read_bytes("secrets.yaml", max_bytes=64) == b"static: []\n"
+        assert reads == [(protected_file, 64, True)]
         material.cleanup()
         assert calls[-1][0][:3] == ["rm", "-rf", "--"]
         assert not material.path.exists()
+
+    def test_scanner_owned_private_read_uses_fixed_bounded_no_follow_helper(
+        self,
+        monkeypatch,
+    ):
+        from services.assessments import http_profile_runtime_read as runtime_read
+
+        captured = {}
+
+        def run(arguments, **kwargs):
+            captured["arguments"] = arguments
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(stdout=b"bounded-report")
+
+        monkeypatch.setattr(runtime_read.shutil, "which", lambda _name: "/usr/bin/sudo")
+        monkeypatch.setattr(runtime_read.subprocess, "run", run)
+
+        content = runtime_read.read_private_material_file(
+            Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
+            max_bytes=1024,
+            scanner_owned=True,
+        )
+
+        assert content == b"bounded-report"
+        assert captured["arguments"][:6] == [
+            "/usr/bin/sudo", "-u", "scanner", "-g", "appuser", runtime_read.sys.executable,
+        ]
+        assert captured["arguments"][6] == "-c"
+        assert "O_NOFOLLOW" in captured["arguments"][7]
+        assert captured["arguments"][-2:] == [
+            "/tmp/private-http-runs/run-0123456789abcdef/events.ndjson",
+            "1024",
+        ]
+        assert captured["kwargs"] == {
+            "check": True,
+            "stdout": runtime_read.subprocess.PIPE,
+            "stderr": runtime_read.subprocess.DEVNULL,
+            "timeout": 10,
+        }
 
     def test_trusted_execution_arguments_are_appended_after_validation_only(self):
         from services.runs.contracts import RunPreparationError

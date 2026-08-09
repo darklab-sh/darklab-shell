@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Mapping
 
 from config import resolve_data_dir, resolve_effective_cfg
+from services.assessments.http_profile_runtime_read import PrivateHttpRunMaterialReader
 
 
 log = logging.getLogger("shell")
@@ -86,8 +87,10 @@ def _scanner_run(arguments: list[str], *, input_bytes: bytes | None = None) -> N
         ) from exc
 
 
-class PrivateHttpRunMaterial:
+class PrivateHttpRunMaterial(PrivateHttpRunMaterialReader):
     """Own one private runtime directory and its scanner-readable files."""
+
+    _material_error = PrivateHttpMaterialError
 
     def __init__(self, *, cfg: Mapping[str, object] | None = None):
         self.root = _runtime_root(cfg)
@@ -100,11 +103,7 @@ class PrivateHttpRunMaterial:
             os.chmod(self.path, _RUN_MODE)
 
     def write_bytes(self, name: str, content: bytes) -> Path:
-        if not name or name in {".", ".."} or "/" in name or "\\" in name:
-            raise PrivateHttpMaterialError("Protected HTTP runtime file name is invalid")
-        destination = self.path / name
-        if destination.parent != self.path:
-            raise PrivateHttpMaterialError("Protected HTTP runtime path is invalid")
+        destination = self._file_path(name)
         if self._scanner_owned:
             _scanner_run(["tee", str(destination)], input_bytes=content)
             _scanner_run(["chmod", f"{_FILE_MODE:o}", str(destination)])

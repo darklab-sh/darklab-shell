@@ -2226,13 +2226,16 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
     assert choose["artifact_selection"]["selected"] is None
 
     schema_path = Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json")
+    config_path = Path("/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml")
     report_path = Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson")
     cleanup = mock.Mock()
     material = SimpleNamespace(
         schema=reviewed,
         schema_path=schema_path,
+        config_path=config_path,
         report_path=report_path,
-        private_values=(str(schema_path), str(report_path)),
+        private_values=(str(schema_path), str(config_path), str(report_path)),
+        read_report=lambda: b"",
         cleanup=cleanup,
     )
     with mock.patch(
@@ -2269,14 +2272,18 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
     assert selected_response.status_code == 200
     assert plan["launchable"] is True
     assert plan["artifact_selection"]["selected"]["operation_count"] == 2
-    assert plan["display_command"].startswith("schemathesis run [protected-schema]")
+    assert plan["display_command"].startswith(
+        "schemathesis --config-file [protected-config] run [protected-schema]"
+    )
     assert launched.status_code == 202
     start_kwargs = start_run.call_args.kwargs
     assert start_kwargs["original_command"] == "schemathesis --help"
     assert start_kwargs["display_command"] == plan["display_command"]
-    assert start_kwargs["private_values"] == (str(schema_path), str(report_path))
+    assert start_kwargs["private_values"] == (
+        str(schema_path), str(config_path), str(report_path),
+    )
     assert start_kwargs["reviewed_execution"].execution_command.startswith(
-        f"schemathesis run {schema_path}"
+        f"schemathesis --config-file {config_path} run {schema_path}"
     )
     assert callable(start_kwargs["run_cleanup_hook"])
     audit = _audit_event_rows(

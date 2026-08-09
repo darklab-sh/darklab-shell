@@ -13,13 +13,11 @@ from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.schemathesis_actions import SCHEMATHESIS_CHECK_KEY
 from services.assessments.schemathesis_artifact import (
     SchemathesisArtifactError,
-    materialize_reviewed_schemathesis_schema,
     review_project_openapi_artifact,
 )
-from services.assessments.schemathesis_command import (
-    reviewed_schemathesis_command_matches,
-)
+from services.assessments.schemathesis_command import reviewed_schemathesis_command_matches
 from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
+from services.assessments.schemathesis_material import materialize_reviewed_schemathesis_schema
 from services.assessments.schemathesis_schema import SchemathesisSchemaError
 
 
@@ -85,6 +83,7 @@ def materialize_reviewed_schemathesis_launch(
         execution = ReviewedSchemathesisExecution(
             material.schema,
             material.schema_path,
+            material.config_path,
             material.report_path,
         )
     except (SchemathesisArtifactError, ValueError) as exc:

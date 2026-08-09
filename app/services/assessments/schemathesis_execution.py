@@ -8,9 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from services.assessments.schemathesis_command import (
-    reviewed_schemathesis_command_plan,
-)
+from services.assessments.schemathesis_command import reviewed_schemathesis_command_plan
 from services.assessments.schemathesis_schema import ReviewedOpenApiSchema
 
 
@@ -20,6 +18,7 @@ class ReviewedSchemathesisExecution:
 
     schema: ReviewedOpenApiSchema
     schema_path: Path
+    config_path: Path
     report_path: Path
 
     def __post_init__(self) -> None:
@@ -32,6 +31,7 @@ class ReviewedSchemathesisExecution:
         return reviewed_schemathesis_command_plan(
             self.schema,
             schema_path=self.schema_path,
+            config_path=self.config_path,
             report_path=self.report_path,
         )
 

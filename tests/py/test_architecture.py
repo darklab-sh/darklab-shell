@@ -298,7 +298,10 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/service_action_catalog.py", 130, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nmap_profiles.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/osv_package_correlation.py", 220, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/http_profile_runtime.py", 176, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/http_profile_runtime.py", 175, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/http_profile_runtime_read.py", 166, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/http_profile_validation.py", 362, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profiles.py", 550, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/handoff.py", 110, "split-package-ratchet"),
@@ -517,10 +520,16 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/schemathesis_schema.py", 269, "split-package-ratchet"
     ),
     ModuleSizeBudget(
-        "app/services/assessments/schemathesis_command.py", 131, "split-package-ratchet"
+        "app/services/assessments/schemathesis_command.py", 109, "split-package-ratchet"
     ),
     ModuleSizeBudget(
-        "app/services/assessments/schemathesis_artifact.py", 182, "split-package-ratchet"
+        "app/services/assessments/schemathesis_command_paths.py", 44, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_artifact.py", 106, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_material.py", 102, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/assessments/schemathesis_actions.py", 188, "split-package-ratchet"
@@ -529,7 +538,7 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/schemathesis_execution.py", 47, "split-package-ratchet"
     ),
     ModuleSizeBudget(
-        "app/services/assessments/schemathesis_launch.py", 123, "split-package-ratchet"
+        "app/services/assessments/schemathesis_launch.py", 122, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/assessments/schemathesis_report.py", 582, "split-package-ratchet"

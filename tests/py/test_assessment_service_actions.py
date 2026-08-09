@@ -92,8 +92,11 @@ from services.assessments.schemathesis_actions import (
 from services.assessments import schemathesis_artifact
 from services.assessments.schemathesis_artifact import (
     SchemathesisArtifactError,
-    materialize_reviewed_schemathesis_schema,
     review_project_openapi_artifact,
+)
+from services.assessments import schemathesis_material
+from services.assessments.schemathesis_material import (
+    materialize_reviewed_schemathesis_schema,
 )
 from services.assessments.schemathesis_schema import (
     SCHEMATHESIS_READ_OPERATION_LIMIT,
@@ -912,21 +915,40 @@ def test_reviewed_schemathesis_schema_materializes_private_schema_and_report(mon
             writes.append((name, content))
             return self.path / name
 
+        def read_bytes(self, name, *, max_bytes):
+            writes.append(("read", name.encode(), max_bytes))
+            return b"report"
+
         def cleanup(self):
             writes.append(("cleanup", b""))
 
-    monkeypatch.setattr(schemathesis_artifact, "PrivateHttpRunMaterial", FakeMaterial)
+    monkeypatch.setattr(schemathesis_material, "PrivateHttpRunMaterial", FakeMaterial)
 
     material = materialize_reviewed_schemathesis_schema(reviewed, cfg={"data_dir": "/private"})
 
     assert material.schema == reviewed
-    assert writes == [("schema.json", reviewed.content), ("events.ndjson", b"")]
+    assert writes == [
+        ("schema.json", reviewed.content),
+        (
+            "schemathesis.toml",
+            b'[cache]\nenabled = false\n\n[generation]\ndatabase = "none"\n',
+        ),
+        ("events.ndjson", b""),
+    ]
     assert material.schema_path == FakeMaterial.path / "schema.json"
+    assert material.config_path == FakeMaterial.path / "schemathesis.toml"
     assert material.report_path == FakeMaterial.path / "events.ndjson"
-    assert material.private_values == (str(material.schema_path), str(material.report_path))
+    assert material.private_values == tuple(map(str, (
+        material.schema_path,
+        material.config_path,
+        material.report_path,
+    )))
+    assert material.read_report() == b"report"
+    assert writes[-1] == ("read", b"events.ndjson", SCHEMATHESIS_REPORT_MAX_BYTES)
     assert reviewed_schemathesis_command_plan(
         material.schema,
         schema_path=material.schema_path,
+        config_path=material.config_path,
         report_path=material.report_path,
     ) is not None
     material.cleanup()
@@ -960,7 +982,7 @@ def test_schemathesis_materialization_requires_review_and_cleans_partial_files(m
         def cleanup(self):
             cleaned.append(True)
 
-    monkeypatch.setattr(schemathesis_artifact, "PrivateHttpRunMaterial", FailingMaterial)
+    monkeypatch.setattr(schemathesis_material, "PrivateHttpRunMaterial", FailingMaterial)
     with pytest.raises(SchemathesisArtifactError) as failed:
         materialize_reviewed_schemathesis_schema(reviewed)
     assert failed.value.code == "schemathesis_materialization_failed"
@@ -978,7 +1000,9 @@ def test_reviewed_schemathesis_command_is_exact_read_only_and_request_bounded():
     assert display is not None
     assert display.request_limit == 2 * SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION == 20
     assert display.time_limit_seconds == SCHEMATHESIS_TIME_LIMIT_SECONDS == 300
-    assert "schemathesis run [protected-schema]" in display.command
+    assert display.command.startswith(
+        "schemathesis --config-file [protected-config] run [protected-schema]"
+    )
     assert "--include-method GET --include-method HEAD" in display.command
     assert "--phases fuzzing" in display.command
     assert "--mode negative" in display.command
@@ -987,29 +1011,35 @@ def test_reviewed_schemathesis_command_is_exact_read_only_and_request_bounded():
     assert "--workers 1" in display.command
     assert "--max-failures 10" in display.command
     assert "--report ndjson --report-ndjson-path [protected-report]" in display.command
+    assert "--generation-database none" in display.command
     assert "--generation-deterministic --no-color" in display.command
     assert "POST" not in display.command
 
     schema_path = "/tmp/private-http-runs/run-0123456789abcdef/schema.json"
+    config_path = "/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml"
     report_path = "/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"
     execution = reviewed_schemathesis_command_plan(
         reviewed,
         schema_path=schema_path,
+        config_path=config_path,
         report_path=report_path,
     )
     assert execution is not None
     assert schema_path in execution.command
+    assert config_path in execution.command
     assert report_path in execution.command
     assert reviewed_schemathesis_command_matches(
         execution.command,
         reviewed,
         schema_path=schema_path,
+        config_path=config_path,
         report_path=report_path,
     )
     assert not reviewed_schemathesis_command_matches(
         execution.command + " --include-method POST",
         reviewed,
         schema_path=schema_path,
+        config_path=config_path,
         report_path=report_path,
     )
 
@@ -1025,21 +1055,25 @@ def test_reviewed_schemathesis_command_rejects_unreviewed_or_unprotected_materia
     assert reviewed_schemathesis_command_plan(
         reviewed,
         schema_path="/tmp/schema.json",
+        config_path="/tmp/schemathesis.toml",
         report_path="/tmp/events.ndjson",
     ) is None
     assert reviewed_schemathesis_command_plan(
         reviewed,
         schema_path="/tmp/run-a/schema.json",
+        config_path="/tmp/run-a/schemathesis.toml",
         report_path="/tmp/run-a/events.ndjson",
     ) is None
     assert reviewed_schemathesis_command_plan(
         reviewed,
         schema_path="/tmp/private-http-runs/run-a/schema.json",
+        config_path="/tmp/private-http-runs/run-a/schemathesis.toml",
         report_path="/tmp/private-http-runs/run-b/events.ndjson",
     ) is None
     assert reviewed_schemathesis_command_plan(
         reviewed,
         schema_path="/tmp/private-http-runs/run-a/other.json",
+        config_path="/tmp/private-http-runs/run-a/schemathesis.toml",
         report_path="/tmp/private-http-runs/run-a/events.ndjson",
     ) is None
 
@@ -1198,6 +1232,7 @@ def test_reviewed_schemathesis_execution_replaces_only_help_carrier():
     execution = ReviewedSchemathesisExecution(
         reviewed,
         Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json"),
+        Path("/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml"),
         Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
     )
     prepared = PreparedRealCommand(
@@ -1256,13 +1291,16 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
         "artifact_selection": context.public_selection(),
     }
     schema_path = Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json")
+    config_path = Path("/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml")
     report_path = Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson")
     cleaned = []
     material = SimpleNamespace(
         schema=reviewed,
         schema_path=schema_path,
+        config_path=config_path,
         report_path=report_path,
-        private_values=(str(schema_path), str(report_path)),
+        private_values=(str(schema_path), str(config_path), str(report_path)),
+        read_report=lambda: b"",
         cleanup=lambda: cleaned.append(True),
     )
     monkeypatch.setattr(
@@ -1283,13 +1321,15 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
     )
 
     assert protected.execution_command == "schemathesis --help"
-    assert protected.private_values == (str(schema_path), str(report_path))
+    assert protected.private_values == (
+        str(schema_path), str(config_path), str(report_path),
+    )
     assert protected.audit_summary == {
         "schema_artifact_id": reviewed.source_artifact_id,
         "schema_operation_count": 2,
     }
     assert launch_context.reviewed_execution.execution_command.startswith(
-        f"schemathesis run {schema_path}"
+        f"schemathesis --config-file {config_path} run {schema_path}"
     )
     assert launch_context.broker_kwargs() == {
         "trusted_execution_args": (),

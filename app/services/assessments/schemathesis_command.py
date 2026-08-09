@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import shlex
 from typing import Any
 
 from services.assessments.command_plan_contracts import CommandPlan
+from services.assessments.schemathesis_command_paths import (
+    schemathesis_runtime_path_args,
+)
 from services.assessments.schemathesis_schema import (
     ReviewedOpenApiSchema,
     SchemathesisSchemaError,
@@ -23,28 +25,26 @@ SCHEMATHESIS_RATE_LIMIT = "2/s"
 SCHEMATHESIS_REQUEST_TIMEOUT_SECONDS = 10
 SCHEMATHESIS_TIME_LIMIT_SECONDS = 300
 SCHEMATHESIS_WORKERS = 1
-_SCHEMA_FILE = "schema.json"
-_REPORT_FILE = "events.ndjson"
-
-
 def reviewed_schemathesis_command_plan(
     schema: ReviewedOpenApiSchema,
     *,
     schema_path: Any = None,
+    config_path: Any = None,
     report_path: Any = None,
 ) -> CommandPlan | None:
     """Return a fixed read-only negative-testing plan for one reviewed schema."""
     reviewed = _rereview(schema)
     if reviewed is None:
         return None
-    paths = _runtime_paths(schema_path, report_path)
+    paths = schemathesis_runtime_path_args(schema_path, config_path, report_path)
     if paths is None:
         return None
-    schema_arg, report_arg = paths
+    schema_arg, config_arg, report_arg = paths
     base_url = shlex.quote(reviewed.base_url)
     request_limit = reviewed.operation_count * SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION
     command = (
-        f"schemathesis run {schema_arg} --url {base_url} --workers {SCHEMATHESIS_WORKERS} "
+        f"schemathesis --config-file {config_arg} run {schema_arg} "
+        f"--url {base_url} --workers {SCHEMATHESIS_WORKERS} "
         "--phases fuzzing --include-method GET --include-method HEAD "
         "--checks not_a_server_error,status_code_conformance,content_type_conformance,"
         "response_schema_conformance,negative_data_rejection "
@@ -54,7 +54,7 @@ def reviewed_schemathesis_command_plan(
         f"--report ndjson --report-ndjson-path {report_arg} "
         "--output-sanitize true --output-truncate true --mode negative "
         f"--max-examples {SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION} --seed 1 "
-        "--generation-deterministic --no-color"
+        "--generation-database none --generation-deterministic --no-color"
     )
     return CommandPlan(
         command,
@@ -73,12 +73,14 @@ def reviewed_schemathesis_command_matches(
     schema: ReviewedOpenApiSchema,
     *,
     schema_path: Any = None,
+    config_path: Any = None,
     report_path: Any = None,
 ) -> bool:
     """Return whether a command exactly matches the app-owned schema plan."""
     expected = reviewed_schemathesis_command_plan(
         schema,
         schema_path=schema_path,
+        config_path=config_path,
         report_path=report_path,
     )
     return expected is not None and str(command or "") == expected.command
@@ -96,27 +98,6 @@ def _rereview(schema: Any) -> ReviewedOpenApiSchema | None:
     except SchemathesisSchemaError:
         return None
     return reviewed if reviewed == schema else None
-
-
-def _runtime_paths(schema_path: Any, report_path: Any) -> tuple[str, str] | None:
-    if schema_path is None and report_path is None:
-        return "[protected-schema]", "[protected-report]"
-    try:
-        schema_file = Path(schema_path)
-        report_file = Path(report_path)
-    except TypeError:
-        return None
-    if (
-        not schema_file.is_absolute()
-        or not report_file.is_absolute()
-        or schema_file.parent != report_file.parent
-        or not schema_file.parent.name.startswith("run-")
-        or schema_file.parent.parent.name != "private-http-runs"
-        or schema_file.name != _SCHEMA_FILE
-        or report_file.name != _REPORT_FILE
-    ):
-        return None
-    return shlex.quote(str(schema_file)), shlex.quote(str(report_file))
 
 
 __all__ = [
