@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Structured Nmap NSE XML now has a bounded informational evidence parser.**
+  - **What:** The parser accepts only exact reviewed service scripts attached to open ports and keeps their structured table and element values with the canonical port, service, source run, Nmap version, parser version, and observation time. Free-form script output, output-only rows, closed ports, unknown or third-party scripts, and the separately reviewed vulnerability scripts stay out. Field depth, values, rows, XML size, and element count are capped, with truncation reported instead of silently expanding the result. Parsing is read-only and doesn't create a finding or turn service metadata into a vulnerability claim.
+  - **Tests:** Focused XML, catalog, provenance, classification, unsafe-input, closed-port, unknown-script, output-omission, field/row-limit, and architecture-ratchet coverage pins the boundary.
 - **Service suggestions now name the exact reviewed Nmap profile they use.**
   - **What:** App-owned Nmap profiles separate approved category scans from fixed service scripts, publish the expected evidence and blocked broad category selectors, and reject custom script arguments or argument files. SMB, SNMP, LDAP, NFS/RPC, mail, FTP, DNS, database, SSH, and TLS suggestions can show that profile on desktop and mobile. The reviewed vulnerability profile contains only named scripts and still requires explicit confirmation; these hints don't add a new launch path.
   - **Tests:** Profile-catalog, public-serialization, command-plan, service-action, desktop/mobile renderer, architecture-ratchet, and lint coverage pins the selectors, evidence labels, exclusions, argument rejection, and no-launch presentation.

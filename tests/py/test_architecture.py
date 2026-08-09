@@ -328,6 +328,16 @@ _MODULE_SIZE_RATCHET = (
         25,
         "split-package-ratchet",
     ),
+    ModuleSizeBudget(
+        "app/services/assessments/nmap_script_evidence_catalog.py",
+        60,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/nmap_service_observations.py",
+        215,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/osv_package_correlation.py", 220, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_runtime.py", 175, "split-package-ratchet"),
     ModuleSizeBudget(
