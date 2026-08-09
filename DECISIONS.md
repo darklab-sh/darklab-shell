@@ -216,6 +216,8 @@ The scheduler owns database-backed feed refresh jobs, leases, and resumable risk
 
 ZAP lifecycle state belongs in the primary database rather than Redis or an in-memory worker. It keeps the owner and reviewed identities, status, fixed deadline, remote plan id, a bounded progress summary, and sanitized report/import metadata. Guarded transitions distinguish cancel intent from remote confirmation and downloaded output from an operator-reviewed import. Plan documents, credentials, report bodies, and full remote logs do not belong in that row.
 
+ZAP service calls use its transfer directory instead of a shared host volume. Each durable job receives one generated subdirectory, the API key is sent only in `X-ZAP-API-Key`, and the connector can call only plan upload, start, progress, stop, and report download. It rejects redirects, changed response URLs, unexpected confirmations, and over-limit responses. Operators must explicitly enable ZAP's security-sensitive file-transfer feature and own that directory's retention; darklab_shell doesn't broaden the ZAP API or assume a remote-delete capability.
+
 ### Shared CVE Risk Data and Ranking
 
 **A fresh install gets dated, bundled EPSS and KEV data; live network refresh remains an operator choice.**

@@ -3328,6 +3328,156 @@ class TestLoadConfig:
                 review_zap_remote_progress(response, expected_plan_id="17")
             assert exc_info.value.code == expected_code
 
+        from urllib.parse import parse_qs, urlsplit
+
+        from services.connectors import zap_http as zap_http_module
+        from services.connectors.zap_http import ZapTransportError
+        from services.connectors.zap_transport import (
+            cancel_zap_automation_plan,
+            download_zap_report,
+            fetch_zap_plan_progress,
+            submit_zap_automation_plan,
+            zap_transfer_paths,
+        )
+
+        class FakeZapResponse:
+            def __init__(self, payload: bytes, url: str = ""):
+                self.payload = payload
+                self.url = url
+                self.status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def getcode(self):
+                return self.status
+
+            def geturl(self):
+                return self.url
+
+            def read(self, amount: int):
+                return self.payload[:amount]
+
+        requests = []
+        responses = [
+            b'{"Uploaded":"/zap/xfer/darklab/jobs/job/plan.yaml"}',
+            b'{"planId":"17"}',
+            json.dumps({
+                "planProgress": {
+                    "planId": 17,
+                    "started": "2026-08-09T15:00:00Z",
+                    "finished": "",
+                    "info": ["Spider started"],
+                    "warn": [],
+                    "error": [],
+                },
+            }).encode(),
+            b'{"Result":"OK"}',
+            b'{"site":[]}',
+        ]
+
+        def fake_zap_open(request, *, settings, timeout):
+            requests.append((request, settings, timeout))
+            return FakeZapResponse(responses.pop(0), request.full_url)
+
+        job_id = "zpj_" + "a" * 32
+        with mock.patch.object(
+            zap_http_module,
+            "_open_zap_request",
+            side_effect=fake_zap_open,
+        ):
+            assert submit_zap_automation_plan(
+                settings,
+                "connector-secret",
+                job_id,
+                safe_plan,
+            ) == "17"
+            remote_progress = fetch_zap_plan_progress(
+                settings,
+                "connector-secret",
+                "17",
+            )
+            cancel_zap_automation_plan(settings, "connector-secret", "17")
+            downloaded = download_zap_report(
+                settings,
+                "connector-secret",
+                job_id,
+                safe_plan.summary.report_file,
+            )
+
+        assert remote_progress.info_count == 1
+        assert downloaded.payload == b'{"site":[]}'
+        assert downloaded.byte_count == 11
+        assert downloaded.sha256 == hashlib.sha256(downloaded.payload).hexdigest()
+        assert len(requests) == 5
+        for request, request_settings, timeout in requests:
+            headers = {key.casefold(): value for key, value in request.header_items()}
+            assert headers["x-zap-api-key"] == "connector-secret"
+            assert "connector-secret" not in request.full_url
+            assert request_settings is settings
+            assert timeout == 30
+        upload_request = requests[0][0]
+        upload_form = parse_qs(upload_request.data.decode("utf-8"))
+        assert upload_request.get_method() == "POST"
+        assert upload_form == {
+            "fileName": [f"darklab/jobs/{job_id}/plan.yaml"],
+            "fileContents": [safe_plan.yaml_bytes.decode("utf-8")],
+        }
+        assert "connector-secret" not in upload_request.data.decode("utf-8")
+        assert parse_qs(urlsplit(requests[1][0].full_url).query) == {
+            "filePath": [f"${{XFER}}/darklab/jobs/{job_id}/plan.yaml"],
+        }
+        assert parse_qs(urlsplit(requests[2][0].full_url).query) == {"planId": ["17"]}
+        assert parse_qs(urlsplit(requests[3][0].full_url).query) == {"planId": ["17"]}
+        assert parse_qs(urlsplit(requests[4][0].full_url).query) == {
+            "fileName": [f"darklab/jobs/{job_id}/darklab-zap-report.json"],
+        }
+        paths = zap_transfer_paths(job_id, "darklab-zap-report.json")
+        assert paths.plan_api_path == f"${{XFER}}/darklab/jobs/{job_id}/plan.yaml"
+        assert paths.report_file == f"darklab/jobs/{job_id}/darklab-zap-report.json"
+
+        with pytest.raises(ZapTransportError) as exc_info:
+            zap_transfer_paths("../../other", "report.json")
+        assert exc_info.value.code == "zap_job_id_invalid"
+        redirected = FakeZapResponse(
+            b'{"planId":"17"}',
+            "https://other.example.test/JSON/automation/action/runPlan/",
+        )
+        with mock.patch.object(
+            zap_http_module,
+            "_open_zap_request",
+            return_value=redirected,
+        ):
+            with pytest.raises(ZapTransportError) as exc_info:
+                submit_zap_automation_plan(settings, "connector-secret", job_id, safe_plan)
+        assert exc_info.value.code == "zap_response_redirected"
+
+        from dataclasses import replace
+
+        tiny_report_settings = replace(settings, max_report_bytes=8)
+        oversized = FakeZapResponse(b"123456789", "")
+
+        def fake_oversized_open(request, **_kwargs):
+            oversized.url = request.full_url
+            return oversized
+
+        with mock.patch.object(
+            zap_http_module,
+            "_open_zap_request",
+            side_effect=fake_oversized_open,
+        ):
+            with pytest.raises(ZapTransportError) as exc_info:
+                download_zap_report(
+                    tiny_report_settings,
+                    "connector-secret",
+                    job_id,
+                    "report.json",
+                )
+        assert exc_info.value.code == "zap_response_too_large"
+
     def test_validation_error_reports_source_and_redacts_secret_values(self):
         cases = [
             (
