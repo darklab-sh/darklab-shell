@@ -412,16 +412,16 @@
       "hash": "2c6f9e64a3dbf233ed8ae70c1e3c104de92e349c9e6f6bbf4d64a93b8ea82fe6"
     },
     "/static/js/features/projects/project_assessment.js": {
-      "path": "/static/build/static-project-assessment.22bfe02d8601.js",
-      "hash": "a904727167411dcb87d02a121f1e9a4e94251e5433685901e9a51d755c2d9a31"
+      "path": "/static/build/static-project-assessment.a50b2c779df0.js",
+      "hash": "d18f9f39380f8f62db1ed09c902852ef00d610659d9ba653fd3a80adac48ace4"
     },
     "/static/js/features/projects/project_assessment_actions.js": {
       "path": "/static/build/static-project-assessment-actions.4744b5676144.js",
       "hash": "729a419999c89da9a43cc712c8e9589ebfe54dc1f7cb2044d24da4386638ba30"
     },
     "/static/js/features/projects/project_assessment_renderer.js": {
-      "path": "/static/build/static-project-assessment-renderer.61438aadda0a.js",
-      "hash": "233b66f265a3d3af0e461446edbe02bd8885c701ae355fbb4464b8e806d7a830"
+      "path": "/static/build/static-project-assessment-renderer.01dcd3a47308.js",
+      "hash": "e8d1a87be9329c56f9d93a3c40041e495e73fd182c55a03306dbfdde67e76042"
     },
     "/static/js/features/projects/project_assessment_risk_renderer.js": {
       "path": "/static/build/static-project-assessment-risk-renderer.930ee2492156.js",
@@ -644,8 +644,8 @@
       "hash": "4158003c0ddda92334eccccb50ae13a59e0fba51eafcbc08e7e3832d8f7832cb"
     },
     "/static/css/features/project-assessment.css": {
-      "path": "/static/build/static-project-assessment.6a4e81fdc044.css",
-      "hash": "6a4e81fdc044251f34b6a14cb9a5b8af23204bfe515ead9a494db3ed6d5cf946"
+      "path": "/static/build/static-project-assessment.c746751db17b.css",
+      "hash": "c746751db17b2dea4fbddcd2f0892ffae157168832691c28ffb7960809724777"
     },
     "/static/css/features/projects.css": {
       "path": "/static/build/static-projects.bf60c5b90c6d.css",

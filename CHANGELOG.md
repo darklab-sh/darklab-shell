@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Assessment targets now turn explicit saved services into conservative next-step suggestions.**
+  - **What:** The shared service registry names each action's policy, supported targets, required features, expected evidence, and conditions that make it unsafe to suggest. Expanded Assessment targets show matching Project-scoped services and reviewed next steps on desktop and mobile without adding a launch button or changing a check. Unknown services stay unsupported, uncertain fingerprints stay in review, and conflicting scanner labels for the same port suppress the suggestion instead of trusting a port-number guess.
+  - **Tests:** Service, Atlas, Project Overview, API, browser, architecture-ratchet, lint, and Postgres-compatible query coverage pins the richer public contract, conflicting-evidence abstention, Project-only evidence, display bounds, desktop/mobile parity, and no-launch reads.
 - **Assessment checks now explain when saved evidence makes a Nuclei review useful.**
   - **What:** Web assessment reads inspect a bounded set of already saved HTTPx technology metadata, version-based CVE findings, app-captured services, and correlated dangling-DNS signals for the exact target. Matching standard or takeover checks get a visible recommendation with the evidence types behind it; reaching the read limit is called out instead of being hidden. The recommendation doesn't change the frozen command or template profile, contact a provider, write data, or start a run. Intrusive Nuclei remains a separate operator choice and is never recommended automatically from these signals.
   - **Tests:** Focused service, browser, architecture-ratchet, and documentation coverage pins target and Project scoping, bounded signal reads, standard/takeover reasoning, intrusive abstention, desktop/mobile presentation, and the no-launch read contract.

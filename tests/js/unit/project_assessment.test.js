@@ -582,6 +582,73 @@ describe('project assessment controller', () => {
     expect(apiFetch).not.toHaveBeenCalled()
   })
 
+  it('shows conservative service suggestions on desktop and mobile without launching', async () => {
+    const serviceDetail = {
+      ...detail,
+      checks: {
+        ...detail.checks,
+        checks: [{
+          ...detail.checks.checks[0],
+          service_action_recommendations: {
+            actions: [{
+              key: 'https_profile',
+              label: 'Review HTTPS surface',
+              rationale: 'The service identified an HTTPS endpoint.',
+              command: 'command:httpx',
+              policy_level: 'standard',
+              target_types: ['domain', 'ip', 'url'],
+              required_features: ['confirmed_project_target', 'httpx'],
+              expected_evidence: ['atlas_service_entity', 'http_metadata', 'tls_metadata'],
+              unsupported_conditions: [
+                'ambiguous_service',
+                'conflicting_service_evidence',
+                'port_only_inference',
+              ],
+              service: 'https',
+              port: 443,
+              proto: 'tcp',
+              version: 'nginx 1.26',
+              launch_mode: 'assessment_action_only',
+              auto_launch: false,
+            }],
+            action_count: 1,
+            evidence_count: 2,
+            needs_review_count: 1,
+            unsupported_count: 0,
+            source_truncated: false,
+            launch_mode: 'assessment_action_only',
+            auto_launch: false,
+          },
+        }],
+      },
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(serviceDetail)
+      return responseFor(url, options)
+    })
+    const apiFetch = vi.fn()
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(makeContext(
+      projectWorkspaceRequest,
+      { apiFetch },
+    ))
+    await controller.load('prj_1', { render: false })
+    const desktop = document.createElement('div')
+    controller.renderAssessment(desktop, 'prj_1')
+    const mobile = controller.renderMobileAssessmentTab('prj_1')
+    desktop.querySelector('.project-assessment-target-toggle')?.click()
+    mobile.querySelector('.project-assessment-target-toggle')?.click()
+
+    for (const surface of [desktop, mobile]) {
+      const recommendation = surface.querySelector('.project-assessment-service-recommendations')
+      expect(recommendation?.textContent).toContain('Suggested next actions')
+      expect(recommendation?.textContent).toContain('Review HTTPS surface')
+      expect(recommendation?.textContent).toContain('443/tcp · https · nginx 1.26')
+      expect(recommendation?.textContent).toContain('1 saved port needs service review')
+      expect(recommendation?.querySelector('button')).toBeNull()
+    }
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
   it('requires a fresh explicit warning before starting intrusive Nuclei', async () => {
     const plan = {
       action: { id: 'nuclei', key: 'command:nuclei', kind: 'command' },

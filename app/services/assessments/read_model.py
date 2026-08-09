@@ -20,6 +20,9 @@ from services.assessments.contracts import (
 from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
 from services.assessments.nuclei_recommendations import attach_nuclei_recommendations
 from services.assessments.reconciliation_read import assessment_finding_delta_read_model
+from services.assessments.service_action_recommendations import (
+    attach_service_action_recommendations,
+)
 from services.assessments.serialization import (
     row_to_assessment,
     row_to_check,
@@ -177,6 +180,13 @@ def _check_page(
         (assessment_id, *params, limit, offset),
     ).fetchall()
     checks = [row_to_check(row) for row in rows]
+    attach_service_action_recommendations(
+        conn,
+        checks,
+        session_id=session_id,
+        team_id=team_id,
+        project_id=project_id,
+    )
     attach_nuclei_recommendations(
         conn,
         checks,

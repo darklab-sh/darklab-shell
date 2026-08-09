@@ -4259,6 +4259,7 @@ def test_api_v1_project_readers_are_token_scoped():
         "occurrence_count": 1,
         "last_seen_at": "2026-05-19T00:00:00+00:00",
         "source_run_count": 1,
+        "service_evidence_state": "identified",
         "assessment_actions": [{
             "key": "https_profile",
             "label": "Review HTTPS surface",
@@ -4266,6 +4267,13 @@ def test_api_v1_project_readers_are_token_scoped():
             "command": "command:httpx",
             "policy_level": "standard",
             "target_types": ["domain", "ip", "url"],
+            "required_features": ["confirmed_project_target", "httpx"],
+            "expected_evidence": [
+                "atlas_service_entity", "http_metadata", "tls_metadata",
+            ],
+            "unsupported_conditions": [
+                "ambiguous_service", "conflicting_service_evidence", "port_only_inference",
+            ],
         }],
     }]
     assert atlas_entity_payload["overview"]["observed"]["app_services"] == ["https"]

@@ -13,7 +13,7 @@ from typing import Any
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.intel.canonical import CanonicalizationError, parse_canonical_port
-from services.assessments.service_actions import service_actions
+from services.assessments.service_actions import service_actions, service_evidence_state
 from services.projects.scope import shared_owner_where
 
 
@@ -99,13 +99,17 @@ def app_ports_by_host(
         "EXISTS ("
         "SELECT 1 FROM project_links pl "
         "WHERE pl.project_id = ? AND pl.entity_type = 'atlas_entity' AND pl.entity_id = e.id"
+        ") OR EXISTS ("
+        "SELECT 1 FROM entity_run_links per "
+        "JOIN project_links prl ON prl.entity_type = 'run' AND prl.entity_id = per.run_id "
+        "WHERE per.entity_id = e.id AND prl.project_id = ?"
         ") AS project_linked "
         "FROM entities e "
         f"WHERE e.type = 'port' AND e.host_entity_id IN ({placeholders}) AND " + owner_sql + " "  # nosec
         "AND COALESCE(e.suppressed, FALSE) = FALSE "
         "AND EXISTS (SELECT 1 FROM entity_run_links erl WHERE erl.entity_id = e.id) "
         "ORDER BY e.host_entity_id ASC, e.last_seen_at DESC, e.id DESC",
-        (project_id, *ids, *owner_params),
+        (project_id, project_id, *ids, *owner_params),
     ).fetchall()
     run_ids_by_entity = _app_port_run_ids_by_entity(
         conn,
@@ -147,6 +151,10 @@ def app_ports_by_host(
             by_host[host_entity_id][key] = existing
         else:
             duplicate_port_count += 1
+            existing_service = str(existing.get("service") or "").strip().casefold()
+            incoming_service = str(port_record.get("service") or "").strip().casefold()
+            if existing_service and incoming_service and existing_service != incoming_service:
+                existing["_service_conflict"] = True
             existing["occurrence_count"] = int(existing.get("occurrence_count") or 0) + int(
                 port_record.get("occurrence_count") or 0
             )
@@ -265,6 +273,17 @@ def _app_port_record(row: Mapping[str, Any], *, dialect) -> tuple[dict[str, Any]
 
 def public_app_port_record(port: Mapping[str, Any]) -> dict[str, Any]:
     result = {str(key): value for key, value in port.items() if not str(key).startswith("_")}
+    conflict = bool(port.get("_service_conflict"))
+    evidence_state = "needs_review" if conflict else service_evidence_state(
+        str(result.get("service") or ""),
+        port=int(result.get("port") or 0),
+    )
+    result["service_evidence_state"] = evidence_state
+    if conflict:
+        result["service_evidence_reason"] = (
+            "Saved scanners reported conflicting services for this port; review the evidence "
+            "before choosing an action."
+        )
     actions = [
         {
             "key": action.key,
@@ -273,8 +292,12 @@ def public_app_port_record(port: Mapping[str, Any]) -> dict[str, Any]:
             "command": action.command,
             "policy_level": action.policy_level,
             "target_types": sorted(action.target_types),
+            "required_features": sorted(action.required_features),
+            "expected_evidence": sorted(action.expected_evidence),
+            "unsupported_conditions": list(action.unsupported_conditions),
         }
         for action in service_actions(str(result.get("service") or ""))
+        if not conflict
     ]
     if actions:
         result["assessment_actions"] = actions

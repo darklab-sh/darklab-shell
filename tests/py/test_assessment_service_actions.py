@@ -14,6 +14,7 @@ from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES, nuclei_output_metadat
 from services.assessments import action_plan_nuclei
 from services.assessments.action_plans import build_assessment_action_plan
 from services.assessments.service_actions import service_actions, service_evidence_state
+from services.assessments import service_action_recommendations
 from services.assessments.command_plans import command_plan
 from services.assessments.cyclonedx_package_observations import (
     CYCLONEDX_COMPONENT_PARSER_VERSION,
@@ -187,7 +188,7 @@ from services.nuclei.template_cache import (
     nuclei_template_cache_unavailable_reason,
 )
 from core.output_signals import OutputSignalClassifier
-from services.atlas.observations import public_app_port_record
+from services.atlas.observations import app_ports_by_host, public_app_port_record
 from services.projects.web_surface_comparison import (
     attach_capture_comparisons,
     capture_matches_change_state,
@@ -351,8 +352,125 @@ def test_service_actions_can_be_serialized_for_read_surfaces_without_launching()
     assert action.command == "command:httpx"
     assert "url" in action.target_types
     record = public_app_port_record({"port": 443, "service": "https", "_run_ids": {"run-1"}})
+    assert record["service_evidence_state"] == "identified"
     assert record["assessment_actions"][0]["command"] == "command:httpx"
+    assert record["assessment_actions"][0]["required_features"] == [
+        "confirmed_project_target", "httpx",
+    ]
+    assert record["assessment_actions"][0]["expected_evidence"] == [
+        "atlas_service_entity", "http_metadata", "tls_metadata",
+    ]
+    assert record["assessment_actions"][0]["unsupported_conditions"] == [
+        "ambiguous_service", "conflicting_service_evidence", "port_only_inference",
+    ]
     assert "_run_ids" not in record
+
+
+def test_conflicting_service_evidence_abstains_from_action_suggestions():
+    record = public_app_port_record({
+        "port": 443,
+        "proto": "tcp",
+        "service": "https",
+        "_service_conflict": True,
+    })
+
+    assert record["service_evidence_state"] == "needs_review"
+    assert "conflicting services" in record["service_evidence_reason"]
+    assert "assessment_actions" not in record
+
+
+def test_duplicate_port_rows_keep_conflicting_services_in_review():
+    class FakeConn:
+        def execute(self, query, _params):
+            if "FROM entities e" in query:
+                return SimpleNamespace(fetchall=lambda: [
+                    {
+                        "id": "ent_https",
+                        "host_entity_id": "ent_target",
+                        "canonical_value": "app.example.com:443/tcp",
+                        "attributes_json": json.dumps({"service": "https"}),
+                        "last_seen_at": "2026-08-09T00:00:00+00:00",
+                        "occurrence_count": 1,
+                        "project_linked": True,
+                    },
+                    {
+                        "id": "ent_ssh",
+                        "host_entity_id": "ent_target",
+                        "canonical_value": "app.example.com:443/tcp",
+                        "attributes_json": json.dumps({"service": "ssh"}),
+                        "last_seen_at": "2026-08-08T00:00:00+00:00",
+                        "occurrence_count": 1,
+                        "project_linked": True,
+                    },
+                ])
+            return SimpleNamespace(fetchall=lambda: [
+                {"entity_id": "ent_https", "run_id": "run-1"},
+                {"entity_id": "ent_ssh", "run_id": "run-2"},
+            ])
+
+    ports = app_ports_by_host(
+        FakeConn(), "session-1", "", "project-1", ["ent_target"],
+    )["ent_target"]
+
+    assert len(ports) == 1
+    assert ports[0]["occurrence_count"] == 2
+    assert ports[0]["source_run_count"] == 2
+    public = public_app_port_record(ports[0])
+    assert public["service_evidence_state"] == "needs_review"
+    assert "assessment_actions" not in public
+
+
+def test_assessment_service_recommendations_are_project_scoped_and_read_only(monkeypatch):
+    monkeypatch.setattr(
+        service_action_recommendations,
+        "app_ports_by_host",
+        lambda *_args, **_kwargs: {
+            "ent_target": [
+                {
+                    "port": 443,
+                    "proto": "tcp",
+                    "service": "https",
+                    "version": "nginx 1.26",
+                    "_project_linked": True,
+                    "_host_total_count": 3,
+                },
+                {
+                    "port": 22,
+                    "proto": "tcp",
+                    "service": "ssh?",
+                    "version": "",
+                    "_project_linked": True,
+                },
+                {
+                    "port": 6379,
+                    "proto": "tcp",
+                    "service": "redis",
+                    "version": "",
+                    "_project_linked": False,
+                },
+            ],
+        },
+    )
+    checks = [{
+        "target_entity_id": "ent_target",
+        "target_type": "domain",
+        "target_value": "app.example.com",
+    }]
+
+    service_action_recommendations.attach_service_action_recommendations(
+        object(), checks, session_id="session-1", team_id="", project_id="project-1",
+    )
+
+    result = checks[0]["service_action_recommendations"]
+    assert result["action_count"] == 1
+    assert result["evidence_count"] == 2
+    assert result["needs_review_count"] == 1
+    assert result["unsupported_count"] == 0
+    assert result["source_truncated"] is True
+    assert result["launch_mode"] == "assessment_action_only"
+    assert result["auto_launch"] is False
+    assert result["actions"][0]["key"] == "https_profile"
+    assert result["actions"][0]["port"] == 443
 
 
 def test_nuclei_recommendation_evidence_is_target_scoped_and_bounded():

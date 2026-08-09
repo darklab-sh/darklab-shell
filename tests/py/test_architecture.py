@@ -312,6 +312,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/http_profile_material_formats.py", 49, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/service_actions.py", 90, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/service_action_catalog.py", 130, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/service_action_recommendations.py",
+        120,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/nmap_profiles.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/osv_package_correlation.py", 220, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_runtime.py", 175, "split-package-ratchet"),

@@ -18,6 +18,9 @@ class ServiceAction:
     command: str
     policy_level: str
     target_types: frozenset[str]
+    required_features: frozenset[str]
+    expected_evidence: frozenset[str]
+    unsupported_conditions: tuple[str, ...]
 
 
 from .service_action_catalog import ACTIONS, ALIASES  # noqa: E402

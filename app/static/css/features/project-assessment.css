@@ -469,6 +469,41 @@
   margin-left: 20px;
 }
 
+.project-assessment-service-recommendations {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.project-assessment-service-recommendation-heading,
+.project-assessment-service-recommendation-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+}
+
+.project-assessment-service-recommendation-heading strong,
+.project-assessment-service-recommendation-item strong {
+  font-size: 12px;
+}
+
+.project-assessment-service-recommendation-item small,
+.project-assessment-service-recommendation-item p,
+.project-assessment-service-recommendation-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.project-assessment-service-recommendation-item p {
+  flex-basis: 100%;
+}
+
 .project-assessment-check-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

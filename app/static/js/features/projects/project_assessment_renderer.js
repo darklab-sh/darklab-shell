@@ -550,6 +550,49 @@ function createProjectAssessmentRenderer(context, actions) {
     return row;
   }
 
+  function renderServiceRecommendations(check) {
+    const data = check?.service_action_recommendations;
+    const actions = Array.isArray(data?.actions) ? data.actions : [];
+    const reviewCount = Number(data?.needs_review_count || 0);
+    if (!actions.length && !reviewCount) return null;
+    const section = makeElement('aside', 'project-assessment-service-recommendations');
+    const heading = makeElement('div', 'project-assessment-service-recommendation-heading');
+    heading.append(
+      makeElement('strong', '', 'Suggested next actions'),
+      badge('Saved service evidence', 'blue'),
+    );
+    section.appendChild(heading);
+    actions.forEach((action) => {
+      const item = makeElement('div', 'project-assessment-service-recommendation-item');
+      const endpoint = [
+        action?.port ? `${Number(action.port)}/${action?.proto || 'tcp'}` : '',
+        action?.service || '',
+        action?.version || '',
+      ].filter(Boolean).join(' · ');
+      item.append(
+        makeElement('strong', '', String(action?.label || 'Review service')),
+        makeElement('small', '', endpoint),
+        makeElement('p', '', String(action?.rationale || '')),
+      );
+      section.appendChild(item);
+    });
+    if (reviewCount) {
+      section.appendChild(makeElement(
+        'p',
+        'project-assessment-service-recommendation-note',
+        `${reviewCount} saved port${reviewCount === 1 ? '' : 's'} need${reviewCount === 1 ? 's' : ''} service review before an action can be suggested.`,
+      ));
+    }
+    if (data?.source_truncated) {
+      section.appendChild(makeElement(
+        'p',
+        'project-assessment-service-recommendation-note',
+        'The saved-service review reached its display limit, so more evidence may be available.',
+      ));
+    }
+    return section;
+  }
+
   function renderTargetGroup(projectId, st, detail, checks, { mobile = false } = {}) {
     const representative = checks[0] || {};
     const key = targetKey(representative);
@@ -572,6 +615,8 @@ function createProjectAssessmentRenderer(context, actions) {
     );
     toggle.append(glyph, label, counts);
     const body = makeElement('div', 'project-assessment-target-body');
+    const serviceRecommendations = renderServiceRecommendations(representative);
+    if (serviceRecommendations) body.appendChild(serviceRecommendations);
     checks.forEach(check => body.appendChild(renderCheck(projectId, detail, check, { mobile })));
     bindDisclosure(toggle, {
       panel: body,

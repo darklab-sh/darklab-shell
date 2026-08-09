@@ -16645,6 +16645,7 @@ class TestAtlasRoutes:
             "occurrence_count": 1,
             "last_seen_at": "2026-05-14T00:03:00+00:00",
             "source_run_count": 1,
+            "service_evidence_state": "needs_review",
         }
         assert detail["overview"]["observed"]["app_services"] == []
         assert detail["overview"]["finding_summary"] == detail["finding_summary"]

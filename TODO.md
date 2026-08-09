@@ -131,12 +131,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Add structured parsers/adapters under focused modules rather than more broad regexes in `output_signals.py`. Preserve raw output, normalize stable findings/entities, carry tool/profile versions, and make parser failure visible without failing the underlying run.
 #### Phase 7 — Add service-aware enumeration and safe next actions
 
-- [ ] Add a central service-to-action registry under the assessment domain:
-  - Map normalized port/service evidence to applicable checks and maintained workflows for HTTP(S), SMB, SNMP, LDAP, NFS/RPC, SSH, SMTP/IMAP/POP3, FTP, DNS, and common databases.
-  - Give each action a label, rationale, accepted entity/target types, policy level, command/workflow key, required features, expected evidence, and unsupported conditions.
-  - Resolve ambiguous service detection conservatively and show why an action is suggested. Do not treat a port number alone as proof of a service when a scanner reported a conflicting service.
-  - Register passive `version_cve_correlation` as an evidence/check family with its identifier requirements, supported advisory sources, confidence rules, and active-verification recommendations. It must not be represented as a command that can silently launch from a read surface.
-  - Reuse this registry in Assessment target rows, Atlas entity profiles, Project Overview hints, and Quick Lookup while keeping actual launch state in the Assessment/Workflow/Run surfaces.
 - [ ] Build curated Nmap NSE workflows first:
   - Separate `safe`, `default`, `version`, `discovery`, and reviewed `vuln` scripts from `auth`, `brute`, `dos`, `exploit`, `external`, `fuzzer`, and `intrusive` categories.
   - Pin allowed script names/categories in app-owned profiles, validate `--script-args` and Files-backed argument files, and keep third-party scripts unavailable unless an operator deliberately installs and allowlists them.

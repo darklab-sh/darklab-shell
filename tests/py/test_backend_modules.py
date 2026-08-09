@@ -4383,6 +4383,7 @@ class TestProjectOverviewContract:
                 "occurrence_count": 1,
                 "last_seen_at": now,
                 "source_run_count": 1,
+                "service_evidence_state": "identified",
                 "assessment_actions": [{
                     "key": "https_profile",
                     "label": "Review HTTPS surface",
@@ -4390,6 +4391,13 @@ class TestProjectOverviewContract:
                     "command": "command:httpx",
                     "policy_level": "standard",
                     "target_types": ["domain", "ip", "url"],
+                    "required_features": ["confirmed_project_target", "httpx"],
+                    "expected_evidence": [
+                        "atlas_service_entity", "http_metadata", "tls_metadata",
+                    ],
+                    "unsupported_conditions": [
+                        "ambiguous_service", "conflicting_service_evidence", "port_only_inference",
+                    ],
                 }],
             },
             {
@@ -4402,6 +4410,7 @@ class TestProjectOverviewContract:
                 "last_seen_at": now,
                 "source_run_count": 1,
                 "banner": "x" * 157 + "...",
+                "service_evidence_state": "unsupported",
             },
         ]
         assert target_row["app_port_count"] == 2
