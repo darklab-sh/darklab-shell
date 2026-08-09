@@ -736,6 +736,49 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     }
     assert "scope_rejected" not in json.dumps(final_public)
 
+    cancel_execution_row = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="checkpoint_cancel",
+        workflow_source="config",
+        definition=definition,
+        inputs={},
+    )
+    cancel_execution_id = str(cancel_execution_row["id"])
+    cancel_step_id = str(cancel_execution_row["steps"][1]["step_id"])
+    cancel_children = initialize_fanout_children(cancel_execution_id, cancel_step_id, 3)
+    assert claim_step_for_launch(cancel_execution_id, cancel_step_id) is not None
+    first_cancel_child = claim_fanout_child(cancel_execution_id, cancel_step_id, 0)
+    assert first_cancel_child is not None
+    assert bind_fanout_child_run(str(first_cancel_child["id"]), "run-fanout-cancel-done")
+    assert finalize_fanout_child_run("run-fanout-cancel-done", 0) is not None
+    unbound_cancel_child = claim_fanout_child(cancel_execution_id, cancel_step_id, 1)
+    bound_cancel_child = claim_fanout_child(cancel_execution_id, cancel_step_id, 2)
+    assert unbound_cancel_child is not None and bound_cancel_child is not None
+    assert bind_fanout_child_run(str(bound_cancel_child["id"]), "run-fanout-cancel-active")
+
+    cancelled = cancel_execution(session_id, cancel_execution_id)
+    assert cancelled is not None
+    assert cancelled["_canceled_run_ids"] == ["run-fanout-cancel-active"]
+    assert cancelled["steps"][1]["fanout_checkpoint"] == {
+        "pending": [], "running": [], "completed": [0], "failed": [],
+        "skipped": [1, 2], "cancelled": True,
+    }
+    assert public_execution(cancelled)["steps"][1]["fanout_summary"] == {
+        "total": 3, "pending": 0, "running": 0, "succeeded": 1,
+        "failed": 0, "skipped": 2, "cancelled": True, "failure_samples": [],
+    }
+    assert [
+        (child["ordinal"], child["status"], child["error_code"])
+        for child in list_fanout_children(cancel_execution_id, cancel_step_id)
+    ] == [
+        (0, "succeeded", ""),
+        (1, "canceled", "cancelled"),
+        (2, "canceled", "cancelled"),
+    ]
+    assert str(cancel_children[1]["id"]) == str(unbound_cancel_child["id"])
+    assert finalize_fanout_child_run("run-fanout-cancel-active", 0) is None
+
 
 def test_collection_fanout_summary_exposes_counts_and_bounded_error_codes_only():
     summary = summarize_fanout_results([

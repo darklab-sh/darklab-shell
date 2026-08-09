@@ -23,6 +23,7 @@ from services.workflows.captures import MAX_CAPTURE_TOTAL_BYTES
 from services.workflows.compiler import workflow_private_values
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
 from services.workflows.fanout_checkpoint import checkpoint_from_payload
+from services.workflows.fanout_child_cancellation import cancel_fanout_children_on_conn
 from services.workflows.fanout_summary import summarize_fanout_results
 
 
@@ -831,8 +832,10 @@ def cancel_execution(session_id: str, execution_id: str, *, team_id: str = "") -
     owner_sql, owner_params = _owner_where(session_id, team_id=team_id)
     now = _now()
     with get_db_connect()() as conn:
+        conn.execute(_dialect().begin_immediate_sql())
+        lock_sql = " FOR UPDATE" if get_db_backend() == DatabaseBackend.POSTGRES else ""
         row = conn.execute(
-            "SELECT * FROM workflow_executions WHERE " + owner_sql + " AND id = ?",  # nosec
+            "SELECT * FROM workflow_executions WHERE " + owner_sql + " AND id = ?" + lock_sql,  # nosec
             (*owner_params, execution_id),
         ).fetchone()
         execution = _execution_from_row(row)
@@ -855,6 +858,11 @@ def cancel_execution(session_id: str, execution_id: str, *, team_id: str = "") -
         if changed.rowcount != 1:
             conn.rollback()
             return get_execution(session_id, execution_id, team_id=team_id)
+        child_run_ids = cancel_fanout_children_on_conn(
+            conn,
+            execution_id,
+            finished=now,
+        )
         if get_db_backend() != DatabaseBackend.POSTGRES:
             active_rows = conn.execute(
                 "SELECT run_id FROM workflow_execution_steps WHERE execution_id = ? "
@@ -873,5 +881,5 @@ def cancel_execution(session_id: str, execution_id: str, *, team_id: str = "") -
             str(row["run_id"])
             for row in active_rows
             if str(row["run_id"] or "")
-        })
+        } | set(child_run_ids))
     return result

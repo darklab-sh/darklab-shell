@@ -3917,6 +3917,23 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         str(child["status"])
         for child in list_fanout_children(contended_fanout["id"], contended_step_id)
     ) == ["launching", "pending"]
+    claimed_for_cancel = next(claim for claim in child_claims if claim is not None)
+    contended_run_id = "run-pg-fanout-cancel-" + uuid.uuid4().hex
+    assert bind_fanout_child_run(str(claimed_for_cancel["id"]), contended_run_id) is True
+    canceled_fanout = cancel_execution(
+        str(contended_fanout["session_id"]),
+        str(contended_fanout["id"]),
+    )
+    assert canceled_fanout is not None
+    assert canceled_fanout["_canceled_run_ids"] == [contended_run_id]
+    assert sorted(
+        (str(child["status"]), str(child["error_code"]))
+        for child in list_fanout_children(contended_fanout["id"], contended_step_id)
+    ) == [("canceled", "cancelled"), ("canceled", "cancelled")]
+    assert canceled_fanout["steps"][1]["fanout_checkpoint"] == {
+        "pending": [], "running": [], "completed": [], "failed": [],
+        "skipped": [0, 1], "cancelled": True,
+    }
 
     barrier = Barrier(2)
     concurrent_session_id = str(uuid.uuid4())
