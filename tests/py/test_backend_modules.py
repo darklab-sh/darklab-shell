@@ -2968,6 +2968,18 @@ class TestLoadConfig:
                       max_per_session: 7
                     project_digests:
                       default_cadence_preset: weekly
+                    zap_connector:
+                      enabled: true
+                      base_url: https://zap.example.test/
+                      api_key_secret_id: DARKLAB_ZAP_API_KEY
+                      tls_verify: true
+                      allowed_target_cidrs:
+                        - 192.0.2.10/24
+                        - 2001:db8::10/64
+                        - 192.0.2.0/24
+                      max_concurrent_jobs: 2
+                      job_timeout_seconds: 900
+                      max_report_bytes: 8388608
                     """
                 ))
 
@@ -2989,6 +3001,70 @@ class TestLoadConfig:
         assert cfg.get("project_digests", {}).get("default_cadence_preset") == "weekly"
         assert cfg["project_digests"]["first_send_lookback_hours"] == 24
         assert cfg.project_digests.default_cadence_preset == "weekly"
+        assert cfg["zap_connector"] == {
+            "enabled": True,
+            "base_url": "https://zap.example.test",
+            "api_key_secret_id": "DARKLAB_ZAP_API_KEY",
+            "tls_verify": True,
+            "allowed_target_cidrs": ["192.0.2.0/24", "2001:db8::/64"],
+            "max_concurrent_jobs": 2,
+            "job_timeout_seconds": 900,
+            "max_report_bytes": 8388608,
+        }
+        from services.connectors.zap_config import (
+            ZapConnectorUnavailable,
+            resolve_zap_api_key,
+            zap_connector_settings,
+        )
+        from services.connectors.zap_scope import ZapTargetScopeError, review_zap_target
+
+        settings = zap_connector_settings(cfg)
+        assert settings.allowed_target_cidrs == ("192.0.2.0/24", "2001:db8::/64")
+        assert settings.base_url == "https://zap.example.test"
+        assert resolve_zap_api_key(
+            settings,
+            environ={"DARKLAB_ZAP_API_KEY": "connector-secret"},
+        ) == "connector-secret"
+        reviewed_target = review_zap_target(
+            "https://app.example.test/login?next=%2F",
+            settings,
+            resolve_addresses=lambda _host: ["192.0.2.10", "2001:db8::10", "192.0.2.10"],
+        )
+        assert reviewed_target.url == "https://app.example.test/login?next=%2F"
+        assert reviewed_target.host == "app.example.test"
+        assert reviewed_target.resolved_addresses == ("192.0.2.10", "2001:db8::10")
+        with pytest.raises(ZapTargetScopeError, match="outside") as exc_info:
+            review_zap_target(
+                "https://app.example.test",
+                settings,
+                resolve_addresses=lambda _host: ["192.0.2.10", "198.51.100.5"],
+            )
+        assert exc_info.value.code == "zap_target_out_of_scope"
+        with pytest.raises(ZapTargetScopeError, match="credential-free") as exc_info:
+            review_zap_target(
+                "https://user:password@app.example.test/#secret",
+                settings,
+                resolve_addresses=lambda _host: ["192.0.2.10"],
+            )
+        assert exc_info.value.code == "zap_target_invalid"
+        with pytest.raises(ZapTargetScopeError, match="too many") as exc_info:
+            review_zap_target(
+                "https://app.example.test",
+                settings,
+                resolve_addresses=lambda _host: [f"192.0.2.{index}" for index in range(1, 18)],
+            )
+        assert exc_info.value.code == "zap_target_resolution_limit"
+        with pytest.raises(ZapConnectorUnavailable, match="API key is unavailable") as exc_info:
+            resolve_zap_api_key(settings, environ={})
+        assert exc_info.value.code == "zap_api_key_unavailable"
+
+        disabled = zap_connector_settings(build_test_config())
+        with pytest.raises(ZapConnectorUnavailable, match="connector is disabled") as exc_info:
+            resolve_zap_api_key(disabled, environ={})
+        assert exc_info.value.code == "zap_connector_disabled"
+        with pytest.raises(ZapTargetScopeError, match="connector is disabled") as exc_info:
+            review_zap_target("https://192.0.2.10", disabled)
+        assert exc_info.value.code == "zap_connector_disabled"
 
     def test_validation_error_reports_source_and_redacts_secret_values(self):
         cases = [
@@ -3018,6 +3094,15 @@ class TestLoadConfig:
                       - smtp-password-secret-ref
                 """,
             ),
+            (
+                "zap_connector.api_key_secret_id",
+                "zap-api-key-secret-ref",
+                """
+                zap_connector:
+                  api_key_secret_id:
+                    - zap-api-key-secret-ref
+                """,
+            ),
         ]
         for key, raw_secret, yaml_text in cases:
             with tempfile.TemporaryDirectory() as tmp:
@@ -3042,6 +3127,41 @@ class TestLoadConfig:
             ("notifications", "notifications: []\n"),
             ("notifications.smtp.port", "notifications:\n  smtp:\n    port: '587'\n"),
             ("scheduler", "scheduler: false\n"),
+            (
+                "zap_connector.base_url",
+                "zap_connector:\n  base_url: https://user:password@zap.example.test/api\n",
+            ),
+            (
+                "zap_connector.allowed_target_cidrs",
+                "zap_connector:\n  allowed_target_cidrs: [not-a-network]\n",
+            ),
+            (
+                "zap_connector.base_url",
+                "zap_connector:\n  enabled: true\n  api_key_secret_id: DARKLAB_ZAP_API_KEY\n"
+                "  allowed_target_cidrs: [192.0.2.0/24]\n",
+            ),
+            (
+                "zap_connector.api_key_secret_id",
+                "zap_connector:\n  enabled: true\n  base_url: http://zap:8080\n"
+                "  allowed_target_cidrs: [192.0.2.0/24]\n",
+            ),
+            (
+                "zap_connector.allowed_target_cidrs",
+                "zap_connector:\n  enabled: true\n  base_url: http://zap:8080\n"
+                "  api_key_secret_id: DARKLAB_ZAP_API_KEY\n",
+            ),
+            (
+                "zap_connector.max_concurrent_jobs",
+                "zap_connector:\n  max_concurrent_jobs: 9\n",
+            ),
+            (
+                "zap_connector.job_timeout_seconds",
+                "zap_connector:\n  job_timeout_seconds: 29\n",
+            ),
+            (
+                "zap_connector.max_report_bytes",
+                "zap_connector:\n  max_report_bytes: 1023\n",
+            ),
         ]
         for key, yaml_text in cases:
             with tempfile.TemporaryDirectory() as tmp:

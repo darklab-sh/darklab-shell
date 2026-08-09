@@ -212,7 +212,7 @@ A second modal would also duplicate the scrim, focus trap, mobile sheet, close b
 
 The public EPSS and CISA KEV data path is useful without the assessment workspace, so it lands independently before assessment schema and routes depend on it. The first workspace release then carries the Network and Web profiles through cycle creation, evidence matching, API, desktop, and mobile. Network, Web, API, TLS, and Combined profiles share one schema from the start, but the remaining profiles and scanner integrations do not block validation of that first end-to-end slice.
 
-The scheduler owns database-backed feed refresh jobs, leases, and resumable risk-escalation work. Notification workers deliver queued notifications but do not own durable refresh or escalation state, and Redis is not required to preserve either workflow. Optional ZAP, private OAST, and Greenbone connectors remain follow-on work until cycles, evidence, imports, findings, and reporting are stable.
+The scheduler owns database-backed feed refresh jobs, leases, and resumable risk-escalation work. Notification workers deliver queued notifications but do not own durable refresh or escalation state, and Redis is not required to preserve either workflow. Optional ZAP, private OAST, and Greenbone systems stay outside the primary image. ZAP has a disabled-by-default operator configuration boundary: its API origin can't carry credentials or a request path, its key comes from an environment reference, every target must resolve inside an explicit CIDR, and concurrency, runtime, TLS, and report-size choices are fixed before any connector call. Reading or enabling settings doesn't submit work.
 
 ### Shared CVE Risk Data and Ranking
 

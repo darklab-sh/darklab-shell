@@ -468,6 +468,23 @@
 #     - www.cisa.gov
 #     - api.osv.dev
 
+# ── Optional OWASP ZAP Connector ─────────────────────────────────────────────
+#
+# ZAP runs outside the darklab_shell image. Enabling this section only makes a
+# validated operator-managed connector available; it doesn't submit a scan by
+# itself. Put the API key in the named environment variable, never in YAML.
+# Every submitted Project target must resolve inside one of the explicit CIDRs.
+# Server default if unset:
+# zap_connector:
+#   enabled: false
+#   base_url: ""  # HTTP(S) origin only, such as http://zap:8080.
+#   api_key_secret_id: ""  # Environment variable name holding the ZAP API key.
+#   tls_verify: true
+#   allowed_target_cidrs: []
+#   max_concurrent_jobs: 1
+#   job_timeout_seconds: 1800
+#   max_report_bytes: 10485760
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 # Log verbosity level . Options: ERROR, WARN, INFO, DEBUG

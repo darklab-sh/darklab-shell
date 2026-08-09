@@ -14,6 +14,7 @@ import re
 from copy import deepcopy
 from collections.abc import Iterator, Mapping, MutableMapping
 from typing import Any, cast
+from urllib.parse import urlsplit
 import yaml
 from pydantic import (
     BaseModel,
@@ -24,7 +25,9 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    ValidationInfo,
     create_model,
+    field_validator,
     model_validator,
 )
 import config_paths
@@ -53,9 +56,11 @@ _SECRET_CONFIG_KEYS = {
     "ai_api_key",
     "ai_api_key_secret_name",
     "notifications.smtp.password_secret_id",
+    "zap_connector.api_key_secret_id",
 }
 _SENSITIVE_URL_CONFIG_KEYS = {
     "database_url",
+    "zap_connector.base_url",
 }
 _MAX_CONFIG_ERROR_VALUE_CHARS = 120
 _MAX_CONFIG_LOG_PATH_CHARS = 240
@@ -544,6 +549,72 @@ class CveRiskConfig(_ConfigModel):
         return self
 
 
+class ZapConnectorConfig(_ConfigModel):
+    enabled: StrictBool = False
+    base_url: StrictStr = ""
+    api_key_secret_id: StrictStr = ""
+    tls_verify: StrictBool = True
+    allowed_target_cidrs: list[StrictStr] = Field(default_factory=list)
+    max_concurrent_jobs: StrictInt = Field(default=1, ge=1, le=8)
+    job_timeout_seconds: StrictInt = Field(default=1800, ge=30, le=86400)
+    max_report_bytes: StrictInt = Field(default=10485760, ge=1024, le=52428800)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("must be a valid HTTP(S) origin") from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or (port is None and parsed.netloc.endswith(":"))
+        ):
+            raise ValueError("must be an HTTP(S) origin without credentials or a path")
+        return normalized
+
+    @field_validator("api_key_secret_id")
+    @classmethod
+    def validate_api_key_secret_id(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if not normalized and info.data.get("enabled"):
+            raise ValueError("is required when the connector is enabled")
+        if normalized and not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", normalized):
+            raise ValueError("must name an environment variable")
+        return normalized
+
+    @field_validator("allowed_target_cidrs")
+    @classmethod
+    def validate_allowed_target_cidrs(
+        cls,
+        values: list[str],
+        info: ValidationInfo,
+    ) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            try:
+                network = ipaddress.ip_network(value.strip(), strict=False)
+            except ValueError as exc:
+                raise ValueError("entries must be IP networks") from exc
+            normalized.append(str(network))
+        deduplicated = list(dict.fromkeys(normalized))
+        if not deduplicated and info.data.get("enabled"):
+            raise ValueError("must include at least one network when the connector is enabled")
+        return deduplicated
+
+
 _FORGIVING_BOOL_KEYS = {
     "workspace_enabled",
     "interactive_pty_enabled",
@@ -626,6 +697,7 @@ _NESTED_CONFIG_MODELS = {
     "watchers": WatchersConfig,
     "project_digests": ProjectDigestsConfig,
     "cve_risk": CveRiskConfig,
+    "zap_connector": ZapConnectorConfig,
 }
 
 
@@ -771,7 +843,10 @@ def _redacted_config_value(path: str, value: Any) -> str:
         return "<redacted>"
     if "api_key" in path or "password" in path or "webhook" in path:
         return "<redacted>"
-    text = repr(value)
+    if isinstance(value, Mapping):
+        text = repr(_redact_config_mapping(value, path))
+    else:
+        text = repr(value)
     if len(text) > _MAX_CONFIG_ERROR_VALUE_CHARS:
         return text[: _MAX_CONFIG_ERROR_VALUE_CHARS - 3] + "..."
     return text
@@ -877,6 +952,18 @@ def _format_validation_error(exc: ValidationError, provenance: dict[str, str], r
     for error in exc.errors():
         loc = ".".join(str(part) for part in error.get("loc", ())) or "<config>"
         source = provenance.get(loc, "effective config")
+        if source == "built-in defaults" and "." in loc:
+            parent = loc.rsplit(".", 1)[0] + "."
+            sibling_sources = {
+                candidate_source
+                for candidate_path, candidate_source in provenance.items()
+                if candidate_path.startswith(parent)
+                and candidate_source != "built-in defaults"
+            }
+            if len(sibling_sources) == 1:
+                source = sibling_sources.pop()
+            elif sibling_sources:
+                source = "effective config"
         raw_value: Any = raw_values
         for part in loc.split("."):
             if isinstance(raw_value, dict) and part in raw_value:
@@ -1311,6 +1398,16 @@ def load_config(conf_dir=None, local_conf_dir=None):
             "epss_reset_probability": 0.08,
             "advisory_cvss_downgrade_delta": 1.0,
             "allowed_hosts": ["epss.cyentia.com", "www.cisa.gov", "api.osv.dev"],
+        },
+        "zap_connector": {
+            "enabled": False,
+            "base_url": "",
+            "api_key_secret_id": "",
+            "tls_verify": True,
+            "allowed_target_cidrs": [],
+            "max_concurrent_jobs": 1,
+            "job_timeout_seconds": 1800,
+            "max_report_bytes": 10485760,
         },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,

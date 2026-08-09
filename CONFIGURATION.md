@@ -23,7 +23,7 @@ The loader validates the final config at startup. Malformed YAML, a non-mapping 
 
 Config events are captured while the files and environment are being resolved, then written once after the effective `log_level` and `log_format` are ready. `CONFIG_VALIDATED` and `CONFIG_LOADED` report a `warning_count` that includes ignored, dropped, defaulted, clamped, and truncated values. If loading can't finish, the app writes one safe `CONFIG_LOAD_FAILED` record using the most recent usable text or GELF format. It includes bounded phase, source, key, and error-type fields, but not raw parser output, file contents, configuration values, or a traceback.
 
-Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, and `cve_risk` merge by field. A local file can override one nested value without restating the whole section.
+Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, and `zap_connector` merge by field. A local file can override one nested value without restating the whole section.
 
 The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow).
 
@@ -36,7 +36,7 @@ The schema contract is:
 | Field group | Validation posture |
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
-| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, and `cve_risk` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
+| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, and `zap_connector` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
 | Forgiving booleans | Boolean environment settings plus YAML settings such as `database_postgres_jit`, `audit_log_enabled`, `ai_allow_full_output`, and `ai_require_private_base_url` accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
@@ -403,6 +403,15 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `cve_risk.advisory_max_local_bytes` | `268435456` | Largest single local NVD or OSV JSON file accepted, from 1024 to 1073741824 bytes |
 | `cve_risk.advisory_max_records` | `500000` | Largest number of records accepted from one local NVD or OSV dataset, from 1 to 1000000 |
 | `cve_risk.allowed_hosts` | `[epss.cyentia.com, www.cisa.gov, api.osv.dev]` | Exact HTTPS hostnames allowed for fixed CVE-risk acquisition URLs. OSV queries still require its exact endpoint and reject redirects. Entries must be hostnames, not URLs |
+| `zap_connector` | see nested defaults | Server-side only. Disabled-by-default connection and safety limits for an operator-managed OWASP ZAP service |
+| `zap_connector.enabled` | `false` | Makes the validated connector configuration available. Enabling it doesn't submit a scan by itself and requires the origin, API-key environment reference, and at least one target CIDR |
+| `zap_connector.base_url` | _(empty)_ | HTTP or HTTPS origin for the operator-managed ZAP API, without credentials, a path, query, or fragment |
+| `zap_connector.api_key_secret_id` | _(empty)_ | Environment variable name that holds the ZAP API key. The key value doesn't enter YAML, config diagnostics, or connector settings |
+| `zap_connector.tls_verify` | `true` | Verifies the ZAP service's TLS certificate for HTTPS connections. Turning this off is an explicit operator choice |
+| `zap_connector.allowed_target_cidrs` | `[]` | IPv4 and IPv6 networks ZAP may receive as scan targets. Hostnames must resolve entirely inside this list before submission |
+| `zap_connector.max_concurrent_jobs` | `1` | Deployment-wide remote-job ceiling, from 1 to 8 |
+| `zap_connector.job_timeout_seconds` | `1800` | Maximum remote-job lifetime, from 30 to 86400 seconds |
+| `zap_connector.max_report_bytes` | `10485760` | Maximum completed report accepted from ZAP, from 1024 to 52428800 bytes. Atlas import limits still apply afterward |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `workflow_active_execution_limit` | `3` | Maximum active workflow executions for one personal session or team owner |
 | `workflow_execution_max_runtime_seconds` | `14400` | Maximum total lifetime of one workflow execution. The engine checks this before launching or advancing each step |
