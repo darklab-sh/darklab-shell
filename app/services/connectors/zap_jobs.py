@@ -40,14 +40,18 @@ def _connection_scope(conn=None):
 def _utc_now(now: datetime | None = None) -> datetime:
     value = datetime.now(timezone.utc) if now is None else now
     if value.tzinfo is None:
-        raise ZapJobError("zap_job_time_invalid", "ZAP job timestamps must include a timezone")
+        raise ZapJobError(
+            "zap_job_time_invalid", "ZAP job timestamps must include a timezone"
+        )
     return value.astimezone(timezone.utc)
 
 
 def _json(value: Any) -> str:
     encoded = json.dumps(value, separators=(",", ":"), sort_keys=True)
     if len(encoded.encode("utf-8")) > _MAX_JSON_BYTES:
-        raise ZapJobError("zap_job_state_too_large", "ZAP job state exceeds the storage limit")
+        raise ZapJobError(
+            "zap_job_state_too_large", "ZAP job state exceeds the storage limit"
+        )
     return encoded
 
 
@@ -103,17 +107,25 @@ def create_zap_job(
         raise ZapJobError("zap_job_owner_invalid", "ZAP jobs require an owner")
     target_count = len(summary.targets)
     if not 1 <= target_count <= 8:
-        raise ZapJobError("zap_job_target_limit", "ZAP jobs require between one and eight targets")
+        raise ZapJobError(
+            "zap_job_target_limit", "ZAP jobs require between one and eight targets"
+        )
     if summary.policy_level not in {"safe", "intrusive"}:
-        raise ZapJobError("zap_job_policy_invalid", "ZAP job policy must be safe or intrusive")
+        raise ZapJobError(
+            "zap_job_policy_invalid", "ZAP job policy must be safe or intrusive"
+        )
     if not 30 <= summary.job_timeout_seconds <= 86400:
         raise ZapJobError("zap_job_timeout_invalid", "The ZAP job lifetime is invalid")
     try:
         revision = int(http_profile_revision)
     except (TypeError, ValueError) as exc:
-        raise ZapJobError("zap_job_profile_invalid", "ZAP jobs require a current HTTP profile") from exc
+        raise ZapJobError(
+            "zap_job_profile_invalid", "ZAP jobs require a current HTTP profile"
+        ) from exc
     if revision < 1:
-        raise ZapJobError("zap_job_profile_invalid", "ZAP jobs require a current HTTP profile")
+        raise ZapJobError(
+            "zap_job_profile_invalid", "ZAP jobs require a current HTTP profile"
+        )
 
     instant = _utc_now(now)
     created_at = instant.isoformat()
@@ -181,7 +193,8 @@ def create_zap_job(
         if owns_conn:
             active_conn.commit()
         row = active_conn.execute(
-            "SELECT * FROM zap_connector_jobs WHERE id = ?", (normalized_job_id,),
+            "SELECT * FROM zap_connector_jobs WHERE id = ?",
+            (normalized_job_id,),
         ).fetchone()
         return _decode_row(row)
 
@@ -193,13 +206,48 @@ def zap_job_for_owner(
     team_id: str = "",
     conn=None,
 ) -> dict[str, Any] | None:
-    owner_sql, owner_params = _owner_predicate(str(session_id or ""), str(team_id or ""))
+    owner_sql, owner_params = _owner_predicate(
+        str(session_id or ""), str(team_id or "")
+    )
     with _connection_scope(conn) as active_conn:
         row = active_conn.execute(
             "SELECT * FROM zap_connector_jobs WHERE id = ? AND " + owner_sql,  # nosec B608
             (job_id, *owner_params),
         ).fetchone()
         return _decode_row(row) if row else None
+
+
+def zap_jobs_for_owner_check(
+    session_id: str,
+    project_id: str,
+    assessment_id: str,
+    check_id: str,
+    *,
+    team_id: str = "",
+    limit: int = 10,
+    conn=None,
+) -> list[dict[str, Any]]:
+    """Return a bounded newest-first job history for one owned assessment check."""
+    bounded_limit = max(1, min(int(limit), 25))
+    owner_sql, owner_params = _owner_predicate(
+        str(session_id or ""),
+        str(team_id or ""),
+    )
+    with _connection_scope(conn) as active_conn:
+        rows = active_conn.execute(
+            "SELECT * FROM zap_connector_jobs WHERE project_id = ? "  # nosec B608
+            "AND assessment_id = ? AND check_id = ? AND "
+            + owner_sql
+            + " ORDER BY created_at DESC, id DESC LIMIT ?",
+            (
+                project_id,
+                assessment_id,
+                check_id,
+                *owner_params,
+                bounded_limit,
+            ),
+        ).fetchall()
+        return [_decode_row(row) for row in rows]
 
 
 def zap_jobs_for_worker(*, limit: int = 50, conn=None) -> list[dict[str, Any]]:
@@ -227,7 +275,8 @@ def remote_zap_job_count(*, conn=None) -> int:
 def staged_zap_job_ids(job_ids: list[str] | tuple[str, ...], *, conn=None) -> set[str]:
     """Return candidate ids that still require their private reviewed plan."""
     candidates = tuple(
-        value for value in dict.fromkeys(str(item or "").strip() for item in job_ids)
+        value
+        for value in dict.fromkeys(str(item or "").strip() for item in job_ids)
         if _JOB_ID_RE.fullmatch(value)
     )[:256]
     if not candidates:

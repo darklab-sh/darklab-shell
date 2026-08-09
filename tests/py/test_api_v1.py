@@ -2442,6 +2442,177 @@ def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
     )
 
 
+def test_assessment_zap_routes_review_queue_scope_and_cancel(
+    monkeypatch,
+    tmp_path,
+):
+    from services.assessments import zap_connector
+
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    project = _create_project(client, token, name="External ZAP review")
+    _seed_assessment_target(token, project["id"])
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(token),
+        json={"profile_key": "web", "title": "ZAP connector review"},
+    ).get_json()
+    check = created["checks"]["checks"][0]
+    suffix = uuid.uuid4().hex[:16]
+    target_id = "ent_api_zap_" + suffix
+    host = f"zap-{suffix}.example.test"
+    target_url = f"https://{host}/app"
+    observed_at = "2026-08-09T18:00:00+00:00"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, "
+            "first_seen_at, last_seen_at, created) "
+            "VALUES (?, ?, 'url', ?, ?, ?, ?, ?)",
+            (
+                target_id,
+                token,
+                target_url,
+                "sig_" + target_id,
+                observed_at,
+                observed_at,
+                observed_at,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO project_links "
+            "(id, project_id, entity_type, entity_id, source, review_state, created) "
+            "VALUES (?, ?, 'atlas_entity', ?, 'manual', 'confirmed', ?)",
+            ("pl_api_zap_" + suffix, project["id"], target_id, observed_at),
+        )
+        conn.commit()
+    profile_response = client.post(
+        f"/api/v1/projects/{project['id']}/http-profiles",
+        headers=_headers(token),
+        json={
+            "name": "Anonymous ZAP scope",
+            "base_url": target_url,
+            "allowed_hosts": [host],
+            "scope_roots": [target_url],
+            "exclude_paths": ["/app/logout"],
+            "rate_limit_per_second": 2,
+            "concurrency": 1,
+        },
+    )
+    assert profile_response.status_code == 201
+    profile_id = profile_response.get_json()["profile"]["id"]
+    monkeypatch.setitem(config.CFG, "data_dir", str(tmp_path))
+    monkeypatch.setitem(config.CFG, "zap_connector", {
+        "enabled": True,
+        "base_url": "http://zap:8080",
+        "api_key_secret_id": "DARKLAB_ZAP_API_KEY",
+        "tls_verify": True,
+        "allowed_target_cidrs": ["203.0.113.0/24"],
+        "max_concurrent_jobs": 1,
+        "job_timeout_seconds": 900,
+        "max_report_bytes": 1048576,
+    })
+    original_review = zap_connector.review_zap_target
+    monkeypatch.setattr(
+        zap_connector,
+        "review_zap_target",
+        lambda url, settings: original_review(
+            url,
+            settings,
+            resolve_addresses=lambda _host: ["203.0.113.10"],
+        ),
+    )
+    base = (
+        f"/api/v1/projects/{project['id']}/assessments/"
+        f"{created['assessment']['id']}/checks/{check['id']}"
+    )
+    selection = {
+        "http_profile_id": profile_id,
+        "target_entity_ids": [target_id],
+        "policy_level": "safe",
+        "scope_exclusions": ["/app/private"],
+    }
+    preview_response = client.post(
+        base + "/zap-plan",
+        headers=_headers(token),
+        json=selection,
+    )
+    assert preview_response.status_code == 200
+    plan = preview_response.get_json()["plan"]
+    assert plan["summary"]["targets"] == [target_url]
+    assert plan["summary"]["policy_level"] == "safe"
+    assert plan["summary"]["authentication_role"] == "anonymous"
+    assert plan["summary"]["exclusion_rule_count"] == 2
+    assert "activeScan" not in plan["summary"]["job_types"]
+    assert "progressToStdout: false" in plan["plan_yaml"]
+    assert len(plan["plan_digest"]) == len(plan["plan_sha256"]) == 64
+    assert "DARKLAB_ZAP_API_KEY" not in preview_response.get_data(as_text=True)
+    assert "http://zap:8080" not in preview_response.get_data(as_text=True)
+
+    browser_preview = client.post(
+        base.removeprefix("/api/v1") + "/zap-plan",
+        headers={"X-Session-ID": token},
+        json=selection,
+    )
+    assert browser_preview.status_code == 200
+    assert browser_preview.get_json()["plan"] == plan
+    stale = client.post(
+        base + "/zap-jobs",
+        headers=_headers(token),
+        json={**selection, "confirmed": True, "plan_digest": "0" * 64},
+    )
+    assert stale.status_code == 409
+    assert stale.get_json()["error"]["code"] == "stale_plan"
+
+    queued = client.post(
+        base + "/zap-jobs",
+        headers=_headers(token),
+        json={**selection, "confirmed": True, "plan_digest": plan["plan_digest"]},
+    )
+    assert queued.status_code == 202
+    job = queued.get_json()["job"]
+    assert job["status"] == "queued"
+    assert job["cancelable"] is True
+    assert job["plan_summary"] == plan["summary"]
+    assert {
+        "session_id", "team_id", "actor_member_id", "actor_role", "import_source_id",
+    }.isdisjoint(job)
+    listed = client.get(base + "/zap-jobs", headers=_headers(token))
+    assert listed.status_code == 200
+    assert listed.get_json()["jobs"] == [job]
+    browser_listed = client.get(
+        base.removeprefix("/api/v1") + "/zap-jobs",
+        headers={"X-Session-ID": token},
+    )
+    assert browser_listed.status_code == 200
+    assert browser_listed.get_json()["jobs"] == [job]
+    assert client.get(base + "/zap-jobs", headers=_headers(other_token)).status_code == 404
+    job_path = base + f"/zap-jobs/{job['id']}"
+    assert client.get(job_path, headers=_headers(token)).get_json()["job"] == job
+    assert client.get(job_path, headers=_headers(other_token)).status_code == 404
+    assert client.get(
+        job_path.replace(check["id"], "ach_wrong_scope"),
+        headers=_headers(token),
+    ).status_code == 404
+
+    canceled = client.delete(job_path, headers=_headers(token))
+    assert canceled.status_code == 200
+    canceled_job = canceled.get_json()["job"]
+    assert canceled_job["status"] == "canceled"
+    assert canceled_job["cancelable"] is False
+    second_cancel = client.delete(job_path, headers=_headers(token))
+    assert second_cancel.status_code == 409
+    assert second_cancel.get_json()["error"]["code"] == "zap_job_not_cancelable"
+    audit_rows = _audit_event_rows(target_id=check["id"])
+    assert [row["event_type"] for row in audit_rows] == [
+        "assessment.zap_job_submit",
+        "assessment.zap_job_cancel",
+    ]
+    assert all(row["details"]["job_id"] == job["id"] for row in audit_rows)
+    assert all("target" not in row["details"] for row in audit_rows)
+
+
 def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context():
     from services.assessments.nuclei_takeover_templates import reviewed_nuclei_takeover_launch
     from services.runs.signal_context import RunOutputSignalContext
@@ -6502,6 +6673,9 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assessment_path = "/projects/{project_id}/assessments/{assessment_id}"
     check_path = assessment_path + "/checks/{check_id}"
     action_path = check_path + "/recommended-action"
+    zap_plan_path = check_path + "/zap-plan"
+    zap_jobs_path = check_path + "/zap-jobs"
+    zap_job_path = zap_jobs_path + "/{job_id}"
     evidence_path = check_path + "/evidence"
     evidence_link_path = evidence_path + "/{evidence_link_id}"
     run_evidence_path = "/runs/{run_id}/service-evidence"
@@ -6510,6 +6684,9 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert set(paths[assessment_path]) == {"get", "patch", "delete"}
     assert set(paths[check_path]) == {"patch"}
     assert set(paths[action_path]) == {"get", "post"}
+    assert set(paths[zap_plan_path]) == {"post"}
+    assert set(paths[zap_jobs_path]) == {"get", "post"}
+    assert set(paths[zap_job_path]) == {"get", "delete"}
     assert set(paths[evidence_path]) == {"post"}
     assert set(paths[evidence_link_path]) == {"delete"}
     assert set(paths[run_evidence_path]) == {"get"}
@@ -6536,6 +6713,35 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert paths[action_path]["post"]["requestBody"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/AssessmentActionLaunchRequest"}
+    assert paths[zap_plan_path]["post"]["requestBody"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/AssessmentZapPlanRequest"}
+    assert paths[zap_jobs_path]["post"]["responses"]["202"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentZapJobResponse"}
+    assert paths[zap_jobs_path]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentZapJobListResponse"}
+    assert schemas["AssessmentZapPlanRequest"]["additionalProperties"] is False
+    assert schemas["AssessmentZapPlanRequest"]["properties"]["target_entity_ids"][
+        "maxItems"
+    ] == 8
+    assert schemas["AssessmentZapSubmitRequest"]["properties"]["confirmed"] == {
+        "type": "boolean",
+        "enum": [True],
+    }
+    assert schemas["AssessmentZapJob"]["properties"]["status"]["enum"] == [
+        "queued",
+        "submitting",
+        "running",
+        "cancel_requested",
+        "downloading",
+        "ready",
+        "imported",
+        "canceled",
+        "failed",
+        "expired",
+    ]
     assert "http_profile_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
     assert "source_run_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
     assert "parameter_observation_id" in schemas["AssessmentActionLaunchRequest"]["properties"]

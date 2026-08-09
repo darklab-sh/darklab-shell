@@ -220,6 +220,8 @@ ZAP service calls use its transfer directory instead of a shared host volume. Ea
 
 The exact reviewed ZAP plan lives briefly in a private app-data spool rather than the lifecycle row because the worker must submit the reviewed bytes, not regenerate a possibly changed plan. One dedicated database-backed worker holds a deployment-wide advisory or file lock, reconciles that spool, uses compare-and-set lifecycle changes, gives fresh in-flight claims a short recovery window, fails abandoned submissions as uncertain, and retries abandoned downloads with the same job and Atlas draft identity. Completed reports enter the owner's Files quota and the existing Atlas preview path. Atlas apply remains an explicit operator action and records the resulting batch on the connector job in the same transaction.
 
+ZAP submission starts from confirmed Project URL entity ids, not arbitrary request URLs or caller-supplied YAML. The browser and API preview the same generated document and non-secret summary. A submit repeats the current owner, cycle, check, profile, Project-link, DNS, and network-scope checks and requires a digest over both the exact plan and its selection metadata. Job reads and cancellation use that same nested owner path, while audit events keep ids and counts but not targets or YAML.
+
 ### Shared CVE Risk Data and Ranking
 
 **A fresh install gets dated, bundled EPSS and KEV data; live network refresh remains an operator choice.**

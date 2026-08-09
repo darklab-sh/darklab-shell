@@ -11,6 +11,7 @@ from config import APP_VERSION
 from services.api_v1 import openapi_assessments as assessments, openapi_manual_findings as manual
 from services.api_v1 import openapi_run_evidence as run_evidence
 from services.api_v1.openapi_assessment_actions import assessment_action_paths, assessment_action_schemas
+from services.api_v1.openapi_assessment_zap import assessment_zap_paths, assessment_zap_schemas
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.api_v1.openapi_cve_risk import cve_risk_schemas
 from services.api_v1.openapi_findings import finding_schemas
@@ -601,6 +602,7 @@ OPENAPI_SPEC: dict = {
             **(
                 finding_evidence_schemas()
                 | assessment_action_schemas()
+                | assessment_zap_schemas()
                 | http_profile_schemas()
                 | manual.manual_finding_schemas()
                 | verification_action_schemas()
@@ -1542,6 +1544,7 @@ OPENAPI_SPEC: dict = {
     "paths": (
         assessments.assessment_paths()
         | assessment_action_paths()
+        | assessment_zap_paths()
         | finding_evidence_paths()
         | http_profile_paths()
         | manual.manual_finding_paths()

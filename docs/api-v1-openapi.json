@@ -2565,6 +2565,423 @@
         ],
         "type": "object"
       },
+      "AssessmentZapJob": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "atlas_batch_id": {
+            "type": "string"
+          },
+          "atlas_draft_id": {
+            "type": "string"
+          },
+          "cancelable": {
+            "type": "boolean"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "error_detail": {
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "files_path": {
+            "type": "string"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "http_profile_id": {
+            "type": "string"
+          },
+          "http_profile_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "pattern": "^zpj_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "plan_summary": {
+            "$ref": "#/components/schemas/AssessmentZapPlanSummary"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "intrusive"
+            ],
+            "type": "string"
+          },
+          "progress": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "remote_plan_id": {
+            "type": "string"
+          },
+          "report_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "report_filename": {
+            "type": "string"
+          },
+          "report_sha256": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "submitting",
+              "running",
+              "cancel_requested",
+              "downloading",
+              "ready",
+              "imported",
+              "canceled",
+              "failed",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_count": {
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "assessment_id",
+          "check_id",
+          "status",
+          "policy_level",
+          "target_count",
+          "plan_summary",
+          "progress",
+          "cancelable",
+          "created_at",
+          "updated_at",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "AssessmentZapJobListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentZapJob"
+            },
+            "maxItems": 10,
+            "type": "array"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "type": "object"
+      },
+      "AssessmentZapJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/AssessmentZapJob"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "type": "object"
+      },
+      "AssessmentZapPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "http_profile": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "revision",
+              "role"
+            ],
+            "type": "object"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "plan_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "plan_yaml": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "scope_exclusions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AssessmentZapPlanSummary"
+          },
+          "target_entity_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "schema_version",
+          "project_id",
+          "assessment_id",
+          "check_id",
+          "http_profile",
+          "target_entity_ids",
+          "scope_exclusions",
+          "summary",
+          "plan_sha256",
+          "plan_yaml",
+          "plan_digest",
+          "requires_confirmation"
+        ],
+        "type": "object"
+      },
+      "AssessmentZapPlanRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "http_profile_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "policy_level": {
+            "default": "safe",
+            "enum": [
+              "safe",
+              "intrusive"
+            ],
+            "type": "string"
+          },
+          "scope_exclusions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "target_entity_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "http_profile_id",
+          "target_entity_ids"
+        ],
+        "type": "object"
+      },
+      "AssessmentZapPlanResponse": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/AssessmentZapPlan"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "type": "object"
+      },
+      "AssessmentZapPlanSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "authentication_role": {
+            "type": "string"
+          },
+          "exclusion_rule_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "include_rule_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "job_timeout_seconds": {
+            "minimum": 30,
+            "type": "integer"
+          },
+          "job_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "intrusive"
+            ],
+            "type": "string"
+          },
+          "report_file": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "policy_level",
+          "authentication_role",
+          "targets",
+          "include_rule_count",
+          "exclusion_rule_count",
+          "job_types",
+          "job_timeout_seconds",
+          "report_file"
+        ],
+        "type": "object"
+      },
+      "AssessmentZapSubmitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "http_profile_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "policy_level": {
+            "default": "safe",
+            "enum": [
+              "safe",
+              "intrusive"
+            ],
+            "type": "string"
+          },
+          "scope_exclusions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "target_entity_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "confirmed",
+          "http_profile_id",
+          "plan_digest",
+          "target_entity_ids"
+        ],
+        "type": "object"
+      },
       "AtlasAppEvidence": {
         "properties": {
           "app_port_count": {
@@ -12413,6 +12830,615 @@
               }
             },
             "description": "Run broker unavailable"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/zap-jobs": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentZapJobListResponse"
+                }
+              }
+            },
+            "description": "Newest ZAP jobs for this assessment check"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid ZAP assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage this ZAP job"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project assessment check or ZAP job not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP plan or job state changed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP job could not be queued"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentZapSubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentZapJobResponse"
+                }
+              }
+            },
+            "description": "ZAP job queued"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid ZAP assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage this ZAP job"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project assessment check or ZAP job not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP plan or job state changed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP job could not be queued"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/zap-jobs/{job_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "ZAP job id",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentZapJobResponse"
+                }
+              }
+            },
+            "description": "ZAP cancellation requested"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid ZAP assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage this ZAP job"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project assessment check or ZAP job not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP plan or job state changed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP job could not be queued"
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "ZAP job id",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentZapJobResponse"
+                }
+              }
+            },
+            "description": "Current ZAP job state"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid ZAP assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage this ZAP job"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project assessment check or ZAP job not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP plan or job state changed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP job could not be queued"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/zap-plan": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentZapPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentZapPlanResponse"
+                }
+              }
+            },
+            "description": "Current reviewed ZAP Automation Framework plan"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid ZAP assessment request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot manage this ZAP job"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project assessment check or ZAP job not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP plan or job state changed"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "ZAP job could not be queued"
           }
         }
       }
