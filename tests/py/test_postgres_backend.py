@@ -3874,6 +3874,54 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     assert failed_fanout_parent["steps"][1]["status"] == "failed"
     assert failed_fanout_parent["steps"][1]["error_code"] == "fanout_failure_limit"
 
+    from blueprints import run as run_routes
+    from services.runs.start import BrokeredRunStartResult
+    from services.workflows import executions
+
+    runtime_fanout = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="postgres_runtime_fanout",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    runtime_fanout_id = str(runtime_fanout["id"])
+    assert claim_step_for_launch(runtime_fanout_id, "collect") is not None
+    assert bind_step_run(runtime_fanout_id, "collect", "run-pg-fanout-collector")
+    assert finalize_run_step(
+        "run-pg-fanout-collector",
+        0,
+        collection_captures={"hosts": ["one.example", "two.example"]},
+    ) is not None
+    runtime_commands: list[str] = []
+
+    def _start_runtime_child(**kwargs):
+        runtime_commands.append(str(kwargs["original_command"]))
+        run_id = "run-pg-fanout-runtime-" + uuid.uuid4().hex
+        kwargs["run_created_hook"](run_id, None)
+        return BrokeredRunStartResult(run_id, "external", "succeeded", 0)
+
+    with monkeypatch.context() as fanout_patch:
+        fanout_patch.setattr(run_routes, "broker_available", lambda: True)
+        fanout_patch.setattr(run_routes, "interactive_pty_spec_for_command", lambda _command: None)
+        fanout_patch.setattr(run_routes, "resolves_exact_special_builtin_command", lambda _command: False)
+        fanout_patch.setattr(run_routes, "resolve_builtin_command", lambda _command: None)
+        fanout_patch.setattr(run_routes, "_start_brokered_run_service", _start_runtime_child)
+        executions.launch_execution_step(runtime_fanout_id)
+
+    runtime_stored = get_execution(session_id, runtime_fanout_id)
+    assert runtime_stored is not None
+    assert runtime_stored["status"] == "completed"
+    assert runtime_commands == [
+        "httpx -u one.example -silent",
+        "httpx -u two.example -silent",
+    ]
+    assert [
+        (child["ordinal"], child["status"])
+        for child in list_fanout_children(runtime_fanout_id, "probe")
+    ] == [(0, "succeeded"), (1, "succeeded")]
+
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
 

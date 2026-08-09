@@ -431,7 +431,10 @@ def test_collection_capture_accumulator_is_bounded_deduplicated_and_required():
         "name": "items", "kind": "collection", "source": "json_pointer",
         "pointer": "/items", "required": True,
     }])
-    assert missing.result() == ({}, "required collection captures were not found: items")
+    assert missing.result() == (
+        {"items": []},
+        "required collection captures were not found: items",
+    )
     scalar = WorkflowCaptureAccumulator([{
         "name": "items", "kind": "collection", "source": "first_nonempty_line",
         "required": True,
@@ -846,6 +849,13 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state(monkeypatch
     )
     partial_execution_id = str(partial["id"])
     partial_step_id = str(partial["steps"][1]["step_id"])
+    assert claim_step_for_launch(partial_execution_id, "collect") is not None
+    assert bind_step_run(partial_execution_id, "collect", "run-fanout-partial-collector")
+    assert finalize_run_step(
+        "run-fanout-partial-collector",
+        0,
+        collection_captures={"hosts": ["one.example", "two.example"]},
+    ) is not None
     partial_children = initialize_fanout_children(partial_execution_id, partial_step_id, 2)
     assert claim_step_for_launch(partial_execution_id, partial_step_id) is not None
     assert claim_fanout_child(partial_execution_id, partial_step_id, 0) is not None
@@ -1721,7 +1731,8 @@ def test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_project
 
 def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_service(monkeypatch):
     from blueprints import run as run_routes
-    from services.workflows.executions import launch_execution_step
+    from services.runs.contracts import RunPreparationError
+    from services.workflows.executions import finalize_workflow_run, launch_execution_step
 
     make_test_app()
     session_id = "workflow-engine-" + uuid.uuid4().hex
@@ -1741,6 +1752,7 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
         owner_tab_id="tab-workflow-context",
     )
     launched: list[dict[str, object]] = []
+    deferred_run_ids: dict[str, str] = {}
 
     class Capture:
         _event_observer: Callable[[LineEvent], None]
@@ -1760,10 +1772,26 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
                 "owner_tab_id",
             )
         })
+        command = str(kwargs["original_command"])
+        if "blocked.example" in command:
+            raise RunPreparationError("The target is outside the allowed scope.")
         run_id = "run-" + uuid.uuid4().hex
         capture = Capture()
         kwargs["run_created_hook"](run_id, capture)
-        capture._event_observer(LineEvent("192.0.2.44"))
+        if hasattr(capture, "_event_observer"):
+            if command == "printf hosts":
+                output = ["one.example", "blocked.example", "two.example"]
+            elif command == "printf async-hosts":
+                output = ["alpha.example", "beta.example", "gamma.example"]
+            elif command == "printf empty-hosts":
+                output = []
+            else:
+                output = ["192.0.2.44"]
+            for line in output:
+                capture._event_observer(LineEvent(line))
+        if command.startswith("printf async "):
+            deferred_run_ids[command] = run_id
+            return BrokeredRunStartResult(run_id, "external", "running", None)
         return BrokeredRunStartResult(run_id, "builtin", "succeeded", 0)
 
     monkeypatch.setattr(run_routes, "broker_available", lambda: True)
@@ -1795,24 +1823,38 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
 
     collection_definition = compile_execution_definition({
         "version": 3,
-        "id": "collect_once",
-        "title": "Collect once",
+        "id": "collect_and_probe",
+        "title": "Collect and probe",
         "inputs": [],
-        "steps": [{
-            "id": "collect",
-            "cmd": "printf hosts",
-            "captures": [{
-                "name": "hosts",
-                "kind": "collection",
-                "source": "first_nonempty_line",
-                "required": True,
-            }],
-        }],
+        "steps": [
+            {
+                "id": "collect",
+                "cmd": "printf hosts",
+                "captures": [{
+                    "name": "hosts",
+                    "kind": "collection",
+                    "source": "first_nonempty_line",
+                    "required": True,
+                }],
+                "next": {"success": "probe", "failure": "stop"},
+            },
+            {
+                "id": "probe",
+                "cmd": "printf probe {{hosts}}",
+                "for_each": {
+                    "collection": "hosts",
+                    "failure_mode": "continue",
+                    "max_parallel": 2,
+                    "max_failures": 3,
+                },
+                "next": {"success": "complete", "failure": "stop"},
+            },
+        ],
     })
     collection_execution = create_execution(
         session_id=session_id,
         team_id="",
-        workflow_id="collect_once",
+        workflow_id="collect_and_probe",
         workflow_source="config",
         definition=collection_definition,
         inputs={},
@@ -1821,8 +1863,156 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     collection_stored = get_execution(session_id, str(collection_execution["id"]))
     assert collection_stored is not None
     assert collection_stored["status"] == "completed"
-    assert collection_stored["variables"]["hosts"] == ["192.0.2.44"]
-    assert "192.0.2.44" not in json.dumps(public_execution(collection_stored))
+    assert collection_stored["variables"]["hosts"] == [
+        "one.example", "blocked.example", "two.example",
+    ]
+    assert [item["original_command"] for item in launched[-4:]] == [
+        "printf hosts",
+        "printf probe one.example",
+        "printf probe blocked.example",
+        "printf probe two.example",
+    ]
+    assert [item["display_command"] for item in launched[-4:]] == [
+        "printf hosts",
+        "printf probe [captured:hosts]",
+        "printf probe [captured:hosts]",
+        "printf probe [captured:hosts]",
+    ]
+    private_hosts = {"one.example", "blocked.example", "two.example"}
+    assert all(
+        private_hosts <= set(cast(tuple[str, ...], item["private_values"]))
+        for item in launched[-3:]
+    )
+    children = list_fanout_children(str(collection_execution["id"]), "probe")
+    assert [(child["ordinal"], child["status"], child["error_code"]) for child in children] == [
+        (0, "succeeded", ""),
+        (1, "failed", "scope_rejected"),
+        (2, "succeeded", ""),
+    ]
+    public_collection = public_execution(collection_stored)
+    assert public_collection["steps"][1]["fanout_summary"] == {
+        "total": 3,
+        "pending": 0,
+        "running": 0,
+        "succeeded": 2,
+        "failed": 1,
+        "skipped": 0,
+        "cancelled": False,
+        "failure_samples": ["child_failed"],
+    }
+    for private_host in private_hosts:
+        assert private_host not in json.dumps(public_collection)
+
+    async_definition = compile_execution_definition({
+        "version": 3,
+        "id": "bounded_parallel_probe",
+        "title": "Bounded parallel probe",
+        "inputs": [],
+        "steps": [
+            {
+                "id": "collect",
+                "cmd": "printf async-hosts",
+                "captures": [{
+                    "name": "hosts",
+                    "kind": "collection",
+                    "source": "first_nonempty_line",
+                }],
+                "next": {"success": "probe", "failure": "stop"},
+            },
+            {
+                "id": "probe",
+                "cmd": "printf async {{hosts}}",
+                "for_each": {
+                    "collection": "hosts",
+                    "failure_mode": "continue",
+                    "max_parallel": 2,
+                    "max_failures": 3,
+                },
+                "next": {"success": "complete", "failure": "stop"},
+            },
+        ],
+    })
+    async_execution = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="bounded_parallel_probe",
+        workflow_source="config",
+        definition=async_definition,
+        inputs={},
+    )
+    launch_execution_step(str(async_execution["id"]))
+    async_children = list_fanout_children(str(async_execution["id"]), "probe")
+    assert [child["status"] for child in async_children] == ["running", "running", "pending"]
+    assert set(deferred_run_ids) == {
+        "printf async alpha.example",
+        "printf async beta.example",
+    }
+
+    finalize_workflow_run(deferred_run_ids["printf async alpha.example"], 0, None)
+    assert set(deferred_run_ids) == {
+        "printf async alpha.example",
+        "printf async beta.example",
+        "printf async gamma.example",
+    }
+    async_children = list_fanout_children(str(async_execution["id"]), "probe")
+    assert [child["status"] for child in async_children] == [
+        "succeeded", "running", "running",
+    ]
+    finalize_workflow_run(deferred_run_ids["printf async beta.example"], 0, None)
+    finalize_workflow_run(deferred_run_ids["printf async gamma.example"], 0, None)
+    async_stored = get_execution(session_id, str(async_execution["id"]))
+    assert async_stored is not None
+    assert async_stored["status"] == "completed"
+    assert async_stored["steps"][1]["status"] == "succeeded"
+
+    empty_definition = compile_execution_definition({
+        "version": 3,
+        "id": "empty_optional_collection",
+        "title": "Empty optional collection",
+        "inputs": [],
+        "steps": [
+            {
+                "id": "collect",
+                "cmd": "printf empty-hosts",
+                "captures": [{
+                    "name": "hosts",
+                    "kind": "collection",
+                    "source": "first_nonempty_line",
+                }],
+                "next": {"success": "probe", "failure": "stop"},
+            },
+            {
+                "id": "probe",
+                "cmd": "printf empty {{hosts}}",
+                "for_each": {"collection": "hosts"},
+                "next": {"success": "complete", "failure": "stop"},
+            },
+        ],
+    })
+    empty_execution = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="empty_optional_collection",
+        workflow_source="config",
+        definition=empty_definition,
+        inputs={},
+    )
+    launch_execution_step(str(empty_execution["id"]))
+    empty_stored = get_execution(session_id, str(empty_execution["id"]))
+    assert empty_stored is not None
+    assert empty_stored["status"] == "completed"
+    assert empty_stored["variables"]["hosts"] == []
+    assert list_fanout_children(str(empty_execution["id"]), "probe") == []
+    assert public_execution(empty_stored)["steps"][1]["fanout_summary"] == {
+        "total": 0,
+        "pending": 0,
+        "running": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "skipped": 0,
+        "cancelled": False,
+        "failure_samples": [],
+    }
 
 
 def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, caplog):

@@ -121,4 +121,10 @@ class WorkflowCollectionAccumulator:
         problems = [*self.errors]
         if missing:
             problems.append("required collection captures were not found: " + ", ".join(missing))
-        return {name: list(values) for name, values in self.values.items()}, "; ".join(problems)
+        return {
+            str(rule.get("name") or ""): list(
+                self.values.get(str(rule.get("name") or ""), [])
+            )
+            for rule in self.rules
+            if str(rule.get("name") or "")
+        }, "; ".join(problems)

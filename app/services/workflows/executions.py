@@ -28,6 +28,7 @@ from services.workflows.compiler import (
 )
 from services.workflows.fanout_child_lifecycle import finalize_fanout_child_run
 from services.workflows.fanout_child_queries import fanout_child_for_run
+from services.workflows.fanout_launch import launch_fanout_batch
 from services.workflows import storage
 
 
@@ -223,6 +224,75 @@ def _log_step_transition(state: Mapping[str, object]) -> None:
         _record_execution_finished(str(state.get("execution_id") or ""), status)
 
 
+def _launch_current_fanout_batch(execution_id: str) -> dict[str, object] | None:
+    execution = storage.get_execution_by_id(execution_id)
+    if not execution:
+        return None
+    step_id = str(execution.get("current_step_id") or "")
+    can_launch, current_role = _execution_can_launch(execution, step_id)
+    if not can_launch:
+        return None
+    definition = execution.get("definition_snapshot")
+    step = _definition_step(
+        definition if isinstance(definition, Mapping) else {},
+        step_id,
+    )
+    if not step or not isinstance(step.get("for_each"), Mapping):
+        changed = storage.fail_execution(
+            execution_id,
+            "fanout_definition_error",
+            "The current workflow fan-out step is invalid.",
+            step_id=step_id,
+        )
+        if changed:
+            _record_failed_step_and_execution(execution_id, step_id)
+        log.warning("WORKFLOW_FANOUT_DEFINITION_MISSING", extra={
+            "execution_id": execution_id,
+            "step_id": step_id,
+        })
+        return None
+    try:
+        result = launch_fanout_batch(execution, step, current_role)
+    except WorkflowDefinitionError as exc:
+        changed = storage.fail_execution(
+            execution_id,
+            "fanout_definition_error",
+            str(exc),
+            step_id=step_id,
+        )
+        if changed:
+            _record_failed_step_and_execution(execution_id, step_id)
+        log.warning("WORKFLOW_FANOUT_LAUNCH_FAILED", extra={
+            "execution_id": execution_id,
+            "step_id": step_id,
+            "error_type": type(exc).__name__,
+            "stage": "plan",
+        })
+        return None
+    except Exception as exc:
+        changed = storage.fail_execution(
+            execution_id,
+            "fanout_launch_failed",
+            "The workflow fan-out batch could not be launched.",
+            step_id=step_id,
+        )
+        if changed:
+            _record_failed_step_and_execution(execution_id, step_id)
+        log.error("WORKFLOW_FANOUT_LAUNCH_ERROR", exc_info=True, extra={
+            "execution_id": execution_id,
+            "step_id": step_id,
+            "error_type": type(exc).__name__,
+            "stage": "batch",
+        })
+        return None
+    raw_transition = result.pop("parent_transition", None)
+    if isinstance(raw_transition, Mapping) and raw_transition:
+        _log_step_transition(raw_transition)
+        if not raw_transition.get("terminal"):
+            launch_execution_step(str(raw_transition["execution_id"]))
+    return result
+
+
 def finalize_workflow_run(run_id: str, exit_code: int, capture: object | None) -> dict[str, object] | None:
     child = fanout_child_for_run(run_id)
     if child and str(child.get("status") or "") != "running":
@@ -267,6 +337,7 @@ def finalize_workflow_run(run_id: str, exit_code: int, capture: object | None) -
             return None
         parent_transition = finalized_child.get("parent_transition")
         if not isinstance(parent_transition, Mapping) or not parent_transition:
+            _launch_current_fanout_batch(str(child.get("execution_id") or ""))
             return None
         _log_step_transition(parent_transition)
         if not parent_transition.get("terminal"):
@@ -324,6 +395,8 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
             "step_id": step_id,
         })
         return None
+    if isinstance(step.get("for_each"), Mapping):
+        return _launch_current_fanout_batch(execution_id)
     try:
         command = render_step_command(step, variables if isinstance(variables, Mapping) else {})
         display_command = render_step_display_command(
