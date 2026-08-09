@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **The workflow editor now authors bounded collection fan-out.**
+  - **What:** Personal and team workflow authors can choose a single-value or collection capture, lower the 32-item collection limit, select a collection captured by an earlier step, and configure fail-fast or continue behavior, retries, parallel runs, and the failure limit with field-level validation. Recent executions show finished, pending, active, succeeded, failed, and skipped child counts plus the existing bounded failure-code sample on desktop and mobile without exposing collection values.
+  - **Tests:** Existing Vitest and mobile Playwright cases now cover version 2 compatibility, version 3 editor round trips, inline bounds, responsive control layout, and count-only progress. The test-function totals are unchanged.
 - **Saved collection workflows can now start through the durable execution route.**
   - **What:** Personal and team `version: 3` workflows use the same start route as scalar playbooks. Each collection child still crosses the normal command policy, target scope, team permission, workspace, and brokered-run checks, while route responses expose only durable execution state and count summaries rather than captured collection values.
   - **Tests:** Existing route and orchestration coverage now starts a saved personal collection workflow through the real shared run service, checks workspace and browser ownership context, pins value-free responses, and verifies team owners and operators can start collection workflows while viewers remain read-only. The test-function totals are unchanged, and the complete repository Pyright pass remains clean.

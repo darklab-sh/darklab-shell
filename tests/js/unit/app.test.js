@@ -2892,6 +2892,64 @@ describe('app helpers', () => {
       codes: { 2: 'scan' },
     })
     expect(payload.steps[1].next).toEqual({ success: 'complete', failure: 'stop' })
+
+    openWorkflowEditor({
+      id: 'usr_collection_probe',
+      source: 'user',
+      version: 3,
+      title: 'Collect and probe',
+      description: 'Probe each captured host.',
+      inputs: [],
+      steps: [
+        {
+          id: 'collect',
+          cmd: 'discover --json',
+          captures: [{
+            name: 'hosts',
+            kind: 'collection',
+            source: 'json_pointer',
+            pointer: '/hosts',
+            item_limit: 12,
+          }],
+          next: { success: 'probe', failure: 'stop' },
+        },
+        {
+          id: 'probe',
+          cmd: 'httpx -u {{hosts}} -silent',
+          for_each: {
+            collection: 'hosts',
+            failure_mode: 'continue',
+            retries: 2,
+            max_parallel: 4,
+            max_failures: 5,
+          },
+          next: { success: 'complete', failure: 'stop' },
+        },
+      ],
+    })
+
+    const collectionSteps = document.querySelectorAll('[data-workflow-editor-step]')
+    const collectionCapture = collectionSteps[0].querySelector('[data-workflow-editor-capture]')
+    expect(collectionCapture.querySelector('.workflow-editor-capture-kind').value).toBe('collection')
+    expect(collectionCapture.querySelector('.workflow-editor-capture-item-limit').value).toBe('12')
+    expect(collectionCapture.querySelector('.workflow-editor-capture-limit-field').hidden).toBe(false)
+    expect(collectionSteps[1].querySelector('.workflow-editor-fanout-enabled').checked).toBe(true)
+    expect(collectionSteps[1].querySelector('.workflow-editor-fanout-collection').value).toBe('hosts')
+    expect(payloadFromEditor()).toMatchObject({
+      version: 3,
+      steps: [
+        { captures: [{ name: 'hosts', kind: 'collection', item_limit: 12 }] },
+        {
+          for_each: {
+            collection: 'hosts',
+            failure_mode: 'continue',
+            retries: 2,
+            max_parallel: 4,
+            max_failures: 5,
+          },
+        },
+      ],
+    })
   })
 
   it('keeps exact exit-code routes visible through step edits and validates route fields', async () => {
@@ -2972,6 +3030,45 @@ describe('app helpers', () => {
       .toBe('Enter a whole-number exit code.')
     duplicate.querySelector('.workflow-editor-remove-exit-code').click()
     expect(payloadFromEditor().steps[0].next.codes).toEqual({ 7: 'stop' })
+
+    openWorkflowEditor({
+      id: 'usr_invalid_collection_limits',
+      source: 'user',
+      version: 3,
+      title: 'Invalid collection limits',
+      inputs: [],
+      steps: [
+        {
+          id: 'collect',
+          cmd: 'discover --json',
+          captures: [{
+            name: 'hosts', kind: 'collection', source: 'json_pointer',
+            pointer: '/hosts', item_limit: 12,
+          }],
+          next: { success: 'probe', failure: 'stop' },
+        },
+        {
+          id: 'probe',
+          cmd: 'httpx -u {{hosts}}',
+          for_each: { collection: 'hosts', max_parallel: 2 },
+          next: { success: 'complete', failure: 'stop' },
+        },
+      ],
+    })
+    const collectionSteps = document.querySelectorAll('[data-workflow-editor-step]')
+    collectionSteps[0].querySelector('.workflow-editor-capture-item-limit').value = '33'
+    collectionSteps[1].querySelector('.workflow-editor-fanout-max-parallel').value = '9'
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(apiFetch).toHaveBeenCalledTimes(initialApiCallCount)
+    expect(collectionSteps[0].querySelector(
+      '[data-workflow-field$="item_limit"] .form-error',
+    ).textContent).toBe('Item limit must be between 1 and 32.')
+    expect(collectionSteps[1].querySelector(
+      '[data-workflow-field$="max_parallel"] .form-error',
+    ).textContent).toBe('Parallel runs must be between 1 and 8.')
   })
 
   it('marks workflow capture-fed command previews as available only during the playbook', async () => {
@@ -3068,7 +3165,7 @@ describe('app helpers', () => {
           transition_reason: 'success',
           capture_names: ['resolved_ip'],
           fanout_summary: {
-            total: 4, succeeded: 3, failed: 1, pending: 0, running: 0,
+            total: 6, succeeded: 2, failed: 1, skipped: 1, pending: 1, running: 1,
             failure_samples: ['scope_rejected'],
           },
         }],
@@ -3085,7 +3182,9 @@ describe('app helpers', () => {
     expect(body.textContent).toContain('Elapsed: 1m 05s')
     expect(body.textContent).toContain('to scan (success)')
     expect(body.textContent).toContain('Captured: resolved_ip')
-    expect(body.textContent).toContain('Fan-out: 3/4 complete, 1 failed')
+    expect(body.textContent).toContain(
+      'Fan-out: 4/6 finished · 1 pending · 1 active · 2 succeeded · 1 failed · 1 skipped',
+    )
     expect(body.textContent).toContain('Failure codes: scope_rejected')
     expect(body.textContent).toContain('run-resolve-1')
   })

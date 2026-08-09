@@ -8,11 +8,11 @@ Open **Browse all workflows** from the desktop rail, press `Alt+G`, or choose **
 
 - Choose parameter values before starting a playbook. Target fields can use active Project targets and recent values. Files and wordlist fields can use active Files entries, while wordlist fields can also use packaged wordlists.
 - **Run all** starts a durable execution for a v2 or v3 playbook and switches to the **Executions** tab so its live status is immediately visible. You can close the panel or browser without stopping it.
-- The **Executions** tab shows the latest runs for the active personal/team scope, including the current step, elapsed time, branch outcomes, capture names, and linked runs. Attach opens an active run in the terminal; Open shows a finished run in Run Details.
+- The **Executions** tab shows the latest runs for the active personal/team scope, including the current step, elapsed time, branch outcomes, capture names, and linked runs. Collection steps show finished, pending, active, succeeded, failed, and skipped counts plus at most three failure codes; they never show collection items. Attach opens an active run in the terminal; Open shows a finished run in Run Details.
 - Cancel stops pending work and signals the active run after confirmation.
 - Run Details and History show the playbook and step that produced a run, with shortcuts to sibling step runs and the execution in the Workflows panel.
 
-The in-app editor saves scalar personal workflows in personal scope and scalar shared workflows in active team scope. Version 3 definitions saved through the scoped workflow routes or deployment files appear in the same catalog and use the same durable start controls. Team owners and admins can create, edit, and delete shared definitions. Team members with command-run permission can run them.
+The in-app editor saves scalar and collection workflows in personal scope or the active team scope. Choose **Collection** on a capture to set its item limit, then enable **Collection fan-out** on a later step to select that capture and configure the failure policy, retries, parallel runs, and failure limit. The editor keeps ordinary definitions at version 2 and saves definitions that use collection behavior as version 3. Team owners and admins can create, edit, and delete shared definitions. Team members with command-run permission can run them.
 
 ### Historical Web Surface Triage
 

@@ -1515,7 +1515,7 @@ Normal relative paths resolve from the shipped config root. Relative filenames c
 - Add welcome samples in `welcome.local.yaml`.
 - Add deployment-specific command registry entries in `commands.local.yaml`.
 - Add complete deployment-specific assessment profiles in `assessment_profiles.local.yaml`. A profile with the same key replaces the shipped profile as one unit; its checks don't merge.
-- Add deployment-specific legacy or v2 workflows in `workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries or set it to `2`; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, execution, and compatibility reference.
+- Add deployment-specific legacy, scalar v2, or collection-enabled v3 workflows in `workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries, use `2` for scalar captures, or use `3` for bounded collection capture and fan-out; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, fan-out, execution, and compatibility reference.
 - Add desktop or mobile hints in `app_hints.local.txt` or `app_hints_mobile.local.txt`.
 - Replace banner art with `ascii.local.txt` or `ascii_mobile.local.txt`. These files replace the shipped text, so the installer provides non-active `.example` files instead of empty active placeholders.
 - Add deployment-specific evidence package presets in `package_presets.local.yaml` and point `package_presets_file` at that file.
