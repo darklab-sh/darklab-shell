@@ -127,7 +127,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 6 — Close the web and API discovery/validation gaps
 
 - [ ] Add focused parameter and application testing tools:
-  - Finish Schemathesis result ingestion with bounded per-operation evidence and minimized failure examples from the reviewed local OpenAPI run.
+  - Persist the validated Schemathesis per-operation evidence and minimized failure examples from the reviewed local OpenAPI run, then reconcile the resulting coverage and findings with the active assessment cycle.
   - Prefer version-pinned multi-arch binaries or isolated Python environments that keep the runtime dependency graph reproducible. Update licenses, hashes, SBOM/provenance, image-size budgets, and container smoke checks for every addition.
   - Add structured parsers/adapters under focused modules rather than more broad regexes in `output_signals.py`. Preserve raw output, normalize stable findings/entities, carry tool/profile versions, and make parser failure visible without failing the underlying run.
 - [ ] Improve Nuclei usage before adding overlapping scanners:

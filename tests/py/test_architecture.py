@@ -532,6 +532,19 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/schemathesis_launch.py", 123, "split-package-ratchet"
     ),
     ModuleSizeBudget(
+        "app/services/assessments/schemathesis_report.py", 582, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_report_contracts.py",
+        83,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_report_decode.py",
+        154,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/recommended_action_selections.py",
         74,
         "split-package-ratchet",

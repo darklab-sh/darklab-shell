@@ -102,6 +102,14 @@ from services.assessments.schemathesis_schema import (
     review_local_openapi_json,
 )
 from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
+from services.assessments.schemathesis_report import (
+    SCHEMATHESIS_REPORT_MAX_BYTES,
+    parse_schemathesis_ndjson,
+)
+from services.assessments.schemathesis_report_contracts import (
+    SCHEMATHESIS_REPORT_TOOL_VERSION,
+    SchemathesisReportError,
+)
 from services.assessments import schemathesis_launch
 from services.assessments import nuclei_takeover_launch
 from services.assessments import run_launch
@@ -192,6 +200,95 @@ def _openapi_artifact(content):
         "file_status": "available",
         "file_available": True,
     }
+
+
+def _schemathesis_report_bytes(
+    *,
+    failure=True,
+    operation="GET /items/{item_id}",
+    request_uri="https://api.example.test/v1/items/generated-secret-value",
+    tool_version=SCHEMATHESIS_REPORT_TOOL_VERSION,
+    seed=1,
+    stop_reason="completed",
+    check_names=None,
+    include_interaction=True,
+):
+    names = check_names or (
+        "not_a_server_error",
+        "status_code_conformance",
+        "content_type_conformance",
+        "response_schema_conformance",
+        "negative_data_rejection",
+    )
+    checks = []
+    for name in names:
+        check = {"name": name, "status": "success"}
+        if failure and name == "response_schema_conformance":
+            check = {
+                "name": name,
+                "status": "failure",
+                "failure_info": {
+                    "failure": {
+                        "type": "JsonSchemaError",
+                        "message": "failure-secret-message\nresponse-secret-body",
+                    },
+                },
+            }
+        checks.append(check)
+    method, path = operation.split(" ", 1)
+    case_id = "case_01"
+    events = [
+        {
+            "Initialize": {
+                "schemathesis_version": tool_version,
+                "seed": seed,
+            },
+        },
+        {
+            "ScenarioFinished": {
+                "phase": "Fuzzing",
+                "status": "failure" if failure else "success",
+                "is_final": False,
+                "recorder": {
+                    "label": operation,
+                    "cases": {
+                        case_id: {
+                            "value": {
+                                "method": method,
+                                "path": path,
+                                "id": case_id,
+                                "path_parameters": {
+                                    "item_id": "generated-secret-value",
+                                },
+                                "meta": {
+                                    "generation": {"mode": "negative"},
+                                    "phase": {"name": "fuzzing"},
+                                },
+                            },
+                            "is_transition_applied": False,
+                        },
+                    },
+                    "checks": {case_id: checks},
+                    "interactions": {
+                        case_id: {
+                            "request": {"method": method, "uri": request_uri},
+                            "response": {
+                                "status_code": 200,
+                                "content": {"$base64": "response-secret-body"},
+                            },
+                        },
+                    } if include_interaction else {},
+                },
+            },
+        },
+        {
+            "EngineFinished": {
+                "running_time": 1.25,
+                "stop_reason": stop_reason,
+            },
+        },
+    ]
+    return ("\n".join(json.dumps(event, separators=(",", ":")) for event in events) + "\n").encode()
 
 
 class _ArtifactStream(io.BytesIO):
@@ -385,6 +482,286 @@ def test_local_openapi_review_rejects_byte_depth_and_decoded_node_limit_expansio
             )
 
         assert exc_info.value.code == error_code
+
+
+def test_schemathesis_report_keeps_bounded_operation_evidence_and_provenance():
+    reviewed = review_local_openapi_json(
+        _openapi_json(paths={
+            "/items/{item_id}": {
+                "get": {"responses": {"200": {"description": "OK"}}},
+            },
+            "/health": {
+                "head": {"responses": {"200": {"description": "OK"}}},
+            },
+        }),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+
+    report = parse_schemathesis_ndjson(
+        _schemathesis_report_bytes(failure=False),
+        reviewed,
+        profile_key="api",
+        profile_version="1.0",
+    )
+
+    assert report.tool_version == SCHEMATHESIS_REPORT_TOOL_VERSION
+    assert report.profile_key == "api"
+    assert report.profile_version == "1.0"
+    assert report.schema_artifact_id == reviewed.source_artifact_id
+    assert report.schema_sha256 == reviewed.source_sha256
+    assert report.schema_version == "3.1.0"
+    assert report.stop_reason == "completed"
+    assert report.complete is True
+    assert report.expected_operation_count == 2
+    assert report.observed_operation_count == 1
+    assert report.case_count == 1
+    assert report.failure_count == 0
+    assert report.missing_operations == ("HEAD /health",)
+    assert report.operations[0].operation == "GET /items/{item_id}"
+    assert report.operations[0].status == "success"
+    assert report.operations[0].response_statuses == (200,)
+    assert report.operations[0].failures == ()
+
+
+def test_schemathesis_report_keeps_safe_failure_shape_without_private_values():
+    reviewed = review_local_openapi_json(
+        _openapi_json(paths={
+            "/items/{item_id}": {
+                "get": {"responses": {"200": {"description": "OK"}}},
+            },
+        }),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+
+    report = parse_schemathesis_ndjson(
+        _schemathesis_report_bytes(stop_reason="failure_limit"),
+        reviewed,
+        profile_key="api",
+        profile_version="1.0",
+    )
+
+    assert report.complete is True
+    assert report.failure_count == 1
+    assert report.operations[0].status == "failure"
+    failure = report.operations[0].failures[0]
+    assert failure.check_name == "response_schema_conformance"
+    assert failure.failure_type == "JsonSchemaError"
+    assert failure.title == "Response violates schema"
+    assert failure.severity == "medium"
+    assert failure.response_status == 200
+    assert failure.parameter_names == ("path:item_id",)
+    assert len(failure.fingerprint) == 64
+    assert len(failure.example_digest) == 64
+    assert len(failure.message_digest) == 64
+    public_result = repr(report)
+    assert "generated-secret-value" not in public_result
+    assert "failure-secret-message" not in public_result
+    assert "response-secret-body" not in public_result
+
+
+@pytest.mark.parametrize(
+    ("raw_report", "error_code"),
+    [
+        (_schemathesis_report_bytes()[:-1], "incomplete_report"),
+        (
+            _schemathesis_report_bytes(tool_version="4.24.4"),
+            "unsupported_report_version",
+        ),
+        (
+            _schemathesis_report_bytes(seed=2),
+            "unsupported_report_version",
+        ),
+        (
+            _schemathesis_report_bytes(seed=True),
+            "unsupported_report_version",
+        ),
+        (
+            _schemathesis_report_bytes(request_uri="https://other.example.test/v1/items/1"),
+            "interaction_out_of_scope",
+        ),
+        (
+            _schemathesis_report_bytes(request_uri="https://api.example.test/v1/other"),
+            "interaction_out_of_scope",
+        ),
+        (
+            _schemathesis_report_bytes(check_names=("not_a_server_error",)),
+            "incomplete_check_set",
+        ),
+        (
+            _schemathesis_report_bytes(failure=False, stop_reason="failure_limit"),
+            "invalid_stop_reason",
+        ),
+        (
+            _schemathesis_report_bytes().replace(
+                b'"status":"failure"',
+                b'"status":"success"',
+                1,
+            ),
+            "scenario_result_mismatch",
+        ),
+        (
+            _schemathesis_report_bytes(include_interaction=False),
+            "missing_case_interaction",
+        ),
+        (b" " * (SCHEMATHESIS_REPORT_MAX_BYTES + 1), "invalid_report_size"),
+    ],
+)
+def test_schemathesis_report_rejects_incomplete_unpinned_or_out_of_scope_evidence(
+    raw_report,
+    error_code,
+):
+    reviewed = review_local_openapi_json(
+        _openapi_json(paths={
+            "/items/{item_id}": {
+                "get": {"responses": {"200": {"description": "OK"}}},
+            },
+        }),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+
+    with pytest.raises(SchemathesisReportError) as exc_info:
+        parse_schemathesis_ndjson(
+            raw_report,
+            reviewed,
+            profile_key="api",
+            profile_version="1.0",
+        )
+
+    assert exc_info.value.code == error_code
+
+
+def test_schemathesis_report_rejects_duplicate_keys_and_unreviewed_operations():
+    reviewed = review_local_openapi_json(
+        _openapi_json(paths={
+            "/items/{item_id}": {
+                "get": {"responses": {"200": {"description": "OK"}}},
+            },
+        }),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    duplicate_key = _schemathesis_report_bytes().replace(
+        b'"seed":1',
+        b'"seed":1,"seed":1',
+        1,
+    )
+    missing_case_events = [
+        json.loads(line)
+        for line in _schemathesis_report_bytes().splitlines()
+    ]
+    missing_case_recorder = missing_case_events[1]["ScenarioFinished"]["recorder"]
+    missing_case_recorder["cases"] = {}
+    missing_case_recorder["checks"] = {}
+    missing_case_recorder["interactions"] = {}
+    missing_cases = (
+        "\n".join(
+            json.dumps(event, separators=(",", ":"))
+            for event in missing_case_events
+        )
+        + "\n"
+    ).encode()
+    rejected = (
+        (duplicate_key, "duplicate_report_key"),
+        (missing_cases, "missing_scenario_cases"),
+        (
+            _schemathesis_report_bytes(
+                operation="GET /admin",
+                request_uri="https://api.example.test/v1/admin",
+            ),
+            "operation_out_of_scope",
+        ),
+    )
+
+    for raw_report, error_code in rejected:
+        with pytest.raises(SchemathesisReportError) as exc_info:
+            parse_schemathesis_ndjson(
+                raw_report,
+                reviewed,
+                profile_key="api",
+                profile_version="1.0",
+            )
+
+        assert exc_info.value.code == error_code
+
+    with pytest.raises(SchemathesisReportError) as invalid_profile:
+        parse_schemathesis_ndjson(
+            _schemathesis_report_bytes(),
+            reviewed,
+            profile_key="api",
+            profile_version=1,
+        )
+
+    assert invalid_profile.value.code == "invalid_profile_provenance"
+
+
+def test_schemathesis_report_applies_the_failure_limit_across_operations():
+    reviewed = review_local_openapi_json(
+        _openapi_json(paths={
+            "/items/{item_id}": {
+                "get": {"responses": {"200": {"description": "OK"}}},
+            },
+            "/users/{user_id}": {
+                "get": {"responses": {"200": {"description": "OK"}}},
+            },
+        }),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    scenarios = []
+    for index in range(12):
+        resource = "items" if index % 2 == 0 else "users"
+        parameter = "item_id" if resource == "items" else "user_id"
+        operation = f"GET /{resource}/{{{parameter}}}"
+        event = json.loads(
+            _schemathesis_report_bytes(
+                operation=operation,
+                request_uri=f"https://api.example.test/v1/{resource}/{index}",
+            ).splitlines()[1]
+        )
+        recorder = event["ScenarioFinished"]["recorder"]
+        case_id = f"case_{index:02}"
+        case = recorder["cases"].pop("case_01")
+        case["value"]["id"] = case_id
+        case["value"]["path_parameters"] = {parameter: index}
+        checks = recorder["checks"].pop("case_01")
+        checks[3]["failure_info"]["failure"]["message"] = f"failure {index}"
+        interaction = recorder["interactions"].pop("case_01")
+        recorder["cases"][case_id] = case
+        recorder["checks"][case_id] = checks
+        recorder["interactions"][case_id] = interaction
+        scenarios.append(event)
+    events = [
+        {
+            "Initialize": {
+                "schemathesis_version": SCHEMATHESIS_REPORT_TOOL_VERSION,
+                "seed": 1,
+            },
+        },
+        *scenarios,
+        {
+            "EngineFinished": {
+                "running_time": 2.5,
+                "stop_reason": "failure_limit",
+            },
+        },
+    ]
+    raw_report = (
+        "\n".join(json.dumps(event, separators=(",", ":")) for event in events)
+        + "\n"
+    ).encode()
+
+    with pytest.raises(SchemathesisReportError) as exc_info:
+        parse_schemathesis_ndjson(
+            raw_report,
+            reviewed,
+            profile_key="api",
+            profile_version="1.0",
+        )
+
+    assert exc_info.value.code == "failure_limit_exceeded"
 
 
 def test_project_openapi_artifact_review_rechecks_owner_file_size_and_digest(monkeypatch):
