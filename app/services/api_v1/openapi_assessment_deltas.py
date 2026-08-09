@@ -27,6 +27,7 @@ def assessment_delta_schemas() -> dict[str, Any]:
                 "finding_check_comparisons",
                 "finding_deltas",
                 "dependent_comparisons_invalidated",
+                "schemathesis_reports", "schemathesis_operations",
             ],
             "properties": {
                 **{
@@ -40,6 +41,7 @@ def assessment_delta_schemas() -> dict[str, Any]:
                         "finding_check_comparisons",
                         "finding_deltas",
                         "dependent_comparisons_invalidated",
+                        "schemathesis_reports", "schemathesis_operations",
                     )
                 },
                 "evidence_links_by_type": {

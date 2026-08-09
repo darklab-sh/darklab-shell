@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 import logging
+from pathlib import Path
 import uuid
 
 import pytest
@@ -60,12 +62,26 @@ from services.assessments.recommended_actions import (
     confirm_recommended_action_plan,
     get_recommended_action_plan,
 )
+from services.assessments.schemathesis_evidence_persistence import (
+    SchemathesisEvidenceError,
+    persist_reviewed_schemathesis_report,
+)
+from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
+from services.assessments.schemathesis_report_context import ReviewedSchemathesisReportContext
+from services.assessments.schemathesis_report_contracts import (
+    SchemathesisFailureExample,
+    SchemathesisOperationEvidence,
+    SchemathesisReport,
+)
+from services.assessments.schemathesis_schema import review_local_openapi_json
 from services.assessments.storage import create_assessment_cycle
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.crud import create_project, delete_project
 from services.projects.links import link_run_to_project_on_conn
 from services.projects.targets import add_project_target
 from services.runs.finalization import save_completed_run
+from services.runs.finalization_schemathesis import persist_schemathesis_evidence_for_finalize
+from services.runs.completion_policy_contracts import RunCompletionPolicy
 from services.runs.output_model import LineEvent, to_wire
 from services.history.mutations import (
     bulk_delete_runs,
@@ -1071,6 +1087,222 @@ def test_reconcile_moves_finding_rules_to_needs_review(assessment_factory):
     assert summary["evidence_linked"] == 1
     assert check["state"] == "needs_review"
     assert "app-captured findings" in check["state_reason"]
+
+
+def test_reviewed_schemathesis_report_persists_safe_idempotent_evidence_and_coverage(
+    assessment_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    factory, cleanup = assessment_factory
+    target = "https://api.example.test/v1"
+    api_rule = _rule(
+        command_roots=["schemathesis"],
+        structured_output_kinds=["api_operations", "findings"],
+    )
+    profile = _profile(rule=api_rule)
+    profile["checks"][0].update({
+        "key": "openapi_negative_testing",
+        "label": "API negative testing",
+        "target_types": ["url"],
+        "recommended_action": "command:schemathesis",
+    })
+    session_id, project_id, assessment_id = factory([("url", target)], profile=profile)
+    source_run_id = _seed_linked_run(
+        cleanup, session_id, project_id, "cat reports/openapi.json",
+    )
+    run_id = _seed_linked_run(
+        cleanup, session_id, project_id,
+        "schemathesis --config-file /protected/config run /protected/schema",
+    )
+    schema_content = json.dumps({
+        "openapi": "3.1.0",
+        "info": {"title": "API", "version": "1"},
+        "paths": {"/items": {"get": {"responses": {"200": {"description": "OK"}}}}},
+    }, separators=(",", ":")).encode()
+    artifact_id = "rfa_0123456789abcdef"
+    check_id = _check_id(assessment_id)
+    with db_connect() as conn:
+        target_row = conn.execute(
+            "SELECT target_entity_id FROM project_assessment_checks WHERE id = ?",
+            (check_id,),
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO run_file_artifacts "
+            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "detected_by, content_type, content_sha256, created) "
+            "VALUES (?, ?, ?, 'reports/openapi.json', 'openapi.json', 'json', ?, "
+            "'workspace', 'application/json', ?, ?)",
+            (
+                artifact_id,
+                session_id,
+                source_run_id,
+                len(schema_content),
+                hashlib.sha256(schema_content).hexdigest(),
+                "2026-08-08T12:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    assert target_row is not None
+    reviewed = review_local_openapi_json(
+        schema_content,
+        source_artifact_id=artifact_id,
+        base_url=target,
+    )
+    failure = SchemathesisFailureExample(
+        fingerprint="f" * 64,
+        operation="GET /items",
+        method="GET",
+        path="/items",
+        check_name="response_schema_conformance",
+        failure_type="JsonSchemaError",
+        title="Response schema mismatch",
+        severity="medium",
+        response_status=500,
+        parameter_names=("item_id",),
+        body_media_type="application/json",
+        example_digest="e" * 64,
+        message_digest="m" * 64,
+    )
+    report = SchemathesisReport(
+        tool_version="4.24.3",
+        profile_key="evidence-test",
+        profile_version="1.0",
+        schema_artifact_id=artifact_id,
+        schema_sha256=reviewed.source_sha256,
+        schema_version="3.1.0",
+        seed=1,
+        stop_reason="completed",
+        running_time_seconds=1.5,
+        complete=True,
+        expected_operation_count=1,
+        observed_operation_count=1,
+        case_count=1,
+        failure_count=1,
+        missing_operations=(),
+        operations=(SchemathesisOperationEvidence(
+            operation="GET /items",
+            method="GET",
+            path="/items",
+            status="failure",
+            case_count=1,
+            failure_count=1,
+            response_statuses=(500,),
+            failures=(failure,),
+        ),),
+    )
+    context = ReviewedSchemathesisReportContext(
+        schema=reviewed,
+        project_id=project_id,
+        assessment_id=assessment_id,
+        check_id=check_id,
+        profile_key="evidence-test",
+        profile_version="1.0",
+        read_report=lambda: b"private report bytes",
+    )
+    private_dir = Path("/tmp/private-http-runs/run-schemathesis-evidence")
+    execution = ReviewedSchemathesisExecution(
+        reviewed,
+        private_dir / "schema.json",
+        private_dir / "schemathesis.toml",
+        private_dir / "events.ndjson",
+        context,
+    )
+    monkeypatch.setattr(ReviewedSchemathesisReportContext, "parse", lambda _self: report)
+    observed_at = "2026-08-08T12:01:00+00:00"
+    with db_connect() as conn:
+        first = persist_reviewed_schemathesis_report(
+            conn, session_id, "", run_id, observed_at, context,
+        )
+        second = persist_reviewed_schemathesis_report(
+            conn, session_id, "", run_id, observed_at, context,
+        )
+        finalized_findings: list[dict[str, object]] = []
+        finalized = persist_schemathesis_evidence_for_finalize(
+            conn,
+            session_id,
+            "",
+            run_id,
+            observed_at,
+            {"project_id": project_id},
+            finalized_findings,
+            RunCompletionPolicy(schemathesis_execution=execution),
+        )
+        operation = conn.execute(
+            "SELECT response_statuses_json, failure_examples_json "
+            "FROM schemathesis_operation_evidence WHERE report_id = ?",
+            (first["report_id"],),
+        ).fetchone()
+        finding = conn.execute(
+            "SELECT id, origin, validation_method, cwe_ids_json, raw_line "
+            "FROM findings WHERE session_id = ? AND tool_root = 'schemathesis'",
+            (session_id,),
+        ).fetchone()
+        evidence_links = conn.execute(
+            "SELECT evidence_type, evidence_id FROM finding_evidence_links "
+            "WHERE finding_id = ? ORDER BY evidence_type",
+            (finding["id"],),
+        ).fetchall()
+        facts = load_run_evidence_facts(conn, run_id)
+        coverage = reconcile_run_evidence_on_conn(conn, run_id)
+        conn.execute(
+            "UPDATE schemathesis_run_evidence SET failure_count = 0, "
+            "expected_operation_count = 2, missing_operations_json = ? WHERE id = ?",
+            (json.dumps(["HEAD /health"]), first["report_id"]),
+        )
+        conn.execute(
+            "UPDATE schemathesis_operation_evidence SET status = 'success', "
+            "failure_count = 0, failure_examples_json = '[]' WHERE report_id = ?",
+            (first["report_id"],),
+        )
+        incomplete_clean_facts = load_run_evidence_facts(conn, run_id)
+        conn.execute(
+            "UPDATE run_file_artifacts SET content_sha256 = ? WHERE id = ?",
+            ("0" * 64, artifact_id),
+        )
+        with pytest.raises(SchemathesisEvidenceError) as drift:
+            persist_reviewed_schemathesis_report(
+                conn, session_id, "", run_id, observed_at, context,
+            )
+        conn.commit()
+
+    assert first["created_now"] is True
+    assert first["operation_count"] == first["finding_count"] == 1
+    assert second["created_now"] is False
+    assert second["finding_created_count"] == 0
+    assert finalized is not None
+    assert finalized["operation_count"] == finalized["finding_count"] == 1
+    assert [item["id"] for item in finalized_findings] == [finding["id"]]
+    assert json.loads(operation["response_statuses_json"]) == [500]
+    safe_examples = json.loads(operation["failure_examples_json"])
+    assert safe_examples == [{
+        "fingerprint": "f" * 64,
+        "check_name": "response_schema_conformance",
+        "failure_type": "JsonSchemaError",
+        "title": "Response schema mismatch",
+        "severity": "medium",
+        "response_status": 500,
+        "parameter_names": ["item_id"],
+        "body_media_type": "application/json",
+        "example_digest": "e" * 64,
+        "message_digest": "m" * 64,
+    }]
+    assert finding["origin"] == "run"
+    assert finding["validation_method"] == "active_confirmation"
+    assert json.loads(finding["cwe_ids_json"]) == ["CWE-20"]
+    assert "private report bytes" not in finding["raw_line"]
+    assert [(row["evidence_type"], row["evidence_id"]) for row in evidence_links] == [
+        ("assessment_check", check_id),
+        ("run", run_id),
+    ]
+    assert facts is not None
+    assert facts.structured_output_kinds >= {"api_operations", "findings"}
+    assert facts.target_identities == (EvidenceIdentity("url", target),)
+    assert coverage["evidence_linked"] == 1
+    assert _check_row(assessment_id)["state"] == "needs_review"
+    assert incomplete_clean_facts is not None
+    assert incomplete_clean_facts.target_identities == ()
+    assert "api_operations" in incomplete_clean_facts.structured_output_kinds
+    assert drift.value.code == "contract_changed"
 
 
 def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(

@@ -541,6 +541,8 @@ def test_archived_cycle_deletion_previews_owned_rows_and_preserves_sources(
     assert active_preview["will_delete"]["evidence_links_by_type"] == {
         "atlas_entity": 1,
     }
+    assert active_preview["will_delete"]["schemathesis_reports"] == 0
+    assert active_preview["will_delete"]["schemathesis_operations"] == 0
     with pytest.raises(AssessmentConflict, match="only archived"):
         delete_assessment_cycle(session_id, project_id, assessment_id)
 

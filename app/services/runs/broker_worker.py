@@ -345,6 +345,13 @@ def brokered_real_run_worker(
                 "exit_code": exit_code,
                 "completion_policy": completion_policy.name if completion_policy else "",
             })
+        finalize_kwargs = {
+            "workspace_artifacts": workspace_artifacts,
+            "owner_tab_id": owner_tab_id,
+            "link_project_id": link_project_id,
+        }
+        if completion_policy is not None:
+            finalize_kwargs["completion_policy"] = completion_policy
         finalize_info = finalize_completed_run_fn(
             run_id,
             session_id,
@@ -354,9 +361,7 @@ def brokered_real_run_worker(
             run_started,
             exit_code,
             capture,
-            workspace_artifacts=workspace_artifacts,
-            owner_tab_id=owner_tab_id,
-            link_project_id=link_project_id,
+            **finalize_kwargs,
         )
         if run_finalized_hook:
             run_finalized_hook(run_id, finalize_info)

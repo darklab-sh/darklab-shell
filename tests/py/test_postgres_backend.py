@@ -495,6 +495,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0065",
         "0066",
         "0067",
+        "0068",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -598,6 +599,17 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'enabled',
                 'created_at'
             ))
+            OR (table_name = 'schemathesis_run_evidence' AND column_name IN (
+                'running_time_seconds',
+                'missing_operations_json',
+                'observed_at',
+                'created_at'
+            ))
+            OR (table_name = 'schemathesis_operation_evidence' AND column_name IN (
+                'response_statuses_json',
+                'failure_examples_json',
+                'created_at'
+            ))
             OR (table_name = 'findings' AND column_name IN (
                 'origin',
                 'validation_method',
@@ -652,6 +664,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "project_assessment_checks",
         "project_assessment_evidence",
         "project_http_profiles",
+        "schemathesis_operation_evidence",
+        "schemathesis_run_evidence",
         "finding_evidence_links",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
@@ -712,6 +726,13 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("project_http_profiles", "file_refs_json", "jsonb"),
         ("project_http_profiles", "enabled", "boolean"),
         ("project_http_profiles", "created_at", "timestamp with time zone"),
+        ("schemathesis_run_evidence", "running_time_seconds", "double precision"),
+        ("schemathesis_run_evidence", "missing_operations_json", "jsonb"),
+        ("schemathesis_run_evidence", "observed_at", "timestamp with time zone"),
+        ("schemathesis_run_evidence", "created_at", "timestamp with time zone"),
+        ("schemathesis_operation_evidence", "response_statuses_json", "jsonb"),
+        ("schemathesis_operation_evidence", "failure_examples_json", "jsonb"),
+        ("schemathesis_operation_evidence", "created_at", "timestamp with time zone"),
         ("findings", "origin", "text"),
         ("findings", "validation_method", "text"),
         ("findings", "summary", "text"),
@@ -819,6 +840,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             'project_assessment_checks',
             'project_assessment_evidence',
             'project_http_profiles',
+            'schemathesis_operation_evidence',
+            'schemathesis_run_evidence',
             'finding_evidence_links',
             'finding_version_inference_sources'
         )
@@ -840,6 +863,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_project_http_profiles_project_enabled",
         "idx_project_http_profiles_personal_updated",
         "idx_project_http_profiles_team_updated",
+        "idx_schemathesis_run_evidence_owner_project",
+        "idx_schemathesis_run_evidence_check_observed",
+        "idx_schemathesis_run_evidence_run",
+        "idx_schemathesis_operation_evidence_report",
         "idx_finding_evidence_owner_finding",
         "idx_finding_evidence_project",
         "idx_finding_evidence_source",
@@ -1457,6 +1484,26 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
         "'domain', 'lifecycle.example', 'lifecycle-hash', ?, ?)",
         (timestamp, timestamp),
     )
+    conn.execute(
+        "INSERT INTO schemathesis_run_evidence "
+        "(id, session_id, project_id, assessment_id, check_id, run_id, "
+        "schema_artifact_id, schema_sha256, schema_version, profile_key, profile_version, "
+        "tool_version, seed, stop_reason, running_time_seconds, expected_operation_count, "
+        "observed_operation_count, case_count, failure_count, missing_operations_json, "
+        "observed_at, created_at) VALUES ('str-lifecycle', 'assessment-lifecycle', "
+        "'prj-assessment-lifecycle', 'asm-lifecycle', 'chk-lifecycle', 'run-lifecycle', "
+        "'rfa_0123456789abcdef', ?, '3.1.0', 'api', '1.0', '4.24.3', 1, 'completed', "
+        "2.5, 1, 1, 2, 1, ?, ?, ?)",
+        ("a" * 64, Jsonb([]), timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO schemathesis_operation_evidence "
+        "(id, report_id, operation_key, method, path, status, case_count, failure_count, "
+        "response_statuses_json, failure_examples_json, created_at) VALUES "
+        "('sop-lifecycle', 'str-lifecycle', 'GET /items', 'GET', '/items', 'failure', "
+        "2, 1, ?, ?, ?)",
+        (Jsonb([500]), Jsonb([]), timestamp),
+    )
 
     completed = update_assessment_cycle(
         "assessment-lifecycle",
@@ -1481,6 +1528,8 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
     )
     assert preview["can_delete"] is True
     assert preview["will_delete"]["checks"] == 1
+    assert preview["will_delete"]["schemathesis_reports"] == 1
+    assert preview["will_delete"]["schemathesis_operations"] == 1
     deleted = delete_assessment_cycle(
         "assessment-lifecycle",
         "prj-assessment-lifecycle",
@@ -1491,6 +1540,8 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
     assert conn.execute(
         "SELECT id FROM project_assessments WHERE id = 'asm-lifecycle'"
     ).fetchone() is None
+    assert conn.execute("SELECT id FROM schemathesis_run_evidence").fetchone() is None
+    assert conn.execute("SELECT id FROM schemathesis_operation_evidence").fetchone() is None
     assert conn.execute(
         "SELECT id FROM projects WHERE id = 'prj-assessment-lifecycle'"
     ).fetchone() is not None

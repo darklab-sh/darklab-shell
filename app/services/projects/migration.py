@@ -182,6 +182,11 @@ def migrate_project_workspace_session(
         "WHERE session_id = ? AND team_id = ''",
         (to_session_id, from_session_id),
     )
+    schemathesis_result = conn.execute(
+        "UPDATE schemathesis_run_evidence SET session_id = ? "
+        "WHERE session_id = ? AND team_id = ''",
+        (to_session_id, from_session_id),
+    )
     assessment_actor_result = conn.execute(
         "UPDATE project_assessments SET "
         "created_by_session_id = CASE WHEN created_by_session_id = ? THEN ? "
@@ -257,6 +262,7 @@ def migrate_project_workspace_session(
         "skipped_workspace_file_notes": source_workspace_file_notes - migrated_workspace_file_notes,
         "migrated_evidence_packages": package_result.rowcount,
         "migrated_project_assessments": assessment_result.rowcount,
+        "migrated_schemathesis_run_evidence": schemathesis_result.rowcount,
         "migrated_project_assessment_actors": assessment_actor_result.rowcount,
         "migrated_project_http_profiles": http_profile_result.rowcount,
         "migrated_project_assessment_check_actors": check_actor_result.rowcount,

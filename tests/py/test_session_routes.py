@@ -706,6 +706,7 @@ class TestSessionMigrate:
         assert data["migrated_entity_notes"] == 1
         assert data["migrated_evidence_packages"] == 1
         assert data["migrated_project_assessments"] == 1
+        assert data["migrated_schemathesis_run_evidence"] == 0
         assert data["migrated_project_assessment_actors"] == 1
         assert data["migrated_project_assessment_check_actors"] == 1
         assert data["migrated_project_http_profiles"] == 1

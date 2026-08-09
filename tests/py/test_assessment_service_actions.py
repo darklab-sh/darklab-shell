@@ -1238,10 +1238,13 @@ def test_reviewed_schemathesis_execution_replaces_only_help_carrier():
         Path("/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml"),
         Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
         ReviewedSchemathesisReportContext(
-            reviewed,
-            "api",
-            "1.0",
-            lambda: _schemathesis_report_bytes(),
+            schema=reviewed,
+            project_id="prj_api",
+            assessment_id="asm_api",
+            check_id="ach_api",
+            profile_key="api",
+            profile_version="1.0",
+            read_report=lambda: _schemathesis_report_bytes(),
         ),
     )
     prepared = PreparedRealCommand(
@@ -1343,6 +1346,9 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
     report_context = launch_context.reviewed_execution.report_context
     assert type(report_context) is ReviewedSchemathesisReportContext
     assert report_context.schema == reviewed
+    assert report_context.project_id == "prj_api"
+    assert report_context.assessment_id == "asm_api"
+    assert report_context.check_id == "ach_api"
     assert report_context.profile_key == "api"
     assert report_context.profile_version == "1.0"
     assert report_context.read_report() == b""
@@ -2719,10 +2725,13 @@ def test_reviewed_schemathesis_findings_exit_requires_complete_private_report(ca
     )
     reports = [_schemathesis_report_bytes()]
     report_context = ReviewedSchemathesisReportContext(
-        reviewed,
-        "api",
-        "1.0",
-        lambda: reports[0],
+        schema=reviewed,
+        project_id="prj_api",
+        assessment_id="asm_api",
+        check_id="ach_api",
+        profile_key="api",
+        profile_version="1.0",
+        read_report=lambda: reports[0],
     )
     execution = ReviewedSchemathesisExecution(
         reviewed,
@@ -3132,10 +3141,13 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
         Path("/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml"),
         Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
         ReviewedSchemathesisReportContext(
-            reviewed_schema,
-            "api",
-            "1.0",
-            lambda: b"",
+            schema=reviewed_schema,
+            project_id="prj_api",
+            assessment_id="asm_api",
+            check_id="ach_api",
+            profile_key="api",
+            profile_version="1.0",
+            read_report=lambda: b"",
         ),
     )
     start_brokered_run(

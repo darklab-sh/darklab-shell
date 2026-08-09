@@ -16,10 +16,10 @@ from services.assessments.contracts import (
     AssessmentError,
     AssessmentNotFound,
 )
+from services.assessments.deletion_preview import assessment_deletion_preview
 from services.assessments.reconciliation import reconcile_assessment_findings_on_conn
 from services.assessments.reconciliation_cleanup import (
     delete_assessment_reconciliation_on_conn,
-    reconciliation_deletion_counts,
 )
 from services.assessments.serialization import row_to_assessment
 from services.projects.scope import shared_owner_where
@@ -236,64 +236,6 @@ def update_assessment_cycle(
         return updated
 
 
-def _deletion_preview(conn: Any, row: Any) -> dict[str, Any]:
-    assessment_id = str(row["id"] or "")
-    check_row = conn.execute(
-        "SELECT COUNT(*) AS count FROM project_assessment_checks "
-        "WHERE assessment_id = ?",
-        (assessment_id,),
-    ).fetchone()
-    evidence_rows = conn.execute(
-        "SELECT evidence_type, source_state, COUNT(*) AS count "
-        "FROM project_assessment_evidence WHERE assessment_id = ? "
-        "GROUP BY evidence_type, source_state "
-        "ORDER BY evidence_type ASC, source_state ASC",
-        (assessment_id,),
-    ).fetchall()
-    by_type: dict[str, int] = {}
-    available = 0
-    unavailable = 0
-    for evidence in evidence_rows:
-        evidence_type = str(evidence["evidence_type"] or "")
-        count = int(evidence["count"] or 0)
-        by_type[evidence_type] = by_type.get(evidence_type, 0) + count
-        if str(evidence["source_state"] or "") == "available":
-            available += count
-        else:
-            unavailable += count
-    evidence_count = available + unavailable
-    reconciliation_counts = reconciliation_deletion_counts(conn, assessment_id)
-    status = str(row["status"] or "")
-    serialized = row_to_assessment(row) or {}
-    return {
-        "assessment": {
-            key: serialized.get(key)
-            for key in (
-                "id",
-                "project_id",
-                "owner_kind",
-                "team_id",
-                "title",
-                "profile_key",
-                "profile_version",
-                "status",
-            )
-        },
-        "can_delete": status == "archived",
-        "requires_archived": True,
-        "will_delete": {
-            "assessments": 1,
-            "checks": int(check_row["count"] or 0) if check_row else 0,
-            "evidence_links": evidence_count,
-            "available_evidence_links": available,
-            "unavailable_evidence_links": unavailable,
-            "evidence_links_by_type": by_type,
-            **reconciliation_counts,
-        },
-        "source_records_deleted": False,
-    }
-
-
 def preview_assessment_deletion(
     session_id: str,
     project_id: str,
@@ -316,7 +258,7 @@ def preview_assessment_deletion(
             normalized_assessment_id,
             team_id=normalized_team_id,
         )
-        return _deletion_preview(active_conn, row)
+        return assessment_deletion_preview(active_conn, row)
 
     if conn is not None:
         return _preview(conn)
@@ -350,8 +292,17 @@ def delete_assessment_cycle(
             raise AssessmentConflict("archived projects are read-only")
         if str(row["status"] or "") != "archived":
             raise AssessmentConflict("only archived assessments can be deleted")
-        preview = _deletion_preview(active_conn, row)
+        preview = assessment_deletion_preview(active_conn, row)
         delete_assessment_reconciliation_on_conn(active_conn, normalized_assessment_id)
+        active_conn.execute(
+            "DELETE FROM schemathesis_operation_evidence WHERE report_id IN "
+            "(SELECT id FROM schemathesis_run_evidence WHERE assessment_id = ?)",
+            (normalized_assessment_id,),
+        )
+        active_conn.execute(
+            "DELETE FROM schemathesis_run_evidence WHERE assessment_id = ?",
+            (normalized_assessment_id,),
+        )
         active_conn.execute(
             "DELETE FROM project_assessment_evidence WHERE assessment_id = ?",
             (normalized_assessment_id,),

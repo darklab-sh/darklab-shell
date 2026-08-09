@@ -1027,6 +1027,14 @@
             "minimum": 0,
             "type": "integer"
           },
+          "schemathesis_operations": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schemathesis_reports": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "unavailable_evidence_links": {
             "minimum": 0,
             "type": "integer"
@@ -1041,7 +1049,9 @@
           "evidence_links_by_type",
           "finding_check_comparisons",
           "finding_deltas",
-          "dependent_comparisons_invalidated"
+          "dependent_comparisons_invalidated",
+          "schemathesis_reports",
+          "schemathesis_operations"
         ],
         "type": "object"
       },

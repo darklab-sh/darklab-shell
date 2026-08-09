@@ -34,9 +34,11 @@ from services.projects.links import (
 from services.projects.targets import record_project_target_discoveries
 from services.pty.transcript import shape_completed_pty_entries
 from services.runs.kinds import RUN_KIND_EXTERNAL, run_kind_for_cmd_type
+from services.runs.completion_policy_contracts import RunCompletionPolicy
 from services.runs.finalization_artifacts import save_run_file_artifacts_for_finalize
 from services.runs.finalization_assessments import reconcile_assessment_evidence_for_finalize
 from services.runs.finalization_dalfox_xss import materialize_dalfox_xss_findings_for_finalize
+from services.runs.finalization_schemathesis import persist_schemathesis_evidence_for_finalize
 from services.runs.finalization_version_inference import (
     materialize_nmap_inferences_for_finalize,
     materialize_run_entities_for_finalize,
@@ -93,6 +95,7 @@ class RunFinalizeRecords:
     scan_observation_count: int = 0
     version_inference_summary: dict | None = None
     auto_promote_summary: dict | None = None
+    schemathesis_summary: dict | None = None
 
 
 def run_output_capture(run_id: str, cfg: Mapping[str, Any] | None = None) -> RunOutputCapture:
@@ -638,6 +641,12 @@ def update_run_finalize_summary(
         "project_auto_promote_promoted_count": int(records.auto_promote_summary.get("promoted_count") or 0)
         if isinstance(records.auto_promote_summary, dict) else 0,
         "project_auto_promote_project_ids": auto_promote_project_ids,
+        "schemathesis_operation_count": int(
+            (records.schemathesis_summary or {}).get("operation_count") or 0
+        ),
+        "schemathesis_failure_count": int(
+            (records.schemathesis_summary or {}).get("failure_count") or 0
+        ),
         **structured_output_summary_fields(persisted_entries),
     })
 
@@ -658,6 +667,7 @@ def save_completed_run(
     run_kind=RUN_KIND_EXTERNAL,
     owner_tab_id="",
     finalize_summary=None,
+    completion_policy: RunCompletionPolicy | None = None,
     cfg: Mapping[str, Any] | None = None,
     load_full_output_entries_fn: Callable = load_full_output_entries,
     workspace_artifacts_with_sizes_fn: Callable = workspace_artifacts_with_sizes,
@@ -799,6 +809,10 @@ def save_completed_run(
                 records.recorded_entities,
                 link_active_project_run_entities_fn=link_active_project_run_entities_fn,
             )
+            records.schemathesis_summary = persist_schemathesis_evidence_for_finalize(
+                conn, session_id, team_id, run_id, finished_iso,
+                records.active_project_link, records.recorded_findings, completion_policy,
+            )
             materialize_dalfox_xss_findings_for_finalize(
                 conn, session_id, team_id, run_id, command, exit_code,
                 output_state.persisted_entries, records.active_project_link,
@@ -844,6 +858,7 @@ def finalize_completed_run(
     workspace_artifacts=None,
     owner_tab_id="",
     link_project_id: str | None = "",
+    completion_policy: RunCompletionPolicy | None = None,
     cfg: Mapping[str, Any] | None = None,
     save_completed_run_fn: Callable = save_completed_run,
 ):
@@ -851,16 +866,20 @@ def finalize_completed_run(
     finished = datetime.now(timezone.utc)
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
     finalize_summary = {}
+    save_kwargs = {
+        "workspace_artifacts": workspace_artifacts,
+        "link_active_project": cmd_type == "real" and link_project_id is not None,
+        "link_project_id": link_project_id or "",
+        "run_kind": run_kind_for_cmd_type(cmd_type),
+        "owner_tab_id": owner_tab_id,
+        "finalize_summary": finalize_summary,
+        "cfg": active_cfg,
+    }
+    if completion_policy is not None:
+        save_kwargs["completion_policy"] = completion_policy
     active_project_link = save_completed_run_fn(
         run_id, session_id, team_id, original_command, run_started,
-        finished.isoformat(), exit_code, capture,
-        workspace_artifacts=workspace_artifacts,
-        link_active_project=cmd_type == "real" and link_project_id is not None,
-        link_project_id=link_project_id or "",
-        run_kind=run_kind_for_cmd_type(cmd_type),
-        owner_tab_id=owner_tab_id,
-        finalize_summary=finalize_summary,
-        cfg=active_cfg,
+        finished.isoformat(), exit_code, capture, **save_kwargs,
     )
     persisted = bool(finalize_summary.get("persisted"))
     finalize_status = "ok" if persisted else "degraded"

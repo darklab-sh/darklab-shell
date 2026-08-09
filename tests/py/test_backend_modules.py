@@ -6638,6 +6638,8 @@ class TestPostgresMigrations:
         "project_assessment_checks",
         "project_assessment_evidence",
         "project_http_profiles",
+        "schemathesis_operation_evidence",
+        "schemathesis_run_evidence",
     )
 
     @staticmethod
@@ -6760,6 +6762,7 @@ class TestPostgresMigrations:
             "0065",
             "0066",
             "0067",
+            "0068",
         ]
         for table_name in (
             "runs",
@@ -7019,12 +7022,37 @@ class TestPostgresMigrations:
             ).fetchone()
             assert tuple(tombstone) == ("run", "run_deleted", now, "source_deleted")
 
+            report_sql = (
+                "INSERT INTO schemathesis_run_evidence "
+                "(id, session_id, project_id, assessment_id, check_id, run_id, "
+                "schema_artifact_id, schema_sha256, schema_version, profile_key, "
+                "profile_version, tool_version, seed, stop_reason, running_time_seconds, "
+                "expected_operation_count, observed_operation_count, case_count, failure_count, "
+                "observed_at, created_at) VALUES (?, 'session-a', 'prj_assessment', "
+                "'asm_one', 'chk_one', 'run_deleted', 'rfa_0123456789abcdef', ?, '3.1.0', "
+                "'api', '1.0', '4.24.3', 1, 'completed', 2.5, 1, 1, 2, 1, ?, ?)"
+            )
+            conn.execute(report_sql, ("str_one", "a" * 64, now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(report_sql, ("str_duplicate", "a" * 64, now, now))
+            operation_sql = (
+                "INSERT INTO schemathesis_operation_evidence "
+                "(id, report_id, operation_key, method, path, status, case_count, "
+                "failure_count, created_at) VALUES (?, 'str_one', 'GET /items', ?, '/items', "
+                "'failure', 2, 1, ?)"
+            )
+            conn.execute(operation_sql, ("sop_one", "GET", now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(operation_sql, ("sop_invalid", "POST", now))
+
             from services.projects.crud import delete_project
 
             assert delete_project("session-a", "prj_assessment", conn=conn) is True
             assert conn.execute("SELECT COUNT(*) FROM project_assessments").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_checks").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_evidence").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM schemathesis_run_evidence").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM schemathesis_operation_evidence").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM finding_evidence_links").fetchone()[0] == 0
             conn.close()
 
@@ -7067,12 +7095,27 @@ class TestPostgresMigrations:
             "enabled",
             "revision",
         }.issubset(inventory.tables["project_http_profiles"].columns)
+        assert {
+            "assessment_id",
+            "check_id",
+            "run_id",
+            "schema_sha256",
+            "missing_operations_json",
+        }.issubset(inventory.tables["schemathesis_run_evidence"].columns)
+        assert {
+            "report_id",
+            "operation_key",
+            "response_statuses_json",
+            "failure_examples_json",
+        }.issubset(inventory.tables["schemathesis_operation_evidence"].columns)
         assert "idx_runs_session_started" in inventory.indexes
         assert "idx_entities_host_entity" in inventory.indexes
         assert "idx_project_assessments_active_project" in inventory.indexes
         assert "idx_project_assessment_evidence_source" in inventory.indexes
         assert "idx_project_http_profiles_project_name" in inventory.indexes
         assert "idx_project_http_profiles_project_enabled" in inventory.indexes
+        assert "idx_schemathesis_run_evidence_run" in inventory.indexes
+        assert "idx_schemathesis_operation_evidence_report" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad", "runs_ai", "runs_ad"}.issubset(inventory.triggers)
         assert set(SQLITE_BACKEND_ARTIFACTS).issubset(set(inventory.fts_artifacts))
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in inventory.tables["run_output_summary_status"].constraints
@@ -7105,12 +7148,27 @@ class TestPostgresMigrations:
             "enabled",
             "revision",
         }.issubset(inventory.tables["project_http_profiles"].columns)
+        assert {
+            "assessment_id",
+            "check_id",
+            "run_id",
+            "schema_sha256",
+            "missing_operations_json",
+        }.issubset(inventory.tables["schemathesis_run_evidence"].columns)
+        assert {
+            "report_id",
+            "operation_key",
+            "response_statuses_json",
+            "failure_examples_json",
+        }.issubset(inventory.tables["schemathesis_operation_evidence"].columns)
         assert "idx_runs_session_started" in inventory.indexes
         assert "idx_entities_host_entity" in inventory.indexes
         assert "idx_project_assessments_active_project" in inventory.indexes
         assert "idx_project_assessment_evidence_source" in inventory.indexes
         assert "idx_project_http_profiles_project_name" in inventory.indexes
         assert "idx_project_http_profiles_project_enabled" in inventory.indexes
+        assert "idx_schemathesis_run_evidence_run" in inventory.indexes
+        assert "idx_schemathesis_operation_evidence_report" in inventory.indexes
         assert "idx_runs_command_trgm" in inventory.indexes
         assert "idx_entities_canonical_value_trgm" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad"}.issubset(inventory.triggers)
@@ -7137,6 +7195,8 @@ class TestPostgresMigrations:
         assert "idx_project_assessment_evidence_source" in manifest.indexes
         assert "idx_project_http_profiles_project_name" in manifest.indexes
         assert "idx_project_http_profiles_project_enabled" in manifest.indexes
+        assert "idx_schemathesis_run_evidence_run" in manifest.indexes
+        assert "idx_schemathesis_operation_evidence_report" in manifest.indexes
         assert "idx_runs_command_trgm" not in manifest.indexes
         assert "findings_ad" in manifest.triggers
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in manifest.constraints["run_output_summary_status"]
@@ -7709,7 +7769,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0067",
+            "0069",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7761,7 +7821,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0067"
+        assert rows[-1]["version"] == "0068"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8219,6 +8279,7 @@ class TestPostgresMigrations:
             "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
             "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056", "0057", "0058",
             "0059", "0060", "0061", "0062", "0063", "0064", "0065", "0066", "0067",
+            "0068",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8250,7 +8311,8 @@ class TestPostgresMigrations:
         assert "0065" in conn.applied_versions
         assert "0066" in conn.applied_versions
         assert "0067" in conn.applied_versions
-        assert conn.commit_count == 29
+        assert "0068" in conn.applied_versions
+        assert conn.commit_count == 30
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8403,7 +8465,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0067",
+            "0069",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8428,9 +8490,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0067"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0069"]
         assert table_exists is not None
-        assert "0067" in versions
+        assert "0069" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -15545,6 +15607,7 @@ class TestDataAccessLayerServiceCoverage:
         assert counts["migrated_finding_evidence_links"] == 1
         assert counts["migrated_finding_triage_details"] == 1
         assert counts["migrated_project_http_profiles"] == 1
+        assert counts["migrated_schemathesis_run_evidence"] == 0
         assert counts["migrated_notification_channels"] == 1
         assert counts["migrated_recent_values"] == 1
         assert counts["migrated_secrets"] == 1

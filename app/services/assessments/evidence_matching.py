@@ -13,6 +13,7 @@ from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from core.output_targets import command_root, extract_target
 from services.assessments.command_modes import assessment_command_mode
+from services.assessments.schemathesis_evidence_matching import merge_schemathesis_run_evidence_facts
 from services.commands.registry import command_project_target_inputs
 from services.intel.canonical import (
     CanonicalizationError,
@@ -22,7 +23,6 @@ from services.intel.canonical import (
     canonical_url,
     parse_canonical_port,
 )
-
 
 _DNS_ROOTS = frozenset({"dig", "dnsrecon", "dnsx"})
 _HTTP_ROOTS = frozenset({"curl", "dalfox", "ffuf", "gobuster", "httpx", "katana", "nuclei", "sqlmap"})
@@ -73,9 +73,7 @@ def canonical_evidence_identity(value: object, value_type: object = "target") ->
     return _canonical_identity(value, value_type)
 
 
-def _command_identities(
-    command: str, command_target_inputs_fn: Callable[[str], list[dict[str, str]]]
-) -> set[EvidenceIdentity]:
+def _command_identities(command: str, command_target_inputs_fn: Callable[[str], list[dict[str, str]]]) -> set[EvidenceIdentity]:
     identities: set[EvidenceIdentity] = set()
     try:
         inputs = command_target_inputs_fn(command)
@@ -149,8 +147,7 @@ def _workflow_actions(conn: Any, run_id: str) -> set[str]:
     }
 
 
-def load_run_evidence_facts(
-    conn: Any, run_id: str, *,
+def load_run_evidence_facts(conn: Any, run_id: str, *,
     command_target_inputs_fn: Callable[[str], list[dict[str, str]]] = command_project_target_inputs,
 ) -> RunEvidenceFacts | None:
     """Load bounded facts used to test one saved run against profile rules."""
@@ -166,6 +163,7 @@ def load_run_evidence_facts(
     entity_identities, structured_kinds = _entity_facts(conn, str(row["id"]))
     identities.update(entity_identities)
     identities.update(_scan_observation_identities(conn, str(row["id"])))
+    merge_schemathesis_run_evidence_facts(conn, str(row["id"]), identities, structured_kinds, _canonical_identity)
     finding_row = conn.execute(
         "SELECT COUNT(*) AS count FROM findings WHERE run_id = ?",
         (str(row["id"]),),

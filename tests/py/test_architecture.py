@@ -285,6 +285,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/contracts.py", 45, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/cleanup.py", 42, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/coverage.py", 225, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/deletion_preview.py", 70, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/evidence_matching.py", 346, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/evidence_sources.py", 330, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/finding_worklist.py", 165, "split-package-ratchet"),
@@ -394,6 +395,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/finalization_assessments.py", 77, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/runs/finalization_dalfox_xss.py", 75, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/runs/finalization_schemathesis.py", 116, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/runs/finalization_summaries.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_takeover.py", 70, "split-package-ratchet"),
@@ -542,6 +546,19 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/services/assessments/schemathesis_execution.py", 47, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_evidence_matching.py", 67, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_evidence_persistence.py",
+        318,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_finding_persistence.py",
+        204,
+        "split-package-ratchet",
     ),
     ModuleSizeBudget(
         "app/services/assessments/schemathesis_launch.py", 122, "split-package-ratchet"

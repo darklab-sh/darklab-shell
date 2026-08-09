@@ -9,5 +9,5 @@ SHARED_TABLES: tuple[str, ...] = (
     "project_assessment_evidence",
     "project_assessment_finding_deltas",
     "project_assessments",
-    "project_http_profiles",
+    "project_http_profiles", "schemathesis_operation_evidence", "schemathesis_run_evidence",
 )

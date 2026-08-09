@@ -8,9 +8,7 @@ from typing import Any
 
 from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
 from services.assessments.schemathesis_material import ProtectedSchemathesisMaterial
-from services.assessments.schemathesis_report_context import (
-    ReviewedSchemathesisReportContext,
-)
+from services.assessments.schemathesis_report_context import ReviewedSchemathesisReportContext
 
 
 def reviewed_schemathesis_execution(
@@ -19,16 +17,14 @@ def reviewed_schemathesis_execution(
 ) -> ReviewedSchemathesisExecution:
     """Bind private paths and report provenance to the reviewed plan snapshot."""
     report_context = ReviewedSchemathesisReportContext(
-        material.schema,
-        str(plan.get("profile_key") or ""),
-        str(plan.get("profile_version") or ""),
-        material.read_report,
+        schema=material.schema,
+        project_id=str(plan.get("project_id") or ""), assessment_id=str(plan.get("assessment_id") or ""),
+        check_id=str(plan.get("check_id") or ""), profile_key=str(plan.get("profile_key") or ""),
+        profile_version=str(plan.get("profile_version") or ""), read_report=material.read_report,
     )
     return ReviewedSchemathesisExecution(
-        material.schema,
-        material.schema_path,
-        material.config_path,
-        material.report_path,
+        material.schema, material.schema_path,
+        material.config_path, material.report_path,
         report_context,
     )
 

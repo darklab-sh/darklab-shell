@@ -1452,6 +1452,8 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         "finding_check_comparisons",
         "finding_deltas",
         "dependent_comparisons_invalidated",
+        "schemathesis_reports",
+        "schemathesis_operations",
     }.issubset(preview["will_delete"])
     assert deleted_response.status_code == 200
     assert json.loads(deleted_response.data)["deleted"]["source_records_deleted"] is False
@@ -6458,6 +6460,8 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "finding_check_comparisons",
         "finding_deltas",
         "dependent_comparisons_invalidated",
+        "schemathesis_reports",
+        "schemathesis_operations",
     }.issubset(schemas["AssessmentDeletionCounts"]["required"])
     assessment_contract = json.dumps({
         key: value

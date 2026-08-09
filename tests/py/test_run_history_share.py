@@ -855,6 +855,7 @@ class TestRunStreaming:
         capture.finalize()
 
         assert finalize.call_args.args[6] == 0
+        assert finalize.call_args.kwargs["completion_policy"] == RunCompletionPolicy(context)
         assert published[-1][1] == "exit"
         assert published[-1][2]["code"] == 0
         assert published[-1][2]["tool_exit_code"] == 1

@@ -78,6 +78,7 @@ from . import (
     v0065_osv_external_query_scope,
     v0066_osv_package_correlation_index,
     v0067_atlas_import_evidence,
+    v0068_schemathesis_evidence,
 )
 
 _ = baseline
@@ -150,4 +151,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0065_osv_external_query_scope.MIGRATION,
     v0066_osv_package_correlation_index.MIGRATION,
     v0067_atlas_import_evidence.MIGRATION,
+    v0068_schemathesis_evidence.MIGRATION,
 )
