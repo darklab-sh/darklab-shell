@@ -9,8 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import config as app_config
 from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES, nuclei_output_metadata
-from services.assessments import action_plans
+from services.assessments import action_plan_nuclei
 from services.assessments.action_plans import build_assessment_action_plan
 from services.assessments.service_actions import service_actions, service_evidence_state
 from services.assessments.command_plans import command_plan
@@ -394,7 +395,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     )
     assert provenance["template_snapshot"] == template_snapshot.public()
     monkeypatch.setattr(
-        action_plans, "managed_nuclei_template_snapshot", lambda: template_snapshot,
+        action_plan_nuclei, "managed_nuclei_template_snapshot", lambda: template_snapshot,
     )
     monkeypatch.setattr(
         nuclei_takeover_launch, "managed_nuclei_template_snapshot", lambda: template_snapshot,
@@ -456,7 +457,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         "policy_level": "standard",
         "recommended_action_key": "command:nuclei",
         "profile_key": "web",
-        "profile_version": "1.4",
+        "profile_version": "1.5",
         "profile_snapshot": json.dumps({"checks": [{
             "key": "vulnerability_templates",
             "policy_level": "standard",
@@ -490,7 +491,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         plan["display_command"]
     )
     monkeypatch.setattr(
-        action_plans,
+        action_plan_nuclei,
         "managed_nuclei_template_snapshot",
         lambda: NucleiTemplateCacheSnapshot("missing"),
     )
@@ -498,7 +499,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     assert unavailable["launchable"] is False
     assert "nuclei -update-templates" in unavailable["unavailable_reason"]
     monkeypatch.setattr(
-        action_plans, "managed_nuclei_template_snapshot", lambda: template_snapshot,
+        action_plan_nuclei, "managed_nuclei_template_snapshot", lambda: template_snapshot,
     )
     launch_context = assessment_run_launch_context(plan)
     assert launch_context.trusted_execution_args == ()
@@ -514,6 +515,43 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     assert line_metadata["template_provenance"]["template_snapshot"] == (
         template_snapshot.public()
     )
+    intrusive_row = {
+        **row,
+        "check_id": "ach_nuclei_intrusive",
+        "check_key": "intrusive_template_validation",
+        "policy_level": "intrusive",
+        "profile_snapshot": json.dumps({"checks": [{
+            "key": "intrusive_template_validation",
+            "policy_level": "intrusive",
+            "recommended_action": "command:nuclei",
+        }]}),
+    }
+    disabled = build_assessment_action_plan(
+        intrusive_row, target, "prj_nuclei",
+    )
+    assert disabled["launchable"] is False
+    assert "operator opt-in" in disabled["unavailable_reason"]
+    monkeypatch.setitem(app_config.CFG, "assessment_intrusive_actions_enabled", True)
+    enabled = build_assessment_action_plan(
+        intrusive_row,
+        target,
+        "prj_nuclei",
+        intrusive_actions_enabled=True,
+    )
+    assert enabled["launchable"] is True
+    assert enabled["nuclei_profile"]["key"] == "intrusive"
+    assert "-headless -dast -fuzz-aggression low" in enabled["display_command"]
+    assert assessment_run_launch_context(enabled).output_signal_context == (
+        RunOutputSignalContext(nuclei_template_snapshot=template_snapshot)
+    )
+    monkeypatch.setitem(app_config.CFG, "assessment_intrusive_actions_enabled", False)
+    with pytest.raises(
+        nuclei_takeover_launch.AssessmentActionError,
+        match="profile is no longer available",
+    ) as gated:
+        assessment_run_launch_context(enabled)
+    assert gated.value.code == "nuclei_profile_contract_changed"
+    monkeypatch.setitem(app_config.CFG, "assessment_intrusive_actions_enabled", True)
     monkeypatch.setattr(
         nuclei_takeover_launch,
         "managed_nuclei_template_snapshot",

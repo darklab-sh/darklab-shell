@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import config as app_config
 from core.database_access import get_db_connect
 from services.assessments.action_plans import (
     build_assessment_action_plan,
@@ -65,6 +66,9 @@ def build_recommended_action_plan(
             http_profile=selected_profile,
             http_profile_web_target=profile_target,
             http_profile_unavailable_reason=profile_error,
+            intrusive_actions_enabled=bool(
+                app_config.CFG.get("assessment_intrusive_actions_enabled", False)
+            ),
             dalfox_xss=selections.dalfox_xss,
             schemathesis=selections.schemathesis,
         )

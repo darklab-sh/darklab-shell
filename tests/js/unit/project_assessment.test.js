@@ -19,6 +19,7 @@ vi.mock('../../../app/static/js/features/findings/finding_triage_bridge.js', () 
 }))
 
 import { DarklabProjectAssessment } from '../../../app/static/js/features/projects/project_assessment.js'
+import { launchAssessmentAction } from '../../../app/static/js/features/projects/project_assessment_actions.js'
 
 function apiResponse(payload = {}, { ok = true } = {}) {
   return { ok, json: vi.fn(async () => payload) }
@@ -520,6 +521,49 @@ describe('project assessment controller', () => {
     expect(confirmation.body.note).toContain('no run closes findings automatically')
     expect(ctx.closeProjectWorkspace).toHaveBeenCalledWith({ refocus: false })
     expect(controller.stateFor('prj_1').category).toBe('discovery')
+  })
+
+  it('requires a fresh explicit warning before starting intrusive Nuclei', async () => {
+    const plan = {
+      action: { id: 'nuclei', key: 'command:nuclei', kind: 'command' },
+      target: { entity_id: 'ent_1', type: 'url', value: 'https://example.com' },
+      http_profile: { name: '', credential_use: 'none' },
+      policy_level: 'intrusive',
+      scope: { target_count: 1, fan_out: 1 },
+      bounds: { summary: 'One approved target.', credential_use: 'none' },
+      display_command: 'nuclei -u https://example.com -headless -dast -fuzz-aggression low',
+      launchable: true,
+      plan_digest: 'f'.repeat(64),
+    }
+    const apiFetch = vi.fn(async (_url, options = {}) => (
+      options.method === 'POST'
+        ? apiResponse({ run: { run_id: 'run_intrusive_nuclei' }, plan })
+        : apiResponse({ plan })
+    ))
+    const showConfirm = vi.fn(async options => options.actions.at(-1).id)
+    const attachActiveRunFromMonitor = vi.fn(async () => true)
+    const launched = await launchAssessmentAction(makeContext(apiFetch, {
+      apiFetch,
+      showConfirm,
+      attachActiveRunFromMonitor,
+    }), {
+      projectId: 'prj_1',
+      assessmentId: 'asmt_1',
+      check: { id: 'asmc_intrusive', recommended_action_key: 'command:nuclei' },
+      httpProfiles: [],
+    })
+
+    expect(launched).toBe(true)
+    const confirmation = showConfirm.mock.calls[0][0]
+    expect(confirmation.body.text).toBe('Start intrusive Nuclei profile?')
+    expect(confirmation.body.note).toContain('fresh confirmation')
+    expect(confirmation.body.note).toContain('headless and low-aggression DAST')
+    expect(confirmation.body.note).toContain('denial-of-service templates stay excluded')
+    expect(confirmation.tone).toBe('warning')
+    expect(confirmation.actions.at(-1).label).toBe('Start intrusive scan')
+    expect(attachActiveRunFromMonitor).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run_intrusive_nuclei' }),
+    )
   })
 
   it('chooses reviewed saved parameter evidence before launching XSS validation', async () => {

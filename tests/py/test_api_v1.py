@@ -2299,6 +2299,86 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
     cleanup.assert_called_once_with()
 
 
+def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
+    monkeypatch,
+):
+    from services.assessments import action_plan_nuclei, nuclei_takeover_launch
+    from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+    from services.runs.signal_context import RunOutputSignalContext
+
+    snapshot = NucleiTemplateCacheSnapshot(
+        "ready", "v10.4.3", "sha256:" + ("b" * 64), 11997,
+    )
+    monkeypatch.setattr(
+        action_plan_nuclei, "managed_nuclei_template_snapshot", lambda: snapshot,
+    )
+    monkeypatch.setattr(
+        nuclei_takeover_launch, "managed_nuclei_template_snapshot", lambda: snapshot,
+    )
+    client = get_client()
+    token = _token(client)
+    project = _create_project(client, token, name="Intrusive Nuclei action")
+    _entity_id, _run_id = _seed_assessment_target(token, project["id"])
+    assessment = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(token),
+        json={"profile_key": "web", "title": "Intrusive template review"},
+    ).get_json()
+    check = next(
+        item for item in assessment["checks"]["checks"]
+        if item["check_key"] == "intrusive_template_validation"
+    )
+    action_path = (
+        f"/api/v1/projects/{project['id']}/assessments/"
+        f"{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
+    )
+
+    disabled = client.get(action_path, headers=_headers(token)).get_json()["plan"]
+    assert disabled["launchable"] is False
+    assert "operator opt-in" in disabled["unavailable_reason"]
+
+    monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", True)
+    preview = client.get(action_path, headers=_headers(token))
+    plan = preview.get_json()["plan"]
+    assert preview.status_code == 200
+    assert plan["launchable"] is True
+    assert plan["policy_level"] == "intrusive"
+    assert plan["nuclei_profile"]["key"] == "intrusive"
+    assert "-headless -dast -fuzz-aggression low" in plan["display_command"]
+
+    monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", False)
+    stale = client.post(
+        action_path,
+        headers=_headers(token),
+        json={"confirmed": True, "plan_digest": plan["plan_digest"]},
+    )
+    assert stale.status_code == 409
+    assert stale.get_json()["error"]["code"] == "stale_plan"
+
+    monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", True)
+    refreshed_plan = client.get(
+        action_path, headers=_headers(token),
+    ).get_json()["plan"]
+    started = SimpleNamespace(run_id="run_intrusive_nuclei", status="running")
+    with mock.patch("blueprints.api_v1.broker_available", return_value=True), mock.patch(
+        "blueprints.api_v1._start_brokered_run_service",
+        return_value=started,
+    ) as start_run:
+        launched = client.post(
+            action_path,
+            headers=_headers(token),
+            json={
+                "confirmed": True,
+                "plan_digest": refreshed_plan["plan_digest"],
+            },
+        )
+
+    assert launched.status_code == 202
+    assert start_run.call_args.kwargs["output_signal_context"] == RunOutputSignalContext(
+        nuclei_template_snapshot=snapshot,
+    )
+
+
 def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context():
     from services.assessments.nuclei_takeover_templates import reviewed_nuclei_takeover_launch
     from services.runs.signal_context import RunOutputSignalContext
@@ -2324,7 +2404,7 @@ def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context()
     preview = client.get(action_path, headers=_headers(token))
     assert preview.status_code == 200
     plan = preview.get_json()["plan"]
-    assert plan["profile_version"] == "1.4"
+    assert plan["profile_version"] == "1.5"
     assert plan["policy_level"] == "safe"
     assert plan["target"]["type"] == "domain"
     assert plan["bounds"] == {

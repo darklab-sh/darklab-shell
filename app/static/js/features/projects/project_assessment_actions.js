@@ -295,16 +295,21 @@ async function launchAssessmentAction(context, options = {}) {
       throw new Error('Assessment launch confirmation is unavailable.');
     }
     trigger?.removeAttribute('aria-busy');
+    const intrusiveNuclei = plan.policy_level === 'intrusive' && plan.action?.id === 'nuclei';
     const choice = await confirm({
       body: {
-        text: `Start ${text(plan.action?.id, 'this assessment action')}?`,
-        note: 'The run will be linked to this Project. Compatible saved output can update this check. Reviewed validators may also create linked findings; no run closes findings automatically.',
+        text: intrusiveNuclei
+          ? 'Start intrusive Nuclei profile?'
+          : `Start ${text(plan.action?.id, 'this assessment action')}?`,
+        note: intrusiveNuclei
+          ? 'This fresh confirmation starts reviewed headless and low-aggression DAST checks against one Project target. Exploit, callback, authentication, brute-force, and denial-of-service templates stay excluded.'
+          : 'The run will be linked to this Project. Compatible saved output can update this check. Reviewed validators may also create linked findings; no run closes findings automatically.',
       },
       content: planContent(plan),
       tone: ['standard', 'intrusive'].includes(plan.policy_level) ? 'warning' : null,
       actions: [
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'run', label: 'Start run', role: 'primary' },
+        { id: 'run', label: intrusiveNuclei ? 'Start intrusive scan' : 'Start run', role: 'primary' },
       ],
       refocusOnResolve: false,
     });

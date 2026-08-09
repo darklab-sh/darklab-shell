@@ -104,13 +104,14 @@ def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks
         "http_profile",
         "content_discovery",
         "vulnerability_templates",
+        "intrusive_template_validation",
         "subdomain_takeover_confirmation",
         "parameter_discovery",
         "xss_validation",
         "sql_injection_detection",
     }
     assert by_key["network"]["version"] == "1.0"
-    assert by_key["web"]["version"] == "1.4"
+    assert by_key["web"]["version"] == "1.5"
     assert by_key["api"]["version"] == "1.0"
     assert by_key["api"]["target_types"] == ["url"]
     assert by_key["api"]["checks"] == [{
@@ -146,7 +147,23 @@ def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks
         for check in profile["checks"]:
             assert check["recommended_action"].startswith("command:")
             assert check["completion_guidance"]
-            assert all(rule["version"] == "1.0" for rule in check["evidence_rules"])
+            assert all(rule["version"] for rule in check["evidence_rules"])
+    standard_nuclei = next(
+        check for check in by_key["web"]["checks"]
+        if check["key"] == "vulnerability_templates"
+    )
+    assert standard_nuclei["evidence_rules"][0]["version"] == "1.1"
+    assert standard_nuclei["evidence_rules"][0]["command_modes"] == [
+        "nuclei_standard_profile"
+    ]
+    intrusive_nuclei = next(
+        check for check in by_key["web"]["checks"]
+        if check["key"] == "intrusive_template_validation"
+    )
+    assert intrusive_nuclei["policy_level"] == "intrusive"
+    assert intrusive_nuclei["evidence_rules"][0]["command_modes"] == [
+        "nuclei_intrusive_profile"
+    ]
     parameter_check = next(
         check for check in by_key["web"]["checks"] if check["key"] == "parameter_discovery"
     )

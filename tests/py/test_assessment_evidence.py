@@ -28,8 +28,12 @@ from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.assessments.command_modes import (
     DALFOX_PARAMETER_DISCOVERY_MODE,
     DALFOX_XSS_VALIDATION_MODE,
+    NUCLEI_INTRUSIVE_PROFILE_MODE,
+    NUCLEI_SAFE_PROFILE_MODE,
+    NUCLEI_STANDARD_PROFILE_MODE,
     assessment_command_mode,
 )
+from services.assessments.command_plans import command_plan
 from services.assessments.dalfox_parameter_evidence import (
     resolve_project_dalfox_parameter_evidence,
 )
@@ -753,6 +757,28 @@ def test_dalfox_evidence_modes_keep_discovery_and_active_clean_runs_distinct():
         target_type="url",
         target_value="https://example.com/search?q=one",
     ) is None
+
+
+def test_nuclei_evidence_modes_keep_reviewed_profiles_distinct():
+    safe = command_plan("nuclei", "url", "https://example.com")
+    standard = command_plan(
+        "nuclei", "url", "https://example.com", nuclei_profile="standard",
+    )
+    intrusive = command_plan(
+        "nuclei", "url", "https://example.com", nuclei_profile="intrusive",
+        allow_intrusive=True,
+    )
+    assert assessment_command_mode(safe.command) == NUCLEI_SAFE_PROFILE_MODE
+    assert assessment_command_mode(standard.command) == NUCLEI_STANDARD_PROFILE_MODE
+    assert assessment_command_mode(intrusive.command) == NUCLEI_INTRUSIVE_PROFILE_MODE
+    assert assessment_command_mode(standard.command + " -sf [protected]") == (
+        NUCLEI_STANDARD_PROFILE_MODE
+    )
+    assert assessment_command_mode(
+        standard.command + " -sf [protected] -cc [protected] -ck [protected]"
+    ) == NUCLEI_STANDARD_PROFILE_MODE
+    assert assessment_command_mode(intrusive.command + " -tags cve") == ""
+    assert assessment_command_mode(intrusive.command.replace("-rl 10", "-rl 1001")) == ""
 
 
 def test_run_fact_loader_uses_scan_observations_and_materialized_service_evidence(

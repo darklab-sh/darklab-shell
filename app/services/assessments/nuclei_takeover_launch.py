@@ -8,7 +8,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Mapping
 
+import config as app_config
 from services.assessments.action_plans import AssessmentActionError
+from services.assessments.command_modes import assessment_command_mode
+from services.assessments.command_modes_nuclei import NUCLEI_PROFILE_MODES
 from services.assessments.nuclei_takeover_command import reviewed_takeover_launch_plan_matches
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_templates import (
@@ -86,6 +89,31 @@ def _validate_generic_nuclei_template_snapshot(
     if not isinstance(action, Mapping) or str(action.get("id") or "") != "nuclei":
         return None
     profile = plan.get("nuclei_profile")
+    profile_key = str(profile.get("key") or "") if isinstance(profile, Mapping) else ""
+    expected_mode = NUCLEI_PROFILE_MODES.get(profile_key, "")
+    current_mode = assessment_command_mode(plan.get("display_command"))
+    intrusive = str(plan.get("policy_level") or "") == "intrusive"
+    if (
+        not expected_mode
+        or current_mode != expected_mode
+        or (intrusive and profile_key != "intrusive")
+        or (intrusive and not app_config.CFG.get("assessment_intrusive_actions_enabled", False))
+    ):
+        log.warning("ASSESSMENT_NUCLEI_PROFILE_CONTRACT_CHANGED", extra={
+            "project_id": str(plan.get("project_id") or "")[:64],
+            "assessment_id": str(plan.get("assessment_id") or "")[:64],
+            "check_id": str(plan.get("check_id") or "")[:64],
+            "profile_key": profile_key[:32],
+            "policy_level": str(plan.get("policy_level") or "")[:32],
+            "deployment_gate_enabled": bool(
+                app_config.CFG.get("assessment_intrusive_actions_enabled", False)
+            ),
+        })
+        raise AssessmentActionError(
+            "nuclei_profile_contract_changed",
+            "The reviewed Nuclei profile is no longer available. Review the action again.",
+            status_code=409,
+        )
     expected = profile.get("template_snapshot") if isinstance(profile, Mapping) else None
     current = managed_nuclei_template_snapshot()
     current_public = current.public()

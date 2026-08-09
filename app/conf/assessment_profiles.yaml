@@ -71,7 +71,7 @@ profiles:
         completion_guidance: Collect the domain's current DNS records and review resolved hosts, delegation, and an explicit clean result when a record type is absent.
 
   - key: web
-    version: "1.4"
+    version: "1.5"
     label: Web assessment
     purpose: Map reachable web applications, discover their exposed content, and review structured vulnerability checks.
     target_types: [domain, ip, url]
@@ -124,9 +124,10 @@ profiles:
         target_types: [domain, ip, url]
         evidence_rules:
           - key: completed_nuclei_templates
-            version: "1.0"
+            version: "1.1"
             evidence_types: [run, finding]
             command_roots: [nuclei]
+            command_modes: [nuclei_standard_profile]
             workflow_actions: []
             structured_output_kinds: [findings]
             target_match: host_or_descendant
@@ -136,6 +137,27 @@ profiles:
         policy_level: standard
         recommended_action: command:nuclei
         completion_guidance: Run the approved template set, review every saved finding, and retain a successful clean run when no template matches.
+      - key: intrusive_template_validation
+        version: "1.0"
+        category: validation
+        label: Intrusive web template validation
+        purpose: Run the reviewed headless and low-aggression DAST template families against one separately approved web target.
+        target_types: [domain, ip, url]
+        evidence_rules:
+          - key: completed_intrusive_nuclei_templates
+            version: "1.0"
+            evidence_types: [run, finding]
+            command_roots: [nuclei]
+            command_modes: [nuclei_intrusive_profile]
+            workflow_actions: []
+            structured_output_kinds: [findings]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: intrusive
+        recommended_action: command:nuclei
+        completion_guidance: Enable maintained intrusive actions, review the exact headless and DAST plan, confirm it for this target, and retain both findings and a successful clean run.
       - key: subdomain_takeover_confirmation
         version: "1.0"
         category: validation

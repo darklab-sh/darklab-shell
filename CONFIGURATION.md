@@ -936,7 +936,7 @@ ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true
 docker compose up -d --force-recreate shell
 ```
 
-The setting only makes maintained intrusive actions available. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project evidence immediately before starting the command. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
+The setting only makes maintained intrusive actions available. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project context immediately before starting the command. That includes one saved Dalfox parameter for XSS validation or the exact reviewed headless and low-aggression DAST profile for Nuclei. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
 
 ---
 

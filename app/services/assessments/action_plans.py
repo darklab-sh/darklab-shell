@@ -11,16 +11,12 @@ from typing import Any, Callable, Mapping
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
+from services.assessments.action_plan_nuclei import generic_nuclei_plan
 from services.assessments.command_plans import command_plan
 from services.assessments.dalfox_xss_actions import DalfoxXssActionContext
-from services.assessments.nuclei_profiles import nuclei_profile, public_nuclei_profile
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
 from services.assessments.schemathesis_actions import SchemathesisActionContext
-from services.nuclei.template_cache import (
-    managed_nuclei_template_snapshot,
-    nuclei_template_cache_unavailable_reason,
-)
 from services.projects.scope import shared_owner_where
 
 
@@ -107,6 +103,7 @@ def build_assessment_action_plan(
     http_profile: Mapping[str, Any] | None = None,
     http_profile_web_target: str = "",
     http_profile_unavailable_reason: str = "",
+    intrusive_actions_enabled: bool = False,
     dalfox_xss: DalfoxXssActionContext | None = None,
     schemathesis: SchemathesisActionContext | None = None,
 ) -> dict[str, Any]:
@@ -119,14 +116,8 @@ def build_assessment_action_plan(
     launchable = True
     unavailable_reason = ""
     selected_command = None
-    selected_nuclei_profile = (
-        nuclei_profile(policy_level)
-        if action_id == "nuclei" and check_key != NUCLEI_TAKEOVER_CHECK_KEY
-        else None
-    )
-    selected_nuclei_snapshot = (
-        managed_nuclei_template_snapshot() if selected_nuclei_profile else None
-    )
+    selected_nuclei = generic_nuclei_plan(action_id, check_key, policy_level)
+    selected_nuclei_profile = selected_nuclei.profile
     if str(row["project_status"] or "") == "archived":
         launchable = False
         unavailable_reason = "Assessment runs cannot start from an archived Project."
@@ -147,9 +138,19 @@ def build_assessment_action_plan(
     elif str(frozen.get("policy_level") or "") != policy_level:
         launchable = False
         unavailable_reason = "The frozen policy no longer matches the saved check."
-    elif selected_nuclei_snapshot and selected_nuclei_snapshot.state != "ready":
+    elif (
+        policy_level == "intrusive"
+        and dalfox_xss is None
+        and not (selected_nuclei_profile and intrusive_actions_enabled)
+    ):
         launchable = False
-        unavailable_reason = nuclei_template_cache_unavailable_reason(selected_nuclei_snapshot)
+        unavailable_reason = (
+            "Intrusive assessment actions require a separate operator opt-in that is "
+            "not enabled here."
+        )
+    elif selected_nuclei.unavailable_reason:
+        launchable = False
+        unavailable_reason = selected_nuclei.unavailable_reason
     elif not separator or action_kind not in {"command", "workflow"} or not action_id:
         launchable = False
         unavailable_reason = "This check does not have a launchable recommended action."
@@ -162,12 +163,6 @@ def build_assessment_action_plan(
     elif policy_level == "destructive":
         launchable = False
         unavailable_reason = "Destructive assessment actions cannot launch from Projects."
-    elif policy_level == "intrusive" and dalfox_xss is None:
-        launchable = False
-        unavailable_reason = (
-            "Intrusive assessment actions require a separate operator opt-in that is "
-            "not enabled here."
-        )
     elif policy_level not in _SUPPORTED_POLICIES and policy_level != "intrusive":
         launchable = False
         unavailable_reason = "The saved action has an unsupported execution policy."
@@ -205,6 +200,11 @@ def build_assessment_action_plan(
                 http_profile=http_profile,
                 nuclei_profile=(
                     selected_nuclei_profile.key if selected_nuclei_profile else "safe"
+                ),
+                allow_intrusive=bool(
+                    intrusive_actions_enabled
+                    and selected_nuclei_profile
+                    and selected_nuclei_profile.requires_confirmation
                 ),
             )
         )
@@ -265,10 +265,7 @@ def build_assessment_action_plan(
     if schemathesis:
         payload["artifact_selection"] = schemathesis.public_selection()
     if selected_nuclei_profile:
-        payload["nuclei_profile"] = public_nuclei_profile(
-            selected_nuclei_profile.key,
-            template_snapshot=selected_nuclei_snapshot.public(),
-        )
+        payload["nuclei_profile"] = selected_nuclei.public()
     payload["plan_digest"] = _digest(payload)
     return payload
 
