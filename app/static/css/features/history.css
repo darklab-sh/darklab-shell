@@ -701,6 +701,74 @@ body #history-panel { background: var(--theme-chrome-bg); }
   overflow-wrap: anywhere;
 }
 
+.history-run-nmap-service-evidence,
+.history-run-nmap-service-evidence .nmap-service-evidence-list,
+.history-run-nmap-service-evidence .nmap-service-evidence-item,
+.history-run-nmap-service-evidence .nmap-service-evidence-fields {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-heading,
+.history-run-nmap-service-evidence .nmap-service-evidence-item-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-heading strong,
+.history-run-nmap-service-evidence .nmap-service-evidence-item-heading strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-item {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-meta,
+.history-run-nmap-service-evidence .nmap-service-evidence-note {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-fields {
+  margin: 0;
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-fields > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.32fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-fields dt,
+.history-run-nmap-service-evidence .nmap-service-evidence-fields dd {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-fields dt {
+  color: var(--muted);
+}
+
+.history-run-nmap-service-evidence .nmap-service-evidence-fields dd {
+  color: var(--text);
+}
+
 .history-run-output-summary {
   display: grid;
   gap: 12px;
@@ -940,6 +1008,11 @@ body #history-panel { background: var(--theme-chrome-bg); }
 
   .history-run-output-outline-list .history-run-field {
     grid-template-columns: 1fr;
+  }
+
+  .history-run-nmap-service-evidence .nmap-service-evidence-fields > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 
   .history-run-ai-suggestion-head {

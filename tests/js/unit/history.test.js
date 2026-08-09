@@ -22,6 +22,7 @@ const HISTORY_SCRIPT_PATHS = [
   'app/static/js/features/history/history_mutations.js',
   'app/static/js/features/history/history_rows.js',
   'app/static/js/features/history/history_restore.js',
+  'app/static/js/features/nmap_service_evidence.js',
   'app/static/js/features/history/history_run_details.js',
   'app/static/js/features/history/history_search.js',
   'app/static/js/features/run-comparison/history_compare_controls.js',
@@ -546,6 +547,7 @@ describe('history panel actions', () => {
     mobileMode = false,
     appConfig = {},
     activeProject = null,
+    serviceEvidence = null,
     showConfirmImpl = vi.fn(() => Promise.resolve(null)),
     openMetadataEditorImpl = vi.fn(),
     openAtlasImpl = vi.fn(() => Promise.resolve()),
@@ -703,6 +705,19 @@ describe('history panel actions', () => {
                 exit_code: 0,
                 started: '2026-01-01T00:00:00Z',
               }),
+          })
+        }
+        if (url === '/runs/run-1/service-evidence?limit=50&offset=0') {
+          const observations = Array.isArray(serviceEvidence) ? serviceEvidence : []
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              observations,
+              total: observations.length,
+              limit: 50,
+              offset: 0,
+              has_more: false,
+            }),
           })
         }
         return Promise.resolve({ json: () => Promise.resolve({}) })
@@ -1006,6 +1021,19 @@ describe('history panel actions', () => {
     } = loadHistoryPanel({
       clipboardImpl: clipboard,
       openAtlasImpl: openAtlas,
+      serviceEvidence: [{
+        id: 'obs_1',
+        run_id: 'run-1',
+        target: '192.0.2.10:445/tcp',
+        service: 'microsoft-ds',
+        script_id: 'smb2-security-mode',
+        evidence_kind: 'smb_signing',
+        classification: 'informational',
+        tool_version: '7.95',
+        parser_version: 'nmap-xml-service-evidence-v1',
+        fields: [{ path: ['message_signing'], value: 'disabled' }],
+        observed_at: '2026-01-01T00:00:01Z',
+      }],
     })
     const historyPanel = document.getElementById('history-panel')
     const cmdInput = document.getElementById('cmd')
@@ -1023,6 +1051,11 @@ describe('history panel actions', () => {
     expect(historyPanel.classList.contains('open')).toBe(true)
     expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('history-run-subtitle').textContent).toBe('ping darklab.sh')
+    const serviceEvidence = document.querySelector('.history-run-nmap-service-evidence')
+    expect(serviceEvidence?.textContent).toContain('Nmap service evidence')
+    expect(serviceEvidence?.textContent).toContain('192.0.2.10:445/tcp')
+    expect(serviceEvidence?.textContent).toContain('Message Signingdisabled')
+    expect(serviceEvidence?.textContent).not.toContain('raw output')
     const scheduleSummary = document.querySelector('.history-run-schedule-summary')
     expect(scheduleSummary?.textContent).toBe('Scheduled runView schedule')
     expect(scheduleSummary?.textContent).not.toContain('sch_c38d8b4eee00d435b91d1d7791e5ff70c')

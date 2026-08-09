@@ -5,6 +5,7 @@
 
 import { bindDisclosure } from '../../ui/ui_disclosure.js';
 import { openActionSheet } from '../../ui/ui_action_sheet.js';
+import { renderNmapServiceEvidence } from '../nmap_service_evidence.js';
 import { renderAssessmentFindingWorklist } from './project_assessment_risk_renderer.js';
 
 const checkStateLabels = {
@@ -506,6 +507,11 @@ function createProjectAssessmentRenderer(context, actions) {
       }
       main.appendChild(recommendation);
     }
+    const serviceEvidence = renderNmapServiceEvidence(check?.nmap_service_evidence, {
+      className: 'project-assessment-nmap-evidence',
+      formatDate: displayDate,
+    });
+    if (serviceEvidence) main.appendChild(serviceEvidence);
     const states = makeElement('div', 'project-assessment-check-states');
     states.appendChild(badge(checkStateLabels[check?.state] || check?.state || 'Unknown', stateTone(check?.state)));
     if (check?.state_source === 'manual') states.appendChild(badge('Manual decision'));

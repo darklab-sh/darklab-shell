@@ -194,6 +194,27 @@ const detail = {
         state_source: 'derived',
         evidence_count: 2,
         unavailable_evidence_count: 0,
+        nmap_service_evidence: {
+          observations: [{
+            id: 'obs_1',
+            run_id: 'run_nmap_1',
+            target: '192.0.2.10:445/tcp',
+            service: 'microsoft-ds',
+            script_id: 'smb2-security-mode',
+            evidence_kind: 'smb_signing',
+            classification: 'informational',
+            tool_version: '7.95',
+            parser_version: 'nmap-xml-service-evidence-v1',
+            fields: [{ path: ['message_signing'], value: 'disabled' }],
+            fields_truncated: false,
+            collection_truncated: false,
+            observed_at: '2026-08-05T11:00:00+00:00',
+          }],
+          total: 1,
+          limit: 20,
+          offset: 0,
+          has_more: false,
+        },
       },
       {
         id: 'asmc_2',
@@ -257,6 +278,12 @@ describe('project assessment controller', () => {
       expect(surface.textContent).toContain('Service inventory')
       expect(surface.textContent).toContain('Needs review')
       expect(surface.textContent).toContain('Manual decision')
+      const serviceEvidence = surface.querySelector('.project-assessment-nmap-evidence')
+      expect(serviceEvidence?.textContent).toContain('Nmap service evidence')
+      expect(serviceEvidence?.textContent).toContain('192.0.2.10:445/tcp')
+      expect(serviceEvidence?.textContent).toContain('Message Signingdisabled')
+      expect(serviceEvidence?.textContent).toContain('Nmap 7.95')
+      expect(serviceEvidence?.textContent).not.toContain('raw output')
     }
     expect(mobile.classList.contains('is-mobile')).toBe(true)
     mobile.querySelector('.project-assessment-mobile-actions button').click()

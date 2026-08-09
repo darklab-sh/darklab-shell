@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Reviewed Nmap service facts now appear where assessors review their work.**
+  - **What:** Run Details and expanded Assessment checks show the same owner-scoped, read-only Nmap service evidence on desktop and mobile. Each view keeps the typed target, service, script, structured fields, tool and parser versions, observation time, and any safety-limit notice while leaving free-form NSE output out. Opening the evidence doesn't change a check or finding.
+  - **Tests:** Browser-route, personal-owner isolation, shared renderer, Run Details, Assessment desktop/mobile, raw-output omission, asset, Pyright, and documentation coverage pins the display contract.
 - **Saved Nmap service facts are available through owner-scoped API reads.**
   - **What:** API clients can page through the structured informational service evidence saved with a run, and matching Assessment checks include a bounded newest-first view of those same facts. Personal and team ownership is checked again on every read. Responses include only the canonical target, reviewed script and evidence family, structured fields, truncation state, versions, and timestamps; they don't copy free-form NSE output or change a check or finding.
   - **Tests:** Focused SQLite, API, OpenAPI, owner-isolation, assessment-link, module-ratchet, Pyright, and real Postgres coverage pins the read contract.

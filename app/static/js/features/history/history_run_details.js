@@ -40,6 +40,7 @@ import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissi
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from '../run-comparison/history_compare_launcher.js';
 import { openContextualFindingRecord as importedOpenContextualFindingRecord } from '../findings/finding_record_context.js';
+import { renderNmapServiceEvidence } from '../nmap_service_evidence.js';
 import { openWorkflows as importedOpenWorkflows } from '../../controller_action_bridge.js';
 import { _closeHistoryRunActionMenus } from './history_actions.js';
 import { copyHistoryRunPermalink as importedCopyHistoryRunPermalink } from './history_links.js';
@@ -458,6 +459,7 @@ let _historyRunModalState = {
   entitiesPagination: null,
   activeEntityTab: 'ip',
   projectState: null,
+  serviceEvidence: null,
   selectingEvidence: false,
   selectedEvidenceLines: new Set(),
   aiAssists: [],
@@ -1592,6 +1594,12 @@ function _renderHistoryRunSummary(body, run) {
   context.appendChild(project);
   body.appendChild(context);
 
+  const serviceEvidence = renderNmapServiceEvidence(_historyRunModalState.serviceEvidence, {
+    className: 'history-run-section history-run-nmap-service-evidence',
+    formatDate: value => new Date(String(value || '')).toLocaleString(),
+  });
+  if (serviceEvidence) body.appendChild(serviceEvidence);
+
   const actions = document.createElement('div');
   actions.className = 'history-run-actions history-run-primary-actions';
   const deleteDisabled = !_historyRunCanManageHistory();
@@ -2123,6 +2131,23 @@ async function _loadHistoryRunDetails(runId, token) {
       _historyRunModalState.loadingDetails = false;
       _renderHistoryRunModal();
     }
+  }
+}
+
+async function _loadHistoryRunServiceEvidence(runId, token) {
+  try {
+    const resp = await _historyRunApiFetch(
+      `/runs/${encodeURIComponent(runId)}/service-evidence?limit=50&offset=0`,
+      { cache: 'no-store' },
+    );
+    if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (token !== _historyRunModalToken) return;
+    _historyRunModalState.serviceEvidence = data && typeof data === 'object' ? data : null;
+  } catch (error) {
+    _historyRunLogClientError('failed to load Run Details service evidence', error, { run_id: runId });
+  } finally {
+    if (token === _historyRunModalToken) _renderHistoryRunModal();
   }
 }
 
@@ -2845,6 +2870,7 @@ function openHistoryRunDetails(run) {
     },
     activeEntityTab: _historyRunEntityTabs()[0]?.id || 'ip',
     projectState: null,
+    serviceEvidence: null,
     selectingEvidence: false,
     selectedEvidenceLines: new Set(),
     aiAssists: [],
@@ -2866,6 +2892,7 @@ function openHistoryRunDetails(run) {
   _openHistoryRunOverlay();
   _renderHistoryRunModal();
   _loadHistoryRunDetails(run.id, token);
+  _loadHistoryRunServiceEvidence(run.id, token);
   _loadHistoryRunFindings(run.id, token);
   _loadHistoryRunEntitySummary(run.id, token);
   _loadHistoryRunEntities(run.id, token);

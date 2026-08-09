@@ -1427,6 +1427,10 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         f"/api/v1/runs/{run_id}/service-evidence?limit=1&offset=0",
         headers=headers,
     )
+    browser_evidence_response = client.get(
+        f"/runs/{run_id}/service-evidence?limit=1&offset=0",
+        headers={"X-Session-ID": token},
+    )
     assessment_evidence_response = client.get(
         f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
         headers=headers,
@@ -1435,6 +1439,10 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         f"/api/v1/runs/{run_id}/service-evidence",
         headers=_headers(other_token),
     )
+    cross_browser_evidence = client.get(
+        f"/runs/{run_id}/service-evidence",
+        headers={"X-Session-ID": other_token},
+    )
     assert run_evidence_response.status_code == 200
     run_evidence = run_evidence_response.get_json()
     assert run_evidence["total"] == 1
@@ -1442,6 +1450,8 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         {"path": ["message_signing"], "value": "disabled"},
     ]
     assert "private output" not in json.dumps(run_evidence)
+    assert browser_evidence_response.status_code == 200
+    assert browser_evidence_response.get_json() == run_evidence
     assessment_check = next(
         item for item in assessment_evidence_response.get_json()["checks"]["checks"]
         if item["id"] == check_id
@@ -1456,6 +1466,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     }
     assert assessment_check["nmap_service_evidence"]["observations"] == run_evidence["observations"]
     assert cross_run_evidence.status_code == 404
+    assert cross_browser_evidence.status_code == 404
 
     evidence_link_id = linked["evidence"]["id"]
     unlinked_response = client.delete(

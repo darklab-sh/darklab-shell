@@ -125,6 +125,7 @@
     "/static/js/features/run-comparison/history_compare_renderer.js",
     "/static/js/features/run-comparison/history_compare_launcher.js",
     "/static/js/features/history/history_run_details.js",
+    "/static/js/features/nmap_service_evidence.js",
     "/static/js/features/preferences/session_token_controls.js",
     "/static/js/features/preferences/secrets_panel.js",
     "/static/js/features/preferences/teams_panel.js",
