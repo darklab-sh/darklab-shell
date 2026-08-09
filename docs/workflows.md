@@ -20,6 +20,12 @@ The built-in **Bounded Subdomain Assessment** playbook discovers no more than 16
 
 The playbook uses structured collection capture rather than a temporary Files list. Partial child failures remain visible in the execution counts and bounded failure sample while the remaining candidates continue. The safe Nuclei step excludes callbacks, redirects, automatic updates, intrusive and denial-of-service tags, headless checks, and local code or file protocols.
 
+### Live Web Review
+
+The built-in **Live Web Review** playbook starts from one approved HTTP or HTTPS URL. HTTPx records its response status, title, technology hints, and a verified screenshot in the fixed `live-web-screenshots` Files directory. The screenshot crosses the same file-size, count, total-storage, content-signature, and authenticated-download checks as any other Web Surface capture.
+
+After the screenshot succeeds, Dalfox builds a structured parameter inventory in discovery-only mode. It doesn't send XSS payloads, follow redirects, or use remote dictionary mining, and it keeps one target inside fixed request-rate, worker, and time limits. This step doesn't create an intermediate file; the saved run output and normalized parameter observations remain the durable evidence.
+
 ### Historical Web Surface Triage
 
 The built-in Historical Web Surface Triage playbook starts with passive `gau` archive discovery and saves a bounded candidate list in Files. It then normalizes and restricts the candidates to the domain you supplied (including its subdomains), checks only that scoped set for live HTTP services, and rechecks scope before Katana crawls confirmed live URLs. A final scope pass protects the HTTPx summary too.

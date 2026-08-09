@@ -13,6 +13,7 @@ import yaml
 import config as app_config
 from services.commands.registry_assessment_workflows import historical_web_surface_workflow
 from services.commands.registry_subdomain_workflows import bounded_subdomain_assessment_workflow
+from services.commands.registry_web_review_workflows import live_web_review_workflow
 from services.workflows import catalog as workflow_catalog
 
 log = logging.getLogger("shell")
@@ -53,10 +54,7 @@ def _load_yaml_list(path: str) -> list:
 
 
 def _load_yaml_list_with_local(path: str, *, local_path: str | None = None) -> list:
-    merged = []
-    merged.extend(_load_yaml_list(path))
-    merged.extend(_load_yaml_list(local_path or _local_overlay_path(path)))
-    return merged
+    return _load_yaml_list(path) + _load_yaml_list(local_path or _local_overlay_path(path))
 
 
 def builtin_workflows() -> list[dict[str, object]]:
@@ -191,6 +189,7 @@ def builtin_workflows() -> list[dict[str, object]]:
             ],
         },
         bounded_subdomain_assessment_workflow(),
+        live_web_review_workflow(),
         {
             "title": "Subdomain HTTP Triage",
             "description": (

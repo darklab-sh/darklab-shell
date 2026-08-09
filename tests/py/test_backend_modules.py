@@ -24856,9 +24856,11 @@ class TestWorkflowInputLoading:
         assert "Historical Web Surface Triage" not in disabled_titles
         assert "Crawl And Scan" not in disabled_titles
         assert "Bounded Subdomain Assessment" in disabled_titles
+        assert "Live Web Review" not in disabled_titles
         assert "Subdomain HTTP Triage" in enabled_titles
         assert "Historical Web Surface Triage" in enabled_titles
         assert "Crawl And Scan" in enabled_titles
+        assert "Live Web Review" in enabled_titles
 
         subdomain = next(item for item in enabled if item["title"] == "Subdomain HTTP Triage")
         assert subdomain["feature_required"] == "workspace"
@@ -24941,6 +24943,31 @@ class TestWorkflowInputLoading:
             (True, ""),
             (True, ""),
             (True, ""),
+            (True, ""),
+            (True, ""),
+        ]
+        live_web = next(item for item in enabled if item["title"] == "Live Web Review")
+        assert live_web["id"] == "live_web_review"
+        assert live_web["version"] == 2
+        assert live_web["feature_required"] == "workspace"
+        live_web_steps = cast(list[dict[str, object]], live_web["steps"])
+        assert [step["id"] for step in live_web_steps] == [
+            "capture_screenshot",
+            "inventory_parameters",
+        ]
+        assert live_web_steps[0]["next"] == {
+            "success": "inventory_parameters",
+            "failure": "stop",
+        }
+        assert "-screenshot -srd live-web-screenshots" in str(live_web_steps[0]["cmd"])
+        assert "--only-discovery --skip-mining-dict --format jsonl" in str(
+            live_web_steps[1]["cmd"]
+        )
+        live_web_commands = [
+            render_workflow_command(str(step["cmd"]), {"url": "https://example.com/search?q=one"})
+            for step in live_web_steps
+        ]
+        assert [is_command_allowed(command) for command in live_web_commands] == [
             (True, ""),
             (True, ""),
         ]
