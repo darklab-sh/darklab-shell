@@ -20,6 +20,9 @@ from core.redaction import REDACTED_ENTITY_SENTINEL, line_entries_from_events, r
 from services.atlas.materializer import materialize_run_entities
 from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.assessments.nmap_inference_materialization import materialize_nmap_xml_version_inferences
+from services.assessments.nmap_service_evidence_persistence import (
+    persist_nmap_xml_service_observations,
+)
 from services.commands.registry import command_project_target_inputs
 from services.metrics_lazy import app_metrics
 from services.notifications.hooks import enqueue_run_complete
@@ -38,9 +41,9 @@ from services.runs.completion_policy_contracts import RunCompletionPolicy
 from services.runs.finalization_artifacts import save_run_file_artifacts_for_finalize
 from services.runs.finalization_assessments import reconcile_assessment_evidence_for_finalize
 from services.runs.finalization_dalfox_xss import materialize_dalfox_xss_findings_for_finalize
+from services.runs.finalization_nmap_evidence import materialize_nmap_evidence_for_finalize
 from services.runs.finalization_schemathesis import persist_schemathesis_evidence_for_finalize
 from services.runs.finalization_version_inference import (
-    materialize_nmap_inferences_for_finalize,
     materialize_run_entities_for_finalize,
 )
 from services.runs.finalization_takeover import materialize_takeover_confirmation_for_finalize
@@ -93,6 +96,7 @@ class RunFinalizeRecords:
     recorded_findings: list = field(default_factory=list)
     recorded_targets: list = field(default_factory=list)
     scan_observation_count: int = 0
+    nmap_service_summary: dict | None = None
     version_inference_summary: dict | None = None
     auto_promote_summary: dict | None = None
     schemathesis_summary: dict | None = None
@@ -635,6 +639,9 @@ def update_run_finalize_summary(
         "version_inference_count": int(
             (records.version_inference_summary or {}).get("materialized_count") or 0
         ),
+        "nmap_service_observation_count": int(
+            (records.nmap_service_summary or {}).get("observation_count") or 0
+        ),
         "project_target_count": len(records.recorded_targets),
         "project_auto_promote_count": int(records.auto_promote_summary.get("linked_count") or 0)
         if isinstance(records.auto_promote_summary, dict) else 0,
@@ -674,6 +681,7 @@ def save_completed_run(
     record_run_findings_fn: Callable = record_run_findings,
     materialize_run_entities_fn: Callable = materialize_run_entities,
     read_owner_workspace_text_file_fn: Callable = read_owner_workspace_text_file,
+    persist_nmap_xml_service_observations_fn: Callable = persist_nmap_xml_service_observations,
     materialize_nmap_xml_version_inferences_fn: Callable = materialize_nmap_xml_version_inferences,
     run_persistence_transaction_fn: Callable = run_persistence_transaction,
     apply_auto_promote_rules_for_run_fn: Callable = apply_auto_promote_rules_for_run,
@@ -766,7 +774,10 @@ def save_completed_run(
                 finished_iso,
                 materialize_run_entities_fn=materialize_run_entities_fn,
             )
-            records.version_inference_summary = materialize_nmap_inferences_for_finalize(
+            (
+                records.nmap_service_summary,
+                records.version_inference_summary,
+            ) = materialize_nmap_evidence_for_finalize(
                 conn,
                 session_id,
                 team_id,
@@ -777,6 +788,7 @@ def save_completed_run(
                 workspace_owner,
                 cfg=cfg,
                 read_owner_workspace_text_file_fn=read_owner_workspace_text_file_fn,
+                persist_nmap_xml_service_observations_fn=persist_nmap_xml_service_observations_fn,
                 materialize_nmap_xml_version_inferences_fn=materialize_nmap_xml_version_inferences_fn,
             )
             records.recorded_targets = _discover_project_targets_for_finalize(
@@ -905,6 +917,9 @@ def finalize_completed_run(
         "finding_count": int(finalize_summary.get("finding_count") or 0),
         "atlas_entity_count": int(finalize_summary.get("atlas_entity_count") or 0),
         "version_inference_count": int(finalize_summary.get("version_inference_count") or 0),
+        "nmap_service_observation_count": int(
+            finalize_summary.get("nmap_service_observation_count") or 0
+        ),
         "project_target_count": int(finalize_summary.get("project_target_count") or 0),
     })
     app_metrics.record_completed_run(original_command, run_kind_for_cmd_type(cmd_type), exit_code, elapsed, capture)

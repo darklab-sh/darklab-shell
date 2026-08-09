@@ -496,6 +496,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0066",
         "0067",
         "0068",
+        "0069",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -610,6 +611,13 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'failure_examples_json',
                 'created_at'
             ))
+            OR (table_name = 'nmap_service_observations' AND column_name IN (
+                'fields_json',
+                'fields_truncated',
+                'collection_truncated',
+                'observed_at',
+                'created_at'
+            ))
             OR (table_name = 'findings' AND column_name IN (
                 'origin',
                 'validation_method',
@@ -664,6 +672,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "project_assessment_checks",
         "project_assessment_evidence",
         "project_http_profiles",
+        "nmap_service_observations",
         "schemathesis_operation_evidence",
         "schemathesis_run_evidence",
         "finding_evidence_links",
@@ -733,6 +742,11 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("schemathesis_operation_evidence", "response_statuses_json", "jsonb"),
         ("schemathesis_operation_evidence", "failure_examples_json", "jsonb"),
         ("schemathesis_operation_evidence", "created_at", "timestamp with time zone"),
+        ("nmap_service_observations", "fields_json", "jsonb"),
+        ("nmap_service_observations", "fields_truncated", "boolean"),
+        ("nmap_service_observations", "collection_truncated", "boolean"),
+        ("nmap_service_observations", "observed_at", "timestamp with time zone"),
+        ("nmap_service_observations", "created_at", "timestamp with time zone"),
         ("findings", "origin", "text"),
         ("findings", "validation_method", "text"),
         ("findings", "summary", "text"),
@@ -840,6 +854,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             'project_assessment_checks',
             'project_assessment_evidence',
             'project_http_profiles',
+            'nmap_service_observations',
             'schemathesis_operation_evidence',
             'schemathesis_run_evidence',
             'finding_evidence_links',
@@ -867,6 +882,9 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_schemathesis_run_evidence_check_observed",
         "idx_schemathesis_run_evidence_run",
         "idx_schemathesis_operation_evidence_report",
+        "idx_nmap_service_observations_owner_run",
+        "idx_nmap_service_observations_target_seen",
+        "idx_nmap_service_observations_kind_seen",
         "idx_finding_evidence_owner_finding",
         "idx_finding_evidence_project",
         "idx_finding_evidence_source",
@@ -5526,6 +5544,65 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
     finally:
         conn.close()
     return db_path
+
+
+@pytest.mark.postgres
+def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkeypatch):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.nmap_service_evidence_persistence import (
+        persist_nmap_xml_service_observations,
+    )
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    observed_at = "2026-08-09T00:01:00+00:00"
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview) "
+        "VALUES ('run-nmap-service-pg', 'nmap-owner-pg', '', 'external', "
+        "'nmap -sV -oX scan.xml 192.0.2.10', ?, ?, 0, '[]')",
+        (observed_at, observed_at),
+    )
+    payload = """<nmaprun version="7.95"><host>
+<address addr="192.0.2.10" addrtype="ipv4"/><ports><port protocol="tcp" portid="445">
+<state state="open"/><service name="microsoft-ds"/><script id="smb2-security-mode">
+<elem key="message_signing">disabled</elem></script></port></ports></host>
+<runstats><finished time="1786233600"/></runstats></nmaprun>"""
+
+    first = persist_nmap_xml_service_observations(
+        conn,
+        "nmap-owner-pg",
+        payload,
+        source_run_id="run-nmap-service-pg",
+        observed_at=observed_at,
+    )
+    repeated = persist_nmap_xml_service_observations(
+        conn,
+        "nmap-owner-pg",
+        payload,
+        source_run_id="run-nmap-service-pg",
+        observed_at=observed_at,
+    )
+    row = raw_conn.execute(
+        "SELECT fields_json, fields_truncated, collection_truncated "
+        "FROM nmap_service_observations WHERE run_id = %s",
+        ("run-nmap-service-pg",),
+    ).fetchone()
+
+    assert first["created_count"] == 1
+    assert repeated["created_count"] == 0
+    assert row == {
+        "fields_json": [{"path": ["message_signing"], "value": "disabled"}],
+        "fields_truncated": False,
+        "collection_truncated": False,
+    }
+    conn.execute("DELETE FROM runs WHERE id = ?", ("run-nmap-service-pg",))
+    assert raw_conn.execute(
+        "SELECT COUNT(*) AS count FROM nmap_service_observations",
+    ).fetchone()["count"] == 0
 
 
 @pytest.mark.postgres

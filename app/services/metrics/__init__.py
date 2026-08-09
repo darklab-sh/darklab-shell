@@ -16,7 +16,6 @@ from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE
 from services.metrics_environment import setup_prometheus_multiproc_dir as setup_prometheus_multiproc_dir
 from services.commands.registry_validation import command_root
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, normalize_run_kind
-
 RUN_DURATION_BUCKETS = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0, 900.0, 1800.0, 3600.0)
 HTTP_DURATION_BUCKETS = (0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0)
 OUTPUT_BYTES_BUCKETS = (1024.0, 10240.0, 102400.0, 1048576.0, 10485760.0, 104857600.0)
@@ -73,7 +72,8 @@ HISTORY_SEARCH_FALLBACK_REASONS = frozenset({"missing_fts", "fts_error"})
 EVIDENCE_PACKAGE_OUTCOMES = frozenset({"success", "too_large", "not_found", "error"})
 HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"})
 STATUS_CLASSES = frozenset({"1xx", "2xx", "3xx", "4xx", "5xx", "unknown"})
-RUN_FINALIZE_STAGES = frozenset({"capture", "db_write", "artifact_write", "entity_materialize", "version_inference"})
+RUN_FINALIZE_STAGES = frozenset({
+    "capture", "db_write", "artifact_write", "entity_materialize", "nmap_evidence", "version_inference"})
 BROKER_EVENT_TYPES = frozenset({
     "clear",
     "error",

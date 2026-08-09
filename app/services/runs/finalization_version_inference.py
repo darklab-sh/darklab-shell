@@ -16,11 +16,6 @@ from services.assessments.nmap_inference_materialization import (
 from services.atlas.materializer import materialize_run_entities
 from services.metrics_lazy import app_metrics
 from services.runs.persistence import run_finalize_savepoint
-from services.runs.workspace_artifact_metadata import (
-    NMAP_XML_SOURCE_FLAG,
-    NMAP_XML_STRUCTURED_OUTPUT,
-)
-from services.workspace.files import read_owner_workspace_text_file
 
 log = logging.getLogger("shell")
 _INFERENCE_COUNT_FIELDS = (
@@ -70,24 +65,6 @@ def materialize_run_entities_for_finalize(
     return []
 
 
-def _marked_nmap_xml_path(workspace_artifacts: object) -> tuple[str, int]:
-    paths = []
-    items = workspace_artifacts if isinstance(workspace_artifacts, list) else []
-    for item in items:
-        if not isinstance(item, Mapping):
-            continue
-        if (
-            item.get("structured_output") != NMAP_XML_STRUCTURED_OUTPUT
-            or item.get("source_flag") != NMAP_XML_SOURCE_FLAG
-            or item.get("kind") not in {"output", "read_write"}
-        ):
-            continue
-        workspace_path = str(item.get("workspace_path") or "").strip()
-        if workspace_path and workspace_path not in paths:
-            paths.append(workspace_path)
-    return (paths[0] if len(paths) == 1 else "", len(paths))
-
-
 def _safe_inference_summary(summary: object) -> dict[str, int | bool]:
     value = summary if isinstance(summary, Mapping) else {}
     return {
@@ -101,30 +78,15 @@ def materialize_nmap_inferences_for_finalize(
     session_id: str,
     team_id: str,
     run_id: str,
-    exit_code: int,
+    payload: str | None,
     finished_iso: str,
-    workspace_artifacts: object,
-    workspace_owner: Any,
     *,
-    cfg: Mapping[str, Any] | None = None,
-    read_owner_workspace_text_file_fn: Callable = read_owner_workspace_text_file,
     materialize_nmap_xml_version_inferences_fn: Callable = materialize_nmap_xml_version_inferences,
 ) -> dict[str, int | bool] | None:
     """Materialize one validated Nmap XML artifact without risking the saved run."""
-    if int(exit_code) != 0:
-        return None
-    workspace_path, marked_count = _marked_nmap_xml_path(workspace_artifacts)
-    if not workspace_path:
-        if marked_count > 1:
-            log.warning("NMAP_VERSION_INFERENCE_ARTIFACT_REJECTED", extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "team_id": team_id,
-                "marked_artifact_count": marked_count,
-            })
+    if payload is None:
         return None
     try:
-        payload = read_owner_workspace_text_file_fn(workspace_owner, workspace_path, cfg)
         safe_summary = run_finalize_savepoint(
             conn,
             "nmap_version_inference",

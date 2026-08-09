@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Reviewed Nmap service facts now survive completed runs as typed evidence.**
+  - **What:** A successful Nmap run with one validated `-oX` artifact saves the parser's bounded informational rows under the run owner. Each row keeps only the canonical port, service, reviewed script and evidence family, structured fields, truncation state, tool/parser versions, and observation time. Replays are idempotent, conflicting identities fail closed, and failed, non-Nmap, cross-owner, ambiguous, or unreadable sources don't write evidence. Service-evidence failure is isolated from version inference and can't roll back the completed run; neither path copies free-form NSE output or changes a finding.
+  - **Tests:** SQLite persistence, owner isolation, idempotency, conflict, failed-source, finalization-order, savepoint rollback, migration-parity, structured logging, module-ratchet, and real Postgres coverage pins the write boundary.
 - **Structured Nmap NSE XML now has a bounded informational evidence parser.**
   - **What:** The parser accepts only exact reviewed service scripts attached to open ports and keeps their structured table and element values with the canonical port, service, source run, Nmap version, parser version, and observation time. Free-form script output, output-only rows, closed ports, unknown or third-party scripts, and the separately reviewed vulnerability scripts stay out. Field depth, values, rows, XML size, and element count are capped, with truncation reported instead of silently expanding the result. Parsing is read-only and doesn't create a finding or turn service metadata into a vulnerability claim.
   - **Tests:** Focused XML, catalog, provenance, classification, unsafe-input, closed-port, unknown-script, output-omission, field/row-limit, and architecture-ratchet coverage pins the boundary.

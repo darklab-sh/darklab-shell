@@ -131,8 +131,8 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Add structured parsers/adapters under focused modules rather than more broad regexes in `output_signals.py`. Preserve raw output, normalize stable findings/entities, carry tool/profile versions, and make parser failure visible without failing the underlying run.
 #### Phase 7 — Add service-aware enumeration and safe next actions
 
-- [ ] Persist and surface reviewed structured Nmap service evidence:
-  - Feed the bounded informational observations into owner-scoped run and assessment evidence without copying free-form NSE output or changing finding state.
+- [ ] Surface reviewed structured Nmap service evidence:
+  - Show the saved owner-scoped informational observations in run and assessment evidence without copying free-form NSE output or changing finding state.
   - Add an exact reviewed anonymous-access evidence contract without enabling credential guessing, unrestricted share downloads, or broad `auth` category execution.
 - [ ] Add small protocol-specific tools only where NSE and current commands leave a proven gap:
   - Evaluate `smbclient`/`enum4linux-ng`, Net-SNMP tools, and LDAP client tools as an optional service-enumeration pack with pinned versions, safe command policies, structured adapters, and multi-arch container validation.

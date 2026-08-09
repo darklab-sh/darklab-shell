@@ -1774,6 +1774,23 @@ def test_completed_run_finalization_materializes_one_marked_nmap_xml_artifact(
             "truncated": False,
         }
 
+    def persist_services(conn, owner_session_id, payload, **kwargs):
+        calls.append("services")
+        assert owner_session_id == session_id
+        assert payload == "<nmaprun version='7.96'/>"
+        assert kwargs == {
+            "source_run_id": run_id,
+            "team_id": "",
+            "observed_at": "2026-08-04 12:01:00",
+        }
+        assert conn.execute("SELECT id FROM runs WHERE id = ?", (run_id,)).fetchone() is not None
+        return {
+            "observation_count": 2,
+            "created_count": 2,
+            "skipped_count": 0,
+            "truncated": False,
+        }
+
     with caplog.at_level(logging.INFO, logger="shell"):
         save_completed_run(
             run_id,
@@ -1796,13 +1813,20 @@ def test_completed_run_finalization_materializes_one_marked_nmap_xml_artifact(
             finalize_summary=finalize_summary,
             materialize_run_entities_fn=materialize_entities,
             read_owner_workspace_text_file_fn=read_xml,
+            persist_nmap_xml_service_observations_fn=persist_services,
             materialize_nmap_xml_version_inferences_fn=materialize_inferences,
         )
     cleanup[-1][3].append(run_id)
 
-    assert calls == ["entities", "read", "inferences"]
+    assert calls == ["entities", "read", "services", "inferences"]
     assert finalize_summary["persisted"] is True
+    assert finalize_summary["nmap_service_observation_count"] == 2
     assert finalize_summary["version_inference_count"] == 1
+    service_event = next(
+        record for record in caplog.records
+        if record.message == "NMAP_SERVICE_EVIDENCE_FINALIZED"
+    )
+    assert service_event.observation_count == 2
     event = next(record for record in caplog.records if record.message == "NMAP_VERSION_INFERENCE_FINALIZED")
     assert event.run_id == run_id
     assert event.materialized_count == 1
@@ -1858,6 +1882,64 @@ def test_completed_run_nmap_inference_failure_rolls_back_only_the_optional_hook(
     assert event.error_class == "RuntimeError"
     assert not hasattr(event, "workspace_path")
     assert "reports/scan.xml CVE-2026-12345 rollback.example" not in caplog.text
+
+
+def test_completed_run_nmap_service_failure_keeps_version_inference(
+    assessment_factory,
+    caplog: pytest.LogCaptureFixture,
+):
+    factory, cleanup = assessment_factory
+    session_id, _project_id, _assessment_id = factory([("domain", "service.example")])
+    run_id = "run-nmap-service-rollback-" + uuid.uuid4().hex
+    calls = []
+    finalize_summary = {}
+
+    def failing_service(conn, *_args, **_kwargs):
+        calls.append("services")
+        conn.execute("UPDATE runs SET command = 'unsafe mutation' WHERE id = ?", (run_id,))
+        raise RuntimeError("reports/service.xml private service output")
+
+    def materialize_inferences(*_args, **_kwargs):
+        calls.append("inferences")
+        return {"materialized_count": 1}
+
+    with caplog.at_level(logging.INFO, logger="shell"):
+        save_completed_run(
+            run_id,
+            session_id,
+            "",
+            "nmap -sV -oX reports/service.xml service.example",
+            "2026-08-04 12:00:00",
+            "2026-08-04 12:01:00",
+            0,
+            _CompletedCapture(),
+            workspace_artifacts=[{
+                "workspace_path": "reports/service.xml",
+                "kind": "output",
+                "structured_output": "nmap_xml",
+                "source_flag": "-oX",
+            }],
+            link_active_project=False,
+            finalize_summary=finalize_summary,
+            materialize_run_entities_fn=lambda *_args, **_kwargs: [],
+            read_owner_workspace_text_file_fn=lambda *_args: "<nmaprun version='7.96'/>",
+            persist_nmap_xml_service_observations_fn=failing_service,
+            materialize_nmap_xml_version_inferences_fn=materialize_inferences,
+        )
+    cleanup[-1][3].append(run_id)
+
+    with db_connect() as conn:
+        saved = conn.execute("SELECT command FROM runs WHERE id = ?", (run_id,)).fetchone()
+    assert saved["command"] == "nmap -sV -oX reports/service.xml service.example"
+    assert calls == ["services", "inferences"]
+    assert finalize_summary["nmap_service_observation_count"] == 0
+    assert finalize_summary["version_inference_count"] == 1
+    event = next(
+        record for record in caplog.records
+        if record.message == "NMAP_SERVICE_EVIDENCE_FINALIZE_ERROR"
+    )
+    assert event.error_class == "RuntimeError"
+    assert "reports/service.xml private service output" not in caplog.text
 
 
 def test_failed_completed_run_does_not_read_marked_nmap_xml_artifact(assessment_factory):

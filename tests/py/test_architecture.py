@@ -338,6 +338,11 @@ _MODULE_SIZE_RATCHET = (
         215,
         "split-package-ratchet",
     ),
+    ModuleSizeBudget(
+        "app/services/assessments/nmap_service_evidence_persistence.py",
+        165,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/osv_package_correlation.py", 220, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_runtime.py", 175, "split-package-ratchet"),
     ModuleSizeBudget(
@@ -448,6 +453,17 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/services/runs/finalization_schemathesis.py", 116, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/runs/finalization_nmap_evidence.py", 64, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/runs/finalization_nmap_service_evidence.py",
+        75,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/runs/finalization_nmap_xml.py", 75, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/runs/finalization_summaries.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_takeover.py", 70, "split-package-ratchet"),
