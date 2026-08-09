@@ -66,8 +66,11 @@ class WorkflowCollectionAccumulator:
         values = self.values.setdefault(name, [])
         if text in values:
             return
+        raw_limit = self._rule(name).get("item_limit")
+        if not isinstance(raw_limit, (str, bytes, bytearray, int, float, type(None))):
+            raw_limit = None
         try:
-            limit = int(self._rule(name).get("item_limit") or MAX_CAPTURE_ITEMS)
+            limit = int(raw_limit or MAX_CAPTURE_ITEMS)
         except (TypeError, ValueError):
             limit = MAX_CAPTURE_ITEMS
         limit = min(max(limit, 1), MAX_CAPTURE_ITEMS)

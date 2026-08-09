@@ -178,9 +178,10 @@ def capture_event_with_signals(
         signals=metadata.get("signals") if isinstance(metadata.get("signals"), list) else None,
         entities=metadata.get("entities") if isinstance(metadata.get("entities"), list) else None,
     )
-    source_detail = (
-        dict(metadata.get("source_detail"))
-        if isinstance(metadata.get("source_detail"), dict)
+    raw_source_detail = metadata.get("source_detail")
+    source_detail: dict[str, object] = (
+        raw_source_detail.copy()
+        if isinstance(raw_source_detail, dict)
         else {}
     )
     for key in ("screenshots", "historical_urls", "version_observations", "takeover_observations"):

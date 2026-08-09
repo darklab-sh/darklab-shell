@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
@@ -13,7 +13,7 @@ from services.atlas.lookup_filters import sql_join as _sql_join
 from services.atlas.scope import metadata_owner_sql as _metadata_owner_sql
 
 
-def atlas_search_clause(columns: list[str], extra_exprs: tuple[str, ...] = ()) -> str:
+def atlas_search_clause(columns: Sequence[str], extra_exprs: tuple[str, ...] = ()) -> str:
     dialect = dialect_for_backend(get_db_backend())
     expressions = [dialect.text_search_expr(column) for column in columns]
     expressions.extend(extra_exprs)
@@ -23,7 +23,7 @@ def atlas_search_clause(columns: list[str], extra_exprs: tuple[str, ...] = ()) -
 def atlas_search_params(
     search: str,
     search_like: str,
-    columns: list[str],
+    columns: Sequence[str],
     extra_expr_count: int = 0,
     *,
     metadata_owner_params: list[str] | None = None,

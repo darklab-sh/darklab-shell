@@ -162,20 +162,24 @@ def attach_remediation_dispositions(
             }))
             reference["review_state"] = (
                 str(disposition.get("review_state") or fallback_state)
-                if disposition
+                if disposition is not None
                 else fallback_state
             )
             reference["review_state_source"] = (
                 "remediation_group" if disposition else "observation"
             )
             reference["disposition_updated_at"] = (
-                str(disposition.get("updated_at") or "") if disposition else ""
+                str(disposition.get("updated_at") or "") if disposition is not None else ""
             )
             has_saved_guidance = bool(
-                disposition and disposition.get("remediation_updated_at") is not None
+                disposition is not None
+                and disposition.get("remediation_updated_at") is not None
+            )
+            saved_remediation = (
+                disposition.get("remediation") if disposition is not None else ""
             )
             remediation = (
-                str(disposition.get("remediation") or "") if has_saved_guidance else ""
+                str(saved_remediation or "") if has_saved_guidance else ""
             )
             reference["has_remediation"] = bool(remediation.strip())
             reference["remediation_preview"] = _remediation_preview(remediation)
@@ -184,7 +188,7 @@ def attach_remediation_dispositions(
             )
             reference["remediation_updated_at"] = (
                 str(disposition.get("remediation_updated_at") or "")
-                if has_saved_guidance
+                if has_saved_guidance and disposition is not None
                 else ""
             )
             groups.append({

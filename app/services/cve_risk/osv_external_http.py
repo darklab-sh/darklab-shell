@@ -19,8 +19,8 @@ OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 
 
 class RejectRedirects(HTTPRedirectHandler):
-    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
-        del request, file_pointer, code, message, headers, new_url
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        del req, fp, code, msg, headers, newurl
         return None
 
 

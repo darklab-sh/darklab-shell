@@ -71,8 +71,12 @@ def sarif_locations(
     rejected = 0
     truncated = len(locations) > SARIF_LOCATION_LIMIT
     for raw_location in locations[:SARIF_LOCATION_LIMIT]:
-        physical = raw_location.get("physicalLocation") if isinstance(raw_location, dict) else None
-        artifact = physical.get("artifactLocation") if isinstance(physical, dict) else None
+        if not isinstance(raw_location, dict):
+            continue
+        physical = raw_location.get("physicalLocation")
+        if not isinstance(physical, dict):
+            continue
+        artifact = physical.get("artifactLocation")
         if not isinstance(artifact, dict):
             continue
         provenance = _artifact_provenance(artifact, artifacts)
@@ -112,7 +116,8 @@ def sarif_location_summary(locations: list[dict[str, Any]]) -> str:
     summaries = []
     for location in locations:
         text = str(location.get("uri") or "")
-        region = location.get("region") if isinstance(location.get("region"), dict) else {}
+        raw_region = location.get("region")
+        region = raw_region if isinstance(raw_region, dict) else {}
         if region.get("start_line"):
             text += f":{region['start_line']}"
             if region.get("start_column"):

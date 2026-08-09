@@ -132,8 +132,8 @@ def query_external_osv(
         )
         if cached is not None:
             return cached
-
     max_attempts = max(1, min(int(settings.get("max_attempts") or 3), 5))
+    result: dict[str, Any] = {"outcome": "failed"}
     try:
         for attempt in range(1, max_attempts + 1):
             try:

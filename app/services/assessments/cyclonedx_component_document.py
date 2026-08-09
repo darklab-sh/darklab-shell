@@ -45,7 +45,8 @@ def parse_cyclonedx_component_document(
 
 
 def _observed_at(document: dict[str, Any], explicit: str) -> str:
-    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    raw_metadata = document.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
     value = _text(explicit or metadata.get("timestamp"), 64)
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))

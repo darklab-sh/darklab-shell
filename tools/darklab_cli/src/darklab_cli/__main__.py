@@ -2018,11 +2018,12 @@ def _assessment(client: DarklabClient, args: argparse.Namespace) -> int:
 
 
 def _print_verification_action_plan(plan: dict[str, Any]) -> None:
-    target = plan.get("target") if isinstance(plan.get("target"), dict) else {}
-    action = plan.get("action") if isinstance(plan.get("action"), dict) else {}
-    http_profile = (
-        plan.get("http_profile") if isinstance(plan.get("http_profile"), dict) else {}
-    )
+    raw_target = plan.get("target")
+    raw_action = plan.get("action")
+    raw_http_profile = plan.get("http_profile")
+    target = raw_target if isinstance(raw_target, dict) else {}
+    action = raw_action if isinstance(raw_action, dict) else {}
+    http_profile = raw_http_profile if isinstance(raw_http_profile, dict) else {}
     rows = [{
         "action": action.get("key") or "",
         "policy": plan.get("policy_level") or "",

@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -199,6 +200,11 @@ from services.projects.web_surface_comparison import (
     capture_matches_change_state,
     normalize_change_state,
 )
+
+
+def _source_detail(metadata: dict[str, object]) -> dict[str, Any]:
+    detail = metadata.get("source_detail")
+    return detail if isinstance(detail, dict) else {}
 
 
 def _openapi_json(paths=None, **extra):
@@ -476,7 +482,7 @@ def test_assessment_service_recommendations_are_project_scoped_and_read_only(mon
             ],
         },
     )
-    checks = [{
+    checks: list[dict[str, Any]] = [{
         "target_entity_id": "ent_target",
         "target_type": "domain",
         "target_value": "app.example.com",
@@ -560,7 +566,7 @@ def test_nuclei_recommendations_explain_signals_without_recommending_intrusive_r
         "load_nuclei_recommendation_signals",
         lambda *_args, **_kwargs: {"ent_target": signal},
     )
-    checks = [
+    checks: list[dict[str, Any]] = [
         {
             "check_key": "vulnerability_templates",
             "recommended_action_key": "command:nuclei",
@@ -718,6 +724,9 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     intrusive = command_plan(
         "nuclei", "domain", "example.com", nuclei_profile="intrusive", allow_intrusive=True,
     )
+    assert safe is not None
+    assert standard is not None
+    assert intrusive is not None
     assert "-severity high,critical" in safe.command
     assert "-severity medium,high,critical" in standard.command
     assert "-tags exposure,misconfig,cve,tech,network,ssl,api" in standard.command
@@ -788,7 +797,8 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         plan["display_command"], "[template-id] finding",
         template_snapshot=template_snapshot,
     )
-    assert line_metadata["template_provenance"]["template_snapshot"] == (
+    template_provenance = cast(dict[str, Any], line_metadata["template_provenance"])
+    assert template_provenance["template_snapshot"] == (
         template_snapshot.public()
     )
     intrusive_row = {
@@ -1173,7 +1183,7 @@ def test_schemathesis_report_rejects_duplicate_keys_and_unreviewed_operations():
             _schemathesis_report_bytes(),
             reviewed,
             profile_key="api",
-            profile_version=1,
+            profile_version=cast(Any, 1),
         )
 
     assert invalid_profile.value.code == "invalid_profile_provenance"
@@ -1436,7 +1446,9 @@ def test_reviewed_schemathesis_schema_materializes_private_schema_and_report(mon
 
 def test_schemathesis_materialization_requires_review_and_cleans_partial_files(monkeypatch):
     with pytest.raises(SchemathesisArtifactError) as unreviewed:
-        materialize_reviewed_schemathesis_schema(SimpleNamespace(content=_openapi_json()))
+        materialize_reviewed_schemathesis_schema(
+            cast(Any, SimpleNamespace(content=_openapi_json()))
+        )
     assert unreviewed.value.code == "schema_review_required"
 
     reviewed = review_local_openapi_json(
@@ -1530,7 +1542,9 @@ def test_reviewed_schemathesis_command_rejects_unreviewed_or_unprotected_materia
         base_url="https://api.example.test",
     )
 
-    assert reviewed_schemathesis_command_plan(SimpleNamespace(**reviewed.__dict__)) is None
+    assert reviewed_schemathesis_command_plan(
+        cast(Any, SimpleNamespace(**reviewed.__dict__))
+    ) is None
     assert reviewed_schemathesis_command_plan(
         reviewed,
         schema_path="/tmp/schema.json",
@@ -1622,7 +1636,9 @@ def test_schemathesis_action_requires_one_reviewed_saved_artifact():
     )
 
     assert plan["launchable"] is True
-    assert plan["display_command"] == reviewed_schemathesis_command_plan(reviewed).command
+    reviewed_plan = reviewed_schemathesis_command_plan(reviewed)
+    assert reviewed_plan is not None
+    assert plan["display_command"] == reviewed_plan.command
     assert plan["bounds"]["request_limit"] == 20
     assert plan["bounds"]["time_limit_seconds"] == 300
     assert plan["artifact_selection"]["selected"] == {
@@ -1728,7 +1744,7 @@ def test_reviewed_schemathesis_execution_replaces_only_help_carrier():
         execution_command="schemathesis --help",
         command="schemathesis --help",
         rewrite_notice=None,
-        validation=object(),
+        validation=cast(Any, object()),
         missing_runtime=None,
         display_missing_runtime=None,
         env_overrides={},
@@ -1765,6 +1781,8 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
     context = SchemathesisActionContext(
         (option,), option, reviewed, True, False, False,
     )
+    reviewed_plan = reviewed_schemathesis_command_plan(reviewed)
+    assert reviewed_plan is not None
     plan = {
         "project_id": "prj_api",
         "assessment_id": "asm_api",
@@ -1775,7 +1793,7 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
         "policy_level": "standard",
         "action": {"key": "command:schemathesis", "kind": "command", "id": "schemathesis"},
         "target": {"entity_id": "ent_api", "type": "url", "value": reviewed.base_url},
-        "display_command": reviewed_schemathesis_command_plan(reviewed).command,
+        "display_command": reviewed_plan.command,
         "artifact_selection": context.public_selection(),
     }
     schema_path = Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json")
@@ -1816,10 +1834,12 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
         "schema_artifact_id": reviewed.source_artifact_id,
         "schema_operation_count": 2,
     }
-    assert launch_context.reviewed_execution.execution_command.startswith(
+    reviewed_execution = launch_context.reviewed_execution
+    assert reviewed_execution is not None
+    assert getattr(reviewed_execution, "execution_command").startswith(
         f"schemathesis --config-file {config_path} run {schema_path}"
     )
-    report_context = launch_context.reviewed_execution.report_context
+    report_context = getattr(reviewed_execution, "report_context")
     assert type(report_context) is ReviewedSchemathesisReportContext
     assert report_context.schema == reviewed
     assert report_context.project_id == "prj_api"
@@ -1832,6 +1852,7 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
         "trusted_execution_args": (),
         "reviewed_execution": launch_context.reviewed_execution,
     }
+    assert protected.cleanup is not None
     protected.cleanup()
     assert cleaned == [True]
 
@@ -2193,7 +2214,9 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
         "observed_at": "2026-08-07T22:00:00Z",
     }
     assert metadata["source_detail"]["nuclei_takeover_observations"] == [evidence]
-    assert to_wire(capture.events[0])["source_detail"]["nuclei_takeover_observations"] == [evidence]
+    assert _source_detail(to_wire(capture.events[0]))[
+        "nuclei_takeover_observations"
+    ] == [evidence]
     confirmed = confirm_takeover_with_nuclei(
         potential,
         evidence,
@@ -2282,14 +2305,18 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
         source_run_id="run-nuclei-owned",
         nuclei_takeover_template=reviewed_template,
     )
-    assert "nuclei_takeover_observations" not in untrusted_classifier.classify_line(json.dumps({
-        "template-id": "other-template",
-        "matched-at": "https://app.example.test",
-        "timestamp": "2026-08-07T22:00:00Z",
-    }))["source_detail"]
-    assert "nuclei_takeover_observations" not in untrusted_classifier.classify_line(
-        "{" + (" " * NUCLEI_JSON_MAX_LINE_BYTES)
-    )["source_detail"]
+    assert "nuclei_takeover_observations" not in _source_detail(
+        untrusted_classifier.classify_line(json.dumps({
+            "template-id": "other-template",
+            "matched-at": "https://app.example.test",
+            "timestamp": "2026-08-07T22:00:00Z",
+        }))
+    )
+    assert "nuclei_takeover_observations" not in _source_detail(
+        untrusted_classifier.classify_line(
+            "{" + (" " * NUCLEI_JSON_MAX_LINE_BYTES)
+        )
+    )
     assert evaluate_takeover_signal({"hostname": "app.example.test", "resolution_state": "timeout"})["state"] == "uncertain"
     assert evaluate_takeover_signal(
         {
@@ -2414,7 +2441,9 @@ def test_dnsx_json_takeover_evidence_survives_event_wire_without_resolver_entiti
     }
     observation = event.source_detail["takeover_observations"][0]
     assert observation["source_run_id"] == "run-dnsx"
-    assert to_wire(capture.events[0])["source_detail"]["takeover_observations"] == [observation]
+    assert _source_detail(to_wire(capture.events[0]))["takeover_observations"] == [
+        observation
+    ]
 
 
 def test_dnsx_target_correlation_joins_exact_owner_scoped_evidence_without_network_work():
@@ -2428,6 +2457,7 @@ def test_dnsx_target_correlation_joins_exact_owner_scoped_evidence_without_netwo
         "status_code": "NXDOMAIN",
         "timestamp": "2026-08-07T20:05:00Z",
     }, command="dnsx -d tenant.vendor.test -a -aaaa -json", source_run_id="run-target")
+    assert target is not None
     correlated = correlate_dnsx_target_observation(
         source, target, allowed_source_run_ids={"run-source", "run-target"},
     )
@@ -2468,6 +2498,7 @@ def test_dnsx_target_correlation_rejects_incompatible_or_untrusted_evidence():
         "host": "tenant.vendor.test", "status_code": "SERVFAIL",
         "timestamp": "2026-08-07T20:05:00Z",
     }, command="dnsx -d tenant.vendor.test -a -json", source_run_id="run-target")
+    assert matching is not None
     assert correlate_dnsx_target_observation(
         source, matching, allowed_source_run_ids={"run-source"},
     ) is None
@@ -2682,7 +2713,7 @@ def test_web_surface_comparison_uses_exact_url_role_and_prior_run_evidence():
 def test_web_gallery_paging_is_bounded_and_skips_malformed_rows():
     rows = filter_web_surface_rows(
         [None, {"url": "https://one.example", "status_code": 200}, {"url": "https://two.example", "status_code": 200}],
-        offset="1",
+        offset=cast(Any, "1"),
         limit=9999,
     )
     assert [row["url"] for row in rows] == ["https://two.example"]
@@ -2842,7 +2873,9 @@ def test_dalfox_parameter_observations_survive_run_event_wire_round_trip():
     observation = capture.events[1].source_detail["parameter_observations"][0]
     assert summary["source_run_id"] == "run-dalfox"
     assert observation["parameter"] == "view"
-    assert to_wire(capture.events[1])["source_detail"]["parameter_observations"] == [observation]
+    assert _source_detail(to_wire(capture.events[1]))["parameter_observations"] == [
+        observation
+    ]
 
 
 def _dalfox_xss_context(**overrides):
@@ -2888,6 +2921,7 @@ def test_reviewed_dalfox_xss_command_is_exact_bounded_and_evidence_derived():
     plan = reviewed_dalfox_xss_command_plan(evidence)
 
     assert plan is not None
+    assert plan.request_limit is not None
     assert plan.request_limit == DALFOX_XSS_REQUEST_LIMIT == 256
     assert plan.time_limit_seconds == DALFOX_XSS_TIME_LIMIT_SECONDS == 90
     assert f"--max-payloads-per-param {DALFOX_XSS_MAX_PAYLOADS_PER_PARAMETER}" in plan.command
@@ -2912,13 +2946,14 @@ def test_reviewed_dalfox_xss_command_is_exact_bounded_and_evidence_derived():
         source_run_id="run-dalfox-xss",
         dalfox_xss_context=context,
     )
-    assert classifier.classify_line(json.dumps({"meta": {
+    metadata = classifier.classify_line(json.dumps({"meta": {
         "dalfox_version": "v3.1.2",
         "targets": [evidence.target],
         "findings_count": 0,
         "total_requests": DALFOX_XSS_REQUEST_LIMIT,
         "scan_duration_ms": 60_000,
-    }}))["source_detail"]["dalfox_xss_scan"]["reported_finding_count"] == 0
+    }}))
+    assert _source_detail(metadata)["dalfox_xss_scan"]["reported_finding_count"] == 0
 
 
 def test_reviewed_dalfox_xss_action_requires_enabled_saved_parameter_selection():
@@ -2957,7 +2992,9 @@ def test_reviewed_dalfox_xss_action_requires_enabled_saved_parameter_selection()
     plan = build_assessment_action_plan(row, target, "prj_xss", dalfox_xss=selected)
     assert plan["launchable"] is True
     assert plan["policy_level"] == "intrusive"
-    assert plan["display_command"] == reviewed_dalfox_xss_command_plan(evidence).command
+    reviewed_plan = reviewed_dalfox_xss_command_plan(evidence)
+    assert reviewed_plan is not None
+    assert plan["display_command"] == reviewed_plan.command
     assert plan["bounds"]["request_limit"] == DALFOX_XSS_REQUEST_LIMIT
     assert plan["bounds"]["time_limit_seconds"] == DALFOX_XSS_TIME_LIMIT_SECONDS
     assert plan["evidence_selection"]["selected"] == options.public_items()[0]
@@ -2998,11 +3035,11 @@ def test_reviewed_dalfox_xss_command_rejects_unbound_or_unsupported_evidence():
     assert reviewed_dalfox_xss_command_plan(
         _reviewed_dalfox_parameter_evidence(observation_id="obs_" + ("f" * 32)),
     ) is None
-    assert reviewed_dalfox_xss_command_plan(SimpleNamespace(
+    assert reviewed_dalfox_xss_command_plan(cast(Any, SimpleNamespace(
         target="https://app.example.test/search?q=one",
         parameter="q",
         location="Query",
-    )) is None
+    ))) is None
     discovery = command_plan("dalfox", "url", "https://app.example.test/search?q=one")
     assert discovery is not None
     assert "--only-discovery" in discovery.command
@@ -3033,7 +3070,7 @@ def test_reviewed_dalfox_execution_replaces_only_its_exact_validated_carrier():
         execution_command=reviewed.validation_command,
         command=reviewed.validation_command + " --only-discovery --skip-mining-dict",
         rewrite_notice="Added bounded discovery flags.",
-        validation=object(),
+        validation=cast(Any, object()),
         missing_runtime=None,
         display_missing_runtime=None,
         env_overrides={},
@@ -3088,7 +3125,7 @@ def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
     }}))
     rows = []
     for result_type, suffix in (("V", "executed"), ("A", "ast"), ("R", "reflected")):
-        rows.append(classifier.classify_line(json.dumps({
+        rows.append(_source_detail(classifier.classify_line(json.dumps({
             "type": result_type,
             "type_description": f"{result_type} result",
             "inject_type": "inHTML-double",
@@ -3100,7 +3137,7 @@ def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
             "severity": "High",
             "message_id": f"{result_type}01",
             "message_str": f"Dalfox {suffix} result",
-        }))["source_detail"]["dalfox_xss_observations"][0])
+        })))["dalfox_xss_observations"][0])
     duplicate = classifier.classify_line(json.dumps({
         "type": "V", "type_description": "V result", "inject_type": "inHTML-double",
         "method": "GET", "param": "q", "payload": "<svg id=executed onload=alert(1)>",
@@ -3111,7 +3148,7 @@ def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
         "type": "I", "param": "q", "message_str": "informational component",
     }))
 
-    assert summary["source_detail"]["dalfox_xss_scan"] == {
+    assert _source_detail(summary)["dalfox_xss_scan"] == {
         "target": "https://app.example.test/search?q=one",
         "parameter": "q",
         "location": "Query",
@@ -3139,8 +3176,8 @@ def test_reviewed_dalfox_xss_jsonl_preserves_confidence_aware_proof():
     assert all(item["source_parameter_run_id"] == "run-dalfox-discovery" for item in rows)
     assert all(item["proof_digest"].startswith("sha256:") for item in rows)
     assert all(item["cwe_ids"] == ["CWE-79"] for item in rows)
-    assert "dalfox_xss_observations" not in duplicate.get("source_detail", {})
-    assert "dalfox_xss_observations" not in informational.get("source_detail", {})
+    assert "dalfox_xss_observations" not in _source_detail(duplicate)
+    assert "dalfox_xss_observations" not in _source_detail(informational)
 
 
 def test_reviewed_dalfox_findings_exit_requires_accepted_bound_evidence():
@@ -3186,7 +3223,7 @@ def test_reviewed_dalfox_findings_exit_requires_accepted_bound_evidence():
         1, completion_policy=None, signal_classifier=classifier, output_sink_error=False,
     ) == 1
     with pytest.raises(ValueError, match="invalid run completion context"):
-        RunCompletionPolicy("caller-made")
+        RunCompletionPolicy(cast(Any, "caller-made"))
 
 
 def test_reviewed_schemathesis_findings_exit_requires_complete_private_report(caplog):
@@ -3223,6 +3260,7 @@ def test_reviewed_schemathesis_findings_exit_requires_complete_private_report(ca
     classifier = SimpleNamespace()
 
     assert policy == RunCompletionPolicy(schemathesis_execution=execution)
+    assert policy is not None
     assert policy.name == "schemathesis_findings"
     assert effective_run_exit_code(
         1, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
@@ -3268,37 +3306,39 @@ def test_reviewed_dalfox_xss_context_and_rows_fail_closed():
         "dalfox https://app.example.test/search?q=one -p other:query --skip-discovery --skip-mining --format jsonl",
         "dalfox https://other.example.test/search?q=one -p q:query --skip-discovery --skip-mining --format jsonl",
     )
-    assert all("dalfox_xss_scan" not in OutputSignalClassifier(
+    assert all("dalfox_xss_scan" not in _source_detail(OutputSignalClassifier(
         command,
         source_run_id="run-dalfox-xss",
         dalfox_xss_context=_dalfox_xss_context(),
-    ).classify_line(meta).get("source_detail", {}) for command in commands)
-    assert "dalfox_xss_scan" not in OutputSignalClassifier(
+    ).classify_line(meta)) for command in commands)
+    assert "dalfox_xss_scan" not in _source_detail(OutputSignalClassifier(
         commands[0] + " --skip-discovery",
         source_run_id="run-dalfox-xss",
-    ).classify_line(meta).get("source_detail", {})
-    assert "dalfox_xss_scan" not in OutputSignalClassifier(
+    ).classify_line(meta))
+    assert "dalfox_xss_scan" not in _source_detail(OutputSignalClassifier(
         commands[0] + " --skip-discovery",
         source_run_id="run-dalfox-xss",
-        dalfox_xss_context={"target": "https://app.example.test/search?q=one"},
-    ).classify_line(meta).get("source_detail", {})
+        dalfox_xss_context=cast(
+            Any, {"target": "https://app.example.test/search?q=one"}
+        ),
+    ).classify_line(meta))
 
     classifier = _dalfox_xss_classifier()
-    assert "dalfox_xss_scan" not in classifier.classify_line(json.dumps({"meta": {
+    assert "dalfox_xss_scan" not in _source_detail(classifier.classify_line(json.dumps({"meta": {
         "dalfox_version": "v3.1.2",
         "targets": ["https://other.example.test/search?q=one"],
         "findings_count": 1,
         "total_requests": 80,
         "scan_duration_ms": 2500,
-    }})).get("source_detail", {})
-    assert "dalfox_xss_scan" not in classifier.classify_line(json.dumps({"meta": {
+    }})))
+    assert "dalfox_xss_scan" not in _source_detail(classifier.classify_line(json.dumps({"meta": {
         "dalfox_version": "v3.1.2",
         "targets": ["https://app.example.test/search?q=one"],
         "findings_count": 1,
         "total_requests": 121,
         "scan_duration_ms": 2500,
-    }})).get("source_detail", {})
-    assert classifier.classify_line(meta)["source_detail"]["dalfox_xss_scan"]
+    }})))
+    assert _source_detail(classifier.classify_line(meta))["dalfox_xss_scan"]
     invalid_rows = (
         {"type": "V", "param": "other", "method": "GET", "payload": "<svg>",
          "evidence": "proof", "cwe": "CWE-79"},
@@ -3311,9 +3351,9 @@ def test_reviewed_dalfox_xss_context_and_rows_fail_closed():
         {"type": "X", "param": "q", "method": "GET", "payload": "<svg>",
          "evidence": "proof", "cwe": "CWE-79"},
     )
-    assert all("dalfox_xss_observations" not in classifier.classify_line(
+    assert all("dalfox_xss_observations" not in _source_detail(classifier.classify_line(
         json.dumps(row),
-    ).get("source_detail", {}) for row in invalid_rows)
+    )) for row in invalid_rows)
 
 
 def test_dalfox_xss_observations_are_bounded_and_survive_event_wire_round_trip():
@@ -3348,7 +3388,9 @@ def test_dalfox_xss_observations_are_bounded_and_survive_event_wire_round_trip()
                     for event in capture.events[1:] if "dalfox_xss_observations" in event.source_detail]
     assert summary["truncated"] is True
     assert len(observations) == DALFOX_XSS_MAX_OBSERVATIONS
-    assert to_wire(capture.events[1])["source_detail"]["dalfox_xss_observations"] == [observations[0]]
+    assert _source_detail(to_wire(capture.events[1]))["dalfox_xss_observations"] == [
+        observations[0]
+    ]
     assert _dalfox_xss_classifier().classify_line(
         "{" + (" " * DALFOX_XSS_JSON_MAX_LINE_BYTES) + "}",
     ).get("source_detail", {}) == {}
@@ -3451,7 +3493,9 @@ def test_httpx_json_version_observations_survive_run_event_wire_round_trip():
     observation = capture.events[0].source_detail["version_observations"][0]
     assert observation["source_run_id"] == "run-httpx"
     assert observation["technology"] == "Nginx:1.25.5"
-    assert to_wire(capture.events[0])["source_detail"]["version_observations"] == [observation]
+    assert _source_detail(to_wire(capture.events[0]))["version_observations"] == [
+        observation
+    ]
 
 
 def test_real_command_classifier_receives_generated_run_id(monkeypatch):
@@ -3469,7 +3513,7 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
         execution_command="httpx -u https://app.example.test -json -cpe",
         command="httpx -u https://app.example.test -json -cpe",
         rewrite_notice=None,
-        validation=None,
+        validation=cast(Any, None),
         missing_runtime=None,
         display_missing_runtime=None,
         env_overrides={},
@@ -3487,13 +3531,13 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
             dalfox_xss_context=_dalfox_xss_context(),
         ),
         cfg={"output_entity_extra_domain_suffixes": []},
-        run_output_capture_fn=lambda run_id: {"run_id": run_id},
-        popen_fn=lambda *args, **kwargs: Process(),
+        run_output_capture_fn=cast(Any, lambda run_id: {"run_id": run_id}),
+        popen_fn=cast(Any, lambda *args, **kwargs: Process()),
         pid_register_fn=lambda *args: None,
         active_run_register_fn=lambda *args, **kwargs: None,
-        output_signal_classifier_cls=Classifier,
+        output_signal_classifier_cls=cast(Any, Classifier),
         workspace_path_filter_cls=lambda *args, **kwargs: object(),
-        owner_context_for_scope_fn=lambda *args, **kwargs: object(),
+        owner_context_for_scope_fn=cast(Any, lambda *args, **kwargs: object()),
         scanner_prefix=(),
         stdbuf_bin=None,
         shell_bin="/bin/sh",
@@ -3510,11 +3554,13 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
     }
     assert output_signal_classifier_kwargs(None) == {}
     with pytest.raises(ValueError, match="invalid run output signal context"):
-        output_signal_classifier_kwargs({"nuclei_takeover_template": "caller-made"})
+        output_signal_classifier_kwargs(cast(
+            Any, {"nuclei_takeover_template": "caller-made"}
+        ))
     with pytest.raises(ValueError, match="invalid Dalfox XSS signal context"):
-        RunOutputSignalContext(dalfox_xss_context="caller-made")
+        RunOutputSignalContext(dalfox_xss_context=cast(Any, "caller-made"))
     with pytest.raises(ValueError, match="invalid Nuclei template snapshot context"):
-        RunOutputSignalContext(nuclei_template_snapshot="caller-made")
+        RunOutputSignalContext(nuclei_template_snapshot=cast(Any, "caller-made"))
 
     context = RunOutputSignalContext(
         nuclei_takeover_template=ReviewedNucleiTakeoverTemplate(
@@ -3646,7 +3692,9 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
             session_id="session-httpx",
             client_ip="192.0.2.1",
             handlers=handlers,
-            output_signal_context={"nuclei_takeover_template": "caller-made"},
+            output_signal_context=cast(
+                Any, {"nuclei_takeover_template": "caller-made"}
+            ),
         )
 
 
@@ -3663,7 +3711,9 @@ def test_gau_output_carries_historical_url_provenance_only():
     assert metadata["historical_urls"] == [{
         "url": "https://example.com/archive?a=1", "source": "gau", "source_run_id": "run-gau",
     }]
-    url_entity = next(entity for entity in metadata["entities"] if entity.get("type") == "url")
+    entities = metadata["entities"]
+    assert isinstance(entities, list)
+    url_entity = next(entity for entity in entities if entity.get("type") == "url")
     assert url_entity["attributes"] == {
         "discovery_mode": "passive", "provider": "gau", "source_run_id": "run-gau",
     }
@@ -3682,7 +3732,7 @@ def test_passive_web_metadata_survives_run_event_wire_round_trip():
     capture_event_with_signals(capture, OutputSignalClassifier("gau example.com", source_run_id="run-1"), "https://example.com/a")
     assert capture.events[0].source_detail["historical_urls"][0]["source_run_id"] == "run-1"
     wire = to_wire(capture.events[0])
-    assert wire["source_detail"]["historical_urls"][0]["url"] == "https://example.com/a"
+    assert _source_detail(wire)["historical_urls"][0]["url"] == "https://example.com/a"
 
 
 def test_gau_command_plan_is_domain_scoped_and_passive():

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import datetime
 from typing import Any
 
@@ -22,8 +22,8 @@ DNSX_TARGET_MAX_SKEW_SECONDS, DNSX_TARGET_MAX_ALLOWED_RUNS = 86_400, 256
 
 
 def correlate_dnsx_target_observation(
-    source: dict[str, Any] | None,
-    target: dict[str, Any] | None,
+    source: Mapping[str, Any] | None,
+    target: Mapping[str, Any] | None,
     *,
     allowed_source_run_ids: Collection[str],
     max_skew_seconds: int = DNSX_TARGET_MAX_SKEW_SECONDS,
@@ -71,8 +71,8 @@ def correlate_dnsx_target_observation(
     }
 
 
-def _evidence(value: dict[str, Any] | None) -> dict[str, Any] | None:
-    item = value if isinstance(value, dict) else {}
+def _evidence(value: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    item = value if isinstance(value, Mapping) else {}
     observation_id = _text(item.get("observation_id"), 64)
     run_id = _text(item.get("source_run_id"), 128)
     hostname = _domain(item.get("hostname"))

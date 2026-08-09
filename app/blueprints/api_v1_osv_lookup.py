@@ -37,6 +37,8 @@ def _request_values(data: dict) -> tuple[str, str]:
 @api_routes.api_v1_bp.route("/advisories/osv/lookup", methods=["POST"])
 @api_routes.require_api_auth
 def api_osv_advisory_lookup():
+    session_id = ""
+    owner_scope = None
     try:
         session_id = api_routes._require_session_id()
         owner_scope = api_routes._api_request_scope()
@@ -69,7 +71,7 @@ def api_osv_advisory_lookup():
         api_routes.log.warning("API_OSV_ADVISORY_LOOKUP_REJECTED", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
-            "team_id": owner_scope.team_id,
+            "team_id": getattr(owner_scope, "team_id", ""),
             "source": "osv",
             "reason": "invalid_request",
         })

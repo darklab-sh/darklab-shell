@@ -17,8 +17,7 @@ import re
 from urllib.parse import urlparse
 
 from core.output_targets import (
-    _find_flag_value,
-    _is_help_output_command,
+    _find_flag_value, _is_help_output_command,
     command_root,
     extract_target,
     tokenize_command,
@@ -72,6 +71,7 @@ from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_r
 from services.assessments.httpx_version_observations import httpx_json_metadata
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
 from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_ip, canonical_url
+from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 
 
 log = logging.getLogger("shell")
@@ -949,7 +949,7 @@ class OutputSignalClassifier:
     source_run_id: str = ""
     profile_role: str = ""
     nuclei_takeover_template: ReviewedNucleiTakeoverTemplate | None = None
-    nuclei_template_snapshot: object | None = None
+    nuclei_template_snapshot: NucleiTemplateCacheSnapshot | None = None
     dalfox_xss_context: ReviewedDalfoxXssContext | None = None
     def __post_init__(self) -> None:
         self.root = command_root(self.command)

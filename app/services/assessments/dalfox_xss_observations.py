@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import urlsplit
 
 from core.output_targets import tokenize_command
@@ -302,7 +302,7 @@ def _text(value: Any, limit: int) -> str:
     return text if text and len(text) <= limit and not any(ord(char) < 32 for char in raw) else ""
 
 
-def _bounded_count(value: Any) -> bool:
+def _bounded_count(value: Any) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10_000_000
 
 

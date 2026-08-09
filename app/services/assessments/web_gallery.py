@@ -26,7 +26,7 @@ def normalize_web_surface_filters(values: object) -> dict[str, object]:
     source = values if isinstance(values, Mapping) else {}
     status_value = source.get("status_code")
     try:
-        status_code = int(status_value) if str(status_value or "").strip() else None
+        status_code = int(status_value) if isinstance(status_value, (str, int)) else None
     except (TypeError, ValueError):
         status_code = None
     if status_code is not None and not 100 <= status_code <= 599:

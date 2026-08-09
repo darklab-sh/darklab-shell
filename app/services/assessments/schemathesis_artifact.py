@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from typing import Any
+from typing import Any, cast
 
 from services.assessments.schemathesis_schema import (
     ReviewedOpenApiSchema,
@@ -89,7 +89,7 @@ def review_project_openapi_artifact(
 
 def _recorded_size(artifact: dict[str, Any]) -> int:
     try:
-        recorded_size = int(artifact.get("byte_size"))
+        recorded_size = int(cast(Any, artifact.get("byte_size")))
     except (TypeError, ValueError) as exc:
         raise SchemathesisArtifactError(
             "schema_artifact_size_invalid",

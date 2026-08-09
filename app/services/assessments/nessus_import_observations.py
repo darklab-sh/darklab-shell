@@ -98,11 +98,10 @@ def _observation(row: Any) -> dict[str, str] | None:
     tool_version = _text(detail.get("tool_version"), 128)
     parser_version = _text(detail.get("parser_version"), 128)
     expected_subject = f"{entity_signature(target_kind, target)}\x1f{cpe}" if target_kind and target and cpe else ""
-    if not all((
+    if normalized is None or not all((
         detail.get("adapter") == "nessus",
         target_kind in {"domain", "ip"},
-        normalized,
-        str(normalized["version"]) == _text(detail.get("version"), 128) if normalized else False,
+        str(normalized["version"]) == _text(detail.get("version"), 128),
         expected_subject == str(row["subject_key"] or ""),
         observed_at,
         tool_version,

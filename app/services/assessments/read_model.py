@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from core.database_access import get_db_connect
@@ -71,8 +72,8 @@ def _assessment_row(
     ).fetchone()
 
 
-def _validated_check_filters(filters: dict[str, object] | None) -> dict[str, str]:
-    values = filters if isinstance(filters, dict) else {}
+def _validated_check_filters(filters: Mapping[str, object] | None) -> dict[str, str]:
+    values = filters if isinstance(filters, Mapping) else {}
     normalized = {
         "category": _normalized_filter(values.get("category"), "category"),
         "state": _normalized_filter(values.get("state"), "state"),
@@ -135,7 +136,7 @@ _CHECK_FILTER_SQL = (
 def _check_page(
     conn: Any,
     assessment_id: str,
-    filters: dict[str, object] | None,
+    filters: Mapping[str, object] | None,
     *,
     session_id: str,
     team_id: str,
@@ -179,7 +180,11 @@ def _check_page(
         page_query,
         (assessment_id, *params, limit, offset),
     ).fetchall()
-    checks = [row_to_check(row) for row in rows]
+    checks = [
+        check
+        for row in rows
+        if (check := row_to_check(row)) is not None
+    ]
     attach_service_action_recommendations(
         conn,
         checks,
@@ -202,7 +207,7 @@ def get_assessment_read_model(
     project_id: str,
     assessment_id: str,
     *,
-    check_filters: dict[str, object] | None = None,
+    check_filters: Mapping[str, object] | None = None,
     check_limit: int = 50,
     check_offset: int = 0,
     finding_priority: object = "",

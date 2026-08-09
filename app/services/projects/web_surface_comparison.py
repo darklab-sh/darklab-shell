@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from typing import Any
 
 from services.intel.canonical import CanonicalizationError, canonical_url
 
@@ -55,8 +56,8 @@ def normalize_change_state(value: object) -> str:
     return normalized if normalized in CHANGE_STATES else ""
 
 
-def _comparison_records(captures: list[dict[str, object]]) -> list[dict[str, object]]:
-    unique: dict[str, dict[str, object]] = {}
+def _comparison_records(captures: list[dict[str, object]]) -> list[dict[str, Any]]:
+    unique: dict[str, dict[str, Any]] = {}
     for capture in captures:
         record = _comparison_record(capture)
         if record is not None:
@@ -64,7 +65,7 @@ def _comparison_records(captures: list[dict[str, object]]) -> list[dict[str, obj
     return list(unique.values())
 
 
-def _comparison_record(capture: Mapping[str, object]) -> dict[str, object] | None:
+def _comparison_record(capture: Mapping[str, object]) -> dict[str, Any] | None:
     artifact = capture.get("artifact")
     source_run = capture.get("source_run")
     if not isinstance(artifact, Mapping) or not isinstance(source_run, Mapping):
@@ -101,9 +102,9 @@ def _capture_order(
 
 
 def _previous_record(
-    current: Mapping[str, object],
-    records: list[dict[str, object]],
-) -> dict[str, object] | None:
+    current: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> dict[str, Any] | None:
     compatible = [
         record
         for record in records
@@ -147,8 +148,6 @@ def _timestamp(value: object) -> datetime | None:
 
 
 __all__ = [
-    "CHANGE_STATES",
-    "attach_capture_comparisons",
-    "capture_matches_change_state",
-    "normalize_change_state",
+    "CHANGE_STATES", "attach_capture_comparisons",
+    "capture_matches_change_state", "normalize_change_state",
 ]

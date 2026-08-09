@@ -46,9 +46,10 @@ def _request_context():
 
 def _details(change: dict, assessment_id: str, *, transition_kind: str) -> dict:
     check = change["check"]
+    view_args = request.view_args or {}
     return {
         "source": "api_v1",
-        "project_id": str(request.view_args.get("project_id") or ""),
+        "project_id": str(view_args.get("project_id") or ""),
         "assessment_id": assessment_id,
         "check_id": str(check.get("id") or ""),
         "check_key": str(check.get("check_key") or ""),

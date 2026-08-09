@@ -107,8 +107,11 @@ def _selection_matches(
     selected: Mapping[str, Any],
     schema: Any,
 ) -> bool:
+    value = selected.get("operation_count")
+    if value is None:
+        return False
     try:
-        operation_count = int(selected.get("operation_count"))
+        operation_count = int(value)
     except (TypeError, ValueError):
         return False
     return bool(

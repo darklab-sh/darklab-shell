@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Any, Mapping
+from typing import Any, Mapping, NoReturn
 
 import config as app_config
 from core.database_access import get_db_connect
@@ -73,7 +73,7 @@ def materialize_reviewed_dalfox_xss_launch(
             observation_id,
             expected_target=expected_target,
         )
-    command = reviewed_dalfox_xss_command_plan(evidence) if evidence else None
+    command = reviewed_dalfox_xss_command_plan(evidence) if evidence is not None else None
     expected_display = command.command if command else ""
     profile = plan.get("http_profile")
     credential_use = profile.get("credential_use") if isinstance(profile, Mapping) else []
@@ -81,7 +81,7 @@ def materialize_reviewed_dalfox_xss_launch(
         "client_certificate"
     }:
         expected_display += " --config [protected]"
-    if not evidence or str(plan.get("display_command") or "") != expected_display:
+    if evidence is None or str(plan.get("display_command") or "") != expected_display:
         _reject(plan, "saved_evidence")
     reviewed = ReviewedDalfoxXssExecution(evidence)
     protected = materialize_http_profile_launch(
@@ -109,7 +109,7 @@ def materialize_reviewed_dalfox_xss_launch(
     )
 
 
-def _reject(plan: Mapping[str, Any], reason: str) -> None:
+def _reject(plan: Mapping[str, Any], reason: str) -> NoReturn:
     log.error("ASSESSMENT_DALFOX_XSS_LAUNCH_CONTRACT_REJECTED", extra={
         "project_id": str(plan.get("project_id") or "")[:64],
         "assessment_id": str(plan.get("assessment_id") or "")[:64],

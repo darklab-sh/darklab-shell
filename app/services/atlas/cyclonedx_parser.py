@@ -63,7 +63,9 @@ def parse_cyclonedx_json(payload, state, entities, findings, evidence) -> None:
                 **detail,
             },
         ))
-        category = str((detail.get("analysis") or {}).get("category") or "affected")
+        raw_analysis = detail.get("analysis")
+        analysis = raw_analysis if isinstance(raw_analysis, dict) else {}
+        category = str(analysis.get("category") or "affected")
         if category != "affected":
             state.warn(
                 row_number,
@@ -93,8 +95,10 @@ def _append_findings(
     from services.atlas.import_parser import _make_finding, _safe_text
 
     rating = _best_rating(vulnerability.get("ratings"))
-    source = vulnerability.get("source") if isinstance(vulnerability.get("source"), dict) else {}
-    components = detail.get("components") if isinstance(detail.get("components"), list) else []
+    raw_source = vulnerability.get("source")
+    raw_components = detail.get("components")
+    source = raw_source if isinstance(raw_source, dict) else {}
+    components = raw_components if isinstance(raw_components, list) else []
     subjects = components
     appended = False
     for component in subjects:

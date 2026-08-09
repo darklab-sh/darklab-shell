@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Mapping
 
 from services.atlas.observations import app_ports_by_host, public_app_port_record
@@ -56,7 +57,7 @@ def attach_service_action_recommendations(
 
 
 def _target_recommendations(
-    ports: list[Mapping[str, Any]],
+    ports: Sequence[Mapping[str, Any]],
     *,
     target_type: str,
 ) -> dict[str, Any]:

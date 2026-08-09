@@ -428,7 +428,7 @@ def test_collection_capture_accumulator_is_bounded_deduplicated_and_required():
 
 
 def test_collection_capture_definitions_require_version_three_and_validate_limits():
-    base = {
+    base: dict[str, Any] = {
         "id": "collect_hosts",
         "title": "Collect hosts",
         "inputs": [],
@@ -445,7 +445,8 @@ def test_collection_capture_definitions_require_version_three_and_validate_limit
         compile_workflow_definition({**base, "version": 2})
     compiled = compile_workflow_definition({**base, "version": 3})
     assert compiled["version"] == 3
-    assert compiled["steps"][0]["captures"][0]["kind"] == "collection"
+    compiled_steps = cast(list[dict[str, Any]], compiled["steps"])
+    assert compiled_steps[0]["captures"][0]["kind"] == "collection"
     with pytest.raises(WorkflowDefinitionError, match="between 1 and 32"):
         compile_workflow_definition({
             **base,
@@ -530,6 +531,7 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     step_id = execution["steps"][0]["step_id"]
     assert set_fanout_checkpoint(execution_id, step_id, {"pending": [0, 1], "completed": [], "failed": [], "cancelled": False})
     stored = get_execution(session_id, execution_id)
+    assert stored is not None
     assert stored["steps"][0]["fanout_checkpoint"] == {
         "pending": [0, 1], "running": [], "completed": [], "failed": [], "cancelled": False,
     }

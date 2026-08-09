@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from typing import Any
 from unittest import mock
 import uuid
 
@@ -37,7 +38,7 @@ def _initialize_dalfox_xss_finding_schema():
     db_init()
 
 
-def _seed_reviewed_xss(*, seed_active_run: bool = True) -> dict[str, object]:
+def _seed_reviewed_xss(*, seed_active_run: bool = True) -> dict[str, Any]:
     suffix = uuid.uuid4().hex[:12]
     session_id = f"tok_dalfox_xss_{suffix}"
     project = create_project(session_id, {"name": f"Dalfox XSS {suffix}"})

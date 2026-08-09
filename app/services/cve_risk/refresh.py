@@ -162,6 +162,11 @@ def refresh_source(
         return {"source": source, "outcome": "lease_held"}
     attempted_at = current.isoformat()
     max_attempts = max(1, min(int(settings.get("max_attempts") or 3), 5))
+    result: dict[str, Any] = {
+        "source": source,
+        "outcome": "failed",
+        "error": "retry_exhausted",
+    }
     try:
         for attempt in range(1, max_attempts + 1):
             try:

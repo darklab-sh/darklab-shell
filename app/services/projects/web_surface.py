@@ -6,13 +6,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.web_gallery import (
-    MAX_GALLERY_ROWS,
-    normalize_web_surface_filters,
-    web_surface_filters_active,
+    MAX_GALLERY_ROWS, normalize_web_surface_filters, web_surface_filters_active,
     web_surface_row_matches,
     web_surface_rows_from_events,
 )
@@ -38,6 +37,7 @@ _IMAGE_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp")
 def list_project_web_surface(session_id, project_id, filters=None, *, limit=50, offset=0, team_id=""):
     """Return a bounded capture page backed by verified project image artifacts."""
     safe_limit, safe_offset = normalize_page_window(limit, offset)
+    safe_limit = int(safe_limit or 50)
     normalized_filters = normalize_web_surface_filters(filters)
     normalized_filters["change_state"] = normalize_change_state(
         filters.get("change_state") if isinstance(filters, Mapping) else ""
@@ -86,7 +86,7 @@ def list_project_web_surface(session_id, project_id, filters=None, *, limit=50, 
     )
 
 
-def _capture_items(session_id: str, rows: list[object]) -> list[dict[str, object]]:
+def _capture_items(session_id: str, rows: list[Any]) -> list[dict[str, Any]]:
     dialect = dialect_for_backend(get_db_backend())
     event_rows_by_run: dict[str, dict[str, dict[str, object] | None]] = {}
     captures = []
@@ -109,7 +109,7 @@ def _capture_items(session_id: str, rows: list[object]) -> list[dict[str, object
             artifact,
             owner_context=artifact_owner_context(str(artifact.get("session_id") or session_id), artifact),
         )
-        capture = {
+        capture: dict[str, object] = {
             **(metadata or {}),
             "metadata_state": metadata_state,
             "capture_state": _capture_state(metadata_state, availability),
@@ -145,7 +145,7 @@ def _capture_metadata_by_path(events: object, run_id: str) -> dict[str, dict[str
     return indexed
 
 
-def _artifact_payload(artifact: Mapping[str, object], availability: Mapping[str, object]) -> dict[str, object]:
+def _artifact_payload(artifact: Mapping[str, Any], availability: Mapping[str, object]) -> dict[str, object]:
     return {
         "id": artifact.get("id") or "",
         "workspace_path": artifact.get("workspace_path") or "",

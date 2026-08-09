@@ -639,7 +639,7 @@ def _parse_nessus_xml(
                     context = host_stack[-1] if host_stack else {}
                     _append_nessus_report_item(
                         elem, str(context.get("host") or ""), state, entities, findings, evidence,
-                        context.get("properties") if isinstance(context.get("properties"), dict) else {},
+                        (properties if isinstance((properties := context.get("properties")), dict) else {}),
                     )
                     elem.clear()
                     active_report_item_depth = 0

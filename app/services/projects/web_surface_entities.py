@@ -5,18 +5,16 @@
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urlsplit
 
 from services.intel.canonical import (
-    CanonicalizationError,
-    canonical_domain,
-    canonical_ip,
-    canonical_url,
+    CanonicalizationError, canonical_domain, canonical_ip, canonical_url,
 )
 from services.projects.scope import shared_owner_where
 
 
-def attach_capture_entity_ids(conn, session_id: str, captures: list[dict[str, object]], *, team_id="") -> None:
+def attach_capture_entity_ids(conn, session_id: str, captures: list[dict[str, Any]], *, team_id="") -> None:
     run_ids = sorted({str(item["source_run"]["id"]) for item in captures if item.get("url")})
     url_values = sorted({_canonical_capture_url(item.get("url")) for item in captures} - {""})
     host_values = sorted({_capture_host(item.get("url")) for item in captures} - {""})

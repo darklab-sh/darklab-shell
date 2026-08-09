@@ -88,7 +88,7 @@ def accept_external_osv_query(
                 "'external', ?, ?)",
                 (
                     *parent[:8],
-                    parsed.version,
+                    source_version,
                     parent[8],
                     parent[9],
                     fetched_at,

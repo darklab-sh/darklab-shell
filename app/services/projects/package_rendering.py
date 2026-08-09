@@ -748,9 +748,12 @@ def _package_finding_changes(manifest, run_pages):
     source = manifest.get("assessment_finding_changes")
     if not isinstance(source, dict):
         return None
-    assessment = source.get("assessment") if isinstance(source.get("assessment"), dict) else {}
-    comparison = source.get("comparison") if isinstance(source.get("comparison"), dict) else {}
-    rollup = source.get("rollup") if isinstance(source.get("rollup"), dict) else {}
+    raw_assessment = source.get("assessment")
+    raw_comparison = source.get("comparison")
+    raw_rollup = source.get("rollup")
+    assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    comparison = raw_comparison if isinstance(raw_comparison, dict) else {}
+    rollup = raw_rollup if isinstance(raw_rollup, dict) else {}
     findings = manifest.get("findings") if isinstance(manifest.get("findings"), list) else []
     manifest_findings = {
         str(finding.get("id") or ""): finding

@@ -31,8 +31,13 @@ def normalize_fanout_policy(value: object) -> FanoutPolicy:
         raise ValueError("fan-out failure_mode must be fail_fast or continue")
 
     def bounded_int(name: str, default: int, maximum: int) -> int:
+        value = raw.get(name)
+        if value is None:
+            value = default
+        if not isinstance(value, (str, bytes, bytearray, int, float)):
+            raise ValueError(f"fan-out {name} must be an integer")
         try:
-            number = int(raw.get(name) if raw.get(name) is not None else default)
+            number = int(value)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"fan-out {name} must be an integer") from exc
         if not 0 <= number <= maximum:

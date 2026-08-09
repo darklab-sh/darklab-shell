@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+from typing import Any
 import uuid
 
 import pytest
@@ -103,8 +104,8 @@ def _initialize_assessment_evidence_schema():
     db_init()
 
 
-def _rule(**overrides: object) -> dict[str, object]:
-    value: dict[str, object] = {
+def _rule(**overrides: object) -> dict[str, Any]:
+    value: dict[str, Any] = {
         "key": "completed_scan",
         "version": "1.0",
         "evidence_types": ["run"],
@@ -120,7 +121,7 @@ def _rule(**overrides: object) -> dict[str, object]:
     return value
 
 
-def _profile(*, rule: dict[str, object] | None = None) -> dict[str, object]:
+def _profile(*, rule: dict[str, object] | None = None) -> dict[str, Any]:
     return {
         "key": "evidence-test",
         "version": "1.0",
@@ -520,7 +521,9 @@ def test_assessment_xss_preview_confirms_and_materializes_only_selected_saved_ev
     )
     assert "--only-discovery" in protected.execution_command
     assert context.reviewed_execution is not None
-    assert context.reviewed_execution.execution_command == selected["display_command"]
+    assert getattr(context.reviewed_execution, "execution_command") == selected[
+        "display_command"
+    ]
     assert context.output_signal_context is not None
     assert context.broker_kwargs()["reviewed_execution"] is context.reviewed_execution
     assert protected.audit_summary == {
@@ -768,6 +771,9 @@ def test_nuclei_evidence_modes_keep_reviewed_profiles_distinct():
         "nuclei", "url", "https://example.com", nuclei_profile="intrusive",
         allow_intrusive=True,
     )
+    assert safe is not None
+    assert standard is not None
+    assert intrusive is not None
     assert assessment_command_mode(safe.command) == NUCLEI_SAFE_PROFILE_MODE
     assert assessment_command_mode(standard.command) == NUCLEI_STANDARD_PROFILE_MODE
     assert assessment_command_mode(intrusive.command) == NUCLEI_INTRUSIVE_PROFILE_MODE
@@ -1826,10 +1832,10 @@ def test_completed_run_finalization_materializes_one_marked_nmap_xml_artifact(
         record for record in caplog.records
         if record.message == "NMAP_SERVICE_EVIDENCE_FINALIZED"
     )
-    assert service_event.observation_count == 2
+    assert getattr(service_event, "observation_count") == 2
     event = next(record for record in caplog.records if record.message == "NMAP_VERSION_INFERENCE_FINALIZED")
-    assert event.run_id == run_id
-    assert event.materialized_count == 1
+    assert getattr(event, "run_id") == run_id
+    assert getattr(event, "materialized_count") == 1
     assert not hasattr(event, "workspace_path")
 
 
@@ -1879,7 +1885,7 @@ def test_completed_run_nmap_inference_failure_rolls_back_only_the_optional_hook(
         record for record in caplog.records
         if record.message == "NMAP_VERSION_INFERENCE_FINALIZE_ERROR"
     )
-    assert event.error_class == "RuntimeError"
+    assert getattr(event, "error_class") == "RuntimeError"
     assert not hasattr(event, "workspace_path")
     assert "reports/scan.xml CVE-2026-12345 rollback.example" not in caplog.text
 
@@ -1938,7 +1944,7 @@ def test_completed_run_nmap_service_failure_keeps_version_inference(
         record for record in caplog.records
         if record.message == "NMAP_SERVICE_EVIDENCE_FINALIZE_ERROR"
     )
-    assert event.error_class == "RuntimeError"
+    assert getattr(event, "error_class") == "RuntimeError"
     assert "reports/service.xml private service output" not in caplog.text
 
 

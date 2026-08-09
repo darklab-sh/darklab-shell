@@ -123,7 +123,8 @@ def build_project_digest_payload(
 ) -> dict[str, Any]:
     top_changes = summary.get("top_changes")
     safe_top_changes = _safe_digest_top_changes(top_changes)
-    risk = summary.get("risk") if isinstance(summary.get("risk"), dict) else {}
+    raw_risk = summary.get("risk")
+    risk = raw_risk if isinstance(raw_risk, dict) else {}
     safe_risk_changes = _safe_digest_risk_changes(risk.get("top_changes"))
     relative_link = _project_monitoring_path(project, summary, digest_identity)
     monitoring_url = _absolute_or_relative_url(relative_link)

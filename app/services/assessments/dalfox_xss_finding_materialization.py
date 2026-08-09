@@ -46,10 +46,14 @@ def materialize_dalfox_xss_findings(
         str(summary.get("source_parameter_observation_id") or ""),
         expected_target=target,
     )
-    plan = reviewed_dalfox_xss_command_plan(evidence) if evidence else None
+    if evidence is None:
+        return []
+    plan = reviewed_dalfox_xss_command_plan(evidence)
     if plan is None or not _active_command_matches(command, plan.command):
         return []
     context = evidence.xss_context(request_limit=int(plan.request_limit or 0))
+    if context is None:
+        return []
     reviewed = _reparse_stored_output(entries, command, run_id, context)
     if reviewed is None:
         return []

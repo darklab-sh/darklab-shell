@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 import sqlite3
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -1305,7 +1306,9 @@ def test_risk_enrichment_and_sql_order_share_kev_epss_age_contract(risk_db):
         "VALUES (?, ?, ?, ?)",
         (("CVE-2026-12345", False, 0.8, 0.99), ("CVE-2026-23456", True, 0.1, 0.7)),
     )
-    findings = [{"id": "finding-old", "title": "CVE-2026-12345"}]
+    findings: list[dict[str, Any]] = [
+        {"id": "finding-old", "title": "CVE-2026-12345"}
+    ]
     attach_risk_to_findings(findings, conn=risk_db)
     assert findings[0]["risk"]["epss"]["probability"] == 0.8
     assert findings[0]["risk"]["priority_reasons"][0].startswith("EPSS")
@@ -1578,7 +1581,7 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     assert len(team_worklist) == 1
     assert team_worklist[0]["observation_count"] == 2
 
-    rule_observations = [{
+    rule_observations: list[dict[str, Any]] = [{
         "id": "rule-confirmed",
         "session_id": "session-one",
         "entity_id": "ent_rule",
@@ -1643,7 +1646,7 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     ]
     assert rule_worklist[0]["review_state"] == "reviewed"
 
-    uncertain_rules = [{
+    uncertain_rules: list[dict[str, Any]] = [{
         "id": finding_id,
         "session_id": "session-one",
         "entity_id": "ent_rule",
@@ -1672,7 +1675,7 @@ def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
             ("CVE-2026-23456", True, 0.1),
         ),
     )
-    findings = [{
+    findings: list[dict[str, Any]] = [{
         "id": "finding-multiple-cves",
         "session_id": "session-one",
         "entity_id": "ent_shared",
@@ -2604,7 +2607,9 @@ def test_local_nvd_dataset_replaces_prior_local_snapshot_and_enriches_ranking(ri
         "INSERT INTO findings (id, session_id, title, created) "
         "VALUES ('finding-cvss', 'session-one', 'CVE-2026-12345', '2026-08-04')"
     )
-    findings = [{"id": "finding-cvss", "title": "CVE-2026-12345"}]
+    findings: list[dict[str, Any]] = [
+        {"id": "finding-cvss", "title": "CVE-2026-12345"}
+    ]
     attach_risk_to_findings(findings, conn=risk_db)
 
     assert findings[0]["risk"]["cvss"]["score"] == 8.1

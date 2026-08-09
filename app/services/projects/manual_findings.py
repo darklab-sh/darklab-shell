@@ -143,6 +143,8 @@ def _duplicate_candidates(
         if str(row["id"] or "") == exclude_id:
             continue
         candidate = row_to_finding(row)
+        if candidate is None:
+            continue
         candidate_cves = {str(value) for value in candidate.get("cve_ids", [])}
         reasons = []
         if title_key and str(candidate.get("title") or "").strip().casefold() == title_key:
@@ -170,6 +172,8 @@ def _serialize_manual_finding(
     row: Any,
 ) -> dict[str, Any]:
     finding = row_to_finding(row)
+    if finding is None:
+        raise ProjectWorkspaceNotFound("manual finding was not found")
     finding["target_ids"] = [finding["target_id"]] if finding["target_id"] else []
     finding["evidence_links"] = list_finding_evidence_links_on_conn(
         conn,
@@ -319,6 +323,8 @@ def update_manual_finding_on_conn(
     if not row:
         raise ProjectWorkspaceNotFound("manual finding was not found")
     existing = row_to_finding(row)
+    if existing is None:
+        raise ProjectWorkspaceNotFound("manual finding was not found")
     _project_target(conn, session_id, team_id, project_id, existing["target_id"])
     payload = normalize_manual_finding_update(data, existing=existing)
     current_revision = int(existing["manual_revision"] or 0)

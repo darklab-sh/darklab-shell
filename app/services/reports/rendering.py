@@ -333,8 +333,10 @@ def _append_assessment_finding_changes_markdown(
     changes = context.get("assessment_finding_changes")
     if not isinstance(changes, dict):
         return
-    assessment = changes.get("assessment") if isinstance(changes.get("assessment"), dict) else {}
-    comparison = changes.get("comparison") if isinstance(changes.get("comparison"), dict) else {}
+    raw_assessment = changes.get("assessment")
+    raw_comparison = changes.get("comparison")
+    assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    comparison = raw_comparison if isinstance(raw_comparison, dict) else {}
     lines.extend([
         "### Assessment finding changes",
         "",

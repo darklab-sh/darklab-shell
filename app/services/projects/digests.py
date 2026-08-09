@@ -525,7 +525,8 @@ def _summary_has_changes(summary: dict[str, Any]) -> bool:
         int(summary.get(key) or 0) > 0
         for key in ("changed_monitor_count", "recovered_monitor_count", "failed_monitor_count")
     )
-    risk = summary.get("risk") if isinstance(summary.get("risk"), dict) else {}
+    raw_risk = summary.get("risk")
+    risk = raw_risk if isinstance(raw_risk, dict) else {}
     return watcher_changes or int(risk.get("actionable_count") or 0) > 0
 
 

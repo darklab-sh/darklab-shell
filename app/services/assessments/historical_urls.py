@@ -114,8 +114,10 @@ def filter_historical_urls(
     scope_roots: object = (),
 ) -> list[dict[str, str]]:
     """Keep normalized URLs whose host and path match an explicit scope."""
-    hosts = {str(host).strip().casefold().rstrip(".") for host in allowed_hosts if str(host).strip()}
-    roots = [str(root).strip() for root in scope_roots if str(root).strip()]
+    host_values = allowed_hosts if isinstance(allowed_hosts, (list, tuple, set, frozenset)) else ()
+    root_values = scope_roots if isinstance(scope_roots, (list, tuple, set, frozenset)) else ()
+    hosts = {str(host).strip().casefold().rstrip(".") for host in host_values if str(host).strip()}
+    roots = [str(root).strip() for root in root_values if str(root).strip()]
     values = rows if isinstance(rows, list) else []
     filtered: list[dict[str, str]] = []
     for row in values:

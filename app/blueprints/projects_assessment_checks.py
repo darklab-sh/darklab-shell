@@ -45,7 +45,7 @@ def _payload(allowed: set[str]):
 def _details(change: dict, assessment_id: str, *, transition_kind: str) -> dict:
     check = change["check"]
     return {
-        "project_id": request.view_args.get("project_id", ""),
+        "project_id": (request.view_args or {}).get("project_id", ""),
         "assessment_id": assessment_id,
         "check_id": str(check.get("id") or ""),
         "check_key": str(check.get("check_key") or ""),

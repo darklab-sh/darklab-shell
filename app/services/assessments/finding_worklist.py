@@ -89,10 +89,12 @@ def _findings(conn: Any, finding_ids: set[str]) -> list[dict[str, Any]]:
 
 
 def _risk_signal(item: dict[str, Any]) -> tuple[bool, bool, bool]:
-    risk = item.get("risk") if isinstance(item.get("risk"), dict) else {}
-    kev = risk.get("kev") if isinstance(risk.get("kev"), dict) else {}
-    epss = risk.get("epss") if isinstance(risk.get("epss"), dict) else {}
-    cvss = risk.get("cvss") if isinstance(risk.get("cvss"), dict) else {}
+    raw_risk = item.get("risk")
+    risk = raw_risk if isinstance(raw_risk, dict) else {}
+    raw_kev, raw_epss, raw_cvss = (risk.get(key) for key in ("kev", "epss", "cvss"))
+    kev = raw_kev if isinstance(raw_kev, dict) else {}
+    epss = raw_epss if isinstance(raw_epss, dict) else {}
+    cvss = raw_cvss if isinstance(raw_cvss, dict) else {}
     has_kev = bool(kev.get("listed"))
     has_epss = epss.get("probability") is not None
     has_cvss = item.get("cvss_score") is not None or cvss.get("score") is not None

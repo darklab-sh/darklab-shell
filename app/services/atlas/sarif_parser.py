@@ -35,8 +35,10 @@ def parse_sarif_json(payload, state, entities, findings) -> None:
         if not isinstance(run, dict):
             state.warn(state.next_row(), "invalid_sarif_run", "SARIF run must be an object.")
             continue
-        tool = run.get("tool") if isinstance(run.get("tool"), dict) else {}
-        driver = tool.get("driver") if isinstance(tool.get("driver"), dict) else {}
+        raw_tool = run.get("tool")
+        tool = raw_tool if isinstance(raw_tool, dict) else {}
+        raw_driver = tool.get("driver")
+        driver = raw_driver if isinstance(raw_driver, dict) else {}
         tool_name = _safe_text(driver.get("name"), limit=128) or "SARIF tool"
         tool_version = _safe_text(driver.get("version"), limit=128)
         tool_semantic_version = _safe_text(driver.get("semanticVersion"), limit=128)
@@ -52,7 +54,8 @@ def parse_sarif_json(payload, state, entities, findings) -> None:
             )
             if isinstance(rule, dict) and _safe_text(rule.get("id"), limit=256)
         }
-        artifacts = run.get("artifacts") if isinstance(run.get("artifacts"), list) else []
+        raw_artifacts = run.get("artifacts")
+        artifacts = raw_artifacts if isinstance(raw_artifacts, list) else []
         results = run.get("results")
         if not isinstance(results, list):
             continue
@@ -62,14 +65,15 @@ def parse_sarif_json(payload, state, entities, findings) -> None:
                 state.warn(row_number, "invalid_sarif_result", "SARIF result must be an object.")
                 continue
             rule_id = _safe_text(result.get("ruleId"), limit=256)
-            rule = rules.get(rule_id, {})
+            rule = rules.get(rule_id) or {}
             locations, rejected_location_count, locations_truncated = sarif_locations(
                 result, artifacts, state, row_number
             )
             entity = sarif_entity(locations, row_number, state)
             if entity:
                 entities.append(entity)
-            message = result.get("message") if isinstance(result.get("message"), dict) else {}
+            raw_message = result.get("message")
+            message = raw_message if isinstance(raw_message, dict) else {}
             title = _safe_text(rule.get("name") or rule_id or "SARIF result")
             help_uri = safe_sarif_web_uri(rule.get("helpUri"))
             fingerprints = sarif_fingerprints(result)

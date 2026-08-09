@@ -5,7 +5,7 @@
 
 from pathlib import Path
 import shlex
-from typing import Any
+from typing import Any, cast
 
 
 _CONFIG_FILE = "schemathesis.toml"
@@ -22,9 +22,9 @@ def schemathesis_runtime_path_args(
     if schema_path is None and config_path is None and report_path is None:
         return "[protected-schema]", "[protected-config]", "[protected-report]"
     try:
-        schema_file = Path(schema_path)
-        config_file = Path(config_path)
-        report_file = Path(report_path)
+        schema_file = Path(cast(Any, schema_path))
+        config_file = Path(cast(Any, config_path))
+        report_file = Path(cast(Any, report_path))
     except TypeError:
         return None
     parent = schema_file.parent
@@ -41,7 +41,7 @@ def schemathesis_runtime_path_args(
         or report_file.name != _REPORT_FILE
     ):
         return None
-    return tuple(shlex.quote(str(path)) for path in (schema_file, config_file, report_file))
+    return cast(tuple[str, str, str], tuple(shlex.quote(str(path)) for path in (schema_file, config_file, report_file)))
 
 
 __all__ = ["schemathesis_runtime_path_args"]

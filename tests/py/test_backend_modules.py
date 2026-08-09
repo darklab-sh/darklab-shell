@@ -43,7 +43,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
-from typing import IO, cast
+from typing import Any, IO, cast
 
 import pytest
 import yaml
@@ -28097,6 +28097,8 @@ SQL syntax error near q</response>
                 "gau example.com",
                 source_run_id="run-atlas",
             ).classify_line("https://example.com/path")
+            gau_entities = gau_metadata["entities"]
+            assert isinstance(gau_entities, list)
             recorded = materialize_run_entities(
                 conn,
                 "atlas-session",
@@ -28111,7 +28113,7 @@ SQL syntax error near q</response>
                             {"type": "ip", "value": "2001:0db8::0001", "canonical_value": "2001:db8::1"},
                             {"type": "hash", "value": "A" * 40, "canonical_value": f"sha1:{'a' * 40}"},
                             {"type": "cve", "value": "cve-2025-49113", "canonical_value": "CVE-2025-49113"},
-                            *gau_metadata["entities"],
+                            *gau_entities,
                             {"type": "domain", "value": "<redacted>", "canonical_value": REDACTED_ENTITY_SENTINEL},
                         ],
                     }
@@ -31347,6 +31349,7 @@ class TestAssessmentHttpProfileExecution:
             'header = "Authorization: Bearer protected\\"token"\n'
         )
         assert str(curl_config) in curl_material.private_values
+        assert curl_material.cleanup is not None
         curl_material.cleanup()
         assert not curl_config.parent.exists()
 
@@ -31564,7 +31567,7 @@ class TestAssessmentHttpProfileExecution:
             execution_command="httpx -u https://app.example",
             command="httpx -u https://app.example",
             rewrite_notice=None,
-            validation=None,
+            validation=cast(Any, None),
             missing_runtime=None,
             display_missing_runtime=None,
             env_overrides={},

@@ -58,15 +58,15 @@ def effective_run_exit_code(
     dalfox_state = getattr(signal_classifier, "dalfox_xss", None)
     if type(dalfox_state) is not DalfoxXssObservationState:
         return tool_exit_code
-    if not dalfox_state.accepts_findings_exit(completion_policy.dalfox_xss_context):
+    dalfox_context = completion_policy.dalfox_xss_context
+    if dalfox_context is None:
+        return tool_exit_code
+    if not dalfox_state.accepts_findings_exit(dalfox_context):
         return tool_exit_code
     return 0
 
 
 __all__ = [
-    "DALFOX_FINDINGS_COMPLETION_POLICY",
-    "SCHEMATHESIS_FINDINGS_COMPLETION_POLICY",
-    "RunCompletionPolicy",
-    "completion_policy_for_signal_context",
-    "effective_run_exit_code",
+    "DALFOX_FINDINGS_COMPLETION_POLICY", "SCHEMATHESIS_FINDINGS_COMPLETION_POLICY",
+    "RunCompletionPolicy", "completion_policy_for_signal_context", "effective_run_exit_code",
 ]

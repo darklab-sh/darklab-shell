@@ -19,7 +19,7 @@ _TEXT_LIMIT = 4096
 
 def document_provenance(document: dict[str, Any], spec_version: str) -> dict[str, Any]:
     """Return bounded BOM identity shared by every imported evidence record."""
-    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    metadata = raw_metadata if isinstance((raw_metadata := document.get("metadata")), dict) else {}
     tool = _first_tool(metadata.get("tools"))
     return _compact({
         "spec_version": spec_version,
@@ -135,7 +135,7 @@ def vulnerability_detail(
     provenance: dict[str, Any],
 ) -> dict[str, Any]:
     """Normalize one included vulnerability and its VEX disposition."""
-    analysis = vulnerability.get("analysis") if isinstance(vulnerability.get("analysis"), dict) else {}
+    analysis = raw_analysis if isinstance((raw_analysis := vulnerability.get("analysis")), dict) else {}
     raw_affects = vulnerability.get("affects")
     affects = raw_affects if isinstance(raw_affects, list) else []
     component_refs = _bounded_unique(
