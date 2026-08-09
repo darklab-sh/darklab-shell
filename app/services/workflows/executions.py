@@ -24,6 +24,8 @@ from services.workflows.compiler import (
     render_step_display_command,
     workflow_private_values,
 )
+from services.workflows.fanout_child_lifecycle import finalize_fanout_child_run
+from services.workflows.fanout_child_queries import fanout_child_for_run
 from services.workflows import storage
 
 
@@ -201,12 +203,24 @@ def _log_step_transition(state: Mapping[str, object]) -> None:
 
 
 def finalize_workflow_run(run_id: str, exit_code: int, capture: object | None) -> dict[str, object] | None:
+    child = fanout_child_for_run(run_id)
+    if child and str(child.get("status") or "") != "running":
+        return None
     linked_execution = storage.execution_for_run(run_id)
     if linked_execution and _execution_expired(linked_execution):
-        changed = storage.fail_execution_for_run(
-            run_id,
-            "execution_timeout",
-            "The workflow exceeded its maximum runtime.",
+        changed = (
+            storage.fail_execution(
+                str(linked_execution.get("id") or ""),
+                "execution_timeout",
+                "The workflow exceeded its maximum runtime.",
+                step_id=str(child.get("step_id") or ""),
+            )
+            if child
+            else storage.fail_execution_for_run(
+                run_id,
+                "execution_timeout",
+                "The workflow exceeded its maximum runtime.",
+            )
         )
         if changed:
             _record_failed_step_and_execution(
@@ -226,6 +240,17 @@ def finalize_workflow_run(run_id: str, exit_code: int, capture: object | None) -
             "transition_reason": "execution_timeout",
             "terminal": True,
         }
+    if child:
+        finalized_child = finalize_fanout_child_run(run_id, int(exit_code))
+        if not finalized_child:
+            return None
+        parent_transition = finalized_child.get("parent_transition")
+        if not isinstance(parent_transition, Mapping) or not parent_transition:
+            return None
+        _log_step_transition(parent_transition)
+        if not parent_transition.get("terminal"):
+            launch_execution_step(str(parent_transition["execution_id"]))
+        return dict(parent_transition)
     accumulator = getattr(capture, "workflow_capture_accumulator", None)
     captures: dict[str, str] = {}
     capture_error = ""

@@ -580,7 +580,9 @@ def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_chil
         checkpoint_from_payload({"pending": [1], "completed": [1], "failed": [], "cancelled": False})
 
 
-def test_collection_fanout_checkpoint_persists_on_private_step_state():
+def test_collection_fanout_checkpoint_persists_on_private_step_state(monkeypatch):
+    from services.workflows import executions
+
     make_test_app()
     session_id = "workflow-checkpoint-" + uuid.uuid4().hex
     definition = compile_execution_definition({
@@ -799,6 +801,7 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
 
     partial_definition = json.loads(json.dumps(definition))
     partial_definition["steps"][1]["for_each"]["max_failures"] = 2
+    partial_definition["steps"][1]["for_each"]["retries"] = 0
     partial_definition["steps"].append({"id": "after", "cmd": "echo done"})
     partial = create_execution(
         session_id=session_id,
@@ -816,16 +819,20 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     assert claim_fanout_child(partial_execution_id, partial_step_id, 1) is not None
     assert bind_fanout_child_run(str(partial_children[0]["id"]), "run-fanout-partial-ok")
     assert bind_fanout_child_run(str(partial_children[1]["id"]), "run-fanout-partial-failed")
-    assert finalize_fanout_child_run("run-fanout-partial-ok", 0) is not None
-    partial_final = finalize_fanout_child_run(
+    launched_after_fanout: list[str] = []
+    monkeypatch.setattr(
+        executions,
+        "launch_execution_step",
+        lambda execution_id: launched_after_fanout.append(execution_id),
+    )
+    assert executions.finalize_workflow_run("run-fanout-partial-ok", 0, None) is None
+    partial_parent = executions.finalize_workflow_run(
         "run-fanout-partial-failed",
         2,
-        error_code="scope_rejected",
+        None,
     )
-    assert partial_final is not None
-    assert partial_final["failure_limit_reached"] is False
-    assert partial_final["checkpoint_complete"] is True
-    partial_parent = cast(dict[str, object], partial_final["parent_transition"])
+    assert partial_parent is not None
+    assert launched_after_fanout == [partial_execution_id]
     assert isinstance(partial_parent["duration_ms"], int)
     assert partial_parent["duration_ms"] >= 0
     assert partial_parent == {
@@ -846,6 +853,38 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     assert partial_stored["status"] == "running"
     assert partial_stored["current_step_id"] == "after"
     assert partial_stored["steps"][1]["status"] == "succeeded"
+
+    timed_out = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="checkpoint_timeout",
+        workflow_source="config",
+        definition=definition,
+        inputs={},
+    )
+    timed_out_id = str(timed_out["id"])
+    timed_out_children = initialize_fanout_children(timed_out_id, "probe", 2)
+    assert claim_step_for_launch(timed_out_id, "probe") is not None
+    for ordinal, run_id in enumerate(("run-fanout-timeout", "run-fanout-timeout-peer")):
+        assert claim_fanout_child(timed_out_id, "probe", ordinal) is not None
+        assert bind_fanout_child_run(str(timed_out_children[ordinal]["id"]), run_id)
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_executions SET created = ? WHERE id = ?",
+            ("2000-01-01 00:00:00", timed_out_id),
+        )
+        conn.commit()
+    timeout_state = executions.finalize_workflow_run("run-fanout-timeout", 0, None)
+    assert timeout_state is not None
+    assert timeout_state["transition_reason"] == "execution_timeout"
+    timed_out_stored = get_execution(session_id, timed_out_id)
+    assert timed_out_stored is not None
+    assert timed_out_stored["status"] == "failed"
+    assert timed_out_stored["failure_code"] == "execution_timeout"
+    assert [(child["status"], child["error_code"]) for child in list_fanout_children(
+        timed_out_id, "probe"
+    )] == [("canceled", "cancelled"), ("canceled", "cancelled")]
+    assert executions.finalize_workflow_run("run-fanout-timeout-peer", 0, None) is None
     assert public_execution(partial_stored)["steps"][1]["fanout_summary"] == {
         "total": 2, "pending": 0, "running": 0, "succeeded": 1,
         "failed": 1, "skipped": 0, "cancelled": False,
@@ -2762,3 +2801,44 @@ def test_finalization_hook_failure_marks_workflow_failed_without_raising(monkeyp
     assert stored is not None
     assert stored["status"] == "failed"
     assert stored["failure_code"] == "finalization_hook_failed"
+
+    fanout_definition = compile_execution_definition({
+        "version": 3,
+        "id": "hook_fanout",
+        "title": "Hook fan-out",
+        "inputs": [],
+        "steps": [
+            {
+                "id": "collect",
+                "cmd": "echo hosts",
+                "captures": [{
+                    "name": "hosts", "kind": "collection",
+                    "source": "json_pointer", "pointer": "/hosts",
+                }],
+            },
+            {
+                "id": "probe",
+                "cmd": "httpx -u {{hosts}} -silent",
+                "for_each": {"collection": "hosts", "failure_mode": "continue"},
+            },
+        ],
+    })
+    fanout = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="hook_fanout",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    children = initialize_fanout_children(str(fanout["id"]), "probe", 2)
+    assert claim_step_for_launch(str(fanout["id"]), "probe") is not None
+    assert claim_fanout_child(str(fanout["id"]), "probe", 0) is not None
+    assert bind_fanout_child_run(str(children[0]["id"]), "run-hook-child")
+    hooks.finalize_workflow_run_safely(True, "run-hook-child", session_id, 0, None)
+    failed_fanout = get_execution(session_id, str(fanout["id"]))
+    assert failed_fanout is not None
+    assert failed_fanout["failure_code"] == "finalization_hook_failed"
+    assert [child["status"] for child in list_fanout_children(
+        str(fanout["id"]), "probe"
+    )] == ["canceled", "canceled"]

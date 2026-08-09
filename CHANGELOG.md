@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Completed collection child runs now advance through the normal workflow hook.**
+  - **What:** Run finalization distinguishes private fan-out child links from scalar parent-step links. Each child advances its checkpoint exactly once; only the final child emits the parent transition and starts the saved next step, while intermediate and duplicate completions stay idle.
+  - **Tests:** Extended SQLite and real Postgres lifecycle coverage to pass child completions through the shared run-finalization boundary, pin exactly-once next-step launch, cancel unfinished child state on the global runtime limit or an isolated hook failure, reject late completion, and keep the new lookup module inside the architecture ratchet. Pyright remains clean for the complete repository.
 - **Collection child runs now keep their workflow ancestry in History and Project evidence.**
   - **What:** Authorized run details and Project run lists recognize both scalar parent-step runs and value-free fan-out child links. A child reports the parent execution and step status through the existing sanitized provenance shape without copying its private collection value, rendered command, or workflow variables into that response.
   - **Tests:** Extended the existing workflow-provenance route coverage across scalar and fan-out runs, Project links, owner isolation, terminal child status, and private-value exclusions. Pyright remains clean for the complete repository.

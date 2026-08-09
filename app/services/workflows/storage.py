@@ -465,6 +465,10 @@ def fail_execution(execution_id: str, code: str, detail: str, *, step_id: str = 
                 "WHERE execution_id = ? AND step_id = ? AND status IN ('pending', 'launching', 'running')",
                 (bounded_code, bounded_detail, now, execution_id, step_id),
             )
+        if get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
+            conn, "workflow_execution_children"
+        ):
+            cancel_fanout_children_on_conn(conn, execution_id, finished=now)
         conn.execute(
             "UPDATE workflow_execution_steps SET status = 'skipped', finished = ? "
             "WHERE execution_id = ? AND status = 'pending'",
@@ -476,10 +480,17 @@ def fail_execution(execution_id: str, code: str, detail: str, *, step_id: str = 
 
 def fail_execution_for_run(run_id: str, code: str, detail: str) -> bool:
     with get_db_connect()() as conn:
-        row = conn.execute(
-            "SELECT execution_id, step_id FROM workflow_execution_steps WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
+        query = "SELECT execution_id, step_id FROM workflow_execution_steps WHERE run_id = ?"
+        params = (run_id,)
+        if get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
+            conn, "workflow_execution_children"
+        ):
+            query += (
+                " UNION ALL SELECT execution_id, step_id "
+                "FROM workflow_execution_children WHERE run_id = ?"
+            )
+            params = (run_id, run_id)
+        row = conn.execute(query + " LIMIT 1", params).fetchone()  # nosec B608
     if not row:
         return False
     return fail_execution(str(row["execution_id"]), code, detail, step_id=str(row["step_id"]))
