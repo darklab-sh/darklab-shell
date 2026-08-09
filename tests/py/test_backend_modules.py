@@ -7564,6 +7564,7 @@ class TestPostgresMigrations:
         "project_assessment_evidence",
         "project_http_profiles",
         "zap_connector_jobs",
+        "oast_correlations",
         "nmap_service_observations",
         "schemathesis_operation_evidence",
         "schemathesis_run_evidence",
@@ -7584,12 +7585,25 @@ class TestPostgresMigrations:
                     line = raw_line.strip().rstrip(",")
                     if not line:
                         continue
-                    keyword = line.split()[0].upper()
+                    column_name = line.split()[0].strip('"')
+                    keyword = column_name.upper()
                     if keyword.startswith("'"):
                         continue
-                    if keyword in {"PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"}:
+                    if (
+                        not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", column_name)
+                        or keyword in {
+                            "PRIMARY",
+                            "UNIQUE",
+                            "FOREIGN",
+                            "CHECK",
+                            "CONSTRAINT",
+                            "REFERENCES",
+                            "OR",
+                            "AND",
+                        }
+                    ):
                         continue
-                    columns.add(line.split()[0].strip('"'))
+                    columns.add(column_name)
             alter_match = alter_re.search(statement)
             if alter_match:
                 columns.add(alter_match.group(1))
@@ -7693,6 +7707,7 @@ class TestPostgresMigrations:
             "0069",
             "0070",
             "0071",
+            "0072",
         ]
         for table_name in (
             "runs",
@@ -8199,6 +8214,17 @@ class TestPostgresMigrations:
             conn.execute(operation_sql, ("sop_one", "GET", now))
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute(operation_sql, ("sop_invalid", "POST", now))
+            conn.execute(
+                "INSERT INTO oast_correlations "
+                "(id, session_id, project_id, assessment_id, check_id, "
+                "target_entity_id, action_key, callback_label, allowed_domain, "
+                "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
+                "VALUES ('ocr_0123456789abcdef0123456789abcdef', 'session-a', "
+                "'prj_assessment', 'asm_two', 'chk_two', 'ent_oast_delete', "
+                "'oast_dns_callback', 'dl-0123456789abcdef0123456789abcdef', "
+                "'oast.darklab.test', ?, ?, ?, ?, ?)",
+                ("a" * 64, now, now, now, now),
+            )
 
             from services.projects.crud import delete_project
 
@@ -8207,6 +8233,7 @@ class TestPostgresMigrations:
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_checks").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_evidence").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM zap_connector_jobs").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM oast_correlations").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM schemathesis_run_evidence").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM schemathesis_operation_evidence").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM finding_evidence_links").fetchone()[0] == 0
@@ -8262,6 +8289,16 @@ class TestPostgresMigrations:
             "expires_at",
         }.issubset(inventory.tables["zap_connector_jobs"].columns)
         assert {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "callback_label",
+            "service_origin_sha256",
+            "status",
+            "active_until",
+            "purge_at",
+        }.issubset(inventory.tables["oast_correlations"].columns)
+        assert {
             "assessment_id",
             "check_id",
             "run_id",
@@ -8281,6 +8318,9 @@ class TestPostgresMigrations:
         assert "idx_project_http_profiles_project_name" in inventory.indexes
         assert "idx_project_http_profiles_project_enabled" in inventory.indexes
         assert "idx_zap_connector_jobs_active_expiry" in inventory.indexes
+        assert "idx_oast_correlations_active_expiry" in inventory.indexes
+        assert "idx_oast_correlations_terminal_purge" in inventory.indexes
+        assert "idx_oast_correlations_run_check" in inventory.indexes
         assert "idx_schemathesis_run_evidence_run" in inventory.indexes
         assert "idx_schemathesis_operation_evidence_report" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad", "runs_ai", "runs_ad"}.issubset(inventory.triggers)
@@ -8326,6 +8366,16 @@ class TestPostgresMigrations:
             "expires_at",
         }.issubset(inventory.tables["zap_connector_jobs"].columns)
         assert {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "callback_label",
+            "service_origin_sha256",
+            "status",
+            "active_until",
+            "purge_at",
+        }.issubset(inventory.tables["oast_correlations"].columns)
+        assert {
             "assessment_id",
             "check_id",
             "run_id",
@@ -8345,6 +8395,9 @@ class TestPostgresMigrations:
         assert "idx_project_http_profiles_project_name" in inventory.indexes
         assert "idx_project_http_profiles_project_enabled" in inventory.indexes
         assert "idx_zap_connector_jobs_active_expiry" in inventory.indexes
+        assert "idx_oast_correlations_active_expiry" in inventory.indexes
+        assert "idx_oast_correlations_terminal_purge" in inventory.indexes
+        assert "idx_oast_correlations_run_check" in inventory.indexes
         assert "idx_schemathesis_run_evidence_run" in inventory.indexes
         assert "idx_schemathesis_operation_evidence_report" in inventory.indexes
         assert "idx_runs_command_trgm" in inventory.indexes
@@ -8374,6 +8427,9 @@ class TestPostgresMigrations:
         assert "idx_project_http_profiles_project_name" in manifest.indexes
         assert "idx_project_http_profiles_project_enabled" in manifest.indexes
         assert "idx_zap_connector_jobs_active_expiry" in manifest.indexes
+        assert "idx_oast_correlations_active_expiry" in manifest.indexes
+        assert "idx_oast_correlations_terminal_purge" in manifest.indexes
+        assert "idx_oast_correlations_run_check" in manifest.indexes
         assert "idx_schemathesis_run_evidence_run" in manifest.indexes
         assert "idx_schemathesis_operation_evidence_report" in manifest.indexes
         assert "idx_runs_command_trgm" not in manifest.indexes
@@ -8948,7 +9004,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0072",
+            "0073",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -9000,7 +9056,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0071"
+        assert rows[-1]["version"] == "0072"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -9462,6 +9518,7 @@ class TestPostgresMigrations:
             "0069",
             "0070",
             "0071",
+            "0072",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -9497,7 +9554,8 @@ class TestPostgresMigrations:
         assert "0069" in conn.applied_versions
         assert "0070" in conn.applied_versions
         assert "0071" in conn.applied_versions
-        assert conn.commit_count == 33
+        assert "0072" in conn.applied_versions
+        assert conn.commit_count == 34
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -9650,7 +9708,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0072",
+            "0073",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -9675,9 +9733,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0072"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0073"]
         assert table_exists is not None
-        assert "0072" in versions
+        assert "0073" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -16793,6 +16851,7 @@ class TestDataAccessLayerServiceCoverage:
         assert counts["migrated_finding_triage_details"] == 1
         assert counts["migrated_project_http_profiles"] == 1
         assert counts["migrated_zap_connector_jobs"] == 0
+        assert counts["migrated_oast_correlations"] == 0
         assert counts["migrated_schemathesis_run_evidence"] == 0
         assert counts["migrated_notification_channels"] == 1
         assert counts["migrated_recent_values"] == 1

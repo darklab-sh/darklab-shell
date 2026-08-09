@@ -318,6 +318,18 @@ class TestSessionMigrate:
                 "datetime('now'), datetime('now'), datetime('now', '+1 hour'))",
                 (session_id, project_id),
             )
+            conn.execute(
+                "INSERT OR REPLACE INTO oast_correlations "
+                "(id, session_id, project_id, assessment_id, check_id, "
+                "target_entity_id, action_key, callback_label, allowed_domain, "
+                "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
+                "VALUES ('ocr_0123456789abcdef0123456789abcdef', ?, ?, "
+                "'asm_migrate_test', 'chk_migrate_test', 'ent_migrate_test', "
+                "'oast_dns_callback', 'dl-0123456789abcdef0123456789abcdef', "
+                "'oast.darklab.test', ?, datetime('now'), datetime('now'), "
+                "datetime('now', '+5 minutes'), datetime('now', '+1 hour'))",
+                (session_id, project_id, "a" * 64),
+            )
             conn.commit()
 
     def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
@@ -710,6 +722,10 @@ class TestSessionMigrate:
                 "SELECT session_id FROM zap_connector_jobs "
                 "WHERE id = 'zap_migrate_test'",
             ).fetchone()
+            oast_correlation = conn.execute(
+                "SELECT session_id FROM oast_correlations "
+                "WHERE id = 'ocr_0123456789abcdef0123456789abcdef'",
+            ).fetchone()
         assert resp.status_code == 200
         assert data["migrated_projects"] == 1
         assert data["migrated_run_file_artifacts"] == 1
@@ -725,6 +741,7 @@ class TestSessionMigrate:
         assert data["migrated_project_assessment_check_actors"] == 1
         assert data["migrated_project_http_profiles"] == 1
         assert data["migrated_zap_connector_jobs"] == 1
+        assert data["migrated_oast_correlations"] == 1
         assert self._count_rows("projects", from_id) == 0
         assert self._count_rows("projects", to_id) == 2
         assert self._count_rows("run_file_artifacts", from_id) == 0
@@ -741,6 +758,7 @@ class TestSessionMigrate:
         assert tuple(assessment_check) == (to_id,)
         assert tuple(http_profile) == (to_id, to_id, to_id)
         assert tuple(zap_job) == (to_id,)
+        assert tuple(oast_correlation) == (to_id,)
 
     def test_migrates_recent_values_and_merges_destination(self):
         client = get_client()

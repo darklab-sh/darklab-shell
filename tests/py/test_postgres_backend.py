@@ -499,6 +499,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0069",
         "0070",
         "0071",
+        "0072",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -610,6 +611,14 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'finished_at',
                 'expires_at'
             ))
+            OR (table_name = 'oast_correlations' AND column_name IN (
+                'created_at',
+                'updated_at',
+                'activated_at',
+                'closed_at',
+                'active_until',
+                'purge_at'
+            ))
             OR (table_name = 'schemathesis_run_evidence' AND column_name IN (
                 'running_time_seconds',
                 'missing_operations_json',
@@ -688,6 +697,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "project_assessment_evidence",
         "project_http_profiles",
         "zap_connector_jobs",
+        "oast_correlations",
         "nmap_service_observations",
         "schemathesis_operation_evidence",
         "schemathesis_run_evidence",
@@ -758,6 +768,12 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("zap_connector_jobs", "submitted_at", "timestamp with time zone"),
         ("zap_connector_jobs", "finished_at", "timestamp with time zone"),
         ("zap_connector_jobs", "expires_at", "timestamp with time zone"),
+        ("oast_correlations", "created_at", "timestamp with time zone"),
+        ("oast_correlations", "updated_at", "timestamp with time zone"),
+        ("oast_correlations", "activated_at", "timestamp with time zone"),
+        ("oast_correlations", "closed_at", "timestamp with time zone"),
+        ("oast_correlations", "active_until", "timestamp with time zone"),
+        ("oast_correlations", "purge_at", "timestamp with time zone"),
         ("schemathesis_run_evidence", "running_time_seconds", "double precision"),
         ("schemathesis_run_evidence", "missing_operations_json", "jsonb"),
         ("schemathesis_run_evidence", "observed_at", "timestamp with time zone"),
@@ -881,6 +897,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             'project_assessment_evidence',
             'project_http_profiles',
             'zap_connector_jobs',
+            'oast_correlations',
             'nmap_service_observations',
             'schemathesis_operation_evidence',
             'schemathesis_run_evidence',
@@ -909,6 +926,13 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_zap_connector_jobs_personal_created",
         "idx_zap_connector_jobs_team_created",
         "idx_zap_connector_jobs_active_expiry",
+        "idx_oast_correlations_project_created",
+        "idx_oast_correlations_personal_created",
+        "idx_oast_correlations_team_created",
+        "idx_oast_correlations_check_created",
+        "idx_oast_correlations_active_expiry",
+        "idx_oast_correlations_terminal_purge",
+        "idx_oast_correlations_run_check",
         "idx_schemathesis_run_evidence_owner_project",
         "idx_schemathesis_run_evidence_check_observed",
         "idx_schemathesis_run_evidence_run",
