@@ -814,6 +814,91 @@ class TestAtlasImportRoutes:
             )
             conn.commit()
 
+    def test_prepared_import_draft_read_is_bounded_owner_scoped_and_expires(
+        self, tmp_path
+    ):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_draft_owner"
+            other_session_id = "tok_atlas_import_draft_other"
+            self._register_session_token(session_id)
+            self._register_session_token(other_session_id)
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "OWASP ZAP",
+                    "import_name": "Prepared ZAP report",
+                    "file": (
+                        io.BytesIO(
+                            b"row_type,entity_kind,entity_value,title,severity,evidence\n"
+                            b"finding,url,https://example.test,Missing header,medium,header absent\n"
+                        ),
+                        "zap-report.csv",
+                    ),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert preview.status_code == 200
+            created = preview.get_json()
+
+            reviewed = client.get(
+                f"/atlas/imports/drafts/{created['draft_id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert reviewed.status_code == 200
+            payload = reviewed.get_json()
+            assert payload["draft_id"] == created["draft_id"]
+            assert payload["row_set_digest"] == created["row_set_digest"]
+            assert payload["source_tool"] == "OWASP ZAP"
+            assert payload["import_name"] == "Prepared ZAP report"
+            assert payload["filename"] == "zap-report.csv"
+            assert payload["counts"] == created["counts"]
+            assert payload["samples"] == created["samples"]
+            assert payload["warnings"] == created["warnings"]
+            assert payload["apply_options"] == created["apply_options"]
+            assert "normalized_rows" not in payload
+
+            cross_owner = client.get(
+                f"/atlas/imports/drafts/{created['draft_id']}",
+                headers={"X-Session-ID": other_session_id},
+            )
+            assert cross_owner.status_code == 404
+            assert cross_owner.get_json()["error"] == "draft_not_found"
+
+            with db_connect() as conn:
+                conn.execute(
+                    "UPDATE atlas_import_drafts SET normalized_rows_sha256 = 'tampered' "
+                    "WHERE id = ?",
+                    (created["draft_id"],),
+                )
+                conn.commit()
+            changed = client.get(
+                f"/atlas/imports/drafts/{created['draft_id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert changed.status_code == 409
+            assert changed.get_json()["error"] == "digest_mismatch"
+
+            with db_connect() as conn:
+                conn.execute(
+                    "UPDATE atlas_import_drafts "
+                    "SET normalized_rows_sha256 = ?, expires_at = '2000-01-01 00:00:00' "
+                    "WHERE id = ?",
+                    (created["row_set_digest"], created["draft_id"]),
+                )
+                conn.commit()
+            expired = client.get(
+                f"/atlas/imports/drafts/{created['draft_id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert expired.status_code == 410
+            assert expired.get_json()["error"] == "draft_expired"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
     def test_preview_and_apply_import_without_creating_history_run(self, tmp_path):
         from services.intel.canonical import entity_signature
         from services.projects.findings import _finding_signature, _normalize_finding_signal_key

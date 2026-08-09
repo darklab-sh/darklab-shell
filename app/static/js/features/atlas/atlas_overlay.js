@@ -150,6 +150,8 @@ let exportedCycleAtlasTab = null;
   const importBtn = document.getElementById('atlas-import-btn');
   const importOverlay = document.getElementById('atlas-import-overlay');
   const importModal = document.getElementById('atlas-import-modal');
+  const importSubtitle = document.getElementById('atlas-import-subtitle');
+  const importSourceSection = document.getElementById('atlas-import-source');
   const importCloseBtn = document.getElementById('atlas-import-close');
   const importCancelBtn = document.getElementById('atlas-import-cancel');
   const importFormatSelect = document.getElementById('atlas-import-format');
@@ -288,6 +290,8 @@ let exportedCycleAtlasTab = null;
       open: false,
       previewLoading: false,
       applyLoading: false,
+      sourceMode: 'upload',
+      preparedLabel: '',
       draftId: '',
       rowSetDigest: '',
       preview: null,
@@ -564,6 +568,13 @@ let exportedCycleAtlasTab = null;
     return detailApi.text ? detailApi.text(value, fallback) : (String(value ?? '').trim() || fallback);
   }
 
+  function formatImportDate(value) {
+    const raw = text(value);
+    if (!raw) return '';
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? raw : date.toLocaleString();
+  }
+
   function selectorValue(value) {
     if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
       return CSS.escape(String(value));
@@ -830,6 +841,8 @@ let exportedCycleAtlasTab = null;
       logImportClientError('failed to load atlas project filters', err);
     });
     await refreshAtlas({ resetOffset: true, initialLoad: options.initialLoad });
+    const importDraftId = String(options && options.importDraftId || '').trim();
+    if (importDraftId) await openPreparedImportDraft(importDraftId);
   }
 
   function closeAtlas(options = {}) {
@@ -1625,9 +1638,21 @@ let exportedCycleAtlasTab = null;
     importFileInput.setAttribute('accept', importAcceptByFormat[importFormatSelect.value] || '');
   }
 
-  function resetImportFlow() {
+  function syncImportSourceMode() {
+    const prepared = state.importFlow.sourceMode === 'prepared';
+    importSourceSection?.classList.toggle('u-hidden', prepared);
+    if (importSubtitle) {
+      importSubtitle.textContent = prepared
+        ? (state.importFlow.preparedLabel || 'Prepared report · review before applying')
+        : 'External findings, entities, and evidence';
+    }
+  }
+
+  function resetImportFlow({ sourceMode = 'upload' } = {}) {
     state.importFlow.previewLoading = false;
     state.importFlow.applyLoading = false;
+    state.importFlow.sourceMode = sourceMode;
+    state.importFlow.preparedLabel = '';
     state.importFlow.draftId = '';
     state.importFlow.rowSetDigest = '';
     state.importFlow.preview = null;
@@ -1638,6 +1663,7 @@ let exportedCycleAtlasTab = null;
       importPreviewHost.classList.add('u-hidden');
     }
     if (importApplyBtn) importApplyBtn.disabled = true;
+    syncImportSourceMode();
   }
 
   function setImportModalOpen(open) {
@@ -1658,13 +1684,16 @@ let exportedCycleAtlasTab = null;
     renderImportPreview();
     if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
     window.setTimeout(() => {
-      const focusTarget = importFormatSelect || importModal;
+      const focusTarget = state.importFlow.sourceMode === 'prepared'
+        ? importModal
+        : (importFormatSelect || importModal);
       focusTarget?.focus?.({ preventScroll: true });
     }, 0);
   }
 
   function openImportModal() {
     setExportMenuOpen(false);
+    resetImportFlow();
     setImportModalOpen(true);
   }
 
@@ -1760,6 +1789,12 @@ let exportedCycleAtlasTab = null;
     const preview = flow.preview;
     const result = flow.result;
     if (!preview && !result) {
+      if (flow.sourceMode === 'prepared' && flow.previewLoading) {
+        importPreviewHost.classList.remove('u-hidden');
+        importPreviewHost.append(node('div', 'atlas-empty-inline', 'Loading prepared preview...'));
+        if (importApplyBtn) importApplyBtn.disabled = true;
+        return;
+      }
       importPreviewHost.classList.add('u-hidden');
       if (importApplyBtn) importApplyBtn.disabled = true;
       return;
@@ -1767,6 +1802,16 @@ let exportedCycleAtlasTab = null;
     importPreviewHost.classList.remove('u-hidden');
     if (preview) {
       const counts = preview.counts || {};
+      if (flow.sourceMode === 'prepared') {
+        const preparedDetails = [
+          text(preview.source_tool),
+          text(preview.filename),
+          preview.expires_at ? `review by ${formatImportDate(preview.expires_at)}` : '',
+        ].filter(Boolean).join(' · ');
+        if (preparedDetails) {
+          importPreviewHost.append(node('div', 'atlas-muted atlas-import-prepared-detail', preparedDetails));
+        }
+      }
       importPreviewHost.append(
         node('div', 'atlas-detail-section-title', 'Preview'),
         importCountGrid(counts),
@@ -1864,6 +1909,7 @@ let exportedCycleAtlasTab = null;
   }
 
   async function previewImportFile() {
+    if (state.importFlow.sourceMode === 'prepared') return;
     if (!importFileInput || !importFormatSelect) return;
     const file = importFileInput.files && importFileInput.files[0] ? importFileInput.files[0] : null;
     if (!file) {
@@ -1894,6 +1940,45 @@ let exportedCycleAtlasTab = null;
       logImportClientError('failed to preview atlas import', err);
       if (importStatus) importStatus.textContent = '';
       showToastSafe(err && err.message ? err.message : 'Failed to preview import', 'error');
+    } finally {
+      state.importFlow.previewLoading = false;
+      syncImportApplyState();
+    }
+  }
+
+  async function openPreparedImportDraft(draftId) {
+    resetImportFlow({ sourceMode: 'prepared' });
+    state.importFlow.previewLoading = true;
+    setImportModalOpen(true);
+    if (importStatus) importStatus.textContent = 'Loading prepared preview...';
+    syncImportApplyState();
+    try {
+      const resp = await api()(`/atlas/imports/drafts/${encodeURIComponent(draftId)}`, {
+        cache: 'no-store',
+      });
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to load prepared import');
+      const data = await resp.json();
+      state.importFlow.draftId = String(data.draft_id || '');
+      state.importFlow.rowSetDigest = String(data.row_set_digest || '');
+      state.importFlow.preview = data;
+      state.importFlow.preparedLabel = [
+        text(data.import_name, 'Prepared report'),
+        text(data.source_tool),
+      ].filter(Boolean).join(' · ');
+      syncImportSourceMode();
+      if (importStatus) importStatus.textContent = 'Review ready';
+      renderImportPreview();
+    } catch (err) {
+      logImportClientError('failed to load prepared atlas import', err, {
+        source: 'prepared_import',
+      });
+      const message = err?.message || 'Failed to load prepared import';
+      if (importStatus) importStatus.textContent = message;
+      if (importPreviewHost) {
+        importPreviewHost.replaceChildren(node('div', 'atlas-empty-inline', message));
+        importPreviewHost.classList.remove('u-hidden');
+      }
+      showToastSafe(message, 'error');
     } finally {
       state.importFlow.previewLoading = false;
       syncImportApplyState();

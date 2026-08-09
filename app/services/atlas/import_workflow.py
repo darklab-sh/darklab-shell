@@ -8,12 +8,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
-import re
 import uuid
 from typing import Any, BinaryIO, IO
 
-from core.database_access import get_db_backend, get_db_connect
-from core.database_backend import dialect_for_backend, parse_database_backend
+from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from services.atlas.import_analysis import (
     analysis_counts as _analysis_counts,
@@ -32,6 +30,12 @@ from services.atlas.import_analysis import (
 from services.atlas.import_counts import (
     current_apply_counts as _current_apply_counts,
     preview_counts as _preview_counts,
+)
+from services.atlas.import_draft_read import (
+    DRAFT_ID_RE as _DRAFT_ID_RE,
+    decode_json_dict as _decode_json_dict,
+    decode_json_list as _decode_json_list,
+    load_draft as _load_draft,
 )
 from services.atlas.import_helpers import (
     MAX_SOURCE_TOOL_LEN,
@@ -86,7 +90,6 @@ DRAFT_TTL_MINUTES = 30
 PREVIEW_SAMPLE_LIMIT = 20
 WARNING_SAMPLE_LIMIT = 50
 MAX_IMPORT_NAME_LEN = 120
-_DRAFT_ID_RE = re.compile(r"impd_[0-9a-f]{32}")
 
 
 def _utc_now() -> datetime:
@@ -95,19 +98,6 @@ def _utc_now() -> datetime:
 
 def _timestamp(value: datetime | None = None) -> str:
     return (value or _utc_now()).strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _conn_dialect(conn):
-    backend = getattr(conn, "database_backend", get_db_backend())
-    return dialect_for_backend(parse_database_backend(backend))
-
-
-def _decode_json_dict(conn, value: Any) -> dict[str, Any]:
-    return _conn_dialect(conn).decode_json_dict(value)
-
-
-def _decode_json_list(conn, value: Any) -> list[Any]:
-    return _conn_dialect(conn).decode_json_list(value)
 
 
 def required_capabilities_for_apply(options: dict[str, Any], preview_counts: dict[str, Any]) -> set[Capability]:
@@ -280,19 +270,6 @@ def cleanup_expired_import_drafts(*, conn=None, now: str | None = None) -> int:
             "cutoff": timestamp,
         })
     return deleted
-
-
-def _load_draft(conn, session_id: str, draft_id: str, *, team_id: str = ""):
-    normalized_team_id = normalize_team_id(team_id)
-    if normalized_team_id:
-        return conn.execute(
-            "SELECT * FROM atlas_import_drafts WHERE team_id = ? AND id = ?",
-            (normalized_team_id, draft_id),
-        ).fetchone()
-    return conn.execute(
-        "SELECT * FROM atlas_import_drafts WHERE (team_id IS NULL OR team_id = '') AND session_id = ? AND id = ?",
-        (str(session_id or "").strip(), draft_id),
-    ).fetchone()
 
 
 def _load_batch_for_draft(conn, session_id: str, draft_id: str, *, team_id: str = ""):

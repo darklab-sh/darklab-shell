@@ -541,10 +541,19 @@ function createProjectAssessmentZapManager(context, hooks = {}) {
     }
   }
 
-  async function openAtlas(projectId, projectName = '') {
+  async function openAtlas(projectId, projectName = '', job = null) {
     if (typeof ctx.openAtlas !== 'function') return false;
     try {
-      await ctx.openAtlas({ projectId, projectName, tab: 'findings', source: 'project_assessment_zap' });
+      const options = {
+        projectId,
+        projectName,
+        tab: 'findings',
+        source: 'project_assessment_zap',
+      };
+      if (job?.status === 'ready' && job?.atlas_draft_id) {
+        options.importDraftId = String(job.atlas_draft_id);
+      }
+      await ctx.openAtlas(options);
       return true;
     } catch (err) {
       ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open Atlas.', { error: true });

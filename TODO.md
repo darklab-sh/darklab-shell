@@ -137,11 +137,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 
 #### Phase 9 — Add optional external scanner and OAST connectors
 
-- [ ] Integrate OWASP ZAP as an operator-configured worker/sidecar, not as part of the main image:
-  - Add configuration for base URL, authentication secret, TLS verification, allowed network ranges, concurrency, job timeout, and maximum report size.
-  - Generate a bounded ZAP Automation Framework plan from selected Project targets, HTTP profile, authentication role, scope exclusions, and safe/intrusive policy; show the plan summary before submission.
-  - Track remote job id/status/progress, cancellation, expiry, and errors without proxying unbounded ZAP logs into the app database.
-  - Download completed output into the active Files/Project evidence boundary and pass it through the existing ZAP import preview/apply path. Do not silently apply remote findings before the operator reviews the import summary and warnings.
 - [ ] Add private OAST support through an operator-configured Interactsh-compatible service:
   - Do not default to a public callback service. Require an explicit server URL, token/secret, allowed domain, TLS policy, retention, and privacy acknowledgement.
   - Issue per-run/per-check correlation ids, keep callback credentials private, and attach bounded DNS/HTTP/SMTP/LDAP interaction evidence to the originating run, assessment check, entity, and finding.

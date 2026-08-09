@@ -620,6 +620,17 @@ describe('project assessment controller', () => {
     })
     expect(container.textContent).toContain(ready.files_path)
     expect(container.textContent).not.toContain('Open Atlas findings')
+    expect(container.textContent).toContain('Review Atlas import')
+    ;[...container.querySelectorAll('.project-assessment-zap-actions .btn')]
+      .find(button => button.textContent === 'Review Atlas import')?.click()
+    await Promise.resolve()
+    expect(ctx.openAtlas).toHaveBeenCalledWith({
+      projectId: 'prj_1',
+      projectName: '',
+      tab: 'findings',
+      source: 'project_assessment_zap',
+      importDraftId: ready.atlas_draft_id,
+    })
     ;[...container.querySelectorAll('.project-assessment-zap-actions .btn')]
       .find(button => button.textContent === 'Open Files')?.click()
     await Promise.resolve()

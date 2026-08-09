@@ -18,7 +18,12 @@ from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.atlas.import_logging import route_count_log_fields as _atlas_import_count_log_fields
-from services.atlas.import_workflow import AtlasImportError, apply_atlas_import, preview_atlas_import
+from services.atlas.import_draft_read import get_atlas_import_preview
+from services.atlas.import_workflow import (
+    AtlasImportError,
+    apply_atlas_import,
+    preview_atlas_import,
+)
 from services.atlas.lookup import (
     atlas_summary,
     run_atlas_read,
@@ -623,6 +628,28 @@ def atlas_import_apply():
         payload=payload,
         options=apply_options,
     )
+    return jsonify(result)
+
+
+@atlas_bp.route("/atlas/imports/drafts/<draft_id>", methods=["GET"])
+@limiter.limit(_atlas_write_limit)
+def atlas_import_draft(draft_id):
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    scope, error_response = _atlas_request_scope_response(session_id)
+    if error_response:
+        return error_response
+    member = (scope.member or {}) if scope else {}
+    try:
+        result = get_atlas_import_preview(
+            session_id=session_id,
+            team_id=scope.team_id if scope else "",
+            role=str(member.get("role") or ""),
+            draft_id=draft_id,
+        )
+    except AtlasImportError as exc:
+        return _atlas_import_error_response(exc)
     return jsonify(result)
 
 from blueprints.atlas_read import (  # noqa: E402,F401

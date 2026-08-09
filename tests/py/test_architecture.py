@@ -454,6 +454,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/atlas/import_archive.py", 146, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_analysis.py", 265, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_counts.py", 47, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_draft_read.py", 127, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_evidence.py", 108, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_helpers.py", 131, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_limits.py", 150, "split-package-ratchet"),
@@ -800,8 +801,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 254
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "d02ff2350a85d20dd3051d0c5cbe7b0f9116fedeb37f6c31730696e6248524af"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 255
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "2f6a0f239f4cd170513424a60ca5b702b31b09fea6b987b1cbc81c0de136a1ec"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

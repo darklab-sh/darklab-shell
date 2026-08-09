@@ -612,13 +612,24 @@ function createProjectAssessmentRenderer(context, actions) {
       if (ctx.canRunCommands?.() === false) cancel.title = 'View-only team members cannot cancel ZAP scans.';
       actions.appendChild(cancel);
     }
+    if (job?.status === 'ready' && job?.atlas_draft_id) {
+      actions.appendChild(zapButton(
+        'Review Atlas import',
+        () => act.openZapAtlas(projectId, '', job),
+        { primary: true },
+      ));
+    }
     if (job?.files_path) {
-      actions.appendChild(zapButton('Open Files', () => act.openZapFiles(job), { primary: true }));
+      actions.appendChild(zapButton(
+        'Open Files',
+        () => act.openZapFiles(job),
+        { primary: !job?.atlas_draft_id },
+      ));
     }
     if (job?.status === 'imported') {
       actions.appendChild(zapButton(
         'Open Atlas findings',
-        () => act.openZapAtlas(projectId),
+        () => act.openZapAtlas(projectId, '', job),
       ));
     }
     if (

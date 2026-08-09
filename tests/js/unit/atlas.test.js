@@ -270,6 +270,8 @@ function setupAtlasDom() {
         <div id="atlas-import-overlay" class="modal-overlay mobile-sheet-overlay atlas-import-overlay u-hidden" aria-hidden="true">
           <form id="atlas-import-modal" class="modal-card mobile-sheet-surface atlas-import-modal" tabindex="-1">
             <button id="atlas-import-close" type="button">close import</button>
+            <div id="atlas-import-subtitle"></div>
+            <section id="atlas-import-source">
             <select id="atlas-import-format">
               <option value="nuclei_jsonl">Nuclei JSONL</option>
               <option value="nessus_xml">Nessus XML</option>
@@ -280,6 +282,7 @@ function setupAtlasDom() {
             <input id="atlas-import-file" type="file" />
             <button id="atlas-import-preview-btn" type="submit">preview</button>
             <span id="atlas-import-status"></span>
+            </section>
             <section id="atlas-import-preview" class="u-hidden"></section>
             <button id="atlas-import-cancel" type="button">cancel</button>
             <button id="atlas-import-apply" type="button">apply</button>
@@ -442,6 +445,42 @@ function loadAtlas({
         headers: { get: () => 'attachment; filename=darklab-atlas-entities.csv' },
         blob: () => Promise.resolve(new Blob(['id,type\nent_ip,ip\n'], { type: 'text/csv' })),
       })
+    }
+    if (target === '/atlas/imports/drafts/impd_zap') {
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        draft_id: 'impd_zap',
+        row_set_digest: 'digest_zap',
+        status: 'previewed',
+        source_tool: 'OWASP ZAP',
+        import_name: 'ZAP assessment report',
+        filename: 'darklab-zap-report.json',
+        expires_at: '2026-08-09 15:00:00',
+        counts: {
+          rows: 2,
+          entity_valid: 1,
+          finding_valid: 1,
+          evidence_valid: 0,
+          new: 2,
+          updated: 0,
+          skipped: 0,
+          warnings: 1,
+          project_target_candidates: 1,
+        },
+        samples: {
+          entities: [{ kind: 'url', canonical_value: 'https://example.test' }],
+          findings: [{ severity: 'medium', title: 'Missing security header' }],
+          evidence: [],
+        },
+        warnings: [{ row_number: 2, code: 'missing_field', message: 'Skipped empty value' }],
+        apply_options: {
+          import_entities: { available: true, requires: ['mutate_projects'] },
+          import_findings: { available: true, requires: ['triage_findings'] },
+          import_evidence: { available: false, requires: ['mutate_projects'] },
+          link_to_project: { available: true, requires: ['mutate_projects'] },
+          create_project_targets: { available: true, requires: ['mutate_projects'] },
+        },
+      }))
     }
     if (target === '/atlas/imports/preview' && options.method === 'POST') {
       return Promise.resolve(jsonResponse({
@@ -2823,6 +2862,49 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project target created')
     expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success')
     expect(projectEvents.some(event => event.name === 'app:project-workspace-changed')).toBe(true)
+  })
+
+  it('opens a prepared ZAP draft in the existing explicit Atlas review and apply flow', async () => {
+    const { openAtlas, apiFetch, showToast } = loadAtlas()
+
+    await openAtlas({
+      source: 'project_assessment_zap',
+      tab: 'findings',
+      projectId: 'proj_1',
+      projectName: 'Evidence',
+      importDraftId: 'impd_zap',
+    })
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/imports/drafts/impd_zap',
+      { cache: 'no-store' },
+    )
+    expect(document.getElementById('atlas-import-overlay')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('atlas-import-source')?.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('atlas-import-subtitle')?.textContent)
+      .toBe('ZAP assessment report · OWASP ZAP')
+    expect(document.getElementById('atlas-import-status')?.textContent).toBe('Review ready')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Skipped empty value')
+    expect(document.getElementById('atlas-import-apply')?.disabled).toBe(false)
+    expect(apiFetch.mock.calls.some(([url]) => url === '/atlas/imports/preview')).toBe(false)
+
+    document.querySelector('[data-atlas-import-option="link_to_project"]').checked = true
+    document.getElementById('atlas-import-apply')?.click()
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success'))
+    const applyCall = apiFetch.mock.calls.find(([url]) => url === '/atlas/imports/apply')
+    expect(JSON.parse(applyCall?.[1].body)).toMatchObject({
+      draft_id: 'impd_zap',
+      row_set_digest: 'digest_zap',
+      project_id: 'proj_1',
+      options: {
+        import_entities: true,
+        import_findings: true,
+        import_evidence: false,
+        link_to_project: true,
+      },
+    })
   })
 
   it('requires a file before previewing an Atlas import', async () => {
