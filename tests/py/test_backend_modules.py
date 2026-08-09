@@ -8223,7 +8223,7 @@ class TestPostgresMigrations:
                 "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
                 "VALUES ('ocr_0123456789abcdef0123456789abcdef', 'session-a', "
                 "'prj_assessment', 'asm_two', 'chk_two', 'ent_oast_delete', "
-                "'oast_dns_callback', 'dl-0123456789abcdef0123456789abcdef', "
+                "'oast_dns_callback', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "
                 "'oast.darklab.test', ?, ?, ?, ?, ?)",
                 ("a" * 64, now, now, now, now),
             )

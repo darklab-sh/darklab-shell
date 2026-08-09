@@ -164,6 +164,21 @@ _MODULE_SIZE_RATCHET = (
         "app/services/connectors/oast_interaction_review.py", 241, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/connectors/oast_interactions.py", 338, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/connectors/oast_provider_contracts.py", 38, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/connectors/oast_provider_crypto.py", 131, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/connectors/oast_provider_http.py", 134, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/connectors/oast_provider_normalization.py", 93, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/connectors/oast_provider_transport.py", 189, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/connectors/zap_config.py", 68, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_http.py", 172, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_job_artifacts.py", 187, "split-package-ratchet"),

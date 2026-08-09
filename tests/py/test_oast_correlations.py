@@ -122,7 +122,7 @@ def _reserve(correlation_db, suffix: str, *, now: datetime = NOW):
         _settings(retention_seconds=300),
         window_seconds=60,
         correlation_id=f"ocr_{suffix * 32}",
-        callback_label=f"dl-{suffix * 32}",
+        callback_label=suffix * 33,
         now=now,
         conn=correlation_db,
     )
@@ -139,7 +139,7 @@ def _interaction_payload(
     *,
     event_id: str = "provider-event-1",
     protocol: str = "http",
-    callback_label: str = "dl-" + "a" * 32,
+    callback_label: str = "a" * 33,
     observed_at: datetime = NOW + timedelta(seconds=10),
     details=None,
 ):
@@ -165,7 +165,7 @@ def test_reservation_is_private_owner_scoped_and_provider_free(correlation_db):
     assert reservation["id"] == "ocr_" + "a" * 32
     assert reservation["status"] == "reserved"
     assert reservation["run_id"] == ""
-    assert reservation["callback_domain"] == "dl-" + "a" * 32 + ".callbacks.example.test"
+    assert reservation["callback_domain"] == "a" * 33 + ".callbacks.example.test"
     assert reservation["service_origin_sha256"] == sha256(
         b"https://interactsh.internal.example"
     ).hexdigest()
@@ -210,7 +210,7 @@ def test_team_reservation_uses_team_scope_instead_of_actor_session(correlation_d
         team_id="team-a",
         window_seconds=60,
         correlation_id="ocr_" + "e" * 32,
-        callback_label="dl-" + "e" * 32,
+        callback_label="e" * 33,
         now=NOW,
         conn=correlation_db,
     )
@@ -410,7 +410,7 @@ def test_interaction_ingestion_rejects_malformed_mismatched_and_late_callbacks(
         ingest_oast_interaction(
             "owner-a",
             correlation["id"],
-            _interaction_payload(callback_label="dl-" + "b" * 32),
+            _interaction_payload(callback_label="b" * 33),
             now=NOW + timedelta(seconds=20),
             conn=correlation_db,
         )

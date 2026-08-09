@@ -29,7 +29,7 @@ _SAFE_FIELDS = {
     "smtp": {"command": 16, "recipient_domain": 253},
     "ldap": {"operation": 16},
 }
-_CALLBACK_LABEL_RE = re.compile(r"dl-[0-9a-f]{32}")
+_CALLBACK_LABEL_RE = re.compile(r"[a-z0-9]{33}")
 _DNS_NAME_RE = re.compile(
     r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"

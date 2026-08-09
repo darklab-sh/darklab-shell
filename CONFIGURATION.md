@@ -405,9 +405,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `cve_risk.allowed_hosts` | `[epss.cyentia.com, www.cisa.gov, api.osv.dev]` | Exact HTTPS hostnames allowed for fixed CVE-risk acquisition URLs. OSV queries still require its exact endpoint and reject redirects. Entries must be hostnames, not URLs |
 | `oast_connector` | see nested defaults | Server-side only. Disabled-by-default safety boundary for an operator-managed private Interactsh-compatible service |
 | `oast_connector.enabled` | `false` | Makes the validated private OAST settings available. Enabling requires every identity, privacy, and retention field below; it doesn't allocate a callback or contact the service |
-| `oast_connector.base_url` | _(empty)_ | HTTPS origin for the private service, without credentials, a path, query, or fragment |
+| `oast_connector.base_url` | _(empty)_ | HTTPS origin for the private service, without credentials, a path, query, or fragment. The service must use Interactsh's default 20-character correlation id and 13-character nonce lengths |
 | `oast_connector.token_secret_id` | _(empty)_ | Environment variable name that holds the service token. The token value doesn't enter YAML, config diagnostics, or connector settings |
-| `oast_connector.allowed_domain` | _(empty)_ | Exact DNS suffix reserved for this private callback service, without a wildcard or IP address |
+| `oast_connector.allowed_domain` | _(empty)_ | Exact DNS suffix reserved for this private callback service, without a wildcard or IP address. The app prepends one random 33-character alphanumeric callback label using the service's default id and nonce lengths |
 | `oast_connector.tls_verify` | `true` | Verifies the private service's TLS certificate. Turning this off is an explicit operator choice |
 | `oast_connector.callback_retention_seconds` | `604800` | Required callback-data retention policy, from 300 to 2592000 seconds |
 | `oast_connector.privacy_acknowledged` | `false` | Must be `true` before the connector can be enabled, confirming the operator accepts the private service's callback-data handling and retention policy |

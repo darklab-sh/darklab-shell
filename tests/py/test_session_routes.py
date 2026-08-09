@@ -325,7 +325,7 @@ class TestSessionMigrate:
                 "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
                 "VALUES ('ocr_0123456789abcdef0123456789abcdef', ?, ?, "
                 "'asm_migrate_test', 'chk_migrate_test', 'ent_migrate_test', "
-                "'oast_dns_callback', 'dl-0123456789abcdef0123456789abcdef', "
+                "'oast_dns_callback', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "
                 "'oast.darklab.test', ?, datetime('now'), datetime('now'), "
                 "datetime('now', '+5 minutes'), datetime('now', '+1 hour'))",
                 (session_id, project_id, "a" * 64),

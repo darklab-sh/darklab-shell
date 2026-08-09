@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import re
+import secrets
 from typing import Any
 import uuid
 
@@ -18,7 +19,8 @@ from services.connectors.oast_config import OastConnectorSettings
 
 _ACTIVE_STATUSES = ("reserved", "active")
 _CORRELATION_ID_RE = re.compile(r"ocr_[0-9a-f]{32}")
-_CALLBACK_LABEL_RE = re.compile(r"dl-[0-9a-f]{32}")
+_CALLBACK_LABEL_RE = re.compile(r"[a-z0-9]{33}")
+_CALLBACK_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 _ACTION_KEY_RE = re.compile(r"oast_[a-z0-9_]{1,80}")
 _MIN_WINDOW_SECONDS = 60
 _MAX_WINDOW_SECONDS = 3600
@@ -78,7 +80,8 @@ def new_oast_correlation_id() -> str:
 
 
 def new_oast_callback_label() -> str:
-    return f"dl-{uuid.uuid4().hex}"
+    """Return an Interactsh-default 20-character id plus 13-character nonce."""
+    return "".join(secrets.choice(_CALLBACK_ALPHABET) for _ in range(33))
 
 
 def _validate_settings(settings: OastConnectorSettings) -> None:
