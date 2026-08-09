@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
+import re
 from typing import Any
 import uuid
 
@@ -16,6 +17,7 @@ from services.connectors.zap_plan_contracts import ZapAutomationPlanSummary
 
 
 _MAX_JSON_BYTES = 65536
+_JOB_ID_RE = re.compile(r"zpj_[0-9a-f]{32}")
 
 
 class ZapJobError(RuntimeError):
@@ -74,6 +76,10 @@ def _owner_predicate(
     return f"{prefix}team_id = '' AND {prefix}session_id = ?", (session_id,)
 
 
+def new_zap_job_id() -> str:
+    return f"zpj_{uuid.uuid4().hex}"
+
+
 def create_zap_job(
     session_id: str,
     project_id: str,
@@ -83,6 +89,7 @@ def create_zap_job(
     http_profile_revision: int,
     summary: ZapAutomationPlanSummary,
     *,
+    job_id: str = "",
     team_id: str = "",
     actor_member_id: str = "",
     actor_role: str = "",
@@ -116,7 +123,9 @@ def create_zap_job(
         owner_team,
         table_prefix="pa",
     )
-    job_id = f"zpj_{uuid.uuid4().hex}"
+    normalized_job_id = str(job_id or "").strip() or new_zap_job_id()
+    if not _JOB_ID_RE.fullmatch(normalized_job_id):
+        raise ZapJobError("zap_job_id_invalid", "The ZAP job id is invalid")
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:
         current = active_conn.execute(
@@ -150,7 +159,7 @@ def create_zap_job(
             "created_at, updated_at, expires_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                job_id,
+                normalized_job_id,
                 owner_session,
                 owner_team,
                 project_id,
@@ -172,7 +181,7 @@ def create_zap_job(
         if owns_conn:
             active_conn.commit()
         row = active_conn.execute(
-            "SELECT * FROM zap_connector_jobs WHERE id = ?", (job_id,),
+            "SELECT * FROM zap_connector_jobs WHERE id = ?", (normalized_job_id,),
         ).fetchone()
         return _decode_row(row)
 
@@ -191,3 +200,43 @@ def zap_job_for_owner(
             (job_id, *owner_params),
         ).fetchone()
         return _decode_row(row) if row else None
+
+
+def zap_jobs_for_worker(*, limit: int = 50, conn=None) -> list[dict[str, Any]]:
+    """Return bounded active work, prioritizing remote jobs over new submissions."""
+    bounded_limit = max(1, min(int(limit), 100))
+    with _connection_scope(conn) as active_conn:
+        rows = active_conn.execute(
+            "SELECT * FROM zap_connector_jobs "
+            "WHERE status IN ('queued', 'submitting', 'running', 'cancel_requested', 'downloading') "
+            "ORDER BY CASE status WHEN 'queued' THEN 1 ELSE 0 END, created_at, id LIMIT ?",
+            (bounded_limit,),
+        ).fetchall()
+        return [_decode_row(row) for row in rows]
+
+
+def remote_zap_job_count(*, conn=None) -> int:
+    with _connection_scope(conn) as active_conn:
+        row = active_conn.execute(
+            "SELECT COUNT(*) AS count FROM zap_connector_jobs "
+            "WHERE status IN ('submitting', 'running', 'cancel_requested', 'downloading')",
+        ).fetchone()
+        return max(0, int(row["count"] if row else 0))
+
+
+def staged_zap_job_ids(job_ids: list[str] | tuple[str, ...], *, conn=None) -> set[str]:
+    """Return candidate ids that still require their private reviewed plan."""
+    candidates = tuple(
+        value for value in dict.fromkeys(str(item or "").strip() for item in job_ids)
+        if _JOB_ID_RE.fullmatch(value)
+    )[:256]
+    if not candidates:
+        return set()
+    placeholders = ", ".join("?" for _ in candidates)
+    with _connection_scope(conn) as active_conn:
+        rows = active_conn.execute(
+            f"SELECT id FROM zap_connector_jobs WHERE id IN ({placeholders}) "  # nosec B608
+            "AND status IN ('queued', 'submitting')",
+            candidates,
+        ).fetchall()
+        return {str(row["id"]) for row in rows}

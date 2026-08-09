@@ -218,6 +218,8 @@ ZAP lifecycle state belongs in the primary database rather than Redis or an in-m
 
 ZAP service calls use its transfer directory instead of a shared host volume. Each durable job receives one generated subdirectory, the API key is sent only in `X-ZAP-API-Key`, and the connector can call only plan upload, start, progress, stop, and report download. It rejects redirects, changed response URLs, unexpected confirmations, and over-limit responses. Operators must explicitly enable ZAP's security-sensitive file-transfer feature and own that directory's retention; darklab_shell doesn't broaden the ZAP API or assume a remote-delete capability.
 
+The exact reviewed ZAP plan lives briefly in a private app-data spool rather than the lifecycle row because the worker must submit the reviewed bytes, not regenerate a possibly changed plan. One dedicated database-backed worker holds a deployment-wide advisory or file lock, reconciles that spool, uses compare-and-set lifecycle changes, gives fresh in-flight claims a short recovery window, fails abandoned submissions as uncertain, and retries abandoned downloads with the same job and Atlas draft identity. Completed reports enter the owner's Files quota and the existing Atlas preview path. Atlas apply remains an explicit operator action and records the resulting batch on the connector job in the same transaction.
+
 ### Shared CVE Risk Data and Ranking
 
 **A fresh install gets dated, bundled EPSS and KEV data; live network refresh remains an operator choice.**

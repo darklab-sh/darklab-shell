@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
+import re
 import uuid
 from typing import Any, BinaryIO, IO
 
@@ -85,6 +86,7 @@ DRAFT_TTL_MINUTES = 30
 PREVIEW_SAMPLE_LIMIT = 20
 WARNING_SAMPLE_LIMIT = 50
 MAX_IMPORT_NAME_LEN = 120
+_DRAFT_ID_RE = re.compile(r"impd_[0-9a-f]{32}")
 
 
 def _utc_now() -> datetime:
@@ -120,6 +122,7 @@ def preview_atlas_import(
     format_id: str,
     source_tool: str,
     import_name: str,
+    draft_id: str = "",
     team_id: str = "",
     actor_member_id: str = "",
     role: str = "",
@@ -127,10 +130,14 @@ def preview_atlas_import(
     source_tool = _safe_label(source_tool or format_id, MAX_SOURCE_TOOL_LEN)
     import_name = _safe_label(import_name or source_tool or "Atlas import", MAX_IMPORT_NAME_LEN)
     filename = _safe_filename(filename)
+    requested_draft_id = str(draft_id or "").strip()
     limits = _parser_limits()
     prepared_source = None
-    stage = "read_source"
+    stage = "validate_draft_id"
     try:
+        if requested_draft_id and not _DRAFT_ID_RE.fullmatch(requested_draft_id):
+            raise AtlasImportError("invalid_draft_id", "Import draft id is invalid.")
+        stage = "read_source"
         source_tool_key = _source_tool_key(source_tool)
         prepared_source = read_import_source(file_content, limits)
         stage = "parse"
@@ -138,7 +145,7 @@ def preview_atlas_import(
         parse_payload = parsed.to_dict()
         normalized_rows = normalized_row_set(parse_payload)
         row_digest = _row_set_digest(normalized_rows)
-        draft_id = "impd_" + uuid.uuid4().hex
+        draft_id = requested_draft_id or ("impd_" + uuid.uuid4().hex)
         created_dt = _utc_now()
         expires_dt = created_dt + timedelta(minutes=_draft_ttl_minutes())
         original_digest = prepared_source.upload_sha256
@@ -858,6 +865,17 @@ def _apply_atlas_import_impl(
             status="applied",
         )
         conn.execute("UPDATE atlas_import_drafts SET status = 'applied' WHERE id = ?", (draft_id,))
+        from services.connectors.zap_job_lifecycle import (  # noqa: PLC0415
+            mark_zap_job_imported_for_atlas_draft,
+        )
+
+        mark_zap_job_imported_for_atlas_draft(
+            session_id,
+            draft_id,
+            batch_id,
+            team_id=team_id,
+            conn=conn,
+        )
         conn.commit()
     log.info(
         "ATLAS_IMPORT_APPLIED",

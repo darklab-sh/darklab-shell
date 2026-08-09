@@ -72,10 +72,10 @@ def transition_zap_job(
             "Only a ready ZAP job may receive its required report identity",
         )
     source_id = str(import_source_id or "").strip()
-    if (status == "imported") != bool(source_id):
+    if (status in {"ready", "imported"}) != bool(source_id):
         raise ZapJobError(
             "zap_job_import_invalid",
-            "Only an imported ZAP job may receive its required import source id",
+            "Ready and imported ZAP jobs require their reviewed Atlas source id",
         )
     instant = _utc_now(now).isoformat()
     assignments = ["status = ?", "updated_at = ?"]
@@ -95,7 +95,7 @@ def transition_zap_job(
     if status == "ready":
         assignments.extend(["report_bytes = ?", "report_sha256 = ?"])
         params.extend([size, digest])
-    if status == "imported":
+    if status in {"ready", "imported"}:
         assignments.append("import_source_id = ?")
         params.append(source_id[:96])
     placeholders = ", ".join("?" for _ in expected)
@@ -120,6 +120,80 @@ def transition_zap_job(
             "SELECT * FROM zap_connector_jobs WHERE id = ?", (job_id,),
         ).fetchone()
         return _decode_row(row)
+
+
+def record_zap_job_submission(
+    job_id: str,
+    remote_plan_id: str,
+    *,
+    now: datetime | None = None,
+    conn=None,
+) -> dict[str, Any]:
+    """Save the remote id while preserving cancellation requested during submission."""
+    remote_id = str(remote_plan_id or "").strip()
+    if not _REMOTE_PLAN_ID_RE.fullmatch(remote_id):
+        raise ZapJobError("zap_job_remote_id_invalid", "The ZAP plan id is invalid")
+    instant = _utc_now(now).isoformat()
+    owns_conn = conn is None
+    with _connection_scope(conn) as active_conn:
+        cursor = active_conn.execute(
+            "UPDATE zap_connector_jobs SET "
+            "status = CASE WHEN status = 'submitting' THEN 'running' ELSE status END, "
+            "remote_plan_id = ?, submitted_at = ?, updated_at = ? "
+            "WHERE id = ? AND status IN ('submitting', 'cancel_requested') "
+            "AND (remote_plan_id = '' OR remote_plan_id IS NULL)",
+            (remote_id, instant, instant, job_id),
+        )
+        if int(getattr(cursor, "rowcount", 0) or 0) != 1:
+            if owns_conn:
+                active_conn.rollback()
+            raise ZapJobError(
+                "zap_job_transition_conflict",
+                "The ZAP job changed before its submission completed",
+            )
+        if owns_conn:
+            active_conn.commit()
+        row = active_conn.execute(
+            "SELECT * FROM zap_connector_jobs WHERE id = ?", (job_id,),
+        ).fetchone()
+        return _decode_row(row)
+
+
+def mark_zap_job_imported_for_atlas_draft(
+    session_id: str,
+    draft_id: str,
+    batch_id: str,
+    *,
+    team_id: str = "",
+    now: datetime | None = None,
+    conn=None,
+) -> bool:
+    """Link an operator-applied Atlas draft back to its ready connector job."""
+    owner_sql, owner_params = (
+        ("team_id = ?", (str(team_id or "").strip(),))
+        if str(team_id or "").strip()
+        else ("team_id = '' AND session_id = ?", (str(session_id or "").strip(),))
+    )
+    owns_conn = conn is None
+    with _connection_scope(conn) as active_conn:
+        row = active_conn.execute(
+            "SELECT id FROM zap_connector_jobs WHERE status = 'ready' "
+            "AND import_source_id = ? AND " + owner_sql,  # nosec B608
+            (str(draft_id or "").strip(), *owner_params),
+        ).fetchone()
+        if row is None:
+            return False
+        transition_zap_job(
+            str(row["id"]),
+            ("ready",),
+            "imported",
+            import_source_id=batch_id,
+            now=now,
+            conn=active_conn,
+        )
+        if owns_conn:
+            active_conn.commit()
+        return True
 
 
 def record_zap_job_progress(

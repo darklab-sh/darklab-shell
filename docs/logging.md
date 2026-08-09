@@ -300,6 +300,9 @@ The current event inventory is:
 | INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
+| INFO | `ZAP_WORKER_STARTED` | ZAP connector worker | pid |
+| INFO | `ZAP_WORKER_LOCK_HELD` | ZAP connector worker | — |
+| INFO | `ZAP_WORKER_STOPPED` | ZAP connector worker | pid |
 | INFO | `SCHEDULER_RECOVERY_APPLIED` | scheduler recovery | fired, skipped |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session, cleanup flags, removed/curated/kept counts |
@@ -350,6 +353,9 @@ The current event inventory is:
 | WARN | `SCHEDULE_FIRE_CLAIM_TIME_INVALID` | scheduler dispatch | schedule_id, owner_kind, session, last_run_at, command_root |
 | WARN | `SCHEDULER_WORKER_DATABASE_INTERRUPTED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type, error_type, sqlstate |
 | WARN | `SCHEDULER_LOCK_RELEASE_SKIPPED` | scheduler worker | phase, error_type, sqlstate |
+| WARN | `ZAP_JOB_FAILED` | ZAP connector worker | job_id, phase, error_class |
+| WARN | `ZAP_CANCEL_RETRY` | ZAP connector worker | job_id, error_class |
+| WARN | `ZAP_CANCEL_CREDENTIAL_RETRY` | ZAP connector worker | job_id, error_class |
 | WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `CVE_RISK_BOOTSTRAP_UNAVAILABLE` | bundled public-risk bootstrap | reason |
@@ -490,6 +496,7 @@ The current event inventory is:
 | ERROR | `SCHEDULE_FAILURE_NOTIFICATION_ERROR` | scheduler dispatch | schedule_id (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_BOOTSTRAP_FAILED` | scheduler worker | phase, pid (+ traceback) |
+| ERROR | `ZAP_WORKER_TICK_FAILED` | ZAP connector worker | (+ traceback) |
 | ERROR | `AI_WORKER_BOOTSTRAP_FAILED` | AI worker startup | phase (+ traceback) |
 | ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Schema migration runner | migration_version, migration_name, error (+ traceback) |

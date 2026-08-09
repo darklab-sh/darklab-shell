@@ -3478,6 +3478,278 @@ class TestLoadConfig:
                 )
         assert exc_info.value.code == "zap_response_too_large"
 
+        from services.connectors import zap_job_artifacts as zap_artifact_module
+        from services.connectors import zap_worker as zap_worker_module
+        from services.connectors import zap_worker_lock as zap_worker_lock_module
+        from services.connectors.zap_job_artifacts import (
+            atlas_draft_id_for_zap_job,
+            discard_zap_job_plan,
+            load_zap_job_plan,
+            save_zap_job_report,
+            stale_zap_job_plan_ids,
+            store_zap_job_plan,
+            zap_report_workspace_path,
+        )
+        from services.connectors.zap_transport import DownloadedZapReport
+
+        artifact_job = {
+            "id": job_id,
+            "session_id": "session-a",
+            "team_id": "",
+            "actor_member_id": "",
+            "plan_summary": safe_plan.summary.to_dict(),
+            "report_filename": safe_plan.summary.report_file,
+            "status": "downloading",
+        }
+        with tempfile.TemporaryDirectory() as artifact_tmp:
+            artifact_cfg = build_test_config({"data_dir": artifact_tmp})
+            with mock.patch.object(
+                zap_artifact_module, "resolve_data_dir", return_value=artifact_tmp,
+            ):
+                store_zap_job_plan(job_id, safe_plan, artifact_cfg)
+                stored_plan_path = Path(artifact_tmp) / "zap-connector-jobs" / f"{job_id}.yaml"
+                assert stored_plan_path.read_bytes() == safe_plan.yaml_bytes
+                assert stored_plan_path.stat().st_mode & 0o777 == 0o600
+                assert load_zap_job_plan(artifact_job, artifact_cfg) == safe_plan
+                discard_zap_job_plan(job_id, artifact_cfg)
+                assert not stored_plan_path.exists()
+                store_zap_job_plan(job_id, safe_plan, artifact_cfg)
+                os.utime(stored_plan_path, (1, 1))
+                assert stale_zap_job_plan_ids(
+                    artifact_cfg,
+                    now=601,
+                    grace_seconds=300,
+                ) == (job_id,)
+                discard_zap_job_plan(job_id, artifact_cfg)
+            with (
+                mock.patch.object(zap_worker_module, "new_zap_job_id", return_value=job_id),
+                mock.patch.object(zap_worker_module, "store_zap_job_plan") as store_plan,
+                mock.patch.object(
+                    zap_worker_module,
+                    "create_zap_job",
+                    return_value={**artifact_job, "status": "queued"},
+                ) as create_job,
+            ):
+                queued = zap_worker_module.queue_zap_job(
+                    "session-a",
+                    "prj_a",
+                    "asm_a",
+                    "chk_a",
+                    "php_a",
+                    3,
+                    safe_plan,
+                    cfg=artifact_cfg,
+                )
+            assert queued["status"] == "queued"
+            store_plan.assert_called_once_with(job_id, safe_plan, artifact_cfg)
+            assert create_job.call_args.kwargs["job_id"] == job_id
+            assert create_job.call_args.args[:7] == (
+                "session-a", "prj_a", "asm_a", "chk_a", "php_a", 3, safe_plan.summary,
+            )
+            with (
+                mock.patch.object(
+                    zap_worker_lock_module,
+                    "resolve_data_dir",
+                    return_value=artifact_tmp,
+                ),
+                mock.patch.object(
+                    zap_worker_lock_module.database,
+                    "DB_BACKEND",
+                    database_backend.DatabaseBackend.SQLITE,
+                ),
+            ):
+                with zap_worker_lock_module.acquire_zap_worker_lock(artifact_cfg) as acquired:
+                    assert acquired is True
+                    with zap_worker_lock_module.acquire_zap_worker_lock(artifact_cfg) as duplicate:
+                        assert duplicate is False
+
+        report = DownloadedZapReport(
+            payload=b'{"site":[]}',
+            sha256=hashlib.sha256(b'{"site":[]}').hexdigest(),
+        )
+        with mock.patch.object(
+            zap_artifact_module,
+            "write_owner_workspace_text_file",
+            return_value={"size": report.byte_count},
+        ) as write_report:
+            report_path = save_zap_job_report(artifact_job, report, cfg)
+        assert report_path == f"assessments/zap/{job_id}/darklab-zap-report.json"
+        assert zap_report_workspace_path(
+            job_id, "darklab-zap-report.json",
+        ) == report_path
+        assert write_report.call_args.args[0].scope == "personal"
+        assert write_report.call_args.args[1:3] == (report_path, '{"site":[]}')
+        draft_id = atlas_draft_id_for_zap_job(job_id)
+        assert re.fullmatch(r"impd_[0-9a-f]{32}", draft_id)
+        assert draft_id == atlas_draft_id_for_zap_job(job_id)
+        with mock.patch.object(
+            zap_worker_module,
+            "preview_atlas_import",
+            return_value={"draft_id": draft_id},
+        ) as preview_report:
+            assert zap_worker_module._preview_report(artifact_job, report.payload) == draft_id
+        assert preview_report.call_args.kwargs == {
+            "session_id": "session-a",
+            "team_id": "",
+            "actor_member_id": "",
+            "role": "",
+            "file_content": report.payload,
+            "filename": "darklab-zap-report.json",
+            "format_id": "zap_json",
+            "source_tool": "OWASP ZAP",
+            "import_name": "ZAP assessment report",
+            "draft_id": draft_id,
+        }
+        from services.atlas.import_limits import AtlasImportError
+        from services.atlas.import_workflow import preview_atlas_import
+
+        with pytest.raises(AtlasImportError) as exc_info:
+            preview_atlas_import(
+                session_id="session-a",
+                file_content=report.payload,
+                filename="report.json",
+                format_id="zap_json",
+                source_tool="OWASP ZAP",
+                import_name="ZAP assessment report",
+                draft_id="caller-selected",
+            )
+        assert exc_info.value.code == "invalid_draft_id"
+
+        with (
+            mock.patch.object(zap_worker_module, "download_zap_report", return_value=report),
+            mock.patch.object(zap_worker_module, "save_zap_job_report", return_value=report_path),
+            mock.patch.object(zap_worker_module, "_preview_report", return_value=draft_id),
+            mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+        ):
+            zap_worker_module.process_zap_job(
+                artifact_job,
+                settings,
+                "connector-secret",
+                cfg,
+            )
+        transition_job.assert_called_once_with(
+            job_id,
+            ("downloading",),
+            "ready",
+            report_bytes=report.byte_count,
+            report_sha256=report.sha256,
+            import_source_id=draft_id,
+        )
+
+        submitted_job = {**artifact_job, "status": "submitting"}
+        with (
+            mock.patch.object(
+                zap_worker_module,
+                "transition_zap_job",
+                return_value=submitted_job,
+            ) as transition_job,
+            mock.patch.object(
+                zap_worker_module,
+                "record_zap_job_submission",
+                return_value={**submitted_job, "status": "running", "remote_plan_id": "21"},
+            ) as record_submission,
+            mock.patch.object(zap_worker_module, "load_zap_job_plan", return_value=safe_plan),
+            mock.patch.object(
+                zap_worker_module, "submit_zap_automation_plan", return_value="21",
+            ) as submit_plan,
+            mock.patch.object(zap_worker_module, "discard_zap_job_plan") as discard_plan,
+        ):
+            zap_worker_module.process_zap_job(
+                {**artifact_job, "status": "queued"}, settings, "connector-secret", cfg,
+            )
+        transition_job.assert_called_once_with(job_id, ("queued",), "submitting")
+        record_submission.assert_called_once_with(job_id, "21")
+        submit_plan.assert_called_once_with(settings, "connector-secret", job_id, safe_plan)
+        discard_plan.assert_called_once_with(job_id, cfg)
+
+        with mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job:
+            zap_worker_module.process_zap_job(
+                {
+                    **artifact_job,
+                    "status": "submitting",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                settings,
+                "connector-secret",
+                cfg,
+            )
+        transition_job.assert_not_called()
+        with (
+            mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+            mock.patch.object(zap_worker_module, "discard_zap_job_plan"),
+        ):
+            zap_worker_module.process_zap_job(
+                {
+                    **artifact_job,
+                    "status": "submitting",
+                    "updated_at": "2020-01-01T00:00:00+00:00",
+                },
+                settings,
+                "connector-secret",
+                cfg,
+            )
+        assert transition_job.call_args.kwargs["error_code"] == "zap_submission_state_uncertain"
+        assert transition_job.call_args.args[:3] == (job_id, ("submitting",), "failed")
+
+        cancel_job = {**artifact_job, "status": "cancel_requested", "remote_plan_id": "21"}
+        with (
+            mock.patch.object(zap_worker_module, "cancel_zap_automation_plan") as cancel_plan,
+            mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+            mock.patch.object(zap_worker_module, "discard_zap_job_plan"),
+        ):
+            zap_worker_module.process_zap_job(
+                cancel_job, settings, "connector-secret", cfg,
+            )
+        cancel_plan.assert_called_once_with(settings, "connector-secret", "21")
+        transition_job.assert_called_once_with(job_id, ("cancel_requested",), "canceled")
+        with (
+            mock.patch.object(
+                zap_worker_module,
+                "cancel_zap_automation_plan",
+                side_effect=RuntimeError("temporary failure"),
+            ),
+            mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+        ):
+            zap_worker_module.process_zap_job(
+                cancel_job, settings, "connector-secret", cfg,
+            )
+        transition_job.assert_not_called()
+
+        queued_jobs = [
+            {**artifact_job, "id": "zpj_" + "b" * 32, "status": "queued"},
+            {**artifact_job, "id": "zpj_" + "c" * 32, "status": "queued"},
+        ]
+        orphan_plan_id = "zpj_" + "d" * 32
+        staged_plan_id = "zpj_" + "e" * 32
+        with (
+            mock.patch.object(zap_worker_module, "expire_zap_jobs"),
+            mock.patch.object(
+                zap_worker_module,
+                "stale_zap_job_plan_ids",
+                return_value=(orphan_plan_id, staged_plan_id),
+            ),
+            mock.patch.object(
+                zap_worker_module,
+                "staged_zap_job_ids",
+                return_value={staged_plan_id},
+            ),
+            mock.patch.object(
+                zap_worker_module,
+                "discard_zap_job_plan",
+            ) as discard_plan,
+            mock.patch.object(zap_worker_module, "zap_jobs_for_worker", return_value=queued_jobs),
+            mock.patch.object(zap_worker_module, "remote_zap_job_count", return_value=1),
+            mock.patch.object(zap_worker_module, "process_zap_job") as process_job,
+        ):
+            assert zap_worker_module.run_once(
+                cfg=cfg,
+                environ={"DARKLAB_ZAP_API_KEY": "connector-secret"},
+            ) == 1
+        process_job.assert_called_once_with(
+            queued_jobs[0], settings, "connector-secret", cfg,
+        )
+        discard_plan.assert_called_once_with(orphan_plan_id, cfg)
+
     def test_validation_error_reports_source_and_redacts_secret_values(self):
         cases = [
             (
@@ -7537,7 +7809,9 @@ class TestPostgresMigrations:
 
             from services.connectors.zap_job_lifecycle import (
                 expire_zap_jobs,
+                mark_zap_job_imported_for_atlas_draft,
                 record_zap_job_progress,
+                record_zap_job_submission,
                 request_zap_job_cancel,
                 transition_zap_job,
             )
@@ -7583,13 +7857,8 @@ class TestPostgresMigrations:
             submitting = transition_zap_job(
                 zap_job["id"], ("queued",), "submitting", now=job_now, conn=conn,
             )
-            running = transition_zap_job(
-                zap_job["id"],
-                ("submitting",),
-                "running",
-                remote_plan_id="17",
-                now=job_now,
-                conn=conn,
+            running = record_zap_job_submission(
+                zap_job["id"], "17", now=job_now, conn=conn,
             )
             assert submitting["status"] == "submitting"
             assert running["remote_plan_id"] == "17"
@@ -7630,6 +7899,97 @@ class TestPostgresMigrations:
                     zap_job["id"], ("running",), "downloading", now=job_now, conn=conn,
                 )
             assert exc_info.value.code == "zap_job_transition_conflict"
+
+            cancel_race_job = create_zap_job(
+                "session-a",
+                "prj_assessment",
+                "asm_two",
+                "chk_two",
+                "php_zap",
+                1,
+                job_summary,
+                now=job_now,
+                conn=conn,
+            )
+            transition_zap_job(
+                cancel_race_job["id"], ("queued",), "submitting", now=job_now, conn=conn,
+            )
+            request_zap_job_cancel(
+                "session-a", cancel_race_job["id"], now=job_now, conn=conn,
+            )
+            canceled_submission = record_zap_job_submission(
+                cancel_race_job["id"], "18", now=job_now, conn=conn,
+            )
+            assert canceled_submission["status"] == "cancel_requested"
+            assert canceled_submission["remote_plan_id"] == "18"
+            transition_zap_job(
+                cancel_race_job["id"],
+                ("cancel_requested",),
+                "canceled",
+                now=job_now,
+                conn=conn,
+            )
+
+            ready_job = create_zap_job(
+                "session-a",
+                "prj_assessment",
+                "asm_two",
+                "chk_two",
+                "php_zap",
+                1,
+                job_summary,
+                now=job_now,
+                conn=conn,
+            )
+            transition_zap_job(
+                ready_job["id"], ("queued",), "submitting", now=job_now, conn=conn,
+            )
+            record_zap_job_submission(
+                ready_job["id"], "19", now=job_now, conn=conn,
+            )
+            transition_zap_job(
+                ready_job["id"], ("running",), "downloading", now=job_now, conn=conn,
+            )
+            with pytest.raises(ZapJobError) as exc_info:
+                transition_zap_job(
+                    ready_job["id"],
+                    ("downloading",),
+                    "ready",
+                    report_bytes=11,
+                    report_sha256="a" * 64,
+                    now=job_now,
+                    conn=conn,
+                )
+            assert exc_info.value.code == "zap_job_import_invalid"
+            ready = transition_zap_job(
+                ready_job["id"],
+                ("downloading",),
+                "ready",
+                report_bytes=11,
+                report_sha256="a" * 64,
+                import_source_id="impd_" + "b" * 32,
+                now=job_now,
+                conn=conn,
+            )
+            assert ready["import_source_id"] == "impd_" + "b" * 32
+            assert mark_zap_job_imported_for_atlas_draft(
+                "other-session",
+                ready["import_source_id"],
+                "impb_" + "c" * 32,
+                now=job_now,
+                conn=conn,
+            ) is False
+            assert mark_zap_job_imported_for_atlas_draft(
+                "session-a",
+                ready["import_source_id"],
+                "impb_" + "c" * 32,
+                now=job_now,
+                conn=conn,
+            ) is True
+            imported = zap_job_for_owner("session-a", ready_job["id"], conn=conn)
+            assert imported is not None
+            assert imported["status"] == "imported"
+            assert imported["import_source_id"] == "impb_" + "c" * 32
 
             expiring_job = create_zap_job(
                 "session-a",
