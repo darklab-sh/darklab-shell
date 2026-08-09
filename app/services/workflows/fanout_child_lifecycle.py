@@ -13,6 +13,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.workflows.fanout_child_failures import fanout_policy_for_row, resolve_failed_fanout_child
 from services.workflows.fanout_checkpoint import FanoutCheckpoint, checkpoint_from_payload
+from services.workflows.fanout_parent_completion import finalize_fanout_parent_on_conn
 
 
 _ACTIVE_EXECUTION_STATUSES = frozenset({"queued", "running"})
@@ -46,13 +47,11 @@ def _begin_locked(conn: Any) -> str:
 
 
 def _context_for_child(
-    conn: Any,
-    where_sql: str,
-    params: tuple[object, ...],
-    lock_sql: str,
+    conn: Any, where_sql: str, params: tuple[object, ...], lock_sql: str,
 ) -> Any:
     query = (
-        "SELECT c.*, s.status AS parent_status, s.fanout_checkpoint, "  # nosec B608
+        "SELECT c.*, s.status AS parent_status, s.started AS parent_started, "  # nosec B608
+        "s.fanout_checkpoint, "
         "e.status AS execution_status, e.definition_snapshot "
         "FROM workflow_execution_children c "
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
@@ -219,6 +218,7 @@ def finalize_fanout_child_run(
             failure_limit_reached = resolution.failure_limit_reached
             skipped_ordinals = resolution.skipped_ordinals
         _save_checkpoint(conn, row, next_checkpoint)
+        parent_transition = finalize_fanout_parent_on_conn(conn, row, next_checkpoint, finished=finished)
         updated = conn.execute(
             "SELECT * FROM workflow_execution_children WHERE id = ?",
             (str(row["id"]),),
@@ -231,6 +231,7 @@ def finalize_fanout_child_run(
     result["failure_limit_reached"] = failure_limit_reached
     result["skipped_ordinals"] = list(skipped_ordinals)
     result["checkpoint_complete"] = not next_checkpoint.pending and not next_checkpoint.running
+    result["parent_transition"] = parent_transition or {}
     return result
 
 

@@ -25,6 +25,7 @@ from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
 from services.workflows.fanout_checkpoint import checkpoint_from_payload
 from services.workflows.fanout_child_cancellation import cancel_fanout_children_on_conn
 from services.workflows.fanout_summary import summarize_fanout_results
+from services.workflows.transitions import transition_for_step
 
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running", "canceling")
@@ -642,38 +643,6 @@ def bind_step_run(execution_id: str, step_id: str, run_id: str) -> bool:
     return result.rowcount == 1
 
 
-def _transition_for_step(
-    definition: Mapping[str, object],
-    step_id: str,
-    *,
-    exit_code: int,
-    capture_failed: bool,
-) -> tuple[str, str]:
-    raw_steps = definition.get("steps")
-    steps = [step for step in raw_steps if isinstance(step, Mapping)] if isinstance(raw_steps, list) else []
-    index = next((position for position, step in enumerate(steps) if step.get("id") == step_id), -1)
-    if index < 0:
-        return "stop", "definition_error"
-    step = steps[index]
-    raw_next = step.get("next")
-    next_value: Mapping[str, object] = raw_next if isinstance(raw_next, Mapping) else {}
-    raw_codes = next_value.get("codes")
-    codes: Mapping[str, object] = raw_codes if isinstance(raw_codes, Mapping) else {}
-    code_destination = None if capture_failed else codes.get(str(exit_code))
-    if code_destination:
-        return str(code_destination), f"exit_code:{exit_code}"
-    success = exit_code == 0 and not capture_failed
-    outcome = "success" if success else "failure"
-    destination = next_value.get(outcome)
-    if destination:
-        return str(destination), outcome
-    if success:
-        if index + 1 < len(steps):
-            return str(steps[index + 1].get("id") or "stop"), "implicit_success"
-        return "complete", "implicit_success"
-    return "stop", "capture_failure" if capture_failed else "implicit_failure"
-
-
 def finalize_run_step(
     run_id: str,
     exit_code: int,
@@ -730,7 +699,7 @@ def finalize_run_step(
             capture_error = capture_error or "workflow captures exceed the execution limit"
             pending_captures = {}
         variables.update(pending_captures)
-        destination, reason = _transition_for_step(
+        destination, reason = transition_for_step(
             definition,
             str(row["step_id"]),
             exit_code=int(exit_code),

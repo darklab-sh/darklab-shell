@@ -713,10 +713,28 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     assert failed["failure_limit_reached"] is True
     assert failed["skipped_ordinals"] == [2]
     assert failed["checkpoint_complete"] is True
+    failed_parent = cast(dict[str, object], failed["parent_transition"])
+    assert isinstance(failed_parent["duration_ms"], int)
+    assert failed_parent["duration_ms"] >= 0
+    assert failed_parent == {
+        "execution_id": execution_id,
+        "step_id": step_id,
+        "step_status": "failed",
+        "exit_code": 1,
+        "duration_ms": failed_parent["duration_ms"],
+        "capture_failed": False,
+        "capture_failure_reason": "",
+        "destination": "stop",
+        "transition_reason": "implicit_failure",
+        "terminal": True,
+        "failure_code": "fanout_failure_limit",
+    }
     assert reset_launching_fanout_child_for_recovery(str(unbound_third["id"])) is False
 
     stored = get_execution(session_id, execution_id)
     assert stored is not None
+    assert stored["status"] == "failed"
+    assert stored["steps"][1]["status"] == "failed"
     assert stored["steps"][1]["fanout_checkpoint"] == {
         "pending": [], "running": [], "completed": [0], "failed": [1],
         "skipped": [2], "cancelled": False,
@@ -778,6 +796,66 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     ]
     assert str(cancel_children[1]["id"]) == str(unbound_cancel_child["id"])
     assert finalize_fanout_child_run("run-fanout-cancel-active", 0) is None
+
+    partial_definition = json.loads(json.dumps(definition))
+    partial_definition["steps"][1]["for_each"]["max_failures"] = 2
+    partial_definition["steps"].append({"id": "after", "cmd": "echo done"})
+    partial = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="checkpoint_partial",
+        workflow_source="config",
+        definition=partial_definition,
+        inputs={},
+    )
+    partial_execution_id = str(partial["id"])
+    partial_step_id = str(partial["steps"][1]["step_id"])
+    partial_children = initialize_fanout_children(partial_execution_id, partial_step_id, 2)
+    assert claim_step_for_launch(partial_execution_id, partial_step_id) is not None
+    assert claim_fanout_child(partial_execution_id, partial_step_id, 0) is not None
+    assert claim_fanout_child(partial_execution_id, partial_step_id, 1) is not None
+    assert bind_fanout_child_run(str(partial_children[0]["id"]), "run-fanout-partial-ok")
+    assert bind_fanout_child_run(str(partial_children[1]["id"]), "run-fanout-partial-failed")
+    assert finalize_fanout_child_run("run-fanout-partial-ok", 0) is not None
+    partial_final = finalize_fanout_child_run(
+        "run-fanout-partial-failed",
+        2,
+        error_code="scope_rejected",
+    )
+    assert partial_final is not None
+    assert partial_final["failure_limit_reached"] is False
+    assert partial_final["checkpoint_complete"] is True
+    partial_parent = cast(dict[str, object], partial_final["parent_transition"])
+    assert isinstance(partial_parent["duration_ms"], int)
+    assert partial_parent["duration_ms"] >= 0
+    assert partial_parent == {
+        "execution_id": partial_execution_id,
+        "step_id": partial_step_id,
+        "step_status": "succeeded",
+        "exit_code": 0,
+        "duration_ms": partial_parent["duration_ms"],
+        "capture_failed": False,
+        "capture_failure_reason": "",
+        "destination": "after",
+        "transition_reason": "implicit_success",
+        "terminal": False,
+        "failure_code": "",
+    }
+    partial_stored = get_execution(session_id, partial_execution_id)
+    assert partial_stored is not None
+    assert partial_stored["status"] == "running"
+    assert partial_stored["current_step_id"] == "after"
+    assert partial_stored["steps"][1]["status"] == "succeeded"
+    assert public_execution(partial_stored)["steps"][1]["fanout_summary"] == {
+        "total": 2, "pending": 0, "running": 0, "succeeded": 1,
+        "failed": 1, "skipped": 0, "cancelled": False,
+        "failure_samples": ["child_failed"],
+    }
+    assert claim_step_for_launch(partial_execution_id, "after") is not None
+    assert bind_step_run(partial_execution_id, "after", "run-fanout-partial-after")
+    assert finalize_run_step("run-fanout-partial-after", 0) is not None
+    completed_partial = get_execution(session_id, partial_execution_id)
+    assert completed_partial is not None and completed_partial["status"] == "completed"
 
 
 def test_collection_fanout_summary_exposes_counts_and_bounded_error_codes_only():

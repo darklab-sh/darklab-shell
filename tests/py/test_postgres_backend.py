@@ -3865,6 +3865,14 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "pending": [], "running": [], "completed": [0], "failed": [1],
         "skipped": [2], "cancelled": False,
     }
+    failed_fanout_parent = get_execution(
+        str(fanout_execution["session_id"]),
+        str(fanout_execution["id"]),
+    )
+    assert failed_fanout_parent is not None
+    assert failed_fanout_parent["status"] == "failed"
+    assert failed_fanout_parent["steps"][1]["status"] == "failed"
+    assert failed_fanout_parent["steps"][1]["error_code"] == "fanout_failure_limit"
 
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier

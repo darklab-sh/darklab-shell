@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **A finished collection step now advances its parent workflow exactly once.**
+  - **What:** The last terminal child closes the parent step in the same transaction as its own result. A fail-fast or configured failure-limit outcome follows the saved failure transition with a bounded error code, while continue-mode partial results preserve their failed-child summary and follow the success transition. Successful retries count once through their final ordinal state, and no child value or free-form failure text is copied into the parent.
+  - **Tests:** Extended SQLite and real Postgres coverage pins atomic parent completion, terminal workflow failure, continue-mode partial success, next-step progression, existing scalar transition behavior, bounded failure metadata, and the module-size contract. Pyright remains clean for the complete repository.
 - **Canceling a collection workflow now stops every unfinished child without losing completed work.**
   - **What:** Workflow cancellation locks the execution, parent steps, and active child attempts together. Pending and unbound children become canceled without launching, bound child run ids flow through the existing process-control path, and completed or failed child evidence stays unchanged. The private checkpoint records the unfinished ordinals as skipped and the public parent summary reports the preserved successes, failures, skipped count, and canceled state without exposing collection values.
   - **Tests:** Extended SQLite and real Postgres coverage pins bound-run signaling, pending and unbound cancellation, preserved child success, canceled attempt rows, terminal public counts, and rejection of late child finalization. Pyright remains clean for the complete repository.
