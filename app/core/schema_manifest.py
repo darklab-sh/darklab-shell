@@ -70,6 +70,7 @@ SHARED_APP_TABLES: tuple[str, ...] = (
     *UNIFIED_BASELINE_APP_TABLES,
     *SHARED_TABLES,
     "atlas_import_evidence",
+    "workflow_execution_children",
     "workflow_execution_steps",
     "workflow_executions",
 )

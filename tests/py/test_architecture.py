@@ -696,6 +696,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/fanout_policy.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_checkpoint.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_summary.py", 120, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workflows/fanout_children.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nuclei_profiles.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/nuclei/template_cache.py", 170, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/historical_urls.py", 140, "split-package-ratchet"),

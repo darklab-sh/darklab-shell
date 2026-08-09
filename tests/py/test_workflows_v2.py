@@ -22,6 +22,7 @@ from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNois
 from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.fanout import expand_collection_step, next_fanout_batch
+from services.workflows.fanout_children import initialize_fanout_children, list_fanout_children
 from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy, should_retry
 from services.workflows.fanout_checkpoint import checkpoint_from_payload, create_fanout_checkpoint
 from services.workflows.fanout_summary import summarize_fanout_results
@@ -570,28 +571,76 @@ def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_chil
 def test_collection_fanout_checkpoint_persists_on_private_step_state():
     make_test_app()
     session_id = "workflow-checkpoint-" + uuid.uuid4().hex
+    definition = compile_execution_definition({
+        "version": 3,
+        "id": "checkpoint",
+        "title": "Checkpoint",
+        "inputs": [],
+        "steps": [
+            {
+                "id": "collect",
+                "cmd": "echo hosts",
+                "captures": [{
+                    "name": "hosts",
+                    "kind": "collection",
+                    "source": "json_pointer",
+                    "pointer": "/hosts",
+                }],
+            },
+            {
+                "id": "probe",
+                "cmd": "httpx -u {{hosts}} -silent",
+                "for_each": {"collection": "hosts", "max_parallel": 2},
+            },
+        ],
+    })
     execution = create_execution(
         session_id=session_id,
         team_id="",
         workflow_id="checkpoint",
         workflow_source="config",
-        definition=compile_execution_definition(_v2_definition()),
-        inputs={"target": "example.com", "ports": "443"},
+        definition=definition,
+        inputs={},
     )
     execution_id = execution["id"]
-    step_id = execution["steps"][0]["step_id"]
-    assert set_fanout_checkpoint(execution_id, step_id, {"pending": [0, 1], "completed": [], "failed": [], "cancelled": False})
+    step_id = execution["steps"][1]["step_id"]
+    children = initialize_fanout_children(execution_id, step_id, 2)
+    assert [(child["ordinal"], child["attempt"], child["status"]) for child in children] == [
+        (0, 1, "pending"),
+        (1, 1, "pending"),
+    ]
+    assert [child["id"] for child in initialize_fanout_children(execution_id, step_id, 2)] == [
+        child["id"] for child in children
+    ]
+    assert list_fanout_children(execution_id, step_id) == children
     stored = get_execution(session_id, execution_id)
     assert stored is not None
-    assert stored["steps"][0]["fanout_checkpoint"] == {
+    assert stored["steps"][1]["fanout_checkpoint"] == {
         "pending": [0, 1], "running": [], "completed": [], "failed": [], "cancelled": False,
     }
     public = public_execution(stored)
-    assert "fanout_checkpoint" not in public["steps"][0]
-    assert public["steps"][0]["fanout_summary"] == {
+    assert "fanout_checkpoint" not in public["steps"][1]
+    assert public["steps"][1]["fanout_summary"] == {
         "total": 2, "pending": 2, "running": 0, "succeeded": 0,
         "failed": 0, "skipped": 0, "cancelled": False, "failure_samples": [],
     }
+    assert str(children[0]["id"]) not in json.dumps(public)
+    with get_db_connect()() as conn:
+        child_columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(workflow_execution_children)").fetchall()
+        }
+        child_schema = str(conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'workflow_execution_children'"
+        ).fetchone()["sql"])
+    assert {"value", "command", "error_detail"}.isdisjoint(child_columns)
+    assert "CHECK (length(error_code) <= 64)" in child_schema
+    assert "FOREIGN KEY (execution_id, step_id)" in child_schema
+    with pytest.raises(ValueError, match="for_each parent"):
+        initialize_fanout_children(execution_id, "collect", 2)
+    with pytest.raises(ValueError, match="between 0 and 32"):
+        initialize_fanout_children(execution_id, step_id, 33)
     with pytest.raises(ValueError, match="overlap"):
         set_fanout_checkpoint(execution_id, step_id, {"pending": [1], "completed": [1], "failed": [], "cancelled": False})
 

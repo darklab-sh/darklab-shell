@@ -497,6 +497,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0067",
         "0068",
         "0069",
+        "0070",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -638,6 +639,11 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'manual_updated_at'
             ))
             OR (table_name = 'finding_evidence_links' AND column_name = 'created_at')
+            OR (table_name = 'workflow_execution_children' AND column_name IN (
+                'created',
+                'started',
+                'finished'
+            ))
         )
         """,
         (postgres_schema.schema,),
@@ -676,6 +682,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "schemathesis_operation_evidence",
         "schemathesis_run_evidence",
         "finding_evidence_links",
+        "workflow_execution_children",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
     assert {
@@ -765,6 +772,9 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("findings", "manual_updated_by_member_id", "text"),
         ("findings", "manual_updated_at", "text"),
         ("finding_evidence_links", "created_at", "timestamp with time zone"),
+        ("workflow_execution_children", "created", "timestamp with time zone"),
+        ("workflow_execution_children", "started", "timestamp with time zone"),
+        ("workflow_execution_children", "finished", "timestamp with time zone"),
     }
     runs_index_rows = conn.execute(
         """
@@ -3506,6 +3516,11 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
 def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, postgres_schema):
     from app import create_app
     from blueprints import workflows as workflow_routes
+    from services.workflows.compiler import compile_execution_definition
+    from services.workflows.fanout_children import (
+        initialize_fanout_children,
+        list_fanout_children,
+    )
     from services.workflows.storage import (
         active_execution_page_for_recovery,
         bind_step_run,
@@ -3526,7 +3541,9 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "WHERE table_schema = current_schema() AND "
         "((table_name = 'workflow_executions' AND column_name IN "
         "('definition_snapshot', 'input_values', 'variables')) OR "
-        "(table_name = 'workflow_execution_steps' AND column_name = 'capture_names'))"
+        "(table_name = 'workflow_execution_steps' AND column_name = 'capture_names') OR "
+        "(table_name = 'workflow_execution_children' AND column_name IN "
+        "('created', 'started', 'finished')))"
     ).fetchall()
     workflow_column_types = {
         (row["table_name"], row["column_name"]): row["data_type"]
@@ -3537,12 +3554,16 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         ("workflow_executions", "input_values"): "jsonb",
         ("workflow_executions", "variables"): "jsonb",
         ("workflow_execution_steps", "capture_names"): "jsonb",
+        ("workflow_execution_children", "created"): "timestamp with time zone",
+        ("workflow_execution_children", "started"): "timestamp with time zone",
+        ("workflow_execution_children", "finished"): "timestamp with time zone",
     }
     workflow_index_names = {
         row["indexname"]
         for row in conn.execute(
             "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() "
-            "AND tablename IN ('workflow_executions', 'workflow_execution_steps')"
+            "AND tablename IN "
+            "('workflow_executions', 'workflow_execution_steps', 'workflow_execution_children')"
         ).fetchall()
     }
     assert {
@@ -3552,6 +3573,8 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "idx_workflow_execution_steps_execution_step",
         "idx_workflow_execution_steps_execution_order",
         "idx_workflow_execution_steps_run",
+        "idx_workflow_execution_children_execution_status",
+        "idx_workflow_execution_children_run",
     } <= workflow_index_names
 
     @contextmanager
@@ -3739,6 +3762,43 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     assert team_execution["id"] not in {
         item["id"] for item in list_executions(session_id)
     }
+
+    fanout_definition = compile_execution_definition({
+        "version": 3,
+        "id": "postgres_fanout",
+        "title": "Postgres fan-out",
+        "inputs": [],
+        "steps": [{
+            "id": "collect",
+            "cmd": "echo hosts",
+            "captures": [{
+                "name": "hosts",
+                "kind": "collection",
+                "source": "json_pointer",
+                "pointer": "/hosts",
+            }],
+        }, {
+            "id": "probe",
+            "cmd": "httpx -u {{hosts}} -silent",
+            "for_each": {"collection": "hosts", "max_parallel": 2},
+        }],
+    })
+    fanout_execution = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="postgres_fanout",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    fanout_step_id = str(fanout_execution["steps"][1]["step_id"])
+    fanout_children = initialize_fanout_children(fanout_execution["id"], fanout_step_id, 2)
+    assert [(child["ordinal"], child["status"]) for child in fanout_children] == [
+        (0, "pending"),
+        (1, "pending"),
+    ]
+    assert list_fanout_children(fanout_execution["id"], fanout_step_id) == fanout_children
+    assert all(child["run_id"] == "" and child["error_code"] == "" for child in fanout_children)
 
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier

@@ -6594,6 +6594,7 @@ class TestPostgresMigrations:
         "starred_commands",
         "session_variables",
         "user_workflows",
+        "workflow_execution_children",
         "workflow_execution_steps",
         "workflow_executions",
         "recent_values",
@@ -6774,6 +6775,7 @@ class TestPostgresMigrations:
             "0067",
             "0068",
             "0069",
+            "0070",
         ]
         for table_name in (
             "runs",
@@ -7780,7 +7782,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0069",
+            "0071",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7832,7 +7834,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0069"
+        assert rows[-1]["version"] == "0070"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8292,6 +8294,7 @@ class TestPostgresMigrations:
             "0059", "0060", "0061", "0062", "0063", "0064", "0065", "0066", "0067",
             "0068",
             "0069",
+            "0070",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8325,7 +8328,8 @@ class TestPostgresMigrations:
         assert "0067" in conn.applied_versions
         assert "0068" in conn.applied_versions
         assert "0069" in conn.applied_versions
-        assert conn.commit_count == 31
+        assert "0070" in conn.applied_versions
+        assert conn.commit_count == 32
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8478,7 +8482,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0069",
+            "0071",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8503,9 +8507,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0069"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0071"]
         assert table_exists is not None
-        assert "0069" in versions
+        assert "0071" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"

@@ -80,6 +80,7 @@ from . import (
     v0067_atlas_import_evidence,
     v0068_schemathesis_evidence,
     v0069_nmap_service_observations,
+    v0070_workflow_fanout_children,
 )
 
 _ = baseline
@@ -154,4 +155,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0067_atlas_import_evidence.MIGRATION,
     v0068_schemathesis_evidence.MIGRATION,
     v0069_nmap_service_observations.MIGRATION,
+    v0070_workflow_fanout_children.MIGRATION,
 )
