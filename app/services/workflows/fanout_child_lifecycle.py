@@ -11,6 +11,7 @@ from typing import Any
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
+from services.workflows.fanout_child_failures import fanout_policy_for_row, resolve_failed_fanout_child
 from services.workflows.fanout_checkpoint import FanoutCheckpoint, checkpoint_from_payload
 
 
@@ -52,17 +53,15 @@ def _context_for_child(
 ) -> Any:
     query = (
         "SELECT c.*, s.status AS parent_status, s.fanout_checkpoint, "  # nosec B608
-        "e.status AS execution_status FROM workflow_execution_children c "
+        "e.status AS execution_status, e.definition_snapshot "
+        "FROM workflow_execution_children c "
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
         "AND s.step_id = c.step_id "
         "JOIN workflow_executions e ON e.id = c.execution_id WHERE "
         + where_sql
         + lock_sql
     )
-    return conn.execute(
-        query,
-        params,
-    ).fetchone()
+    return conn.execute(query, params).fetchone()
 
 
 def _active_context(row: Any) -> bool:
@@ -114,6 +113,9 @@ def claim_fanout_child(
             return None
         checkpoint = _checkpoint_from_row(row)
         if child_ordinal not in checkpoint.pending:
+            conn.rollback()
+            return None
+        if len(checkpoint.running) >= fanout_policy_for_row(row).max_parallel:
             conn.rollback()
             return None
         changed = conn.execute(
@@ -190,26 +192,46 @@ def finalize_fanout_child_run(
             conn.rollback()
             return None
         status = "succeeded" if child_exit_code == 0 else "failed"
+        finished = _now()
         changed = conn.execute(
             "UPDATE workflow_execution_children SET status = ?, exit_code = ?, error_code = ?, finished = ? "
             "WHERE id = ? AND status = 'running'",
-            (status, child_exit_code, normalized_error, _now(), str(row["id"])),
+            (status, child_exit_code, normalized_error, finished, str(row["id"])),
         )
         if changed.rowcount != 1:
             conn.rollback()
             return None
-        next_checkpoint = (
-            checkpoint.mark_completed([ordinal])
-            if status == "succeeded"
-            else checkpoint.mark_failed([ordinal])
-        )
+        retry_child_id = ""
+        failure_limit_reached = False
+        skipped_ordinals: tuple[int, ...] = ()
+        if status == "succeeded":
+            next_checkpoint = checkpoint.mark_completed([ordinal])
+        else:
+            resolution = resolve_failed_fanout_child(
+                conn,
+                row,
+                checkpoint,
+                normalized_error,
+                now=finished,
+            )
+            next_checkpoint = resolution.checkpoint
+            retry_child_id = resolution.retry_child_id
+            failure_limit_reached = resolution.failure_limit_reached
+            skipped_ordinals = resolution.skipped_ordinals
         _save_checkpoint(conn, row, next_checkpoint)
         updated = conn.execute(
             "SELECT * FROM workflow_execution_children WHERE id = ?",
             (str(row["id"]),),
         ).fetchone()
         conn.commit()
-    return _child_from_row(updated) if updated else None
+    if not updated:
+        return None
+    result = _child_from_row(updated)
+    result["retry_child_id"] = retry_child_id
+    result["failure_limit_reached"] = failure_limit_reached
+    result["skipped_ordinals"] = list(skipped_ordinals)
+    result["checkpoint_complete"] = not next_checkpoint.pending and not next_checkpoint.running
+    return result
 
 
 def reset_launching_fanout_child_for_recovery(child_id: str) -> bool:

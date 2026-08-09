@@ -560,7 +560,7 @@ def test_collection_fanout_policy_normalizes_retry_parallel_and_failure_modes():
 def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_children():
     checkpoint = create_fanout_checkpoint(4)
     assert checkpoint.next_batch(2) == (0, 1)
-    checkpoint = checkpoint.mark_running([0, 1]).reset_running([1])
+    checkpoint = checkpoint.mark_running([1, 0]).reset_running([1])
     assert checkpoint.running == (0,)
     assert checkpoint.pending == (1, 2, 3)
     checkpoint = checkpoint.mark_completed([0, 1])
@@ -568,6 +568,9 @@ def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_chil
     checkpoint = checkpoint.mark_failed([2])
     assert checkpoint.next_batch(2) == (3,)
     assert checkpoint.failed == (2,)
+    checkpoint = checkpoint.mark_skipped([3])
+    assert checkpoint.next_batch(2) == ()
+    assert checkpoint.skipped == (3,)
     assert checkpoint.cancel().next_batch(2) == ()
     with pytest.raises(ValueError, match="between 0 and 32"):
         create_fanout_checkpoint(33)
@@ -599,7 +602,13 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
             {
                 "id": "probe",
                 "cmd": "httpx -u {{hosts}} -silent",
-                "for_each": {"collection": "hosts", "max_parallel": 2},
+                "for_each": {
+                    "collection": "hosts",
+                    "failure_mode": "continue",
+                    "retries": 1,
+                    "max_parallel": 2,
+                    "max_failures": 1,
+                },
             },
         ],
     })
@@ -613,24 +622,26 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     )
     execution_id = execution["id"]
     step_id = execution["steps"][1]["step_id"]
-    children = initialize_fanout_children(execution_id, step_id, 2)
+    children = initialize_fanout_children(execution_id, step_id, 3)
     assert [(child["ordinal"], child["attempt"], child["status"]) for child in children] == [
         (0, 1, "pending"),
         (1, 1, "pending"),
+        (2, 1, "pending"),
     ]
-    assert [child["id"] for child in initialize_fanout_children(execution_id, step_id, 2)] == [
+    assert [child["id"] for child in initialize_fanout_children(execution_id, step_id, 3)] == [
         child["id"] for child in children
     ]
     assert list_fanout_children(execution_id, step_id) == children
     stored = get_execution(session_id, execution_id)
     assert stored is not None
     assert stored["steps"][1]["fanout_checkpoint"] == {
-        "pending": [0, 1], "running": [], "completed": [], "failed": [], "cancelled": False,
+        "pending": [0, 1, 2], "running": [], "completed": [], "failed": [],
+        "skipped": [], "cancelled": False,
     }
     public = public_execution(stored)
     assert "fanout_checkpoint" not in public["steps"][1]
     assert public["steps"][1]["fanout_summary"] == {
-        "total": 2, "pending": 2, "running": 0, "succeeded": 0,
+        "total": 3, "pending": 3, "running": 0, "succeeded": 0,
         "failed": 0, "skipped": 0, "cancelled": False, "failure_samples": [],
     }
     assert str(children[0]["id"]) not in json.dumps(public)
@@ -662,7 +673,8 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     stored = get_execution(session_id, execution_id)
     assert stored is not None
     assert stored["steps"][1]["fanout_checkpoint"] == {
-        "pending": [1], "running": [0], "completed": [], "failed": [], "cancelled": False,
+        "pending": [1, 2], "running": [0], "completed": [], "failed": [],
+        "skipped": [], "cancelled": False,
     }
 
     child_id = str(claimed["id"])
@@ -671,14 +683,26 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     assert claim_fanout_child(execution_id, step_id, 0) is not None
     assert bind_fanout_child_run(child_id, "run-fanout-0") is True
     assert bind_fanout_child_run(child_id, "run-fanout-duplicate") is False
-    succeeded = finalize_fanout_child_run("run-fanout-0", 0)
+    second = claim_fanout_child(execution_id, step_id, 1)
+    assert second is not None
+    assert claim_fanout_child(execution_id, step_id, 2) is None
+    retried = finalize_fanout_child_run("run-fanout-0", 2, error_code="worker_unavailable")
+    assert retried is not None
+    assert retried["status"] == "failed"
+    assert retried["retry_child_id"]
+    assert retried["failure_limit_reached"] is False
+    retry_child_id = str(retried["retry_child_id"])
+    retry_child = claim_fanout_child(execution_id, step_id, 0, attempt=2)
+    assert retry_child is not None and retry_child["id"] == retry_child_id
+    assert bind_fanout_child_run(retry_child_id, "run-fanout-0-retry") is True
+    succeeded = finalize_fanout_child_run("run-fanout-0-retry", 0)
     assert succeeded is not None
     assert succeeded["status"] == "succeeded"
     assert succeeded["error_code"] == ""
     assert finalize_fanout_child_run("run-fanout-0", 0) is None
 
-    second = claim_fanout_child(execution_id, step_id, 1)
-    assert second is not None
+    unbound_third = claim_fanout_child(execution_id, step_id, 2)
+    assert unbound_third is not None and unbound_third["status"] == "launching"
     assert bind_fanout_child_run(str(second["id"]), "run-fanout-1") is True
     with pytest.raises(ValueError, match="error code is invalid"):
         finalize_fanout_child_run("run-fanout-1", 2, error_code="private.example")
@@ -686,21 +710,28 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
     assert failed is not None
     assert failed["status"] == "failed"
     assert failed["error_code"] == "scope_rejected"
+    assert failed["failure_limit_reached"] is True
+    assert failed["skipped_ordinals"] == [2]
+    assert failed["checkpoint_complete"] is True
+    assert reset_launching_fanout_child_for_recovery(str(unbound_third["id"])) is False
 
     stored = get_execution(session_id, execution_id)
     assert stored is not None
     assert stored["steps"][1]["fanout_checkpoint"] == {
-        "pending": [], "running": [], "completed": [0], "failed": [1], "cancelled": False,
+        "pending": [], "running": [], "completed": [0], "failed": [1],
+        "skipped": [2], "cancelled": False,
     }
     final_children = list_fanout_children(execution_id, step_id)
-    assert [(child["id"], child["status"]) for child in final_children] == [
-        (children[0]["id"], "succeeded"),
-        (children[1]["id"], "failed"),
+    assert [(child["ordinal"], child["attempt"], child["status"]) for child in final_children] == [
+        (0, 1, "failed"),
+        (0, 2, "succeeded"),
+        (1, 1, "failed"),
+        (2, 1, "skipped"),
     ]
     final_public = public_execution(stored)
     assert final_public["steps"][1]["fanout_summary"] == {
-        "total": 2, "pending": 0, "running": 0, "succeeded": 1,
-        "failed": 1, "skipped": 0, "cancelled": False,
+        "total": 3, "pending": 0, "running": 0, "succeeded": 1,
+        "failed": 1, "skipped": 1, "cancelled": False,
         "failure_samples": ["child_failed"],
     }
     assert "scope_rejected" not in json.dumps(final_public)

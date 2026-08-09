@@ -164,6 +164,7 @@ def public_execution(execution: Mapping[str, Any] | None) -> dict[str, Any]:
                 *({"status": "running"} for _ in checkpoint.get("running", [])),
                 *({"status": "succeeded"} for _ in checkpoint.get("completed", [])),
                 *({"status": "failed", "error_code": "child_failed"} for _ in checkpoint.get("failed", [])),
+                *({"status": "skipped"} for _ in checkpoint.get("skipped", [])),
             ]
             public_step["fanout_summary"] = summarize_fanout_results(
                 rows,
