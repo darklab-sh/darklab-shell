@@ -131,10 +131,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Add structured parsers/adapters under focused modules rather than more broad regexes in `output_signals.py`. Preserve raw output, normalize stable findings/entities, carry tool/profile versions, and make parser failure visible without failing the underlying run.
 #### Phase 7 — Add service-aware enumeration and safe next actions
 
-- [ ] Build curated Nmap NSE workflows first:
-  - Separate `safe`, `default`, `version`, `discovery`, and reviewed `vuln` scripts from `auth`, `brute`, `dos`, `exploit`, `external`, `fuzzer`, and `intrusive` categories.
-  - Pin allowed script names/categories in app-owned profiles, validate `--script-args` and Files-backed argument files, and keep third-party scripts unavailable unless an operator deliberately installs and allowlists them.
-  - Parse useful structured service evidence such as SMB signing/dialect, anonymous access, SSH algorithms/keys, RPC/NFS exports, TLS state, and mail capabilities without classifying every informational row as a vulnerability.
+- [ ] Parse useful structured Nmap NSE service evidence such as SMB signing/dialect, anonymous access, SSH algorithms/keys, RPC/NFS exports, TLS state, and mail capabilities without classifying every informational row as a vulnerability.
 - [ ] Add small protocol-specific tools only where NSE and current commands leave a proven gap:
   - Evaluate `smbclient`/`enum4linux-ng`, Net-SNMP tools, and LDAP client tools as an optional service-enumeration pack with pinned versions, safe command policies, structured adapters, and multi-arch container validation.
   - Keep credential attacks, spraying, unrestricted share downloads, and invasive directory modification disabled. Any future intrusive extension must be a separate operator opt-in and is not part of this item.

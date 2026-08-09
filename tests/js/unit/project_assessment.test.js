@@ -610,8 +610,25 @@ describe('project assessment controller', () => {
               version: 'nginx 1.26',
               launch_mode: 'assessment_action_only',
               auto_launch: false,
+            }, {
+              key: 'smb_enumeration',
+              label: 'Enumerate SMB safely',
+              rationale: 'The service fingerprint explicitly identified SMB.',
+              command: 'command:nmap',
+              nmap_profile: {
+                key: 'smb',
+                label: 'SMB protocol and signing',
+                selector_kind: 'scripts',
+                selectors: ['smb-protocols', 'smb2-security-mode'],
+              },
+              service: 'smb',
+              port: 445,
+              proto: 'tcp',
+              version: '',
+              launch_mode: 'assessment_action_only',
+              auto_launch: false,
             }],
-            action_count: 1,
+            action_count: 2,
             evidence_count: 2,
             needs_review_count: 1,
             unsupported_count: 0,
@@ -643,6 +660,8 @@ describe('project assessment controller', () => {
       expect(recommendation?.textContent).toContain('Suggested next actions')
       expect(recommendation?.textContent).toContain('Review HTTPS surface')
       expect(recommendation?.textContent).toContain('443/tcp · https · nginx 1.26')
+      expect(recommendation?.textContent).toContain('445/tcp · smb')
+      expect(recommendation?.textContent).toContain('Reviewed profile: SMB protocol and signing')
       expect(recommendation?.textContent).toContain('1 saved port needs service review')
       expect(recommendation?.querySelector('button')).toBeNull()
     }

@@ -14,6 +14,7 @@ from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.intel.canonical import CanonicalizationError, parse_canonical_port
 from services.assessments.service_actions import service_actions, service_evidence_state
+from services.assessments.nmap_profiles import public_nmap_profile
 from services.projects.scope import shared_owner_where
 
 
@@ -284,8 +285,9 @@ def public_app_port_record(port: Mapping[str, Any]) -> dict[str, Any]:
             "Saved scanners reported conflicting services for this port; review the evidence "
             "before choosing an action."
         )
-    actions = [
-        {
+    actions = []
+    for action in service_actions(str(result.get("service") or "")):
+        public_action = {
             "key": action.key,
             "label": action.label,
             "rationale": action.rationale,
@@ -296,9 +298,10 @@ def public_app_port_record(port: Mapping[str, Any]) -> dict[str, Any]:
             "expected_evidence": sorted(action.expected_evidence),
             "unsupported_conditions": list(action.unsupported_conditions),
         }
-        for action in service_actions(str(result.get("service") or ""))
-        if not conflict
-    ]
+        if action.nmap_profile:
+            public_action["nmap_profile"] = public_nmap_profile(action.nmap_profile)
+        if not conflict:
+            actions.append(public_action)
     if actions:
         result["assessment_actions"] = actions
     return result

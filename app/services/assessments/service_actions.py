@@ -21,6 +21,7 @@ class ServiceAction:
     required_features: frozenset[str]
     expected_evidence: frozenset[str]
     unsupported_conditions: tuple[str, ...]
+    nmap_profile: str = ""
 
 
 from .service_action_catalog import ACTIONS, ALIASES  # noqa: E402

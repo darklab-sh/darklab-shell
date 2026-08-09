@@ -574,6 +574,13 @@ function createProjectAssessmentRenderer(context, actions) {
         makeElement('small', '', endpoint),
         makeElement('p', '', String(action?.rationale || '')),
       );
+      if (action?.nmap_profile?.label) {
+        item.appendChild(makeElement(
+          'small',
+          'project-assessment-service-recommendation-profile',
+          `Reviewed profile: ${action.nmap_profile.label}`,
+        ));
+      }
       section.appendChild(item);
     });
     if (reviewCount) {

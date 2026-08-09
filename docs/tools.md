@@ -106,6 +106,8 @@ Use `mtr --interactive <host>` for the continuously redrawn display when Interac
 
 `nmap` and `naabu` use connect scanning when raw readiness is inactive. An explicit `nmap -sT` always stays a connect scan, and spoofing or link-layer bypass flags remain blocked. Restricted-CIDR deployments keep Naabu in connect mode.
 
+Direct `nmap` commands still follow the normal command policy. Assessment service suggestions use a narrower set of app-owned NSE profiles with fixed category or script selectors. The suggestion names the profile, and those maintained profiles don't accept custom scripts, script arguments, or argument files.
+
 `masscan` has no connect fallback. If raw readiness is unavailable, use RustScan or `nmap -sT`.
 
 ### `wget`

@@ -74,7 +74,12 @@ from services.assessments.dns_takeover_correlation import (
     correlate_dnsx_target_observation,
 )
 from services.assessments.dns_takeover_event_review import build_dnsx_takeover_event_review
-from services.assessments.nmap_profiles import nmap_profile_args, nmap_profile_keys
+from services.assessments.nmap_profiles import (
+    EXCLUDED_CATEGORIES,
+    nmap_profile_args,
+    nmap_profile_keys,
+    public_nmap_profile,
+)
 from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_observations
 from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_PARSER_VERSION
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
@@ -341,6 +346,7 @@ def test_common_protocol_aliases_are_bounded_safe_recommendations():
     assert [(action.key, action.command, action.policy_level) for action in actions] == [
         ("smb_enumeration", "command:nmap", "standard"),
     ]
+    assert actions[0].nmap_profile == "smb"
     assert service_actions("version-cve", target_type="url")[0].command == (
         "evidence:version_cve_correlation"
     )
@@ -364,6 +370,25 @@ def test_service_actions_can_be_serialized_for_read_surfaces_without_launching()
         "ambiguous_service", "conflicting_service_evidence", "port_only_inference",
     ]
     assert "_run_ids" not in record
+
+
+def test_nmap_service_actions_expose_the_reviewed_profile_contract():
+    record = public_app_port_record({
+        "port": 445,
+        "service": "microsoft-ds",
+        "_run_ids": {"run-1"},
+    })
+
+    profile = record["assessment_actions"][0]["nmap_profile"]
+    assert profile["key"] == "smb"
+    assert profile["label"] == "SMB protocol and signing"
+    assert profile["selector_kind"] == "scripts"
+    assert profile["selectors"] == [
+        "smb-protocols", "smb-security-mode", "smb2-security-mode",
+        "smb2-capabilities", "smb-os-discovery",
+    ]
+    assert profile["script_arguments"] == []
+    assert profile["script_argument_file"] is False
 
 
 def test_conflicting_service_evidence_abstains_from_action_suggestions():
@@ -584,7 +609,27 @@ def test_nuclei_recommendations_explain_signals_without_recommending_intrusive_r
 def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
     assert nmap_profile_args("tls") == ("--script", "ssl-cert,ssl-enum-ciphers")
     assert nmap_profile_args("--script=exploit") == ()
-    assert nmap_profile_keys() == ("safe", "version", "discovery", "tls", "ssh", "smtp")
+    assert nmap_profile_args("ssh", script_args={"ssh_hostkey": "all"}) == ()
+    assert nmap_profile_args("ssh", script_args_file="nmap-script-args.txt") == ()
+    assert nmap_profile_keys() == (
+        "safe", "default", "version", "discovery", "vuln", "tls", "ssh", "smtp",
+        "smb", "snmp", "ldap", "nfs", "rpc", "ftp", "dns", "mysql", "redis",
+        "imap", "pop3",
+    )
+    smb = public_nmap_profile("smb")
+    assert smb["selector_kind"] == "scripts"
+    assert smb["selectors"] == [
+        "smb-protocols", "smb-security-mode", "smb2-security-mode",
+        "smb2-capabilities", "smb-os-discovery",
+    ]
+    assert smb["evidence_kinds"] == ["smb_dialects", "smb_signing", "smb_identity"]
+    assert smb["excluded_category_selectors"] == list(EXCLUDED_CATEGORIES)
+    assert smb["script_arguments"] == []
+    assert smb["script_argument_file"] is False
+    assert public_nmap_profile("vuln")["selectors"] == [
+        "ssl-heartbleed", "ssl-poodle", "smb-vuln-ms17-010",
+    ]
+    assert public_nmap_profile("vuln")["requires_confirmation"] is True
     plan = command_plan("nmap", "ip", "192.0.2.10", nmap_profile="ssh")
     assert plan is not None
     assert "--script ssh2-enum-algos,ssh-hostkey" in plan.command

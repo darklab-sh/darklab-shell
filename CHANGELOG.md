@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Service suggestions now name the exact reviewed Nmap profile they use.**
+  - **What:** App-owned Nmap profiles separate approved category scans from fixed service scripts, publish the expected evidence and blocked broad category selectors, and reject custom script arguments or argument files. SMB, SNMP, LDAP, NFS/RPC, mail, FTP, DNS, database, SSH, and TLS suggestions can show that profile on desktop and mobile. The reviewed vulnerability profile contains only named scripts and still requires explicit confirmation; these hints don't add a new launch path.
+  - **Tests:** Profile-catalog, public-serialization, command-plan, service-action, desktop/mobile renderer, architecture-ratchet, and lint coverage pins the selectors, evidence labels, exclusions, argument rejection, and no-launch presentation.
 - **Assessment targets now turn explicit saved services into conservative next-step suggestions.**
   - **What:** The shared service registry names each action's policy, supported targets, required features, expected evidence, and conditions that make it unsafe to suggest. Expanded Assessment targets show matching Project-scoped services and reviewed next steps on desktop and mobile without adding a launch button or changing a check. Unknown services stay unsupported, uncertain fingerprints stay in review, and conflicting scanner labels for the same port suppress the suggestion instead of trusting a port-number guess.
   - **Tests:** Service, Atlas, Project Overview, API, browser, architecture-ratchet, lint, and Postgres-compatible query coverage pins the richer public contract, conflicting-evidence abstention, Project-only evidence, display bounds, desktop/mobile parity, and no-launch reads.
