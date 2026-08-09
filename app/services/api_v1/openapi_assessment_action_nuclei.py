@@ -12,7 +12,7 @@ def assessment_nuclei_profile_schema() -> dict[str, Any]:
         "required": [
             "key", "label", "policy_level", "template_source",
             "template_families", "excluded_tags", "excluded_protocols",
-            "headless", "dast", "update_policy",
+            "headless", "dast", "update_policy", "template_snapshot",
         ],
         "properties": {
             "key": {"type": "string", "enum": ["safe", "standard", "intrusive"]},
@@ -27,6 +27,9 @@ def assessment_nuclei_profile_schema() -> dict[str, Any]:
             "headless": {"type": "boolean"},
             "dast": {"type": "boolean"},
             "update_policy": {"type": "string", "enum": ["explicit_only"]},
+            "template_snapshot": {
+                "$ref": "#/components/schemas/AssessmentNucleiTemplateSnapshot",
+            },
         },
         "additionalProperties": False,
     }

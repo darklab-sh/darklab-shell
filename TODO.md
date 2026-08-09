@@ -130,7 +130,7 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Prefer version-pinned multi-arch binaries or isolated Python environments that keep the runtime dependency graph reproducible. Update licenses, hashes, SBOM/provenance, image-size budgets, and container smoke checks for every addition.
   - Add structured parsers/adapters under focused modules rather than more broad regexes in `output_signals.py`. Preserve raw output, normalize stable findings/entities, carry tool/profile versions, and make parser failure visible without failing the underlying run.
 - [ ] Improve Nuclei usage before adding overlapping scanners:
-  - Preserve template source/version provenance, show excluded intrusive/code templates, and require explicit action before updating templates or running a higher-risk profile.
+  - Require a separately enabled, freshly confirmed action before running a higher-risk profile.
   - Use detected technologies, inferred CVE candidates, dangling-record signals, and service evidence to recommend a bounded profile; never start Nuclei automatically from HTTPx, an import, a correlation job, or an Atlas/Assessment read.
 
 #### Phase 7 — Add service-aware enumeration and safe next actions

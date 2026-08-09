@@ -10,6 +10,7 @@ from typing import Any
 
 from services.api_v1.openapi_assessment_action_artifact import assessment_artifact_schemas
 from services.api_v1.openapi_assessment_action_nuclei import assessment_nuclei_profile_schema
+from services.api_v1.openapi_nuclei_template_snapshot import nuclei_template_snapshot_schema
 from services.api_v1.openapi_verification_actions import verification_action_schemas
 
 
@@ -22,6 +23,7 @@ def assessment_action_schemas() -> dict[str, Any]:
     plan["properties"]["evidence_selection"] = _ref("AssessmentParameterEvidenceSelection")
     plan["properties"]["artifact_selection"] = _ref("AssessmentOpenApiArtifactSelection")
     schemas = {
+        "AssessmentNucleiTemplateSnapshot": nuclei_template_snapshot_schema(),
         "AssessmentNucleiTemplateProfile": assessment_nuclei_profile_schema(),
         "AssessmentParameterEvidenceOption": {
             "type": "object",
@@ -50,10 +52,7 @@ def assessment_action_schemas() -> dict[str, Any]:
                     "maxItems": 64,
                     "items": _ref("AssessmentParameterEvidenceOption"),
                 },
-                "selected": {
-                    "allOf": [_ref("AssessmentParameterEvidenceOption")],
-                    "nullable": True,
-                },
+                "selected": {"allOf": [_ref("AssessmentParameterEvidenceOption")], "nullable": True},
             },
             "additionalProperties": False,
         },

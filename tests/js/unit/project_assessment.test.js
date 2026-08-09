@@ -446,6 +446,13 @@ describe('project assessment controller', () => {
       nuclei_profile: {
         label: 'Standard vulnerability review',
         template_source: 'managed_cache',
+        template_snapshot: {
+          state: 'ready',
+          source_label: 'Managed local cache',
+          release_version: 'v10.4.3',
+          content_digest: `sha256:${'b'.repeat(64)}`,
+          manifest_entry_count: 11997,
+        },
         template_families: ['Exposure', 'Misconfiguration', 'Known CVEs', 'Technology', 'Network services', 'TLS', 'API'],
         excluded_tags: ['intrusive', 'oast', 'dast'],
         excluded_protocols: ['code', 'javascript', 'file', 'headless'],
@@ -502,7 +509,10 @@ describe('project assessment controller', () => {
     const confirmation = ctx.showConfirm.mock.calls[0][0]
     expect(confirmation.content.textContent).toContain(plan.display_command)
     expect(confirmation.content.textContent).toContain('Nuclei profileStandard vulnerability review')
-    expect(confirmation.content.textContent).toContain('Template sourcemanaged cache')
+    expect(confirmation.content.textContent).toContain('Template sourceManaged local cache')
+    expect(confirmation.content.textContent).toContain('Template versionv10.4.3')
+    expect(confirmation.content.textContent).toContain(`Template revisionsha256:${'b'.repeat(64)}`)
+    expect(confirmation.content.textContent).toContain('Template cacheready · 11,997 manifest entries')
     expect(confirmation.content.textContent).toContain('Template familiesExposure, Misconfiguration, Known CVEs')
     expect(confirmation.content.textContent).toContain('Excluded templatesintrusive, oast, dast, code')
     expect(confirmation.content.textContent).toContain('Template updatesExplicit action only')

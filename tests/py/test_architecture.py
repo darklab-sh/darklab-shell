@@ -26,6 +26,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi.py",
     "openapi_assessment_action_artifact.py",
     "openapi_assessment_action_nuclei.py",
+    "openapi_nuclei_template_snapshot.py",
     "openapi_assessment_action_profile.py",
     "openapi_assessment_action_schemas.py",
     "openapi_atlas_profile.py",
@@ -238,7 +239,12 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/services/api_v1/openapi_assessment_action_nuclei.py",
-        33,
+        37,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_nuclei_template_snapshot.py",
+        30,
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_actions.py", 89, "split-package-ratchet"),
@@ -624,6 +630,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/fanout_checkpoint.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_summary.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nuclei_profiles.py", 100, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/nuclei/template_cache.py", 170, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/historical_urls.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/intel/epss.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/intel/kev.py", 110, "split-package-ratchet"),
@@ -654,7 +661,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/start.py", 219, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/start_context.py", 63, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/start_contracts.py", 30, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/runs/signal_context.py", 44, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/signal_context.py", 47, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/runs/schemathesis_execution_override.py", 29, "split-package-ratchet"
     ),

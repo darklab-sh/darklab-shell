@@ -13,6 +13,7 @@ from services.assessments.nuclei_takeover_observations import (
     nuclei_takeover_json_metadata,
 )
 from services.nuclei.provenance import nuclei_source_detail, nuclei_template_provenance
+from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 
 
 NUCLEI_JSON_MAX_LINE_BYTES = 131_072
@@ -24,14 +25,18 @@ def nuclei_output_metadata(
     *,
     source_run_id: str = "",
     takeover_template: ReviewedNucleiTakeoverTemplate | None = None,
+    template_snapshot: NucleiTemplateCacheSnapshot | None = None,
 ) -> dict[str, object]:
     """Return provenance for every line and bounded confirmation evidence for JSON."""
     row = _json_row(line_text)
-    provenance = nuclei_template_provenance(command)
+    public_snapshot = template_snapshot.public() if template_snapshot else None
+    provenance = nuclei_template_provenance(command, template_snapshot=public_snapshot)
     metadata: dict[str, object] = {}
     if provenance:
         metadata["template_provenance"] = provenance
-    source_detail = nuclei_source_detail(command, line_text=line_text, row=row)
+    source_detail = nuclei_source_detail(
+        command, line_text=line_text, row=row, template_snapshot=public_snapshot,
+    )
     takeover = nuclei_takeover_json_metadata(
         row,
         source_run_id=source_run_id,

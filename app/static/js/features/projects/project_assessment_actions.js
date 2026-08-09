@@ -26,6 +26,7 @@ function restoreFocus(target) {
 function planContent(plan) {
   const wrap = document.createElement('div');
   wrap.className = 'finding-verification-plan project-assessment-action-plan';
+  const templateSnapshot = plan.nuclei_profile?.template_snapshot || {};
   const rows = [
     ['Command', plan.display_command],
     ['Target', `${text(plan.target?.type)} · ${text(plan.target?.value)}`],
@@ -35,7 +36,14 @@ function planContent(plan) {
     ] : []),
     ...(plan.nuclei_profile ? [
       ['Nuclei profile', text(plan.nuclei_profile.label)],
-      ['Template source', text(plan.nuclei_profile.template_source).replaceAll('_', ' ')],
+      ['Template source', text(templateSnapshot.source_label,
+        text(plan.nuclei_profile.template_source).replaceAll('_', ' '))],
+      ['Template version', text(templateSnapshot.release_version, 'Release not recorded')],
+      ['Template revision', text(templateSnapshot.content_digest, 'Unavailable')],
+      ['Template cache', [
+        text(templateSnapshot.state, 'unknown').replaceAll('_', ' '),
+        `${Number(templateSnapshot.manifest_entry_count || 0).toLocaleString()} manifest entries`,
+      ].join(' · ')],
       ['Template families', (plan.nuclei_profile.template_families || []).join(', ')],
       ['Excluded templates', [
         ...(plan.nuclei_profile.excluded_tags || []),

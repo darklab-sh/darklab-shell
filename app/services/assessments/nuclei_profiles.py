@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from typing import Any, Mapping, NamedTuple
 
 
 class NucleiProfile(NamedTuple):
@@ -86,9 +86,9 @@ def nuclei_profile_args(profile: str = "safe") -> tuple[str, ...]:
     return (*args, "-dast", "-fuzz-aggression", "low") if selected.dast else args
 
 
-def public_nuclei_profile(profile: str = "safe") -> dict[str, Any]:
+def public_nuclei_profile(profile: str = "safe", *, template_snapshot: Mapping[str, Any] | None = None) -> dict[str, Any]:
     selected = nuclei_profile(profile)
-    return {
+    public = {
         "key": selected.key, "label": selected.label,
         "policy_level": selected.policy_level,
         "template_source": selected.template_source,
@@ -98,3 +98,6 @@ def public_nuclei_profile(profile: str = "safe") -> dict[str, Any]:
         "headless": selected.headless, "dast": selected.dast,
         "update_policy": "explicit_only",
     }
+    if template_snapshot:
+        public["template_snapshot"] = dict(template_snapshot)
+    return public

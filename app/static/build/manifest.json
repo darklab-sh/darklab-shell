@@ -412,12 +412,12 @@
       "hash": "2c6f9e64a3dbf233ed8ae70c1e3c104de92e349c9e6f6bbf4d64a93b8ea82fe6"
     },
     "/static/js/features/projects/project_assessment.js": {
-      "path": "/static/build/static-project-assessment.ff75f4500d32.js",
-      "hash": "7c4fc5d3bd771f6641fcb9497f2559ac22d306ba55f9d74d4ce746aaaa2b0ef1"
+      "path": "/static/build/static-project-assessment.67d13a63d98b.js",
+      "hash": "ea7cc3391c7646d067805c403bf531dad9048f2673219954ef49b082e16fb682"
     },
     "/static/js/features/projects/project_assessment_actions.js": {
-      "path": "/static/build/static-project-assessment-actions.9d8f61f5f212.js",
-      "hash": "fb5a0c7e1bf64c4b9b26dde9f8050e77c6972ad92912a40af68c49e4dbe2bafc"
+      "path": "/static/build/static-project-assessment-actions.e602cf0f1545.js",
+      "hash": "e98681849285c0847ea02b81328539a672c7b39b43d4bd06d297d37327bc7da2"
     },
     "/static/js/features/projects/project_assessment_renderer.js": {
       "path": "/static/build/static-project-assessment-renderer.9f4762b9fa66.js",

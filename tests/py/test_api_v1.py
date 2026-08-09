@@ -6397,6 +6397,13 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "type": "string",
         "enum": ["explicit_only"],
     }
+    assert schemas["AssessmentNucleiTemplateProfile"]["properties"]["template_snapshot"] == {
+        "$ref": "#/components/schemas/AssessmentNucleiTemplateSnapshot",
+    }
+    assert schemas["AssessmentNucleiTemplateSnapshot"]["properties"]["content_digest"] == {
+        "type": "string",
+        "pattern": "^(?:sha256:[a-f0-9]{64})?$",
+    }
     assert schemas["AssessmentOpenApiArtifactSelection"]["properties"]["options"][
         "maxItems"
     ] == 64

@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES
+from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES, nuclei_output_metadata
+from services.assessments import action_plans
 from services.assessments.action_plans import build_assessment_action_plan
 from services.assessments.service_actions import service_actions, service_evidence_state
 from services.assessments.command_plans import command_plan
@@ -173,6 +174,12 @@ from services.runs.start import start_brokered_run
 from services.runs.start_contracts import RunStartHandlers
 from services.intel.epss import normalize_epss_rows
 from services.intel.kev import normalize_kev_catalog
+from services.nuclei.provenance import nuclei_template_provenance
+from services.nuclei.template_cache import (
+    NucleiTemplateCacheSnapshot,
+    managed_nuclei_template_snapshot,
+    nuclei_template_cache_unavailable_reason,
+)
 from core.output_signals import OutputSignalClassifier
 from services.atlas.observations import public_app_port_record
 from services.projects.web_surface_comparison import (
@@ -351,7 +358,47 @@ def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
     assert "--script ssh2-enum-algos,ssh-hostkey" in plan.command
 
 
-def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
+def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, monkeypatch):
+    template_dir = tmp_path / "nuclei-templates"
+    template_dir.mkdir()
+    checksum_rows = (
+        f"{template_dir}/http/exposure.yaml,{'a' * 32};"
+        f"{template_dir}/ssl/certificate.yaml,{'b' * 32};"
+    )
+    (template_dir / ".checksum").write_text(checksum_rows, encoding="utf-8")
+    config_path = tmp_path / ".templates-config.json"
+    config_path.write_text(json.dumps({
+        "nuclei-templates-directory": str(template_dir),
+        "nuclei-templates-version": "v10.4.3",
+    }), encoding="utf-8")
+    template_snapshot = managed_nuclei_template_snapshot(
+        template_dir, config_path=config_path,
+    )
+    assert template_snapshot == NucleiTemplateCacheSnapshot(
+        state="ready",
+        release_version="v10.4.3",
+        content_digest="sha256:b045f0d45961f8defc264a57b85d22e0f2f6dd964c130f2e5f9e5bd30e95a694",
+        manifest_entry_count=2,
+    )
+    config_path.write_text("[]", encoding="utf-8")
+    assert managed_nuclei_template_snapshot(
+        template_dir, config_path=config_path,
+    ).release_version == ""
+    assert managed_nuclei_template_snapshot(tmp_path / "missing").state == "missing"
+    assert "nuclei -update-templates" in nuclei_template_cache_unavailable_reason(
+        NucleiTemplateCacheSnapshot("missing")
+    )
+    provenance = nuclei_template_provenance(
+        "nuclei -u https://example.test",
+        template_snapshot=template_snapshot.public(),
+    )
+    assert provenance["template_snapshot"] == template_snapshot.public()
+    monkeypatch.setattr(
+        action_plans, "managed_nuclei_template_snapshot", lambda: template_snapshot,
+    )
+    monkeypatch.setattr(
+        nuclei_takeover_launch, "managed_nuclei_template_snapshot", lambda: template_snapshot,
+    )
     assert nuclei_profile_keys() == ("safe", "standard", "intrusive")
     assert nuclei_profile("unknown").key == "safe"
     safe_args = nuclei_profile_args("safe")
@@ -427,7 +474,9 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     plan = build_assessment_action_plan(row, target, "prj_nuclei")
 
     assert plan["launchable"] is True
-    assert plan["nuclei_profile"] == public_nuclei_profile("standard")
+    assert plan["nuclei_profile"] == public_nuclei_profile(
+        "standard", template_snapshot=template_snapshot.public(),
+    )
     assert "-severity medium,high,critical" in plan["display_command"]
     assert "-tags exposure,misconfig,cve,tech,network,ssl,api" in plan["display_command"]
     assert "-type http,tcp,ssl" in plan["display_command"]
@@ -440,6 +489,44 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     assert "-no-interactsh -disable-redirects -disable-update-check" in (
         plan["display_command"]
     )
+    monkeypatch.setattr(
+        action_plans,
+        "managed_nuclei_template_snapshot",
+        lambda: NucleiTemplateCacheSnapshot("missing"),
+    )
+    unavailable = build_assessment_action_plan(row, target, "prj_nuclei")
+    assert unavailable["launchable"] is False
+    assert "nuclei -update-templates" in unavailable["unavailable_reason"]
+    monkeypatch.setattr(
+        action_plans, "managed_nuclei_template_snapshot", lambda: template_snapshot,
+    )
+    launch_context = assessment_run_launch_context(plan)
+    assert launch_context.trusted_execution_args == ()
+    assert launch_context.output_signal_context == RunOutputSignalContext(
+        nuclei_template_snapshot=template_snapshot,
+    )
+    classifier_kwargs = output_signal_classifier_kwargs(launch_context.output_signal_context)
+    assert classifier_kwargs["nuclei_template_snapshot"] is template_snapshot
+    line_metadata = nuclei_output_metadata(
+        plan["display_command"], "[template-id] finding",
+        template_snapshot=template_snapshot,
+    )
+    assert line_metadata["template_provenance"]["template_snapshot"] == (
+        template_snapshot.public()
+    )
+    monkeypatch.setattr(
+        nuclei_takeover_launch,
+        "managed_nuclei_template_snapshot",
+        lambda: NucleiTemplateCacheSnapshot(
+            "ready", "v10.4.4", "sha256:" + ("c" * 64), 3,
+        ),
+    )
+    with pytest.raises(
+        nuclei_takeover_launch.AssessmentActionError,
+        match="templates changed after preview",
+    ) as changed:
+        assessment_run_launch_context(plan)
+    assert changed.value.code == "nuclei_template_cache_changed"
 
 
 def test_local_openapi_review_keeps_only_bounded_read_operations_and_internal_refs():
@@ -3112,6 +3199,8 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
         output_signal_classifier_kwargs({"nuclei_takeover_template": "caller-made"})
     with pytest.raises(ValueError, match="invalid Dalfox XSS signal context"):
         RunOutputSignalContext(dalfox_xss_context="caller-made")
+    with pytest.raises(ValueError, match="invalid Nuclei template snapshot context"):
+        RunOutputSignalContext(nuclei_template_snapshot="caller-made")
 
     context = RunOutputSignalContext(
         nuclei_takeover_template=ReviewedNucleiTakeoverTemplate(

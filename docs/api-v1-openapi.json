@@ -2128,6 +2128,9 @@
             "maxItems": 16,
             "type": "array"
           },
+          "template_snapshot": {
+            "$ref": "#/components/schemas/AssessmentNucleiTemplateSnapshot"
+          },
           "template_source": {
             "enum": [
               "managed_cache"
@@ -2151,7 +2154,50 @@
           "excluded_protocols",
           "headless",
           "dast",
-          "update_policy"
+          "update_policy",
+          "template_snapshot"
+        ],
+        "type": "object"
+      },
+      "AssessmentNucleiTemplateSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "content_digest": {
+            "pattern": "^(?:sha256:[a-f0-9]{64})?$",
+            "type": "string"
+          },
+          "manifest_entry_count": {
+            "maximum": 25000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "release_version": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "source_label": {
+            "enum": [
+              "Managed local cache"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "missing",
+              "oversized",
+              "invalid",
+              "unreadable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "source_label",
+          "release_version",
+          "content_digest",
+          "manifest_entry_count"
         ],
         "type": "object"
       },

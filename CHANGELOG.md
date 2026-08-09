@@ -198,6 +198,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Nuclei profiles now expose provenance and safety exclusions.**
   - **What:** The desktop and mobile launch preview names the reviewed profile, included template families, excluded tags and protocols, managed-cache source, and explicit-only update policy before confirmation.
   - **Tests:** Profile and Assessment UI coverage pins the public metadata, visible safety exclusions, corrected finding-materialization note, and intrusive confirmation state.
+- **Nuclei launch plans now pin the installed template manifest.**
+  - **What:** Generic Assessment previews read the bounded managed-cache manifest without contacting ProjectDiscovery, show its recorded release, SHA-256 revision, and entry count, and cover that snapshot with the plan digest. Missing, oversized, invalid, unreadable, or changed manifests fail closed and point the operator to the explicit `nuclei -update-templates` command before a fresh preview. Managed-cache result provenance keeps the same snapshot.
+  - **Tests:** Existing profile and action coverage pins bounded manifest parsing, exact directory/version matching, stable revisions, missing-cache guidance, plan-digest inclusion, launch drift rejection, output provenance, and desktop/mobile confirmation metadata.
 - **Assessment discovery now normalizes passive historical URLs safely.**
   - **What:** Historical HTTP(S) URLs retain source/run provenance, are deduplicated and bounded, and are never classified as vulnerability findings by normalization alone.
   - **Tests:** URL coverage pins credential, fragment, scheme, deduplication, and provenance boundaries.

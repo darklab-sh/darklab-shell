@@ -949,8 +949,8 @@ class OutputSignalClassifier:
     source_run_id: str = ""
     profile_role: str = ""
     nuclei_takeover_template: ReviewedNucleiTakeoverTemplate | None = None
+    nuclei_template_snapshot: object | None = None
     dalfox_xss_context: ReviewedDalfoxXssContext | None = None
-
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
@@ -1008,7 +1008,7 @@ class OutputSignalClassifier:
         if self.root == "nuclei":
             metadata.update(nuclei_output_metadata(
                 self.command, normalized_text, source_run_id=self.source_run_id,
-                takeover_template=self.nuclei_takeover_template,
+                takeover_template=self.nuclei_takeover_template, template_snapshot=self.nuclei_template_snapshot,
             ))
         if scopes:
             metadata["signals"] = scopes

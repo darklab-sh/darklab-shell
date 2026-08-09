@@ -17,6 +17,10 @@ from services.assessments.nuclei_profiles import nuclei_profile, public_nuclei_p
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
 from services.assessments.schemathesis_actions import SchemathesisActionContext
+from services.nuclei.template_cache import (
+    managed_nuclei_template_snapshot,
+    nuclei_template_cache_unavailable_reason,
+)
 from services.projects.scope import shared_owner_where
 
 
@@ -120,6 +124,9 @@ def build_assessment_action_plan(
         if action_id == "nuclei" and check_key != NUCLEI_TAKEOVER_CHECK_KEY
         else None
     )
+    selected_nuclei_snapshot = (
+        managed_nuclei_template_snapshot() if selected_nuclei_profile else None
+    )
     if str(row["project_status"] or "") == "archived":
         launchable = False
         unavailable_reason = "Assessment runs cannot start from an archived Project."
@@ -140,6 +147,9 @@ def build_assessment_action_plan(
     elif str(frozen.get("policy_level") or "") != policy_level:
         launchable = False
         unavailable_reason = "The frozen policy no longer matches the saved check."
+    elif selected_nuclei_snapshot and selected_nuclei_snapshot.state != "ready":
+        launchable = False
+        unavailable_reason = nuclei_template_cache_unavailable_reason(selected_nuclei_snapshot)
     elif not separator or action_kind not in {"command", "workflow"} or not action_id:
         launchable = False
         unavailable_reason = "This check does not have a launchable recommended action."
@@ -255,7 +265,10 @@ def build_assessment_action_plan(
     if schemathesis:
         payload["artifact_selection"] = schemathesis.public_selection()
     if selected_nuclei_profile:
-        payload["nuclei_profile"] = public_nuclei_profile(selected_nuclei_profile.key)
+        payload["nuclei_profile"] = public_nuclei_profile(
+            selected_nuclei_profile.key,
+            template_snapshot=selected_nuclei_snapshot.public(),
+        )
     payload["plan_digest"] = _digest(payload)
     return payload
 

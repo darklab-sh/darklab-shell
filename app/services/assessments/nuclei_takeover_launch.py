@@ -16,6 +16,10 @@ from services.assessments.nuclei_takeover_templates import (
     reviewed_nuclei_takeover_launch,
 )
 from services.assessments.run_launch_context import AssessmentRunLaunchContext
+from services.nuclei.template_cache import (
+    NucleiTemplateCacheSnapshot,
+    managed_nuclei_template_snapshot,
+)
 from services.runs.signal_context import RunOutputSignalContext
 
 
@@ -29,7 +33,9 @@ def assessment_run_launch_context(
 ) -> AssessmentRunLaunchContext:
     """Add takeover evidence context only for the exact frozen check contract."""
     if str(plan.get("check_key") or "") != NUCLEI_TAKEOVER_CHECK_KEY:
-        return AssessmentRunLaunchContext(tuple(trusted_execution_args))
+        snapshot = _validate_generic_nuclei_template_snapshot(plan)
+        context = RunOutputSignalContext(nuclei_template_snapshot=snapshot) if snapshot else None
+        return AssessmentRunLaunchContext(tuple(trusted_execution_args), context)
     if not reviewed_takeover_launch_plan_matches(plan):
         action = plan.get("action")
         log.error("ASSESSMENT_TAKEOVER_LAUNCH_CONTRACT_REJECTED", extra={
@@ -70,4 +76,30 @@ def assessment_run_launch_context(
         output_signal_context=RunOutputSignalContext(
             nuclei_takeover_template=reviewed.template,
         ),
+    )
+
+
+def _validate_generic_nuclei_template_snapshot(
+    plan: Mapping[str, Any],
+) -> NucleiTemplateCacheSnapshot | None:
+    action = plan.get("action")
+    if not isinstance(action, Mapping) or str(action.get("id") or "") != "nuclei":
+        return None
+    profile = plan.get("nuclei_profile")
+    expected = profile.get("template_snapshot") if isinstance(profile, Mapping) else None
+    current = managed_nuclei_template_snapshot()
+    current_public = current.public()
+    if isinstance(expected, Mapping) and dict(expected) == current_public and current.state == "ready":
+        return current
+    log.warning("ASSESSMENT_NUCLEI_TEMPLATE_CACHE_CHANGED", extra={
+        "project_id": str(plan.get("project_id") or "")[:64],
+        "assessment_id": str(plan.get("assessment_id") or "")[:64],
+        "check_id": str(plan.get("check_id") or "")[:64],
+        "expected_state": str(expected.get("state") or "") if isinstance(expected, Mapping) else "",
+        "current_state": current.state,
+    })
+    raise AssessmentActionError(
+        "nuclei_template_cache_changed",
+        "The managed Nuclei templates changed after preview. Review the action again.",
+        status_code=409,
     )
