@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from core.output_targets import tokenize_command
 from services.assessments.command_modes_dalfox import (
+    DALFOX_OAST_VALIDATION_MODE,
     DALFOX_PARAMETER_DISCOVERY_MODE,
     DALFOX_XSS_VALIDATION_MODE,
     dalfox_command_mode,
@@ -20,6 +21,7 @@ from services.assessments.command_modes_nuclei import (
 
 
 ASSESSMENT_COMMAND_MODES = frozenset({
+    DALFOX_OAST_VALIDATION_MODE,
     DALFOX_PARAMETER_DISCOVERY_MODE,
     DALFOX_XSS_VALIDATION_MODE,
     NUCLEI_SAFE_PROFILE_MODE,
@@ -42,6 +44,7 @@ def assessment_command_mode(command: object) -> str:
 
 __all__ = [
     "ASSESSMENT_COMMAND_MODES",
+    "DALFOX_OAST_VALIDATION_MODE",
     "DALFOX_PARAMETER_DISCOVERY_MODE",
     "DALFOX_XSS_VALIDATION_MODE",
     "NUCLEI_INTRUSIVE_PROFILE_MODE",

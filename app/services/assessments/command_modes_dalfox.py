@@ -5,9 +5,14 @@
 
 from __future__ import annotations
 
+from services.assessments.command_modes_dalfox_oast import (
+    is_reviewed_dalfox_oast_validation,
+)
+
 
 DALFOX_PARAMETER_DISCOVERY_MODE = "dalfox_parameter_discovery"
 DALFOX_XSS_VALIDATION_MODE = "dalfox_xss_validation"
+DALFOX_OAST_VALIDATION_MODE = "dalfox_oast_validation"
 _PROTECTED_CONFIG_SUFFIX = ["--config", "[protected]"]
 
 
@@ -65,11 +70,14 @@ def dalfox_command_mode(tokens: list[str]) -> str:
         return DALFOX_PARAMETER_DISCOVERY_MODE
     if _is_reviewed_xss_validation(tokens):
         return DALFOX_XSS_VALIDATION_MODE
+    if is_reviewed_dalfox_oast_validation(tokens):
+        return DALFOX_OAST_VALIDATION_MODE
     return ""
 
 
 __all__ = [
     "DALFOX_PARAMETER_DISCOVERY_MODE",
+    "DALFOX_OAST_VALIDATION_MODE",
     "DALFOX_XSS_VALIDATION_MODE",
     "dalfox_command_mode",
 ]

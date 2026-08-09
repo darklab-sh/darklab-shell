@@ -19,6 +19,7 @@ import yaml
 import config as app_config
 import config_paths
 from services.assessments.command_modes import ASSESSMENT_COMMAND_MODES
+from services.assessments.dalfox_oast_contracts import DALFOX_OAST_ACTION_KEY
 from services.projects.contracts import ProjectWorkspaceError
 
 
@@ -223,9 +224,14 @@ def _recommended_action(
     value: object, *, known_command_roots: frozenset[str], known_workflow_ids: frozenset[str]
 ) -> str:
     action = _required_text(value, "recommended_action", ASSESSMENT_PROFILE_ACTION_MAX_LEN)
+    if action == DALFOX_OAST_ACTION_KEY:
+        return action
     kind, separator, identifier = action.partition(":")
     if not separator or not identifier:
-        raise _catalog_error("recommended_action must use command:<root> or workflow:<id>")
+        raise _catalog_error(
+            "recommended_action must use command:<root>, workflow:<id>, or the "
+            "reviewed private OAST action"
+        )
     if kind == "command" and identifier in known_command_roots:
         return action
     if kind == "workflow" and identifier in known_workflow_ids:
@@ -344,6 +350,17 @@ def _normalize_check(
     policy_level = _required_text(check.get("policy_level"), "policy_level", 32).lower()
     if policy_level not in ASSESSMENT_POLICY_LEVELS:
         raise _catalog_error(f"unsupported policy_level: {policy_level}")
+    recommended_action = _recommended_action(
+        check.get("recommended_action"),
+        known_command_roots=known_command_roots,
+        known_workflow_ids=known_workflow_ids,
+    )
+    if recommended_action == DALFOX_OAST_ACTION_KEY and (
+        policy_level != "intrusive" or target_types != ["url"]
+    ):
+        raise _catalog_error(
+            "the reviewed private OAST action requires intrusive policy and one URL target"
+        )
     return {
         "key": _stable_key(check.get("key"), "profile check key"),
         "version": _version(check.get("version"), "profile check version"),
@@ -355,11 +372,7 @@ def _normalize_check(
         "target_types": target_types,
         "evidence_rules": rules,
         "policy_level": policy_level,
-        "recommended_action": _recommended_action(
-            check.get("recommended_action"),
-            known_command_roots=known_command_roots,
-            known_workflow_ids=known_workflow_ids,
-        ),
+        "recommended_action": recommended_action,
         "completion_guidance": _required_text(
             check.get("completion_guidance"),
             "profile check completion_guidance",

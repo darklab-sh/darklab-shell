@@ -346,7 +346,12 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/action_plans.py", 318, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plan_contracts.py", 12, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_modes.py", 83, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/command_modes_dalfox.py", 75, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/command_modes_dalfox.py", 83, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/command_modes_dalfox_oast.py",
+        38,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/command_modes_nuclei.py", 73, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plans.py", 110, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plans_web.py", 80, "split-package-ratchet"),
@@ -422,7 +427,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/lifecycle.py", 376, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/mutations.py", 474, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/profile_summaries.py", 27, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/profiles.py", 617, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/assessments/profiles.py", 633, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/assessments/read_model.py", 345, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/nuclei_recommendation_evidence.py",
@@ -642,6 +647,12 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/services/assessments/dalfox_xss_command.py", 99, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_oast_contracts.py", 14, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_oast_command.py", 126, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/assessments/dalfox_xss_execution.py", 53, "split-package-ratchet"

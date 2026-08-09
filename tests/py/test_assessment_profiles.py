@@ -411,6 +411,49 @@ def test_catalog_accepts_known_workflow_actions_and_returns_defensive_copies(tmp
     assert current["checks"][0]["recommended_action"] == "workflow:custom_web_review"
 
 
+def test_catalog_accepts_only_the_exact_reviewed_private_oast_action():
+    accepted = _catalog(_profile(
+        target_types=["url"],
+        checks=[_check(
+            target_types=["url"],
+            policy_level="intrusive",
+            recommended_action="oast_private_callback",
+        )],
+    ))
+
+    assert _normalize(accepted).profiles[0]["checks"][0][
+        "recommended_action"
+    ] == "oast_private_callback"
+
+    rejected = _catalog(_profile(
+        target_types=["url"],
+        checks=[_check(
+            target_types=["url"],
+            policy_level="intrusive",
+            recommended_action="oast_public_callback",
+        )],
+    ))
+    with pytest.raises(
+        profiles.AssessmentProfileCatalogError,
+        match="must use command:<root>, workflow:<id>, or the reviewed private OAST action",
+    ):
+        _normalize(rejected)
+
+    wrong_policy = _catalog(_profile(
+        target_types=["url"],
+        checks=[_check(
+            target_types=["url"],
+            policy_level="standard",
+            recommended_action="oast_private_callback",
+        )],
+    ))
+    with pytest.raises(
+        profiles.AssessmentProfileCatalogError,
+        match="requires intrusive policy and one URL target",
+    ):
+        _normalize(wrong_policy)
+
+
 def test_assessment_profiles_use_the_shared_external_local_config_root(tmp_path: Path):
     shipped = tmp_path / "shipped"
     local = tmp_path / "local"
