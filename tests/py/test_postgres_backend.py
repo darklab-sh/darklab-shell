@@ -12,7 +12,7 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit
@@ -3921,6 +3921,65 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         (child["ordinal"], child["status"])
         for child in list_fanout_children(runtime_fanout_id, "probe")
     ] == [(0, "succeeded"), (1, "succeeded")]
+
+    recovery_fanout = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="postgres_recovery_fanout",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    recovery_fanout_id = str(recovery_fanout["id"])
+    assert claim_step_for_launch(recovery_fanout_id, "collect") is not None
+    assert bind_step_run(recovery_fanout_id, "collect", "run-pg-recovery-collector")
+    assert finalize_run_step(
+        "run-pg-recovery-collector",
+        0,
+        collection_captures={"hosts": ["one.example", "two.example"]},
+    ) is not None
+    recovery_children = initialize_fanout_children(recovery_fanout_id, "probe", 2)
+    assert claim_step_for_launch(recovery_fanout_id, "probe") is not None
+    assert claim_fanout_child(recovery_fanout_id, "probe", 0) is not None
+    assert claim_fanout_child(recovery_fanout_id, "probe", 1) is not None
+    completed_recovery_run_id = "run-pg-recovery-completed-" + uuid.uuid4().hex
+    assert bind_fanout_child_run(
+        str(recovery_children[0]["id"]),
+        completed_recovery_run_id,
+    )
+    recovery_finished = datetime.now(timezone.utc)
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, command, started, finished, exit_code, output_preview, "
+        "output_line_count) VALUES (%s, %s, 'httpx -u one.example -silent', %s, %s, 0, '[]', 0)",
+        (completed_recovery_run_id, session_id, recovery_finished, recovery_finished),
+    )
+    conn.commit()
+    runtime_commands.clear()
+    with monkeypatch.context() as recovery_patch:
+        recovery_patch.setattr(run_routes, "broker_available", lambda: True)
+        recovery_patch.setattr(
+            run_routes,
+            "interactive_pty_spec_for_command",
+            lambda _command: None,
+        )
+        recovery_patch.setattr(
+            run_routes,
+            "resolves_exact_special_builtin_command",
+            lambda _command: False,
+        )
+        recovery_patch.setattr(run_routes, "resolve_builtin_command", lambda _command: None)
+        recovery_patch.setattr(run_routes, "_start_brokered_run_service", _start_runtime_child)
+        assert executions.recover_workflow_execution(recovery_fanout_id) == "recovered"
+
+    recovered_fanout = get_execution(session_id, recovery_fanout_id)
+    assert recovered_fanout is not None and recovered_fanout["status"] == "completed"
+    assert runtime_commands == ["httpx -u two.example -silent"]
+    assert [
+        (child["ordinal"], child["status"])
+        for child in list_fanout_children(recovery_fanout_id, "probe")
+    ] == [(0, "succeeded"), (1, "succeeded")]
+    assert executions.recover_workflow_execution(recovery_fanout_id) == "ignored"
 
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier

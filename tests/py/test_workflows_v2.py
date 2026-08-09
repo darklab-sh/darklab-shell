@@ -3084,6 +3084,226 @@ def test_recovery_reclaims_stale_states_and_advances_completed_step_once(monkeyp
     assert collection_stored["status"] == "completed"
     assert collection_stored["variables"]["hosts"] == ["one.example", "two.example"]
 
+    from blueprints import run as run_routes
+
+    fanout_recovery_definition = compile_execution_definition({
+        "version": 3,
+        "id": "recovery_fanout",
+        "title": "Recovery fan-out",
+        "inputs": [],
+        "steps": [
+            {
+                "id": "collect",
+                "cmd": "echo hosts",
+                "captures": [{
+                    "name": "hosts",
+                    "kind": "collection",
+                    "source": "first_nonempty_line",
+                    "required": True,
+                }],
+                "next": {"success": "probe", "failure": "stop"},
+            },
+            {
+                "id": "probe",
+                "cmd": "echo recovered {{hosts}}",
+                "for_each": {
+                    "collection": "hosts",
+                    "failure_mode": "continue",
+                    "max_parallel": 3,
+                    "max_failures": 3,
+                },
+                "next": {"success": "complete", "failure": "stop"},
+            },
+        ],
+    })
+    fanout_recovery = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="recovery_fanout",
+        workflow_source="config",
+        definition=fanout_recovery_definition,
+        inputs={},
+    )
+    fanout_recovery_id = str(fanout_recovery["id"])
+    assert claim_step_for_launch(fanout_recovery_id, "collect") is not None
+    assert bind_step_run(fanout_recovery_id, "collect", "run-recovery-fanout-collector")
+    assert finalize_run_step(
+        "run-recovery-fanout-collector",
+        0,
+        collection_captures={
+            "hosts": ["one.example", "two.example", "three.example"],
+        },
+    ) is not None
+    fanout_recovery_children = initialize_fanout_children(
+        fanout_recovery_id,
+        "probe",
+        3,
+    )
+    assert claim_step_for_launch(fanout_recovery_id, "probe") is not None
+    for ordinal in range(3):
+        assert claim_fanout_child(fanout_recovery_id, "probe", ordinal) is not None
+    completed_child_run = "run-recovery-fanout-completed"
+    active_child_run = "run-recovery-fanout-active"
+    assert bind_fanout_child_run(
+        str(fanout_recovery_children[0]["id"]),
+        completed_child_run,
+    )
+    assert bind_fanout_child_run(
+        str(fanout_recovery_children[1]["id"]),
+        active_child_run,
+    )
+    active_run_ids.add(active_child_run)
+    with get_db_connect()() as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, command, started, finished, exit_code, output_preview, "
+            "output_line_count) VALUES (?, ?, 'echo recovered one.example', ?, ?, 0, '[]', 0)",
+            (completed_child_run, session_id, finished, finished),
+        )
+        conn.commit()
+
+    recovered_child_commands: list[str] = []
+
+    def start_recovered_child(**kwargs: Any):
+        recovered_child_commands.append(str(kwargs["original_command"]))
+        run_id = "run-recovery-fanout-relaunched-" + uuid.uuid4().hex
+        kwargs["run_created_hook"](run_id, None)
+        active_run_ids.add(run_id)
+        return BrokeredRunStartResult(run_id, "external", "running", None)
+
+    monkeypatch.setattr(run_routes, "broker_available", lambda: True)
+    monkeypatch.setattr(run_routes, "interactive_pty_spec_for_command", lambda _command: None)
+    monkeypatch.setattr(run_routes, "resolves_exact_special_builtin_command", lambda _command: False)
+    monkeypatch.setattr(run_routes, "resolve_builtin_command", lambda _command: None)
+    monkeypatch.setattr(run_routes, "_start_brokered_run_service", start_recovered_child)
+
+    assert executions.recover_workflow_execution(fanout_recovery_id) == "recovered"
+    recovered_children = list_fanout_children(fanout_recovery_id, "probe")
+    assert [(child["ordinal"], child["status"]) for child in recovered_children] == [
+        (0, "succeeded"),
+        (1, "running"),
+        (2, "running"),
+    ]
+    assert str(recovered_children[2]["id"]) == str(fanout_recovery_children[2]["id"])
+    assert recovered_child_commands == ["echo recovered three.example"]
+    assert executions.recover_workflow_execution(fanout_recovery_id) == "left_running"
+    assert recovered_child_commands == ["echo recovered three.example"]
+
+    uninitialized_fanout = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="recovery_fanout_uninitialized",
+        workflow_source="config",
+        definition=fanout_recovery_definition,
+        inputs={},
+    )
+    uninitialized_fanout_id = str(uninitialized_fanout["id"])
+    assert claim_step_for_launch(uninitialized_fanout_id, "collect") is not None
+    assert bind_step_run(
+        uninitialized_fanout_id,
+        "collect",
+        "run-recovery-uninitialized-collector",
+    )
+    assert finalize_run_step(
+        "run-recovery-uninitialized-collector",
+        0,
+        collection_captures={"hosts": ["fresh.example"]},
+    ) is not None
+    assert claim_step_for_launch(uninitialized_fanout_id, "probe") is not None
+    assert executions.recover_workflow_execution(uninitialized_fanout_id) == "recovered"
+    assert [
+        (child["ordinal"], child["status"])
+        for child in list_fanout_children(uninitialized_fanout_id, "probe")
+    ] == [(0, "running")]
+    assert recovered_child_commands[-1] == "echo recovered fresh.example"
+
+    empty_recovery_definition = json.loads(json.dumps(fanout_recovery_definition))
+    empty_recovery_definition["steps"][0]["captures"][0]["required"] = False
+    empty_recovery = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="recovery_fanout_empty",
+        workflow_source="config",
+        definition=empty_recovery_definition,
+        inputs={},
+    )
+    empty_recovery_id = str(empty_recovery["id"])
+    assert claim_step_for_launch(empty_recovery_id, "collect") is not None
+    assert bind_step_run(empty_recovery_id, "collect", "run-recovery-empty-collector")
+    assert finalize_run_step(
+        "run-recovery-empty-collector",
+        0,
+        collection_captures={"hosts": []},
+    ) is not None
+    assert claim_step_for_launch(empty_recovery_id, "probe") is not None
+    assert executions.recover_workflow_execution(empty_recovery_id) == "recovered"
+    empty_recovery_stored = get_execution(session_id, empty_recovery_id)
+    assert empty_recovery_stored is not None
+    assert empty_recovery_stored["status"] == "completed"
+    assert list_fanout_children(empty_recovery_id, "probe") == []
+
+    missing_fanout_definition = json.loads(json.dumps(fanout_recovery_definition))
+    missing_fanout_definition["steps"][1]["for_each"].update({
+        "failure_mode": "fail_fast",
+        "max_failures": 1,
+    })
+    missing_fanout = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="recovery_fanout_missing",
+        workflow_source="config",
+        definition=missing_fanout_definition,
+        inputs={},
+    )
+    missing_fanout_id = str(missing_fanout["id"])
+    assert claim_step_for_launch(missing_fanout_id, "collect") is not None
+    assert bind_step_run(missing_fanout_id, "collect", "run-recovery-missing-collector")
+    assert finalize_run_step(
+        "run-recovery-missing-collector",
+        0,
+        collection_captures={"hosts": ["missing.example"]},
+    ) is not None
+    missing_child = initialize_fanout_children(missing_fanout_id, "probe", 1)[0]
+    assert claim_step_for_launch(missing_fanout_id, "probe") is not None
+    assert claim_fanout_child(missing_fanout_id, "probe", 0) is not None
+    assert bind_fanout_child_run(str(missing_child["id"]), "run-recovery-fanout-missing")
+    assert executions.recover_workflow_execution(missing_fanout_id) == "failed"
+    missing_stored = get_execution(session_id, missing_fanout_id)
+    assert missing_stored is not None and missing_stored["status"] == "failed"
+    assert list_fanout_children(missing_fanout_id, "probe")[0]["error_code"] == (
+        "active_run_missing"
+    )
+
+    invalid_fanout = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="recovery_fanout_invalid",
+        workflow_source="config",
+        definition=fanout_recovery_definition,
+        inputs={},
+    )
+    invalid_fanout_id = str(invalid_fanout["id"])
+    assert claim_step_for_launch(invalid_fanout_id, "collect") is not None
+    assert bind_step_run(invalid_fanout_id, "collect", "run-recovery-invalid-collector")
+    assert finalize_run_step(
+        "run-recovery-invalid-collector",
+        0,
+        collection_captures={"hosts": ["invalid.example"]},
+    ) is not None
+    invalid_child = initialize_fanout_children(invalid_fanout_id, "probe", 1)[0]
+    assert claim_step_for_launch(invalid_fanout_id, "probe") is not None
+    assert claim_fanout_child(invalid_fanout_id, "probe", 0) is not None
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_execution_children SET status = 'running' WHERE id = ?",
+            (str(invalid_child["id"]),),
+        )
+        conn.commit()
+    assert executions.recover_workflow_execution(invalid_fanout_id) == "failed"
+    invalid_fanout_stored = get_execution(session_id, invalid_fanout_id)
+    assert invalid_fanout_stored is not None
+    assert invalid_fanout_stored["failure_code"] == "recovery_state_invalid"
+
 
 def test_completed_personal_execution_moves_with_session_migration(monkeypatch):
     from blueprints import session as session_routes

@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Collection workflows now resume unfinished child batches after startup.**
+  - **What:** Recovery rebuilds a claimed fan-out parent that stopped before child initialization, returns only unbound launching children to pending with their existing identity, reconciles completed linked runs, leaves still-active children alone, and refills available parallel slots without relaunching completed work. A vanished linked run follows the saved retry and failure policy with a bounded machine code, while impossible parent or child state fails closed.
+  - **Tests:** Extended SQLite and real Postgres recovery coverage across pre-initialization, pre-binding, completed, active, vanished, repeated, and invalid-state cases. The checks pin stable child identity, no duplicate command launch, policy-aware terminal state, and the bounded missing-run code; the complete repository Pyright pass remains clean.
 - **Collection workflows now launch bounded child batches through the normal run boundary.**
   - **What:** A `for_each` step rebuilds its private child plan from the saved collection, fills only the configured parallel slots, and sends every rendered command through the same policy, scope, ownership, workspace, and brokered-run checks as an ordinary run. Each completion backfills the next child or bounded retry, pre-run failures keep only a safe machine code, and an optional empty collection completes without creating child rows or exposing collection values.
   - **Tests:** Extended SQLite and real Postgres workflow coverage for normal child launch, private display redaction, bounded parallel backfill, pre-run rejection, immediate completion, optional empty collections, public count-only summaries, and module-size limits. The complete repository Pyright pass remains clean.
