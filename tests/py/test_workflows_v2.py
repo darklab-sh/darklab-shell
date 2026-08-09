@@ -432,6 +432,23 @@ def test_collection_capture_accumulator_is_bounded_deduplicated_and_required():
         "pointer": "/items", "required": True,
     }])
     assert missing.result() == ({}, "required collection captures were not found: items")
+    scalar = WorkflowCaptureAccumulator([{
+        "name": "items", "kind": "collection", "source": "first_nonempty_line",
+        "required": True,
+    }])
+    scalar.observe(LineEvent(text="must stay a collection", kind=LineKind.info))
+    assert scalar.result() == ({}, "")
+    oversized = WorkflowCollectionAccumulator([{
+        "name": "items", "kind": "collection", "source": "json_pointer",
+        "pointer": "/items",
+    }])
+    oversized.observe(LineEvent(json.dumps({
+        "items": [str(index) + ("x" * 1999) for index in range(5)],
+    })))
+    assert oversized.result()[1] == "workflow collection captures exceed the execution limit"
+    assert workflow_private_values({}, {"hosts": ["one.example", "two.example"]}) == (
+        "one.example", "two.example",
+    )
 
 
 def test_collection_capture_definitions_require_version_three_and_validate_limits():
@@ -624,6 +641,22 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state(monkeypatch
     )
     execution_id = execution["id"]
     step_id = execution["steps"][1]["step_id"]
+    collector_run_id = "run-fanout-collector"
+    assert claim_step_for_launch(execution_id, "collect") is not None
+    assert bind_step_run(execution_id, "collect", collector_run_id)
+    collector_state = finalize_run_step(
+        collector_run_id,
+        0,
+        collection_captures={"hosts": ["one.example", "two.example", "three.example"]},
+    )
+    assert collector_state is not None
+    assert collector_state["destination"] == "probe"
+    captured = get_execution(session_id, execution_id)
+    assert captured is not None
+    assert captured["variables"]["hosts"] == [
+        "one.example", "two.example", "three.example",
+    ]
+    assert "one.example" not in json.dumps(public_execution(captured))
     children = initialize_fanout_children(execution_id, step_id, 3)
     assert [(child["ordinal"], child["attempt"], child["status"]) for child in children] == [
         (0, 1, "pending"),
@@ -1760,6 +1793,37 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     assert all(item["owner_tab_id"] == "tab-workflow-context" for item in launched)
     assert stored["status"] == "completed"
 
+    collection_definition = compile_execution_definition({
+        "version": 3,
+        "id": "collect_once",
+        "title": "Collect once",
+        "inputs": [],
+        "steps": [{
+            "id": "collect",
+            "cmd": "printf hosts",
+            "captures": [{
+                "name": "hosts",
+                "kind": "collection",
+                "source": "first_nonempty_line",
+                "required": True,
+            }],
+        }],
+    })
+    collection_execution = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="collect_once",
+        workflow_source="config",
+        definition=collection_definition,
+        inputs={},
+    )
+    launch_execution_step(str(collection_execution["id"]))
+    collection_stored = get_execution(session_id, str(collection_execution["id"]))
+    assert collection_stored is not None
+    assert collection_stored["status"] == "completed"
+    assert collection_stored["variables"]["hosts"] == ["192.0.2.44"]
+    assert "192.0.2.44" not in json.dumps(public_execution(collection_stored))
+
 
 def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, caplog):
     from blueprints import run as run_routes
@@ -2043,18 +2107,82 @@ def test_required_capture_failure_uses_failure_branch_without_leaking_values(mon
     assert probe["error_code"] == "required_capture_missing"
     assert probe["selected_transition"] == "fallback"
     assert probe["transition_reason"] == "failure"
-    assert capture_failures == ["required_missing"]
+    collection_private_value = "collection-private.example"
+    collection_definition = compile_execution_definition({
+        "version": 3,
+        "id": "required_collection_capture_branch",
+        "title": "Required collection capture branch",
+        "inputs": [{"id": "target", "type": "domain", "required": True}],
+        "steps": [
+            {
+                "id": "probe",
+                "cmd": "printf no-match {{target}}",
+                "captures": [{
+                    "name": "answers",
+                    "kind": "collection",
+                    "source": "first_line_containing",
+                    "contains": "ANSWER=",
+                    "required": True,
+                }],
+                "next": {"success": "success_path", "failure": "fallback"},
+            },
+            {
+                "id": "success_path",
+                "cmd": "echo should-not-run",
+                "next": {"success": "complete", "failure": "stop"},
+            },
+            {
+                "id": "fallback",
+                "cmd": "echo collection-fallback",
+                "next": {"success": "complete", "failure": "stop"},
+            },
+        ],
+    })
+    collection_execution = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="required_collection_capture_branch",
+        workflow_source="personal",
+        definition=collection_definition,
+        inputs={"target": collection_private_value},
+    )
+    executions.launch_execution_step(collection_execution["id"])
+
+    collection_stored = get_execution(session_id, collection_execution["id"])
+    assert collection_stored is not None
+    assert collection_stored["status"] == "completed"
+    assert launched_commands == [
+        f"printf no-match {private_value}",
+        "echo fallback",
+        f"printf no-match {collection_private_value}",
+        "echo collection-fallback",
+    ]
+    assert [step["status"] for step in collection_stored["steps"]] == [
+        "failed", "skipped", "succeeded",
+    ]
+    collection_probe = collection_stored["steps"][0]
+    assert collection_probe["exit_code"] == 0
+    assert collection_probe["error_code"] == "required_capture_missing"
+    assert collection_probe["selected_transition"] == "fallback"
+    assert collection_probe["transition_reason"] == "failure"
+    assert capture_failures == ["required_missing", "required_missing"]
     assert any(record.getMessage() == "WORKFLOW_CAPTURE_FAILED" for record in caplog.records)
-    assert private_value not in caplog.text
-    event_page = replay_execution_events(stored, after=0, limit=100)
-    assert private_value not in json.dumps(event_page, sort_keys=True)
+    for value in (private_value, collection_private_value):
+        assert value not in caplog.text
+    event_payload = [
+        replay_execution_events(stored, after=0, limit=100),
+        replay_execution_events(collection_stored, after=0, limit=100),
+    ]
+    for value in (private_value, collection_private_value):
+        assert value not in json.dumps(event_payload, sort_keys=True)
     with get_db_connect()() as conn:
         audit_payload = [dict(row) for row in conn.execute("SELECT * FROM audit_events").fetchall()]
         notification_payload = [
             dict(row) for row in conn.execute("SELECT * FROM notification_events").fetchall()
         ]
-    assert private_value not in json.dumps(audit_payload, default=str, sort_keys=True)
-    assert private_value not in json.dumps(notification_payload, default=str, sort_keys=True)
+    for value in (private_value, collection_private_value):
+        assert value not in json.dumps(audit_payload, default=str, sort_keys=True)
+        assert value not in json.dumps(notification_payload, default=str, sort_keys=True)
 
 
 def test_server_orchestrator_rejects_interactive_pty_steps(monkeypatch):
@@ -2714,6 +2842,57 @@ def test_recovery_reclaims_stale_states_and_advances_completed_step_once(monkeyp
     assert [item for item in launched if item == (racing["id"], "inspect")] == [
         (racing["id"], "inspect")
     ]
+    assert executions.storage.fail_execution(stale["id"], "test_cleanup", "")
+    assert executions.storage.fail_execution(pending["id"], "test_cleanup", "")
+    assert executions.storage.fail_execution(racing["id"], "test_cleanup", "")
+
+    collection_definition = compile_execution_definition({
+        "version": 3,
+        "id": "recovery_collection",
+        "title": "Recovery collection",
+        "inputs": [],
+        "steps": [{
+            "id": "collect",
+            "cmd": "echo hosts",
+            "captures": [{
+                "name": "hosts", "kind": "collection",
+                "source": "first_nonempty_line", "required": True,
+            }],
+        }],
+    })
+    collection = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="recovery_collection",
+        workflow_source="config",
+        definition=collection_definition,
+        inputs={},
+    )
+    collection_run_id = "run-collection-" + uuid.uuid4().hex
+    assert claim_step_for_launch(collection["id"], "collect") is not None
+    assert bind_step_run(collection["id"], "collect", collection_run_id)
+    with get_db_connect()() as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+            "VALUES (?, ?, 'echo hosts', ?, ?, 0, ?, 2)",
+            (
+                collection_run_id,
+                session_id,
+                finished,
+                finished,
+                json.dumps([
+                    {"text": "one.example", "cls": ""},
+                    {"text": "two.example", "cls": ""},
+                ]),
+            ),
+        )
+        conn.commit()
+    assert executions.recover_workflow_execution(collection["id"]) == "recovered"
+    collection_stored = get_execution(session_id, collection["id"])
+    assert collection_stored is not None
+    assert collection_stored["status"] == "completed"
+    assert collection_stored["variables"]["hosts"] == ["one.example", "two.example"]
 
 
 def test_completed_personal_execution_moves_with_session_migration(monkeypatch):

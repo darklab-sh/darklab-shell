@@ -55,7 +55,12 @@ class WorkflowCaptureAccumulator:
 
     def __init__(self, captures: object):
         rules = captures if isinstance(captures, list) else []
-        self.rules = [dict(rule) for rule in rules[:MAX_CAPTURES_PER_STEP] if isinstance(rule, Mapping)]
+        self.rules = [
+            dict(rule)
+            for rule in rules[:MAX_CAPTURES_PER_STEP]
+            if isinstance(rule, Mapping)
+            and str(rule.get("kind") or rule.get("mode") or "").lower() != "collection"
+        ]
         self.values: dict[str, str] = {}
         self.errors: list[str] = []
         self._json_attempted: set[str] = set()

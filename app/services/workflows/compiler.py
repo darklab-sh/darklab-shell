@@ -556,7 +556,7 @@ def render_step_display_command(
 
 def workflow_private_values(
     definition: Mapping[str, object],
-    variables: Mapping[str, str],
+    variables: Mapping[str, object],
 ) -> tuple[str, ...]:
     """Return sensitive inputs and capture values that metadata must not expose."""
     raw_inputs = definition.get("inputs")
@@ -572,11 +572,14 @@ def workflow_private_values(
         if item.get("sensitive") and item.get("id")
     }
     private_names.update(name for name in variables if name not in input_names)
-    return tuple(
-        str(variables[name])
-        for name in sorted(private_names)
-        if name in variables and str(variables[name])
-    )
+    values: list[str] = []
+    for name in sorted(private_names):
+        value = variables.get(name)
+        if isinstance(value, list):
+            values.extend(str(item) for item in value if str(item))
+        elif value is not None and str(value):
+            values.append(str(value))
+    return tuple(values)
 
 
 def definition_json(definition: Mapping[str, object]) -> str:

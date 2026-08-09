@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Collection captures now persist as private bounded workflow values.**
+  - **What:** The normal output observer separates scalar and collection selectors, stores deduplicated collection lists in the execution's private variables, applies one combined capture-byte ceiling, and keeps each item in the private-value masking set. Recovery rebuilds both accumulator types from saved run output. Public execution payloads continue exposing counts rather than collection contents.
+  - **Tests:** Extended accumulator and workflow persistence coverage for selector separation, list-valued private state, next-step transitions, public redaction, and the existing fan-out lifecycle. Pyright remains clean for the complete repository.
 - **Completed collection child runs now advance through the normal workflow hook.**
   - **What:** Run finalization distinguishes private fan-out child links from scalar parent-step links. Each child advances its checkpoint exactly once; only the final child emits the parent transition and starts the saved next step, while intermediate and duplicate completions stay idle.
   - **Tests:** Extended SQLite and real Postgres lifecycle coverage to pass child completions through the shared run-finalization boundary, pin exactly-once next-step launch, cancel unfinished child state on the global runtime limit or an isolated hook failure, reject late completion, and keep the new lookup module inside the architecture ratchet. Pyright remains clean for the complete repository.

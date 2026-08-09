@@ -81,7 +81,10 @@ def _elapsed_ms(started: object, finished: object) -> int:
 
 def _capture_failure_metadata(error: str) -> tuple[str, str]:
     normalized = str(error or "").lower()
-    if "required captures were not found" in normalized:
+    if (
+        "required captures were not found" in normalized
+        or "required collection captures were not found" in normalized
+    ):
         return "required_capture_missing", "required_missing"
     if "execution limit" in normalized:
         return "capture_total_limit", "total_limit"
@@ -688,6 +691,7 @@ def finalize_run_step(
     exit_code: int,
     *,
     captures: Mapping[str, str] | None = None,
+    collection_captures: Mapping[str, list[str]] | None = None,
     capture_error: str = "",
 ) -> dict[str, Any] | None:
     """Finalize a linked step and select its next destination exactly once."""
@@ -705,7 +709,13 @@ def finalize_run_step(
             return None
         definition = dialect.decode_json_dict(row["definition_snapshot"])
         variables = dialect.decode_json_dict(row["variables"])
-        pending_captures = {str(key): str(value) for key, value in (captures or {}).items()}
+        pending_captures: dict[str, object] = {
+            str(key): str(value) for key, value in (captures or {}).items()
+        }
+        pending_captures.update({
+            str(key): [str(item) for item in value]
+            for key, value in (collection_captures or {}).items()
+        })
         current_step = next(
             (
                 step
@@ -729,13 +739,18 @@ def finalize_run_step(
             for item in definition.get("inputs") or []
             if isinstance(item, Mapping)
         }
-        capture_values = {
-            key: str(value)
+        capture_values: dict[str, object] = {
+            key: value
             for key, value in variables.items()
             if key not in input_ids
         }
         capture_values.update(pending_captures)
-        if sum(len(value.encode("utf-8")) for value in capture_values.values()) > MAX_CAPTURE_TOTAL_BYTES:
+        capture_bytes = sum(
+            len(str(item).encode("utf-8"))
+            for value in capture_values.values()
+            for item in (value if isinstance(value, list) else [value])
+        )
+        if capture_bytes > MAX_CAPTURE_TOTAL_BYTES:
             capture_error = capture_error or "workflow captures exceed the execution limit"
             pending_captures = {}
         variables.update(pending_captures)

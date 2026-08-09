@@ -15,9 +15,11 @@ from core.database_access import get_db_connect
 from services.metrics_lazy import app_metrics
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.runs.output_store import load_run_output_events_for_run
+from services.runs.output_model import LineEvent
 from services.teams.capabilities import Capability, role_can
 from services.teams.storage import get_member, get_team
 from services.workflows.captures import WorkflowCaptureAccumulator
+from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.compiler import (
     WorkflowDefinitionError,
     render_step_command,
@@ -163,6 +165,25 @@ def _definition_step(definition: Mapping[str, object], step_id: str) -> dict[str
     return None
 
 
+def _capture_results(
+    capture: object | None,
+) -> tuple[dict[str, str], dict[str, list[str]], str]:
+    scalar = getattr(capture, "workflow_capture_accumulator", None)
+    collection = getattr(capture, "workflow_collection_accumulator", None)
+    captures: dict[str, str] = {}
+    collections: dict[str, list[str]] = {}
+    errors: list[str] = []
+    if isinstance(scalar, WorkflowCaptureAccumulator):
+        captures, error = scalar.result()
+        if error:
+            errors.append(error)
+    if isinstance(collection, WorkflowCollectionAccumulator):
+        collections, error = collection.result()
+        if error:
+            errors.append(error)
+    return captures, collections, "; ".join(errors)
+
+
 def _log_step_transition(state: Mapping[str, object]) -> None:
     duration_ms = int(str(state.get("duration_ms") or 0))
     log.info("WORKFLOW_STEP_COMPLETED", extra={
@@ -251,15 +272,12 @@ def finalize_workflow_run(run_id: str, exit_code: int, capture: object | None) -
         if not parent_transition.get("terminal"):
             launch_execution_step(str(parent_transition["execution_id"]))
         return dict(parent_transition)
-    accumulator = getattr(capture, "workflow_capture_accumulator", None)
-    captures: dict[str, str] = {}
-    capture_error = ""
-    if isinstance(accumulator, WorkflowCaptureAccumulator):
-        captures, capture_error = accumulator.result()
+    captures, collection_captures, capture_error = _capture_results(capture)
     state = storage.finalize_run_step(
         run_id,
         int(exit_code),
         captures=captures,
+        collection_captures=collection_captures,
         capture_error=capture_error,
     )
     if not state:
@@ -346,14 +364,20 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
         return None
 
     accumulator = WorkflowCaptureAccumulator(step.get("captures"))
+    collection_accumulator = WorkflowCollectionAccumulator(step.get("captures"))
     capture_holder: dict[str, object] = {}
 
     def attach_run(run_id: str, capture: object | None) -> None:
         if not storage.bind_step_run(execution_id, step_id, run_id):
             raise _WorkflowRunBindingError("workflow step run binding was already claimed")
         if capture is not None:
-            setattr(capture, "_event_observer", accumulator.observe)
+            def observe(event: LineEvent) -> None:
+                accumulator.observe(event)
+                collection_accumulator.observe(event)
+
+            setattr(capture, "_event_observer", observe)
             setattr(capture, "workflow_capture_accumulator", accumulator)
+            setattr(capture, "workflow_collection_accumulator", collection_accumulator)
             capture_holder["capture"] = capture
 
     try:
@@ -500,6 +524,7 @@ def _recover_completed_step(
         })
         return None
     accumulator = WorkflowCaptureAccumulator(step_definition.get("captures"))
+    collection_accumulator = WorkflowCollectionAccumulator(step_definition.get("captures"))
     output = load_run_output_events_for_run(
         run,
         log_event="WORKFLOW_RECOVERY_OUTPUT_LOAD_FAILED",
@@ -511,11 +536,15 @@ def _recover_completed_step(
     )
     for event in output.events:
         accumulator.observe(event)
+        collection_accumulator.observe(event)
     captures, capture_error = accumulator.result()
+    collection_captures, collection_error = collection_accumulator.result()
+    capture_error = "; ".join(error for error in (capture_error, collection_error) if error)
     state = storage.finalize_run_step(
         str(run.get("id") or ""),
         int(str(run.get("exit_code") or 0)),
         captures=captures,
+        collection_captures=collection_captures,
         capture_error=capture_error,
     )
     if state:
