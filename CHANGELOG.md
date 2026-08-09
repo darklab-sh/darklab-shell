@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Workflow fan-out child attempts now move through atomic, restart-safe lifecycle transitions.**
+  - **What:** Claiming a pending child moves the same ordinal from the parent checkpoint into running state in one transaction. A claimed child can bind one run exactly once, and finalization records success or a bounded machine error code while advancing the checkpoint exactly once. Recovery can return only an unbound launching child to pending without changing its stable identity; child collection values, rendered commands, and free-form errors remain outside durable state and public payloads.
+  - **Tests:** Extended SQLite and real Postgres coverage pins claim conflicts, checkpoint alignment, unbound recovery, stable identity, one-time run binding, idempotent completion, safe error-code validation, and public-summary privacy. The full Pyright pass remains at zero errors and warnings.
 - **Workflow fan-out now has durable, value-free child identities.**
   - **What:** Each validated `for_each` parent can idempotently reserve one private attempt row per bounded collection ordinal together with the parent checkpoint. Rows keep only stable identity, attempt, run link, status, exit code, bounded error code, and lifecycle timestamps; collection values, rendered commands, and free-form errors aren't stored or returned through public execution payloads.
   - **Tests:** SQLite and real Postgres coverage pins migration-head parity, timestamp types, indexes, parent linkage, idempotent initialization, child bounds, checkpoint alignment, and the no-value schema and serializer boundary. Pyright remains clean for the touched workflow modules.

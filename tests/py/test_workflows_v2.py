@@ -22,6 +22,12 @@ from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNois
 from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.fanout import expand_collection_step, next_fanout_batch
+from services.workflows.fanout_child_lifecycle import (
+    bind_fanout_child_run,
+    claim_fanout_child,
+    finalize_fanout_child_run,
+    reset_launching_fanout_child_for_recovery,
+)
 from services.workflows.fanout_children import initialize_fanout_children, list_fanout_children
 from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy, should_retry
 from services.workflows.fanout_checkpoint import checkpoint_from_payload, create_fanout_checkpoint
@@ -554,6 +560,9 @@ def test_collection_fanout_policy_normalizes_retry_parallel_and_failure_modes():
 def test_collection_fanout_checkpoint_resumes_without_relaunching_completed_children():
     checkpoint = create_fanout_checkpoint(4)
     assert checkpoint.next_batch(2) == (0, 1)
+    checkpoint = checkpoint.mark_running([0, 1]).reset_running([1])
+    assert checkpoint.running == (0,)
+    assert checkpoint.pending == (1, 2, 3)
     checkpoint = checkpoint.mark_completed([0, 1])
     assert checkpoint.next_batch(2) == (2, 3)
     checkpoint = checkpoint.mark_failed([2])
@@ -643,6 +652,58 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state():
         initialize_fanout_children(execution_id, step_id, 33)
     with pytest.raises(ValueError, match="overlap"):
         set_fanout_checkpoint(execution_id, step_id, {"pending": [1], "completed": [1], "failed": [], "cancelled": False})
+
+    assert claim_step_for_launch(execution_id, step_id) is not None
+    claimed = claim_fanout_child(execution_id, step_id, 0)
+    assert claimed is not None
+    assert claimed["id"] == children[0]["id"]
+    assert claimed["status"] == "launching"
+    assert claim_fanout_child(execution_id, step_id, 0) is None
+    stored = get_execution(session_id, execution_id)
+    assert stored is not None
+    assert stored["steps"][1]["fanout_checkpoint"] == {
+        "pending": [1], "running": [0], "completed": [], "failed": [], "cancelled": False,
+    }
+
+    child_id = str(claimed["id"])
+    assert reset_launching_fanout_child_for_recovery(child_id) is True
+    assert reset_launching_fanout_child_for_recovery(child_id) is False
+    assert claim_fanout_child(execution_id, step_id, 0) is not None
+    assert bind_fanout_child_run(child_id, "run-fanout-0") is True
+    assert bind_fanout_child_run(child_id, "run-fanout-duplicate") is False
+    succeeded = finalize_fanout_child_run("run-fanout-0", 0)
+    assert succeeded is not None
+    assert succeeded["status"] == "succeeded"
+    assert succeeded["error_code"] == ""
+    assert finalize_fanout_child_run("run-fanout-0", 0) is None
+
+    second = claim_fanout_child(execution_id, step_id, 1)
+    assert second is not None
+    assert bind_fanout_child_run(str(second["id"]), "run-fanout-1") is True
+    with pytest.raises(ValueError, match="error code is invalid"):
+        finalize_fanout_child_run("run-fanout-1", 2, error_code="private.example")
+    failed = finalize_fanout_child_run("run-fanout-1", 2, error_code="scope_rejected")
+    assert failed is not None
+    assert failed["status"] == "failed"
+    assert failed["error_code"] == "scope_rejected"
+
+    stored = get_execution(session_id, execution_id)
+    assert stored is not None
+    assert stored["steps"][1]["fanout_checkpoint"] == {
+        "pending": [], "running": [], "completed": [0], "failed": [1], "cancelled": False,
+    }
+    final_children = list_fanout_children(execution_id, step_id)
+    assert [(child["id"], child["status"]) for child in final_children] == [
+        (children[0]["id"], "succeeded"),
+        (children[1]["id"], "failed"),
+    ]
+    final_public = public_execution(stored)
+    assert final_public["steps"][1]["fanout_summary"] == {
+        "total": 2, "pending": 0, "running": 0, "succeeded": 1,
+        "failed": 1, "skipped": 0, "cancelled": False,
+        "failure_samples": ["child_failed"],
+    }
+    assert "scope_rejected" not in json.dumps(final_public)
 
 
 def test_collection_fanout_summary_exposes_counts_and_bounded_error_codes_only():

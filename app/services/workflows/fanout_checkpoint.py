@@ -42,6 +42,13 @@ class FanoutCheckpoint:
     def mark_failed(self, ordinals: tuple[int, ...] | list[int]) -> "FanoutCheckpoint":
         return self._advance(ordinals, completed=False)
 
+    def reset_running(self, ordinals: tuple[int, ...] | list[int]) -> "FanoutCheckpoint":
+        """Return unbound launching children to stable pending order."""
+        chosen = {int(item) for item in ordinals if int(item) in self.running}
+        pending = tuple(sorted(dict.fromkeys((*self.pending, *chosen))))
+        running = tuple(item for item in self.running if item not in chosen)
+        return FanoutCheckpoint(pending, running, self.completed, self.failed, self.cancelled)
+
     def cancel(self) -> "FanoutCheckpoint":
         return FanoutCheckpoint(self.pending, self.running, self.completed, self.failed, True)
 

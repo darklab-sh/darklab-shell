@@ -3521,6 +3521,12 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         initialize_fanout_children,
         list_fanout_children,
     )
+    from services.workflows.fanout_child_lifecycle import (
+        bind_fanout_child_run,
+        claim_fanout_child,
+        finalize_fanout_child_run,
+        reset_launching_fanout_child_for_recovery,
+    )
     from services.workflows.storage import (
         active_execution_page_for_recovery,
         bind_step_run,
@@ -3799,6 +3805,35 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     ]
     assert list_fanout_children(fanout_execution["id"], fanout_step_id) == fanout_children
     assert all(child["run_id"] == "" and child["error_code"] == "" for child in fanout_children)
+    assert claim_step_for_launch(fanout_execution["id"], fanout_step_id) is not None
+    claimed_child = claim_fanout_child(fanout_execution["id"], fanout_step_id, 0)
+    assert claimed_child is not None and claimed_child["status"] == "launching"
+    claimed_child_id = str(claimed_child["id"])
+    assert reset_launching_fanout_child_for_recovery(claimed_child_id) is True
+    assert claim_fanout_child(fanout_execution["id"], fanout_step_id, 0) is not None
+    assert bind_fanout_child_run(claimed_child_id, "run-pg-fanout-0") is True
+    assert finalize_fanout_child_run("run-pg-fanout-0", 0) is not None
+    second_child = claim_fanout_child(fanout_execution["id"], fanout_step_id, 1)
+    assert second_child is not None
+    assert bind_fanout_child_run(str(second_child["id"]), "run-pg-fanout-1") is True
+    assert finalize_fanout_child_run(
+        "run-pg-fanout-1",
+        2,
+        error_code="scope_rejected",
+    ) is not None
+    final_fanout_children = list_fanout_children(fanout_execution["id"], fanout_step_id)
+    assert [(child["status"], child["error_code"]) for child in final_fanout_children] == [
+        ("succeeded", ""),
+        ("failed", "scope_rejected"),
+    ]
+    checkpoint = conn.execute(
+        "SELECT fanout_checkpoint FROM workflow_execution_steps "
+        "WHERE execution_id = %s AND step_id = %s",
+        (fanout_execution["id"], fanout_step_id),
+    ).fetchone()["fanout_checkpoint"]
+    assert checkpoint == {
+        "pending": [], "running": [], "completed": [0], "failed": [1], "cancelled": False,
+    }
 
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
@@ -3824,6 +3859,29 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
             yield PostgresSqliteCompatConnection(raw_conn)
 
     monkeypatch.setattr(core_database, "db_connect", _concurrent_postgres_connect)
+    contended_fanout = create_execution(
+        session_id=str(uuid.uuid4()),
+        team_id="",
+        workflow_id="postgres_fanout_contention",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    contended_step_id = str(contended_fanout["steps"][1]["step_id"])
+    initialize_fanout_children(contended_fanout["id"], contended_step_id, 1)
+    assert claim_step_for_launch(contended_fanout["id"], contended_step_id) is not None
+    child_claim_barrier = Barrier(2)
+
+    def claim_child_concurrently() -> dict[str, object] | None:
+        child_claim_barrier.wait()
+        return claim_fanout_child(contended_fanout["id"], contended_step_id, 0)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        child_claims = list(pool.map(lambda _index: claim_child_concurrently(), range(2)))
+
+    assert sum(claim is not None for claim in child_claims) == 1
+    assert list_fanout_children(contended_fanout["id"], contended_step_id)[0]["status"] == "launching"
+
     barrier = Barrier(2)
     concurrent_session_id = str(uuid.uuid4())
     definition = {
