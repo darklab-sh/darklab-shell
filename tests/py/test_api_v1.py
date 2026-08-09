@@ -6389,6 +6389,14 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert "schema_artifact_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
     assert "evidence_selection" in schemas["AssessmentActionPlan"]["properties"]
     assert "artifact_selection" in schemas["AssessmentActionPlan"]["properties"]
+    assert schemas["AssessmentActionPlan"]["properties"]["nuclei_profile"] == {
+        "$ref": "#/components/schemas/AssessmentNucleiTemplateProfile",
+    }
+    assert schemas["AssessmentNucleiTemplateProfile"]["additionalProperties"] is False
+    assert schemas["AssessmentNucleiTemplateProfile"]["properties"]["update_policy"] == {
+        "type": "string",
+        "enum": ["explicit_only"],
+    }
     assert schemas["AssessmentOpenApiArtifactSelection"]["properties"]["options"][
         "maxItems"
     ] == 64

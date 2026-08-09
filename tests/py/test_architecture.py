@@ -25,6 +25,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "auth.py",
     "openapi.py",
     "openapi_assessment_action_artifact.py",
+    "openapi_assessment_action_nuclei.py",
     "openapi_assessment_action_profile.py",
     "openapi_assessment_action_schemas.py",
     "openapi_atlas_profile.py",
@@ -233,6 +234,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/api_v1/openapi_assessment_action_artifact.py",
         60,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_assessment_action_nuclei.py",
+        33,
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_actions.py", 89, "split-package-ratchet"),

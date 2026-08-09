@@ -193,11 +193,11 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **What:** Command planning returns no intrusive plan unless the caller explicitly confirms the higher-risk profile; safe and standard profiles are unaffected.
   - **Tests:** Assessment command coverage pins the confirmation gate and headless argument.
 - **Assessment Nuclei plans now use reviewed profiles.**
-  - **What:** Safe, standard, and explicitly intrusive profiles have fixed severity/headless arguments; safe remains the default and unknown names fail closed.
-  - **Tests:** Command-plan coverage pins profile allowlisting and default behavior.
+  - **What:** Safe, standard, and explicitly intrusive profiles now have fixed template families, tags, protocols, severities, and exclusions. Generic Assessment actions derive the profile from the frozen check policy, while unknown names fail closed to safe and intrusive plans still require a separate confirmation boundary. All three profiles disable callbacks, redirects, and implicit template updates; safe and standard also exclude code, local-file, workflow, headless, and intrusive templates.
+  - **Tests:** Command-plan coverage pins every safe argument, standard CVE/API/network selection, intrusive headless/DAST bounds, profile allowlisting, and default behavior.
 - **Nuclei profiles now expose provenance and safety exclusions.**
-  - **What:** Each reviewed profile identifies its app-managed template source, excluded categories, and whether launch confirmation is required.
-  - **Tests:** Profile coverage pins safe exclusions and intrusive confirmation metadata.
+  - **What:** The desktop and mobile launch preview names the reviewed profile, included template families, excluded tags and protocols, managed-cache source, and explicit-only update policy before confirmation.
+  - **Tests:** Profile and Assessment UI coverage pins the public metadata, visible safety exclusions, corrected finding-materialization note, and intrusive confirmation state.
 - **Assessment discovery now normalizes passive historical URLs safely.**
   - **What:** Historical HTTP(S) URLs retain source/run provenance, are deduplicated and bounded, and are never classified as vulnerability findings by normalization alone.
   - **Tests:** URL coverage pins credential, fragment, scheme, deduplication, and provenance boundaries.

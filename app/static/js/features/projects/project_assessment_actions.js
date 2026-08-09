@@ -33,6 +33,18 @@ function planContent(plan) {
       ['OpenAPI schema', text(plan.artifact_selection?.selected?.name, 'None')],
       ['Read operations', plan.artifact_selection?.selected?.operation_count || 'None'],
     ] : []),
+    ...(plan.nuclei_profile ? [
+      ['Nuclei profile', text(plan.nuclei_profile.label)],
+      ['Template source', text(plan.nuclei_profile.template_source).replaceAll('_', ' ')],
+      ['Template families', (plan.nuclei_profile.template_families || []).join(', ')],
+      ['Excluded templates', [
+        ...(plan.nuclei_profile.excluded_tags || []),
+        ...(plan.nuclei_profile.excluded_protocols || []),
+      ].join(', ')],
+      ['Template updates', plan.nuclei_profile.update_policy === 'explicit_only'
+        ? 'Explicit action only'
+        : text(plan.nuclei_profile.update_policy)],
+    ] : []),
     ['HTTP profile', text(plan.http_profile?.name, 'None')],
     ['Profile role', text(plan.http_profile?.role, 'Anonymous')],
     ['Policy', text(plan.policy_level)],
@@ -278,7 +290,7 @@ async function launchAssessmentAction(context, options = {}) {
     const choice = await confirm({
       body: {
         text: `Start ${text(plan.action?.id, 'this assessment action')}?`,
-        note: 'The run will be linked to this Project. Compatible saved output can update this check, but it will not create or close a finding automatically.',
+        note: 'The run will be linked to this Project. Compatible saved output can update this check. Reviewed validators may also create linked findings; no run closes findings automatically.',
       },
       content: planContent(plan),
       tone: ['standard', 'intrusive'].includes(plan.policy_level) ? 'warning' : null,

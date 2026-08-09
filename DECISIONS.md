@@ -252,6 +252,14 @@ Assessor-authored findings get an opaque identity when they're created, and that
 
 Safe actions use the normal launch confirmation. Standard actions disclose target, fan-out, request, time, and credential bounds. Intrusive actions require operator enablement and per-launch confirmation. Destructive actions are unavailable from assessment recommendations, workflows, API, and CLI.
 
+#### Nuclei Recommendations Use Reviewed Template Profiles
+
+**Generic Nuclei checks use fixed safe, standard, or intrusive profiles instead of an open-ended template selection.**
+
+The frozen Assessment policy selects the profile. Safe covers high and critical exposure, misconfiguration, technology, and TLS checks. Standard adds medium-severity known-CVE, network-service, and API checks. Both exclude intrusive, callback, code, local-file, workflow, headless, fuzzing, brute-force, denial-of-service, and exploit templates. The intrusive profile is separately gated and limited to reviewed headless and low-aggression DAST checks. All profiles disable redirects, Interactsh, and automatic template updates.
+
+The confirmation shows the profile, included families, exclusions, and explicit-only update policy before the operator starts the run. Unknown profile names fail closed to safe. The dedicated subdomain-takeover check remains a separate digest-pinned one-template contract.
+
 `assessment_intrusive_actions_enabled` is the deployment gate and defaults to `false`. It is a necessary condition, not an authorization bypass: each maintained intrusive plan still has to prove its exact frozen check, Project target, source evidence, bounds, and fresh confirmation immediately before execution. The ordinary command registry remains on its existing policy, and destructive actions have no launch path even when the gate is enabled.
 
 A finding can repeat its saved assessment command only from a freshly recomputed plan tied to the exact originating check and still-confirmed Project target. The operator sees the command, target, policy, Project-only fan-out, request/time bounds, and credential use before confirming the plan digest. This path accepts maintained safe and standard command templates only; it rejects workflows, unsupported commands, stale plans, archived context, and intrusive or destructive policy. The resulting run stays linked to the Project, and neither launch nor completion changes the finding's human verification disposition.

@@ -13,6 +13,7 @@ from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.assessments.command_plans import command_plan
 from services.assessments.dalfox_xss_actions import DalfoxXssActionContext
+from services.assessments.nuclei_profiles import nuclei_profile, public_nuclei_profile
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
 from services.assessments.schemathesis_actions import SchemathesisActionContext
@@ -114,6 +115,11 @@ def build_assessment_action_plan(
     launchable = True
     unavailable_reason = ""
     selected_command = None
+    selected_nuclei_profile = (
+        nuclei_profile(policy_level)
+        if action_id == "nuclei" and check_key != NUCLEI_TAKEOVER_CHECK_KEY
+        else None
+    )
     if str(row["project_status"] or "") == "archived":
         launchable = False
         unavailable_reason = "Assessment runs cannot start from an archived Project."
@@ -187,6 +193,9 @@ def build_assessment_action_plan(
                 target["value"],
                 web_target=http_profile_web_target,
                 http_profile=http_profile,
+                nuclei_profile=(
+                    selected_nuclei_profile.key if selected_nuclei_profile else "safe"
+                ),
             )
         )
         if selected_command is None:
@@ -245,6 +254,8 @@ def build_assessment_action_plan(
         payload["evidence_selection"] = dalfox_xss.public_selection()
     if schemathesis:
         payload["artifact_selection"] = schemathesis.public_selection()
+    if selected_nuclei_profile:
+        payload["nuclei_profile"] = public_nuclei_profile(selected_nuclei_profile.key)
     payload["plan_digest"] = _digest(payload)
     return payload
 

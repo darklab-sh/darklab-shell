@@ -9,6 +9,7 @@ from copy import deepcopy
 from typing import Any
 
 from services.api_v1.openapi_assessment_action_artifact import assessment_artifact_schemas
+from services.api_v1.openapi_assessment_action_nuclei import assessment_nuclei_profile_schema
 from services.api_v1.openapi_verification_actions import verification_action_schemas
 
 
@@ -21,6 +22,7 @@ def assessment_action_schemas() -> dict[str, Any]:
     plan["properties"]["evidence_selection"] = _ref("AssessmentParameterEvidenceSelection")
     plan["properties"]["artifact_selection"] = _ref("AssessmentOpenApiArtifactSelection")
     schemas = {
+        "AssessmentNucleiTemplateProfile": assessment_nuclei_profile_schema(),
         "AssessmentParameterEvidenceOption": {
             "type": "object",
             "required": [
@@ -98,6 +100,3 @@ def assessment_evidence_parameters() -> list[dict[str, Any]]:
             "schema": {"type": "string"},
         },
     ]
-
-
-__all__ = ["assessment_action_schemas", "assessment_evidence_parameters"]

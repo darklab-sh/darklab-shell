@@ -448,6 +448,9 @@
           "launchable": {
             "type": "boolean"
           },
+          "nuclei_profile": {
+            "$ref": "#/components/schemas/AssessmentNucleiTemplateProfile"
+          },
           "plan_digest": {
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
@@ -2073,6 +2076,82 @@
         },
         "required": [
           "state"
+        ],
+        "type": "object"
+      },
+      "AssessmentNucleiTemplateProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "dast": {
+            "type": "boolean"
+          },
+          "excluded_protocols": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "excluded_tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "headless": {
+            "type": "boolean"
+          },
+          "key": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive"
+            ],
+            "type": "string"
+          },
+          "template_families": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "template_source": {
+            "enum": [
+              "managed_cache"
+            ],
+            "type": "string"
+          },
+          "update_policy": {
+            "enum": [
+              "explicit_only"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "policy_level",
+          "template_source",
+          "template_families",
+          "excluded_tags",
+          "excluded_protocols",
+          "headless",
+          "dast",
+          "update_policy"
         ],
         "type": "object"
       },
@@ -4617,6 +4696,9 @@
           },
           "launchable": {
             "type": "boolean"
+          },
+          "nuclei_profile": {
+            "$ref": "#/components/schemas/AssessmentNucleiTemplateProfile"
           },
           "plan_digest": {
             "pattern": "^[a-f0-9]{64}$",

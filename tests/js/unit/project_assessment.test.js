@@ -404,20 +404,54 @@ describe('project assessment controller', () => {
     expect(viewerCreate.title).toContain('View-only')
   })
 
-  it('previews and confirms a saved check action before handing its run to the terminal', async () => {
-    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+  it('previews reviewed Nuclei bounds before handing its run to the terminal', async () => {
+    const nucleiDetail = {
+      ...detail,
+      assessment: {
+        ...detail.assessment,
+        profile_snapshot: {
+          checks: [
+            { key: 'service_inventory', label: 'Vulnerability templates', purpose: 'Review known exposures.' },
+            detail.assessment.profile_snapshot.checks[1],
+          ],
+        },
+      },
+      checks: {
+        ...detail.checks,
+        checks: [
+          {
+            ...detail.checks.checks[0],
+            policy_level: 'standard',
+            recommended_action_key: 'command:nuclei',
+          },
+          detail.checks.checks[1],
+        ],
+      },
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options) => {
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(nucleiDetail)
+      return responseFor(url, options)
+    })
     const actionPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_1/recommended-action'
     const plan = {
-      action: { id: 'nmap', key: 'command:nmap', kind: 'command' },
+      action: { id: 'nuclei', key: 'command:nuclei', kind: 'command' },
       target: { entity_id: 'ent_1', type: 'domain', value: 'example.com' },
       http_profile: { name: '', credential_use: 'none' },
       policy_level: 'standard',
       scope: { target_count: 1, fan_out: 1 },
       bounds: {
-        summary: 'One approved host, the top 100 TCP ports, and a 10-minute host timeout.',
+        summary: 'One approved target using the reviewed template profile.',
         credential_use: 'none',
       },
-      display_command: 'nmap -sT -sV -Pn --top-ports 100 example.com',
+      nuclei_profile: {
+        label: 'Standard vulnerability review',
+        template_source: 'managed_cache',
+        template_families: ['Exposure', 'Misconfiguration', 'Known CVEs', 'Technology', 'Network services', 'TLS', 'API'],
+        excluded_tags: ['intrusive', 'oast', 'dast'],
+        excluded_protocols: ['code', 'javascript', 'file', 'headless'],
+        update_policy: 'explicit_only',
+      },
+      display_command: 'nuclei -u https://example.com -tags exposure,misconfig,cve,tech,network,ssl,api',
       launchable: true,
       unavailable_reason: '',
       plan_digest: 'a'.repeat(64),
@@ -448,7 +482,7 @@ describe('project assessment controller', () => {
     controller.renderAssessment(container, 'prj_1')
     container.querySelector('.project-assessment-target-toggle')?.click()
     const runButton = [...container.querySelectorAll('.project-assessment-check-row .btn')]
-      .find(button => button.textContent === 'Run Nmap')
+      .find(button => button.textContent === 'Run Nuclei')
     runButton.click()
 
     await vi.waitFor(() => expect(attachActiveRunFromMonitor).toHaveBeenCalledWith(
@@ -465,7 +499,15 @@ describe('project assessment controller', () => {
       refocusOnResolve: false,
       tone: 'warning',
     }))
-    expect(ctx.showConfirm.mock.calls[0][0].content.textContent).toContain(plan.display_command)
+    const confirmation = ctx.showConfirm.mock.calls[0][0]
+    expect(confirmation.content.textContent).toContain(plan.display_command)
+    expect(confirmation.content.textContent).toContain('Nuclei profileStandard vulnerability review')
+    expect(confirmation.content.textContent).toContain('Template sourcemanaged cache')
+    expect(confirmation.content.textContent).toContain('Template familiesExposure, Misconfiguration, Known CVEs')
+    expect(confirmation.content.textContent).toContain('Excluded templatesintrusive, oast, dast, code')
+    expect(confirmation.content.textContent).toContain('Template updatesExplicit action only')
+    expect(confirmation.body.note).toContain('Reviewed validators may also create linked findings')
+    expect(confirmation.body.note).toContain('no run closes findings automatically')
     expect(ctx.closeProjectWorkspace).toHaveBeenCalledWith({ refocus: false })
     expect(controller.stateFor('prj_1').category).toBe('discovery')
   })

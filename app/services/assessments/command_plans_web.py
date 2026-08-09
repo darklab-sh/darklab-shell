@@ -49,7 +49,7 @@ def web_command_plans(
         "nuclei": CommandPlan(
             f"nuclei -u {target} {' '.join(nuclei_args)} -rl {rate} "
             f"-c {concurrency} -timeout 10 -retries 1 -silent{protected_suffix}",
-            f"One approved target, high/critical templates, {rate} requests per second, "
+            f"One approved target, the reviewed template profile, {rate} requests per second, "
             f"concurrency {concurrency}, and one retry.",
             None,
             None,

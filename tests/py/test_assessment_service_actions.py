@@ -138,7 +138,12 @@ from services.assessments.takeover_confirmation import (
 )
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
-from services.assessments.nuclei_profiles import nuclei_profile, nuclei_profile_args, nuclei_profile_keys
+from services.assessments.nuclei_profiles import (
+    nuclei_profile,
+    nuclei_profile_args,
+    nuclei_profile_keys,
+    public_nuclei_profile,
+)
 from services.assessments.historical_urls import (
     filter_historical_urls,
     normalize_domain_scoped_historical_urls,
@@ -349,13 +354,40 @@ def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
 def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     assert nuclei_profile_keys() == ("safe", "standard", "intrusive")
     assert nuclei_profile("unknown").key == "safe"
-    assert nuclei_profile_args("safe") == ("-severity", "high,critical")
-    assert nuclei_profile_args("intrusive") == (
-        "-severity", "low,medium,high,critical", "-headless"
+    safe_args = nuclei_profile_args("safe")
+    assert safe_args == (
+        "-severity", "high,critical",
+        "-tags", "exposure,misconfig,tech,ssl",
+        "-type", "http,tcp,ssl",
+        "-exclude-tags", "auth,brute,dos,exploit,fuzz,intrusive,oast,dast",
+        "-exclude-type", "code,javascript,file,workflow,whois,headless",
+        "-no-interactsh", "-disable-redirects", "-disable-update-check",
     )
-    assert "exploit" in nuclei_profile("safe").excluded_categories
+    intrusive_args = nuclei_profile_args("intrusive")
+    assert intrusive_args[-3:] == ("-dast", "-fuzz-aggression", "low")
+    assert "-headless" in intrusive_args
+    assert "exploit" in nuclei_profile("safe").excluded_tags
     assert nuclei_profile("intrusive").requires_confirmation is True
-    assert nuclei_profile("safe").template_source == "app-managed"
+    assert nuclei_profile("safe").template_source == "managed_cache"
+    assert public_nuclei_profile("standard") == {
+        "key": "standard",
+        "label": "Standard vulnerability review",
+        "policy_level": "standard",
+        "template_source": "managed_cache",
+        "template_families": [
+            "Exposure", "Misconfiguration", "Known CVEs", "Technology",
+            "Network services", "TLS", "API",
+        ],
+        "excluded_tags": [
+            "auth", "brute", "dos", "exploit", "fuzz", "intrusive", "oast", "dast",
+        ],
+        "excluded_protocols": [
+            "code", "javascript", "file", "workflow", "whois", "headless",
+        ],
+        "headless": False,
+        "dast": False,
+        "update_policy": "explicit_only",
+    }
     safe = command_plan("nuclei", "domain", "example.com")
     standard = command_plan("nuclei", "domain", "example.com", nuclei_profile="standard")
     assert command_plan("nuclei", "domain", "example.com", nuclei_profile="intrusive") is None
@@ -364,7 +396,50 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default():
     )
     assert "-severity high,critical" in safe.command
     assert "-severity medium,high,critical" in standard.command
+    assert "-tags exposure,misconfig,cve,tech,network,ssl,api" in standard.command
+    assert "-no-interactsh -disable-redirects -disable-update-check" in standard.command
     assert "-headless" in intrusive.command
+    row = {
+        "check_id": "ach_nuclei",
+        "assessment_id": "asm_nuclei",
+        "check_key": "vulnerability_templates",
+        "target_entity_id": "ent_nuclei",
+        "target_type": "url",
+        "target_value": "https://app.example.test",
+        "policy_level": "standard",
+        "recommended_action_key": "command:nuclei",
+        "profile_key": "web",
+        "profile_version": "1.4",
+        "profile_snapshot": json.dumps({"checks": [{
+            "key": "vulnerability_templates",
+            "policy_level": "standard",
+            "recommended_action": "command:nuclei",
+        }]}),
+        "assessment_status": "active",
+        "project_status": "active",
+    }
+    target = {
+        "entity_id": "ent_nuclei",
+        "type": "url",
+        "value": "https://app.example.test",
+    }
+
+    plan = build_assessment_action_plan(row, target, "prj_nuclei")
+
+    assert plan["launchable"] is True
+    assert plan["nuclei_profile"] == public_nuclei_profile("standard")
+    assert "-severity medium,high,critical" in plan["display_command"]
+    assert "-tags exposure,misconfig,cve,tech,network,ssl,api" in plan["display_command"]
+    assert "-type http,tcp,ssl" in plan["display_command"]
+    assert "-exclude-tags auth,brute,dos,exploit,fuzz,intrusive,oast,dast" in (
+        plan["display_command"]
+    )
+    assert "-exclude-type code,javascript,file,workflow,whois,headless" in (
+        plan["display_command"]
+    )
+    assert "-no-interactsh -disable-redirects -disable-update-check" in (
+        plan["display_command"]
+    )
 
 
 def test_local_openapi_review_keeps_only_bounded_read_operations_and_internal_refs():

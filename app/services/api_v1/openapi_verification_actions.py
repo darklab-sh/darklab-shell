@@ -77,6 +77,7 @@ def verification_action_schemas() -> dict[str, Any]:
                     "type": "string",
                     "enum": ["safe", "standard", "intrusive", "destructive"],
                 },
+                "nuclei_profile": _ref("AssessmentNucleiTemplateProfile"),
                 "http_profile": assessment_http_profile_schema(),
                 "scope": {
                     "type": "object",
