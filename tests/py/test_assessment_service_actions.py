@@ -113,6 +113,9 @@ from services.assessments.schemathesis_report_contracts import (
     SCHEMATHESIS_REPORT_TOOL_VERSION,
     SchemathesisReportError,
 )
+from services.assessments.schemathesis_report_context import (
+    ReviewedSchemathesisReportContext,
+)
 from services.assessments import schemathesis_launch
 from services.assessments import nuclei_takeover_launch
 from services.assessments import run_launch
@@ -1234,6 +1237,12 @@ def test_reviewed_schemathesis_execution_replaces_only_help_carrier():
         Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json"),
         Path("/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml"),
         Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
+        ReviewedSchemathesisReportContext(
+            reviewed,
+            "api",
+            "1.0",
+            lambda: _schemathesis_report_bytes(),
+        ),
     )
     prepared = PreparedRealCommand(
         registry_command="schemathesis --help",
@@ -1331,6 +1340,12 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
     assert launch_context.reviewed_execution.execution_command.startswith(
         f"schemathesis --config-file {config_path} run {schema_path}"
     )
+    report_context = launch_context.reviewed_execution.report_context
+    assert type(report_context) is ReviewedSchemathesisReportContext
+    assert report_context.schema == reviewed
+    assert report_context.profile_key == "api"
+    assert report_context.profile_version == "1.0"
+    assert report_context.read_report() == b""
     assert launch_context.broker_kwargs() == {
         "trusted_execution_args": (),
         "reviewed_execution": launch_context.reviewed_execution,
@@ -2688,8 +2703,63 @@ def test_reviewed_dalfox_findings_exit_requires_accepted_bound_evidence():
     assert effective_run_exit_code(
         1, completion_policy=None, signal_classifier=classifier, output_sink_error=False,
     ) == 1
-    with pytest.raises(ValueError, match="invalid Dalfox completion context"):
+    with pytest.raises(ValueError, match="invalid run completion context"):
         RunCompletionPolicy("caller-made")
+
+
+def test_reviewed_schemathesis_findings_exit_requires_complete_private_report(caplog):
+    reviewed = review_local_openapi_json(
+        _openapi_json(paths={
+            "/items/{item_id}": {
+                "get": {"responses": {"200": {"description": "OK"}}},
+            },
+        }),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    reports = [_schemathesis_report_bytes()]
+    report_context = ReviewedSchemathesisReportContext(
+        reviewed,
+        "api",
+        "1.0",
+        lambda: reports[0],
+    )
+    execution = ReviewedSchemathesisExecution(
+        reviewed,
+        Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json"),
+        Path("/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml"),
+        Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
+        report_context,
+    )
+    policy = completion_policy_for_signal_context(
+        None,
+        reviewed_execution=execution,
+    )
+    classifier = SimpleNamespace()
+
+    assert policy == RunCompletionPolicy(schemathesis_execution=execution)
+    assert policy.name == "schemathesis_findings"
+    assert effective_run_exit_code(
+        1, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
+    ) == 0
+    assert effective_run_exit_code(
+        1, completion_policy=policy, signal_classifier=classifier, output_sink_error=True,
+    ) == 1
+    assert effective_run_exit_code(
+        2, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
+    ) == 2
+
+    reports[0] = _schemathesis_report_bytes(failure=False)
+    assert effective_run_exit_code(
+        1, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
+    ) == 1
+    reports[0] = b""
+    assert effective_run_exit_code(
+        1, completion_policy=policy, signal_classifier=classifier, output_sink_error=False,
+    ) == 1
+    assert [record.message for record in caplog.records].count(
+        "SCHEMATHESIS_FINDINGS_EXIT_REJECTED"
+    ) == 2
 
 
 def test_reviewed_dalfox_xss_context_and_rows_fail_closed():
@@ -3050,6 +3120,35 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
     assert (
         prepare_call["kwargs"]["output_signal_context"].dalfox_xss_context
         == reviewed_execution.output_context
+    )
+    reviewed_schema = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    schemathesis_execution = ReviewedSchemathesisExecution(
+        reviewed_schema,
+        Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json"),
+        Path("/tmp/private-http-runs/run-0123456789abcdef/schemathesis.toml"),
+        Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
+        ReviewedSchemathesisReportContext(
+            reviewed_schema,
+            "api",
+            "1.0",
+            lambda: b"",
+        ),
+    )
+    start_brokered_run(
+        original_command=schemathesis_execution.validation_command,
+        display_command=schemathesis_execution.execution_command,
+        session_id="session-httpx",
+        client_ip="192.0.2.1",
+        handlers=handlers,
+        reviewed_execution=schemathesis_execution,
+    )
+    assert prepare_call["kwargs"]["reviewed_execution"] is schemathesis_execution
+    assert Thread.created["kwargs"]["completion_policy"] == RunCompletionPolicy(
+        schemathesis_execution=schemathesis_execution,
     )
     with pytest.raises(ValueError, match="invalid run output signal context"):
         start_brokered_run(

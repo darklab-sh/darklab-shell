@@ -380,7 +380,13 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/broker_worker.py", 496, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/broker_batcher.py", 130, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/broker_capture.py", 46, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/runs/completion_policy.py", 70, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/completion_policy.py", 69, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/runs/completion_policy_contracts.py", 37, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/runs/schemathesis_completion.py", 45, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/runs/execution_override.py", 48, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization.py", 1000, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_artifacts.py", 85, "split-package-ratchet"),
@@ -539,6 +545,16 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/services/assessments/schemathesis_launch.py", 122, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_launch_execution.py",
+        33,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_report_context.py",
+        45,
+        "split-package-ratchet",
     ),
     ModuleSizeBudget(
         "app/services/assessments/schemathesis_report.py", 582, "split-package-ratchet"

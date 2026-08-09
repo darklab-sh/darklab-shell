@@ -44,7 +44,10 @@ def start_brokered_run(
     run_cleanup_hook: Callable[[], None] | None = None,
 ) -> BrokeredRunStartResult:
     output_signal_context = validated_run_output_signal_context(output_signal_context)
-    completion_policy = completion_policy_for_signal_context(output_signal_context)
+    completion_policy = completion_policy_for_signal_context(
+        output_signal_context,
+        reviewed_execution=reviewed_execution,
+    )
     safe_command = str(display_command or original_command)
     safe_private_values = private_data.normalized_private_values(private_values)
     owner_context: OwnerContext = owner_context_for_scope(session_id, team_id=team_id)

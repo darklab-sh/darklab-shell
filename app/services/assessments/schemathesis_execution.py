@@ -20,6 +20,7 @@ class ReviewedSchemathesisExecution:
     schema_path: Path
     config_path: Path
     report_path: Path
+    report_context: object
 
     def __post_init__(self) -> None:
         if type(self.schema) is not ReviewedOpenApiSchema:
@@ -45,6 +46,3 @@ class ReviewedSchemathesisExecution:
         if plan is None:
             raise ValueError("reviewed Schemathesis execution is unavailable")
         return plan.command
-
-
-__all__ = ["ReviewedSchemathesisExecution"]

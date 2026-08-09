@@ -5,38 +5,31 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from services.assessments.dalfox_xss_observations import (
     DalfoxXssObservationState,
-    ReviewedDalfoxXssContext,
 )
+from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
+from services.runs.completion_policy_contracts import (
+    DALFOX_FINDINGS_COMPLETION_POLICY,
+    SCHEMATHESIS_FINDINGS_COMPLETION_POLICY,
+    RunCompletionPolicy,
+)
+from services.runs.schemathesis_completion import accepts_schemathesis_findings_exit
 from services.runs.signal_context import RunOutputSignalContext
-
-
-DALFOX_FINDINGS_COMPLETION_POLICY = "dalfox_findings"
-
-
-@dataclass(frozen=True)
-class RunCompletionPolicy:
-    """One typed completion exception derived from trusted signal context."""
-
-    dalfox_xss_context: ReviewedDalfoxXssContext
-
-    def __post_init__(self) -> None:
-        if type(self.dalfox_xss_context) is not ReviewedDalfoxXssContext:
-            raise ValueError("invalid Dalfox completion context")
-
-    @property
-    def name(self) -> str:
-        return DALFOX_FINDINGS_COMPLETION_POLICY
 
 
 def completion_policy_for_signal_context(
     context: RunOutputSignalContext | None,
+    *,
+    reviewed_execution: object | None = None,
 ) -> RunCompletionPolicy | None:
     """Derive completion behavior only from an app-owned output context."""
+    if type(reviewed_execution) is ReviewedSchemathesisExecution:
+        if context is not None and context.dalfox_xss_context is not None:
+            return None
+        return RunCompletionPolicy(schemathesis_execution=reviewed_execution)
     if context is None or context.dalfox_xss_context is None:
         return None
     return RunCompletionPolicy(context.dalfox_xss_context)
@@ -54,6 +47,14 @@ def effective_run_exit_code(
         return 1 if tool_exit_code == 0 else tool_exit_code
     if tool_exit_code != 1 or type(completion_policy) is not RunCompletionPolicy:
         return tool_exit_code
+    if completion_policy.schemathesis_execution is not None:
+        return (
+            0
+            if accepts_schemathesis_findings_exit(
+                completion_policy.schemathesis_execution
+            )
+            else tool_exit_code
+        )
     dalfox_state = getattr(signal_classifier, "dalfox_xss", None)
     if type(dalfox_state) is not DalfoxXssObservationState:
         return tool_exit_code
@@ -64,6 +65,7 @@ def effective_run_exit_code(
 
 __all__ = [
     "DALFOX_FINDINGS_COMPLETION_POLICY",
+    "SCHEMATHESIS_FINDINGS_COMPLETION_POLICY",
     "RunCompletionPolicy",
     "completion_policy_for_signal_context",
     "effective_run_exit_code",

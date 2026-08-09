@@ -17,6 +17,7 @@ from services.assessments.schemathesis_artifact import (
 )
 from services.assessments.schemathesis_command import reviewed_schemathesis_command_matches
 from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
+from services.assessments.schemathesis_launch_execution import reviewed_schemathesis_execution
 from services.assessments.schemathesis_material import materialize_reviewed_schemathesis_schema
 from services.assessments.schemathesis_schema import SchemathesisSchemaError
 
@@ -80,12 +81,7 @@ def materialize_reviewed_schemathesis_launch(
     material = None
     try:
         material = materialize_reviewed_schemathesis_schema(schema)
-        execution = ReviewedSchemathesisExecution(
-            material.schema,
-            material.schema_path,
-            material.config_path,
-            material.report_path,
-        )
+        execution = reviewed_schemathesis_execution(material, plan)
     except (SchemathesisArtifactError, ValueError) as exc:
         if material is not None:
             material.cleanup()
