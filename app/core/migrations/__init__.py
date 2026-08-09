@@ -81,6 +81,7 @@ from . import (
     v0068_schemathesis_evidence,
     v0069_nmap_service_observations,
     v0070_workflow_fanout_children,
+    v0071_zap_connector_jobs,
 )
 
 _ = baseline
@@ -156,4 +157,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0068_schemathesis_evidence.MIGRATION,
     v0069_nmap_service_observations.MIGRATION,
     v0070_workflow_fanout_children.MIGRATION,
+    v0071_zap_connector_jobs.MIGRATION,
 )

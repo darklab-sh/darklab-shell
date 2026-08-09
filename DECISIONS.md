@@ -214,6 +214,8 @@ The public EPSS and CISA KEV data path is useful without the assessment workspac
 
 The scheduler owns database-backed feed refresh jobs, leases, and resumable risk-escalation work. Notification workers deliver queued notifications but do not own durable refresh or escalation state, and Redis is not required to preserve either workflow. Optional ZAP, private OAST, and Greenbone systems stay outside the primary image. ZAP has a disabled-by-default operator configuration boundary: its API origin can't carry credentials or a request path, its key comes from an environment reference, every target must resolve inside an explicit CIDR, and concurrency, runtime, TLS, and report-size choices are fixed before any connector call. Its Automation Framework documents are generated locally for review. Safe policy is passive and doesn't submit forms; active scanning requires the separate intrusive-action gate. Protected HTTP profile material isn't written into plans. Reading settings or generating a plan doesn't submit work.
 
+ZAP lifecycle state belongs in the primary database rather than Redis or an in-memory worker. It keeps the owner and reviewed identities, status, fixed deadline, remote plan id, a bounded progress summary, and sanitized report/import metadata. Guarded transitions distinguish cancel intent from remote confirmation and downloaded output from an operator-reviewed import. Plan documents, credentials, report bodies, and full remote logs do not belong in that row.
+
 ### Shared CVE Risk Data and Ranking
 
 **A fresh install gets dated, bundled EPSS and KEV data; live network refresh remains an operator choice.**

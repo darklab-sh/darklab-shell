@@ -308,6 +308,16 @@ class TestSessionMigrate:
                 "'anonymous', 'https://darklab.sh', ?, ?, datetime('now'), datetime('now'))",
                 (session_id, project_id, session_id, session_id),
             )
+            conn.execute(
+                "INSERT OR REPLACE INTO zap_connector_jobs "
+                "(id, session_id, project_id, assessment_id, check_id, "
+                "http_profile_id, http_profile_revision, policy_level, "
+                "target_count, created_at, updated_at, expires_at) VALUES "
+                "('zap_migrate_test', ?, ?, 'asm_migrate_test', "
+                "'chk_migrate_test', 'htp_migrate_test', 1, 'safe', 1, "
+                "datetime('now'), datetime('now'), datetime('now', '+1 hour'))",
+                (session_id, project_id),
+            )
             conn.commit()
 
     def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
@@ -696,6 +706,10 @@ class TestSessionMigrate:
                 "SELECT session_id, created_by_session_id, updated_by_session_id "
                 "FROM project_http_profiles WHERE id = 'htp_migrate_test'",
             ).fetchone()
+            zap_job = conn.execute(
+                "SELECT session_id FROM zap_connector_jobs "
+                "WHERE id = 'zap_migrate_test'",
+            ).fetchone()
         assert resp.status_code == 200
         assert data["migrated_projects"] == 1
         assert data["migrated_run_file_artifacts"] == 1
@@ -710,6 +724,7 @@ class TestSessionMigrate:
         assert data["migrated_project_assessment_actors"] == 1
         assert data["migrated_project_assessment_check_actors"] == 1
         assert data["migrated_project_http_profiles"] == 1
+        assert data["migrated_zap_connector_jobs"] == 1
         assert self._count_rows("projects", from_id) == 0
         assert self._count_rows("projects", to_id) == 2
         assert self._count_rows("run_file_artifacts", from_id) == 0
@@ -725,6 +740,7 @@ class TestSessionMigrate:
         assert tuple(assessment) == (to_id, to_id, to_id)
         assert tuple(assessment_check) == (to_id,)
         assert tuple(http_profile) == (to_id, to_id, to_id)
+        assert tuple(zap_job) == (to_id,)
 
     def test_migrates_recent_values_and_merges_destination(self):
         client = get_client()

@@ -73,6 +73,7 @@ SHARED_APP_TABLES: tuple[str, ...] = (
     "workflow_execution_children",
     "workflow_execution_steps",
     "workflow_executions",
+    "zap_connector_jobs",
 )
 SQLITE_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "runs_fts",

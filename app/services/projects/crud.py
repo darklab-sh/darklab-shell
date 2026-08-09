@@ -210,6 +210,7 @@ def delete_project(session_id, project_id, *, team_id="", conn=None):
             "(SELECT id FROM project_assessments WHERE project_id = ?)",
             (project_id,),
         )
+        conn.execute("DELETE FROM zap_connector_jobs WHERE project_id = ?", (project_id,))
         conn.execute(
             "DELETE FROM project_assessment_checks WHERE assessment_id IN "
             "(SELECT id FROM project_assessments WHERE project_id = ?)",

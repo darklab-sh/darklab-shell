@@ -3256,6 +3256,78 @@ class TestLoadConfig:
                 build_plan()
             assert exc_info.value.code == expected_code
 
+        from services.connectors.zap_remote_progress import (
+            ZapRemoteProgressError,
+            review_zap_remote_progress,
+        )
+
+        reviewed_progress = review_zap_remote_progress(
+            {
+                "planProgress": {
+                    "planId": 17,
+                    "started": "2026-08-09T15:00:00.123Z",
+                    "finished": "",
+                    "info": [f"  Job {index}\nprogress  " for index in range(10)],
+                    "warn": ["One bounded warning"],
+                    "error": [],
+                },
+            },
+            expected_plan_id="17",
+        )
+        assert reviewed_progress.to_dict() == {
+            "remote_plan_id": "17",
+            "started_at": "2026-08-09T15:00:00.123000Z",
+            "finished_at": "",
+            "complete": False,
+            "info_count": 10,
+            "warning_count": 1,
+            "error_count": 0,
+            "recent_messages": [
+                *[
+                    {"level": "info", "message": f"Job {index} progress"}
+                    for index in range(2, 10)
+                ],
+                {"level": "warn", "message": "One bounded warning"},
+            ],
+        }
+        finished_progress = review_zap_remote_progress(
+            {
+                "planId": "17",
+                "started": "2026-08-09T15:00:00Z",
+                "finished": "2026-08-09T15:05:00+00:00",
+                "info": [],
+                "warn": [],
+                "error": ["Plan failed safely"],
+            },
+            expected_plan_id="17",
+        )
+        assert finished_progress.complete is True
+        assert finished_progress.error_count == 1
+        progress_errors = [
+            (
+                "zap_progress_plan_mismatch",
+                {"planId": 18, "info": [], "warn": [], "error": []},
+            ),
+            (
+                "zap_progress_invalid",
+                {
+                    "planId": 17,
+                    "started": "not-a-time",
+                    "info": [],
+                    "warn": [],
+                    "error": [],
+                },
+            ),
+            (
+                "zap_progress_invalid",
+                {"planId": 17, "info": "unbounded", "warn": [], "error": []},
+            ),
+        ]
+        for expected_code, response in progress_errors:
+            with pytest.raises(ZapRemoteProgressError) as exc_info:
+                review_zap_remote_progress(response, expected_plan_id="17")
+            assert exc_info.value.code == expected_code
+
     def test_validation_error_reports_source_and_redacts_secret_values(self):
         cases = [
             (
@@ -6959,6 +7031,7 @@ class TestPostgresMigrations:
         "project_assessment_checks",
         "project_assessment_evidence",
         "project_http_profiles",
+        "zap_connector_jobs",
         "nmap_service_observations",
         "schemathesis_operation_evidence",
         "schemathesis_run_evidence",
@@ -7087,6 +7160,7 @@ class TestPostgresMigrations:
             "0068",
             "0069",
             "0070",
+            "0071",
         ]
         for table_name in (
             "runs",
@@ -7288,6 +7362,14 @@ class TestPostgresMigrations:
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute("UPDATE project_assessments SET status = 'completed' WHERE id = 'asm_two'")
 
+            conn.execute(
+                "INSERT INTO project_http_profiles "
+                "(id, session_id, project_id, name, name_key, base_url, created_at, updated_at) "
+                "VALUES ('php_zap', 'session-a', 'prj_assessment', 'ZAP', 'zap', "
+                "'https://app.example.test', ?, ?)",
+                (now, now),
+            )
+
             check_sql = (
                 "INSERT INTO project_assessment_checks "
                 "(id, assessment_id, category, check_key, target_type, target_value, target_value_hash, "
@@ -7302,6 +7384,135 @@ class TestPostgresMigrations:
                 conn.execute(
                     "UPDATE project_assessment_checks SET state = 'unknown' WHERE id = 'chk_one'"
                 )
+
+            from services.connectors.zap_job_lifecycle import (
+                expire_zap_jobs,
+                record_zap_job_progress,
+                request_zap_job_cancel,
+                transition_zap_job,
+            )
+            from services.connectors.zap_jobs import (
+                ZapJobError,
+                create_zap_job,
+                zap_job_for_owner,
+            )
+            from services.connectors.zap_plan_contracts import ZapAutomationPlanSummary
+            from services.connectors.zap_remote_progress import review_zap_remote_progress
+
+            job_now = datetime(2026, 8, 9, 16, 0, tzinfo=timezone.utc)
+            job_summary = ZapAutomationPlanSummary(
+                policy_level="safe",
+                authentication_role="anonymous",
+                targets=("https://app.example.test/",),
+                include_rule_count=1,
+                exclusion_rule_count=1,
+                job_types=("passiveScan-config", "spider", "passiveScan-wait", "report"),
+                job_timeout_seconds=900,
+                report_file="darklab-zap-report.json",
+            )
+            zap_job = create_zap_job(
+                "session-a",
+                "prj_assessment",
+                "asm_two",
+                "chk_two",
+                "php_zap",
+                1,
+                job_summary,
+                now=job_now,
+                conn=conn,
+            )
+            assert zap_job["id"].startswith("zpj_")
+            assert zap_job["status"] == "queued"
+            assert zap_job["plan_summary"] == job_summary.to_dict()
+            assert zap_job["progress"] == {}
+            assert zap_job["expires_at"] == "2026-08-09T16:15:00+00:00"
+            assert zap_job_for_owner(
+                "other-session", zap_job["id"], conn=conn,
+            ) is None
+
+            submitting = transition_zap_job(
+                zap_job["id"], ("queued",), "submitting", now=job_now, conn=conn,
+            )
+            running = transition_zap_job(
+                zap_job["id"],
+                ("submitting",),
+                "running",
+                remote_plan_id="17",
+                now=job_now,
+                conn=conn,
+            )
+            assert submitting["status"] == "submitting"
+            assert running["remote_plan_id"] == "17"
+            with pytest.raises(ZapJobError) as exc_info:
+                transition_zap_job(
+                    zap_job["id"], ("running",), "downloading", remote_plan_id="18", conn=conn,
+                )
+            assert exc_info.value.code == "zap_job_remote_id_invalid"
+            progress = review_zap_remote_progress(
+                {
+                    "planId": 17,
+                    "started": "2026-08-09T16:00:00Z",
+                    "finished": "",
+                    "info": ["Spider started"],
+                    "warn": [],
+                    "error": [],
+                },
+                expected_plan_id="17",
+            )
+            progressed = record_zap_job_progress(
+                zap_job["id"], progress, now=job_now, conn=conn,
+            )
+            assert progressed["progress"]["info_count"] == 1
+            cancel_requested = request_zap_job_cancel(
+                "session-a", zap_job["id"], now=job_now, conn=conn,
+            )
+            assert cancel_requested["status"] == "cancel_requested"
+            canceled = transition_zap_job(
+                zap_job["id"],
+                ("cancel_requested",),
+                "canceled",
+                now=job_now,
+                conn=conn,
+            )
+            assert canceled["finished_at"] == "2026-08-09T16:00:00+00:00"
+            with pytest.raises(ZapJobError) as exc_info:
+                transition_zap_job(
+                    zap_job["id"], ("running",), "downloading", now=job_now, conn=conn,
+                )
+            assert exc_info.value.code == "zap_job_transition_conflict"
+
+            expiring_job = create_zap_job(
+                "session-a",
+                "prj_assessment",
+                "asm_two",
+                "chk_two",
+                "php_zap",
+                1,
+                job_summary,
+                now=job_now,
+                conn=conn,
+            )
+            assert expire_zap_jobs(
+                now=job_now + timedelta(seconds=901), conn=conn,
+            ) == 1
+            expired = zap_job_for_owner("session-a", expiring_job["id"], conn=conn)
+            assert expired is not None
+            assert expired["status"] == "expired"
+            assert expired["error_code"] == "zap_job_expired"
+
+            with pytest.raises(ZapJobError) as exc_info:
+                create_zap_job(
+                    "session-a",
+                    "prj_assessment",
+                    "asm_two",
+                    "chk_two",
+                    "php_zap",
+                    2,
+                    job_summary,
+                    now=job_now,
+                    conn=conn,
+                )
+            assert exc_info.value.code == "zap_job_scope_changed"
 
             evidence_sql = (
                 "INSERT INTO project_assessment_evidence "
@@ -7375,6 +7586,7 @@ class TestPostgresMigrations:
             assert conn.execute("SELECT COUNT(*) FROM project_assessments").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_checks").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_evidence").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM zap_connector_jobs").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM schemathesis_run_evidence").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM schemathesis_operation_evidence").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM finding_evidence_links").fetchone()[0] == 0
@@ -7420,6 +7632,16 @@ class TestPostgresMigrations:
             "revision",
         }.issubset(inventory.tables["project_http_profiles"].columns)
         assert {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "http_profile_id",
+            "plan_summary_json",
+            "progress_json",
+            "status",
+            "expires_at",
+        }.issubset(inventory.tables["zap_connector_jobs"].columns)
+        assert {
             "assessment_id",
             "check_id",
             "run_id",
@@ -7438,6 +7660,7 @@ class TestPostgresMigrations:
         assert "idx_project_assessment_evidence_source" in inventory.indexes
         assert "idx_project_http_profiles_project_name" in inventory.indexes
         assert "idx_project_http_profiles_project_enabled" in inventory.indexes
+        assert "idx_zap_connector_jobs_active_expiry" in inventory.indexes
         assert "idx_schemathesis_run_evidence_run" in inventory.indexes
         assert "idx_schemathesis_operation_evidence_report" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad", "runs_ai", "runs_ad"}.issubset(inventory.triggers)
@@ -7473,6 +7696,16 @@ class TestPostgresMigrations:
             "revision",
         }.issubset(inventory.tables["project_http_profiles"].columns)
         assert {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "http_profile_id",
+            "plan_summary_json",
+            "progress_json",
+            "status",
+            "expires_at",
+        }.issubset(inventory.tables["zap_connector_jobs"].columns)
+        assert {
             "assessment_id",
             "check_id",
             "run_id",
@@ -7491,6 +7724,7 @@ class TestPostgresMigrations:
         assert "idx_project_assessment_evidence_source" in inventory.indexes
         assert "idx_project_http_profiles_project_name" in inventory.indexes
         assert "idx_project_http_profiles_project_enabled" in inventory.indexes
+        assert "idx_zap_connector_jobs_active_expiry" in inventory.indexes
         assert "idx_schemathesis_run_evidence_run" in inventory.indexes
         assert "idx_schemathesis_operation_evidence_report" in inventory.indexes
         assert "idx_runs_command_trgm" in inventory.indexes
@@ -7519,6 +7753,7 @@ class TestPostgresMigrations:
         assert "idx_project_assessment_evidence_source" in manifest.indexes
         assert "idx_project_http_profiles_project_name" in manifest.indexes
         assert "idx_project_http_profiles_project_enabled" in manifest.indexes
+        assert "idx_zap_connector_jobs_active_expiry" in manifest.indexes
         assert "idx_schemathesis_run_evidence_run" in manifest.indexes
         assert "idx_schemathesis_operation_evidence_report" in manifest.indexes
         assert "idx_runs_command_trgm" not in manifest.indexes
@@ -8093,7 +8328,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0071",
+            "0072",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -8145,7 +8380,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0070"
+        assert rows[-1]["version"] == "0071"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -8606,6 +8841,7 @@ class TestPostgresMigrations:
             "0068",
             "0069",
             "0070",
+            "0071",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -8640,7 +8876,8 @@ class TestPostgresMigrations:
         assert "0068" in conn.applied_versions
         assert "0069" in conn.applied_versions
         assert "0070" in conn.applied_versions
-        assert conn.commit_count == 32
+        assert "0071" in conn.applied_versions
+        assert conn.commit_count == 33
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8793,7 +9030,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0071",
+            "0072",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8818,9 +9055,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0071"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0072"]
         assert table_exists is not None
-        assert "0071" in versions
+        assert "0072" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -15935,6 +16172,7 @@ class TestDataAccessLayerServiceCoverage:
         assert counts["migrated_finding_evidence_links"] == 1
         assert counts["migrated_finding_triage_details"] == 1
         assert counts["migrated_project_http_profiles"] == 1
+        assert counts["migrated_zap_connector_jobs"] == 0
         assert counts["migrated_schemathesis_run_evidence"] == 0
         assert counts["migrated_notification_channels"] == 1
         assert counts["migrated_recent_values"] == 1

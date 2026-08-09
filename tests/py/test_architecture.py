@@ -154,9 +154,12 @@ class ModuleSizeBudget:
 
 _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/connectors/zap_config.py", 68, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_job_lifecycle.py", 197, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_jobs.py", 190, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_plan.py", 194, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_plan_contracts.py", 45, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_plan_scope.py", 165, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_remote_progress.py", 154, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_scope.py", 121, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry.py", 1150, "split-target-phase1"),
     ModuleSizeBudget("app/services/commands/registry_adaptations.py", 87, "split-package-ratchet"),
@@ -502,7 +505,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/scope.py", 188, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/schema_manifest.py", 905, "cohesive-ratchet"),
+    ModuleSizeBudget("app/core/schema_manifest.py", 906, "cohesive-ratchet"),
     ModuleSizeBudget("app/core/database_backend.py", 845, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/commands/builtins_runtime.py", 824, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/builtins_runtime_specs.py", 169, "split-package-ratchet"),

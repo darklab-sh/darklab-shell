@@ -498,6 +498,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0068",
         "0069",
         "0070",
+        "0071",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -601,6 +602,14 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'enabled',
                 'created_at'
             ))
+            OR (table_name = 'zap_connector_jobs' AND column_name IN (
+                'plan_summary_json',
+                'progress_json',
+                'created_at',
+                'submitted_at',
+                'finished_at',
+                'expires_at'
+            ))
             OR (table_name = 'schemathesis_run_evidence' AND column_name IN (
                 'running_time_seconds',
                 'missing_operations_json',
@@ -678,6 +687,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "project_assessment_checks",
         "project_assessment_evidence",
         "project_http_profiles",
+        "zap_connector_jobs",
         "nmap_service_observations",
         "schemathesis_operation_evidence",
         "schemathesis_run_evidence",
@@ -742,6 +752,12 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("project_http_profiles", "file_refs_json", "jsonb"),
         ("project_http_profiles", "enabled", "boolean"),
         ("project_http_profiles", "created_at", "timestamp with time zone"),
+        ("zap_connector_jobs", "plan_summary_json", "jsonb"),
+        ("zap_connector_jobs", "progress_json", "jsonb"),
+        ("zap_connector_jobs", "created_at", "timestamp with time zone"),
+        ("zap_connector_jobs", "submitted_at", "timestamp with time zone"),
+        ("zap_connector_jobs", "finished_at", "timestamp with time zone"),
+        ("zap_connector_jobs", "expires_at", "timestamp with time zone"),
         ("schemathesis_run_evidence", "running_time_seconds", "double precision"),
         ("schemathesis_run_evidence", "missing_operations_json", "jsonb"),
         ("schemathesis_run_evidence", "observed_at", "timestamp with time zone"),
@@ -864,6 +880,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             'project_assessment_checks',
             'project_assessment_evidence',
             'project_http_profiles',
+            'zap_connector_jobs',
             'nmap_service_observations',
             'schemathesis_operation_evidence',
             'schemathesis_run_evidence',
@@ -888,6 +905,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_project_http_profiles_project_enabled",
         "idx_project_http_profiles_personal_updated",
         "idx_project_http_profiles_team_updated",
+        "idx_zap_connector_jobs_project_created",
+        "idx_zap_connector_jobs_personal_created",
+        "idx_zap_connector_jobs_team_created",
+        "idx_zap_connector_jobs_active_expiry",
         "idx_schemathesis_run_evidence_owner_project",
         "idx_schemathesis_run_evidence_check_observed",
         "idx_schemathesis_run_evidence_run",
