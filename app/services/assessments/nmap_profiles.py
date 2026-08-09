@@ -27,7 +27,10 @@ def nmap_profile_args(
     selected = nmap_profile(profile)
     if selected is None or script_args or str(script_args_file or "").strip():
         return ()
-    return ("--script", ",".join(selected.selectors))
+    args = ("--script", ",".join(selected.selectors))
+    if selected.fixed_script_args:
+        args += ("--script-args", ",".join(selected.fixed_script_args))
+    return args
 
 
 def nmap_profile_suffix(profile: str | None) -> str:
@@ -54,6 +57,7 @@ def public_nmap_profile(profile: str | None) -> dict[str, Any]:
         "selectors": list(selected.selectors),
         "evidence_kinds": list(selected.evidence_kinds),
         "excluded_category_selectors": list(EXCLUDED_CATEGORIES),
+        "fixed_script_arguments": list(selected.fixed_script_args),
         "script_arguments": [],
         "script_argument_file": False,
         "requires_confirmation": selected.requires_confirmation,

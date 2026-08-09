@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Reviewed FTP checks can record anonymous access without listing remote files.**
+  - **What:** The app-owned FTP profile runs only the exact `ftp-syst` and `ftp-anon` scripts, fixes `ftp-anon.maxlist=0`, and requires confirmation. The anonymous check makes one standard login attempt, never guesses credentials or selects the broad `auth` category, and doesn't open a directory-listing connection. Only an exact FTP 230 success becomes typed access, account, and reply-code evidence; changed or listing-bearing output stays out with all free-form output.
+  - **Tests:** Profile, command-plan, public-contract, exact-output, unknown-script, listing-rejection, catalog-alignment, architecture-ratchet, Pyright, and documentation coverage pins the boundary.
 - **Reviewed Nmap service facts now appear where assessors review their work.**
   - **What:** Run Details and expanded Assessment checks show the same owner-scoped, read-only Nmap service evidence on desktop and mobile. Each view keeps the typed target, service, script, structured fields, tool and parser versions, observation time, and any safety-limit notice while leaving free-form NSE output out. Opening the evidence doesn't change a check or finding.
   - **Tests:** Browser-route, personal-owner isolation, shared renderer, Run Details, Assessment desktop/mobile, raw-output omission, asset, Pyright, and documentation coverage pins the display contract.

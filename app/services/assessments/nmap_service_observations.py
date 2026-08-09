@@ -12,6 +12,7 @@ from typing import Any
 from defusedxml import ElementTree as SafeElementTree
 from defusedxml.common import DefusedXmlException
 
+from services.assessments.nmap_exact_output_evidence import exact_output_fields
 from services.assessments.nmap_script_evidence_catalog import (
     INFORMATIONAL_SCRIPT_EVIDENCE,
 )
@@ -23,7 +24,7 @@ from services.intel.canonical import (
 )
 
 
-NMAP_SERVICE_XML_PARSER_VERSION = "nmap-xml-service-evidence-v1"
+NMAP_SERVICE_XML_PARSER_VERSION = "nmap-xml-service-evidence-v2"
 NMAP_SERVICE_XML_MAX_BYTES = 5 * 1024 * 1024
 NMAP_SERVICE_XML_MAX_ELEMENTS = 50_000
 NMAP_SERVICE_XML_MAX_OBSERVATIONS = 100
@@ -73,7 +74,10 @@ def parse_nmap_xml_service_observations(
                 evidence_kind = INFORMATIONAL_SCRIPT_EVIDENCE.get(script_id)
                 if not evidence_kind or (target, script_id) in seen:
                     continue
-                fields, fields_truncated = _structured_fields(script)
+                fields = exact_output_fields(script_id, script.get("output"))
+                fields_truncated = False
+                if fields is None:
+                    fields, fields_truncated = _structured_fields(script)
                 if not fields:
                     continue
                 if len(observations) >= NMAP_SERVICE_XML_MAX_OBSERVATIONS:

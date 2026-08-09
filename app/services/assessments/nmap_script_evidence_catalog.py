@@ -24,6 +24,7 @@ INFORMATIONAL_SCRIPT_EVIDENCE: Final = {
     "nfs-showmount": "nfs_exports",
     "rpcinfo": "rpc_programs",
     "ftp-syst": "ftp_capabilities",
+    "ftp-anon": "anonymous_access",
     "dns-nsid": "dns_server_identity",
     "mysql-info": "database_metadata",
     "redis-info": "database_metadata",

@@ -332,6 +332,11 @@ _MODULE_SIZE_RATCHET = (
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
+        "app/services/assessments/nmap_exact_output_evidence.py",
+        35,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/nmap_script_evidence_catalog.py",
         60,
         "split-package-ratchet",

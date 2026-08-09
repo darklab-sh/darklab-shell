@@ -16,6 +16,7 @@ class NmapProfile:
     selector_kind: str
     selectors: tuple[str, ...]
     evidence_kinds: tuple[str, ...]
+    fixed_script_args: tuple[str, ...] = ()
     requires_confirmation: bool = False
 
 

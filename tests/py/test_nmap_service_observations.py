@@ -23,11 +23,13 @@ def _document(ports: str, *, finished: str = "1786233600") -> str:
 """
 
 
-def _port(scripts: str, *, state: str = "open", port: int = 445) -> str:
+def _port(
+    scripts: str, *, state: str = "open", port: int = 445, service: str = "microsoft-ds",
+) -> str:
     return f"""
 <port protocol="tcp" portid="{port}">
   <state state="{state}"/>
-  <service name="microsoft-ds"/>
+  <service name="{service}"/>
   {scripts}
 </port>
 """
@@ -42,7 +44,9 @@ def test_structured_nse_service_facts_keep_exact_provenance_and_informational_st
       <script id="smb-protocols" output="dialects">
         <table key="dialects"><elem key="preferred">3.1.1</elem></table>
       </script>
-    """))
+    """) + _port("""
+      <script id="ftp-anon" output="Anonymous FTP login allowed (FTP code 230)"/>
+    """, port=21, service="ftp"))
 
     parsed = parse_nmap_xml_service_observations(payload, source_run_id="run-1")
 
@@ -53,7 +57,7 @@ def test_structured_nse_service_facts_keep_exact_provenance_and_informational_st
     assert parsed["observed_at"] == "2026-08-09T00:00:00+00:00"
     assert parsed["truncated"] is False
     assert [item["script_id"] for item in parsed["observations"]] == [
-        "smb2-security-mode", "smb-protocols",
+        "smb2-security-mode", "smb-protocols", "ftp-anon",
     ]
     signing = parsed["observations"][0]
     assert signing["target"] == "192.0.2.10:445/tcp"
@@ -64,7 +68,15 @@ def test_structured_nse_service_facts_keep_exact_provenance_and_informational_st
         {"path": ["account_used", "name"], "value": "guest"},
         {"path": ["message_signing"], "value": "disabled"},
     ]
+    assert parsed["observations"][2]["evidence_kind"] == "anonymous_access"
+    assert parsed["observations"][2]["service"] == "ftp"
+    assert parsed["observations"][2]["fields"] == [
+        {"path": ["access"], "value": "allowed"},
+        {"path": ["account"], "value": "anonymous"},
+        {"path": ["reply_code"], "value": "230"},
+    ]
     assert "private free-form output" not in str(parsed)
+    assert "Anonymous FTP login allowed" not in str(parsed)
 
 
 def test_parser_abstains_from_vulnerability_unknown_output_only_and_closed_scripts():
@@ -77,6 +89,10 @@ def test_parser_abstains_from_vulnerability_unknown_output_only_and_closed_scrip
             <elem key="value">custom</elem>
           </script>
           <script id="ssh-hostkey" output="output-only evidence"/>
+          <script id="ftp-anon" output="Anonymous FTP login allowed (FTP code 230)&#10;drwxrwxrwx public"/>
+          <script id="smb-enum-shares" output="anonymous share access">
+            <elem key="share">public</elem>
+          </script>
         """, port=443)
         + _port("""
           <script id="smtp-commands" output="commands">
@@ -158,5 +174,7 @@ def test_invalid_or_unsafe_xml_and_unqualified_timestamps_fail_closed():
 def test_evidence_catalog_covers_only_exact_informational_profile_scripts():
     assert INFORMATIONAL_SCRIPT_EVIDENCE["nfs-showmount"] == "nfs_exports"
     assert INFORMATIONAL_SCRIPT_EVIDENCE["ssl-enum-ciphers"] == "tls_ciphers"
+    assert INFORMATIONAL_SCRIPT_EVIDENCE["ftp-anon"] == "anonymous_access"
     assert "ssl-heartbleed" not in INFORMATIONAL_SCRIPT_EVIDENCE
     assert "auth" not in INFORMATIONAL_SCRIPT_EVIDENCE
+    assert "smb-enum-shares" not in INFORMATIONAL_SCRIPT_EVIDENCE

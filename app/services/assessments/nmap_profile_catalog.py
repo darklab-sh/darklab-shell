@@ -10,6 +10,7 @@ from services.assessments.nmap_profile_contracts import NmapProfile
 
 
 ALLOWED_CATEGORY_SELECTORS: Final = frozenset({"safe", "default", "version", "discovery"})
+ALLOWED_FIXED_SCRIPT_ARGUMENTS: Final = frozenset({"ftp-anon.maxlist=0"})
 EXCLUDED_CATEGORIES: Final = (
     "auth", "brute", "dos", "exploit", "external", "fuzzer", "intrusive",
 )
@@ -24,6 +25,7 @@ def _profile(
     *,
     selector_kind: str = "scripts",
     policy_level: str = "standard",
+    fixed_script_args: tuple[str, ...] = (),
     requires_confirmation: bool = False,
 ) -> NmapProfile:
     return NmapProfile(
@@ -33,6 +35,7 @@ def _profile(
         selector_kind=selector_kind,
         selectors=selectors,
         evidence_kinds=evidence_kinds,
+        fixed_script_args=fixed_script_args,
         requires_confirmation=requires_confirmation,
     )
 
@@ -62,7 +65,11 @@ PROFILES = {
     "ldap": _profile("ldap", "LDAP Root DSE", ("ldap-rootdse",), ("ldap_root_dse",)),
     "nfs": _profile("nfs", "NFS exports", ("nfs-showmount",), ("nfs_exports",)),
     "rpc": _profile("rpc", "RPC program inventory", ("rpcinfo",), ("rpc_programs",)),
-    "ftp": _profile("ftp", "FTP service details", ("ftp-syst",), ("ftp_capabilities",)),
+    "ftp": _profile(
+        "ftp", "FTP details and anonymous access", ("ftp-syst", "ftp-anon"),
+        ("ftp_capabilities", "anonymous_access"),
+        fixed_script_args=("ftp-anon.maxlist=0",), requires_confirmation=True,
+    ),
     "dns": _profile("dns", "DNS server identity", ("dns-nsid",), ("dns_server_identity",)),
     "mysql": _profile("mysql", "MySQL service details", ("mysql-info",), ("database_metadata",)),
     "redis": _profile("redis", "Redis service details", ("redis-info",), ("database_metadata",)),
@@ -86,6 +93,10 @@ def _validate_catalog() -> None:
             raise ValueError(f"unreviewed category in Nmap profile: {key}")
         if profile.selector_kind == "scripts" and set(profile.selectors) & set(EXCLUDED_CATEGORIES):
             raise ValueError(f"category selector used as a script in Nmap profile: {key}")
+        if profile.selector_kind == "category" and profile.fixed_script_args:
+            raise ValueError(f"category Nmap profile has script arguments: {key}")
+        if not set(profile.fixed_script_args) <= ALLOWED_FIXED_SCRIPT_ARGUMENTS:
+            raise ValueError(f"unreviewed fixed argument in Nmap profile: {key}")
 
 
 _validate_catalog()

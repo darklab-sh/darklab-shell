@@ -121,7 +121,7 @@ def test_persistence_is_owner_scoped_idempotent_and_omits_free_form_output(evide
             "evidence_kind": "smb_signing",
             "classification": "informational",
             "tool_version": "7.95",
-            "parser_version": "nmap-xml-service-evidence-v1",
+            "parser_version": "nmap-xml-service-evidence-v2",
             "fields": [{"path": ["message_signing"], "value": "disabled"}],
             "fields_truncated": False,
             "collection_truncated": False,

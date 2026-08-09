@@ -396,6 +396,15 @@ def test_nmap_service_actions_expose_the_reviewed_profile_contract():
     assert profile["script_arguments"] == []
     assert profile["script_argument_file"] is False
 
+    ftp_profile = public_app_port_record({
+        "port": 21,
+        "service": "ftp",
+        "_run_ids": {"run-2"},
+    })["assessment_actions"][0]["nmap_profile"]
+    assert ftp_profile["label"] == "FTP details and anonymous access"
+    assert ftp_profile["fixed_script_arguments"] == ["ftp-anon.maxlist=0"]
+    assert ftp_profile["requires_confirmation"] is True
+
 
 def test_conflicting_service_evidence_abstains_from_action_suggestions():
     record = public_app_port_record({
@@ -614,6 +623,9 @@ def test_nuclei_recommendations_explain_signals_without_recommending_intrusive_r
 
 def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
     assert nmap_profile_args("tls") == ("--script", "ssl-cert,ssl-enum-ciphers")
+    assert nmap_profile_args("ftp") == (
+        "--script", "ftp-syst,ftp-anon", "--script-args", "ftp-anon.maxlist=0",
+    )
     assert nmap_profile_args("--script=exploit") == ()
     assert nmap_profile_args("ssh", script_args={"ssh_hostkey": "all"}) == ()
     assert nmap_profile_args("ssh", script_args_file="nmap-script-args.txt") == ()
@@ -630,8 +642,15 @@ def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
     ]
     assert smb["evidence_kinds"] == ["smb_dialects", "smb_signing", "smb_identity"]
     assert smb["excluded_category_selectors"] == list(EXCLUDED_CATEGORIES)
+    assert smb["fixed_script_arguments"] == []
     assert smb["script_arguments"] == []
     assert smb["script_argument_file"] is False
+    ftp = public_nmap_profile("ftp")
+    assert ftp["selectors"] == ["ftp-syst", "ftp-anon"]
+    assert ftp["evidence_kinds"] == ["ftp_capabilities", "anonymous_access"]
+    assert ftp["fixed_script_arguments"] == ["ftp-anon.maxlist=0"]
+    assert ftp["requires_confirmation"] is True
+    assert not set(ftp["selectors"]) & set(EXCLUDED_CATEGORIES)
     assert public_nmap_profile("vuln")["selectors"] == [
         "ssl-heartbleed", "ssl-poodle", "smb-vuln-ms17-010",
     ]
@@ -639,6 +658,9 @@ def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():
     plan = command_plan("nmap", "ip", "192.0.2.10", nmap_profile="ssh")
     assert plan is not None
     assert "--script ssh2-enum-algos,ssh-hostkey" in plan.command
+    ftp_plan = command_plan("nmap", "ip", "192.0.2.10", nmap_profile="ftp")
+    assert ftp_plan is not None
+    assert "--script ftp-syst,ftp-anon --script-args ftp-anon.maxlist=0" in ftp_plan.command
 
 
 def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, monkeypatch):
