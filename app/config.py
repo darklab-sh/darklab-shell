@@ -56,10 +56,12 @@ _SECRET_CONFIG_KEYS = {
     "ai_api_key",
     "ai_api_key_secret_name",
     "notifications.smtp.password_secret_id",
+    "oast_connector.token_secret_id",
     "zap_connector.api_key_secret_id",
 }
 _SENSITIVE_URL_CONFIG_KEYS = {
     "database_url",
+    "oast_connector.base_url",
     "zap_connector.base_url",
 }
 _MAX_CONFIG_ERROR_VALUE_CHARS = 120
@@ -615,6 +617,83 @@ class ZapConnectorConfig(_ConfigModel):
         return deduplicated
 
 
+class OastConnectorConfig(_ConfigModel):
+    enabled: StrictBool = False
+    base_url: StrictStr = ""
+    token_secret_id: StrictStr = ""
+    allowed_domain: StrictStr = ""
+    tls_verify: StrictBool = True
+    callback_retention_seconds: StrictInt = Field(default=604800, ge=300, le=2592000)
+    privacy_acknowledged: StrictBool = False
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("must be a valid HTTPS origin") from exc
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or (port is None and parsed.netloc.endswith(":"))
+        ):
+            raise ValueError("must be an HTTPS origin without credentials or a path")
+        return normalized
+
+    @field_validator("token_secret_id")
+    @classmethod
+    def validate_token_secret_id(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if not normalized and info.data.get("enabled"):
+            raise ValueError("is required when the connector is enabled")
+        if normalized and not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", normalized):
+            raise ValueError("must name an environment variable")
+        return normalized
+
+    @field_validator("allowed_domain")
+    @classmethod
+    def validate_allowed_domain(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip().lower().rstrip(".")
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        labels = normalized.split(".")
+        valid_label = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+        try:
+            ipaddress.ip_address(normalized)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("must be a DNS suffix rather than an IP address")
+        if (
+            len(normalized) > 253
+            or len(labels) < 2
+            or any(not valid_label.fullmatch(label) for label in labels)
+        ):
+            raise ValueError("must be an exact DNS suffix without a wildcard")
+        return normalized
+
+    @field_validator("privacy_acknowledged")
+    @classmethod
+    def validate_privacy_acknowledged(cls, value: bool, info: ValidationInfo) -> bool:
+        if info.data.get("enabled") and not value:
+            raise ValueError("must be true when the connector is enabled")
+        return value
+
+
 _FORGIVING_BOOL_KEYS = {
     "workspace_enabled",
     "interactive_pty_enabled",
@@ -697,6 +776,7 @@ _NESTED_CONFIG_MODELS = {
     "watchers": WatchersConfig,
     "project_digests": ProjectDigestsConfig,
     "cve_risk": CveRiskConfig,
+    "oast_connector": OastConnectorConfig,
     "zap_connector": ZapConnectorConfig,
 }
 
@@ -1408,6 +1488,15 @@ def load_config(conf_dir=None, local_conf_dir=None):
             "max_concurrent_jobs": 1,
             "job_timeout_seconds": 1800,
             "max_report_bytes": 10485760,
+        },
+        "oast_connector": {
+            "enabled": False,
+            "base_url": "",
+            "token_secret_id": "",
+            "allowed_domain": "",
+            "tls_verify": True,
+            "callback_retention_seconds": 604800,
+            "privacy_acknowledged": False,
         },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,

@@ -485,6 +485,23 @@
 #   job_timeout_seconds: 1800
 #   max_report_bytes: 10485760
 
+# ── Optional Private OAST Connector ──────────────────────────────────────────
+#
+# OAST callbacks stay disabled until an operator points darklab_shell at a
+# private Interactsh-compatible HTTPS service and accepts the callback-data
+# privacy and retention policy. Put the service token in the named environment
+# variable, never in YAML. Loading this section doesn't allocate a callback
+# domain or contact the service.
+# Server default if unset:
+# oast_connector:
+#   enabled: false
+#   base_url: ""  # Credential-free HTTPS origin for the private service.
+#   token_secret_id: ""  # Environment variable name holding its access token.
+#   allowed_domain: ""  # Exact callback DNS suffix, without a wildcard.
+#   tls_verify: true
+#   callback_retention_seconds: 604800
+#   privacy_acknowledged: false
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 # Log verbosity level . Options: ERROR, WARN, INFO, DEBUG

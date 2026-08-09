@@ -3750,6 +3750,58 @@ class TestLoadConfig:
         )
         discard_plan.assert_called_once_with(orphan_plan_id, cfg)
 
+    def test_private_oast_config_is_explicit_non_secret_and_disabled_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    oast_connector:
+                      enabled: true
+                      base_url: https://interactsh.internal.example/
+                      token_secret_id: DARKLAB_OAST_TOKEN
+                      allowed_domain: callbacks.example.test.
+                      tls_verify: false
+                      callback_retention_seconds: 86400
+                      privacy_acknowledged: true
+                    """
+                ))
+
+            cfg = app_config.load_config(tmp)
+
+        assert cfg["oast_connector"] == {
+            "enabled": True,
+            "base_url": "https://interactsh.internal.example",
+            "token_secret_id": "DARKLAB_OAST_TOKEN",
+            "allowed_domain": "callbacks.example.test",
+            "tls_verify": False,
+            "callback_retention_seconds": 86400,
+            "privacy_acknowledged": True,
+        }
+        from services.connectors.oast_config import (
+            OastConnectorUnavailable,
+            oast_connector_settings,
+            resolve_oast_token,
+        )
+
+        settings = oast_connector_settings(cfg)
+        assert settings.base_url == "https://interactsh.internal.example"
+        assert settings.allowed_domain == "callbacks.example.test"
+        assert settings.callback_retention_seconds == 86400
+        assert resolve_oast_token(
+            settings,
+            environ={"DARKLAB_OAST_TOKEN": "private-connector-token"},
+        ) == "private-connector-token"
+        with pytest.raises(OastConnectorUnavailable, match="token is unavailable") as exc_info:
+            resolve_oast_token(settings, environ={})
+        assert exc_info.value.code == "oast_token_unavailable"
+
+        disabled = oast_connector_settings(build_test_config())
+        assert disabled.enabled is False
+        assert disabled.privacy_acknowledged is False
+        with pytest.raises(OastConnectorUnavailable, match="connector is disabled") as exc_info:
+            resolve_oast_token(disabled, environ={})
+        assert exc_info.value.code == "oast_connector_disabled"
+
     def test_validation_error_reports_source_and_redacts_secret_values(self):
         cases = [
             (
@@ -3776,6 +3828,15 @@ class TestLoadConfig:
                   smtp:
                     password_secret_id:
                       - smtp-password-secret-ref
+                """,
+            ),
+            (
+                "oast_connector.token_secret_id",
+                "oast-token-secret-ref",
+                """
+                oast_connector:
+                  token_secret_id:
+                    - oast-token-secret-ref
                 """,
             ),
             (
@@ -3811,6 +3872,50 @@ class TestLoadConfig:
             ("notifications", "notifications: []\n"),
             ("notifications.smtp.port", "notifications:\n  smtp:\n    port: '587'\n"),
             ("scheduler", "scheduler: false\n"),
+            (
+                "oast_connector.base_url",
+                "oast_connector:\n  base_url: http://interactsh.example.test\n",
+            ),
+            (
+                "oast_connector.allowed_domain",
+                "oast_connector:\n  allowed_domain: '*.example.test'\n",
+            ),
+            (
+                "oast_connector.allowed_domain",
+                "oast_connector:\n  allowed_domain: 192.0.2.10\n",
+            ),
+            (
+                "oast_connector.base_url",
+                "oast_connector:\n  enabled: true\n"
+                "  token_secret_id: DARKLAB_OAST_TOKEN\n"
+                "  allowed_domain: callbacks.example.test\n"
+                "  privacy_acknowledged: true\n",
+            ),
+            (
+                "oast_connector.token_secret_id",
+                "oast_connector:\n  enabled: true\n"
+                "  base_url: https://interactsh.example.test\n"
+                "  allowed_domain: callbacks.example.test\n"
+                "  privacy_acknowledged: true\n",
+            ),
+            (
+                "oast_connector.allowed_domain",
+                "oast_connector:\n  enabled: true\n"
+                "  base_url: https://interactsh.example.test\n"
+                "  token_secret_id: DARKLAB_OAST_TOKEN\n"
+                "  privacy_acknowledged: true\n",
+            ),
+            (
+                "oast_connector.privacy_acknowledged",
+                "oast_connector:\n  enabled: true\n"
+                "  base_url: https://interactsh.example.test\n"
+                "  token_secret_id: DARKLAB_OAST_TOKEN\n"
+                "  allowed_domain: callbacks.example.test\n",
+            ),
+            (
+                "oast_connector.callback_retention_seconds",
+                "oast_connector:\n  callback_retention_seconds: 299\n",
+            ),
             (
                 "zap_connector.base_url",
                 "zap_connector:\n  base_url: https://user:password@zap.example.test/api\n",
@@ -3868,6 +3973,9 @@ class TestLoadConfig:
                     """
                     database_url:
                       - postgresql://darklab:secret@postgres:5432/darklab_shell
+                    oast_connector:
+                      base_url:
+                        - https://private-token@interactsh.example.test
                     intel_rate_limit_urlscan_bucket:
                       - not-a-secret
                     """
@@ -3878,9 +3986,11 @@ class TestLoadConfig:
 
         message = str(exc_info.value)
         assert f"database_url from {config_path}" in message
+        assert f"oast_connector.base_url from {config_path}" in message
         assert f"intel_rate_limit_urlscan_bucket from {config_path}" in message
         assert "database_url from " in message and "value=<redacted>" in message
         assert "postgresql://darklab:secret@postgres:5432/darklab_shell" not in message
+        assert "https://private-token@interactsh.example.test" not in message
         assert "intel_rate_limit_urlscan_bucket" in message
         assert "value=['not-a-secret']" in message
 

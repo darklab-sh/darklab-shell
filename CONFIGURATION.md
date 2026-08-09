@@ -23,7 +23,7 @@ The loader validates the final config at startup. Malformed YAML, a non-mapping 
 
 Config events are captured while the files and environment are being resolved, then written once after the effective `log_level` and `log_format` are ready. `CONFIG_VALIDATED` and `CONFIG_LOADED` report a `warning_count` that includes ignored, dropped, defaulted, clamped, and truncated values. If loading can't finish, the app writes one safe `CONFIG_LOAD_FAILED` record using the most recent usable text or GELF format. It includes bounded phase, source, key, and error-type fields, but not raw parser output, file contents, configuration values, or a traceback.
 
-Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, and `zap_connector` merge by field. A local file can override one nested value without restating the whole section.
+Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, `oast_connector`, and `zap_connector` merge by field. A local file can override one nested value without restating the whole section.
 
 The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow).
 
@@ -36,7 +36,7 @@ The schema contract is:
 | Field group | Validation posture |
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
-| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, and `zap_connector` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
+| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, `oast_connector`, and `zap_connector` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
 | Forgiving booleans | Boolean environment settings plus YAML settings such as `database_postgres_jit`, `audit_log_enabled`, `ai_allow_full_output`, and `ai_require_private_base_url` accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
@@ -403,6 +403,14 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `cve_risk.advisory_max_local_bytes` | `268435456` | Largest single local NVD or OSV JSON file accepted, from 1024 to 1073741824 bytes |
 | `cve_risk.advisory_max_records` | `500000` | Largest number of records accepted from one local NVD or OSV dataset, from 1 to 1000000 |
 | `cve_risk.allowed_hosts` | `[epss.cyentia.com, www.cisa.gov, api.osv.dev]` | Exact HTTPS hostnames allowed for fixed CVE-risk acquisition URLs. OSV queries still require its exact endpoint and reject redirects. Entries must be hostnames, not URLs |
+| `oast_connector` | see nested defaults | Server-side only. Disabled-by-default safety boundary for an operator-managed private Interactsh-compatible service |
+| `oast_connector.enabled` | `false` | Makes the validated private OAST settings available. Enabling requires every identity, privacy, and retention field below; it doesn't allocate a callback or contact the service |
+| `oast_connector.base_url` | _(empty)_ | HTTPS origin for the private service, without credentials, a path, query, or fragment |
+| `oast_connector.token_secret_id` | _(empty)_ | Environment variable name that holds the service token. The token value doesn't enter YAML, config diagnostics, or connector settings |
+| `oast_connector.allowed_domain` | _(empty)_ | Exact DNS suffix reserved for this private callback service, without a wildcard or IP address |
+| `oast_connector.tls_verify` | `true` | Verifies the private service's TLS certificate. Turning this off is an explicit operator choice |
+| `oast_connector.callback_retention_seconds` | `604800` | Required callback-data retention policy, from 300 to 2592000 seconds |
+| `oast_connector.privacy_acknowledged` | `false` | Must be `true` before the connector can be enabled, confirming the operator accepts the private service's callback-data handling and retention policy |
 | `zap_connector` | see nested defaults | Server-side only. Disabled-by-default connection and safety limits for an operator-managed OWASP ZAP service |
 | `zap_connector.enabled` | `false` | Makes the validated connector configuration available. Enabling it doesn't submit a scan by itself and requires the origin, API-key environment reference, and at least one target CIDR |
 | `zap_connector.base_url` | _(empty)_ | HTTP or HTTPS origin for the operator-managed ZAP API, without credentials, a path, query, or fragment |
@@ -453,6 +461,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 The connector uses ZAP's transfer directory to upload its reviewed Automation Framework plan and retrieve the generated JSON report. ZAP disables file transfer by default because API access with file transfer enabled is powerful enough to run uploaded scripts. Enable it only on the operator-managed ZAP service, require the API key, restrict which hosts can reach that API, and keep the transfer directory on an operator-managed retention policy. darklab_shell uses only per-job subdirectories, sends the key in `X-ZAP-API-Key`, and never follows redirects. ZAP doesn't provide this connector with a remote-delete endpoint, so downloading a report doesn't remove its plan or report from that directory.
 
 When `zap_connector.enabled` is `true`, run one `python -m services.connectors.zap_worker` process as a supervised sibling of the web, scheduler, and notification processes. Give it the same release, configuration, app-data directory, workspace, database, and API-key environment variable as the web process. A deployment-wide database or file lock makes a duplicate worker exit cleanly. The worker keeps reviewed plans in a private app-data spool only until submission or cleanup, saves completed reports through the owner's normal Files quota, and creates an Atlas preview. It never applies that preview; the operator still reviews the import summary and warnings before choosing **Apply** in Atlas.
+
+The private OAST settings are a server-side safety boundary, not a background connection. darklab_shell accepts no public callback default, keeps the service token in the named environment variable, and requires an exact callback suffix plus an acknowledged retention policy before enabling the connector. Reading the settings doesn't register with the service, allocate a callback domain, or start polling for interactions.
 
 Release images include dated FIRST EPSS and CISA KEV snapshots, so saved CVE findings can be ranked without network access. Run `providers` to see each snapshot's source, version, age, and whether live refresh is enabled. When `cve_risk.refresh_enabled` is `true`, the scheduler downloads only the fixed public bulk feeds over allowlisted HTTPS; Python's standard `HTTPS_PROXY` and `NO_PROXY` settings still apply. A rejected, oversized, malformed, or failed download leaves the last accepted snapshot in place.
 

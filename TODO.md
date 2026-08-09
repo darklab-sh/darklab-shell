@@ -138,7 +138,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
 #### Phase 9 — Add optional external scanner and OAST connectors
 
 - [ ] Add private OAST support through an operator-configured Interactsh-compatible service:
-  - Do not default to a public callback service. Require an explicit server URL, token/secret, allowed domain, TLS policy, retention, and privacy acknowledgement.
   - Issue per-run/per-check correlation ids, keep callback credentials private, and attach bounded DNS/HTTP/SMTP/LDAP interaction evidence to the originating run, assessment check, entity, and finding.
   - Deduplicate callbacks, reject callbacks outside the active correlation window, redact sensitive request fields, and make retention/cleanup behavior visible.
   - Keep OAST use explicit and policy-gated; viewing a recommendation or running unrelated Nuclei checks must not allocate a callback domain.

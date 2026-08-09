@@ -154,6 +154,7 @@ class ModuleSizeBudget:
 
 
 _MODULE_SIZE_RATCHET = (
+    ModuleSizeBudget("app/services/connectors/oast_config.py", 75, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_config.py", 68, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_http.py", 172, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_job_artifacts.py", 187, "split-package-ratchet"),
