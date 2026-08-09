@@ -8,7 +8,6 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable
 
-from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
 from services.runs import private_data
 from services.runs.completion_policy import completion_policy_for_signal_context
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected, attach_started_run  # noqa: E501,F401
@@ -37,7 +36,7 @@ def start_brokered_run(
     link_project_id: str = "",
     private_values: tuple[str, ...] = (),
     trusted_execution_args: tuple[str, ...] = (),
-    reviewed_execution: ReviewedDalfoxXssExecution | None = None,
+    reviewed_execution: object | None = None,
     output_signal_context: RunOutputSignalContext | None = None,
     thread_name_prefix: str = "run-broker",
     run_created_hook: Callable[[str, object | None], None] | None = None,

@@ -38,7 +38,7 @@ def api_project_assessment_action_preview(project_id, assessment_id, check_id):
         http_profile_id = str(request.args.get("http_profile_id") or "").strip()
         evidence_selection = {
             key: str(request.args.get(key) or "").strip()
-            for key in ("source_run_id", "parameter_observation_id")
+            for key in ("source_run_id", "parameter_observation_id", "schema_artifact_id")
         }
         if http_profile_id:
             api_routes._require_api_team_capability(

@@ -10,7 +10,7 @@ from flask import jsonify, request
 from blueprints import projects as project_routes
 from blueprints.projects_assessment_actions import _error
 from extensions import limiter
-from services.assessments.nuclei_takeover_launch import materialize_assessment_run_launch
+from services.assessments.run_launch import materialize_assessment_run_launch
 from services.assessments.recommended_actions import (
     AssessmentActionError,
     HttpProfileExecutionError,

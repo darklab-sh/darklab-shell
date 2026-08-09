@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1.openapi_assessment_action_artifact import (
+    assessment_artifact_parameter,
+)
 from services.api_v1.openapi_assessment_action_schemas import (
     assessment_action_schemas as _assessment_action_schemas,
     assessment_evidence_parameters,
@@ -42,6 +45,7 @@ def assessment_action_paths() -> dict[str, Any]:
         *parameters,
         assessment_http_profile_parameter(),
         *assessment_evidence_parameters(),
+        assessment_artifact_parameter(),
     ]
     errors = {
         "400": _response("Invalid assessment action request", _ref("ApiError")),

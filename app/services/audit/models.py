@@ -283,6 +283,11 @@ MANUAL_FINDING_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
     "duplicate_override",
 })
 
+ASSESSMENT_ACTION_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "schema_artifact_id",
+    "schema_operation_count",
+})
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -359,6 +364,7 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditEventType.ASSESSMENT_ACTION_LAUNCH,
         AuditTargetType.ASSESSMENT_CHECK,
         RecordingMode.BEST_EFFORT,
+        detail_keys=ASSESSMENT_ACTION_DETAIL_KEYS,
     ),
     AuditEventType.HTTP_PROFILE_CREATE.value: _spec(
         AuditEventType.HTTP_PROFILE_CREATE,

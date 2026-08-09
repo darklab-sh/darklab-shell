@@ -90,11 +90,11 @@ def _clear_catalog_cache():
     profiles.clear_assessment_profile_catalog_cache()
 
 
-def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
+def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks():
     catalog = profiles.load_assessment_profile_catalog()
 
     by_key = {profile["key"]: profile for profile in catalog.profiles}
-    assert list(by_key) == ["network", "web"]
+    assert list(by_key) == ["network", "web", "api"]
     assert {check["key"] for check in by_key["network"]["checks"]} == {
         "host_reachability",
         "service_discovery",
@@ -111,6 +111,37 @@ def test_shipped_assessment_profiles_define_versioned_network_and_web_checks():
     }
     assert by_key["network"]["version"] == "1.0"
     assert by_key["web"]["version"] == "1.4"
+    assert by_key["api"]["version"] == "1.0"
+    assert by_key["api"]["target_types"] == ["url"]
+    assert by_key["api"]["checks"] == [{
+        "key": "openapi_negative_testing",
+        "version": "1.0",
+        "category": "validation",
+        "label": "OpenAPI negative testing",
+        "purpose": (
+            "Exercise the approved API's saved GET and HEAD operations with bounded "
+            "invalid inputs."
+        ),
+        "target_types": ["url"],
+        "evidence_rules": [{
+            "key": "completed_openapi_negative_testing",
+            "version": "1.0",
+            "evidence_types": ["run", "run_artifact", "finding"],
+            "command_roots": ["schemathesis"],
+            "workflow_actions": [],
+            "structured_output_kinds": ["artifacts", "findings"],
+            "target_match": "exact",
+            "completion": "succeeded",
+            "compatible_versions": ["*"],
+            "negative_evidence": True,
+        }],
+        "policy_level": "standard",
+        "recommended_action": "command:schemathesis",
+        "completion_guidance": (
+            "Choose one unchanged OpenAPI JSON artifact, review the exact read-only "
+            "operation and request limits, and keep both failures and a successful clean run."
+        ),
+    }]
     for profile in catalog.profiles:
         for check in profile["checks"]:
             assert check["recommended_action"].startswith("command:")

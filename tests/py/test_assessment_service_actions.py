@@ -83,6 +83,12 @@ from services.assessments.schemathesis_command import (
     reviewed_schemathesis_command_matches,
     reviewed_schemathesis_command_plan,
 )
+from services.assessments import schemathesis_actions
+from services.assessments.schemathesis_actions import (
+    SCHEMATHESIS_ARTIFACT_OPTION_LIMIT,
+    SchemathesisActionContext,
+    schemathesis_action_context,
+)
 from services.assessments import schemathesis_artifact
 from services.assessments.schemathesis_artifact import (
     SchemathesisArtifactError,
@@ -95,12 +101,15 @@ from services.assessments.schemathesis_schema import (
     SchemathesisSchemaError,
     review_local_openapi_json,
 )
+from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
+from services.assessments import schemathesis_launch
 from services.assessments import nuclei_takeover_launch
+from services.assessments import run_launch
 from services.assessments.nuclei_takeover_launch import (
     NUCLEI_TAKEOVER_CHECK_KEY,
     assessment_run_launch_context,
-    materialize_assessment_run_launch,
 )
+from services.assessments.run_launch import materialize_assessment_run_launch
 from services.assessments import nuclei_takeover_templates
 from services.assessments.nuclei_takeover_templates import (
     NUCLEI_TAKEOVER_TEMPLATE_ID,
@@ -658,6 +667,261 @@ def test_reviewed_schemathesis_command_rejects_unreviewed_or_unprotected_materia
     ) is None
 
 
+def test_schemathesis_action_requires_one_reviewed_saved_artifact():
+    reviewed = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    option = {
+        "artifact_id": reviewed.source_artifact_id,
+        "run_id": "run_openapi",
+        "name": "openapi.json",
+        "byte_size": len(reviewed.content),
+        "content_type": "application/json",
+        "recorded_sha256": reviewed.source_sha256,
+        "created": "2026-08-08T00:00:00+00:00",
+    }
+    row = {
+        "check_id": "ach_api",
+        "assessment_id": "asm_api",
+        "check_key": "openapi_negative_testing",
+        "target_entity_id": "ent_api",
+        "target_type": "url",
+        "target_value": reviewed.base_url,
+        "policy_level": "standard",
+        "recommended_action_key": "command:schemathesis",
+        "profile_key": "api",
+        "profile_version": "1.0",
+        "profile_snapshot": json.dumps({"checks": [{
+            "key": "openapi_negative_testing",
+            "policy_level": "standard",
+            "recommended_action": "command:schemathesis",
+        }]}),
+        "assessment_status": "active",
+        "project_status": "active",
+    }
+    target = {"entity_id": "ent_api", "type": "url", "value": reviewed.base_url}
+    choose = build_assessment_action_plan(
+        row,
+        target,
+        "prj_api",
+        schemathesis=SchemathesisActionContext(
+            (option,), None, None, False, False, False,
+        ),
+    )
+
+    assert choose["launchable"] is False
+    assert choose["unavailable_reason"].startswith("Choose one saved OpenAPI JSON")
+    assert choose["artifact_selection"] == {
+        "kind": "project_openapi_artifact",
+        "required": True,
+        "overflow": False,
+        "options": [option],
+        "selected": None,
+    }
+
+    selected = SchemathesisActionContext(
+        (option,), option, reviewed, True, False, False,
+    )
+    plan = build_assessment_action_plan(
+        row,
+        target,
+        "prj_api",
+        schemathesis=selected,
+    )
+
+    assert plan["launchable"] is True
+    assert plan["display_command"] == reviewed_schemathesis_command_plan(reviewed).command
+    assert plan["bounds"]["request_limit"] == 20
+    assert plan["bounds"]["time_limit_seconds"] == 300
+    assert plan["artifact_selection"]["selected"] == {
+        **option,
+        "openapi_version": "3.1.0",
+        "operation_count": 2,
+        "schema_sha256": reviewed.source_sha256,
+    }
+
+
+def test_schemathesis_action_options_are_bounded_and_selected_in_project_scope(monkeypatch):
+    reviewed = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    row = {
+        "id": reviewed.source_artifact_id,
+        "run_id": "run_openapi",
+        "display_name": "openapi.json",
+        "workspace_path": "reports/openapi.json",
+        "byte_size": len(reviewed.content),
+        "content_type": "application/json",
+        "content_sha256": reviewed.source_sha256,
+        "created": "2026-08-08T00:00:00+00:00",
+    }
+    calls = []
+
+    class FakeConnection:
+        def execute(self, sql, params):
+            calls.append((sql, params))
+            return SimpleNamespace(fetchall=lambda: [row])
+
+    monkeypatch.setattr(
+        schemathesis_actions,
+        "review_project_openapi_artifact",
+        lambda *_args, **_kwargs: reviewed,
+    )
+    context = schemathesis_action_context(
+        FakeConnection(),
+        "session-api",
+        "",
+        "prj_api",
+        "openapi_negative_testing",
+        {"type": "url", "value": reviewed.base_url},
+        {"schema_artifact_id": reviewed.source_artifact_id},
+    )
+
+    assert context is not None
+    assert context.reviewed_schema == reviewed
+    assert context.public_selection()["selected"]["operation_count"] == 2
+    assert calls[0][1][-1] == SCHEMATHESIS_ARTIFACT_OPTION_LIMIT + 1
+    assert "pl.project_id = p.id" in calls[0][0]
+    assert "a.byte_size <= ?" in calls[0][0]
+
+    overflow_rows = [
+        {**row, "id": f"rfa_{index:016x}"}
+        for index in range(SCHEMATHESIS_ARTIFACT_OPTION_LIMIT + 1)
+    ]
+
+    class OverflowConnection:
+        def execute(self, _sql, _params):
+            return SimpleNamespace(fetchall=lambda: overflow_rows)
+
+    overflow = schemathesis_action_context(
+        OverflowConnection(),
+        "session-api",
+        "",
+        "prj_api",
+        "openapi_negative_testing",
+        {"type": "url", "value": reviewed.base_url},
+        {},
+    )
+    assert overflow is not None
+    assert overflow.overflow is True
+    assert len(overflow.options) == SCHEMATHESIS_ARTIFACT_OPTION_LIMIT
+    assert overflow.unavailable_reason().startswith("Saved JSON artifacts exceed")
+
+
+def test_reviewed_schemathesis_execution_replaces_only_help_carrier():
+    reviewed = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    execution = ReviewedSchemathesisExecution(
+        reviewed,
+        Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json"),
+        Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
+    )
+    prepared = PreparedRealCommand(
+        registry_command="schemathesis --help",
+        execution_command="schemathesis --help",
+        command="schemathesis --help",
+        rewrite_notice=None,
+        validation=object(),
+        missing_runtime=None,
+        display_missing_runtime=None,
+        env_overrides={},
+        secret_env_names=[],
+    )
+
+    replaced = apply_reviewed_execution(prepared, execution)
+
+    assert execution.validation_command == "schemathesis --help"
+    assert replaced.execution_command == execution.execution_command
+    assert replaced.command == execution.execution_command
+    with pytest.raises(RunPreparationError, match="carrier no longer matches"):
+        apply_reviewed_execution(
+            SimpleNamespace(registry_command="schemathesis --version"),
+            execution,
+        )
+
+
+def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monkeypatch):
+    reviewed = review_local_openapi_json(
+        _openapi_json(),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    option = {
+        "artifact_id": reviewed.source_artifact_id,
+        "run_id": "run_openapi",
+        "name": "openapi.json",
+        "byte_size": len(reviewed.content),
+        "content_type": "application/json",
+        "recorded_sha256": reviewed.source_sha256,
+        "created": "2026-08-08T00:00:00+00:00",
+    }
+    context = SchemathesisActionContext(
+        (option,), option, reviewed, True, False, False,
+    )
+    plan = {
+        "project_id": "prj_api",
+        "assessment_id": "asm_api",
+        "check_id": "ach_api",
+        "check_key": "openapi_negative_testing",
+        "profile_key": "api",
+        "profile_version": "1.0",
+        "policy_level": "standard",
+        "action": {"key": "command:schemathesis", "kind": "command", "id": "schemathesis"},
+        "target": {"entity_id": "ent_api", "type": "url", "value": reviewed.base_url},
+        "display_command": reviewed_schemathesis_command_plan(reviewed).command,
+        "artifact_selection": context.public_selection(),
+    }
+    schema_path = Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json")
+    report_path = Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson")
+    cleaned = []
+    material = SimpleNamespace(
+        schema=reviewed,
+        schema_path=schema_path,
+        report_path=report_path,
+        private_values=(str(schema_path), str(report_path)),
+        cleanup=lambda: cleaned.append(True),
+    )
+    monkeypatch.setattr(
+        schemathesis_launch,
+        "review_project_openapi_artifact",
+        lambda *_args, **_kwargs: reviewed,
+    )
+    monkeypatch.setattr(
+        schemathesis_launch,
+        "materialize_reviewed_schemathesis_schema",
+        lambda _schema: material,
+    )
+
+    protected, launch_context = materialize_assessment_run_launch(
+        "session-api",
+        "prj_api",
+        plan,
+    )
+
+    assert protected.execution_command == "schemathesis --help"
+    assert protected.private_values == (str(schema_path), str(report_path))
+    assert protected.audit_summary == {
+        "schema_artifact_id": reviewed.source_artifact_id,
+        "schema_operation_count": 2,
+    }
+    assert launch_context.reviewed_execution.execution_command.startswith(
+        f"schemathesis run {schema_path}"
+    )
+    assert launch_context.broker_kwargs() == {
+        "trusted_execution_args": (),
+        "reviewed_execution": launch_context.reviewed_execution,
+    }
+    protected.cleanup()
+    assert cleaned == [True]
+
+
 def test_app_owned_nuclei_takeover_template_is_digest_pinned_and_non_destructive():
     launch = reviewed_nuclei_takeover_launch()
 
@@ -825,7 +1089,7 @@ def test_takeover_launch_materialization_never_creates_protected_http_files(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        nuclei_takeover_launch,
+        run_launch,
         "materialize_http_profile_launch",
         lambda *_args, **_kwargs: pytest.fail("takeover launch requested HTTP material"),
     )

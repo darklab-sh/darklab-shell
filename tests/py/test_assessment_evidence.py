@@ -48,7 +48,7 @@ from services.assessments.evidence_matching import (
 from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
 from services.assessments.handoff import get_project_assessment_finding_changes
 from services.assessments.lifecycle import update_assessment_cycle
-from services.assessments.nuclei_takeover_launch import materialize_assessment_run_launch
+from services.assessments.run_launch import materialize_assessment_run_launch
 from services.assessments.mutations import update_manual_check_state_on_conn
 from services.assessments.reconciliation import reconcile_assessment_findings_on_conn
 from services.assessments.reconciliation_cleanup import (

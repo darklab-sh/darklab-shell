@@ -7,19 +7,22 @@ from dataclasses import replace
 from typing import Any
 
 from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
+from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
 from services.runs.contracts import RunPreparationError
+from services.runs.schemathesis_execution_override import apply_schemathesis_execution
 from services.runs.signal_context import RunOutputSignalContext
-
 
 def apply_reviewed_execution(
     prepared: Any,
-    reviewed_execution: ReviewedDalfoxXssExecution | None,
+    reviewed_execution: object | None,
     *,
     output_signal_context: RunOutputSignalContext | None = None,
 ) -> Any:
     """Replace a validated carrier with its evidence-derived active command."""
     if reviewed_execution is None:
         return prepared
+    if type(reviewed_execution) is ReviewedSchemathesisExecution:
+        return apply_schemathesis_execution(prepared, reviewed_execution)
     if type(reviewed_execution) is not ReviewedDalfoxXssExecution:
         raise RunPreparationError("Reviewed execution context is invalid.")
     try:

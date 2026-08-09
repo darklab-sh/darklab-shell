@@ -24,6 +24,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "__init__.py",
     "auth.py",
     "openapi.py",
+    "openapi_assessment_action_artifact.py",
     "openapi_assessment_action_profile.py",
     "openapi_assessment_action_schemas.py",
     "openapi_atlas_profile.py",
@@ -227,6 +228,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/api_v1/openapi_assessment_action_schemas.py",
         100,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_assessment_action_artifact.py",
+        60,
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_actions.py", 89, "split-package-ratchet"),
@@ -517,6 +523,24 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/schemathesis_artifact.py", 182, "split-package-ratchet"
     ),
     ModuleSizeBudget(
+        "app/services/assessments/schemathesis_actions.py", 188, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_execution.py", 47, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/schemathesis_launch.py", 123, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/recommended_action_selections.py",
+        74,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget("app/services/assessments/run_launch.py", 105, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/run_launch_context.py", 26, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/recommended_action_builder.py", 77, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/stored_nvd_inference.py", 52, "split-package-ratchet"),
@@ -570,6 +594,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/start_context.py", 63, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/start_contracts.py", 30, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/signal_context.py", 44, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/runs/schemathesis_execution_override.py", 29, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/runs/streaming.py", 156, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/structured_filters.py", 317, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/structured_summary.py", 59, "split-package-ratchet"),

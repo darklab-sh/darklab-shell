@@ -1866,11 +1866,11 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     )
     with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
          mock.patch(
-             "services.assessments.nuclei_takeover_launch.materialize_http_profile_launch",
+            "services.assessments.run_launch.materialize_http_profile_launch",
              return_value=protected,
          ), \
          mock.patch(
-             "services.assessments.nuclei_takeover_launch.assessment_run_launch_context",
+             "services.assessments.run_launch.assessment_run_launch_context",
              side_effect=launch_error,
          ):
         failed_api_launch = client.post(
@@ -1887,11 +1887,11 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     cleanup.reset_mock()
     with mock.patch("blueprints.run.broker_available", return_value=True), \
          mock.patch(
-             "services.assessments.nuclei_takeover_launch.materialize_http_profile_launch",
+            "services.assessments.run_launch.materialize_http_profile_launch",
              return_value=protected,
          ), \
          mock.patch(
-             "services.assessments.nuclei_takeover_launch.assessment_run_launch_context",
+             "services.assessments.run_launch.assessment_run_launch_context",
              side_effect=launch_error,
          ):
         failed_browser_launch = client.post(
@@ -2166,6 +2166,128 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     assert secret_value not in dalfox_launched.get_data(as_text=True)
     dalfox_start_kwargs["run_cleanup_hook"]()
     assert not dalfox_config_path.parent.exists()
+
+
+def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema():
+    from services.assessments.schemathesis_schema import review_local_openapi_json
+
+    client = get_client()
+    token = _token(client)
+    project = _create_project(client, token, name="Saved API contract")
+    entity_id, run_id = _seed_assessment_target(token, project["id"])
+    target = f"https://api-{uuid.uuid4().hex[:12]}.example/v1"
+    artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+    content = json.dumps({
+        "openapi": "3.1.0",
+        "info": {"title": "Saved API", "version": "1"},
+        "paths": {
+            "/items": {"get": {"responses": {"200": {"description": "OK"}}}},
+            "/health": {"head": {"responses": {"200": {"description": "OK"}}}},
+        },
+    }, separators=(",", ":")).encode()
+    reviewed = review_local_openapi_json(
+        content,
+        source_artifact_id=artifact_id,
+        base_url=target,
+    )
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE entities SET type = 'url', canonical_value = ?, signature_hash = ? "
+            "WHERE id = ?",
+            (target, "sig_url_" + uuid.uuid4().hex, entity_id),
+        )
+        conn.execute(
+            "UPDATE runs SET command = ? WHERE id = ?",
+            (f"curl -I {target}", run_id),
+        )
+        conn.execute(
+            "INSERT INTO run_file_artifacts "
+            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "detected_by, content_type, content_sha256, created) VALUES "
+            "(?, ?, ?, 'reports/openapi.json', 'openapi.json', 'output', ?, "
+            "'test', 'application/json', ?, '2026-08-08T00:00:00+00:00')",
+            (artifact_id, token, run_id, len(content), reviewed.source_sha256),
+        )
+        conn.commit()
+    assessment = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(token),
+        json={"profile_key": "api", "title": "Saved API assessment"},
+    ).get_json()
+    check = assessment["checks"]["checks"][0]
+    action_path = (
+        f"/api/v1/projects/{project['id']}/assessments/"
+        f"{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
+    )
+    choose = client.get(action_path, headers=_headers(token)).get_json()["plan"]
+
+    assert choose["launchable"] is False
+    assert choose["artifact_selection"]["options"][0]["artifact_id"] == artifact_id
+    assert choose["artifact_selection"]["selected"] is None
+
+    schema_path = Path("/tmp/private-http-runs/run-0123456789abcdef/schema.json")
+    report_path = Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson")
+    cleanup = mock.Mock()
+    material = SimpleNamespace(
+        schema=reviewed,
+        schema_path=schema_path,
+        report_path=report_path,
+        private_values=(str(schema_path), str(report_path)),
+        cleanup=cleanup,
+    )
+    with mock.patch(
+        "services.assessments.schemathesis_actions.review_project_openapi_artifact",
+        return_value=reviewed,
+    ), mock.patch(
+        "services.assessments.schemathesis_launch.review_project_openapi_artifact",
+        return_value=reviewed,
+    ), mock.patch(
+        "services.assessments.schemathesis_launch.materialize_reviewed_schemathesis_schema",
+        return_value=material,
+    ):
+        selected_response = client.get(
+            action_path,
+            headers=_headers(token),
+            query_string={"schema_artifact_id": artifact_id},
+        )
+        plan = selected_response.get_json()["plan"]
+        started = SimpleNamespace(run_id="run_api_negative", status="running")
+        with mock.patch("blueprints.api_v1.broker_available", return_value=True), mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            return_value=started,
+        ) as start_run:
+            launched = client.post(
+                action_path,
+                headers=_headers(token),
+                json={
+                    "confirmed": True,
+                    "plan_digest": plan["plan_digest"],
+                    "schema_artifact_id": artifact_id,
+                },
+            )
+
+    assert selected_response.status_code == 200
+    assert plan["launchable"] is True
+    assert plan["artifact_selection"]["selected"]["operation_count"] == 2
+    assert plan["display_command"].startswith("schemathesis run [protected-schema]")
+    assert launched.status_code == 202
+    start_kwargs = start_run.call_args.kwargs
+    assert start_kwargs["original_command"] == "schemathesis --help"
+    assert start_kwargs["display_command"] == plan["display_command"]
+    assert start_kwargs["private_values"] == (str(schema_path), str(report_path))
+    assert start_kwargs["reviewed_execution"].execution_command.startswith(
+        f"schemathesis run {schema_path}"
+    )
+    assert callable(start_kwargs["run_cleanup_hook"])
+    audit = _audit_event_rows(
+        target_id=check["id"],
+        event_type="assessment.action_launch",
+    )[-1]
+    assert audit["details"]["schema_artifact_id"] == artifact_id
+    assert audit["details"]["schema_operation_count"] == 2
+    assert str(schema_path) not in json.dumps(audit)
+    start_kwargs["run_cleanup_hook"]()
+    cleanup.assert_called_once_with()
 
 
 def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context():
@@ -6248,13 +6370,19 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert "http_profile_id" in action_preview_params
     assert "source_run_id" in action_preview_params
     assert "parameter_observation_id" in action_preview_params
+    assert "schema_artifact_id" in action_preview_params
     assert paths[action_path]["post"]["requestBody"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/AssessmentActionLaunchRequest"}
     assert "http_profile_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
     assert "source_run_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
     assert "parameter_observation_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
+    assert "schema_artifact_id" in schemas["AssessmentActionLaunchRequest"]["properties"]
     assert "evidence_selection" in schemas["AssessmentActionPlan"]["properties"]
+    assert "artifact_selection" in schemas["AssessmentActionPlan"]["properties"]
+    assert schemas["AssessmentOpenApiArtifactSelection"]["properties"]["options"][
+        "maxItems"
+    ] == 64
     assert schemas["FindingVerificationActionPlan"]["properties"]["bounds"]["properties"][
         "credential_use"
     ]["enum"] == ["none", "protected_http_profile"]

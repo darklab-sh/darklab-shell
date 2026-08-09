@@ -29,6 +29,10 @@ function planContent(plan) {
   const rows = [
     ['Command', plan.display_command],
     ['Target', `${text(plan.target?.type)} · ${text(plan.target?.value)}`],
+    ...(plan.artifact_selection ? [
+      ['OpenAPI schema', text(plan.artifact_selection?.selected?.name, 'None')],
+      ['Read operations', plan.artifact_selection?.selected?.operation_count || 'None'],
+    ] : []),
     ['HTTP profile', text(plan.http_profile?.name, 'None')],
     ['Profile role', text(plan.http_profile?.role, 'Anonymous')],
     ['Policy', text(plan.policy_level)],
@@ -142,13 +146,48 @@ async function chooseParameterEvidence(confirm, selection) {
   return { cancelled: choice !== 'continue', evidence };
 }
 
-function previewPath(path, httpProfileId, evidence = null) {
+async function chooseOpenApiArtifact(confirm, selection) {
+  const candidates = Array.isArray(selection?.options) ? selection.options : [];
+  if (!candidates.length) return { cancelled: false, artifact: null };
+  const content = document.createElement('label');
+  content.className = 'project-assessment-action-profile-field';
+  const label = document.createElement('span');
+  label.textContent = 'Saved OpenAPI JSON';
+  const select = document.createElement('select');
+  select.className = 'form-select';
+  select.setAttribute('aria-label', 'Saved OpenAPI JSON for API negative testing');
+  candidates.forEach((item, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = `${text(item?.name, 'OpenAPI JSON')} · ${Number(item?.byte_size || 0).toLocaleString()} bytes · ${text(item?.run_id, 'saved run')}`;
+    select.appendChild(option);
+  });
+  content.append(label, select);
+  const choice = await confirm({
+    body: {
+      text: 'Choose the saved API contract to test.',
+      note: 'The file is read from this Project, checked against its recorded digest, and limited to in-scope GET and HEAD operations before the plan is shown.',
+    },
+    content,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'continue', label: 'Review run', role: 'primary' },
+    ],
+    defaultFocus: select,
+    refocusOnResolve: false,
+  });
+  const artifact = candidates[Number(select.value) || 0] || null;
+  return { cancelled: choice !== 'continue', artifact };
+}
+
+function previewPath(path, httpProfileId, evidence = null, schemaArtifactId = '') {
   const params = new URLSearchParams();
   if (httpProfileId) params.set('http_profile_id', httpProfileId);
   if (evidence?.source_run_id) params.set('source_run_id', evidence.source_run_id);
   if (evidence?.observation_id) {
     params.set('parameter_observation_id', evidence.observation_id);
   }
+  if (schemaArtifactId) params.set('schema_artifact_id', schemaArtifactId);
   const query = params.toString();
   return query ? `${path}?${query}` : path;
 }
@@ -179,6 +218,7 @@ async function launchAssessmentAction(context, options = {}) {
       trigger?.setAttribute('aria-busy', 'true');
     }
     let evidence = null;
+    let schemaArtifactId = '';
     let selectedPreviewPath = previewPath(path, httpProfileId);
     let previewResp = await request(selectedPreviewPath, { cache: 'no-store' });
     let previewData = await previewResp.json().catch(() => ({}));
@@ -197,6 +237,25 @@ async function launchAssessmentAction(context, options = {}) {
       if (evidence) {
         trigger?.setAttribute('aria-busy', 'true');
         selectedPreviewPath = previewPath(path, httpProfileId, evidence);
+        previewResp = await request(selectedPreviewPath, { cache: 'no-store' });
+        previewData = await previewResp.json().catch(() => ({}));
+        if (!previewResp.ok) {
+          throw responseError(previewData, previewResp.status, 'Could not load this assessment action.');
+        }
+        plan = previewData?.plan || {};
+      }
+    }
+    if (plan.artifact_selection?.required && !plan.artifact_selection?.selected) {
+      if (typeof confirm !== 'function') {
+        throw new Error('Assessment launch confirmation is unavailable.');
+      }
+      trigger?.removeAttribute('aria-busy');
+      const selected = await chooseOpenApiArtifact(confirm, plan.artifact_selection);
+      if (selected.cancelled) return false;
+      schemaArtifactId = text(selected.artifact?.artifact_id);
+      if (schemaArtifactId) {
+        trigger?.setAttribute('aria-busy', 'true');
+        selectedPreviewPath = previewPath(path, httpProfileId, evidence, schemaArtifactId);
         previewResp = await request(selectedPreviewPath, { cache: 'no-store' });
         previewData = await previewResp.json().catch(() => ({}));
         if (!previewResp.ok) {
@@ -238,6 +297,7 @@ async function launchAssessmentAction(context, options = {}) {
         confirmed: true,
         plan_digest: text(plan.plan_digest),
         ...(httpProfileId ? { http_profile_id: httpProfileId } : {}),
+        ...(schemaArtifactId ? { schema_artifact_id: schemaArtifactId } : {}),
         ...(evidence ? {
           source_run_id: text(evidence.source_run_id),
           parameter_observation_id: text(evidence.observation_id),

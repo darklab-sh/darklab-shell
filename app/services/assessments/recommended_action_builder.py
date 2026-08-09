@@ -8,16 +8,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-import config as app_config
 from core.database_access import get_db_connect
 from services.assessments.action_plans import (
-    AssessmentActionError,
     build_assessment_action_plan,
     current_assessment_target,
 )
-from services.assessments.dalfox_xss_actions import dalfox_xss_action_context
 from services.assessments.recommended_action_profiles import selected_http_profile_context
 from services.assessments.recommended_action_queries import load_action_row
+from services.assessments.recommended_action_selections import (
+    resolve_recommended_action_selections,
+)
 
 
 def build_recommended_action_plan(
@@ -39,7 +39,7 @@ def build_recommended_action_plan(
         target = current_assessment_target(
             conn, session_id, team_id, project_id, row,
         )
-        xss_context = dalfox_xss_action_context(
+        selections = resolve_recommended_action_selections(
             conn,
             session_id,
             team_id,
@@ -47,15 +47,7 @@ def build_recommended_action_plan(
             str(row["check_key"] or ""),
             target,
             evidence_selection,
-            enabled=bool(
-                app_config.CFG.get("assessment_intrusive_actions_enabled", False)
-            ),
         )
-        if xss_context is None and any((evidence_selection or {}).values()):
-            raise AssessmentActionError(
-                "unsupported_evidence_selection",
-                "Saved parameter evidence applies only to the reviewed XSS action.",
-            )
         selected_profile, profile_target, profile_error = selected_http_profile_context(
             conn,
             row,
@@ -73,7 +65,8 @@ def build_recommended_action_plan(
             http_profile=selected_profile,
             http_profile_web_target=profile_target,
             http_profile_unavailable_reason=profile_error,
-            dalfox_xss=xss_context,
+            dalfox_xss=selections.dalfox_xss,
+            schemathesis=selections.schemathesis,
         )
 
 

@@ -58,7 +58,7 @@ def confirm_recommended_action_plan(
     )
     selection = {
         key: str(data.get(key) or "").strip()
-        for key in ("source_run_id", "parameter_observation_id")
+        for key in ("source_run_id", "parameter_observation_id", "schema_artifact_id")
     } if isinstance(data, Mapping) else {}
     return confirm_action_plan(
         data,

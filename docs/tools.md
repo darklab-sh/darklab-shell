@@ -128,7 +128,7 @@ darklab_shell uses Dalfox for bounded parameter discovery. Normal commands and t
 
 ### `schemathesis`
 
-The image includes an exact-pinned Schemathesis runtime in a virtual environment separate from the app. The terminal allows `schemathesis --help` and `schemathesis --version`, but blocks direct schema runs because generated API traffic can call mutating operations. The guarded command contract accepts unchanged Project-linked OpenAPI JSON with internal references, fixed in-scope servers, GET/HEAD operations, private schema and report files, and strict request limits. It isn't exposed through a browser or API launch route, so Schemathesis network tests remain unavailable to users.
+The image includes an exact-pinned Schemathesis runtime in a virtual environment separate from the app. The terminal allows `schemathesis --help` and `schemathesis --version`, but blocks direct schema runs because generated API traffic can call mutating operations. To run a test, start an API assessment for the approved URL, choose an unchanged Project-linked OpenAPI JSON artifact, and review the GET/HEAD operation count and request limits before confirming. The app rechecks the saved file, gives Schemathesis private schema and report paths for that run, and rejects external references, out-of-scope servers, redirects, retries, and write operations.
 
 ### `wpscan`
 

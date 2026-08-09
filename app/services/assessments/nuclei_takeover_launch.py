@@ -5,45 +5,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 from typing import Any, Mapping
 
 from services.assessments.action_plans import AssessmentActionError
-from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
-from services.assessments.dalfox_xss_launch import materialize_reviewed_dalfox_xss_launch
-from services.assessments.http_profile_execution import (
-    ProtectedHttpLaunch,
-    materialize_http_profile_launch,
-)
-from services.assessments.nuclei_takeover_command import (
-    reviewed_takeover_command_plan,
-    reviewed_takeover_launch_plan_matches,
-)
+from services.assessments.nuclei_takeover_command import reviewed_takeover_launch_plan_matches
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_templates import (
     NucleiTakeoverTemplateError,
     reviewed_nuclei_takeover_launch,
 )
+from services.assessments.run_launch_context import AssessmentRunLaunchContext
 from services.runs.signal_context import RunOutputSignalContext
 
 
 log = logging.getLogger("shell")
-@dataclass(frozen=True)
-class AssessmentRunLaunchContext:
-    trusted_execution_args: tuple[str, ...]
-    output_signal_context: RunOutputSignalContext | None = None
-    reviewed_execution: ReviewedDalfoxXssExecution | None = None
-
-    def broker_kwargs(self) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
-            "trusted_execution_args": self.trusted_execution_args,
-        }
-        if self.output_signal_context is not None:
-            kwargs["output_signal_context"] = self.output_signal_context
-        if self.reviewed_execution is not None:
-            kwargs["reviewed_execution"] = self.reviewed_execution
-        return kwargs
 
 
 def assessment_run_launch_context(
@@ -95,59 +71,3 @@ def assessment_run_launch_context(
             nuclei_takeover_template=reviewed.template,
         ),
     )
-
-
-def materialize_assessment_run_launch(
-    session_id: str,
-    project_id: str,
-    plan: Mapping[str, Any],
-    *,
-    team_id: str = "",
-    actor_member_id: str = "",
-) -> tuple[ProtectedHttpLaunch, AssessmentRunLaunchContext]:
-    """Compose protected HTTP material with app-owned evidence context."""
-    xss_launch = materialize_reviewed_dalfox_xss_launch(
-        session_id,
-        project_id,
-        plan,
-        team_id=team_id,
-        actor_member_id=actor_member_id,
-    )
-    if xss_launch is not None:
-        return xss_launch.protected, AssessmentRunLaunchContext(
-            trusted_execution_args=xss_launch.protected.trusted_execution_args,
-            output_signal_context=xss_launch.output_signal_context,
-            reviewed_execution=xss_launch.reviewed_execution,
-        )
-    if str(plan.get("check_key") or "") == NUCLEI_TAKEOVER_CHECK_KEY:
-        target = plan.get("target")
-        execution_plan = reviewed_takeover_command_plan(
-            str(target.get("type") or "") if isinstance(target, Mapping) else "",
-            str(target.get("value") or "") if isinstance(target, Mapping) else "",
-            protected_display=False,
-        )
-        protected = ProtectedHttpLaunch(
-            execution_plan.command if execution_plan else "",
-            (),
-            (),
-            None,
-            {},
-        )
-    else:
-        protected = materialize_http_profile_launch(
-            session_id,
-            project_id,
-            plan,
-            team_id=team_id,
-            actor_member_id=actor_member_id,
-        )
-    try:
-        context = assessment_run_launch_context(
-            plan,
-            trusted_execution_args=protected.trusted_execution_args,
-        )
-    except AssessmentActionError:
-        if protected.cleanup:
-            protected.cleanup()
-        raise
-    return protected, context

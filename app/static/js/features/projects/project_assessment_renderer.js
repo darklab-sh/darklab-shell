@@ -455,6 +455,7 @@ function createProjectAssessmentRenderer(context, actions) {
       nmap: 'Nmap',
       nuclei: 'Nuclei',
       ping: 'Ping',
+      schemathesis: 'Schemathesis',
     };
     return `Run ${labels[actionId] || actionId}`;
   }

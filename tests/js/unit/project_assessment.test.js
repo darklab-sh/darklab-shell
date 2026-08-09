@@ -560,6 +560,97 @@ describe('project assessment controller', () => {
     })
   })
 
+  it('chooses a saved OpenAPI artifact before launching API negative testing', async () => {
+    const apiDetail = {
+      ...detail,
+      checks: {
+        ...detail.checks,
+        checks: [{ ...detail.checks.checks[0], recommended_action_key: 'command:schemathesis' }],
+        total: 1,
+      },
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(apiDetail)
+      return responseFor(url, options)
+    })
+    const actionPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_1/recommended-action'
+    const artifact = {
+      artifact_id: 'rfa_1234567890abcdef',
+      run_id: 'run_openapi',
+      name: 'openapi.json',
+      byte_size: 2048,
+    }
+    const chooser = {
+      launchable: false,
+      unavailable_reason: 'Choose one saved OpenAPI JSON artifact.',
+      artifact_selection: { required: true, selected: null, options: [artifact] },
+    }
+    const selected = {
+      ...artifact,
+      openapi_version: '3.1.0',
+      operation_count: 2,
+      schema_sha256: 'd'.repeat(64),
+    }
+    const plan = {
+      action: { id: 'schemathesis', key: 'command:schemathesis', kind: 'command' },
+      target: { entity_id: 'ent_1', type: 'url', value: 'https://api.example.com/' },
+      http_profile: { name: '', credential_use: 'none' },
+      policy_level: 'standard',
+      scope: { target_count: 1, fan_out: 1 },
+      bounds: { summary: 'Two reviewed GET/HEAD operations.', credential_use: 'none' },
+      display_command: 'schemathesis run [protected-schema] --url https://api.example.com/',
+      launchable: true,
+      artifact_selection: { required: true, selected, options: [artifact] },
+      plan_digest: 'e'.repeat(64),
+    }
+    const selectedPath = `${actionPath}?schema_artifact_id=rfa_1234567890abcdef`
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (options.method === 'POST') {
+        return apiResponse({ run: { run_id: 'run_schemathesis' }, plan })
+      }
+      return apiResponse({ plan: url === selectedPath ? plan : chooser })
+    })
+    const showConfirm = vi.fn(async (options) => {
+      if (options.body?.text === 'Choose the saved API contract to test.') {
+        expect(options.content.querySelector('select').getAttribute('aria-label'))
+          .toBe('Saved OpenAPI JSON for API negative testing')
+        expect(options.content.textContent).toContain('openapi.json · 2,048 bytes · run_openapi')
+        return 'continue'
+      }
+      expect(options.tone).toBe('warning')
+      expect(options.content.textContent).toContain('OpenAPI schemaopenapi.json')
+      expect(options.content.textContent).toContain('Read operations2')
+      return 'run'
+    })
+    const attachActiveRunFromMonitor = vi.fn(async () => true)
+    const ctx = makeContext(projectWorkspaceRequest, {
+      apiFetch,
+      showConfirm,
+      attachActiveRunFromMonitor,
+    })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle').click()
+    ;[...container.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'Run Schemathesis').click()
+
+    await vi.waitFor(() => expect(attachActiveRunFromMonitor).toHaveBeenCalled())
+    expect(apiFetch).toHaveBeenNthCalledWith(1, actionPath, { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenNthCalledWith(2, selectedPath, { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenNthCalledWith(3, actionPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        confirmed: true,
+        plan_digest: 'e'.repeat(64),
+        schema_artifact_id: 'rfa_1234567890abcdef',
+      }),
+    })
+  })
+
   it('selects an available HTTP role before previewing and launching a protected assessment action', async () => {
     const protectedDetail = {
       ...detail,

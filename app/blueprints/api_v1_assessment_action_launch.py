@@ -10,7 +10,7 @@ from flask import jsonify, request
 from blueprints import api_v1 as api_routes
 from blueprints.api_v1_assessment_actions import _error
 from core.helpers import get_client_ip, get_log_session_id
-from services.assessments.nuclei_takeover_launch import materialize_assessment_run_launch
+from services.assessments.run_launch import materialize_assessment_run_launch
 from services.assessments.recommended_actions import (
     AssessmentActionError,
     HttpProfileExecutionError,

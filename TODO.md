@@ -122,12 +122,12 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Show a redacted display command in the terminal, History, Run Details, workflow execution state, audit, metrics, notifications, and errors. Apply the existing secret masking pass to tool output as a second line of defense.
   - Never allow a profile to broaden a Project target into an unrelated hostname through redirects, schema servers, callback URLs, or proxy behavior without a visible allowlist decision.
 - [x] Add a protected Dalfox parameter-discovery adapter with one-target bounds, no redirects, no remote dictionaries, no active XSS payloads, and private header material.
-- [x] Extend protected execution to SQLmap where it has a safe, testable contract. SQLmap is URL-scoped and detection-only; extraction, takeover, fan-out, redirects, and unsupported profile features fail closed. Schemathesis and ZAP remain pending until their schema-fetch and operator-managed contracts are separately reviewed.
+- [x] Extend protected execution to SQLmap where it has a safe, testable contract. SQLmap is URL-scoped and detection-only; extraction, takeover, fan-out, redirects, and unsupported profile features fail closed. ZAP remains pending until its operator-managed contract is separately reviewed.
 
 #### Phase 6 — Close the web and API discovery/validation gaps
 
 - [ ] Add focused parameter and application testing tools:
-  - Add Schemathesis for OpenAPI/GraphQL operation coverage, bounded negative testing, minimized failure examples, and per-operation evidence. Schema fetches and `$ref` resolution must obey the same scope and private-network rules as the target.
+  - Finish Schemathesis result ingestion with bounded per-operation evidence and minimized failure examples from the reviewed local OpenAPI run.
   - Prefer version-pinned multi-arch binaries or isolated Python environments that keep the runtime dependency graph reproducible. Update licenses, hashes, SBOM/provenance, image-size budgets, and container smoke checks for every addition.
   - Add structured parsers/adapters under focused modules rather than more broad regexes in `output_signals.py`. Preserve raw output, normalize stable findings/entities, carry tool/profile versions, and make parser failure visible without failing the underlying run.
 - [ ] Improve Nuclei usage before adding overlapping scanners:

@@ -8,6 +8,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from services.api_v1.openapi_assessment_action_artifact import assessment_artifact_schemas
 from services.api_v1.openapi_verification_actions import verification_action_schemas
 
 
@@ -17,10 +18,9 @@ def _ref(name: str) -> dict[str, str]:
 
 def assessment_action_schemas() -> dict[str, Any]:
     plan = deepcopy(verification_action_schemas()["FindingVerificationActionPlan"])
-    plan["properties"]["evidence_selection"] = _ref(
-        "AssessmentParameterEvidenceSelection"
-    )
-    return {
+    plan["properties"]["evidence_selection"] = _ref("AssessmentParameterEvidenceSelection")
+    plan["properties"]["artifact_selection"] = _ref("AssessmentOpenApiArtifactSelection")
+    schemas = {
         "AssessmentParameterEvidenceOption": {
             "type": "object",
             "required": [
@@ -40,10 +40,7 @@ def assessment_action_schemas() -> dict[str, Any]:
             "type": "object",
             "required": ["kind", "required", "overflow", "options", "selected"],
             "properties": {
-                "kind": {
-                    "type": "string",
-                    "enum": ["dalfox_parameter_observation"],
-                },
+                "kind": {"type": "string", "enum": ["dalfox_parameter_observation"]},
                 "required": {"type": "boolean", "enum": [True]},
                 "overflow": {"type": "boolean"},
                 "options": {
@@ -73,12 +70,15 @@ def assessment_action_schemas() -> dict[str, Any]:
                 "http_profile_id": {"type": "string"},
                 "source_run_id": {"type": "string"},
                 "parameter_observation_id": {"type": "string"},
+                "schema_artifact_id": {"type": "string"},
                 "plan_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
                 "workspace_cwd": {"type": "string"},
             },
             "additionalProperties": False,
         },
     }
+    schemas.update(assessment_artifact_schemas())
+    return schemas
 
 
 def assessment_evidence_parameters() -> list[dict[str, Any]]:

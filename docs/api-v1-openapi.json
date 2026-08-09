@@ -286,6 +286,9 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "schema_artifact_id": {
+            "type": "string"
+          },
           "source_run_id": {
             "type": "string"
           },
@@ -326,6 +329,9 @@
               "id"
             ],
             "type": "object"
+          },
+          "artifact_selection": {
+            "$ref": "#/components/schemas/AssessmentOpenApiArtifactSelection"
           },
           "assessment_id": {
             "type": "string"
@@ -2057,6 +2063,98 @@
         },
         "required": [
           "state"
+        ],
+        "type": "object"
+      },
+      "AssessmentOpenApiArtifactOption": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          },
+          "byte_size": {
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "created": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "openapi_version": {
+            "type": "string"
+          },
+          "operation_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "recorded_sha256": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "schema_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "run_id",
+          "name",
+          "byte_size",
+          "content_type",
+          "recorded_sha256",
+          "created"
+        ],
+        "type": "object"
+      },
+      "AssessmentOpenApiArtifactSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "project_openapi_artifact"
+            ],
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentOpenApiArtifactOption"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "overflow": {
+            "type": "boolean"
+          },
+          "required": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "selected": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssessmentOpenApiArtifactOption"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "kind",
+          "required",
+          "overflow",
+          "options",
+          "selected"
         ],
         "type": "object"
       },
@@ -11811,6 +11909,15 @@
             "description": "Reviewed parameter observation from the selected run.",
             "in": "query",
             "name": "parameter_observation_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Saved Project-linked OpenAPI JSON artifact id.",
+            "in": "query",
+            "name": "schema_artifact_id",
             "required": false,
             "schema": {
               "type": "string"

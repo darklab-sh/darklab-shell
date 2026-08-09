@@ -15,6 +15,7 @@ from services.assessments.command_plans import command_plan
 from services.assessments.dalfox_xss_actions import DalfoxXssActionContext
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
+from services.assessments.schemathesis_actions import SchemathesisActionContext
 from services.projects.scope import shared_owner_where
 
 
@@ -102,6 +103,7 @@ def build_assessment_action_plan(
     http_profile_web_target: str = "",
     http_profile_unavailable_reason: str = "",
     dalfox_xss: DalfoxXssActionContext | None = None,
+    schemathesis: SchemathesisActionContext | None = None,
 ) -> dict[str, Any]:
     """Build one bounded plan from a persisted check and its frozen profile."""
     frozen = _frozen_check(row)
@@ -156,12 +158,18 @@ def build_assessment_action_plan(
     elif dalfox_xss and (action_id != "dalfox" or not target or target["type"] != "url"):
         launchable = False
         unavailable_reason = "The reviewed XSS action no longer matches its saved URL contract."
+    elif schemathesis and (action_id != "schemathesis" or not target or target["type"] != "url"):
+        launchable = False
+        unavailable_reason = "The reviewed API action no longer matches its saved URL contract."
     elif http_profile_unavailable_reason:
         launchable = False
         unavailable_reason = http_profile_unavailable_reason
     elif dalfox_xss and dalfox_xss.unavailable_reason():
         launchable = False
         unavailable_reason = dalfox_xss.unavailable_reason()
+    elif schemathesis and schemathesis.unavailable_reason():
+        launchable = False
+        unavailable_reason = schemathesis.unavailable_reason()
     elif check_key == NUCLEI_TAKEOVER_CHECK_KEY and http_profile:
         launchable = False
         unavailable_reason = "The reviewed takeover check does not send saved credentials."
@@ -169,6 +177,8 @@ def build_assessment_action_plan(
         selected_command = (
             dalfox_xss.command_plan(http_profile)
             if dalfox_xss
+            else schemathesis.command_plan()
+            if schemathesis
             else reviewed_takeover_command_plan(target["type"], target["value"])
             if check_key == NUCLEI_TAKEOVER_CHECK_KEY
             else command_plan(
@@ -233,6 +243,8 @@ def build_assessment_action_plan(
     }
     if dalfox_xss:
         payload["evidence_selection"] = dalfox_xss.public_selection()
+    if schemathesis:
+        payload["artifact_selection"] = schemathesis.public_selection()
     payload["plan_digest"] = _digest(payload)
     return payload
 
@@ -249,7 +261,7 @@ def confirm_assessment_action_plan(
         )
     allowed = {
         "confirmed", "http_profile_id", "parameter_observation_id",
-        "plan_digest", "source_run_id", "workspace_cwd",
+        "plan_digest", "schema_artifact_id", "source_run_id", "workspace_cwd",
     }
     if set(data) - allowed:
         raise AssessmentActionError(
