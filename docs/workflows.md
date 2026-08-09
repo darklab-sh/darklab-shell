@@ -26,6 +26,16 @@ The built-in **Live Web Review** playbook starts from one approved HTTP or HTTPS
 
 After the screenshot succeeds, Dalfox builds a structured parameter inventory in discovery-only mode. It doesn't send XSS payloads, follow redirects, or use remote dictionary mining, and it keeps one target inside fixed request-rate, worker, and time limits. This step doesn't create an intermediate file; the saved run output and normalized parameter observations remain the durable evidence.
 
+### Port Service Review
+
+The built-in **Port Service Review** playbook takes one approved host and TCP port. Its first connect-mode Nmap run fingerprints that exact service. If the fingerprint succeeds, a second run uses Nmap's reviewed `default` selector so only default scripts that apply to the detected service run. One retry, a 30-second per-script timeout, and a three-minute host timeout bound the enumeration step.
+
+This playbook doesn't guess credentials or run broad intrusive script categories. When the saved service evidence supports a deeper TLS, SSH, SMB, mail, DNS, database, or other protocol check, Project Assessment offers that fixed profile separately so you can review its exact scripts before starting it.
+
+### API Schema Testing
+
+API schema testing stays in Project Assessment instead of the generic workflow runner. Choose one unchanged Project-linked OpenAPI JSON artifact on the API check, review the allowed GET/HEAD operation inventory and fixed request limits, then confirm the protected Schemathesis action. The app rechecks the artifact and keeps schema, configuration, and report paths private. Ordinary commands and workflows can't start a schema run, which prevents a saved playbook from adding write operations, remote references, redirects, or unreviewed targets.
+
 ### Historical Web Surface Triage
 
 The built-in Historical Web Surface Triage playbook starts with passive `gau` archive discovery and saves a bounded candidate list in Files. It then normalizes and restricts the candidates to the domain you supplied (including its subdomains), checks only that scoped set for live HTTP services, and rechecks scope before Katana crawls confirmed live URLs. A final scope pass protects the HTTPx summary too.

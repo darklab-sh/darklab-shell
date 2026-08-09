@@ -135,21 +135,6 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Evaluate `smbclient`/`enum4linux-ng`, Net-SNMP tools, and LDAP client tools as an optional service-enumeration pack with pinned versions, safe command policies, structured adapters, and multi-arch container validation.
   - Keep credential attacks, spraying, unrestricted share downloads, and invasive directory modification disabled. Any future intrusive extension must be a separate operator opt-in and is not part of this item.
 
-#### Phase 8 — Add bounded collection fan-out to durable workflows
-
-- [ ] Introduce an explicit workflow version for collection semantics while leaving legacy and v2 scalar workflows unchanged:
-  - Add bounded list captures for lines, entities, and JSON Pointer arrays with type, item limit, byte limit, deduplication, normalization, and required/empty behavior.
-  - Add a `for_each`/fan-out step that renders one command per captured item, validates every rendered command and target through normal policy/scope checks, and records each child run against the parent step.
-  - Add global execution limits for captured items, generated child runs, parallel children, total requests where known, total runtime, stored output, retries, and failure count.
-  - Support fail-fast, continue-and-summarize, and bounded retry policies without letting one failed target erase successful child evidence.
-  - Checkpoint pending/completed item state so restart recovery resumes unlaunched work without duplicating completed runs. Cancellation must stop active children and leave a truthful partial summary.
-  - Keep collection values out of public execution serializers, logs, metrics, and notifications; expose counts and bounded redacted samples only where the current role may see them.
-- [ ] Extend the workflow editor/execution UI and built-in playbooks:
-  - Let authors choose scalar or collection captures, configure limits, select a fan-out source, preview command templates with placeholders, and see validation beside the affected field.
-  - Show parent-step progress, succeeded/failed/skipped counts, active child runs, and a bounded failure sample on desktop and mobile.
-  - Add maintained assessment playbooks such as subdomain → resolve → probe → crawl → scan, live URL → screenshot → parameter inventory, API schema → operations → bounded tests, and port → service-specific enumeration.
-  - Require Files only where a tool genuinely needs an intermediate file; use structured captures for orchestration and Files artifacts for user-visible durable output.
-
 #### Phase 9 — Add optional external scanner and OAST connectors
 
 - [ ] Integrate OWASP ZAP as an operator-configured worker/sidecar, not as part of the main image:

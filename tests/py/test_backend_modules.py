@@ -24857,6 +24857,7 @@ class TestWorkflowInputLoading:
         assert "Crawl And Scan" not in disabled_titles
         assert "Bounded Subdomain Assessment" in disabled_titles
         assert "Live Web Review" not in disabled_titles
+        assert "Port Service Review" in disabled_titles
         assert "Subdomain HTTP Triage" in enabled_titles
         assert "Historical Web Surface Triage" in enabled_titles
         assert "Crawl And Scan" in enabled_titles
@@ -24967,7 +24968,36 @@ class TestWorkflowInputLoading:
             render_workflow_command(str(step["cmd"]), {"url": "https://example.com/search?q=one"})
             for step in live_web_steps
         ]
-        assert [is_command_allowed(command) for command in live_web_commands] == [
+        live_web_validations = [
+            commands.validate_command(command, cfg={"workspace_enabled": True})
+            for command in live_web_commands
+        ]
+        assert [
+            (validation.allowed, validation.reason)
+            for validation in live_web_validations
+        ] == [
+            (True, ""),
+            (True, ""),
+        ]
+        port_review = next(item for item in enabled if item["title"] == "Port Service Review")
+        assert port_review["id"] == "port_service_review"
+        assert port_review["version"] == 2
+        port_steps = cast(list[dict[str, object]], port_review["steps"])
+        assert [step["id"] for step in port_steps] == [
+            "fingerprint_service",
+            "enumerate_service",
+        ]
+        assert port_steps[0]["next"] == {"success": "enumerate_service", "failure": "stop"}
+        assert "-sT -sV -Pn -p {{port}}" in str(port_steps[0]["cmd"])
+        assert "--script default --script-timeout 30s" in str(port_steps[1]["cmd"])
+        port_commands = [
+            render_workflow_command(
+                str(step["cmd"]),
+                {"host": "example.com", "port": "443"},
+            )
+            for step in port_steps
+        ]
+        assert [is_command_allowed(command) for command in port_commands] == [
             (True, ""),
             (True, ""),
         ]
