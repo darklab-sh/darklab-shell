@@ -990,9 +990,15 @@ class TestSessionWorkflows:
             "steps": [{"cmd": "dig {{domain}} A", "note": "resolve apex"}],
         }
 
-    def test_create_lists_and_returns_normalized_workflow(self):
+    def test_create_lists_and_returns_normalized_workflow(self, monkeypatch):
         client = get_client()
         session_id = "workflow-create-" + __import__("uuid").uuid4().hex[:8]
+        launched: list[str] = []
+        monkeypatch.setattr(
+            "blueprints.workflows.launch_execution_step",
+            lambda execution_id: launched.append(execution_id)
+            or {"execution_id": execution_id},
+        )
 
         create_resp = client.post(
             "/session/workflows",
@@ -1052,8 +1058,10 @@ class TestSessionWorkflows:
             json={"workflow_id": collection["id"], "inputs": {}},
             headers={"X-Session-ID": session_id},
         )
-        assert launch_resp.status_code == 400
-        assert launch_resp.get_json()["error"] == "workflow_fanout_execution_unavailable"
+        assert launch_resp.status_code == 202
+        launched_execution = launch_resp.get_json()["execution"]
+        assert launched == [launched_execution["id"]]
+        assert launched_execution["workflow_id"] == collection["id"]
 
     def test_rejects_undeclared_workflow_variables(self):
         client = get_client()

@@ -115,30 +115,6 @@ def workflow_executions_create():
             "session": get_log_session_id(session_id),
         })
         return jsonify({"error": str(exc)}), 400
-    raw_steps = definition.get("steps")
-    definition_steps = raw_steps if isinstance(raw_steps, list) else []
-    if any(
-        isinstance(step, dict) and (
-            isinstance(step.get("for_each"), dict)
-            or any(
-                isinstance(capture, dict)
-                and str(capture.get("kind") or capture.get("mode") or "").strip().lower()
-                == "collection"
-                for capture in step.get("captures") or []
-            )
-        )
-        for step in definition_steps
-    ):
-        log.warning("WORKFLOW_EXECUTION_VALIDATION_FAILED", extra={
-            "reason": "fanout_execution_unavailable",
-            "workflow_id": workflow_id,
-            "session": get_log_session_id(session_id),
-        })
-        return jsonify({
-            "error": "workflow_fanout_execution_unavailable",
-            "message": "This workflow's collection fan-out cannot start safely.",
-        }), 400
-
     project = get_active_project(session_id, team_id=scope.team_id)
     member = scope.member or {}
     try:

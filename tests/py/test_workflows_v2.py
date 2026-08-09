@@ -1255,13 +1255,54 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
         json={"workflow_id": workflow["id"], "inputs": {"target": "viewer.example"}},
         headers=viewer_headers,
     )
-    owner_execution = owner_create.get_json()["execution"]
-    operator_execution = operator_create.get_json()["execution"]
-
+    collection_workflow_response = client.post(
+        "/session/workflows",
+        json={
+            "version": 3,
+            "title": "Team collection workflow",
+            "description": "Collect and probe hosts",
+            "inputs": [],
+            "steps": [
+                {
+                    "id": "collect",
+                    "cmd": "printf hosts",
+                    "captures": [{
+                        "name": "hosts",
+                        "kind": "collection",
+                        "source": "first_nonempty_line",
+                    }],
+                },
+                {
+                    "id": "probe",
+                    "cmd": "printf probe {{hosts}}",
+                    "for_each": {"collection": "hosts", "max_parallel": 2},
+                },
+            ],
+        },
+        headers=owner_headers,
+    )
+    assert collection_workflow_response.status_code == 201
+    collection_workflow = collection_workflow_response.get_json()["workflow"]
+    collection_create = client.post(
+        "/workflow-executions",
+        json={"workflow_id": collection_workflow["id"], "inputs": {}},
+        headers=operator_headers,
+    )
+    viewer_collection_create = client.post(
+        "/workflow-executions",
+        json={"workflow_id": collection_workflow["id"], "inputs": {}},
+        headers=viewer_headers,
+    )
     assert workflow_response.status_code == 201
     assert owner_create.status_code == 202
     assert operator_create.status_code == 202
+    assert collection_create.status_code == 202
     assert viewer_create.status_code == 403
+    assert viewer_collection_create.status_code == 403
+    owner_execution = owner_create.get_json()["execution"]
+    operator_execution = operator_create.get_json()["execution"]
+    collection_execution = collection_create.get_json()["execution"]
+
     _assert_public_execution_payload(
         owner_execution,
         "owner.example",
@@ -1272,6 +1313,14 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
     )
     _assert_public_execution_payload(
         operator_execution,
+        "owner.example",
+        "operator.example",
+        owner_token,
+        operator_token,
+        viewer_token,
+    )
+    _assert_public_execution_payload(
+        collection_execution,
         "owner.example",
         "operator.example",
         owner_token,
@@ -1292,6 +1341,7 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
         assert {item["id"] for item in listed.get_json()["executions"]} == {
             owner_execution["id"],
             operator_execution["id"],
+            collection_execution["id"],
         }
         assert detail.status_code == 200
         assert events.status_code == 200
@@ -1396,7 +1446,11 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
     assert team_pid_reads == [(run_id, team_id)]
     assert validated == [(run_id, 5201, operator_token, team_id)]
     assert signaled == [5201]
-    assert launches == [owner_execution["id"], operator_execution["id"]]
+    assert launches == [
+        owner_execution["id"],
+        operator_execution["id"],
+        collection_execution["id"],
+    ]
     assert finalize_run_step(run_id, 0, captures={"resolved_ip": "192.0.2.40"}) is None
 
     with get_db_connect()() as conn:
@@ -1734,7 +1788,7 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     from services.runs.contracts import RunPreparationError
     from services.workflows.executions import finalize_workflow_run, launch_execution_step
 
-    make_test_app()
+    client = make_test_app().test_client()
     session_id = "workflow-engine-" + uuid.uuid4().hex
     source = _v2_definition()
     source["inputs"][0]["sensitive"] = True
@@ -1821,10 +1875,10 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     assert all(item["owner_tab_id"] == "tab-workflow-context" for item in launched)
     assert stored["status"] == "completed"
 
-    collection_definition = compile_execution_definition({
+    collection_source = {
         "version": 3,
-        "id": "collect_and_probe",
         "title": "Collect and probe",
+        "description": "Collect and probe hosts",
         "inputs": [],
         "steps": [
             {
@@ -1850,16 +1904,30 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
                 "next": {"success": "complete", "failure": "stop"},
             },
         ],
-    })
-    collection_execution = create_execution(
-        session_id=session_id,
-        team_id="",
-        workflow_id="collect_and_probe",
-        workflow_source="config",
-        definition=collection_definition,
-        inputs={},
+    }
+    collection_workflow_response = client.post(
+        "/session/workflows",
+        json=collection_source,
+        headers={"X-Session-ID": session_id},
     )
-    launch_execution_step(str(collection_execution["id"]))
+    assert collection_workflow_response.status_code == 201
+    collection_workflow = collection_workflow_response.get_json()["workflow"]
+    collection_launch_response = client.post(
+        "/workflow-executions",
+        json={
+            "workflow_id": collection_workflow["id"],
+            "inputs": {},
+            "workspace_cwd": "cases/collection-review",
+            "tab_id": "tab-collection-context",
+        },
+        headers={
+            "X-Session-ID": session_id,
+            "X-Client-ID": "client-collection-context",
+        },
+    )
+    assert collection_launch_response.status_code == 202
+    collection_payload = collection_launch_response.get_json()
+    collection_execution = collection_payload["execution"]
     collection_stored = get_execution(session_id, str(collection_execution["id"]))
     assert collection_stored is not None
     assert collection_stored["status"] == "completed"
@@ -1883,6 +1951,18 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
         private_hosts <= set(cast(tuple[str, ...], item["private_values"]))
         for item in launched[-3:]
     )
+    assert all(
+        item["workspace_cwd"] == "cases/collection-review"
+        for item in launched[-4:]
+    )
+    assert all(
+        item["owner_client_id"] == "client-collection-context"
+        for item in launched[-4:]
+    )
+    assert all(
+        item["owner_tab_id"] == "tab-collection-context"
+        for item in launched[-4:]
+    )
     children = list_fanout_children(str(collection_execution["id"]), "probe")
     assert [(child["ordinal"], child["status"], child["error_code"]) for child in children] == [
         (0, "succeeded", ""),
@@ -1902,6 +1982,7 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     }
     for private_host in private_hosts:
         assert private_host not in json.dumps(public_collection)
+        assert private_host not in json.dumps(collection_payload)
 
     async_definition = compile_execution_definition({
         "version": 3,
