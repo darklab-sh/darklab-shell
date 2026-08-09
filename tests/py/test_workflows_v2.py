@@ -454,6 +454,57 @@ def test_collection_capture_definitions_require_version_three_and_validate_limit
             "steps": [{**base["steps"][0], "captures": [{**base["steps"][0]["captures"][0], "item_limit": 33}]}],
         })
 
+    fanout = {
+        **base,
+        "version": 3,
+        "steps": [
+            base["steps"][0],
+            {
+                "id": "probe",
+                "cmd": "httpx -u {{hosts}} -silent",
+                "for_each": {
+                    "collection": "hosts",
+                    "failure_mode": "continue",
+                    "retries": 2,
+                    "max_parallel": 4,
+                    "max_failures": 5,
+                },
+            },
+        ],
+    }
+    compiled_fanout = compile_workflow_definition(fanout)
+    compiled_fanout_steps = cast(list[dict[str, Any]], compiled_fanout["steps"])
+    assert compiled_fanout_steps[1]["for_each"] == {
+        "collection": "hosts",
+        "failure_mode": "continue",
+        "retries": 2,
+        "max_parallel": 4,
+        "max_failures": 5,
+    }
+    with pytest.raises(WorkflowDefinitionError, match="require version 3"):
+        compile_workflow_definition({**fanout, "version": 2})
+    with pytest.raises(WorkflowDefinitionError, match="require a for_each"):
+        compile_workflow_definition({
+            **fanout,
+            "steps": [fanout["steps"][0], {"id": "probe", "cmd": "httpx -u {{hosts}}"}],
+        })
+    with pytest.raises(WorkflowDefinitionError, match="must name a collection capture"):
+        compile_workflow_definition({
+            **fanout,
+            "steps": [
+                {
+                    **fanout["steps"][0],
+                    "captures": [{"name": "hosts", "source": "json_pointer", "pointer": "/host"}],
+                },
+                fanout["steps"][1],
+            ],
+        })
+    with pytest.raises(WorkflowDefinitionError, match="referenced by the step command"):
+        compile_workflow_definition({
+            **fanout,
+            "steps": [fanout["steps"][0], {**fanout["steps"][1], "cmd": "httpx -silent"}],
+        })
+
 
 def test_collection_fanout_renders_bounded_deduplicated_child_commands_without_public_items():
     children = expand_collection_step(

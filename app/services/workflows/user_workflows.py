@@ -105,7 +105,7 @@ def _clean_payload(data):
         note = _trim_text(item.get("note"), MAX_WORKFLOW_STEP_NOTE_LEN)
         if not cmd:
             raise UserWorkflowError("workflow step command is required", field=f"steps.{index}.cmd")
-        if version == 2:
+        if version >= 2:
             step_id = str(item.get("id") or "").strip().lower()
             if not WORKFLOW_INPUT_ID_RE.fullmatch(step_id):
                 raise UserWorkflowError(
@@ -277,7 +277,8 @@ def _new_workflow_id():
 
 
 def _definition_version(workflow) -> int:
-    return 2 if workflow.get("version") == 2 else 1
+    version = workflow.get("version")
+    return version if isinstance(version, int) and version in {1, 2, 3} else 1
 
 
 def create_user_workflow(session_id, data, *, team_id=""):

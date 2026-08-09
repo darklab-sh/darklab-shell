@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Version 3 workflows can declare a bounded collection fan-out contract.**
+  - **What:** A `for_each` step names one earlier collection capture and stores normalized fail-fast or continue behavior, retry, parallel-child, and failure limits. The compiler requires that collection on every incoming path, requires the command to use it, rejects scalar or additional collection substitutions, and preserves version 3 when a personal or team workflow is saved. Execution fails closed until the durable child-run path can bind every rendered command separately.
+  - **Tests:** Compiler and session-route coverage pins version gating, collection-only sources, command references, normalized policy bounds, saved-definition round trips, and the no-scalar-launch boundary. Pyright remains clean for the touched workflow modules.
 - **Reviewed FTP checks can record anonymous access without listing remote files.**
   - **What:** The app-owned FTP profile runs only the exact `ftp-syst` and `ftp-anon` scripts, fixes `ftp-anon.maxlist=0`, and requires confirmation. The anonymous check makes one standard login attempt, never guesses credentials or selects the broad `auth` category, and doesn't open a directory-listing connection. Only an exact FTP 230 success becomes typed access, account, and reply-code evidence; changed or listing-bearing output stays out with all free-form output.
   - **Tests:** Profile, command-plan, public-contract, exact-output, unknown-script, listing-rejection, catalog-alignment, architecture-ratchet, Pyright, and documentation coverage pins the boundary.

@@ -195,6 +195,15 @@ def normalize_workflow_entry(entry):
         if version >= 2 and captures:
             clean_step["captures"] = captures
             capture_names.update(pending_capture_names)
+        raw_for_each = step.get("for_each")
+        if version >= 3 and isinstance(raw_for_each, dict):
+            for_each: dict[str, object] = {
+                "collection": str(raw_for_each.get("collection") or "").strip().lower(),
+            }
+            for field in ("failure_mode", "mode", "retries", "max_parallel", "max_failures"):
+                if field in raw_for_each:
+                    for_each[field] = raw_for_each[field]
+            clean_step["for_each"] = for_each
         raw_next = step.get("next")
         if version >= 2 and isinstance(raw_next, dict):
             next_value: dict[str, object] = {}

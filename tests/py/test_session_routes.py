@@ -1009,6 +1009,52 @@ class TestSessionWorkflows:
         assert created["inputs"][0]["sensitive"] is True
         assert listed[0]["id"] == created["id"]
 
+        collection_resp = client.post(
+            "/session/workflows",
+            json={
+                "version": 3,
+                "title": "Saved bounded fan-out",
+                "description": "collect and probe",
+                "inputs": [],
+                "steps": [
+                    {
+                        "id": "collect",
+                        "cmd": "echo hosts",
+                        "captures": [{
+                            "name": "hosts",
+                            "kind": "collection",
+                            "source": "json_pointer",
+                            "pointer": "/hosts",
+                            "item_limit": 4,
+                        }],
+                    },
+                    {
+                        "id": "probe",
+                        "cmd": "httpx -u {{hosts}} -silent",
+                        "for_each": {"collection": "hosts", "max_parallel": 2},
+                    },
+                ],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        collection = collection_resp.get_json()["workflow"]
+        assert collection_resp.status_code == 201
+        assert collection["version"] == 3
+        assert collection["steps"][1]["for_each"] == {
+            "collection": "hosts",
+            "failure_mode": "fail_fast",
+            "retries": 0,
+            "max_parallel": 2,
+            "max_failures": 1,
+        }
+        launch_resp = client.post(
+            "/workflow-executions",
+            json={"workflow_id": collection["id"], "inputs": {}},
+            headers={"X-Session-ID": session_id},
+        )
+        assert launch_resp.status_code == 400
+        assert launch_resp.get_json()["error"] == "workflow_fanout_execution_unavailable"
+
     def test_rejects_undeclared_workflow_variables(self):
         client = get_client()
         session_id = "workflow-invalid-" + __import__("uuid").uuid4().hex[:8]

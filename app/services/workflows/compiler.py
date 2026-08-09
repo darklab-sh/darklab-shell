@@ -13,6 +13,7 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 from services.workflows.captures import MAX_CAPTURES_PER_STEP
+from services.workflows.fanout_policy import normalize_fanout_policy
 
 from services.workflows.catalog import (
     WORKFLOW_CAPTURE_SOURCES,
@@ -134,6 +135,7 @@ def _validate_graph(
 def _validate_capture_paths(
     steps: list[dict[str, object]],
     input_ids: set[str],
+    collection_names: set[str],
     edges: Mapping[str, set[str]],
     topological: list[str],
 ) -> None:
@@ -154,10 +156,39 @@ def _validate_capture_paths(
         used = workflow_tokens(str(step.get("cmd") or "")) | workflow_tokens(
             str(step.get("note") or "")
         )
+        step_index = steps.index(step)
+        raw_for_each = step.get("for_each")
+        if isinstance(raw_for_each, Mapping):
+            collection_name = str(raw_for_each.get("collection") or "")
+            if collection_name not in collection_names:
+                raise WorkflowDefinitionError(
+                    "workflow for_each source must name a collection capture",
+                    field=f"steps.{step_index}.for_each.collection",
+                )
+            if collection_name not in available_before:
+                raise WorkflowDefinitionError(
+                    "workflow for_each source is not available on every path",
+                    field=f"steps.{step_index}.for_each.collection",
+                )
+            if collection_name not in workflow_tokens(str(step.get("cmd") or "")):
+                raise WorkflowDefinitionError(
+                    "workflow for_each collection must be referenced by the step command",
+                    field=f"steps.{step_index}.cmd",
+                )
+            extra_collections = (used & collection_names) - {collection_name}
+            if extra_collections:
+                raise WorkflowDefinitionError(
+                    "workflow fan-out steps can reference only their selected collection",
+                    field=f"steps.{step_index}.cmd",
+                )
+        elif used & collection_names:
+            raise WorkflowDefinitionError(
+                "workflow collection variables require a for_each step",
+                field=f"steps.{step_index}.for_each",
+            )
         unavailable = used - available_before
         if unavailable:
             missing = ", ".join(sorted(unavailable))
-            step_index = steps.index(step)
             raise WorkflowDefinitionError(
                 f"workflow step {step_id!r} uses variables not available on every path: {missing}",
                 field=f"steps.{step_index}.cmd",
@@ -179,6 +210,43 @@ def compile_workflow_definition(entry: object, *, require_workflow_id: bool = Fa
         raise WorkflowDefinitionError("unsupported workflow version", field="version")
     raw_inputs = _raw_list(entry.get("inputs") or [], "inputs")
     raw_steps = _raw_list(entry.get("steps"), "steps")
+    raw_version = str(entry.get("version") or "").strip()
+    version = int(raw_version) if raw_version in {"1", "2", "3"} else 1
+    normalized_for_each: dict[int, dict[str, object]] = {}
+    for step_index, raw_step in enumerate(raw_steps):
+        if not isinstance(raw_step, dict) or "for_each" not in raw_step:
+            continue
+        if version < 3:
+            raise WorkflowDefinitionError(
+                "workflow for_each steps require version 3",
+                field=f"steps.{step_index}.for_each",
+            )
+        raw_for_each = raw_step.get("for_each")
+        if not isinstance(raw_for_each, dict):
+            raise WorkflowDefinitionError(
+                "workflow for_each must be an object",
+                field=f"steps.{step_index}.for_each",
+            )
+        collection_name = str(raw_for_each.get("collection") or "").strip().lower()
+        if not WORKFLOW_INPUT_ID_RE.fullmatch(collection_name):
+            raise WorkflowDefinitionError(
+                "workflow for_each collection must use lowercase letters, numbers, and underscores",
+                field=f"steps.{step_index}.for_each.collection",
+            )
+        try:
+            policy = normalize_fanout_policy(raw_for_each)
+        except ValueError as exc:
+            raise WorkflowDefinitionError(
+                str(exc),
+                field=f"steps.{step_index}.for_each",
+            ) from exc
+        normalized_for_each[step_index] = {
+            "collection": collection_name,
+            "failure_mode": policy.failure_mode,
+            "retries": policy.retries,
+            "max_parallel": policy.max_parallel,
+            "max_failures": policy.max_failures,
+        }
     declared_raw = {
         str(item.get("id") or "").strip().lower()
         for item in raw_inputs
@@ -233,8 +301,6 @@ def compile_workflow_definition(entry: object, *, require_workflow_id: bool = Fa
             field="steps",
         )
 
-    raw_version = str(entry.get("version") or "").strip()
-    version = int(raw_version) if raw_version in {"1", "2", "3"} else 1
     workflow_id = str(entry.get("id") or "").strip().lower()
     if version >= 2 and require_workflow_id and not workflow_id:
         raise WorkflowDefinitionError(f"version {version} operator workflows require a stable id", field="id")
@@ -255,9 +321,12 @@ def compile_workflow_definition(entry: object, *, require_workflow_id: bool = Fa
     for index, step in enumerate(steps):
         if isinstance(step, dict):
             step.setdefault("id", f"step_{index + 1}")
+            if index in normalized_for_each:
+                step["for_each"] = normalized_for_each[index]
 
     declared = {str(item.get("id")) for item in inputs if isinstance(item, dict)}
     capture_names: set[str] = set()
+    collection_names: set[str] = set()
     for step_index, (raw_step, step) in enumerate(zip(raw_steps, steps, strict=True)):
         if not isinstance(raw_step, dict) or not isinstance(step, dict):
             raise WorkflowDefinitionError(
@@ -306,13 +375,14 @@ def compile_workflow_definition(entry: object, *, require_workflow_id: bool = Fa
                     raise WorkflowDefinitionError("collection item_limit must be an integer") from exc
                 if not 1 <= item_limit <= 32:
                     raise WorkflowDefinitionError("collection item_limit must be between 1 and 32")
+                collection_names.add(name)
             capture_names.add(name)
 
     for item in inputs:
         if isinstance(item, dict) and item.get("type") == "path":
             item["type"] = "workspace_path"
     edges, topological = _validate_graph(steps)
-    _validate_capture_paths(steps, declared, edges, topological)
+    _validate_capture_paths(steps, declared, collection_names, edges, topological)
     if version == 1:
         for step in steps:
             if isinstance(step, dict):
