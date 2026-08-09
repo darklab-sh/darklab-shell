@@ -15846,6 +15846,7 @@ class TestWorkflowsRoute:
         assert "Subdomain HTTP Triage" not in disabled_titles
         assert "Historical Web Surface Triage" not in disabled_titles
         assert "Crawl And Scan" not in disabled_titles
+        assert "Bounded Subdomain Assessment" in disabled_titles
         assert enabled_by_title["Subdomain HTTP Triage"]["steps"][0]["cmd"] == (
             "subfinder -d {{domain}} -silent -o subdomains.txt"
         )
@@ -15860,6 +15861,11 @@ class TestWorkflowsRoute:
         assert historical["steps"][4]["cmd"].startswith(
             "katana -list live-scoped-urls.txt"
         )
+        bounded = enabled_by_title["Bounded Subdomain Assessment"]
+        assert bounded["version"] == 3
+        assert bounded["steps"][0]["captures"][0]["item_limit"] == 16
+        assert bounded["steps"][1]["for_each"]["collection"] == "subdomains"
+        assert bounded["steps"][1]["for_each"]["max_parallel"] == 4
         assert enabled_by_title["Crawl And Scan"]["steps"][2]["cmd"] == (
             "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt"
         )

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-
 def historical_web_surface_workflow() -> dict[str, object]:
     """Return the guarded passive-to-active historical web workflow."""
     return {

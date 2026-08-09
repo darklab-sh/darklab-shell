@@ -76,6 +76,7 @@ import services.secrets.vault as secrets_vault
 import services.workspace.file_mutations as workspace_file_mutations
 import services.workspace.files as workspace_module
 import services.commands.wordlists as wordlists
+from services.workflows.catalog import render_workflow_command
 from services.commands.registry import (
     split_chained_commands, load_all_faq, load_all_workflows, load_faq,
     load_welcome, load_tour, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
@@ -24728,7 +24729,7 @@ class TestWorkflowInputLoading:
             }
         ]
 
-    def test_load_workflows_rejects_an_invalid_v2_entry_as_one_playbook(self):
+    def test_load_workflows_validates_each_durable_entry_as_one_playbook(self):
         payload = textwrap.dedent(
             """
             - version: 2
@@ -24762,16 +24763,58 @@ class TestWorkflowInputLoading:
         assert warning.call_args.args[0] == "WORKFLOW_DEFINITION_REJECTED"
         assert warning.call_args.kwargs["extra"]["entry_index"] == 0
 
-        unsupported = textwrap.dedent(
+        collection = textwrap.dedent(
             """
             - version: 3
-              id: future_playbook
-              title: Future playbook
+              id: collection_playbook
+              title: Collection playbook
               steps:
-                - id: skipped
-                  cmd: "echo should-not-run"
+                - id: discover
+                  cmd: "subfinder -d example.test -silent"
+                  captures:
+                    - name: hosts
+                      source: first_nonempty_line
+                      kind: collection
+                      item_limit: 4
+                  next:
+                    success: probe
+                    failure: stop
+                - id: probe
+                  cmd: "httpx -u {{hosts}} -silent"
+                  for_each:
+                    collection: hosts
+                    failure_mode: continue
+                    max_parallel: 2
+                    max_failures: 4
+                  next:
+                    success: complete
+                    failure: stop
             """
         )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(collection, encoding="utf-8")
+            with (
+                mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)),
+                mock.patch("services.workflows.catalog.log.warning") as warning,
+            ):
+                result = load_workflows()
+
+        assert result[0]["version"] == 3
+        assert result[0]["id"] == "collection_playbook"
+        compiled_steps = cast(list[dict[str, object]], result[0]["steps"])
+        compiled_captures = cast(list[dict[str, object]], compiled_steps[0]["captures"])
+        assert compiled_captures[0]["kind"] == "collection"
+        assert compiled_steps[1]["for_each"] == {
+            "collection": "hosts",
+            "failure_mode": "continue",
+            "retries": 0,
+            "max_parallel": 2,
+            "max_failures": 4,
+        }
+        warning.assert_not_called()
+
+        unsupported = collection.replace("version: 3", "version: 4")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflows.yaml"
             path.write_text(unsupported, encoding="utf-8")
@@ -24812,6 +24855,7 @@ class TestWorkflowInputLoading:
         assert "Subdomain HTTP Triage" not in disabled_titles
         assert "Historical Web Surface Triage" not in disabled_titles
         assert "Crawl And Scan" not in disabled_titles
+        assert "Bounded Subdomain Assessment" in disabled_titles
         assert "Subdomain HTTP Triage" in enabled_titles
         assert "Historical Web Surface Triage" in enabled_titles
         assert "Crawl And Scan" in enabled_titles
@@ -24856,6 +24900,50 @@ class TestWorkflowInputLoading:
             ),
         ]
         assert historical_steps[-1]["next"] == {"success": "complete", "failure": "stop"}
+        bounded = next(item for item in enabled if item["title"] == "Bounded Subdomain Assessment")
+        assert bounded["id"] == "bounded_subdomain_assessment"
+        assert bounded["version"] == 3
+        bounded_steps = cast(list[dict[str, object]], bounded["steps"])
+        assert [step["id"] for step in bounded_steps] == [
+            "discover_subdomains",
+            "resolve_subdomains",
+            "probe_subdomains",
+            "crawl_subdomains",
+            "scan_subdomains",
+        ]
+        captures = cast(list[dict[str, object]], bounded_steps[0]["captures"])
+        assert captures == [{
+            "name": "subdomains",
+            "source": "entity",
+            "required": True,
+            "kind": "collection",
+            "item_limit": 16,
+            "entity_type": "domain",
+        }]
+        assert bounded_steps[1]["for_each"] == {
+            "collection": "subdomains",
+            "failure_mode": "continue",
+            "retries": 1,
+            "max_parallel": 4,
+            "max_failures": 16,
+        }
+        assert "-no-interactsh -disable-redirects -disable-update-check" in str(
+            bounded_steps[-1]["cmd"]
+        )
+        rendered_commands = [
+            render_workflow_command(
+                str(step["cmd"]),
+                {"domain": "example.com", "subdomains": "api.example.com"},
+            )
+            for step in bounded_steps
+        ]
+        assert [is_command_allowed(command) for command in rendered_commands] == [
+            (True, ""),
+            (True, ""),
+            (True, ""),
+            (True, ""),
+            (True, ""),
+        ]
 
 
 class TestSeedHistoryFixtures:

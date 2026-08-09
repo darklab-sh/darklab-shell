@@ -12,6 +12,7 @@ import yaml
 
 import config as app_config
 from services.commands.registry_assessment_workflows import historical_web_surface_workflow
+from services.commands.registry_subdomain_workflows import bounded_subdomain_assessment_workflow
 from services.workflows import catalog as workflow_catalog
 
 log = logging.getLogger("shell")
@@ -189,6 +190,7 @@ def builtin_workflows() -> list[dict[str, object]]:
                 },
             ],
         },
+        bounded_subdomain_assessment_workflow(),
         {
             "title": "Subdomain HTTP Triage",
             "description": (

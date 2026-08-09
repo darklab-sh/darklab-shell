@@ -3,18 +3,21 @@
 
 # Custom workflow entries for this instance.
 # Entries are appended after the built-in catalog and reloaded without a restart.
-# Legacy entries can keep their linear title/inputs/steps shape. New playbooks
-# should use version: 2 plus a stable lowercase id.
+# Legacy entries can keep their linear title/inputs/steps shape. Scalar durable
+# playbooks use version: 2, while collection capture and fan-out use version: 3.
+# Both durable shapes need a stable lowercase id.
 #
 # Supported parameter types are text, target, domain, host, url, port,
 # port_set, workspace_path, and wordlist. The old path type remains an alias
 # for workspace_path. Set sensitive: true when a value shouldn't be remembered
 # by the browser.
 #
-# Every v2 step needs a stable id and cmd. Transitions can point to another step,
+# Every durable step needs a stable id and cmd. Transitions can point to another step,
 # complete, or stop. Quoted next.codes keys take precedence over success/failure.
 # Captures can select the first useful line, the first line containing literal
-# text, a structured entity, or a scalar reached through JSON Pointer.
+# text, a structured entity, or a value reached through JSON Pointer. Version 3
+# captures can set kind: collection and item_limit, then a later step can use a
+# for_each policy that names that collection.
 #
 # Example:
 # - version: 2

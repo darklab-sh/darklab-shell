@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **A maintained playbook now runs a bounded subdomain assessment without intermediate files.**
+  - **What:** **Bounded Subdomain Assessment** collects at most 16 unique subdomains, then resolves, probes, shallow-crawls, and checks each candidate with the maintained safe Nuclei profile. Every stage uses the version 3 fan-out limits, normal scope and command checks, controlled parallelism, and count-only progress. The catalog and terminal now start every explicit v2 or v3 playbook through the durable server route, and deployment `workflows.local.yaml` files can load the documented version 3 shape.
+  - **Tests:** Existing loader, route, architecture-ratchet, and Vitest cases now pin the maintained definition, deployment version 3 compilation, Files-independent availability, collection limits, fan-out policy, rendered command acceptance, safe Nuclei exclusions, and durable panel and terminal launch behavior. The existing exact-route editor regression also has enough time to finish under parallel CI load. The test-function totals are unchanged.
 - **The workflow editor now authors bounded collection fan-out.**
   - **What:** Personal and team workflow authors can choose a single-value or collection capture, lower the 32-item collection limit, select a collection captured by an earlier step, and configure fail-fast or continue behavior, retries, parallel runs, and the failure limit with field-level validation. Recent executions show finished, pending, active, succeeded, failed, and skipped child counts plus the existing bounded failure-code sample on desktop and mobile without exposing collection values.
   - **Tests:** Existing Vitest and mobile Playwright cases now cover version 2 compatibility, version 3 editor round trips, inline bounds, responsive control layout, and count-only progress. The test-function totals are unchanged.

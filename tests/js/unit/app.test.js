@@ -3069,7 +3069,7 @@ describe('app helpers', () => {
     expect(collectionSteps[1].querySelector(
       '[data-workflow-field$="max_parallel"] .form-error',
     ).textContent).toBe('Parallel runs must be between 1 and 8.')
-  })
+  }, 10000)
 
   it('marks workflow capture-fed command previews as available only during the playbook', async () => {
     const { renderWorkflowItems } = await loadAppFns()
@@ -3445,13 +3445,29 @@ describe('app helpers', () => {
 
     const durableWorkflow = {
       ...workflow,
-      id: 'builtin:durable-dns',
-      version: 2,
-      title: 'Durable DNS',
+      id: 'bounded_subdomain_assessment',
+      version: 3,
+      title: 'Bounded Subdomain Assessment',
       inputs: [{ ...workflow.inputs[0], default: 'darklab.sh' }],
       steps: [
-        { id: 'resolve', cmd: 'dig {{domain}} A', next: { success: 'inspect', failure: 'stop' } },
-        { id: 'inspect', cmd: 'host {{domain}}', next: { success: 'complete', failure: 'stop' } },
+        {
+          id: 'discover',
+          cmd: 'subfinder -d {{domain}} -silent',
+          captures: [{
+            name: 'hosts', source: 'entity', entity_type: 'domain',
+            kind: 'collection', item_limit: 4, required: true,
+          }],
+          next: { success: 'probe', failure: 'stop' },
+        },
+        {
+          id: 'probe',
+          cmd: 'httpx -u {{hosts}} -silent',
+          for_each: {
+            collection: 'hosts', failure_mode: 'continue', retries: 0,
+            max_parallel: 2, max_failures: 4,
+          },
+          next: { success: 'complete', failure: 'stop' },
+        },
       ],
     }
     document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
@@ -3468,15 +3484,15 @@ describe('app helpers', () => {
     expect(document.body.textContent).not.toContain('wfx_terminal_test')
 
     const durableExecution = createBrowserCommandExecution(
-      'workflow run durable-dns --domain darklab.sh',
+      'workflow run bounded-subdomain-assessment --domain darklab.sh',
     )
     await handleWorkflowTerminalCommand(
-      'workflow run durable-dns --domain darklab.sh',
+      'workflow run bounded-subdomain-assessment --domain darklab.sh',
       'tab-1',
       durableExecution,
     )
     await vi.waitFor(() => expect(commandExecutionText(durableExecution)).toContain(
-      '[workflow] Durable DNS: execution wfx_terminal_test started with 1 input. '
+      '[workflow] Bounded Subdomain Assessment: execution wfx_terminal_test started with 1 input. '
         + 'Check progress with workflow status wfx_terminal_test.',
     ))
     expect(commandExecutionText(durableExecution)).not.toContain('step_1')

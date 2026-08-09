@@ -14,6 +14,12 @@ Open **Browse all workflows** from the desktop rail, press `Alt+G`, or choose **
 
 The in-app editor saves scalar and collection workflows in personal scope or the active team scope. Choose **Collection** on a capture to set its item limit, then enable **Collection fan-out** on a later step to select that capture and configure the failure policy, retries, parallel runs, and failure limit. The editor keeps ordinary definitions at version 2 and saves definitions that use collection behavior as version 3. Team owners and admins can create, edit, and delete shared definitions. Team members with command-run permission can run them.
 
+### Bounded Subdomain Assessment
+
+The built-in **Bounded Subdomain Assessment** playbook discovers no more than 16 unique subdomains from one approved root domain. It uses that private collection to start normal scoped DNSx, HTTPx, Katana, and safe-profile Nuclei runs for each candidate. DNS resolution and HTTP probing use at most four children at once; crawling and scanning use at most two. Each command also carries its own time, rate, retry, or output bounds where the tool supports them.
+
+The playbook uses structured collection capture rather than a temporary Files list. Partial child failures remain visible in the execution counts and bounded failure sample while the remaining candidates continue. The safe Nuclei step excludes callbacks, redirects, automatic updates, intrusive and denial-of-service tags, headless checks, and local code or file protocols.
+
 ### Historical Web Surface Triage
 
 The built-in Historical Web Surface Triage playbook starts with passive `gau` archive discovery and saves a bounded candidate list in Files. It then normalizes and restricts the candidates to the domain you supplied (including its subdomains), checks only that scoped set for live HTTP services, and rechecks scope before Katana crawls confirmed live URLs. A final scope pass protects the HTTPx summary too.

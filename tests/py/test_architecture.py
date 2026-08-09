@@ -160,6 +160,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/registry_catalog.py", 359, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_content.py", 580, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_assessment_workflows.py", 100, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_subdomain_workflows.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_faq.py", 505, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_loader.py", 744, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_runtime.py", 173, "split-package-ratchet"),

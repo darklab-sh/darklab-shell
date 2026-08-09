@@ -400,8 +400,8 @@
       "hash": "848ce5a4fb68644c3e08d8272216f667b8685c1c9c4e87ad7b0fff88d8402a55"
     },
     "/static/js/features/preferences/session_token_controls.js": {
-      "path": "/static/build/static-session-token-controls.07964775bcee.js",
-      "hash": "2854e55cef2e73304173efeef716c3f6ec16a988fa6b3c5eb49fd838b7e2ab0a"
+      "path": "/static/build/static-session-token-controls.a46d5d728092.js",
+      "hash": "4abd902e3a73328c1a237cc373c1a41317e64e0b69abcf4678804bfb29212785"
     },
     "/static/js/features/preferences/teams_panel.js": {
       "path": "/static/build/static-teams-panel.056125b84b8b.js",
@@ -612,8 +612,8 @@
       "hash": "ac6effc895028e1be07c2cea907b14bf1fe886e9d0883e7d95f4514100640cca"
     },
     "/static/js/features/workflows/workflows.js": {
-      "path": "/static/build/static-workflows.2b1a2ef4fa3a.js",
-      "hash": "ed2e25705ce9f38673d7d0a146ae11495e46a3663423aae6cb9a3c8b0295cdbc"
+      "path": "/static/build/static-workflows.f919901eba07.js",
+      "hash": "4cc4fcae2b37fb53da58539773987edced62ead06ec136f7ca164d6129d69fd9"
     },
     "/static/js/features/workspace/workspace_drag_drop.js": {
       "path": "/static/build/static-workspace-drag-drop.36a084e3284b.js",

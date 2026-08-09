@@ -259,7 +259,7 @@ def load_workflows(path: str, *, local_path: str | None = None) -> list[dict[str
             try:
                 from services.workflows.compiler import compile_workflow_definition  # noqa: PLC0415
 
-                if str(entry.get("version") or "").strip() != "2":
+                if str(entry.get("version") or "").strip() not in {"2", "3"}:
                     raise ValueError("unsupported workflow version")
                 normalized = compile_workflow_definition(entry, require_workflow_id=True)
             except ValueError as exc:
