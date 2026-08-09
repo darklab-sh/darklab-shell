@@ -78,6 +78,11 @@ from services.assessments.nmap_version_observations import parse_nmap_xml_cpe_ob
 from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_PARSER_VERSION
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
+from services.assessments.nuclei_recommendation_evidence import (
+    NucleiTargetSignals,
+    load_nuclei_recommendation_signals,
+)
+from services.assessments import nuclei_recommendations
 from services.assessments.schemathesis_command import (
     SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION,
     SCHEMATHESIS_RATE_LIMIT,
@@ -348,6 +353,114 @@ def test_service_actions_can_be_serialized_for_read_surfaces_without_launching()
     record = public_app_port_record({"port": 443, "service": "https", "_run_ids": {"run-1"}})
     assert record["assessment_actions"][0]["command"] == "command:httpx"
     assert "_run_ids" not in record
+
+
+def test_nuclei_recommendation_evidence_is_target_scoped_and_bounded():
+    preview = json.dumps([{
+        "source_detail": {
+            "screenshots": [{
+                "url": "https://app.example.com/",
+                "technologies": ["nginx:1.26", "React"],
+            }],
+        },
+    }])
+
+    class FakeConn:
+        def execute(self, query, _params):
+            if "e.attributes_json" in query:
+                return SimpleNamespace(fetchall=lambda: [{
+                    "id": "ent_port",
+                    "type": "port",
+                    "canonical_value": "example.com:443/tcp",
+                    "host_entity_id": "ent_target",
+                    "attributes_json": json.dumps({"service": "https"}),
+                    "host_type": "domain",
+                    "host_value": "example.com",
+                }])
+            if "validation_method = 'version_inference'" in query:
+                return SimpleNamespace(fetchall=lambda: [{
+                    "id": "fnd_inferred",
+                    "entity_type": "domain",
+                    "canonical_value": "app.example.com",
+                }])
+            return SimpleNamespace(fetchall=lambda: [{
+                "id": "run_httpx",
+                "output_preview": preview,
+            }])
+
+    signals = load_nuclei_recommendation_signals(
+        FakeConn(),
+        "session-1",
+        "",
+        "project-1",
+        [{"entity_id": "ent_target", "type": "domain", "value": "example.com"}],
+    )["ent_target"]
+
+    assert signals.technologies == {"React", "nginx:1.26"}
+    assert signals.services == {"https"}
+    assert signals.inferred_cve_count == 1
+    assert signals.dangling_record_count == 0
+    assert signals.truncated is False
+
+
+def test_nuclei_recommendations_explain_signals_without_recommending_intrusive_runs(
+    monkeypatch,
+):
+    signal = NucleiTargetSignals(
+        technologies={"nginx:1.26"},
+        services={"https"},
+        inferred_cve_count=2,
+        dangling_record_count=1,
+    )
+    monkeypatch.setattr(
+        nuclei_recommendations,
+        "load_nuclei_recommendation_signals",
+        lambda *_args, **_kwargs: {"ent_target": signal},
+    )
+    checks = [
+        {
+            "check_key": "vulnerability_templates",
+            "recommended_action_key": "command:nuclei",
+            "target_entity_id": "ent_target",
+            "target_type": "domain",
+            "target_value": "example.com",
+        },
+        {
+            "check_key": "subdomain_takeover_confirmation",
+            "recommended_action_key": "command:nuclei",
+            "target_entity_id": "ent_target",
+            "target_type": "domain",
+            "target_value": "example.com",
+        },
+        {
+            "check_key": "intrusive_template_validation",
+            "recommended_action_key": "command:nuclei",
+            "target_entity_id": "ent_target",
+            "target_type": "domain",
+            "target_value": "example.com",
+        },
+    ]
+
+    nuclei_recommendations.attach_nuclei_recommendations(
+        object(), checks, session_id="session-1", team_id="", project_id="project-1",
+    )
+
+    standard = checks[0]["nuclei_recommendation"]
+    assert standard["recommended"] is True
+    assert standard["profile_key"] == "standard"
+    assert standard["reason_codes"] == [
+        "inferred_cve", "detected_technology", "service_evidence",
+    ]
+    assert standard["auto_launch"] is False
+    assert standard["launch_mode"] == "manual_confirmation_only"
+    takeover = checks[1]["nuclei_recommendation"]
+    assert takeover["recommended"] is True
+    assert takeover["profile_key"] == "safe"
+    assert takeover["reason_codes"] == ["dangling_record"]
+    intrusive = checks[2]["nuclei_recommendation"]
+    assert intrusive["recommended"] is False
+    assert intrusive["profile_key"] == "intrusive"
+    assert "never recommended automatically" in intrusive["summary"]
 
 
 def test_nmap_profiles_are_fixed_and_reject_arbitrary_script_arguments():

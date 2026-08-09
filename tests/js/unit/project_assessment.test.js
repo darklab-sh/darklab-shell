@@ -523,6 +523,65 @@ describe('project assessment controller', () => {
     expect(controller.stateFor('prj_1').category).toBe('discovery')
   })
 
+  it('shows saved-evidence Nuclei recommendations without starting a run', async () => {
+    const recommendedDetail = {
+      ...detail,
+      assessment: {
+        ...detail.assessment,
+        profile_snapshot: {
+          checks: [{
+            key: 'vulnerability_templates',
+            label: 'Web vulnerability templates',
+            purpose: 'Apply reviewed templates to this target.',
+          }],
+        },
+      },
+      checks: {
+        ...detail.checks,
+        checks: [{
+          ...detail.checks.checks[0],
+          check_key: 'vulnerability_templates',
+          policy_level: 'standard',
+          recommended_action_key: 'command:nuclei',
+          nuclei_recommendation: {
+            recommended: true,
+            profile_key: 'standard',
+            reason_codes: ['inferred_cve', 'detected_technology'],
+            summary: 'The standard Nuclei profile is recommended from saved evidence: 1 version-based CVE candidate, 2 detected technologies. Review its exact bounds before starting a run.',
+            source_truncated: false,
+            launch_mode: 'manual_confirmation_only',
+            auto_launch: false,
+          },
+        }],
+        total: 1,
+        has_more: false,
+      },
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(recommendedDetail)
+      return responseFor(url, options)
+    })
+    const apiFetch = vi.fn()
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(makeContext(
+      projectWorkspaceRequest,
+      { apiFetch },
+    ))
+    await controller.load('prj_1', { render: false })
+    const desktop = document.createElement('div')
+    controller.renderAssessment(desktop, 'prj_1')
+    const mobile = controller.renderMobileAssessmentTab('prj_1')
+    desktop.querySelector('.project-assessment-target-toggle')?.click()
+    mobile.querySelector('.project-assessment-target-toggle')?.click()
+
+    for (const surface of [desktop, mobile]) {
+      const recommendation = surface.querySelector('.project-assessment-check-recommendation')
+      expect(recommendation?.textContent).toContain('Recommended from saved evidence')
+      expect(recommendation?.textContent).toContain('1 version-based CVE candidate')
+      expect(recommendation?.textContent).toContain('Review its exact bounds')
+    }
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
   it('requires a fresh explicit warning before starting intrusive Nuclei', async () => {
     const plan = {
       action: { id: 'nuclei', key: 'command:nuclei', kind: 'command' },

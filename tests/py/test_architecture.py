@@ -326,6 +326,16 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/profile_summaries.py", 27, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/profiles.py", 617, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/assessments/read_model.py", 345, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/nuclei_recommendation_evidence.py",
+        230,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/nuclei_recommendations.py",
+        135,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/reconciliation.py", 462, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/reconciliation_cleanup.py", 63, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/reconciliation_observations.py", 120, "split-package-ratchet"),

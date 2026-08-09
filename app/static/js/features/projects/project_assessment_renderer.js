@@ -490,6 +490,22 @@ function createProjectAssessmentRenderer(context, actions) {
     );
     const purpose = String(definition?.purpose || check?.state_reason || '');
     if (purpose) main.appendChild(makeElement('p', 'project-assessment-check-purpose', purpose));
+    const nucleiRecommendation = check?.nuclei_recommendation;
+    if (nucleiRecommendation?.recommended) {
+      const recommendation = makeElement('div', 'project-assessment-check-recommendation');
+      recommendation.append(
+        badge('Recommended from saved evidence', 'blue'),
+        makeElement('p', '', String(nucleiRecommendation.summary || '')),
+      );
+      if (nucleiRecommendation.source_truncated) {
+        recommendation.appendChild(makeElement(
+          'small',
+          '',
+          'The saved-evidence review reached its safety limit, so this recommendation may be incomplete.',
+        ));
+      }
+      main.appendChild(recommendation);
+    }
     const states = makeElement('div', 'project-assessment-check-states');
     states.appendChild(badge(checkStateLabels[check?.state] || check?.state || 'Unknown', stateTone(check?.state)));
     if (check?.state_source === 'manual') states.appendChild(badge('Manual decision'));

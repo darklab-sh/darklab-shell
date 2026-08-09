@@ -18,6 +18,7 @@ from services.assessments.contracts import (
     AssessmentError,
 )
 from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
+from services.assessments.nuclei_recommendations import attach_nuclei_recommendations
 from services.assessments.reconciliation_read import assessment_finding_delta_read_model
 from services.assessments.serialization import (
     row_to_assessment,
@@ -133,6 +134,9 @@ def _check_page(
     assessment_id: str,
     filters: dict[str, object] | None,
     *,
+    session_id: str,
+    team_id: str,
+    project_id: str,
     limit: int,
     offset: int,
 ) -> dict[str, Any]:
@@ -173,6 +177,13 @@ def _check_page(
         (assessment_id, *params, limit, offset),
     ).fetchall()
     checks = [row_to_check(row) for row in rows]
+    attach_nuclei_recommendations(
+        conn,
+        checks,
+        session_id=session_id,
+        team_id=team_id,
+        project_id=project_id,
+    )
     return page_payload("checks", checks, total, limit, offset)
 
 
@@ -219,6 +230,9 @@ def get_assessment_read_model(
                 conn,
                 str(row["id"]),
                 check_filters,
+                session_id=str(session_id or "").strip(),
+                team_id=str(team_id or "").strip(),
+                project_id=str(project_id or "").strip(),
                 limit=safe_limit,
                 offset=safe_offset,
             ),
