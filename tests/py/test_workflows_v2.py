@@ -1567,6 +1567,85 @@ def test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_project
     assert hidden["workflow_execution"] is None
     assert hidden["workflow_execution_id"] == ""
 
+    fanout_definition = compile_execution_definition({
+        "version": 3,
+        "id": "probe_hosts",
+        "title": "Probe hosts",
+        "inputs": [],
+        "steps": [
+            {
+                "id": "collect",
+                "cmd": "echo hosts",
+                "captures": [{
+                    "name": "hosts",
+                    "kind": "collection",
+                    "source": "json_pointer",
+                    "pointer": "/hosts",
+                }],
+            },
+            {
+                "id": "probe",
+                "cmd": "httpx -u {{hosts}} -silent",
+                "for_each": {"collection": "hosts", "failure_mode": "continue"},
+            },
+        ],
+    })
+    fanout_execution = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="probe_hosts",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    fanout_run = "run-" + uuid.uuid4().hex
+    children = initialize_fanout_children(fanout_execution["id"], "probe", 1)
+    assert claim_step_for_launch(fanout_execution["id"], "probe") is not None
+    assert claim_fanout_child(fanout_execution["id"], "probe", 0) is not None
+    assert bind_fanout_child_run(str(children[0]["id"]), fanout_run)
+    assert finalize_fanout_child_run(fanout_run, 0) is not None
+    with get_db_connect()() as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+            "VALUES (?, ?, 'httpx -u [redacted]', datetime('now'), datetime('now'), 0, '[]', 0)",
+            (fanout_run, session_id),
+        )
+        conn.commit()
+    response = client.post(
+        f"/projects/{project['id']}/links",
+        json={"entity_type": "run", "entity_id": fanout_run, "source": "manual"},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    fanout_history = client.get(f"/history/{fanout_run}?json=1", headers=headers).get_json()
+    fanout_project_runs = client.get(
+        f"/projects/{project['id']}/runs", headers=headers
+    ).get_json()["runs"]
+    assert fanout_history["workflow_execution_id"] == fanout_execution["id"]
+    assert fanout_history["workflow_step_id"] == "probe"
+    assert fanout_history["workflow_execution"]["step"] == {
+        "step_id": "probe",
+        "step_index": 1,
+        "status": "succeeded",
+        "run_id": fanout_run,
+        "exit_code": 0,
+        "selected_transition": "complete",
+        "transition_reason": "implicit_success",
+    }
+    assert next(
+        run for run in fanout_project_runs if run["id"] == fanout_run
+    )["workflow_execution_id"] == fanout_execution["id"]
+    fanout_serialized = json.dumps(fanout_history["workflow_execution"], sort_keys=True)
+    for private_name in ("definition_snapshot", "input_values", "variables", "command"):
+        assert private_name not in fanout_serialized
+    fanout_hidden = client.get(
+        f"/history/{fanout_run}?json=1",
+        headers={"X-Session-ID": "other-session"},
+    ).get_json()
+    assert fanout_hidden["workflow_execution"] is None
+    assert fanout_hidden["workflow_execution_id"] == ""
+
 
 def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_service(monkeypatch):
     from blueprints import run as run_routes

@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Collection child runs now keep their workflow ancestry in History and Project evidence.**
+  - **What:** Authorized run details and Project run lists recognize both scalar parent-step runs and value-free fan-out child links. A child reports the parent execution and step status through the existing sanitized provenance shape without copying its private collection value, rendered command, or workflow variables into that response.
+  - **Tests:** Extended the existing workflow-provenance route coverage across scalar and fan-out runs, Project links, owner isolation, terminal child status, and private-value exclusions. Pyright remains clean for the complete repository.
 - **A finished collection step now advances its parent workflow exactly once.**
   - **What:** The last terminal child closes the parent step in the same transaction as its own result. A fail-fast or configured failure-limit outcome follows the saved failure transition with a bounded error code, while continue-mode partial results preserve their failed-child summary and follow the success transition. Successful retries count once through their final ordinal state, and no child value or free-form failure text is copied into the parent.
   - **Tests:** Extended SQLite and real Postgres coverage pins atomic parent completion, terminal workflow failure, continue-mode partial success, next-step progression, existing scalar transition behavior, bounded failure metadata, and the module-size contract. Pyright remains clean for the complete repository.

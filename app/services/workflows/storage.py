@@ -487,10 +487,21 @@ def fail_execution_for_run(run_id: str, code: str, detail: str) -> bool:
 
 def execution_for_run(run_id: str) -> dict[str, Any] | None:
     with get_db_connect()() as conn:
+        child_clause = ""
+        params = (run_id,)
+        if get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
+            conn, "workflow_execution_children"
+        ):
+            child_clause = (
+                " OR EXISTS (SELECT 1 FROM workflow_execution_children c "
+                "WHERE c.execution_id = e.id AND c.run_id = ?)"
+            )
+            params = (run_id, run_id)
         row = conn.execute(
-            "SELECT e.* FROM workflow_executions e "
-            "JOIN workflow_execution_steps s ON s.execution_id = e.id WHERE s.run_id = ?",
-            (run_id,),
+            "SELECT e.* FROM workflow_executions e WHERE "  # nosec B608
+            "EXISTS (SELECT 1 FROM workflow_execution_steps s "
+            "WHERE s.execution_id = e.id AND s.run_id = ?)" + child_clause,
+            params,
         ).fetchone()
     return _execution_from_row(row)
 
@@ -523,15 +534,33 @@ def workflow_provenance_by_run(
     elif session_id or team_id:
         owner_clause, owner_params = _owner_where(session_id, team_id=team_id, table_alias="e")
         owner_sql = " AND " + owner_clause
-    rows = conn.execute(
+    scalar_query = (
         "SELECT s.run_id, s.execution_id, s.step_id, s.step_index, s.status AS step_status, "  # nosec
         "s.exit_code, s.selected_transition, s.transition_reason, "
         "e.workflow_id, e.workflow_source, e.title, e.status AS execution_status, e.current_step_id "
         "FROM workflow_execution_steps s "
         "JOIN workflow_executions e ON e.id = s.execution_id "
-        f"WHERE s.run_id IN ({placeholders})" + owner_sql,
-        (*normalized_ids, *owner_params),
-    ).fetchall()
+        f"WHERE s.run_id IN ({placeholders})" + owner_sql
+    )
+    query_params: tuple[Any, ...] = (*normalized_ids, *owner_params)
+    child_table_exists = get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
+        conn, "workflow_execution_children"
+    )
+    if child_table_exists:
+        child_query = (
+            "SELECT c.run_id, c.execution_id, c.step_id, s.step_index, "  # nosec B608
+            "c.status AS step_status, "
+            "c.exit_code, s.selected_transition, s.transition_reason, "
+            "e.workflow_id, e.workflow_source, e.title, e.status AS execution_status, e.current_step_id "
+            "FROM workflow_execution_children c "
+            "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
+            "AND s.step_id = c.step_id "
+            "JOIN workflow_executions e ON e.id = c.execution_id "
+            f"WHERE c.run_id IN ({placeholders})" + owner_sql
+        )
+        scalar_query += " UNION ALL " + child_query
+        query_params += (*normalized_ids, *owner_params)
+    rows = conn.execute(scalar_query, query_params).fetchall()
     result: dict[str, dict[str, Any]] = {}
     execution_ids: set[str] = set()
     for row in rows:
