@@ -39,6 +39,19 @@ const findingDeltaLabels = {
   incomparable: 'Incomparable',
 };
 
+const zapStatusLabels = {
+  cancel_requested: 'Cancel requested',
+  canceled: 'Canceled',
+  downloading: 'Saving report',
+  expired: 'Expired',
+  failed: 'Failed',
+  imported: 'Imported',
+  queued: 'Queued',
+  ready: 'Ready for Atlas review',
+  running: 'Running',
+  submitting: 'Submitting',
+};
+
 function createProjectAssessmentRenderer(context, actions) {
   const ctx = context || {};
   const act = actions || {};
@@ -464,6 +477,25 @@ function createProjectAssessmentRenderer(context, actions) {
   function checkActionItems(projectId, detail, check, returnFocus) {
     const definition = checkDefinition(detail, check);
     const items = [];
+    if (check?.target_type === 'url') {
+      const zapState = act.zapStateFor?.(projectId, detail?.assessment?.id, check?.id);
+      const zapJob = zapState?.jobs?.[0] || null;
+      let label = 'ZAP scan';
+      if (zapState?.loading) label = 'Loading ZAP job…';
+      else if (zapJob && ['failed', 'canceled', 'expired'].includes(String(zapJob.status || ''))) {
+        label = ctx.canRunCommands?.() === false || detail?.assessment?.status !== 'active'
+          ? 'View ZAP job'
+          : 'Retry ZAP scan';
+      } else if (zapJob) label = 'View ZAP job';
+      items.push({
+        label,
+        disabled: Boolean(zapState?.loading || zapState?.mutating),
+        disabledTitle: zapState?.loading
+          ? 'ZAP job status is loading.'
+          : (zapState?.mutating ? 'A ZAP job update is already in progress.' : ''),
+        action: () => act.openZap(projectId, detail, check, returnFocus),
+      });
+    }
     if (check?.recommended_action_key) {
       items.push({
         label: actionLabel(check),
@@ -479,6 +511,131 @@ function createProjectAssessmentRenderer(context, actions) {
       });
     }
     return items;
+  }
+
+  function zapStatusTone(status) {
+    if (status === 'imported') return 'green';
+    if (status === 'ready') return 'blue';
+    if (['queued', 'submitting', 'running', 'downloading', 'cancel_requested'].includes(status)) return 'amber';
+    if (['failed', 'expired'].includes(status)) return 'red';
+    return 'muted';
+  }
+
+  function zapStatusCopy(job) {
+    const status = String(job?.status || '');
+    if (status === 'ready') {
+      return 'The ZAP JSON report is in Files and its Atlas import draft is waiting for explicit review and apply.';
+    }
+    if (status === 'imported') return 'The reviewed Atlas import was applied. The report remains available in Files.';
+    if (status === 'queued') return 'The worker has this scan in its durable queue.';
+    if (status === 'submitting') return 'The worker is submitting the exact reviewed plan to ZAP.';
+    if (status === 'running') return 'ZAP is running the reviewed plan.';
+    if (status === 'downloading') return 'The worker is saving the bounded JSON report into Files.';
+    if (status === 'cancel_requested') return 'Remote cancellation was requested. The worker is waiting for the final state.';
+    if (status === 'canceled') return 'The scan was canceled before an import draft was created.';
+    if (status === 'expired') return 'The scan exceeded its saved deadline.';
+    if (status === 'failed') return String(job?.error_detail || 'The ZAP worker could not finish this scan.');
+    return '';
+  }
+
+  function zapButton(label, action, { disabled = false, primary = false } = {}) {
+    const button = makeElement(
+      'button',
+      `${primary ? 'btn btn-primary' : 'btn btn-secondary'} btn-compact`,
+      label,
+    );
+    button.type = 'button';
+    button.disabled = disabled;
+    ctx.bindProjectRuntimePressable?.(button, { onActivate: () => action(button) });
+    return button;
+  }
+
+  function renderZapStatus(projectId, detail, check) {
+    const assessmentId = String(detail?.assessment?.id || '');
+    const st = act.zapStateFor?.(projectId, assessmentId, check?.id);
+    const job = st?.jobs?.[0] || null;
+    if (!st || (!st.loading && !st.error && !job && !st.mutating)) return null;
+    const panel = makeElement('aside', 'project-assessment-zap-status');
+    const header = makeElement('div', 'project-assessment-zap-status-header');
+    header.appendChild(makeElement('strong', '', 'External ZAP scan'));
+    if (job) {
+      const status = String(job.status || 'unknown');
+      header.appendChild(badge(zapStatusLabels[status] || status, zapStatusTone(status)));
+    } else if (st.loading) {
+      header.appendChild(badge('Loading', 'muted'));
+    }
+    panel.appendChild(header);
+    if (st.error) panel.appendChild(makeElement('p', 'project-assessment-zap-error', st.error));
+    if (st.mutating === 'planning') panel.appendChild(makeElement('p', '', 'Reviewing the selected targets and building the exact plan…'));
+    if (st.mutating === 'submitting') panel.appendChild(makeElement('p', '', 'Saving the confirmed plan in the durable queue…'));
+    if (st.mutating === 'canceling') panel.appendChild(makeElement('p', '', 'Requesting cancellation…'));
+    if (job) {
+      const copy = zapStatusCopy(job);
+      if (copy) panel.appendChild(makeElement('p', '', copy));
+      const progress = job?.progress || {};
+      const progressParts = [
+        progress.info_count ? `${Number(progress.info_count)} info` : '',
+        progress.warning_count ? `${Number(progress.warning_count)} warning` : '',
+        progress.error_count ? `${Number(progress.error_count)} error` : '',
+      ].filter(Boolean);
+      if (progressParts.length) {
+        panel.appendChild(makeElement('small', 'project-assessment-zap-progress', progressParts.join(' · ')));
+      }
+      const recentMessages = Array.isArray(progress.recent_messages) ? progress.recent_messages.slice(-2) : [];
+      if (recentMessages.length) {
+        const list = makeElement('ul', 'project-assessment-zap-messages');
+        recentMessages.forEach((item) => {
+          list.appendChild(makeElement('li', '', `${item?.level || 'info'} · ${item?.message || ''}`));
+        });
+        panel.appendChild(list);
+      }
+      if (job.files_path) {
+        const path = makeElement('div', 'project-assessment-zap-path');
+        path.append(makeElement('span', '', 'Files path'), makeElement('code', '', job.files_path));
+        panel.appendChild(path);
+      }
+      if (job.atlas_draft_id) {
+        panel.appendChild(makeElement(
+          'small',
+          'project-assessment-zap-atlas-note',
+          'Atlas import draft ready. Review and apply controls remain separate from the scanner job.',
+        ));
+      }
+    }
+    const actions = makeElement('div', 'project-assessment-zap-actions');
+    if (job?.cancelable) {
+      const cancel = zapButton(
+        st.mutating === 'canceling' ? 'Canceling…' : 'Cancel scan',
+        button => act.cancelZap(projectId, assessmentId, check.id, job, button),
+        { disabled: Boolean(st.mutating || ctx.canRunCommands?.() === false) },
+      );
+      if (ctx.canRunCommands?.() === false) cancel.title = 'View-only team members cannot cancel ZAP scans.';
+      actions.appendChild(cancel);
+    }
+    if (job?.files_path) {
+      actions.appendChild(zapButton('Open Files', () => act.openZapFiles(job), { primary: true }));
+    }
+    if (job?.status === 'imported') {
+      actions.appendChild(zapButton(
+        'Open Atlas findings',
+        () => act.openZapAtlas(projectId),
+      ));
+    }
+    if (
+      job
+      && ['failed', 'canceled', 'expired', 'imported'].includes(String(job.status || ''))
+      && detail?.assessment?.status === 'active'
+    ) {
+      const start = zapButton(
+        'New ZAP scan',
+        button => act.startNewZap(projectId, detail, check, button),
+        { disabled: Boolean(st.mutating || ctx.canRunCommands?.() === false) },
+      );
+      if (ctx.canRunCommands?.() === false) start.title = 'View-only team members cannot start ZAP scans.';
+      actions.appendChild(start);
+    }
+    if (actions.childElementCount) panel.appendChild(actions);
+    return panel;
   }
 
   function renderCheck(projectId, detail, check, { mobile = false } = {}) {
@@ -538,9 +695,9 @@ function createProjectAssessmentRenderer(context, actions) {
         button.type = 'button';
         button.disabled = item.disabled;
         if (item.disabled) {
-          button.title = item.label === 'Create finding'
+          button.title = item.disabledTitle || (item.label === 'Create finding'
             ? "View-only team members can't create findings. Switch to Personal or ask for operator access."
-            : "View-only team members can't start runs. Switch to Personal or ask for operator access.";
+            : "View-only team members can't start runs. Switch to Personal or ask for operator access.");
         }
         ctx.bindProjectRuntimePressable?.(button, {
           onActivate: () => {
@@ -553,6 +710,8 @@ function createProjectAssessmentRenderer(context, actions) {
       });
     }
     row.append(main, states);
+    const zapStatus = renderZapStatus(projectId, detail, check);
+    if (zapStatus) row.appendChild(zapStatus);
     return row;
   }
 

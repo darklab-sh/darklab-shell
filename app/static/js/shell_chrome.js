@@ -2156,6 +2156,8 @@ let importedProjectWorkspaceShell;
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       showConfirm: _shellFn('showConfirm', importedShowConfirm),
       closeProjectWorkspace: (options = {}) => closeProjectWorkspace(options),
+      openWorkspace: _shellFn('openWorkspace', importedOpenWorkspace),
+      openAtlas: _shellOpenAtlas,
       openSecretsOptions: () => {
         importedOpenOptions?.();
         importedActivateOptionsTab?.('secrets', { persist: true, focus: true });

@@ -57,6 +57,8 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     canManageSecrets: vi.fn(() => true),
     canTriageFindings: vi.fn(() => true),
     openSecretsOptions: vi.fn(),
+    openWorkspace: vi.fn(async () => true),
+    openAtlas: vi.fn(async () => true),
     apiFetch: projectWorkspaceRequest,
     attachActiveRunFromMonitor: vi.fn(async () => true),
     closeProjectWorkspace: vi.fn(),
@@ -105,6 +107,17 @@ const httpProfile = {
   revision: 1,
   protected_references_visible: true,
   reference_counts: { secret_refs: 1, file_refs: 0, headers: 0 },
+}
+
+const anonymousHttpProfile = {
+  ...httpProfile,
+  id: 'htp_zap',
+  name: 'Anonymous web scope',
+  role: 'anonymous',
+  secret_refs: {},
+  credential_use: [],
+  include_paths: [],
+  reference_counts: { secret_refs: 0, file_refs: 0, headers: 0, capture_rules: 0 },
 }
 
 const detail = {
@@ -234,6 +247,46 @@ const detail = {
     limit: 50,
     offset: 0,
     has_more: true,
+  },
+}
+
+const zapDetail = {
+  ...detail,
+  assessment: {
+    ...detail.assessment,
+    profile_snapshot: {
+      checks: [
+        { key: 'web_review', label: 'Web review', purpose: 'Review the live application.' },
+        { key: 'admin_review', label: 'Admin review', purpose: 'Review the admin application.' },
+      ],
+    },
+  },
+  checks: {
+    ...detail.checks,
+    checks: [
+      {
+        ...detail.checks.checks[0],
+        id: 'asmc_web',
+        check_key: 'web_review',
+        target_entity_id: 'ent_url_1',
+        target_type: 'url',
+        target_value: 'https://example.com/app',
+        recommended_action_key: 'command:httpx',
+        state: 'not_started',
+      },
+      {
+        ...detail.checks.checks[1],
+        id: 'asmc_admin',
+        check_key: 'admin_review',
+        target_entity_id: 'ent_url_2',
+        target_type: 'url',
+        target_value: 'https://example.com/admin',
+        recommended_action_key: 'command:httpx',
+        state: 'not_started',
+      },
+    ],
+    total: 2,
+    has_more: false,
   },
 }
 
@@ -378,6 +431,200 @@ describe('project assessment controller', () => {
       .every(button => button.disabled)).toBe(true)
     expect([...section.querySelectorAll('.project-http-profile-actions .btn')]
       .every(button => button.disabled)).toBe(true)
+  })
+
+  it('reviews the exact ZAP plan before queueing the same bounded selection on desktop and mobile', async () => {
+    const plan = {
+      plan_digest: 'd'.repeat(64),
+      plan_yaml: 'env:\n  contexts:\n    - name: darklab-anonymous\njobs:\n  - type: spider\n',
+      summary: {
+        policy_level: 'safe',
+        authentication_role: 'anonymous',
+        targets: ['https://example.com/app', 'https://example.com/admin'],
+        include_rule_count: 2,
+        exclusion_rule_count: 2,
+        job_types: ['passiveScan-config', 'spider', 'passiveScan-wait', 'report'],
+        job_timeout_seconds: 900,
+        report_file: 'darklab-zap-report.json',
+      },
+    }
+    const queuedJob = {
+      id: 'zap_job_1',
+      project_id: 'prj_1',
+      assessment_id: 'asmt_1',
+      check_id: 'asmc_web',
+      status: 'queued',
+      policy_level: 'safe',
+      target_count: 2,
+      cancelable: true,
+      plan_summary: plan.summary,
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) {
+        return apiResponse({ profiles: [httpProfile, anonymousHttpProfile], total: 2 })
+      }
+      if (url.endsWith('/zap-plan') && options.method === 'POST') return apiResponse({ plan })
+      if (url.endsWith('/zap-jobs') && options.method === 'POST') return apiResponse({ job: queuedJob })
+      if (url.endsWith('/zap-jobs')) return apiResponse({ jobs: [] })
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(zapDetail)
+      return apiResponse({ assessments: [cycle], profiles, total: 1 })
+    })
+    const showConfirm = vi.fn(async (options) => {
+      if (options.body?.text === 'Set up an external ZAP scan.') {
+        const profileSelect = options.content.querySelector('[aria-label="HTTP profile for ZAP scan"]')
+        const profileOptions = [...profileSelect.options]
+        expect(profileOptions.find(option => option.value === httpProfile.id)?.disabled).toBe(true)
+        expect(profileOptions.find(option => option.value === anonymousHttpProfile.id)?.disabled).toBe(false)
+        options.content.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = true })
+        options.content.querySelector('[aria-label="Extra ZAP path exclusions"]').value = '/logout\n/app/private'
+        expect(options.actions.find(action => action.id === 'review').onActivate()).toBe(true)
+        return 'review'
+      }
+      if (options.body?.text === 'Queue this ZAP scan?') {
+        expect(options.content.textContent).toContain('2 Project URLs')
+        expect(options.content.textContent).toContain('passiveScan-config, spider, passiveScan-wait, report')
+        expect(options.content.querySelector('.project-assessment-zap-yaml').textContent).toContain('darklab-anonymous')
+        return 'queue'
+      }
+      return options.actions.at(-1).id
+    })
+    const ctx = makeContext(projectWorkspaceRequest, { showConfirm })
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+    const desktop = document.createElement('div')
+    controller.renderAssessment(desktop, 'prj_1')
+    const mobile = controller.renderMobileAssessmentTab('prj_1')
+    desktop.querySelector('.project-assessment-target-toggle')?.click()
+    mobile.querySelector('.project-assessment-target-toggle')?.click()
+    expect([...desktop.querySelectorAll('.project-assessment-check-row .btn')]
+      .some(button => button.textContent === 'ZAP scan')).toBe(true)
+    mobile.querySelector('.project-assessment-check-row .btn')?.click()
+    const mobileZap = [...document.querySelectorAll('.action-sheet-item')]
+      .find(button => button.textContent === 'ZAP scan')
+    expect(mobileZap).toBeTruthy()
+    mobileZap.click()
+
+    await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      '/projects/prj_1/assessments/asmt_1/checks/asmc_web/zap-jobs',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const planCall = projectWorkspaceRequest.mock.calls.find(([url]) => url.endsWith('/zap-plan'))
+    const submitCall = projectWorkspaceRequest.mock.calls.find(([, options]) => options?.method === 'POST'
+      && JSON.parse(options.body || '{}').confirmed === true)
+    const selection = {
+      http_profile_id: 'htp_zap',
+      policy_level: 'safe',
+      scope_exclusions: ['/logout', '/app/private'],
+      target_entity_ids: ['ent_url_1', 'ent_url_2'],
+    }
+    expect(JSON.parse(planCall[1].body)).toEqual(selection)
+    expect(JSON.parse(submitCall[1].body)).toEqual({
+      ...selection,
+      confirmed: true,
+      plan_digest: plan.plan_digest,
+    })
+    controller.renderAssessment(desktop, 'prj_1')
+    expect(desktop.textContent).toContain('External ZAP scan')
+    expect(desktop.textContent).toContain('The worker has this scan in its durable queue.')
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'ZAP scan queued. Progress will stay with this assessment check.',
+    )
+    controller.invalidate('prj_1')
+  })
+
+  it('recovers a running ZAP job, cancels it, and polls its durable final state', async () => {
+    vi.useFakeTimers()
+    const running = {
+      id: 'zap_job_running',
+      status: 'running',
+      policy_level: 'safe',
+      target_count: 1,
+      cancelable: true,
+      progress: { info_count: 2, warning_count: 1, error_count: 0, recent_messages: [] },
+    }
+    const cancelRequested = { ...running, status: 'cancel_requested' }
+    const canceled = { ...running, status: 'canceled', cancelable: false }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) return apiResponse({ profiles: [anonymousHttpProfile], total: 1 })
+      if (url.endsWith('/zap-jobs/zap_job_running') && options.method === 'DELETE') {
+        return apiResponse({ job: cancelRequested })
+      }
+      if (url.endsWith('/zap-jobs/zap_job_running')) return apiResponse({ job: canceled })
+      if (url.endsWith('/zap-jobs')) return apiResponse({ jobs: [running] })
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(zapDetail)
+      return apiResponse({ assessments: [cycle], profiles, total: 1 })
+    })
+    const showConfirm = vi.fn(async options => (
+      options.body?.text === 'Cancel this ZAP scan?' ? 'cancel_zap' : options.actions.at(-1).id
+    ))
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(makeContext(
+      projectWorkspaceRequest,
+      { showConfirm },
+    ))
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle')?.click()
+    ;[...container.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'ZAP scan')?.click()
+    await vi.advanceTimersByTimeAsync(0)
+    controller.renderAssessment(container, 'prj_1')
+    expect(container.textContent).toContain('ZAP is running the reviewed plan.')
+    expect(container.textContent).toContain('2 info · 1 warning')
+    ;[...container.querySelectorAll('.project-assessment-zap-actions .btn')]
+      .find(button => button.textContent === 'Cancel scan')?.click()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      '/projects/prj_1/assessments/asmt_1/checks/asmc_web/zap-jobs/zap_job_running',
+      { method: 'DELETE' },
+    )
+    await vi.advanceTimersByTimeAsync(2000)
+    controller.renderAssessment(container, 'prj_1')
+    expect(container.textContent).toContain('The scan was canceled before an import draft was created.')
+    expect(container.textContent).toContain('New ZAP scan')
+    controller.invalidate('prj_1')
+    vi.useRealTimers()
+  })
+
+  it('recovers a ready ZAP report and opens its visible Files handoff without applying Atlas', async () => {
+    const ready = {
+      id: 'zap_job_ready',
+      status: 'ready',
+      policy_level: 'safe',
+      target_count: 1,
+      cancelable: false,
+      files_path: 'assessments/zap/zap_job_ready/darklab-zap-report.json',
+      atlas_draft_id: 'aim_zap_job_ready',
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) return apiResponse({ profiles: [anonymousHttpProfile], total: 1 })
+      if (url.endsWith('/zap-jobs')) return apiResponse({ jobs: [ready] })
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(zapDetail)
+      return apiResponse({ assessments: [cycle], profiles, total: 1 })
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle')?.click()
+    ;[...container.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'ZAP scan')?.click()
+    await vi.waitFor(() => {
+      expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+        '/projects/prj_1/assessments/asmt_1/checks/asmc_web/zap-jobs',
+        { cache: 'no-store' },
+      )
+      controller.renderAssessment(container, 'prj_1')
+      expect(container.textContent).toContain('Atlas import draft ready')
+    })
+    expect(container.textContent).toContain(ready.files_path)
+    expect(container.textContent).not.toContain('Open Atlas findings')
+    ;[...container.querySelectorAll('.project-assessment-zap-actions .btn')]
+      .find(button => button.textContent === 'Open Files')?.click()
+    await Promise.resolve()
+    expect(ctx.openWorkspace).toHaveBeenCalledTimes(1)
+    controller.invalidate('prj_1')
   })
 
   it('creates a target-scoped finding from an assessment check on desktop and mobile', async () => {

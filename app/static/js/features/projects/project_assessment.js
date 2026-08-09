@@ -5,6 +5,7 @@
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
 import { launchAssessmentAction } from './project_assessment_actions.js';
+import { createProjectAssessmentZapManager } from './project_assessment_zap.js';
 import { createProjectHttpProfileManager } from './project_http_profiles.js';
 import { openContextualFindingRecord } from '../findings/finding_record_context.js';
 import { openFindingTriageEditor } from '../findings/finding_triage_bridge.js';
@@ -59,6 +60,7 @@ function createProjectAssessmentController(context) {
       st.detailError = '';
     });
     httpProfileManager.invalidate(id);
+    zapManager.invalidate(id);
   }
 
   async function responseError(resp, fallback) {
@@ -78,6 +80,7 @@ function createProjectAssessmentController(context) {
   }
 
   const httpProfileManager = createProjectHttpProfileManager(ctx, { renderViews });
+  const zapManager = createProjectAssessmentZapManager(ctx, { renderViews });
 
   function cycleSelection(st) {
     return st.assessments.find(item => String(item?.id || '') === st.selectedId)
@@ -555,6 +558,26 @@ function createProjectAssessmentController(context) {
     }
   }
 
+  function openZap(projectId, detail, check, returnFocus = null) {
+    return zapManager.open(
+      projectId,
+      detail,
+      check,
+      httpProfileManager.profilesForLaunch(projectId),
+      returnFocus,
+    );
+  }
+
+  function startNewZap(projectId, detail, check, returnFocus = null) {
+    return zapManager.startNew(
+      projectId,
+      detail,
+      check,
+      httpProfileManager.profilesForLaunch(projectId),
+      returnFocus,
+    );
+  }
+
   const renderer = createProjectAssessmentRenderer(ctx, {
     deleteCycle,
     createCycle,
@@ -562,6 +585,10 @@ function createProjectAssessmentController(context) {
     load,
     loadDetail,
     launchRecommendedAction,
+    cancelZap: zapManager.cancel,
+    openZap,
+    openZapAtlas: zapManager.openAtlas,
+    openZapFiles: zapManager.openFiles,
     openDeltaFinding,
     selectCycle,
     setFilter,
@@ -569,6 +596,8 @@ function createProjectAssessmentController(context) {
     setFindingPage,
     setPage,
     transitionCycle,
+    startNewZap,
+    zapStateFor: zapManager.stateFor,
     renderHttpProfiles: (projectId, options = {}) => httpProfileManager.renderSection(projectId, options),
   });
 
