@@ -18,6 +18,7 @@ from services.connectors.oast_provider_spool import (
     OastProviderSessionSpoolError,
     discard_oast_provider_session,
     load_oast_provider_session,
+    oast_provider_session_is_staged,
     stale_oast_provider_session_ids,
     store_oast_provider_session,
 )
@@ -61,6 +62,7 @@ def test_oast_provider_session_spool_round_trips_encrypted_private_material(tmp_
     store_oast_provider_session(_correlation(), session)
 
     path = _session_path(tmp_path)
+    assert oast_provider_session_is_staged(_CORRELATION_ID) is True
     raw = path.read_bytes()
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -76,6 +78,7 @@ def test_oast_provider_session_spool_round_trips_encrypted_private_material(tmp_
     assert "PRIVATE KEY" not in repr(loaded)
     discard_oast_provider_session(_CORRELATION_ID)
     assert not path.exists()
+    assert oast_provider_session_is_staged(_CORRELATION_ID) is False
 
 
 def test_oast_provider_session_spool_rejects_tampering_and_identity_drift(tmp_path):

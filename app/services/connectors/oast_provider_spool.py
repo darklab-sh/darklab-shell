@@ -261,6 +261,23 @@ def discard_oast_provider_session(
         return
 
 
+def oast_provider_session_is_staged(
+    correlation_id: str,
+    cfg: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether any filesystem entry occupies this private session slot."""
+    try:
+        _session_path(correlation_id, cfg).lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise OastProviderSessionSpoolError(
+            "oast_provider_spool_unavailable",
+            "Private OAST session storage is unavailable",
+        ) from exc
+    return True
+
+
 def stale_oast_provider_session_ids(
     cfg: Mapping[str, Any] | None = None,
     *,
@@ -290,6 +307,7 @@ __all__ = [
     "OastProviderSessionSpoolError",
     "discard_oast_provider_session",
     "load_oast_provider_session",
+    "oast_provider_session_is_staged",
     "stale_oast_provider_session_ids",
     "store_oast_provider_session",
 ]

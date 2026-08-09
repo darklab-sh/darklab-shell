@@ -271,6 +271,72 @@ def test_postgres_backend_smoke_exercises_phase6_contract(postgres_schema):
 
 
 @pytest.mark.postgres
+def test_postgres_oast_worker_state_queries_and_reject_counter(postgres_schema):
+    from services.connectors.oast_worker_state import (
+        oast_correlations_by_ids,
+        oast_correlations_for_worker,
+        record_oast_provider_rejections,
+    )
+
+    raw_conn = postgres_schema.conn
+    raw_conn.execute(
+        "CREATE TABLE oast_correlations (id TEXT PRIMARY KEY, status TEXT, "
+        "created_at TIMESTAMPTZ, callback_label TEXT, allowed_domain TEXT, "
+        "rejected_count INTEGER, updated_at TIMESTAMPTZ)"
+    )
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    rows = (
+        (
+            "ocr_0123456789abcdef0123456789abcdef",
+            "reserved",
+            "2026-08-09T10:00:00+00:00",
+        ),
+        (
+            "ocr_11111111111111111111111111111111",
+            "active",
+            "2026-08-09T11:00:00+00:00",
+        ),
+        (
+            "ocr_22222222222222222222222222222222",
+            "closed",
+            "2026-08-09T09:00:00+00:00",
+        ),
+    )
+    for correlation_id, status, created_at in rows:
+        conn.execute(
+            "INSERT INTO oast_correlations VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (
+                correlation_id,
+                status,
+                created_at,
+                "abcdefghijklmnopqrstuvwxy01234567",
+                "callbacks.example.test",
+                created_at,
+            ),
+        )
+
+    work = oast_correlations_for_worker(conn=conn)
+    selected = oast_correlations_by_ids(
+        [rows[0][0], "../../invalid", rows[2][0]],
+        conn=conn,
+    )
+    updated = record_oast_provider_rejections(
+        rows[1][0],
+        3,
+        now=datetime(2026, 8, 9, 12, tzinfo=timezone.utc),
+        conn=conn,
+    )
+
+    assert [row["status"] for row in work] == ["active", "reserved"]
+    assert set(selected) == {rows[0][0], rows[2][0]}
+    assert updated == 1
+    assert conn.execute(
+        "SELECT rejected_count FROM oast_correlations WHERE id = ?",
+        (rows[1][0],),
+    ).fetchone()["rejected_count"] == 3
+
+
+@pytest.mark.postgres
 def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
