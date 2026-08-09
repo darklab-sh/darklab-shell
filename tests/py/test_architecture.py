@@ -154,6 +154,9 @@ class ModuleSizeBudget:
 
 _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/connectors/zap_config.py", 68, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_plan.py", 194, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_plan_contracts.py", 45, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_plan_scope.py", 165, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_scope.py", 121, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry.py", 1150, "split-target-phase1"),
     ModuleSizeBudget("app/services/commands/registry_adaptations.py", 87, "split-package-ratchet"),

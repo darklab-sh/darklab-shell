@@ -3066,6 +3066,196 @@ class TestLoadConfig:
             review_zap_target("https://192.0.2.10", disabled)
         assert exc_info.value.code == "zap_connector_disabled"
 
+        from services.connectors.zap_plan import build_zap_automation_plan
+        from services.connectors.zap_plan_contracts import ZapPlanError
+
+        http_profile = {
+            "enabled": True,
+            "role": "anonymous",
+            "allowed_hosts": ["app.example.test"],
+            "scope_roots": ["https://app.example.test/"],
+            "include_paths": ["/login"],
+            "exclude_paths": ["/login/logout"],
+            "rate_limit_per_second": 4,
+            "reference_counts": {
+                "secret_refs": 0,
+                "file_refs": 0,
+                "headers": 0,
+                "capture_rules": 0,
+            },
+        }
+        safe_plan = build_zap_automation_plan(
+            settings,
+            [reviewed_target],
+            http_profile,
+            scope_exclusions=["/login/admin", "/login/admin"],
+        )
+        safe_document = yaml.safe_load(safe_plan.yaml_bytes)
+        safe_context = safe_document["env"]["contexts"][0]
+        assert safe_document["env"]["parameters"] == {
+            "failOnError": True,
+            "failOnWarning": False,
+            "continueOnFailure": False,
+            "progressToStdout": False,
+        }
+        assert safe_context == {
+            "name": "darklab-anonymous",
+            "urls": ["https://app.example.test/login"],
+            "includePaths": [
+                r"^https://app\.example\.test/login(?:/.*)?(?:\?.*)?$",
+            ],
+            "excludePaths": [
+                r"^https://app\.example\.test/login/logout(?:/.*)?(?:\?.*)?$",
+                r"^https://app\.example\.test/login/admin(?:/.*)?(?:\?.*)?$",
+            ],
+        }
+        assert [job["type"] for job in safe_document["jobs"]] == [
+            "passiveScan-config",
+            "spider",
+            "passiveScan-wait",
+            "report",
+        ]
+        assert safe_document["jobs"][0]["parameters"] == {
+            "maxAlertsPerRule": 20,
+            "scanOnlyInScope": True,
+            "maxBodySizeInBytesToScan": 1048576,
+            "enableTags": False,
+        }
+        assert safe_document["jobs"][1]["parameters"]["postForm"] is False
+        assert safe_document["jobs"][1]["parameters"]["threadCount"] == 1
+        assert safe_document["jobs"][-1]["parameters"]["template"] == "traditional-json"
+        assert safe_plan.summary.to_dict() == {
+            "policy_level": "safe",
+            "authentication_role": "anonymous",
+            "targets": ["https://app.example.test/login"],
+            "include_rule_count": 1,
+            "exclusion_rule_count": 2,
+            "job_types": ["passiveScan-config", "spider", "passiveScan-wait", "report"],
+            "job_timeout_seconds": 900,
+            "report_file": "darklab-zap-report.json",
+        }
+        intrusive_plan = build_zap_automation_plan(
+            settings,
+            [reviewed_target],
+            http_profile,
+            policy_level="intrusive",
+            intrusive_enabled=True,
+        )
+        intrusive_document = yaml.safe_load(intrusive_plan.yaml_bytes)
+        active_job = next(
+            job for job in intrusive_document["jobs"] if job["type"] == "activeScan"
+        )
+        assert active_job["parameters"]["maxScanDurationInMins"] == 3
+        assert active_job["parameters"]["maxRuleDurationInMins"] == 3
+        assert active_job["parameters"]["threadPerHost"] == 1
+        assert active_job["parameters"]["delayInMs"] == 250
+        assert intrusive_plan.summary.policy_level == "intrusive"
+        outside_profile_target = review_zap_target(
+            "https://app.example.test/outside",
+            settings,
+            resolve_addresses=lambda _host: ["192.0.2.10"],
+        )
+
+        plan_errors = [
+            (
+                "zap_connector_disabled",
+                lambda: build_zap_automation_plan(
+                    disabled,
+                    [reviewed_target],
+                    http_profile,
+                ),
+            ),
+            (
+                "zap_policy_invalid",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    http_profile,
+                    policy_level="unbounded",
+                ),
+            ),
+            (
+                "zap_intrusive_disabled",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    http_profile,
+                    policy_level="intrusive",
+                ),
+            ),
+            (
+                "zap_http_profile_unsupported",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    {**http_profile, "credential_use": ["bearer_token"]},
+                ),
+            ),
+            (
+                "zap_http_profile_unsupported",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    {**http_profile, "role": "authenticated"},
+                ),
+            ),
+            (
+                "zap_scope_exclusion_invalid",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    http_profile,
+                    scope_exclusions=["https://outside.example.test"],
+                ),
+            ),
+            (
+                "zap_http_profile_scope_mismatch",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [outside_profile_target],
+                    http_profile,
+                ),
+            ),
+            (
+                "zap_http_profile_invalid",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    {**http_profile, "reference_counts": {"secret_refs": "many"}},
+                ),
+            ),
+            (
+                "zap_http_profile_invalid",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    {**http_profile, "rate_limit_per_second": None},
+                    policy_level="intrusive",
+                    intrusive_enabled=True,
+                ),
+            ),
+            (
+                "zap_target_duplicate",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target, reviewed_target],
+                    http_profile,
+                ),
+            ),
+            (
+                "zap_target_limit",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target] * 9,
+                    http_profile,
+                ),
+            ),
+        ]
+        for expected_code, build_plan in plan_errors:
+            with pytest.raises(ZapPlanError) as exc_info:
+                build_plan()
+            assert exc_info.value.code == expected_code
+
     def test_validation_error_reports_source_and_redacts_secret_values(self):
         cases = [
             (
