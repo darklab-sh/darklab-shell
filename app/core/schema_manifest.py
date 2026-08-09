@@ -75,6 +75,7 @@ SHARED_APP_TABLES: tuple[str, ...] = (
     "workflow_executions",
     "zap_connector_jobs",
     "oast_correlations",
+    "oast_interactions",
 )
 SQLITE_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "runs_fts",

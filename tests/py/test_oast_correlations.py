@@ -25,9 +25,15 @@ from services.connectors.oast_correlations import (
     oast_correlations_for_owner_check,
     reserve_oast_correlation,
 )
+from services.connectors.oast_interaction_findings import attach_oast_interaction_to_finding
+from services.connectors.oast_interactions import (
+    ingest_oast_interaction,
+    oast_interactions_for_owner_correlation,
+)
 
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
+RUN_ID = "12345678-1234-4123-8123-123456789abc"
 
 
 @pytest.fixture
@@ -55,6 +61,11 @@ def correlation_db():
         (timestamp,),
     )
     conn.execute(
+        "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+        "VALUES ('link-oast-atlas', 'project-oast', 'atlas_entity', 'entity-oast', ?)",
+        (timestamp,),
+    )
+    conn.execute(
         "INSERT INTO project_assessments ("
         "id, session_id, project_id, title, profile_key, profile_version, "
         "started_at, created_at, updated_at) VALUES "
@@ -71,6 +82,17 @@ def correlation_db():
         "'entity-oast', 'domain', 'app.example.test', 'target-hash', "
         "'intrusive', 'oast_private_callback', ?, ?)",
         (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, run_kind, command, started, finished, exit_code) "
+        "VALUES (?, 'owner-a', 'external', 'private OAST probe', ?, ?, 0)",
+        (RUN_ID, timestamp, (NOW + timedelta(seconds=30)).isoformat()),
+    )
+    conn.execute(
+        "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+        "VALUES ('link-oast-run', 'project-oast', 'run', ?, ?)",
+        (RUN_ID, timestamp),
     )
     try:
         yield conn
@@ -104,6 +126,37 @@ def _reserve(correlation_db, suffix: str, *, now: datetime = NOW):
         now=now,
         conn=correlation_db,
     )
+
+
+def _activate(correlation_db, suffix: str = "a"):
+    reservation = _reserve(correlation_db, suffix)
+    return activate_oast_correlation(
+        "owner-a", reservation["id"], RUN_ID, now=NOW, conn=correlation_db
+    )
+
+
+def _interaction_payload(
+    *,
+    event_id: str = "provider-event-1",
+    protocol: str = "http",
+    callback_label: str = "dl-" + "a" * 32,
+    observed_at: datetime = NOW + timedelta(seconds=10),
+    details=None,
+):
+    return {
+        "protocol": protocol,
+        "callback_label": callback_label,
+        "provider_event_id": event_id,
+        "observed_at": observed_at.isoformat(),
+        "details": details
+        if details is not None
+        else {
+            "method": "post",
+            "path": "/collect?token=private-query",
+            "headers": {"Authorization": "Bearer private-token"},
+            "body": "private-body",
+        },
+    }
 
 
 def test_reservation_is_private_owner_scoped_and_provider_free(correlation_db):
@@ -272,3 +325,287 @@ def test_reservation_rejects_instead_of_evicting_at_check_limit(correlation_db):
     assert correlation_db.execute(
         "SELECT COUNT(*) FROM oast_correlations"
     ).fetchone()[0] == 4
+
+
+def test_interaction_ingestion_redacts_deduplicates_and_marks_check_for_review(
+    correlation_db,
+):
+    correlation = _activate(correlation_db)
+    payload = _interaction_payload()
+
+    created = ingest_oast_interaction(
+        "owner-a",
+        correlation["id"],
+        payload,
+        interaction_id="oin_" + "1" * 32,
+        now=NOW + timedelta(seconds=20),
+        conn=correlation_db,
+    )
+
+    assert created["created"] is True
+    interaction = created["interaction"]
+    assert interaction["protocol"] == "http"
+    assert interaction["summary"] == {"method": "POST", "path": "/collect"}
+    assert interaction["redacted_field_count"] == 3
+    assert interaction["provider_event_sha256"] == sha256(
+        b"provider-event-1"
+    ).hexdigest()
+    assert interaction["run_id"] == RUN_ID
+    assert interaction["check_id"] == "check-oast"
+    assert interaction["target_entity_id"] == "entity-oast"
+    assert "private-token" not in str(interaction)
+    assert "private-query" not in str(interaction)
+    assert oast_interactions_for_owner_correlation(
+        "owner-b", correlation["id"], conn=correlation_db
+    ) == []
+    duplicate = ingest_oast_interaction(
+        "owner-a",
+        correlation["id"],
+        {**payload, "details": {"method": "GET", "path": "/changed"}},
+        now=NOW + timedelta(seconds=21),
+        conn=correlation_db,
+    )
+    assert duplicate["created"] is False
+    counters = correlation_db.execute(
+        "SELECT interaction_count, duplicate_count, rejected_count "
+        "FROM oast_correlations WHERE id = ?",
+        (correlation["id"],),
+    ).fetchone()
+    assert tuple(counters) == (1, 1, 0)
+    evidence = correlation_db.execute(
+        "SELECT evidence_type, evidence_id, match_rule_key, match_rule_version "
+        "FROM project_assessment_evidence WHERE check_id = 'check-oast'"
+    ).fetchone()
+    assert tuple(evidence) == (
+        "run",
+        RUN_ID,
+        "private_oast_interaction",
+        "1",
+    )
+    check = correlation_db.execute(
+        "SELECT state, state_source, state_reason FROM project_assessment_checks "
+        "WHERE id = 'check-oast'"
+    ).fetchone()
+    assert check["state"] == "needs_review"
+    assert check["state_source"] == "derived"
+    assert "Private OAST interaction" in check["state_reason"]
+
+
+def test_interaction_ingestion_rejects_malformed_mismatched_and_late_callbacks(
+    correlation_db,
+):
+    correlation = _activate(correlation_db)
+
+    with pytest.raises(OastCorrelationError) as exc_info:
+        ingest_oast_interaction(
+            "owner-a",
+            correlation["id"],
+            _interaction_payload(protocol="ftp"),
+            now=NOW + timedelta(seconds=20),
+            conn=correlation_db,
+        )
+    assert exc_info.value.code == "oast_interaction_protocol_invalid"
+
+    with pytest.raises(OastCorrelationError) as exc_info:
+        ingest_oast_interaction(
+            "owner-a",
+            correlation["id"],
+            _interaction_payload(callback_label="dl-" + "b" * 32),
+            now=NOW + timedelta(seconds=20),
+            conn=correlation_db,
+        )
+    assert exc_info.value.code == "oast_interaction_window_closed"
+
+    with pytest.raises(OastCorrelationError) as exc_info:
+        ingest_oast_interaction(
+            "owner-a",
+            correlation["id"],
+            _interaction_payload(observed_at=NOW + timedelta(seconds=61)),
+            now=NOW + timedelta(seconds=61),
+            conn=correlation_db,
+        )
+    assert exc_info.value.code == "oast_interaction_window_closed"
+    assert correlation_db.execute(
+        "SELECT rejected_count FROM oast_correlations WHERE id = ?",
+        (correlation["id"],),
+    ).fetchone()[0] == 3
+    assert correlation_db.execute(
+        "SELECT COUNT(*) FROM oast_interactions"
+    ).fetchone()[0] == 0
+
+
+def test_interaction_ingestion_keeps_protocol_summaries_bounded(correlation_db):
+    correlation = _activate(correlation_db)
+    cases = (
+        (
+            "dns",
+            {
+                "query_name": correlation["callback_domain"],
+                "query_type": "a",
+                "raw_request": "private",
+            },
+            {"query_name": correlation["callback_domain"], "query_type": "A"},
+        ),
+        (
+            "smtp",
+            {
+                "command": "ehlo",
+                "recipient_domain": "example.test",
+                "message": "private",
+            },
+            {"command": "EHLO", "recipient_domain": "example.test"},
+        ),
+        (
+            "ldap",
+            {"operation": "search", "bind_dn": "private"},
+            {"operation": "SEARCH"},
+        ),
+    )
+    for index, (protocol, details, expected) in enumerate(cases, start=1):
+        result = ingest_oast_interaction(
+            "owner-a",
+            correlation["id"],
+            _interaction_payload(
+                event_id=f"provider-event-{index}",
+                protocol=protocol,
+                details=details,
+            ),
+            interaction_id="oin_" + str(index + 1) * 32,
+            now=NOW + timedelta(seconds=20 + index),
+            conn=correlation_db,
+        )
+        assert result["interaction"]["summary"] == expected
+        assert result["interaction"]["redacted_field_count"] == 1
+    assert correlation_db.execute(
+        "SELECT interaction_count FROM oast_correlations WHERE id = ?",
+        (correlation["id"],),
+    ).fetchone()[0] == 3
+
+
+def test_interaction_limit_rejects_without_evicting_existing_evidence(
+    correlation_db,
+    monkeypatch,
+):
+    from services.connectors import oast_interactions
+
+    monkeypatch.setattr(oast_interactions, "_MAX_INTERACTIONS_PER_CORRELATION", 1)
+    correlation = _activate(correlation_db)
+    ingest_oast_interaction(
+        "owner-a",
+        correlation["id"],
+        _interaction_payload(),
+        now=NOW + timedelta(seconds=20),
+        conn=correlation_db,
+    )
+
+    with pytest.raises(OastCorrelationError) as exc_info:
+        ingest_oast_interaction(
+            "owner-a",
+            correlation["id"],
+            _interaction_payload(event_id="provider-event-2"),
+            now=NOW + timedelta(seconds=21),
+            conn=correlation_db,
+        )
+    assert exc_info.value.code == "oast_interaction_limit"
+    assert correlation_db.execute(
+        "SELECT COUNT(*) FROM oast_interactions"
+    ).fetchone()[0] == 1
+
+
+def test_interaction_finding_attachment_requires_exact_target_and_adds_source_links(
+    correlation_db,
+):
+    correlation = _activate(correlation_db)
+    created = ingest_oast_interaction(
+        "owner-a",
+        correlation["id"],
+        _interaction_payload(),
+        interaction_id="oin_" + "9" * 32,
+        now=NOW + timedelta(seconds=20),
+        conn=correlation_db,
+    )
+    correlation_db.execute(
+        "INSERT INTO findings (id, session_id, entity_id, target_id, created) "
+        "VALUES ('finding-oast', 'owner-a', 'entity-oast', 'entity-oast', ?)",
+        (NOW.isoformat(),),
+    )
+    correlation_db.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
+        "('entity-other', 'owner-a', 'domain', 'other.example.test', 'other-hash', "
+        "?, ?, 1, ?)",
+        (NOW.isoformat(), NOW.isoformat(), NOW.isoformat()),
+    )
+    correlation_db.execute(
+        "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+        "VALUES ('link-other-atlas', 'project-oast', 'atlas_entity', 'entity-other', ?)",
+        (NOW.isoformat(),),
+    )
+    correlation_db.execute(
+        "INSERT INTO findings (id, session_id, entity_id, target_id, created) "
+        "VALUES ('finding-other', 'owner-a', 'entity-other', 'entity-other', ?)",
+        (NOW.isoformat(),),
+    )
+
+    with pytest.raises(OastCorrelationError) as exc_info:
+        attach_oast_interaction_to_finding(
+            "owner-a",
+            created["interaction"]["id"],
+            "finding-other",
+            conn=correlation_db,
+        )
+    assert exc_info.value.code == "oast_interaction_finding_mismatch"
+
+    attached = attach_oast_interaction_to_finding(
+        "owner-a",
+        created["interaction"]["id"],
+        "finding-oast",
+        actor_member_id="member-a",
+        conn=correlation_db,
+    )
+
+    assert attached["finding_id"] == "finding-oast"
+    links = correlation_db.execute(
+        "SELECT evidence_type, evidence_id, created_by_member_id "
+        "FROM finding_evidence_links WHERE finding_id = 'finding-oast' "
+        "ORDER BY evidence_type"
+    ).fetchall()
+    assert [tuple(row) for row in links] == [
+        ("assessment_check", "check-oast", "member-a"),
+        ("run", RUN_ID, "member-a"),
+    ]
+    repeated = attach_oast_interaction_to_finding(
+        "owner-a",
+        created["interaction"]["id"],
+        "finding-oast",
+        actor_member_id="member-a",
+        conn=correlation_db,
+    )
+    assert repeated["finding_id"] == "finding-oast"
+    assert correlation_db.execute(
+        "SELECT COUNT(*) FROM finding_evidence_links WHERE finding_id = 'finding-oast'"
+    ).fetchone()[0] == 2
+
+
+def test_interactions_are_removed_with_their_expired_correlation(correlation_db):
+    correlation = _activate(correlation_db)
+    ingest_oast_interaction(
+        "owner-a",
+        correlation["id"],
+        _interaction_payload(),
+        now=NOW + timedelta(seconds=20),
+        conn=correlation_db,
+    )
+    close_oast_correlation(
+        "owner-a",
+        correlation["id"],
+        now=NOW + timedelta(seconds=30),
+        conn=correlation_db,
+    )
+
+    assert purge_oast_correlations(
+        now=NOW + timedelta(seconds=301), conn=correlation_db
+    ) == 1
+    assert correlation_db.execute(
+        "SELECT COUNT(*) FROM oast_interactions"
+    ).fetchone()[0] == 0

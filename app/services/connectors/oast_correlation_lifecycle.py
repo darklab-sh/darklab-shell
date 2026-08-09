@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import re
+from typing import Any
 
 from services.connectors.oast_correlations import (
     OastCorrelationError,
@@ -30,7 +31,7 @@ def activate_oast_correlation(
     team_id: str = "",
     now: datetime | None = None,
     conn=None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Bind a reserved callback to the exact run created for its action."""
     selected_run_id = str(run_id or "").strip().lower()
     if not _RUN_ID_RE.fullmatch(selected_run_id):
@@ -100,7 +101,7 @@ def close_oast_correlation(
     error_detail: str = "",
     now: datetime | None = None,
     conn=None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Close active work, or fail a reservation that never reached its run."""
     status = "failed" if failed else "closed"
     expected = ("reserved", "active") if failed else ("active",)
