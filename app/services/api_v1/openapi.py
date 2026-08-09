@@ -9,6 +9,7 @@ from copy import deepcopy
 
 from config import APP_VERSION
 from services.api_v1 import openapi_assessments as assessments, openapi_manual_findings as manual
+from services.api_v1 import openapi_run_evidence as run_evidence
 from services.api_v1.openapi_assessment_actions import assessment_action_paths, assessment_action_schemas
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.api_v1.openapi_cve_risk import cve_risk_schemas
@@ -596,6 +597,7 @@ OPENAPI_SPEC: dict = {
             },
             **atlas_profile_schemas(),
             **assessments.assessment_schemas(),
+            **run_evidence.run_evidence_schemas(),
             **(
                 finding_evidence_schemas()
                 | assessment_action_schemas()
@@ -1544,6 +1546,7 @@ OPENAPI_SPEC: dict = {
         | http_profile_paths()
         | manual.manual_finding_paths()
         | osv_lookup_paths()
+        | run_evidence.run_evidence_paths()
         | action_paths()
         | {
         "/health": {

@@ -12,6 +12,9 @@ from core.migrations.runner import run_migrations
 from services.assessments.nmap_service_evidence_persistence import (
     persist_nmap_xml_service_observations,
 )
+from services.assessments.nmap_service_evidence_read import (
+    nmap_service_evidence_for_run_on_conn,
+)
 
 
 @pytest.fixture
@@ -101,6 +104,67 @@ def test_persistence_is_owner_scoped_idempotent_and_omits_free_form_output(evide
         {"path": ["message_signing"], "value": "disabled"},
     ]
     assert "free-form output" not in str(row)
+
+    page = nmap_service_evidence_for_run_on_conn(
+        evidence_db,
+        "nmap-owner",
+        "run-nmap-service",
+        limit=1,
+    )
+    assert page == {
+        "observations": [{
+            "id": row["id"],
+            "run_id": "run-nmap-service",
+            "target": "192.0.2.10:445/tcp",
+            "service": "microsoft-ds",
+            "script_id": "smb2-security-mode",
+            "evidence_kind": "smb_signing",
+            "classification": "informational",
+            "tool_version": "7.95",
+            "parser_version": "nmap-xml-service-evidence-v1",
+            "fields": [{"path": ["message_signing"], "value": "disabled"}],
+            "fields_truncated": False,
+            "collection_truncated": False,
+            "observed_at": "2026-08-09T00:01:00+00:00",
+            "created_at": "2026-08-09T00:01:00+00:00",
+        }],
+        "total": 1,
+        "limit": 1,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert nmap_service_evidence_for_run_on_conn(
+        evidence_db, "other-owner", "run-nmap-service",
+    ) is None
+
+    _seed_run(
+        evidence_db,
+        "run-nmap-team",
+        session_id="team-member-a",
+        team_id="team-nmap",
+    )
+    team_summary = persist_nmap_xml_service_observations(
+        evidence_db,
+        "team-member-b",
+        _xml(),
+        source_run_id="run-nmap-team",
+        team_id="team-nmap",
+        observed_at="2026-08-09T00:01:00+00:00",
+    )
+    team_page = nmap_service_evidence_for_run_on_conn(
+        evidence_db,
+        "team-member-c",
+        "run-nmap-team",
+        team_id="team-nmap",
+    )
+    assert team_summary["created_count"] == 1
+    assert team_page is not None and team_page["total"] == 1
+    assert nmap_service_evidence_for_run_on_conn(
+        evidence_db, "team-member-a", "run-nmap-team",
+    ) is None
+    assert nmap_service_evidence_for_run_on_conn(
+        evidence_db, "team-member-a", "run-nmap-team", team_id="other-team",
+    ) is None
 
 
 @pytest.mark.parametrize(

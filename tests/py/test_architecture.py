@@ -46,6 +46,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_manual_findings.py",
     "openapi_osv_lookup.py",
     "openapi_finding_priority.py",
+    "openapi_run_evidence.py",
     "openapi_verification_actions.py",
     "serialization.py",
 }
@@ -211,6 +212,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_notifications.py", 159, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_osv_lookup.py", 114, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_read.py", 401, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_run_evidence.py", 24, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_runs.py", 340, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_schedules.py", 211, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_streaming.py", 150, "split-package-ratchet"),
@@ -261,6 +263,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/api_v1/openapi_finding_verification_suggestion.py", 49, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_manual_findings.py", 157, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_osv_lookup.py", 86, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_run_evidence.py", 98, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_verification_actions.py", 209, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_finding_priority.py", 81, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
@@ -341,6 +344,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/assessments/nmap_service_evidence_persistence.py",
         165,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/nmap_service_evidence_read.py",
+        154,
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/services/assessments/osv_package_correlation.py", 220, "split-package-ratchet"),
@@ -756,8 +764,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 243
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "46a1914b3e4796346dece0508059eefe45d68a5b820da47da4d4ebbf46856b3f"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 244
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "2bc567e0d6853304637236c6dd9905d66c6341383880d835c9ee45316f43bd23"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

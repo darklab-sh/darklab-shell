@@ -5553,6 +5553,9 @@ def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkey
     from services.assessments.nmap_service_evidence_persistence import (
         persist_nmap_xml_service_observations,
     )
+    from services.assessments.nmap_service_evidence_read import (
+        nmap_service_evidence_for_run_on_conn,
+    )
 
     raw_conn = postgres_schema.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
@@ -5599,6 +5602,20 @@ def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkey
         "fields_truncated": False,
         "collection_truncated": False,
     }
+    page = nmap_service_evidence_for_run_on_conn(
+        conn,
+        "nmap-owner-pg",
+        "run-nmap-service-pg",
+        limit=1,
+    )
+    assert page is not None
+    assert page["total"] == 1
+    assert page["observations"][0]["fields"] == [
+        {"path": ["message_signing"], "value": "disabled"},
+    ]
+    assert nmap_service_evidence_for_run_on_conn(
+        conn, "other-owner-pg", "run-nmap-service-pg",
+    ) is None
     conn.execute("DELETE FROM runs WHERE id = ?", ("run-nmap-service-pg",))
     assert raw_conn.execute(
         "SELECT COUNT(*) AS count FROM nmap_service_observations",

@@ -15,6 +15,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Saved Nmap service facts are available through owner-scoped API reads.**
+  - **What:** API clients can page through the structured informational service evidence saved with a run, and matching Assessment checks include a bounded newest-first view of those same facts. Personal and team ownership is checked again on every read. Responses include only the canonical target, reviewed script and evidence family, structured fields, truncation state, versions, and timestamps; they don't copy free-form NSE output or change a check or finding.
+  - **Tests:** Focused SQLite, API, OpenAPI, owner-isolation, assessment-link, module-ratchet, Pyright, and real Postgres coverage pins the read contract.
 - **Reviewed Nmap service facts now survive completed runs as typed evidence.**
   - **What:** A successful Nmap run with one validated `-oX` artifact saves the parser's bounded informational rows under the run owner. Each row keeps only the canonical port, service, reviewed script and evidence family, structured fields, truncation state, tool/parser versions, and observation time. Replays are idempotent, conflicting identities fail closed, and failed, non-Nmap, cross-owner, ambiguous, or unreadable sources don't write evidence. Service-evidence failure is isolated from version inference and can't roll back the completed run; neither path copies free-form NSE output or changes a finding.
   - **Tests:** SQLite persistence, owner isolation, idempotency, conflict, failed-source, finalization-order, savepoint rollback, migration-parity, structured logging, module-ratchet, and real Postgres coverage pins the write boundary.

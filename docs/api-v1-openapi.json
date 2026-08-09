@@ -671,6 +671,9 @@
             "nullable": true,
             "type": "string"
           },
+          "nmap_service_evidence": {
+            "$ref": "#/components/schemas/NmapServiceEvidencePage"
+          },
           "policy_level": {
             "enum": [
               "safe",
@@ -759,6 +762,7 @@
           "evidence_count",
           "available_evidence_count",
           "unavailable_evidence_count",
+          "nmap_service_evidence",
           "created_at",
           "updated_at"
         ],
@@ -6020,6 +6024,130 @@
       "NdjsonStream": {
         "description": "Newline-delimited RunStreamEvent objects. The first row is the line-event schema row; output rows include v=1 plus kind/role metadata, and idle streams may include heartbeat rows.",
         "type": "string"
+      },
+      "NmapServiceEvidenceField": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "value"
+        ],
+        "type": "object"
+      },
+      "NmapServiceEvidencePage": {
+        "additionalProperties": false,
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/NmapServiceObservation"
+            },
+            "type": "array"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "observations",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "NmapServiceObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "classification": {
+            "enum": [
+              "informational"
+            ],
+            "type": "string"
+          },
+          "collection_truncated": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "evidence_kind": {
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/NmapServiceEvidenceField"
+            },
+            "type": "array"
+          },
+          "fields_truncated": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "parser_version": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "script_id": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "tool_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "target",
+          "service",
+          "script_id",
+          "evidence_kind",
+          "classification",
+          "tool_version",
+          "parser_version",
+          "fields",
+          "fields_truncated",
+          "collection_truncated",
+          "observed_at",
+          "created_at"
+        ],
+        "type": "object"
       },
       "Note": {
         "properties": {
@@ -14941,6 +15069,82 @@
               }
             },
             "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/service-evidence": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NmapServiceEvidencePage"
+                }
+              }
+            },
+            "description": "Informational service evidence saved with the run"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
           }
         }
       }

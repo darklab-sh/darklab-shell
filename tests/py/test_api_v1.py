@@ -1405,6 +1405,58 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     assert linked["evidence"]["evidence_id"] == run_id
     assert linked["check"]["state"] == "covered"
 
+    from services.assessments.nmap_service_evidence_persistence import (
+        persist_nmap_xml_service_observations,
+    )
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        persist_nmap_xml_service_observations(
+            conn,
+            token,
+            """<nmaprun version="7.95"><host><address addr="192.0.2.10" addrtype="ipv4"/>
+            <ports><port protocol="tcp" portid="445"><state state="open"/>
+            <service name="microsoft-ds"/><script id="smb2-security-mode" output="private output">
+            <elem key="message_signing">disabled</elem></script></port></ports></host>
+            <runstats><finished time="1786233600"/></runstats></nmaprun>""",
+            source_run_id=run_id,
+            observed_at="2026-08-09T00:01:00+00:00",
+        )
+        conn.commit()
+    run_evidence_response = client.get(
+        f"/api/v1/runs/{run_id}/service-evidence?limit=1&offset=0",
+        headers=headers,
+    )
+    assessment_evidence_response = client.get(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
+        headers=headers,
+    )
+    cross_run_evidence = client.get(
+        f"/api/v1/runs/{run_id}/service-evidence",
+        headers=_headers(other_token),
+    )
+    assert run_evidence_response.status_code == 200
+    run_evidence = run_evidence_response.get_json()
+    assert run_evidence["total"] == 1
+    assert run_evidence["observations"][0]["fields"] == [
+        {"path": ["message_signing"], "value": "disabled"},
+    ]
+    assert "private output" not in json.dumps(run_evidence)
+    assessment_check = next(
+        item for item in assessment_evidence_response.get_json()["checks"]["checks"]
+        if item["id"] == check_id
+    )
+    assert assessment_check["state"] == "covered"
+    assert assessment_check["nmap_service_evidence"] == {
+        **assessment_check["nmap_service_evidence"],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert assessment_check["nmap_service_evidence"]["observations"] == run_evidence["observations"]
+    assert cross_run_evidence.status_code == 404
+
     evidence_link_id = linked["evidence"]["id"]
     unlinked_response = client.delete(
         f"/api/v1/projects/{project['id']}/assessments/{assessment_id}/checks/{check_id}/"
@@ -6441,6 +6493,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     action_path = check_path + "/recommended-action"
     evidence_path = check_path + "/evidence"
     evidence_link_path = evidence_path + "/{evidence_link_id}"
+    run_evidence_path = "/runs/{run_id}/service-evidence"
 
     assert set(paths["/projects/{project_id}/assessments"]) == {"get", "post"}
     assert set(paths[assessment_path]) == {"get", "patch", "delete"}
@@ -6448,6 +6501,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert set(paths[action_path]) == {"get", "post"}
     assert set(paths[evidence_path]) == {"post"}
     assert set(paths[evidence_link_path]) == {"delete"}
+    assert set(paths[run_evidence_path]) == {"get"}
     assert paths["/projects/{project_id}/assessments"]["post"]["requestBody"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/AssessmentCreateRequest"}
@@ -6532,6 +6586,15 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "failed",
         "skipped",
         "not_applicable",
+    ]
+    assert schemas["AssessmentCheck"]["properties"]["nmap_service_evidence"] == {
+        "$ref": "#/components/schemas/NmapServiceEvidencePage",
+    }
+    assert paths[run_evidence_path]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/NmapServiceEvidencePage"}
+    assert schemas["NmapServiceObservation"]["properties"]["classification"]["enum"] == [
+        "informational",
     ]
     assert "finding_deltas" in schemas["AssessmentDetail"]["required"]
     assert "finding_worklist" in schemas["AssessmentDetail"]["required"]
