@@ -1402,6 +1402,130 @@ class TestAtlasImportRoutes:
             for patcher in reversed(patchers):
                 patcher.stop()
 
+    def test_greenbone_import_reuses_atlas_dedupe_and_project_mapping(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_greenbone_import"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_greenbone_import"
+            now = datetime.now(timezone.utc).isoformat()
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Greenbone Import', 'greenbone-import', ?, ?)",
+                    (project_id, session_id, now, now),
+                )
+                conn.commit()
+            payload = b"""
+            <get_reports_response status="200" status_text="OK">
+              <report id="report-1"><report id="report-1"><results>
+                <result id="result-1">
+                  <name>First exported title</name>
+                  <modification_time>2026-08-08T10:30:00Z</modification_time>
+                  <host>greenbone.example.test</host><port>443/tcp</port>
+                  <nvt oid="1.3.6.1.4.1.25623.1.0.12345">
+                    <family>Web application abuses</family>
+                    <solution type="VendorFix">Upgrade the affected service.</solution>
+                  </nvt>
+                  <severity>7.5</severity><qod><value>95</value><type>remote_vul</type></qod>
+                  <description>First result for CVE-2026-12345.</description>
+                </result>
+                <result id="result-2">
+                  <name>Updated exported title</name>
+                  <modification_time>2026-08-08T11:00:00Z</modification_time>
+                  <host>GREENBONE.example.test</host><port>443/tcp</port>
+                  <nvt oid="1.3.6.1.4.1.25623.1.0.12345">
+                    <family>Web application abuses</family>
+                    <solution type="VendorFix">Upgrade the affected service.</solution>
+                  </nvt>
+                  <severity>7.5</severity><qod><value>90</value><type>remote_banner</type></qod>
+                  <description>Updated result for CVE-2026-12345.</description>
+                </result>
+              </results></report></report>
+            </get_reports_response>
+            """
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "greenbone_xml",
+                    "source_tool": "Greenbone",
+                    "import_name": "Quarterly Greenbone report",
+                    "file": (io.BytesIO(payload), "greenbone-report.xml"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["rows"] == 2
+            assert preview_payload["counts"]["finding_valid"] == 2
+            assert preview_payload["samples"]["findings"][0]["source_detail"]["nvt_oid"] == (
+                "1.3.6.1.4.1.25623.1.0.12345"
+            )
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "project_id": project_id,
+                    "options": {
+                        "import_findings": True,
+                        "link_to_project": True,
+                        "create_project_targets": True,
+                    },
+                },
+            )
+
+            assert applied.status_code == 200
+            counts = applied.get_json()["counts"]
+            assert counts["entities_created"] == 1
+            assert counts["findings_created"] == 1
+            assert counts["findings_updated"] == 1
+            assert counts["finding_occurrences"] == 2
+            assert counts["project_links_added"] == 1
+            assert counts["project_targets_created"] == 1
+            with db_connect() as conn:
+                finding_rows = conn.execute(
+                    "SELECT id, tool_root, origin, validation_method, severity, title, raw_line "
+                    "FROM findings"
+                ).fetchall()
+                occurrences = conn.execute(
+                    "SELECT external_id, source_detail_json FROM atlas_finding_import_occurrences "
+                    "ORDER BY row_number"
+                ).fetchall()
+                project_links = conn.execute(
+                    "SELECT entity_type FROM project_links WHERE project_id = ?",
+                    (project_id,),
+                ).fetchall()
+            assert len(finding_rows) == 1
+            assert dict(finding_rows[0]) == {
+                "id": finding_rows[0]["id"],
+                "tool_root": "greenbone",
+                "origin": "import",
+                "validation_method": "imported_assertion",
+                "severity": "high",
+                "title": "Updated exported title",
+                "raw_line": (
+                    "Updated result for CVE-2026-12345. "
+                    "CVE references: CVE-2026-12345 Location: 443/tcp "
+                    "QoD: 90% (remote_banner)"
+                ),
+            }
+            assert [row["external_id"] for row in occurrences] == [
+                "1.3.6.1.4.1.25623.1.0.12345",
+                "1.3.6.1.4.1.25623.1.0.12345",
+            ]
+            assert {
+                json.loads(row["source_detail_json"])["result_id"]
+                for row in occurrences
+            } == {"result-1", "result-2"}
+            assert [row["entity_type"] for row in project_links] == ["atlas_entity"]
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
     def test_create_project_targets_only_reports_target_entity_side_effects(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
@@ -13986,6 +14110,7 @@ class TestVendorAssets:
                 assert 'id="atlas-surface"' in fragment_body
                 assert '<option value="sarif_json">SARIF 2.1 JSON</option>' in fragment_body
                 assert '<option value="cyclonedx_json">CycloneDX JSON</option>' in fragment_body
+                assert '<option value="greenbone_xml">Greenbone XML</option>' in fragment_body
             else:
                 assert 'id="project-workspace-overlay"' in fragment_body
                 assert 'id="project-workspace-body"' in fragment_body

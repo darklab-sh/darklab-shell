@@ -483,8 +483,9 @@ requires the current personal or team owner, rejects applied or expired drafts,
 rechecks the stored row-set digest, and returns fresh apply-option availability.
 The response doesn't include the draft's normalized row set.
 
-The declared parser formats include Nuclei JSONL, Nessus XML, ZAP JSON/XML,
-Burp Suite XML, SARIF 2.1 JSON, CycloneDX JSON, Generic CSV, and Generic JSONL.
+The declared parser formats include Nuclei JSONL, Nessus XML, Greenbone XML,
+ZAP JSON/XML, Burp Suite XML, SARIF 2.1 JSON, CycloneDX JSON, Generic CSV, and
+Generic JSONL.
 The source reader recognizes gzip and ZIP by file signature rather than trusting
 the filename. It applies one limit to the uploaded bytes and a separate limit to
 the expanded report. ZIP input caps archive entries and must contain exactly one
@@ -516,6 +517,21 @@ a timezone; timezone-free legacy values remain raw provenance, and the import
 time orders the stored row. Wildcard and malformed CPEs fail closed. Per-item and whole-import
 limits reject extra evidence without evicting earlier rows, and a retained
 service version never becomes a confirmed vulnerability by itself.
+
+Greenbone parsing streams native GMP XML `result` elements through the same
+bounded XML reader and row, warning, upload, expansion, and element limits as
+the other XML adapters. A usable row requires an affected host and NVT OID. It
+normalizes the host and CVE entities and preserves the result UUID, NVT OID and
+family, port and protocol, severity and threat, quality of detection, scanner
+NVT version, source timestamp, safe credential-free web references, and
+solution text as imported-finding provenance. The NVT OID is the stable rule
+identity. Finding deduplication uses the current owner, exact affected subject,
+that rule identity, and normalized severity; changing a result UUID, title, or
+description therefore creates another occurrence instead of another finding.
+DTD and external-entity input fails closed. The adapter never contacts a
+Greenbone service, and apply uses the normal Atlas batch, Project entity/target
+mapping, imported-assertion evidence method, assessment links, and reporting
+rather than a connector lifecycle or a second findings store.
 
 `POST /atlas/imports/apply` accepts JSON with `draft_id`, `row_set_digest`,
 `options`, and optional `project_id`. `options` uses the same five boolean keys

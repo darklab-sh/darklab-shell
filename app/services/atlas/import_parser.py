@@ -21,6 +21,7 @@ from defusedxml import ElementTree as SafeElementTree
 from defusedxml.common import DefusedXmlException
 
 from services.atlas.materializer import canonicalize_entity_record
+from services.atlas.import_formats import SUPPORTED_FORMATS
 from services.atlas.schema import ATLAS_ENTITY_TYPES
 from services.atlas.import_archive import (
     ImportSourceError,
@@ -38,18 +39,6 @@ from services.intel.canonical import entity_signature
 from services.projects.findings import _finding_signature, _normalize_finding_signal_key
 
 log = logging.getLogger("shell")
-
-SUPPORTED_FORMATS = frozenset({
-    "generic_csv",
-    "generic_jsonl",
-    "nessus_xml",
-    "zap_json",
-    "zap_xml",
-    "burp_xml",
-    "nuclei_jsonl",
-    "sarif_json",
-    "cyclonedx_json",
-})
 
 ENTITY_KINDS = ATLAS_ENTITY_TYPES
 SEVERITIES = frozenset({"info", "low", "medium", "high", "critical"})
@@ -153,6 +142,9 @@ def parse_prepared_import(
     elif normalized_format == "cyclonedx_json":
         from services.atlas.cyclonedx_parser import parse_cyclonedx_json
         parse_cyclonedx_json(payload, state, entities, findings, evidence)
+    elif normalized_format == "greenbone_xml":
+        from services.atlas.greenbone_parser import parse_greenbone_xml
+        parse_greenbone_xml(payload, state, entities, findings)
     elif normalized_format == "nessus_xml":
         _parse_nessus_xml(payload, state, entities, findings, evidence)
     elif normalized_format == "zap_json":

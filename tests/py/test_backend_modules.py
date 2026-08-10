@@ -29200,6 +29200,107 @@ class TestDatabaseInit:
         ]
         assert result.skipped_count == 0
 
+    def test_atlas_import_parser_streams_greenbone_xml_with_stable_nvt_identity(self):
+        payload = """
+        <get_reports_response status="200" status_text="OK">
+          <report id="report-1" extension="xml" content_type="text/xml">
+            <report id="report-1">
+              <results>
+                <result id="result-first">
+                  <name>Example service vulnerability</name>
+                  <creation_time>2026-08-08T10:00:00Z</creation_time>
+                  <modification_time>2026-08-08T10:30:00Z</modification_time>
+                  <host>192.0.2.44<hostname>api.example.test</hostname></host>
+                  <port>443/tcp</port>
+                  <nvt oid="1.3.6.1.4.1.25623.1.0.12345">
+                    <name>Example service vulnerability</name>
+                    <family>Web application abuses</family>
+                    <cvss_base>8.7</cvss_base>
+                    <refs>
+                      <ref type="cve" id="CVE-2026-12345"/>
+                      <ref type="url" id="https://example.test/advisories/12345"/>
+                      <ref type="url" id="https://user:secret@example.test/private"/>
+                    </refs>
+                    <solution type="VendorFix">Upgrade the affected service.</solution>
+                  </nvt>
+                  <scan_nvt_version>2026-08-08T09:00:00Z</scan_nvt_version>
+                  <threat>High</threat>
+                  <severity>8.7</severity>
+                  <qod><value>95</value><type>remote_vul</type></qod>
+                  <description>The service is affected by CVE-2026-12345.</description>
+                </result>
+                <result id="result-second">
+                  <name>Renamed result title</name>
+                  <host>192.0.2.44<hostname>api.example.test</hostname></host>
+                  <port>443/tcp</port>
+                  <nvt oid="1.3.6.1.4.1.25623.1.0.12345">
+                    <name>Example service vulnerability</name>
+                    <family>Web application abuses</family>
+                    <refs><ref type="cve" id="CVE-2026-12345"/></refs>
+                  </nvt>
+                  <threat>High</threat>
+                  <severity>8.7</severity>
+                  <qod><value>80</value><type>remote_banner</type></qod>
+                  <description>A later result body with the same stable NVT.</description>
+                </result>
+              </results>
+            </report>
+          </report>
+        </get_reports_response>
+        """
+
+        result = parse_import_file(payload, format_id="greenbone_xml")
+
+        assert result.row_count == 2
+        assert {(entity.kind, entity.canonical_value) for entity in result.entities} == {
+            ("ip", "192.0.2.44"),
+            ("cve", "CVE-2026-12345"),
+        }
+        assert [finding.severity for finding in result.findings] == ["high", "high"]
+        assert result.findings[0].external_id == "1.3.6.1.4.1.25623.1.0.12345"
+        assert result.findings[0].remediation == "Upgrade the affected service."
+        assert result.findings[0].references == ["https://example.test/advisories/12345"]
+        assert "CVE references: CVE-2026-12345" in result.findings[0].evidence
+        assert result.findings[0].observed_at == "2026-08-08T10:30:00Z"
+        assert result.findings[0].source_detail == {
+            "adapter": "greenbone",
+            "rule_identity": "nvt:1.3.6.1.4.1.25623.1.0.12345",
+            "nvt_oid": "1.3.6.1.4.1.25623.1.0.12345",
+            "result_id": "result-first",
+            "family": "Web application abuses",
+            "location": "443/tcp",
+            "port": "443",
+            "protocol": "tcp",
+            "hostname": "api.example.test",
+            "severity_score": "8.7",
+            "threat": "High",
+            "qod_value": "95",
+            "qod_type": "remote_vul",
+            "scan_nvt_version": "2026-08-08T09:00:00Z",
+            "cve_ids": ["CVE-2026-12345"],
+        }
+        assert result.findings[0].signature_hash == result.findings[1].signature_hash
+        assert result.warnings == []
+
+    def test_atlas_import_parser_rejects_incomplete_greenbone_results(self):
+        payload = """
+        <report><results>
+          <result id="missing-nvt"><host>192.0.2.10</host><severity>5.0</severity></result>
+          <result id="missing-host"><nvt oid="1.3.6.1.4.1.25623.1.0.7"/></result>
+        </results></report>
+        """
+
+        result = parse_import_file(payload, format_id="greenbone_xml")
+
+        assert result.row_count == 2
+        assert result.entities == []
+        assert result.findings == []
+        assert result.skipped_count == 2
+        assert [warning.code for warning in result.warnings] == [
+            "missing_greenbone_nvt_oid",
+            "missing_greenbone_host",
+        ]
+
     def test_atlas_import_parser_normalizes_zap_json_and_xml_reports(self):
         json_payload = json.dumps({
             "site": [{
@@ -29334,6 +29435,13 @@ SQL syntax error near q</response>
 
         with pytest.raises(ImportParseError, match="unsafe"):
             parse_import_file(payload, format_id="burp_xml")
+
+        greenbone_payload = payload.replace(
+            "<issues><issue><name>",
+            "<report><results><result><host>192.0.2.1</host><nvt oid='1.2.3'/><name>",
+        ).replace("</name></issue></issues>", "</name></result></results></report>")
+        with pytest.raises(ImportParseError, match="unsafe"):
+            parse_import_file(greenbone_payload, format_id="greenbone_xml")
 
     def test_atlas_import_parser_enforces_row_and_element_limits(self):
         csv_payload = "\n".join((

@@ -184,6 +184,7 @@ let exportedCycleAtlasTab = null;
     burp_xml: `.xml,application/xml,text/xml,${compressedImportAccept}`,
     generic_csv: `.csv,text/csv,${compressedImportAccept}`,
     generic_jsonl: `.jsonl,application/x-ndjson,application/jsonl,application/json,${compressedImportAccept}`,
+    greenbone_xml: `.xml,application/xml,text/xml,${compressedImportAccept}`,
     nessus_xml: `.nessus,.xml,application/xml,text/xml,${compressedImportAccept}`,
     nuclei_jsonl: `.jsonl,application/x-ndjson,application/jsonl,application/json,${compressedImportAccept}`,
     sarif_json: `.sarif,.json,application/sarif+json,application/json,${compressedImportAccept}`,

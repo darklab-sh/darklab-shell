@@ -1448,7 +1448,7 @@ atlas_import_warning_sample_limit: 50
 atlas_import_draft_ttl_minutes: 30
 ```
 
-These caps apply to Atlas imports before and during apply, so lowering them can make large Nessus, ZAP, Burp, Nuclei, CSV, or JSONL files fail preview with a clear limit error. Invalid values and `0` fall back to the server defaults above.
+These caps apply to Atlas imports before and during apply, so lowering them can make large Nessus, Greenbone, ZAP, Burp, Nuclei, CSV, or JSONL files fail preview with a clear limit error. Invalid values and `0` fall back to the server defaults above.
 
 ### Set The Default Theme
 

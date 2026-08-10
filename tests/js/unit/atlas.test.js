@@ -275,6 +275,7 @@ function setupAtlasDom() {
             <select id="atlas-import-format">
               <option value="nuclei_jsonl">Nuclei JSONL</option>
               <option value="nessus_xml">Nessus XML</option>
+              <option value="greenbone_xml">Greenbone XML</option>
               <option value="sarif_json">SARIF 2.1 JSON</option>
               <option value="cyclonedx_json">CycloneDX JSON</option>
             </select>
@@ -2794,6 +2795,9 @@ describe('Atlas overlay', () => {
     formatSelect.value = 'nessus_xml'
     formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
     expect(fileInput?.getAttribute('accept')).toContain('.nessus')
+    formatSelect.value = 'greenbone_xml'
+    formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(fileInput?.getAttribute('accept')).toContain('application/xml')
     formatSelect.value = 'sarif_json'
     formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
     expect(fileInput?.getAttribute('accept')).toContain('.sarif')

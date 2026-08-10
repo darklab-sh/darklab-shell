@@ -386,8 +386,10 @@ def _import_finding_identity(finding: dict[str, Any]) -> tuple[str, str]:
     source_detail: dict[str, Any] = raw_source_detail if isinstance(raw_source_detail, dict) else {}
     tool_root = str(source_detail.get("adapter") or "")
     severity = _safe_label(finding.get("severity"), 32)
+    rule_identity = _safe_label(source_detail.get("rule_identity"), 512)
     signal_key = _normalize_finding_signal_key(
-        "\n".join(part for part in (
+        rule_identity
+        or "\n".join(part for part in (
             str(finding.get("title") or ""),
             str(finding.get("evidence") or ""),
         ) if part)
