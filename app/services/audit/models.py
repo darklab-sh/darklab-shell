@@ -129,6 +129,7 @@ class AuditEventType(str, Enum):
     ASSESSMENT_EVIDENCE_LINK = "assessment.evidence_link"
     ASSESSMENT_EVIDENCE_UNLINK = "assessment.evidence_unlink"
     ASSESSMENT_ACTION_LAUNCH = "assessment.action_launch"
+    ASSESSMENT_OAST_RESERVE = "assessment.oast_reserve"
     ASSESSMENT_ZAP_JOB_SUBMIT = "assessment.zap_job_submit"
     ASSESSMENT_ZAP_JOB_CANCEL = "assessment.zap_job_cancel"
     HTTP_PROFILE_CREATE = "http_profile.create"
@@ -367,6 +368,11 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditTargetType.ASSESSMENT_CHECK,
         RecordingMode.BEST_EFFORT,
         detail_keys=ASSESSMENT_ACTION_DETAIL_KEYS,
+    ),
+    AuditEventType.ASSESSMENT_OAST_RESERVE.value: _spec(
+        AuditEventType.ASSESSMENT_OAST_RESERVE,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.BEST_EFFORT,
     ),
     AuditEventType.ASSESSMENT_ZAP_JOB_SUBMIT.value: _spec(
         AuditEventType.ASSESSMENT_ZAP_JOB_SUBMIT,

@@ -70,6 +70,7 @@ def build_recommended_action_plan(
                 app_config.CFG.get("assessment_intrusive_actions_enabled", False)
             ),
             dalfox_xss=selections.dalfox_xss,
+            dalfox_oast=selections.dalfox_oast,
             schemathesis=selections.schemathesis,
         )
 

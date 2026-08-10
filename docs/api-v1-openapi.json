@@ -451,6 +451,9 @@
           "nuclei_profile": {
             "$ref": "#/components/schemas/AssessmentNucleiTemplateProfile"
           },
+          "oast": {
+            "$ref": "#/components/schemas/AssessmentOastPlanState"
+          },
           "plan_digest": {
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
@@ -2202,6 +2205,192 @@
           "release_version",
           "content_digest",
           "manifest_entry_count"
+        ],
+        "type": "object"
+      },
+      "AssessmentOastCorrelation": {
+        "additionalProperties": false,
+        "properties": {
+          "action_key": {
+            "enum": [
+              "oast_private_callback"
+            ],
+            "type": "string"
+          },
+          "activated_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "active_until": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "assessment_id": {
+            "type": "string"
+          },
+          "callback_url": {
+            "type": "string"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "closed_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "duplicate_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^ocr_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "interaction_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "provider_ready": {
+            "type": "boolean"
+          },
+          "purge_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "rejected_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "reserved",
+              "active",
+              "closed",
+              "failed",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "assessment_id",
+          "check_id",
+          "action_key",
+          "run_id",
+          "status",
+          "provider_ready",
+          "callback_url",
+          "interaction_count",
+          "duplicate_count",
+          "rejected_count",
+          "error_code",
+          "created_at",
+          "updated_at",
+          "activated_at",
+          "closed_at",
+          "active_until",
+          "purge_at"
+        ],
+        "type": "object"
+      },
+      "AssessmentOastCorrelationListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "correlations": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentOastCorrelation"
+            },
+            "maxItems": 10,
+            "type": "array"
+          }
+        },
+        "required": [
+          "correlations"
+        ],
+        "type": "object"
+      },
+      "AssessmentOastCorrelationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "correlation": {
+            "$ref": "#/components/schemas/AssessmentOastCorrelation"
+          }
+        },
+        "required": [
+          "correlation"
+        ],
+        "type": "object"
+      },
+      "AssessmentOastPlanState": {
+        "additionalProperties": false,
+        "properties": {
+          "callback_url": {
+            "type": "string"
+          },
+          "preparable": {
+            "type": "boolean"
+          },
+          "reservation_window_seconds": {
+            "maximum": 900,
+            "minimum": 300,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "preparable",
+          "callback_url",
+          "reservation_window_seconds"
+        ],
+        "type": "object"
+      },
+      "AssessmentOastReserveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "parameter_observation_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "source_run_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmed",
+          "plan_digest",
+          "source_run_id",
+          "parameter_observation_id"
         ],
         "type": "object"
       },
@@ -12536,6 +12725,368 @@
               }
             },
             "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/oast-correlations": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentOastCorrelationListResponse"
+                }
+              }
+            },
+            "description": "Newest private OAST correlations for this check"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid private OAST request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot prepare private OAST"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project assessment check or OAST correlation not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Plan is stale or private OAST is unavailable"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Private OAST state could not be read"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentOastReserveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentOastCorrelationResponse"
+                }
+              }
+            },
+            "description": "Private OAST correlation reserved"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid private OAST request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot prepare private OAST"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project assessment check or OAST correlation not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Plan is stale or private OAST is unavailable"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Private OAST state could not be read"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/oast-correlations/{correlation_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment cycle id",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Assessment check id",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private OAST correlation id",
+            "in": "path",
+            "name": "correlation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentOastCorrelationResponse"
+                }
+              }
+            },
+            "description": "Current private OAST correlation state"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid private OAST request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot prepare private OAST"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project assessment check or OAST correlation not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Plan is stale or private OAST is unavailable"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Private OAST state could not be read"
           }
         }
       }

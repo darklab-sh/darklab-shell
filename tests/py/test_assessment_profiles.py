@@ -108,10 +108,11 @@ def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks
         "subdomain_takeover_confirmation",
         "parameter_discovery",
         "xss_validation",
+        "blind_xss_validation",
         "sql_injection_detection",
     }
     assert by_key["network"]["version"] == "1.0"
-    assert by_key["web"]["version"] == "1.5"
+    assert by_key["web"]["version"] == "1.6"
     assert by_key["api"]["version"] == "1.0"
     assert by_key["api"]["target_types"] == ["url"]
     assert by_key["api"]["checks"] == [{
@@ -145,7 +146,8 @@ def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks
     }]
     for profile in catalog.profiles:
         for check in profile["checks"]:
-            assert check["recommended_action"].startswith("command:")
+            action = check["recommended_action"]
+            assert action.startswith("command:") or action == "oast_private_callback"
             assert check["completion_guidance"]
             assert all(rule["version"] for rule in check["evidence_rules"])
     standard_nuclei = next(
@@ -156,6 +158,16 @@ def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks
     assert standard_nuclei["evidence_rules"][0]["command_modes"] == [
         "nuclei_standard_profile"
     ]
+    blind_xss = next(
+        check for check in by_key["web"]["checks"]
+        if check["key"] == "blind_xss_validation"
+    )
+    assert blind_xss["policy_level"] == "intrusive"
+    assert blind_xss["recommended_action"] == "oast_private_callback"
+    assert blind_xss["evidence_rules"][0]["command_modes"] == [
+        "dalfox_oast_validation"
+    ]
+    assert blind_xss["evidence_rules"][0]["negative_evidence"] is False
     intrusive_nuclei = next(
         check for check in by_key["web"]["checks"]
         if check["key"] == "intrusive_template_validation"

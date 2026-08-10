@@ -173,7 +173,7 @@ def reserve_oast_correlation(
             "JOIN project_assessment_checks pc ON pc.assessment_id = pa.id "
             "JOIN project_links target_link ON target_link.project_id = pa.project_id "
             "AND target_link.entity_id = pc.target_entity_id "
-            "AND target_link.entity_type = pc.target_type "
+            "AND target_link.entity_type = 'atlas_entity' "
             "WHERE pa.project_id = ? AND pa.id = ? AND pc.id = ? "
             "AND pa.status = 'active' AND pc.applicability = 'applicable' "
             "AND target_link.review_state = 'confirmed' AND " + owner_sql,  # nosec B608

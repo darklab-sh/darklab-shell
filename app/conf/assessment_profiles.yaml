@@ -71,7 +71,7 @@ profiles:
         completion_guidance: Collect the domain's current DNS records and review resolved hosts, delegation, and an explicit clean result when a record type is absent.
 
   - key: web
-    version: "1.5"
+    version: "1.6"
     label: Web assessment
     purpose: Map reachable web applications, discover their exposed content, and review structured vulnerability checks.
     target_types: [domain, ip, url]
@@ -224,6 +224,27 @@ profiles:
         policy_level: intrusive
         recommended_action: command:dalfox
         completion_guidance: Review the saved parameter, confirm the bounded active plan, and retain both confirmed evidence and a successful clean result.
+      - key: blind_xss_validation
+        version: "1.0"
+        category: validation
+        label: Blind XSS validation
+        purpose: Send bounded blind-XSS probes for one saved query parameter through the configured private callback service.
+        target_types: [url]
+        evidence_rules:
+          - key: completed_blind_xss_validation
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [dalfox]
+            command_modes: [dalfox_oast_validation]
+            workflow_actions: []
+            structured_output_kinds: [findings]
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: false
+        policy_level: intrusive
+        recommended_action: oast_private_callback
+        completion_guidance: Review one saved query parameter, prepare the private callback, confirm the bounded run, and review any callback evidence before the reservation closes.
       - key: sql_injection_detection
         version: "1.0"
         category: validation

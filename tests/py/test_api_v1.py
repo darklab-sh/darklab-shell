@@ -251,6 +251,8 @@ _API_V1_TEAM_SCOPED_READ_ROUTES = (
     "api_project_assessment",
     "api_project_assessment_delete_preview",
     "api_project_assessment_action_preview",
+    "api_project_assessment_oast_correlations",
+    "api_project_assessment_oast_correlation",
     "api_project_finding_verification_action_preview",
     "api_schedules",
     "api_schedule",
@@ -300,6 +302,8 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_project_manual_finding_update": "Capability.TRIAGE_FINDINGS",
     "api_osv_advisory_lookup": "Capability.TRIAGE_FINDINGS",
     "api_project_assessment_action_launch": "Capability.RUN_COMMANDS",
+    "api_project_assessment_oast_correlations": "Capability.RUN_COMMANDS",
+    "api_project_assessment_oast_correlation": "Capability.RUN_COMMANDS",
     "api_project_finding_verification_action_launch": "Capability.RUN_COMMANDS",
 }
 
@@ -2442,6 +2446,211 @@ def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
     )
 
 
+def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
+    monkeypatch,
+    tmp_path,
+):
+    from services.assessments.dalfox_oast_actions import DalfoxParameterOptions
+    from services.assessments.dalfox_parameter_evidence import (
+        ReviewedDalfoxParameterEvidence,
+    )
+    from services.assessments.dalfox_parameter_observations import (
+        DALFOX_DISCOVERY_PARSER_VERSION,
+        dalfox_parameter_observation_id,
+    )
+
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    project = _create_project(client, token, name="Private OAST review")
+    entity_id, source_run_id = _seed_assessment_target(token, project["id"])
+    target = f"https://oast-{uuid.uuid4().hex[:12]}.example.test/search?q=one"
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE entities SET type = 'url', canonical_value = ?, signature_hash = ? "
+            "WHERE id = ?",
+            (target, "sig_oast_" + uuid.uuid4().hex, entity_id),
+        )
+        conn.commit()
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=_headers(token),
+        json={"profile_key": "web", "title": "Private OAST review"},
+    ).get_json()
+    check = next(
+        item for item in created["checks"]["checks"]
+        if item["check_key"] == "blind_xss_validation"
+    )
+    observation_id = dalfox_parameter_observation_id(
+        source_run_id,
+        target,
+        "Query",
+        "q",
+    )
+    evidence = ReviewedDalfoxParameterEvidence(
+        source_run_id=source_run_id,
+        observation_id=observation_id,
+        target=target,
+        parameter="q",
+        location="Query",
+        tool_version="2.12.0",
+        parser_version=DALFOX_DISCOVERY_PARSER_VERSION,
+    )
+    monkeypatch.setattr(
+        "services.assessments.dalfox_oast_actions."
+        "list_project_dalfox_parameter_options",
+        lambda *_args, **_kwargs: DalfoxParameterOptions((evidence,)),
+    )
+    monkeypatch.setitem(config.CFG, "data_dir", str(tmp_path))
+    monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", True)
+    monkeypatch.setitem(config.CFG, "oast_connector", {
+        "enabled": True,
+        "base_url": "https://private-oast.internal.example",
+        "token_secret_id": "DARKLAB_PRIVATE_OAST_TOKEN",
+        "allowed_domain": "callbacks.example.test",
+        "tls_verify": True,
+        "callback_retention_seconds": 3600,
+        "privacy_acknowledged": True,
+    })
+    check_base = (
+        f"/api/v1/projects/{project['id']}/assessments/"
+        f"{created['assessment']['id']}/checks/{check['id']}"
+    )
+    action_path = check_base + "/recommended-action"
+    correlation_path = check_base + "/oast-correlations"
+    selection = {
+        "source_run_id": source_run_id,
+        "parameter_observation_id": observation_id,
+    }
+
+    with mock.patch(
+        "services.connectors.oast_config.resolve_oast_token"
+    ) as resolve_token, mock.patch(
+        "services.connectors.oast_provider_transport.register_oast_provider_session"
+    ) as register_provider:
+        preview = client.get(
+            action_path,
+            headers=_headers(token),
+            query_string=selection,
+        )
+        plan = preview.get_json()["plan"]
+        with mock.patch(
+            "blueprints.api_v1._start_brokered_run_service"
+        ) as start_run:
+            blocked_launch = client.post(
+                action_path,
+                headers=_headers(token),
+                json={
+                    **selection,
+                    "confirmed": True,
+                    "plan_digest": plan["plan_digest"],
+                },
+            )
+        stale_reservation = client.post(
+            correlation_path,
+            headers=_headers(token),
+            json={
+                **selection,
+                "confirmed": True,
+                "plan_digest": "0" * 64,
+            },
+        )
+        reserved = client.post(
+            correlation_path,
+            headers=_headers(token),
+            json={
+                **selection,
+                "confirmed": True,
+                "plan_digest": plan["plan_digest"],
+            },
+        )
+        listed = client.get(correlation_path, headers=_headers(token))
+        browser_listed = client.get(
+            correlation_path.removeprefix("/api/v1"),
+            headers={"X-Session-ID": token},
+        )
+
+    assert preview.status_code == 200
+    assert plan["profile_version"] == "1.6"
+    assert plan["action"] == {
+        "key": "oast_private_callback",
+        "kind": "",
+        "id": "",
+    }
+    assert plan["launchable"] is False
+    assert plan["oast"] == {
+        "preparable": True,
+        "callback_url": "https://[private-oast-callback]",
+        "reservation_window_seconds": 900,
+    }
+    assert "--blind 'https://[private-oast-callback]'" in plan["display_command"]
+    assert "private-oast.internal.example" not in preview.get_data(as_text=True)
+    assert "DARKLAB_PRIVATE_OAST_TOKEN" not in preview.get_data(as_text=True)
+    assert blocked_launch.status_code == 409
+    assert blocked_launch.get_json()["error"]["code"] == "action_unavailable"
+    assert stale_reservation.status_code == 409
+    assert stale_reservation.get_json()["error"]["code"] == "stale_plan"
+    start_run.assert_not_called()
+
+    assert reserved.status_code == 202, reserved.get_json()
+    correlation = reserved.get_json()["correlation"]
+    assert correlation["status"] == "reserved"
+    assert correlation["run_id"] == ""
+    assert correlation["provider_ready"] is False
+    assert correlation["callback_url"] == "https://[private-oast-callback]"
+    assert {
+        "session_id",
+        "team_id",
+        "callback_label",
+        "allowed_domain",
+        "service_origin_sha256",
+        "actor_member_id",
+        "actor_role",
+        "error_detail",
+    }.isdisjoint(correlation)
+    assert listed.get_json()["correlations"] == [correlation]
+    assert browser_listed.get_json()["correlations"] == [correlation]
+    assert resolve_token.call_count == 0
+    assert register_provider.call_count == 0
+
+    exact_path = correlation_path + f"/{correlation['id']}"
+    with mock.patch(
+        "services.assessments.assessment_oast.oast_provider_session_is_staged",
+        return_value=True,
+    ):
+        ready = client.get(exact_path, headers=_headers(token))
+        ready_list = client.get(correlation_path, headers=_headers(token))
+    ready_correlation = ready.get_json()["correlation"]
+    assert ready_correlation["provider_ready"] is True
+    assert ready_correlation["callback_url"].startswith("https://")
+    assert ready_correlation["callback_url"].endswith(".callbacks.example.test")
+    assert ready_list.get_json()["correlations"][0]["callback_url"] == (
+        "https://[private-oast-callback]"
+    )
+    assert client.get(exact_path, headers=_headers(other_token)).status_code == 404
+    assert client.get(correlation_path, headers=_headers(other_token)).status_code == 404
+    assert client.get(
+        exact_path.replace(check["id"], "ach_wrong_oast_scope"),
+        headers=_headers(token),
+    ).status_code == 404
+    audit = _audit_event_rows(
+        target_id=check["id"],
+        event_type="assessment.oast_reserve",
+    )
+    assert len(audit) == 1
+    assert audit[0]["details"] == {
+        "action": "oast_private_callback",
+        "assessment_id": created["assessment"]["id"],
+        "check_id": check["id"],
+        "correlation_id": correlation["id"],
+        "project_id": project["id"],
+        "source": "api_v1",
+        "status": "reserved",
+    }
+    assert "callback_url" not in json.dumps(audit)
+    assert "private-oast.internal.example" not in json.dumps(audit)
+
+
 def test_assessment_zap_routes_review_queue_scope_and_cancel(
     monkeypatch,
     tmp_path,
@@ -2638,7 +2847,7 @@ def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context()
     preview = client.get(action_path, headers=_headers(token))
     assert preview.status_code == 200
     plan = preview.get_json()["plan"]
-    assert plan["profile_version"] == "1.5"
+    assert plan["profile_version"] == "1.6"
     assert plan["policy_level"] == "safe"
     assert plan["target"]["type"] == "domain"
     assert plan["bounds"] == {
@@ -3130,6 +3339,19 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         headers=viewer_headers,
         json={"state": "skipped", "reason": "Viewer cannot decide this"},
     )
+    oast_route = (
+        f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/"
+        f"{check_id}/oast-correlations"
+    )
+    viewer_oast_reserve = client.post(
+        oast_route,
+        headers=viewer_headers,
+        json={},
+    )
+    viewer_oast_exact = client.get(
+        oast_route + "/ocr_" + "0" * 32,
+        headers=viewer_headers,
+    )
     finding_evidence_route = (
         f"/api/v1/projects/{project_id}/findings/{finding_id}/evidence"
     )
@@ -3146,7 +3368,13 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     assert viewer_evidence["evidence"] == []
     assert viewer_evidence["total"] == 0
     assert viewer_evidence["verification"]["baseline_run_id"] == evidence_run_id
-    for response in (viewer_update, viewer_check_update, viewer_evidence_write):
+    for response in (
+        viewer_update,
+        viewer_check_update,
+        viewer_evidence_write,
+        viewer_oast_reserve,
+        viewer_oast_exact,
+    ):
         assert response.status_code == 403
         assert json.loads(response.data)["error"]["code"] == "team_forbidden"
 
@@ -6676,6 +6904,8 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     zap_plan_path = check_path + "/zap-plan"
     zap_jobs_path = check_path + "/zap-jobs"
     zap_job_path = zap_jobs_path + "/{job_id}"
+    oast_correlations_path = check_path + "/oast-correlations"
+    oast_correlation_path = oast_correlations_path + "/{correlation_id}"
     evidence_path = check_path + "/evidence"
     evidence_link_path = evidence_path + "/{evidence_link_id}"
     run_evidence_path = "/runs/{run_id}/service-evidence"
@@ -6687,6 +6917,8 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert set(paths[zap_plan_path]) == {"post"}
     assert set(paths[zap_jobs_path]) == {"get", "post"}
     assert set(paths[zap_job_path]) == {"get", "delete"}
+    assert set(paths[oast_correlations_path]) == {"get", "post"}
+    assert set(paths[oast_correlation_path]) == {"get"}
     assert set(paths[evidence_path]) == {"post"}
     assert set(paths[evidence_link_path]) == {"delete"}
     assert set(paths[run_evidence_path]) == {"get"}
@@ -6713,6 +6945,31 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert paths[action_path]["post"]["requestBody"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/AssessmentActionLaunchRequest"}
+    assert schemas["AssessmentActionPlan"]["properties"]["oast"] == {
+        "$ref": "#/components/schemas/AssessmentOastPlanState"
+    }
+    assert paths[oast_correlations_path]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentOastReserveRequest"}
+    assert paths[oast_correlations_path]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentOastCorrelationListResponse"
+    }
+    assert paths[oast_correlation_path]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentOastCorrelationResponse"
+    }
+    assert schemas["AssessmentOastReserveRequest"]["required"] == [
+        "confirmed",
+        "plan_digest",
+        "source_run_id",
+        "parameter_observation_id",
+    ]
+    assert schemas["AssessmentOastCorrelation"]["properties"]["callback_url"] == {
+        "type": "string"
+    }
     assert paths[zap_plan_path]["post"]["requestBody"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/AssessmentZapPlanRequest"}

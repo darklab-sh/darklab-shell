@@ -22,6 +22,7 @@ def assessment_action_schemas() -> dict[str, Any]:
     plan = deepcopy(verification_action_schemas()["FindingVerificationActionPlan"])
     plan["properties"]["evidence_selection"] = _ref("AssessmentParameterEvidenceSelection")
     plan["properties"]["artifact_selection"] = _ref("AssessmentOpenApiArtifactSelection")
+    plan["properties"]["oast"] = _ref("AssessmentOastPlanState")
     schemas = {
         "AssessmentNucleiTemplateSnapshot": nuclei_template_snapshot_schema(),
         "AssessmentNucleiTemplateProfile": assessment_nuclei_profile_schema(),
