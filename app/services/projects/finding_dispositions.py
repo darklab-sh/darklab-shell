@@ -123,7 +123,7 @@ def attach_remediation_dispositions(
         rows = conn.execute(
             "SELECT session_id, team_id, affected_subject, identity_value, "
             "review_state, updated_at, remediation, remediation_updated_at "
-            "FROM finding_remediation_dispositions WHERE "  # nosec B608
+            "FROM finding_remediation_dispositions WHERE "  # nosec
             + clauses,
             tuple(value for key in chunk for value in key),
         ).fetchall()
@@ -277,7 +277,7 @@ def remediation_guidance_by_finding_id(
         # The clause shape is fixed; every owner and identity value remains bound.
         rows = conn.execute(
             "SELECT session_id, team_id, affected_subject, identity_value, remediation "
-            "FROM finding_remediation_dispositions WHERE "  # nosec B608
+            "FROM finding_remediation_dispositions WHERE "  # nosec
             + clauses,
             tuple(value for key in chunk for value in key),
         ).fetchall()

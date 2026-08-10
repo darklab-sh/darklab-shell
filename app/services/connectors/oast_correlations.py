@@ -176,7 +176,7 @@ def reserve_oast_correlation(
             "AND target_link.entity_type = 'atlas_entity' "
             "WHERE pa.project_id = ? AND pa.id = ? AND pc.id = ? "
             "AND pa.status = 'active' AND pc.applicability = 'applicable' "
-            "AND target_link.review_state = 'confirmed' AND " + owner_sql,  # nosec B608
+            "AND target_link.review_state = 'confirmed' AND " + owner_sql,  # nosec
             (project_id, assessment_id, check_id, *owner_params),
         ).fetchone()
         if (
@@ -189,7 +189,7 @@ def reserve_oast_correlation(
                 "The Project, assessment check, target, or reviewed action changed",
             )
         owner_count = active_conn.execute(
-            "SELECT COUNT(*) AS count FROM oast_correlations WHERE "  # nosec B608
+            "SELECT COUNT(*) AS count FROM oast_correlations WHERE "  # nosec
             + _owner_predicate(owner_session, owner_team)[0]
             + " AND status IN ('reserved', 'active') AND active_until > ?",
             (*_owner_predicate(owner_session, owner_team)[1], created_at),
@@ -256,7 +256,7 @@ def oast_correlation_for_owner(
     )
     with _connection_scope(conn) as active_conn:
         row = active_conn.execute(
-            "SELECT * FROM oast_correlations WHERE id = ? AND " + owner_sql,  # nosec B608
+            "SELECT * FROM oast_correlations WHERE id = ? AND " + owner_sql,  # nosec
             (correlation_id, *owner_params),
         ).fetchone()
         return _decode_row(row) if row else None
@@ -278,7 +278,7 @@ def oast_correlations_for_owner_check(
     )
     with _connection_scope(conn) as active_conn:
         rows = active_conn.execute(
-            "SELECT * FROM oast_correlations WHERE project_id = ? "  # nosec B608
+            "SELECT * FROM oast_correlations WHERE project_id = ? "  # nosec
             "AND assessment_id = ? AND check_id = ? AND "
             + owner_sql
             + " ORDER BY created_at DESC, id DESC LIMIT ?",

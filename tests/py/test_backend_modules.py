@@ -27514,7 +27514,7 @@ class TestDatabaseInit:
                     "audit_events",
                 )
                 before_counts = {
-                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec
                     for table in protected_tables
                 }
 
@@ -27555,7 +27555,7 @@ class TestDatabaseInit:
                             unreadable_url,
                         )
                 after_counts = {
-                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec
                     for table in protected_tables
                 }
                 raw_url_audit_rows = int(conn.execute(

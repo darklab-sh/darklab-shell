@@ -165,7 +165,7 @@ def _project_urls(
     )
     placeholders = ", ".join("?" for _ in entity_ids)
     rows = conn.execute(
-        "SELECT e.id, e.type, e.canonical_value FROM project_links pl "  # nosec B608
+        "SELECT e.id, e.type, e.canonical_value FROM project_links pl "  # nosec
         "JOIN entities e ON e.id = pl.entity_id WHERE pl.project_id = ? "
         "AND pl.entity_type = 'atlas_entity' AND pl.review_state = 'confirmed' "
         "AND COALESCE(e.suppressed, FALSE) = FALSE AND "

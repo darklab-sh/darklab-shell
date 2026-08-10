@@ -73,7 +73,7 @@ def delta_rollup(
     ranked_ids: list[tuple[int, str]] = []
     for rollup_sql, remediation_sql, filter_params in _filtered_queries(remediation_ids):
         params = (assessment_id, *filter_params)
-        rows = conn.execute(rollup_sql, params).fetchall()  # nosec B608
+        rows = conn.execute(rollup_sql, params).fetchall()  # nosec
         for row in rows:
             rank = int(row["state_rank"] or 0)
             state = state_by_rank.get(rank, "incomparable")
@@ -81,7 +81,7 @@ def delta_rollup(
         id_rows = conn.execute(
             remediation_sql,
             (*params, max(1, int(item_limit))),
-        ).fetchall()  # nosec B608
+        ).fetchall()  # nosec
         ranked_ids.extend(
             (int(row["state_rank"] or 0), str(row["remediation_id"]))
             for row in id_rows

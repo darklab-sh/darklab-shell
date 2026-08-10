@@ -28,8 +28,10 @@ function createProjectAssessmentController(context) {
       loaded: false,
       loading: false,
       loadPromise: null,
+      loadGeneration: 0,
       detailLoading: false,
       detailPromise: null,
+      detailGeneration: 0,
       creating: false,
       mutating: '',
       error: '',
@@ -52,10 +54,24 @@ function createProjectAssessmentController(context) {
     return states.get(id);
   }
 
+  function cancelListRequest(st) {
+    st.loadGeneration += 1;
+    st.loading = false;
+    st.loadPromise = null;
+  }
+
+  function cancelDetailRequest(st) {
+    st.detailGeneration += 1;
+    st.detailLoading = false;
+    st.detailPromise = null;
+  }
+
   function invalidate(projectId = '') {
     const id = String(projectId || '');
     const targets = id ? [states.get(id)] : Array.from(states.values());
     targets.filter(Boolean).forEach((st) => {
+      cancelListRequest(st);
+      cancelDetailRequest(st);
       st.assessments = [];
       st.profiles = [];
       st.detail = null;
@@ -120,13 +136,16 @@ function createProjectAssessmentController(context) {
     const st = stateFor(id);
     const selected = cycleSelection(st);
     if (!id || !selected) {
+      cancelDetailRequest(st);
       st.detail = null;
       st.selectedId = '';
       st.detailError = '';
       return false;
     }
     st.selectedId = String(selected.id || '');
-    if (st.detailLoading && st.detailPromise) return st.detailPromise;
+    if (st.detailLoading && st.detailPromise && options.force !== true) return st.detailPromise;
+    const generation = st.detailGeneration + 1;
+    st.detailGeneration = generation;
     st.detailLoading = true;
     st.detailError = '';
     const promise = (async () => {
@@ -135,11 +154,15 @@ function createProjectAssessmentController(context) {
           `/projects/${encodeURIComponent(id)}/assessments/${encodeURIComponent(st.selectedId)}?${checkQuery(st)}`,
           { cache: 'no-store' },
         );
+        if (st.detailGeneration !== generation) return false;
         if (!resp.ok) throw await responseError(resp, 'Could not load this assessment cycle.');
-        st.detail = await resp.json();
+        const payload = await resp.json();
+        if (st.detailGeneration !== generation) return false;
+        st.detail = payload;
         loadOastHistoryForDetail(id, st.detail);
         return true;
       } catch (err) {
+        if (st.detailGeneration !== generation) return false;
         st.detailError = err?.message || 'Could not load this assessment cycle.';
         logFailure('PROJECT_ASSESSMENT_CLIENT_DETAIL_LOAD_FAILED', err, {
           phase: 'detail',
@@ -148,9 +171,11 @@ function createProjectAssessmentController(context) {
         });
         return false;
       } finally {
-        st.detailLoading = false;
-        st.detailPromise = null;
-        if (options.render !== false) renderViews();
+        if (st.detailGeneration === generation) {
+          st.detailLoading = false;
+          st.detailPromise = null;
+          if (options.render !== false) renderViews();
+        }
       }
     })();
     st.detailPromise = promise;
@@ -165,7 +190,9 @@ function createProjectAssessmentController(context) {
       if (!st.detail && st.selectedId) return loadDetail(id, options);
       return true;
     }
-    if (st.loading && st.loadPromise) return st.loadPromise;
+    if (st.loading && st.loadPromise && options.force !== true) return st.loadPromise;
+    const generation = st.loadGeneration + 1;
+    st.loadGeneration = generation;
     st.loading = true;
     st.error = '';
     const promise = (async () => {
@@ -175,24 +202,33 @@ function createProjectAssessmentController(context) {
           `/projects/${encodeURIComponent(id)}/assessments?${params.toString()}`,
           { cache: 'no-store' },
         );
+        if (st.loadGeneration !== generation) return false;
         if (!resp.ok) throw await responseError(resp, 'Could not load project assessments.');
         const payload = await resp.json();
+        if (st.loadGeneration !== generation) return false;
         st.assessments = Array.isArray(payload?.assessments) ? payload.assessments : [];
         st.profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
         st.selectedId = String(cycleSelection(st)?.id || '');
         st.loaded = true;
-        await httpProfileManager.load(id, { render: false });
-        if (st.selectedId) await loadDetail(id, { render: false });
-        else st.detail = null;
+        const detailLoad = st.selectedId
+          ? loadDetail(id, { render: false, force: options.force === true })
+          : Promise.resolve(false);
+        void httpProfileManager.load(id);
+        await detailLoad;
+        if (st.loadGeneration !== generation) return false;
+        if (!st.selectedId) st.detail = null;
         return true;
       } catch (err) {
+        if (st.loadGeneration !== generation) return false;
         st.error = err?.message || 'Could not load project assessments.';
         logFailure('PROJECT_ASSESSMENT_CLIENT_LOAD_FAILED', err, { phase: 'list', project_id: id });
         return false;
       } finally {
-        st.loading = false;
-        st.loadPromise = null;
-        if (options.render !== false) renderViews();
+        if (st.loadGeneration === generation) {
+          st.loading = false;
+          st.loadPromise = null;
+          if (options.render !== false) renderViews();
+        }
       }
     })();
     st.loadPromise = promise;
@@ -200,6 +236,7 @@ function createProjectAssessmentController(context) {
   }
 
   function resetDetailState(st, { findings = true } = {}) {
+    cancelDetailRequest(st);
     st.detail = null;
     st.offset = 0;
     st.checksScrollTop = 0;
@@ -306,7 +343,8 @@ function createProjectAssessmentController(context) {
       resetDetailState(st);
       ctx.invalidateProjectOverview?.(id);
       ctx.setProjectWorkspaceMessage?.('Assessment cycle started.');
-      return load(id, { force: true, render: false });
+      const loaded = await load(id, { force: true, render: false });
+      return loaded;
     } catch (err) {
       st.error = err?.message || 'Could not start the assessment.';
       logFailure('PROJECT_ASSESSMENT_CLIENT_CREATE_FAILED', err, {
@@ -368,11 +406,13 @@ function createProjectAssessmentController(context) {
         resetDetailState(st);
       } else {
         st.loaded = false;
+        cancelDetailRequest(st);
         st.detail = null;
       }
       ctx.invalidateProjectOverview?.(id);
       ctx.setProjectWorkspaceMessage?.(successMessage);
-      return load(id, { force: true, render: false });
+      const loaded = await load(id, { force: true, render: false });
+      return loaded;
     } catch (err) {
       const message = err?.message || 'Could not update this assessment cycle.';
       ctx.setProjectWorkspaceMessage?.(message, { error: true });
@@ -411,10 +451,11 @@ function createProjectAssessmentController(context) {
     }, returnFocus);
     if (!confirmed) return false;
     return mutateCycle(projectId, completing ? 'complete' : 'archive', async () => {
-      await ctx.projectWorkspaceRequest(
+      const resp = await ctx.projectWorkspaceRequest(
         `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessment.id)}`,
         { method: 'PATCH', body: JSON.stringify({ status: nextStatus }) },
       );
+      if (!resp.ok) throw await responseError(resp, 'Could not update this assessment cycle.');
     }, completing ? 'Assessment cycle completed.' : 'Assessment cycle archived.');
   }
 
@@ -431,6 +472,7 @@ function createProjectAssessmentController(context) {
         `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessment.id)}/delete-preview`,
         { cache: 'no-store' },
       );
+      if (!resp.ok) throw await responseError(resp, 'Could not preview assessment deletion.');
       preview = (await resp.json())?.preview || null;
     } catch (err) {
       ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not preview assessment deletion.', { error: true });
@@ -460,10 +502,11 @@ function createProjectAssessmentController(context) {
     }, returnFocus);
     if (!confirmed) return false;
     return mutateCycle(projectId, 'delete', async () => {
-      await ctx.projectWorkspaceRequest(
+      const resp = await ctx.projectWorkspaceRequest(
         `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessment.id)}`,
         { method: 'DELETE' },
       );
+      if (!resp.ok) throw await responseError(resp, 'Could not delete this assessment cycle.');
     }, 'Assessment cycle deleted.', { resetSelection: true });
   }
 

@@ -22,7 +22,7 @@ def cancel_fanout_children_on_conn(
     """Cancel unfinished child attempts and return their bound run ids."""
     lock_sql = " FOR UPDATE" if get_db_backend() == DatabaseBackend.POSTGRES else ""
     rows = conn.execute(
-        "SELECT c.step_id, c.ordinal, c.run_id, s.fanout_checkpoint "  # nosec B608
+        "SELECT c.step_id, c.ordinal, c.run_id, s.fanout_checkpoint "  # nosec
         "FROM workflow_execution_children c "
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
         "AND s.step_id = c.step_id "

@@ -4416,7 +4416,7 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
     )
     with sqlite3.connect(DB_PATH) as conn:
         before_private_lookup = {
-            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])  # nosec B608
+            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])  # nosec
             for table in protected_tables
         }
     with (
@@ -4447,7 +4447,7 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
         )
     with sqlite3.connect(DB_PATH) as conn:
         after_private_lookup = {
-            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])  # nosec B608
+            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])  # nosec
             for table in protected_tables
         }
     cross_response = client.post(

@@ -65,7 +65,7 @@ def _select_sql(owner_sql: str) -> str:
         "c.check_id, c.run_id, c.target_entity_id, c.callback_label, "
         "c.allowed_domain, c.status AS correlation_status, c.activated_at, "
         "c.active_until FROM oast_interactions i JOIN oast_correlations c "
-        "ON c.id = i.correlation_id WHERE " + owner_sql  # nosec B608
+        "ON c.id = i.correlation_id WHERE " + owner_sql  # nosec
     )
 
 
@@ -76,7 +76,7 @@ def _owned_correlation(conn, session_id: str, team_id: str, correlation_id: str)
         "pc.state_reason AS check_state_reason, pc.first_evidence_at, pc.last_evidence_at "
         "FROM oast_correlations c JOIN project_assessment_checks pc "
         "ON pc.assessment_id = c.assessment_id AND pc.id = c.check_id "
-        "WHERE c.id = ? AND " + owner_sql,  # nosec B608
+        "WHERE c.id = ? AND " + owner_sql,  # nosec
         (correlation_id, *owner_params),
     ).fetchone()
 
@@ -85,7 +85,7 @@ def _increment_count(conn, correlation_id: str, column: str, instant: str) -> No
     if column not in {"duplicate_count", "rejected_count"}:
         raise ValueError("unsupported OAST counter")
     conn.execute(
-        f"UPDATE oast_correlations SET {column} = {column} + 1, updated_at = ? "  # nosec B608
+        f"UPDATE oast_correlations SET {column} = {column} + 1, updated_at = ? "  # nosec
         f"WHERE id = ? AND {column} < 10000",
         (instant, correlation_id),
     )
@@ -305,7 +305,7 @@ def ingest_oast_interaction(
             str(session_id or ""), str(team_id or ""), table_prefix="c"
         )
         row = active_conn.execute(
-            _select_sql(owner_sql) + " AND i.id = ?",  # nosec B608
+            _select_sql(owner_sql) + " AND i.id = ?",  # nosec
             (*owner_params, selected_id),
         ).fetchone()
         return {"created": True, "interaction": _interaction_row(active_conn, row)}
@@ -326,7 +326,7 @@ def oast_interactions_for_owner_correlation(
     with _connection_scope(conn) as active_conn:
         rows = active_conn.execute(
             _select_sql(owner_sql)
-            + " AND i.correlation_id = ? ORDER BY i.observed_at DESC, i.id DESC LIMIT ?",  # nosec B608
+            + " AND i.correlation_id = ? ORDER BY i.observed_at DESC, i.id DESC LIMIT ?",  # nosec
             (*owner_params, correlation_id, bounded_limit),
         ).fetchall()
         return [_interaction_row(active_conn, row) for row in rows]

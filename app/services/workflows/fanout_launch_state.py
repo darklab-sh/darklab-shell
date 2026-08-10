@@ -38,7 +38,7 @@ def _context(conn: Any, child_id: str, lock_sql: str) -> Any:
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
         "AND s.step_id = c.step_id "
         "JOIN workflow_executions e ON e.id = c.execution_id "
-        "WHERE c.id = ?" + lock_sql,  # nosec B608
+        "WHERE c.id = ?" + lock_sql,  # nosec
         (child_id,),
     ).fetchone()
 
@@ -141,7 +141,7 @@ def finalize_empty_fanout_parent(
             "e.status AS execution_status, e.definition_snapshot "
             "FROM workflow_execution_steps s "
             "JOIN workflow_executions e ON e.id = s.execution_id "
-            "WHERE s.execution_id = ? AND s.step_id = ?" + lock_sql,  # nosec B608
+            "WHERE s.execution_id = ? AND s.step_id = ?" + lock_sql,  # nosec
             (execution_id, step_id),
         ).fetchone()
         if not _active(row):

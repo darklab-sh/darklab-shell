@@ -103,7 +103,7 @@ def transition_zap_job(
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:
         cursor = active_conn.execute(
-            f"UPDATE zap_connector_jobs SET {', '.join(assignments)} "  # nosec B608
+            f"UPDATE zap_connector_jobs SET {', '.join(assignments)} "  # nosec
             f"WHERE id = ? AND status IN ({placeholders})",
             tuple(params),
         )
@@ -178,7 +178,7 @@ def mark_zap_job_imported_for_atlas_draft(
     with _connection_scope(conn) as active_conn:
         row = active_conn.execute(
             "SELECT id FROM zap_connector_jobs WHERE status = 'ready' "
-            "AND import_source_id = ? AND " + owner_sql,  # nosec B608
+            "AND import_source_id = ? AND " + owner_sql,  # nosec
             (str(draft_id or "").strip(), *owner_params),
         ).fetchone()
         if row is None:

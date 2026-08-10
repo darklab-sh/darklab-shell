@@ -32,7 +32,7 @@ def attach_capture_entity_ids(conn, session_id: str, captures: list[dict[str, An
         + f"AND e.canonical_value IN ({value_placeholders})"
     )
     rows = conn.execute(
-        "SELECT erl.run_id, e.id, e.type, e.canonical_value, e.host_entity_id "  # nosec B608
+        "SELECT erl.run_id, e.id, e.type, e.canonical_value, e.host_entity_id "  # nosec
         "FROM entity_run_links erl JOIN entities e ON e.id = erl.entity_id WHERE "
         + entity_filter_sql,
         (*run_ids, *entity_owner_params, *url_values, *host_values),

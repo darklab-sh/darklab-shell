@@ -73,7 +73,7 @@ def _valid_source_run(
     )
     row = conn.execute(
         "SELECT r.command, r.run_kind, r.finished, r.exit_code FROM runs r WHERE r.id = ? AND "
-        + owner_sql,  # nosec B608
+        + owner_sql,  # nosec
         (run_id, *owner_params),
     ).fetchall()
     if len(row) != 1:

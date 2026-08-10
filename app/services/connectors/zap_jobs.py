@@ -141,7 +141,7 @@ def create_zap_job(
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:
         current = active_conn.execute(
-            "SELECT 1 FROM project_assessments pa "  # nosec B608
+            "SELECT 1 FROM project_assessments pa "  # nosec
             "JOIN project_assessment_checks pc ON pc.assessment_id = pa.id "
             "JOIN project_http_profiles hp ON hp.project_id = pa.project_id "
             "WHERE pa.project_id = ? AND pa.id = ? AND pc.id = ? "
@@ -211,7 +211,7 @@ def zap_job_for_owner(
     )
     with _connection_scope(conn) as active_conn:
         row = active_conn.execute(
-            "SELECT * FROM zap_connector_jobs WHERE id = ? AND " + owner_sql,  # nosec B608
+            "SELECT * FROM zap_connector_jobs WHERE id = ? AND " + owner_sql,  # nosec
             (job_id, *owner_params),
         ).fetchone()
         return _decode_row(row) if row else None
@@ -235,7 +235,7 @@ def zap_jobs_for_owner_check(
     )
     with _connection_scope(conn) as active_conn:
         rows = active_conn.execute(
-            "SELECT * FROM zap_connector_jobs WHERE project_id = ? "  # nosec B608
+            "SELECT * FROM zap_connector_jobs WHERE project_id = ? "  # nosec
             "AND assessment_id = ? AND check_id = ? AND "
             + owner_sql
             + " ORDER BY created_at DESC, id DESC LIMIT ?",
@@ -284,7 +284,7 @@ def staged_zap_job_ids(job_ids: list[str] | tuple[str, ...], *, conn=None) -> se
     placeholders = ", ".join("?" for _ in candidates)
     with _connection_scope(conn) as active_conn:
         rows = active_conn.execute(
-            f"SELECT id FROM zap_connector_jobs WHERE id IN ({placeholders}) "  # nosec B608
+            f"SELECT id FROM zap_connector_jobs WHERE id IN ({placeholders}) "  # nosec
             "AND status IN ('queued', 'submitting')",
             candidates,
         ).fetchall()

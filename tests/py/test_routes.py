@@ -46,6 +46,7 @@ import core.database as database
 import core.process as process
 import services.runs.comparison as run_comparison
 import services.assets.diagnostics as assets_diagnostics
+import services.assessments.http_profile_scope as http_profile_scope_service
 import services.secrets.vault as secrets_vault
 import services.projects.package_presets as package_presets
 import services.atlas.import_workflow as atlas_import_workflow
@@ -6660,6 +6661,50 @@ class TestProjectRoutes:
         )
         assert removed.get_json() == {"ok": True, "removed": True}
         assert client.get(detail_route, headers={"X-Session-ID": session_id}).status_code == 404
+
+    def test_project_http_profiles_skip_invalid_confirmed_targets(self):
+        client = get_client()
+        session_id = self._session_id("project-http-profile-invalid-target")
+        project = self._create_project(client, session_id, name="HTTP Profile Target Recovery")
+        valid_target = "valid-http-profile.example.com"
+        self._create_target(client, session_id, project["id"], value=valid_target)
+        invalid_target = self._create_target(
+            client,
+            session_id,
+            project["id"],
+            value="www.namecheap.com)",
+        )
+        assert invalid_target["review_state"] == "confirmed"
+        route = f"/projects/{project['id']}/http-profiles"
+
+        with mock.patch.object(http_profile_scope_service.log, "warning") as warning_log:
+            listed = client.get(route, headers={"X-Session-ID": session_id})
+            created = client.post(
+                route,
+                headers={"X-Session-ID": session_id},
+                json={
+                    "name": "Valid target scope",
+                    "role": "anonymous",
+                    "base_url": f"https://{valid_target}",
+                    "allowed_hosts": [valid_target],
+                },
+            )
+
+        assert listed.status_code == 200
+        assert listed.get_json() == {"profiles": [], "total": 0}
+        assert created.status_code == 201
+        assert created.get_json()["profile"]["allowed_hosts"] == [valid_target]
+        assert warning_log.call_count == 2
+        event, = warning_log.call_args.args
+        fields = warning_log.call_args.kwargs["extra"]
+        assert event == "PROJECT_HTTP_PROFILE_INVALID_TARGETS_SKIPPED"
+        assert fields == {
+            "project_id": project["id"],
+            "team_scope": False,
+            "invalid_target_count": 1,
+            "invalid_target_types": ["domain"],
+        }
+        assert invalid_target["value"] not in json.dumps(fields)
 
     def test_project_overview_route_returns_empty_contract_and_404_for_foreign_project(self):
         client = get_client()
@@ -16490,7 +16535,7 @@ class TestAtlasRoutes:
         )
         with db_connect() as conn:
             before_private_lookup = {
-                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec
                 for table in protected_tables
             }
         with (
@@ -16521,7 +16566,7 @@ class TestAtlasRoutes:
             )
         with db_connect() as conn:
             after_private_lookup = {
-                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec
                 for table in protected_tables
             }
         with mock.patch.object(atlas_blueprint.log, "debug") as lookup_debug:

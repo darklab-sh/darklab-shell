@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import secrets
 from typing import Any, Mapping
-from urllib.parse import urlsplit
 
 from config import resolve_effective_cfg
 from core.database_access import get_db_backend, get_db_connect
@@ -17,9 +16,9 @@ from services.assessments.http_profile_contracts import (
     HttpProfileError,
     HttpProfileNotFound,
 )
+from services.assessments.http_profile_scope import project_hosts as _project_hosts
 from services.assessments.http_profile_validation import (
     HTTP_PROFILE_INPUT_FIELDS,
-    normalize_http_host,
     normalize_http_profile_payload,
 )
 from services.commands.registry import load_all_workflows
@@ -111,44 +110,6 @@ def _profile_row(
     return conn.execute(sql, (*owner_params, project_id, profile_id)).fetchone()
 
 
-def _project_hosts(
-    conn: Any,
-    session_id: str,
-    project_id: str,
-    *,
-    team_id: str,
-    require_active: bool = False,
-) -> set[str]:
-    owner_sql, owner_params = shared_owner_where(
-        session_id, team_id=team_id, table_alias="p"
-    )
-    sql = "".join((
-        "SELECT p.status, e.type, e.canonical_value FROM projects p ",
-        "LEFT JOIN project_links pl ON pl.project_id = p.id ",
-        "AND pl.entity_type = 'atlas_entity' AND pl.review_state = 'confirmed' ",
-        "LEFT JOIN entities e ON e.id = pl.entity_id AND COALESCE(e.suppressed, FALSE) = FALSE ",
-        "WHERE ",
-        owner_sql,
-        " AND p.id = ? ORDER BY e.type ASC, e.canonical_value ASC",
-    ))
-    rows = conn.execute(sql, (*owner_params, project_id)).fetchall()
-    if not rows:
-        raise HttpProfileNotFound("HTTP profile Project was not found in this owner scope")
-    if require_active and str(rows[0]["status"] or "") == "archived":
-        raise HttpProfileConflict("archived Projects cannot change HTTP profiles")
-    hosts: set[str] = set()
-    for row in rows:
-        entity_type = str(row["type"] or "")
-        value = str(row["canonical_value"] or "")
-        if entity_type in {"domain", "ip"} and value:
-            hosts.add(normalize_http_host(value))
-        elif entity_type == "url" and value:
-            host = str(urlsplit(value).hostname or "")
-            if host:
-                hosts.add(normalize_http_host(host))
-    return hosts
-
-
 def _referenced_secret_names(profile: Mapping[str, Any]) -> set[str]:
     names = {str(value) for value in profile.get("secret_refs", {}).values() if str(value)}
     names.update(
@@ -172,7 +133,7 @@ def _workflow_ids(conn: Any, session_id: str, team_id: str) -> set[str]:
         session_id, team_id=team_id, table_alias="w"
     )
     # The owner clause comes from shared_owner_where; all values stay bound.
-    sql = "SELECT w.id FROM user_workflows w WHERE " + owner_sql  # nosec B608
+    sql = "SELECT w.id FROM user_workflows w WHERE " + owner_sql  # nosec
     rows = conn.execute(sql, owner_params).fetchall()
     ids = {str(row["id"] or "") for row in rows}
     ids.update(

@@ -50,7 +50,7 @@ def _context_for_child(
     conn: Any, where_sql: str, params: tuple[object, ...], lock_sql: str,
 ) -> Any:
     query = (
-        "SELECT c.*, s.status AS parent_status, s.started AS parent_started, "  # nosec B608
+        "SELECT c.*, s.status AS parent_status, s.started AS parent_started, "  # nosec
         "s.fanout_checkpoint, "
         "e.status AS execution_status, e.definition_snapshot "
         "FROM workflow_execution_children c "

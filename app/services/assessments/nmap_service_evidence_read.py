@@ -73,7 +73,7 @@ def nmap_service_evidence_for_run_on_conn(
     )
     params = (str(run_id or "").strip(), *run_owner_params, *observation_owner_params)
     run = conn.execute(
-        "SELECT r.id FROM runs r WHERE r.id = ? AND " + run_owner_sql,  # nosec B608
+        "SELECT r.id FROM runs r WHERE r.id = ? AND " + run_owner_sql,  # nosec
         (str(run_id or "").strip(), *run_owner_params),
     ).fetchone()
     if not run:
@@ -82,7 +82,7 @@ def nmap_service_evidence_for_run_on_conn(
     total = int(total_row["count"] or 0) if total_row else 0
     rows = conn.execute(
         "SELECT o.*" + base
-        + " ORDER BY o.observed_at DESC, o.id DESC LIMIT ? OFFSET ?",  # nosec B608
+        + " ORDER BY o.observed_at DESC, o.id DESC LIMIT ? OFFSET ?",  # nosec
         (*params, safe_limit, safe_offset),
     ).fetchall()
     return page_payload(
@@ -130,7 +130,7 @@ def attach_nmap_service_evidence(
             "COUNT(*) OVER (PARTITION BY e.check_id) AS item_total "
             "FROM project_assessment_evidence e JOIN nmap_service_observations o "
             "ON o.run_id = e.evidence_id WHERE e.evidence_type = 'run' "
-            "AND e.source_state = 'available' AND e.check_id IN (" + placeholders + ") AND "  # nosec B608
+            "AND e.source_state = 'available' AND e.check_id IN (" + placeholders + ") AND "  # nosec
             + owner_sql + ") ranked WHERE item_rank <= ? "
             "ORDER BY check_id ASC, observed_at DESC, id DESC",
             (*check_ids, *owner_params, NMAP_SERVICE_EVIDENCE_PER_CHECK),

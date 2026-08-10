@@ -35,7 +35,7 @@ def attach_oast_interaction_to_finding(
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:
         row = active_conn.execute(
-            _select_sql(owner_sql) + " AND i.id = ?",  # nosec B608
+            _select_sql(owner_sql) + " AND i.id = ?",  # nosec
             (*owner_params, interaction_id),
         ).fetchone()
         if row is None:
@@ -104,7 +104,7 @@ def attach_oast_interaction_to_finding(
         if owns_conn:
             active_conn.commit()
         updated = active_conn.execute(
-            _select_sql(owner_sql) + " AND i.id = ?",  # nosec B608
+            _select_sql(owner_sql) + " AND i.id = ?",  # nosec
             (*owner_params, interaction_id),
         ).fetchone()
         return _interaction_row(active_conn, updated)

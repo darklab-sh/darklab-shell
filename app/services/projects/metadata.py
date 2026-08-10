@@ -320,7 +320,7 @@ def _full_finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
     scope_params = finding_source_scope_params(session_id, team_id)
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
-        "SELECT f.id, f.session_id, f.team_id, f.entity_id, f.target_id, "  # nosec B608
+        "SELECT f.id, f.session_id, f.team_id, f.entity_id, f.target_id, "  # nosec
         "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.status, "
         "f.kind, f.tool_root, f.title, f.raw_line, f.fingerprint, f.cve_ids_json "
         "FROM findings f WHERE " + scope_sql + f" AND f.id IN ({placeholders})",

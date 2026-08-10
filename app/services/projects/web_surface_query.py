@@ -29,7 +29,7 @@ def load_project_web_surface_rows(conn, session_id, project_id, *, limit, offset
         session_id, team_id=team_id, table_alias="r",
     )
     project_row = conn.execute(
-        "SELECT 1 FROM projects p WHERE p.id = ? AND " + project_owner_sql,  # nosec B608
+        "SELECT 1 FROM projects p WHERE p.id = ? AND " + project_owner_sql,  # nosec
         (project_id, *project_owner_params),
     ).fetchone()
     if not project_row:
@@ -42,7 +42,7 @@ def load_project_web_surface_rows(conn, session_id, project_id, *, limit, offset
     )
     params = (project_id, *project_owner_params, *run_owner_params, RUN_KIND_EXTERNAL)
     total_row = conn.execute(
-        "SELECT COUNT(*) AS count FROM run_file_artifacts a "  # nosec B608
+        "SELECT COUNT(*) AS count FROM run_file_artifacts a "  # nosec
         "JOIN runs r ON r.id = a.run_id "
         "JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = r.id "
         "JOIN projects p ON p.id = l.project_id WHERE " + where_sql,

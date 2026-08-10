@@ -82,7 +82,7 @@ def _findings(conn: Any, finding_ids: set[str]) -> list[dict[str, Any]]:
         chunk = ordered[offset:offset + _FINDING_QUERY_CHUNK]
         in_sql, in_params = dialect.in_clause("f.id", chunk)
         rows.extend(conn.execute(
-            "SELECT f.* FROM findings f WHERE " + in_sql,  # nosec B608
+            "SELECT f.* FROM findings f WHERE " + in_sql,  # nosec
             in_params,
         ).fetchall())
     return [_finding_payload(row) for row in rows]

@@ -339,7 +339,7 @@ def _dispositions_for_members(conn: Any, members: list[dict[str, str]]) -> list[
         rows.extend(conn.execute(
             "SELECT session_id, team_id, affected_subject, identity_value, review_state, "
             "remediation, created_at, updated_at, remediation_updated_at "
-            "FROM finding_remediation_dispositions WHERE "  # nosec B608
+            "FROM finding_remediation_dispositions WHERE "  # nosec
             + clauses,
             tuple(value for key in chunk for value in key),
         ).fetchall())

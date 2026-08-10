@@ -72,7 +72,7 @@ def rows_by_keys(conn: Any, keys: set[tuple[str, str, str, str]]) -> list[Any]:
         rows.extend(conn.execute(
             "SELECT session_id, team_id, merge_id, affected_subject, identity_kind, "
             "identity_value, vulnerability_id, rule_identity, created_by_session_id, created_at "
-            "FROM finding_remediation_merge_members WHERE "  # nosec B608
+            "FROM finding_remediation_merge_members WHERE "  # nosec
             + clauses,
             tuple(value for key in chunk for value in key),
         ).fetchall())
@@ -94,7 +94,7 @@ def rows_by_merge_ids(
         rows.extend(conn.execute(
             "SELECT session_id, team_id, merge_id, affected_subject, identity_kind, "
             "identity_value, vulnerability_id, rule_identity, created_by_session_id, created_at "
-            "FROM finding_remediation_merge_members WHERE "  # nosec B608
+            "FROM finding_remediation_merge_members WHERE "  # nosec
             + clauses,
             tuple(value for key in chunk for value in key),
         ).fetchall())

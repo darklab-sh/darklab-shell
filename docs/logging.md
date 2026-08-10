@@ -315,6 +315,7 @@ The current event inventory is:
 | WARN | `RAW_PACKET_SCANNING_UNAVAILABLE` | app startup | tool, reason, availability_reason |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
 | WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, http_status |
+| WARN | `PROJECT_HTTP_PROFILE_INVALID_TARGETS_SKIPPED` | Project HTTP-profile scope discovery | project_id, team_scope, invalid_target_count, invalid_target_types |
 | WARN / ERROR | `TEAM_ACTION_REJECTED` / `TEAM_ROUTE_FAILED` / `TEAM_ACTION_FAILED` | browser/API team management routes | action, team_id, session, ip, result, source, reason, error_code, http_status, route, method |
 | WARN | `API_BROKER_UNAVAILABLE` | API run start routes | ip, reason |
 | WARN | `API_FULL_OUTPUT_LOAD_FAILED` | API output route | run_id, session, rel_path, error |

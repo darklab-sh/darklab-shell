@@ -41,7 +41,7 @@ def prune_retention_on_conn(
     linked_run_row = conn.execute(
         "SELECT COUNT(DISTINCT r.id) AS linked_runs, COUNT(DISTINCT l.project_id) AS linked_projects "
         "FROM runs r JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = r.id "
-        f"WHERE {run_older_sql}",  # nosec B608
+        f"WHERE {run_older_sql}",  # nosec
         (cutoff,),
     ).fetchone()
     linked_run_count = int(linked_run_row["linked_runs"] or 0) if linked_run_row else 0
@@ -55,14 +55,14 @@ def prune_retention_on_conn(
     old_run_ids = [
         row["id"]
         for row in conn.execute(
-            f"SELECT id FROM runs WHERE {started_older_sql}",  # nosec B608
+            f"SELECT id FROM runs WHERE {started_older_sql}",  # nosec
             (cutoff,),
         ).fetchall()
     ]
     old_snapshot_ids = [
         row["id"]
         for row in conn.execute(
-            f"SELECT id FROM snapshots WHERE {created_older_sql}",  # nosec B608
+            f"SELECT id FROM snapshots WHERE {created_older_sql}",  # nosec
             (cutoff,),
         ).fetchall()
     ]
@@ -70,11 +70,11 @@ def prune_retention_on_conn(
     delete_run_artifacts_fn(conn, old_run_ids)
     delete_snapshot_metadata_fn(conn, old_snapshot_ids)
     cur_runs = conn.execute(
-        f"DELETE FROM runs WHERE {started_older_sql}",  # nosec B608
+        f"DELETE FROM runs WHERE {started_older_sql}",  # nosec
         (cutoff,),
     )
     cur_snaps = conn.execute(
-        f"DELETE FROM snapshots WHERE {created_older_sql}",  # nosec B608
+        f"DELETE FROM snapshots WHERE {created_older_sql}",  # nosec
         (cutoff,),
     )
     counts = {

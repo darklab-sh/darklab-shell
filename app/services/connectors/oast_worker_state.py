@@ -56,7 +56,7 @@ def oast_correlations_by_ids(
     placeholders = ", ".join("?" for _ in candidates)
     with _connection_scope(conn) as active_conn:
         rows = active_conn.execute(
-            f"SELECT * FROM oast_correlations WHERE id IN ({placeholders})",  # nosec B608
+            f"SELECT * FROM oast_correlations WHERE id IN ({placeholders})",  # nosec
             candidates,
         ).fetchall()
         return {

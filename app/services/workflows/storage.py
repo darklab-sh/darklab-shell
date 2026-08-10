@@ -493,7 +493,7 @@ def fail_execution_for_run(run_id: str, code: str, detail: str) -> bool:
                 "FROM workflow_execution_children WHERE run_id = ?"
             )
             params = (run_id, run_id)
-        row = conn.execute(query + " LIMIT 1", params).fetchone()  # nosec B608
+        row = conn.execute(query + " LIMIT 1", params).fetchone()  # nosec
     if not row:
         return False
     return fail_execution(str(row["execution_id"]), code, detail, step_id=str(row["step_id"]))
@@ -512,7 +512,7 @@ def execution_for_run(run_id: str) -> dict[str, Any] | None:
             )
             params = (run_id, run_id)
         row = conn.execute(
-            "SELECT e.* FROM workflow_executions e WHERE "  # nosec B608
+            "SELECT e.* FROM workflow_executions e WHERE "  # nosec
             "EXISTS (SELECT 1 FROM workflow_execution_steps s "
             "WHERE s.execution_id = e.id AND s.run_id = ?)" + child_clause,
             params,
@@ -562,7 +562,7 @@ def workflow_provenance_by_run(
     )
     if child_table_exists:
         child_query = (
-            "SELECT c.run_id, c.execution_id, c.step_id, s.step_index, "  # nosec B608
+            "SELECT c.run_id, c.execution_id, c.step_id, s.step_index, "  # nosec
             "c.status AS step_status, "
             "c.exit_code, s.selected_transition, s.transition_reason, "
             "e.workflow_id, e.workflow_source, e.title, e.status AS execution_status, e.current_step_id "

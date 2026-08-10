@@ -1716,6 +1716,9 @@ describe('project assessment controller', () => {
     const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
     await controller.load('prj_1', { render: false })
     const container = document.createElement('div')
+    ctx.renderProjectExplorer.mockImplementation(() => {
+      controller.renderAssessment(container, 'prj_1')
+    })
     controller.renderAssessment(container, 'prj_1')
     expect(container.querySelector('button[type="submit"]').disabled).toBe(false)
 
@@ -1727,6 +1730,8 @@ describe('project assessment controller', () => {
     expect(controller.stateFor('prj_1').selectedId).toBe('asmt_new')
     expect(ctx.invalidateProjectOverview).toHaveBeenCalledWith('prj_1')
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle started.')
+    expect(container.textContent).toContain('Network review')
+    expect(container.textContent).not.toContain('Loading project assessments...')
 
     const viewerRequest = vi.fn(async () => apiResponse({ assessments: [], profiles, total: 0 }))
     const viewer = DarklabProjectAssessment.createProjectAssessmentController(makeContext(viewerRequest, {
@@ -1785,11 +1790,18 @@ describe('project assessment controller', () => {
     const ctx = makeContext(projectWorkspaceRequest)
     const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
     await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    ctx.renderProjectExplorer.mockImplementation(() => {
+      controller.renderAssessment(container, 'prj_1')
+    })
+    controller.renderAssessment(container, 'prj_1')
 
     expect(await controller.transitionCycle('prj_1', 'completed')).toBe(true)
     expect(current.status).toBe('completed')
     expect(ctx.invalidateProjectOverview).toHaveBeenCalledWith('prj_1')
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle completed.')
+    expect(container.textContent).toContain('Network review')
+    expect(container.textContent).not.toContain('Loading project assessments...')
 
     expect(await controller.transitionCycle('prj_1', 'archived')).toBe(true)
     expect(current.status).toBe('archived')
@@ -1802,6 +1814,147 @@ describe('project assessment controller', () => {
     expect(controller.stateFor('prj_1').assessments).toEqual([])
     expect(ctx.invalidateProjectOverview).toHaveBeenCalledTimes(3)
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle deleted.')
+  })
+
+  it('renders the empty cycle state without waiting for an HTTP-profile refresh', async () => {
+    let deleted = false
+    let httpProfileLoads = 0
+    let resolvePendingHttpProfiles
+    const pendingHttpProfiles = new Promise((resolve) => {
+      resolvePendingHttpProfiles = resolve
+    })
+    let controller
+    const archived = { ...cycle, status: 'archived' }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) {
+        httpProfileLoads += 1
+        if (httpProfileLoads === 1) return apiResponse({ profiles: [], total: 0 })
+        return pendingHttpProfiles
+      }
+      if (url.endsWith('/delete-preview')) {
+        return apiResponse({
+          preview: {
+            can_delete: true,
+            will_delete: { checks: 2, evidence_links: 0 },
+          },
+        })
+      }
+      if (options.method === 'DELETE') {
+        deleted = true
+        controller.httpProfileStateFor('prj_1').loaded = false
+        return apiResponse({ ok: true })
+      }
+      if (/\/assessments\/[^?]+/.test(url)) {
+        return apiResponse({ ...detail, assessment: { ...detail.assessment, ...archived } })
+      }
+      return apiResponse({
+        assessments: deleted ? [] : [archived],
+        profiles,
+        total: deleted ? 0 : 1,
+        limit: 100,
+        offset: 0,
+        has_more: false,
+      })
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+
+    let deletionSettled = false
+    const deletion = controller.deleteCycle('prj_1').then((result) => {
+      deletionSettled = true
+      return result
+    })
+    await vi.waitFor(() => expect(httpProfileLoads).toBe(2))
+    await Promise.resolve()
+
+    expect(deletionSettled).toBe(true)
+    expect(await deletion).toBe(true)
+    expect(controller.stateFor('prj_1').assessments).toEqual([])
+    const surface = document.createElement('div')
+    controller.renderAssessment(surface, 'prj_1')
+    expect(surface.textContent).toContain('Start an assessment')
+    expect(surface.textContent).not.toContain('Delete assessment')
+
+    resolvePendingHttpProfiles(apiResponse({ profiles: [], total: 0 }))
+  })
+
+  it('rejects failed lifecycle mutation responses without claiming success', async () => {
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (options.method === 'PATCH') {
+        return apiResponse({ error: 'assessment update rejected' }, { ok: false })
+      }
+      return responseFor(url, options)
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+
+    expect(await controller.transitionCycle('prj_1', 'completed')).toBe(false)
+    expect(controller.stateFor('prj_1').assessments[0].status).toBe('active')
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Could not update this assessment cycle.',
+      { error: true },
+    )
+    expect(ctx.setProjectWorkspaceMessage).not.toHaveBeenCalledWith('Assessment cycle completed.')
+  })
+
+  it('supersedes a stale detail load when a lifecycle reload is forced', async () => {
+    let current = { ...cycle }
+    let detailCalls = 0
+    let resolveFirstDetail
+    const firstDetailResponse = new Promise((resolve) => {
+      resolveFirstDetail = resolve
+    })
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) {
+        return apiResponse({ error: 'Internal server error' }, { ok: false })
+      }
+      if (options.method === 'PATCH') {
+        current = { ...current, status: JSON.parse(options.body).status }
+        return apiResponse({ assessment: current })
+      }
+      if (/\/assessments\/[^?]+/.test(url)) {
+        detailCalls += 1
+        if (detailCalls === 1) return firstDetailResponse
+        return apiResponse({
+          ...detail,
+          assessment: { ...detail.assessment, ...current },
+        })
+      }
+      return apiResponse({
+        assessments: [current],
+        profiles,
+        total: 1,
+        limit: 100,
+        offset: 0,
+        has_more: false,
+      })
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    const initialLoad = controller.load('prj_1', { render: false })
+
+    await vi.waitFor(() => expect(detailCalls).toBe(1))
+    const surface = document.createElement('div')
+    controller.renderAssessment(surface, 'prj_1')
+    expect(surface.textContent).toContain('Complete cycle')
+
+    const transition = controller.transitionCycle('prj_1', 'completed')
+    await vi.waitFor(() => expect(detailCalls).toBe(2))
+    expect(await transition).toBe(true)
+
+    const state = controller.stateFor('prj_1')
+    expect(state.loading).toBe(false)
+    expect(state.detailLoading).toBe(false)
+    expect(state.loaded).toBe(true)
+    expect(state.detail.assessment.status).toBe('completed')
+    controller.renderAssessment(surface, 'prj_1')
+    expect(surface.textContent).not.toContain('Loading project assessments...')
+
+    resolveFirstDetail(apiResponse(detail))
+    expect(await initialLoad).toBe(false)
+    expect(state.detail.assessment.status).toBe('completed')
   })
 
   it('cancels lifecycle transitions without sending a mutation', async () => {

@@ -45,7 +45,7 @@ def activate_oast_correlation(
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:
         current = active_conn.execute(
-            "SELECT check_id FROM oast_correlations WHERE id = ? AND " + owner_sql,  # nosec B608
+            "SELECT check_id FROM oast_correlations WHERE id = ? AND " + owner_sql,  # nosec
             (correlation_id, *owner_params),
         ).fetchone()
         if current is None:
@@ -63,7 +63,7 @@ def activate_oast_correlation(
                 "The run already has an OAST correlation for this check",
             )
         cursor = active_conn.execute(
-            "UPDATE oast_correlations SET status = 'active', run_id = ?, "  # nosec B608
+            "UPDATE oast_correlations SET status = 'active', run_id = ?, "  # nosec
             "activated_at = ?, updated_at = ? WHERE id = ? AND "
             + owner_sql
             + " AND status = 'reserved' AND active_until > ?",
@@ -113,7 +113,7 @@ def close_oast_correlation(
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:
         cursor = active_conn.execute(
-            "UPDATE oast_correlations SET status = ?, closed_at = ?, updated_at = ?, "  # nosec B608
+            "UPDATE oast_correlations SET status = ?, closed_at = ?, updated_at = ?, "  # nosec
             "error_code = ?, error_detail = ? WHERE id = ? AND "
             + owner_sql
             + f" AND status IN ({placeholders})",

@@ -78,7 +78,7 @@ def initialize_fanout_children(
             "INSERT INTO workflow_execution_children "
             "(id, execution_id, step_id, ordinal, attempt, run_id, status, error_code, created) "
             "VALUES (?, ?, ?, ?, 1, '', 'pending', '', ?) "
-            + dialect.insert_or_ignore_clause(("execution_id", "step_id", "ordinal", "attempt"))  # nosec B608
+            + dialect.insert_or_ignore_clause(("execution_id", "step_id", "ordinal", "attempt"))  # nosec
         )
         for ordinal in checkpoint.pending:
             conn.execute(

@@ -18,6 +18,7 @@ function createProjectHttpProfileManager(context, hooks = {}) {
         loaded: false,
         loading: false,
         loadPromise: null,
+        loadGeneration: 0,
         error: '',
         mutating: '',
       });
@@ -52,7 +53,9 @@ function createProjectHttpProfileManager(context, hooks = {}) {
     if (!id) return false;
     const st = stateFor(id);
     if (st.loaded && options.force !== true) return true;
-    if (st.loading && st.loadPromise) return st.loadPromise;
+    if (st.loading && st.loadPromise && options.force !== true) return st.loadPromise;
+    const generation = st.loadGeneration + 1;
+    st.loadGeneration = generation;
     st.loading = true;
     st.error = '';
     const promise = (async () => {
@@ -61,12 +64,15 @@ function createProjectHttpProfileManager(context, hooks = {}) {
           `/projects/${encodeURIComponent(id)}/http-profiles`,
           { cache: 'no-store' },
         );
+        if (st.loadGeneration !== generation) return false;
         if (!resp.ok) throw await responseError(resp, 'Could not load HTTP profiles.');
         const payload = await resp.json();
+        if (st.loadGeneration !== generation) return false;
         st.profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
         st.loaded = true;
         return true;
       } catch (err) {
+        if (st.loadGeneration !== generation) return false;
         st.error = err?.message || 'Could not load HTTP profiles.';
         logFailure('PROJECT_ASSESSMENT_CLIENT_HTTP_PROFILES_LOAD_FAILED', err, {
           phase: 'http_profiles',
@@ -74,9 +80,11 @@ function createProjectHttpProfileManager(context, hooks = {}) {
         });
         return false;
       } finally {
-        st.loading = false;
-        st.loadPromise = null;
-        if (options.render !== false) renderViews();
+        if (st.loadGeneration === generation) {
+          st.loading = false;
+          st.loadPromise = null;
+          if (options.render !== false) renderViews();
+        }
       }
     })();
     st.loadPromise = promise;
@@ -87,8 +95,11 @@ function createProjectHttpProfileManager(context, hooks = {}) {
     const id = String(projectId || '');
     const targets = id ? [states.get(id)] : Array.from(states.values());
     targets.filter(Boolean).forEach((st) => {
+      st.loadGeneration += 1;
       st.profiles = [];
       st.loaded = false;
+      st.loading = false;
+      st.loadPromise = null;
       st.error = '';
     });
   }
