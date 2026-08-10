@@ -578,6 +578,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/output_sinks.py", 143, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/output_sink_files.py", 81, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/process_control.py", 85, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/import_formats.py", 20, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/import_parser.py", 870, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/atlas/sarif_parser.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/sarif_details.py", 255, "split-package-ratchet"),
