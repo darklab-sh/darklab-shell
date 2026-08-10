@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
+
+from services.api_v1.openapi_verification_actions import verification_action_schemas
 
 
 def _ref(name: str) -> dict[str, str]:
@@ -30,6 +33,15 @@ def _path_parameter(name: str, description: str) -> dict[str, Any]:
 
 
 def assessment_oast_schemas() -> dict[str, Any]:
+    launch_response = deepcopy(
+        verification_action_schemas()["FindingVerificationActionLaunchResponse"]
+    )
+    launch_response["required"].append("correlation_id")
+    launch_response["properties"]["plan"] = _ref("AssessmentActionPlan")
+    launch_response["properties"]["correlation_id"] = {
+        "type": "string",
+        "pattern": "^ocr_[0-9a-f]{32}$",
+    }
     return {
         "AssessmentOastPlanState": {
             "type": "object",
@@ -60,6 +72,7 @@ def assessment_oast_schemas() -> dict[str, Any]:
             ],
             "properties": {
                 "confirmed": {"type": "boolean", "enum": [True]},
+                "http_profile_id": {"type": "string"},
                 "plan_digest": {
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$",
@@ -71,6 +84,31 @@ def assessment_oast_schemas() -> dict[str, Any]:
                 },
             },
         },
+        "AssessmentOastLaunchRequest": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "confirmed",
+                "plan_digest",
+                "source_run_id",
+                "parameter_observation_id",
+            ],
+            "properties": {
+                "confirmed": {"type": "boolean", "enum": [True]},
+                "http_profile_id": {"type": "string"},
+                "plan_digest": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "source_run_id": {"type": "string", "minLength": 1},
+                "parameter_observation_id": {
+                    "type": "string",
+                    "minLength": 1,
+                },
+                "workspace_cwd": {"type": "string"},
+            },
+        },
+        "AssessmentOastLaunchResponse": launch_response,
         "AssessmentOastCorrelation": {
             "type": "object",
             "additionalProperties": False,
@@ -219,6 +257,30 @@ def assessment_oast_paths() -> dict[str, Any]:
                         _ref("AssessmentOastCorrelationResponse"),
                     ),
                     **errors,
+                },
+            },
+        },
+        base + "/oast-correlations/{correlation_id}/launch": {
+            "post": {
+                "parameters": [
+                    *parameters,
+                    _path_parameter("correlation_id", "Private OAST correlation id"),
+                ],
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": _ref("AssessmentOastLaunchRequest")
+                        }
+                    },
+                },
+                "responses": {
+                    "202": _response(
+                        "Private OAST assessment run started",
+                        _ref("AssessmentOastLaunchResponse"),
+                    ),
+                    **errors,
+                    "503": _response("Run broker unavailable", _ref("ApiError")),
                 },
             },
         },

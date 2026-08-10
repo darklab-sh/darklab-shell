@@ -304,6 +304,7 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_project_assessment_action_launch": "Capability.RUN_COMMANDS",
     "api_project_assessment_oast_correlations": "Capability.RUN_COMMANDS",
     "api_project_assessment_oast_correlation": "Capability.RUN_COMMANDS",
+    "api_project_assessment_oast_launch": "Capability.RUN_COMMANDS",
     "api_project_finding_verification_action_launch": "Capability.RUN_COMMANDS",
 }
 
@@ -2458,6 +2459,7 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         DALFOX_DISCOVERY_PARSER_VERSION,
         dalfox_parameter_observation_id,
     )
+    from services.connectors.oast_config import OastConnectorSettings
 
     client = get_client()
     token = _token(client)
@@ -2614,12 +2616,89 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
     assert register_provider.call_count == 0
 
     exact_path = correlation_path + f"/{correlation['id']}"
+    launch_path = exact_path + "/launch"
+    launch_body = {
+        **selection,
+        "confirmed": True,
+        "plan_digest": plan["plan_digest"],
+    }
+    with mock.patch(
+        "services.assessments.assessment_oast_launch_confirmation."
+        "oast_connector_settings",
+        return_value=OastConnectorSettings(
+            enabled=True,
+            base_url="https://private-oast.internal.example",
+            token_secret_id="DARKLAB_PRIVATE_OAST_TOKEN",
+            allowed_domain="changed.example.test",
+            tls_verify=True,
+            callback_retention_seconds=3600,
+            privacy_acknowledged=True,
+        ),
+    ):
+        scope_changed_launch = client.post(
+            launch_path,
+            headers=_headers(token),
+            json=launch_body,
+        )
+    assert scope_changed_launch.status_code == 409
+    assert scope_changed_launch.get_json()["error"]["code"] == (
+        "oast_provider_scope_changed"
+    )
+    with mock.patch(
+        "blueprints.api_v1._start_brokered_run_service"
+    ) as start_run:
+        not_ready_launch = client.post(
+            launch_path,
+            headers=_headers(token),
+            json=launch_body,
+        )
+    assert not_ready_launch.status_code == 409
+    assert not_ready_launch.get_json()["error"]["code"] == (
+        "oast_provider_not_ready"
+    )
+    start_run.assert_not_called()
+
+    launched_run_id = str(uuid.uuid4())
+
+    def _start_ready_oast(**kwargs):
+        assert kwargs["display_command"] == plan["display_command"]
+        assert "callbacks.example.test" not in kwargs["original_command"]
+        reviewed_command = kwargs["reviewed_execution"].execution_command
+        assert "callbacks.example.test" in reviewed_command
+        assert kwargs["output_signal_context"].dalfox_oast_validation is True
+        assert any(
+            value.endswith(".callbacks.example.test")
+            for value in kwargs["private_values"]
+        )
+        kwargs["run_created_hook"](launched_run_id, None)
+        return SimpleNamespace(run_id=launched_run_id, status="running")
+
     with mock.patch(
         "services.assessments.assessment_oast.oast_provider_session_is_staged",
         return_value=True,
-    ):
+    ), mock.patch(
+        "services.assessments.assessment_oast_run_launch."
+        "resolve_project_dalfox_parameter_evidence",
+        return_value=evidence,
+    ), mock.patch(
+        "blueprints.api_v1.broker_available",
+        return_value=True,
+    ), mock.patch(
+        "blueprints.api_v1._start_brokered_run_service",
+        side_effect=_start_ready_oast,
+    ) as start_run:
         ready = client.get(exact_path, headers=_headers(token))
         ready_list = client.get(correlation_path, headers=_headers(token))
+        launched = client.post(
+            launch_path,
+            headers=_headers(token),
+            json=launch_body,
+        )
+        repeated_launch = client.post(
+            launch_path,
+            headers=_headers(token),
+            json=launch_body,
+        )
     ready_correlation = ready.get_json()["correlation"]
     assert ready_correlation["provider_ready"] is True
     assert ready_correlation["callback_url"].startswith("https://")
@@ -2627,6 +2706,19 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
     assert ready_list.get_json()["correlations"][0]["callback_url"] == (
         "https://[private-oast-callback]"
     )
+    assert launched.status_code == 202, launched.get_json()
+    assert launched.get_json()["correlation_id"] == correlation["id"]
+    assert launched.get_json()["run"]["run_id"] == launched_run_id
+    assert launched.get_json()["run"]["command"] == plan["display_command"]
+    assert "callbacks.example.test" not in launched.get_data(as_text=True)
+    assert repeated_launch.status_code == 409
+    assert repeated_launch.get_json()["error"]["code"] == (
+        "oast_correlation_unavailable"
+    )
+    assert start_run.call_count == 1
+    active = client.get(exact_path, headers=_headers(token)).get_json()["correlation"]
+    assert active["status"] == "active"
+    assert active["run_id"] == launched_run_id
     assert client.get(exact_path, headers=_headers(other_token)).status_code == 404
     assert client.get(correlation_path, headers=_headers(other_token)).status_code == 404
     assert client.get(
@@ -2647,8 +2739,30 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         "source": "api_v1",
         "status": "reserved",
     }
+    launch_audit = _audit_event_rows(
+        target_id=check["id"],
+        event_type="assessment.action_launch",
+    )
+    assert len(launch_audit) == 1
+    assert launch_audit[0]["details"] == {
+        "action": "oast_private_callback",
+        "assessment_id": created["assessment"]["id"],
+        "check_id": check["id"],
+        "check_key": "blind_xss_validation",
+        "correlation_id": correlation["id"],
+        "parameter_observation_id": observation_id,
+        "parameter_source_run_id": source_run_id,
+        "policy_level": "intrusive",
+        "profile_key": "web",
+        "profile_version": "1.6",
+        "project_id": project["id"],
+        "run_id": launched_run_id,
+        "source": "api_v1",
+    }
     assert "callback_url" not in json.dumps(audit)
+    assert "callback_url" not in json.dumps(launch_audit)
     assert "private-oast.internal.example" not in json.dumps(audit)
+    assert "private-oast.internal.example" not in json.dumps(launch_audit)
 
 
 def test_assessment_zap_routes_review_queue_scope_and_cancel(
@@ -3352,6 +3466,11 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         oast_route + "/ocr_" + "0" * 32,
         headers=viewer_headers,
     )
+    viewer_oast_launch = client.post(
+        oast_route + "/ocr_" + "0" * 32 + "/launch",
+        headers=viewer_headers,
+        json={},
+    )
     finding_evidence_route = (
         f"/api/v1/projects/{project_id}/findings/{finding_id}/evidence"
     )
@@ -3374,6 +3493,7 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         viewer_evidence_write,
         viewer_oast_reserve,
         viewer_oast_exact,
+        viewer_oast_launch,
     ):
         assert response.status_code == 403
         assert json.loads(response.data)["error"]["code"] == "team_forbidden"
@@ -6906,6 +7026,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     zap_job_path = zap_jobs_path + "/{job_id}"
     oast_correlations_path = check_path + "/oast-correlations"
     oast_correlation_path = oast_correlations_path + "/{correlation_id}"
+    oast_launch_path = oast_correlation_path + "/launch"
     evidence_path = check_path + "/evidence"
     evidence_link_path = evidence_path + "/{evidence_link_id}"
     run_evidence_path = "/runs/{run_id}/service-evidence"
@@ -6919,6 +7040,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert set(paths[zap_job_path]) == {"get", "delete"}
     assert set(paths[oast_correlations_path]) == {"get", "post"}
     assert set(paths[oast_correlation_path]) == {"get"}
+    assert set(paths[oast_launch_path]) == {"post"}
     assert set(paths[evidence_path]) == {"post"}
     assert set(paths[evidence_link_path]) == {"delete"}
     assert set(paths[run_evidence_path]) == {"get"}

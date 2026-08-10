@@ -85,12 +85,18 @@ def api_project_assessment_oast_correlations(project_id, assessment_id, check_id
             owner_scope,
             Capability.RUN_COMMANDS,
         )
+        data = api_routes._json_body()
+        if str(data.get("http_profile_id") or "").strip():
+            api_routes._require_api_team_capability(
+                owner_scope,
+                Capability.MANAGE_SECRETS,
+            )
         correlation = reserve_assessment_oast(
             session_id,
             project_id,
             assessment_id,
             check_id,
-            api_routes._json_body(),
+            data,
             team_id=owner_scope.team_id,
             actor_member_id=str((owner_scope.member or {}).get("id") or ""),
             actor_role=(

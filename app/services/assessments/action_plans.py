@@ -135,12 +135,16 @@ def build_assessment_action_plan(
         launchable = False
         unavailable_reason = selected_nuclei.unavailable_reason
     elif dalfox_oast is not None:
-        oast_decision = private_oast_decision(
-            action_key, target, http_profile, dalfox_oast,
-        )
-        selected_command = oast_decision.command
-        launchable = False
-        unavailable_reason = oast_decision.unavailable_reason
+        if http_profile_unavailable_reason:
+            launchable = False
+            unavailable_reason = http_profile_unavailable_reason
+        else:
+            oast_decision = private_oast_decision(
+                action_key, target, http_profile, dalfox_oast,
+            )
+            selected_command = oast_decision.command
+            launchable = False
+            unavailable_reason = oast_decision.unavailable_reason
     elif not separator or action_kind not in {"command", "workflow"} or not action_id:
         launchable = False
         unavailable_reason = "This check does not have a launchable recommended action."

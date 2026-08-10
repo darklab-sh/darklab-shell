@@ -33,6 +33,7 @@ from services.connectors.oast_provider_spool import (
 _PLAN_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _RESERVATION_FIELDS = frozenset({
     "confirmed",
+    "http_profile_id",
     "parameter_observation_id",
     "plan_digest",
     "source_run_id",
@@ -57,6 +58,7 @@ def _oast_plan(
     *,
     team_id: str,
     actor_member_id: str = "",
+    http_profile_id: str = "",
     evidence_selection: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     plan = get_recommended_action_plan(
@@ -66,6 +68,7 @@ def _oast_plan(
         check_id,
         team_id=team_id,
         actor_member_id=actor_member_id,
+        http_profile_id=http_profile_id,
         evidence_selection=evidence_selection,
     )
     if (
@@ -109,7 +112,7 @@ def _assert_oast_check_scope(
         )
 
 
-def _confirmed_oast_plan(
+def confirmed_assessment_oast_plan(
     session_id: str,
     project_id: str,
     assessment_id: str,
@@ -118,13 +121,14 @@ def _confirmed_oast_plan(
     *,
     team_id: str,
     actor_member_id: str,
+    allowed_fields: frozenset[str] = _RESERVATION_FIELDS,
 ) -> dict[str, Any]:
     if not isinstance(data, Mapping):
         raise AssessmentOastError(
             "invalid_body",
             "Request body must be a JSON object.",
         )
-    if set(data) - _RESERVATION_FIELDS:
+    if set(data) - allowed_fields:
         raise AssessmentOastError(
             "unsupported_fields",
             "Private OAST reservation contains unsupported fields.",
@@ -152,6 +156,7 @@ def _confirmed_oast_plan(
         check_id,
         team_id=team_id,
         actor_member_id=actor_member_id,
+        http_profile_id=str(data.get("http_profile_id") or "").strip(),
         evidence_selection=selection,
     )
     if supplied_digest != str(plan.get("plan_digest") or ""):
@@ -179,7 +184,7 @@ def _timestamp(value: object) -> str | None:
     return text or None
 
 
-def _provider_ready(correlation: Mapping[str, Any]) -> bool:
+def assessment_oast_provider_ready(correlation: Mapping[str, Any]) -> bool:
     if str(correlation.get("status") or "") not in _LIVE_STATUSES:
         return False
     try:
@@ -193,7 +198,7 @@ def _public_correlation(
     *,
     reveal_ready_callback: bool,
 ) -> dict[str, Any]:
-    ready = _provider_ready(correlation)
+    ready = assessment_oast_provider_ready(correlation)
     callback_url = "https://[private-oast-callback]"
     if ready and reveal_ready_callback:
         callback_url = f"https://{str(correlation.get('callback_domain') or '')}"
@@ -232,7 +237,7 @@ def reserve_assessment_oast(
     actor_role: str = "",
 ) -> dict[str, Any]:
     """Confirm the current redacted plan and reserve one callback identity."""
-    plan = _confirmed_oast_plan(
+    plan = confirmed_assessment_oast_plan(
         session_id,
         project_id,
         assessment_id,
@@ -327,6 +332,8 @@ def get_assessment_oast_correlation(
 
 __all__ = [
     "AssessmentOastError",
+    "assessment_oast_provider_ready",
+    "confirmed_assessment_oast_plan",
     "get_assessment_oast_correlation",
     "list_assessment_oast_correlations",
     "reserve_assessment_oast",

@@ -15,6 +15,7 @@ class RunOutputSignalContext:
     nuclei_takeover_template: ReviewedNucleiTakeoverTemplate | None = None
     nuclei_template_snapshot: NucleiTemplateCacheSnapshot | None = None
     dalfox_xss_context: ReviewedDalfoxXssContext | None = None
+    dalfox_oast_validation: bool = False
 
     def __post_init__(self) -> None:
         if (self.nuclei_takeover_template is not None
@@ -24,6 +25,10 @@ class RunOutputSignalContext:
             raise ValueError("invalid Nuclei template snapshot context")
         if self.dalfox_xss_context is not None and type(self.dalfox_xss_context) is not ReviewedDalfoxXssContext:
             raise ValueError("invalid Dalfox XSS signal context")
+        if type(self.dalfox_oast_validation) is not bool:
+            raise ValueError("invalid Dalfox OAST signal context")
+        if self.dalfox_oast_validation and self.dalfox_xss_context is not None:
+            raise ValueError("conflicting Dalfox signal contexts")
 
 
 def output_signal_classifier_kwargs(
@@ -35,8 +40,13 @@ def output_signal_classifier_kwargs(
     values = {
         "nuclei_takeover_template": context.nuclei_takeover_template,
         "nuclei_template_snapshot": context.nuclei_template_snapshot, "dalfox_xss_context": context.dalfox_xss_context,
+        "dalfox_oast_validation": context.dalfox_oast_validation,
     }
-    return {key: value for key, value in values.items() if value is not None}
+    return {
+        key: value
+        for key, value in values.items()
+        if value is not None and value is not False
+    }
 
 
 def validated_run_output_signal_context(

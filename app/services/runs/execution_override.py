@@ -6,6 +6,7 @@
 from dataclasses import replace
 from typing import Any
 
+from services.assessments.dalfox_oast_execution import ReviewedDalfoxOastExecution
 from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
 from services.assessments.schemathesis_execution import ReviewedSchemathesisExecution
 from services.runs.contracts import RunPreparationError
@@ -23,6 +24,22 @@ def apply_reviewed_execution(
         return prepared
     if type(reviewed_execution) is ReviewedSchemathesisExecution:
         return apply_schemathesis_execution(prepared, reviewed_execution)
+    if type(reviewed_execution) is ReviewedDalfoxOastExecution:
+        if (
+            type(output_signal_context) is not RunOutputSignalContext
+            or output_signal_context.dalfox_oast_validation is not True
+            or str(getattr(prepared, "registry_command", ""))
+            != reviewed_execution.validation_command
+        ):
+            raise RunPreparationError(
+                "Reviewed private OAST execution context no longer matches validation."
+            )
+        return replace(
+            prepared,
+            execution_command=reviewed_execution.execution_command,
+            command=reviewed_execution.execution_command,
+            rewrite_notice=None,
+        )
     if type(reviewed_execution) is not ReviewedDalfoxXssExecution:
         raise RunPreparationError("Reviewed execution context is invalid.")
     try:

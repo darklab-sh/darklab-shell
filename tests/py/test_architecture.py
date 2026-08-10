@@ -233,7 +233,10 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_assessment_action_launch.py", 157, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_assessment_actions.py", 162, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_assessment_checks.py", 238, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/projects_assessment_oast.py", 160, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_assessment_oast.py", 165, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/blueprints/projects_assessment_oast_launch.py", 192, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/blueprints/projects_assessment_zap.py", 200, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_assessments.py", 300, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_artifacts.py", 155, "split-package-ratchet"),
@@ -258,7 +261,10 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_assessment_action_launch.py", 156, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_assessment_actions.py", 167, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_assessment_checks.py", 267, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/api_v1_assessment_oast.py", 166, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_assessment_oast.py", 169, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/blueprints/api_v1_assessment_oast_launch.py", 191, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/blueprints/api_v1_assessment_zap.py", 210, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_assessments.py", 359, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_atlas_lookup.py", 27, "split-package-ratchet"),
@@ -309,7 +315,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_actions.py", 89, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_deltas.py", 277, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_worklist.py", 195, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/api_v1/openapi_assessment_oast.py", 228, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_assessment_oast.py", 287, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_zap.py", 330, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessments.py", 728, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_advisory.py", 66, "split-package-ratchet"),
@@ -328,7 +334,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/output_entities.py", 393, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_port_entities.py", 207, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_shodan.py", 74, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/output_signals.py", 1190, "split-target-phase4"),
+    ModuleSizeBudget("app/core/output_signals.py", 1195, "split-target-phase4"),
     ModuleSizeBudget("app/core/output_structured_signals.py", 223, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_targets.py", 239, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_target_recon.py", 62, "split-package-ratchet"),
@@ -451,7 +457,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/reconciliation_read.py", 231, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/reconciliation_read_filters.py", 90, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/recommended_actions.py", 107, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/recommended_action_profiles.py", 31, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/recommended_action_profiles.py", 35, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/recommended_action_queries.py", 41, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/schema.py", 10, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/serialization.py", 128, "split-package-ratchet"),
@@ -524,7 +530,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/runs/schemathesis_completion.py", 45, "split-package-ratchet"
     ),
-    ModuleSizeBudget("app/services/runs/execution_override.py", 48, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/execution_override.py", 65, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization.py", 1000, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_artifacts.py", 85, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_assessment_findings.py", 57, "split-package-ratchet"),
@@ -754,8 +760,21 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/services/assessments/assessment_oast.py",
-        333,
+        337,
         "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/assessment_oast_launch_confirmation.py",
+        193,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/assessment_oast_run_launch.py",
+        143,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/dalfox_oast_execution.py", 50, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/run_launch.py", 105, "split-package-ratchet"),
     ModuleSizeBudget(
@@ -825,7 +844,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/start.py", 219, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/start_context.py", 63, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/start_contracts.py", 30, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/runs/signal_context.py", 47, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/signal_context.py", 57, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/runs/schemathesis_execution_override.py", 29, "split-package-ratchet"
     ),
@@ -866,8 +885,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 261
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "6f68654ce6958d18a2d9f34edcfcff0fe5a1d7bc959e4005aced72838d038ed5"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 263
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "5cc4fdac428290171393e77c4dbcd0df758aebd530a5a199d99ad7ac8127ae7e"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

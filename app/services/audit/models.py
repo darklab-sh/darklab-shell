@@ -287,6 +287,8 @@ MANUAL_FINDING_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
 })
 
 ASSESSMENT_ACTION_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "parameter_observation_id",
+    "parameter_source_run_id",
     "schema_artifact_id",
     "schema_operation_count",
 })

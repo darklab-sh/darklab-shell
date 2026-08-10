@@ -951,6 +951,7 @@ class OutputSignalClassifier:
     nuclei_takeover_template: ReviewedNucleiTakeoverTemplate | None = None
     nuclei_template_snapshot: NucleiTemplateCacheSnapshot | None = None
     dalfox_xss_context: ReviewedDalfoxXssContext | None = None
+    dalfox_oast_validation: bool = False
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
@@ -960,7 +961,11 @@ class OutputSignalClassifier:
         self.is_help_output = _is_help_output_command(self.command, self.root)
         self.current_target: str | None = None
         self.current_nmap_service_target: str | None = None
-        self.dalfox_discovery = DalfoxParameterObservationState(self.command, self.source_run_id)
+        dalfox_command = "" if self.dalfox_oast_validation else self.command
+        self.dalfox_discovery = DalfoxParameterObservationState(
+            dalfox_command,
+            self.source_run_id,
+        )
         self.dalfox_xss = DalfoxXssObservationState(self.command, self.source_run_id, self.dalfox_xss_context)
         self.line_index = 0
         self.previous_text = ""

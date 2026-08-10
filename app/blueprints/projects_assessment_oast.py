@@ -78,6 +78,14 @@ def project_assessment_oast_correlations(project_id, assessment_id, check_id):
     session_id, team_id, error_response = project_routes._project_owner(capability)
     if error_response:
         return error_response
+    data = request.get_json(silent=True)
+    body = data if isinstance(data, dict) else {}
+    if request.method == "POST" and str(body.get("http_profile_id") or "").strip():
+        _session_id, _team_id, error_response = project_routes._project_owner(
+            Capability.MANAGE_SECRETS
+        )
+        if error_response:
+            return error_response
     try:
         if request.method == "GET":
             correlations = list_assessment_oast_correlations(
@@ -93,7 +101,7 @@ def project_assessment_oast_correlations(project_id, assessment_id, check_id):
             project_id,
             assessment_id,
             check_id,
-            request.get_json(silent=True),
+            data,
             team_id=team_id,
             actor_member_id=project_routes._project_actor_member_id(
                 session_id, team_id
