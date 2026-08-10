@@ -135,12 +135,8 @@ Resolve these choices and record the accepted contracts in `DECISIONS.md` before
   - Evaluate `smbclient`/`enum4linux-ng`, Net-SNMP tools, and LDAP client tools as an optional service-enumeration pack with pinned versions, safe command policies, structured adapters, and multi-arch container validation.
   - Keep credential attacks, spraying, unrestricted share downloads, and invasive directory modification disabled. Any future intrusive extension must be a separate operator opt-in and is not part of this item.
 
-#### Phase 9 — Add optional external scanner and OAST connectors
+#### Phase 9 — Add optional external scanner connectors
 
-- [ ] Add private OAST support through an operator-configured Interactsh-compatible service:
-  - Issue per-run/per-check correlation ids, keep callback credentials private, and attach bounded DNS/HTTP/SMTP/LDAP interaction evidence to the originating run, assessment check, entity, and finding.
-  - Deduplicate callbacks, reject callbacks outside the active correlation window, redact sensitive request fields, and make retention/cleanup behavior visible.
-  - Keep OAST use explicit and policy-gated; viewing a recommendation or running unrelated Nuclei checks must not allocate a callback domain.
 - [ ] Treat Greenbone/OpenVAS and similar full vulnerability managers as external systems:
   - Add a Greenbone result importer or connector only after its source format, ownership, duplicate handling, and Project/Atlas mapping are defined.
   - Prefer submit/status/result integration with an operator-managed deployment; do not embed its services, feeds, database, or scheduler into darklab_shell.

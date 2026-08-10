@@ -5,6 +5,10 @@
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
 import { launchAssessmentAction } from './project_assessment_actions.js';
+import {
+  createProjectAssessmentOastManager,
+  isPrivateOastCheck,
+} from './project_assessment_oast.js';
 import { createProjectAssessmentZapManager } from './project_assessment_zap.js';
 import { createProjectHttpProfileManager } from './project_http_profiles.js';
 import { openContextualFindingRecord } from '../findings/finding_record_context.js';
@@ -60,6 +64,7 @@ function createProjectAssessmentController(context) {
       st.detailError = '';
     });
     httpProfileManager.invalidate(id);
+    oastManager.invalidate(id);
     zapManager.invalidate(id);
   }
 
@@ -80,7 +85,18 @@ function createProjectAssessmentController(context) {
   }
 
   const httpProfileManager = createProjectHttpProfileManager(ctx, { renderViews });
+  const oastManager = createProjectAssessmentOastManager(ctx, { renderViews });
   const zapManager = createProjectAssessmentZapManager(ctx, { renderViews });
+
+  function loadOastHistoryForDetail(projectId, loadedDetail) {
+    const assessmentId = String(loadedDetail?.assessment?.id || '');
+    const checks = Array.isArray(loadedDetail?.checks?.checks)
+      ? loadedDetail.checks.checks
+      : [];
+    checks.filter(isPrivateOastCheck).forEach((check) => {
+      void oastManager.loadHistory(projectId, assessmentId, check?.id);
+    });
+  }
 
   function cycleSelection(st) {
     return st.assessments.find(item => String(item?.id || '') === st.selectedId)
@@ -121,6 +137,7 @@ function createProjectAssessmentController(context) {
         );
         if (!resp.ok) throw await responseError(resp, 'Could not load this assessment cycle.');
         st.detail = await resp.json();
+        loadOastHistoryForDetail(id, st.detail);
         return true;
       } catch (err) {
         st.detailError = err?.message || 'Could not load this assessment cycle.';
@@ -558,6 +575,26 @@ function createProjectAssessmentController(context) {
     }
   }
 
+  function openOast(projectId, detail, check, returnFocus = null) {
+    return oastManager.open(
+      projectId,
+      detail,
+      check,
+      httpProfileManager.profilesForLaunch(projectId),
+      returnFocus,
+    );
+  }
+
+  function startNewOast(projectId, detail, check, returnFocus = null) {
+    return oastManager.startNew(
+      projectId,
+      detail,
+      check,
+      httpProfileManager.profilesForLaunch(projectId),
+      returnFocus,
+    );
+  }
+
   function openZap(projectId, detail, check, returnFocus = null) {
     return zapManager.open(
       projectId,
@@ -586,6 +623,9 @@ function createProjectAssessmentController(context) {
     loadDetail,
     launchRecommendedAction,
     cancelZap: zapManager.cancel,
+    openOast,
+    openOastRunDetails: oastManager.openRunDetails,
+    refreshOast: oastManager.refresh,
     openZap,
     openZapAtlas: zapManager.openAtlas,
     openZapFiles: zapManager.openFiles,
@@ -596,7 +636,10 @@ function createProjectAssessmentController(context) {
     setFindingPage,
     setPage,
     transitionCycle,
+    startNewOast,
     startNewZap,
+    oastCurrentCorrelation: oastManager.currentCorrelation,
+    oastStateFor: oastManager.stateFor,
     zapStateFor: zapManager.stateFor,
     renderHttpProfiles: (projectId, options = {}) => httpProfileManager.renderSection(projectId, options),
   });
@@ -627,6 +670,7 @@ function createProjectAssessmentController(context) {
     invalidate,
     load,
     loadDetail,
+    oastStateFor: oastManager.stateFor,
     renderAssessment,
     renderMobileAssessmentTab,
     httpProfileStateFor: httpProfileManager.stateFor,

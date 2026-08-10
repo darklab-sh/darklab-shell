@@ -59,6 +59,7 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     openSecretsOptions: vi.fn(),
     openWorkspace: vi.fn(async () => true),
     openAtlas: vi.fn(async () => true),
+    openHistoryRunDetails: vi.fn(),
     apiFetch: projectWorkspaceRequest,
     attachActiveRunFromMonitor: vi.fn(async () => true),
     closeProjectWorkspace: vi.fn(),
@@ -286,6 +287,45 @@ const zapDetail = {
       },
     ],
     total: 2,
+    has_more: false,
+  },
+}
+
+const oastEvidence = {
+  source_run_id: 'run_parameter_discovery',
+  observation_id: 'dpo_query_term',
+  parameter: 'term',
+  location: 'query',
+  tool_version: 'Dalfox 2.12.0',
+}
+
+const oastDetail = {
+  ...detail,
+  assessment: {
+    ...detail.assessment,
+    profile_snapshot: {
+      checks: [{
+        key: 'blind_xss_validation',
+        label: 'Blind XSS validation',
+        purpose: 'Watch a private callback for server-side execution.',
+      }],
+    },
+  },
+  checks: {
+    ...detail.checks,
+    checks: [{
+      ...detail.checks.checks[0],
+      id: 'asmc_oast',
+      assessment_id: 'asmt_1',
+      check_key: 'blind_xss_validation',
+      target_entity_id: 'ent_oast_url',
+      target_type: 'url',
+      target_value: 'https://example.com/search?term=one',
+      policy_level: 'intrusive',
+      recommended_action_key: 'oast_private_callback',
+      state: 'not_started',
+    }],
+    total: 1,
     has_more: false,
   },
 }
@@ -635,6 +675,196 @@ describe('project assessment controller', () => {
       .find(button => button.textContent === 'Open Files')?.click()
     await Promise.resolve()
     expect(ctx.openWorkspace).toHaveBeenCalledTimes(1)
+    controller.invalidate('prj_1')
+  })
+
+  it('recovers, prepares, polls, and freshly confirms a private OAST run without rendering its callback', async () => {
+    const actionPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_oast/recommended-action'
+    const correlationPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_oast/oast-correlations'
+    const callbackUrl = 'https://private-callback.callbacks.example.test'
+    const planFor = selected => ({
+      action: { id: '', key: 'oast_private_callback', kind: '' },
+      target: {
+        entity_id: 'ent_oast_url',
+        type: 'url',
+        value: 'https://example.com/search?term=one',
+      },
+      http_profile: null,
+      policy_level: 'intrusive',
+      scope: { target_count: 1, fan_out: 1 },
+      bounds: {
+        summary: 'One reviewed URL and saved query parameter.',
+        credential_use: 'none',
+      },
+      display_command: "dalfox url 'https://example.com/search?term=one' -p term --blind 'https://[private-oast-callback]'",
+      launchable: false,
+      unavailable_reason: selected ? 'Prepare a private callback before this reviewed action can start.' : 'Choose saved evidence.',
+      plan_digest: selected ? 'b'.repeat(64) : 'a'.repeat(64),
+      evidence_selection: {
+        kind: 'dalfox_parameter_observation',
+        required: true,
+        overflow: false,
+        options: [oastEvidence],
+        selected: selected ? oastEvidence : null,
+      },
+      oast: {
+        preparable: selected,
+        callback_url: 'https://[private-oast-callback]',
+        reservation_window_seconds: 900,
+      },
+    })
+    const reserved = {
+      id: 'ocr_private_1',
+      project_id: 'prj_1',
+      assessment_id: 'asmt_1',
+      check_id: 'asmc_oast',
+      action_key: 'oast_private_callback',
+      run_id: '',
+      status: 'reserved',
+      provider_ready: false,
+      callback_url: 'https://[private-oast-callback]',
+      interaction_count: 0,
+      duplicate_count: 0,
+      rejected_count: 0,
+      active_until: '2026-08-05T10:15:00+00:00',
+      purge_at: '2026-08-12T10:15:00+00:00',
+    }
+    const ready = { ...reserved, provider_ready: true, callback_url: callbackUrl }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) return apiResponse({ profiles: [], total: 0 })
+      if (url === actionPath || url.startsWith(`${actionPath}?`)) {
+        return apiResponse({ plan: planFor(url.includes('parameter_observation_id=')) })
+      }
+      if (url === correlationPath && options.method === 'POST') {
+        return apiResponse({ correlation: reserved })
+      }
+      if (url === correlationPath) return apiResponse({ correlations: [] })
+      if (url === `${correlationPath}/${reserved.id}`) {
+        return apiResponse({ correlation: ready })
+      }
+      if (url === `${correlationPath}/${reserved.id}/launch` && options.method === 'POST') {
+        return apiResponse({
+          correlation_id: reserved.id,
+          run: {
+            run_id: 'run_oast_1',
+            run_type: 'external',
+            status: 'running',
+            command: planFor(true).display_command,
+            started: '2026-08-05T10:02:00+00:00',
+            stream: '/runs/run_oast_1/stream',
+          },
+          plan: planFor(true),
+        })
+      }
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(oastDetail)
+      return apiResponse({ assessments: [cycle], profiles, total: 1 })
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+    await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      correlationPath,
+      { cache: 'no-store' },
+    ))
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle')?.click()
+    ;[...container.querySelectorAll('.project-assessment-check-row .btn')]
+      .find(button => button.textContent === 'Prepare private callback')?.click()
+
+    await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      correlationPath,
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle')?.click()
+    expect(container.textContent).toContain('The private worker is preparing an app-owned callback')
+    expect(container.textContent).toContain('Callback window ends')
+    expect(container.textContent).not.toContain(callbackUrl)
+    ;[...container.querySelectorAll('.project-assessment-oast-actions .btn')]
+      .find(button => button.textContent === 'Refresh status')?.click()
+
+    await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      `${correlationPath}/${reserved.id}`,
+      { cache: 'no-store' },
+    ))
+    await vi.waitFor(() => expect(
+      controller.oastStateFor('prj_1', 'asmt_1', 'asmc_oast').correlations[0]?.provider_ready,
+    ).toBe(true))
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle')?.click()
+    expect(container.textContent).toContain('The private callback is ready')
+    expect(container.textContent).not.toContain(callbackUrl)
+    ;[...container.querySelectorAll('.project-assessment-oast-actions .btn')]
+      .find(button => button.textContent === 'Review and start run')?.click()
+
+    await vi.waitFor(() => expect(ctx.attachActiveRunFromMonitor).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run_oast_1' }),
+    ))
+    expect(ctx.closeProjectWorkspace).toHaveBeenCalledWith({ refocus: false })
+    const reservationCall = projectWorkspaceRequest.mock.calls.find(([url, options]) => (
+      url === correlationPath && options?.method === 'POST'
+    ))
+    expect(JSON.parse(reservationCall[1].body)).toEqual({
+      confirmed: true,
+      plan_digest: 'b'.repeat(64),
+      source_run_id: oastEvidence.source_run_id,
+      parameter_observation_id: oastEvidence.observation_id,
+    })
+    const launchCall = projectWorkspaceRequest.mock.calls.find(([url, options]) => (
+      url.endsWith('/launch') && options?.method === 'POST'
+    ))
+    expect(JSON.parse(launchCall[1].body)).toEqual(JSON.parse(reservationCall[1].body))
+    expect(JSON.stringify(ctx.showConfirm.mock.calls)).not.toContain(callbackUrl)
+    expect(ctx.logClientError).not.toHaveBeenCalled()
+    controller.invalidate('prj_1')
+  })
+
+  it('shows recovered private OAST interaction counts and retention with a Run Details handoff', async () => {
+    const correlationPath = '/projects/prj_1/assessments/asmt_1/checks/asmc_oast/oast-correlations'
+    const active = {
+      id: 'ocr_active_1',
+      project_id: 'prj_1',
+      assessment_id: 'asmt_1',
+      check_id: 'asmc_oast',
+      action_key: 'oast_private_callback',
+      run_id: 'run_oast_active',
+      status: 'active',
+      provider_ready: true,
+      callback_url: 'https://must-not-render.callbacks.example.test',
+      interaction_count: 2,
+      duplicate_count: 1,
+      rejected_count: 3,
+      active_until: '2026-08-05T10:15:00+00:00',
+      purge_at: '2026-08-12T10:15:00+00:00',
+    }
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/http-profiles')) return apiResponse({ profiles: [], total: 0 })
+      if (url === correlationPath) return apiResponse({ correlations: [active] })
+      if (url === `${correlationPath}/${active.id}`) return apiResponse({ correlation: active })
+      if (/\/assessments\/[^?]+/.test(url)) return apiResponse(oastDetail)
+      return apiResponse({ assessments: [cycle], profiles, total: 1 })
+    })
+    const ctx = makeContext(projectWorkspaceRequest)
+    const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
+    await controller.load('prj_1', { render: false })
+    await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      correlationPath,
+      { cache: 'no-store' },
+    ))
+    const container = document.createElement('div')
+    controller.renderAssessment(container, 'prj_1')
+    container.querySelector('.project-assessment-target-toggle')?.click()
+
+    expect(container.textContent).toContain('2 accepted interactions attached the source run as assessment evidence')
+    expect(container.textContent).toContain('2 accepted · 1 duplicate · 3 rejected')
+    expect(container.textContent).toContain('Cleanup eligible')
+    expect(container.textContent).not.toContain('must-not-render')
+    ;[...container.querySelectorAll('.project-assessment-oast-actions .btn')]
+      .find(button => button.textContent === 'Open Run Details')?.click()
+    expect(ctx.openHistoryRunDetails).toHaveBeenCalledWith({ id: 'run_oast_active' })
+    expect(ctx.closeProjectWorkspace).toHaveBeenCalledWith({ refocus: false })
     controller.invalidate('prj_1')
   })
 

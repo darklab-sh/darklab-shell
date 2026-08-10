@@ -2156,6 +2156,7 @@ let importedProjectWorkspaceShell;
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       showConfirm: _shellFn('showConfirm', importedShowConfirm),
       closeProjectWorkspace: (options = {}) => closeProjectWorkspace(options),
+      openHistoryRunDetails: _shellFn('openHistoryRunDetails', importedOpenHistoryRunDetails),
       openWorkspace: _shellFn('openWorkspace', importedOpenWorkspace),
       openAtlas: _shellOpenAtlas,
       openSecretsOptions: () => {

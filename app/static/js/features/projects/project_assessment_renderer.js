@@ -6,6 +6,7 @@
 import { bindDisclosure } from '../../ui/ui_disclosure.js';
 import { openActionSheet } from '../../ui/ui_action_sheet.js';
 import { renderNmapServiceEvidence } from '../nmap_service_evidence.js';
+import { isPrivateOastCheck } from './project_assessment_oast.js';
 import { renderAssessmentFindingWorklist } from './project_assessment_risk_renderer.js';
 
 const checkStateLabels = {
@@ -457,6 +458,7 @@ function createProjectAssessmentRenderer(context, actions) {
   }
 
   function actionLabel(check) {
+    if (isPrivateOastCheck(check)) return 'Prepare private callback';
     const [kind, actionId] = String(check?.recommended_action_key || '').split(':', 2);
     if (!actionId) return 'Run recommended action';
     if (kind === 'workflow') return `Open ${actionId} workflow`;
@@ -496,7 +498,31 @@ function createProjectAssessmentRenderer(context, actions) {
         action: () => act.openZap(projectId, detail, check, returnFocus),
       });
     }
-    if (check?.recommended_action_key) {
+    if (isPrivateOastCheck(check)) {
+      const oastState = act.oastStateFor?.(projectId, detail?.assessment?.id, check?.id);
+      const correlation = act.oastCurrentCorrelation?.(oastState) || null;
+      let label = 'Prepare private callback';
+      if (oastState?.loading) label = 'Loading private callback…';
+      else if (correlation?.status === 'active') label = 'Open private OAST run';
+      else if (correlation?.status === 'reserved' && correlation?.provider_ready) {
+        label = 'Review and start blind-XSS';
+      } else if (correlation?.status === 'reserved') label = 'View callback preparation';
+      else if (correlation && detail?.assessment?.status === 'active') label = 'Prepare new private callback';
+      items.push({
+        label,
+        disabled: Boolean(
+          oastState?.loading
+          || oastState?.mutating
+          || ctx.canRunCommands?.() === false
+        ),
+        disabledTitle: oastState?.loading
+          ? 'Private callback state is loading.'
+          : (oastState?.mutating
+            ? 'A private callback update is already in progress.'
+            : "View-only team members can't prepare or start private OAST runs."),
+        action: () => act.openOast(projectId, detail, check, returnFocus),
+      });
+    } else if (check?.recommended_action_key) {
       items.push({
         label: actionLabel(check),
         disabled: ctx.canRunCommands?.() === false,
@@ -511,6 +537,157 @@ function createProjectAssessmentRenderer(context, actions) {
       });
     }
     return items;
+  }
+
+  function oastStatusTone(correlation) {
+    const status = String(correlation?.status || '');
+    if (status === 'reserved' && correlation?.provider_ready) return 'green';
+    if (status === 'active' && Number(correlation?.interaction_count || 0) > 0) return 'green';
+    if (['reserved', 'active'].includes(status)) return 'amber';
+    if (['failed', 'expired'].includes(status)) return 'red';
+    return 'muted';
+  }
+
+  function oastStatusLabel(correlation) {
+    const status = String(correlation?.status || '');
+    if (status === 'reserved') return correlation?.provider_ready ? 'Ready' : 'Preparing';
+    if (status === 'active') {
+      return Number(correlation?.interaction_count || 0) > 0 ? 'Interactions found' : 'Watching';
+    }
+    const labels = {
+      closed: 'Closed',
+      expired: 'Expired',
+      failed: 'Failed',
+    };
+    return labels[status] || status || 'Unknown';
+  }
+
+  function oastStatusCopy(correlation) {
+    const status = String(correlation?.status || '');
+    const interactions = Number(correlation?.interaction_count || 0);
+    if (status === 'reserved' && correlation?.provider_ready) {
+      return 'The private callback is ready. Review the redacted plan again before starting the bounded blind-XSS run.';
+    }
+    if (status === 'reserved') {
+      return 'The private worker is preparing an app-owned callback. No scan has started.';
+    }
+    if (status === 'active' && interactions > 0) {
+      return `${interactions.toLocaleString()} accepted interaction${interactions === 1 ? '' : 's'} attached the source run as assessment evidence. This check needs human review.`;
+    }
+    if (status === 'active') {
+      return 'The bounded run is active and the private worker is watching for callbacks.';
+    }
+    if (status === 'closed' && interactions > 0) {
+      return `${interactions.toLocaleString()} accepted interaction${interactions === 1 ? '' : 's'} remain attached as bounded assessment evidence.`;
+    }
+    if (status === 'closed') return 'The callback window is closed. No new interactions are accepted.';
+    if (status === 'expired') return 'The callback window expired. Prepare a new callback to run this check again.';
+    if (status === 'failed') return 'The private worker could not keep this callback available.';
+    return '';
+  }
+
+  function renderOastStatus(projectId, detail, check) {
+    if (!isPrivateOastCheck(check)) return null;
+    const assessmentId = String(detail?.assessment?.id || '');
+    const st = act.oastStateFor?.(projectId, assessmentId, check?.id);
+    const correlation = act.oastCurrentCorrelation?.(st) || null;
+    if (!st || (!st.loading && !st.error && !correlation && !st.mutating)) return null;
+    const panel = makeElement('aside', 'project-assessment-oast-status');
+    const header = makeElement('div', 'project-assessment-oast-status-header');
+    header.appendChild(makeElement('strong', '', 'Private blind-XSS validation'));
+    if (correlation) {
+      header.appendChild(badge(oastStatusLabel(correlation), oastStatusTone(correlation)));
+    } else if (st.loading) {
+      header.appendChild(badge('Loading', 'muted'));
+    }
+    panel.appendChild(header);
+    if (st.error) panel.appendChild(makeElement('p', 'project-assessment-oast-error', st.error));
+    const mutationCopy = {
+      checking: 'Checking the exact private callback state…',
+      launching: 'Starting the bounded run and binding its private callback…',
+      planning: 'Rebuilding the redacted plan from saved evidence…',
+      reserving: 'Saving the confirmed callback reservation…',
+    };
+    if (mutationCopy[st.mutating]) {
+      panel.appendChild(makeElement('p', '', mutationCopy[st.mutating]));
+    }
+    if (correlation) {
+      const copy = oastStatusCopy(correlation);
+      if (copy) panel.appendChild(makeElement('p', '', copy));
+      const counts = [
+        `${Number(correlation.interaction_count || 0).toLocaleString()} accepted`,
+        `${Number(correlation.duplicate_count || 0).toLocaleString()} duplicate`,
+        `${Number(correlation.rejected_count || 0).toLocaleString()} rejected`,
+      ];
+      panel.appendChild(makeElement(
+        'small',
+        'project-assessment-oast-counts',
+        counts.join(' · '),
+      ));
+      const retention = makeElement('div', 'project-assessment-oast-retention');
+      if (correlation.active_until) {
+        retention.appendChild(makeElement(
+          'small',
+          '',
+          `Callback window ends ${displayDate(correlation.active_until)}`,
+        ));
+      }
+      if (correlation.purge_at) {
+        retention.appendChild(makeElement(
+          'small',
+          '',
+          `Cleanup eligible ${displayDate(correlation.purge_at)}`,
+        ));
+      }
+      if (retention.childElementCount) panel.appendChild(retention);
+      if (correlation.error_code) {
+        panel.appendChild(makeElement(
+          'small',
+          'project-assessment-oast-error-code',
+          `Worker status: ${correlation.error_code.replaceAll('_', ' ')}`,
+        ));
+      }
+    }
+    const actions = makeElement('div', 'project-assessment-oast-actions');
+    if (correlation?.status === 'reserved' && !correlation.provider_ready) {
+      actions.appendChild(zapButton(
+        'Refresh status',
+        button => act.refreshOast(
+          projectId,
+          assessmentId,
+          check.id,
+          correlation.id,
+          button,
+        ),
+        { disabled: Boolean(st.mutating || ctx.canRunCommands?.() === false) },
+      ));
+    }
+    if (correlation?.status === 'reserved' && correlation.provider_ready) {
+      actions.appendChild(zapButton(
+        'Review and start run',
+        button => act.openOast(projectId, detail, check, button),
+        { disabled: Boolean(st.mutating || ctx.canRunCommands?.() === false), primary: true },
+      ));
+    }
+    if (correlation?.run_id) {
+      actions.appendChild(zapButton(
+        'Open Run Details',
+        button => act.openOastRunDetails(st, correlation, button),
+      ));
+    }
+    if (
+      correlation
+      && ['closed', 'expired', 'failed'].includes(String(correlation.status || ''))
+      && detail?.assessment?.status === 'active'
+    ) {
+      actions.appendChild(zapButton(
+        'Prepare new callback',
+        button => act.startNewOast(projectId, detail, check, button),
+        { disabled: Boolean(st.mutating || ctx.canRunCommands?.() === false), primary: true },
+      ));
+    }
+    if (actions.childElementCount) panel.appendChild(actions);
+    return panel;
   }
 
   function zapStatusTone(status) {
@@ -721,6 +898,8 @@ function createProjectAssessmentRenderer(context, actions) {
       });
     }
     row.append(main, states);
+    const oastStatus = renderOastStatus(projectId, detail, check);
+    if (oastStatus) row.appendChild(oastStatus);
     const zapStatus = renderZapStatus(projectId, detail, check);
     if (zapStatus) row.appendChild(zapStatus);
     return row;

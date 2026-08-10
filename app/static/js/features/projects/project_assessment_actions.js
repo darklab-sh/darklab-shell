@@ -363,4 +363,14 @@ async function launchAssessmentAction(context, options = {}) {
   }
 }
 
-export { launchAssessmentAction };
+export {
+  chooseHttpProfile,
+  chooseParameterEvidence,
+  launchAssessmentAction,
+  planContent,
+  previewPath,
+  responseError,
+  restoreFocus,
+  supportsHttpProfile,
+  text,
+};
