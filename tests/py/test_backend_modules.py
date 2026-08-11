@@ -19276,6 +19276,12 @@ class TestDerivedCommandRegistry:
     def test_real_registry_commands_have_root_descriptions(self):
         registry = load_commands_registry()
         by_root = {str(item.get("root") or ""): item for item in registry.get("commands", [])}
+        sqlmap_sections = [
+            section
+            for section in ("commands", "pipe_helpers")
+            for item in registry.get(section, [])
+            if str(item.get("root") or "").strip() == "sqlmap"
+        ]
 
         missing = [
             str(item.get("root") or "<unknown>").strip()
@@ -19284,6 +19290,7 @@ class TestDerivedCommandRegistry:
         ]
 
         assert missing == []
+        assert sqlmap_sections == ["commands"]
         dalfox = by_root["dalfox"]
         assert dalfox["policy"]["allow"] == ["dalfox"]
         assert {
@@ -19315,10 +19322,17 @@ class TestDerivedCommandRegistry:
         )[0]
         sqlmap = by_root["sqlmap"]
         assert sqlmap["policy"]["allow"] == ["sqlmap"]
-        assert {"sqlmap --dump", "sqlmap --os-shell", "sqlmap --file-read", "sqlmap --technique"}.issubset(
+        assert {
+            "sqlmap --config-file",
+            "sqlmap --dump",
+            "sqlmap --os-shell",
+            "sqlmap --file-read",
+            "sqlmap --technique",
+        }.issubset(
             set(sqlmap["policy"]["deny"])
         )
         assert is_command_allowed("sqlmap https://darklab.sh/item?id=1")[0]
+        assert not is_command_allowed("sqlmap --config-file settings.ini")[0]
         assert not is_command_allowed("sqlmap https://darklab.sh/item?id=1 --dump")[0]
         ipinfo = by_root["ipinfo"]
         assert ipinfo["requires_secrets"] == [{"env": "IPINFO_TOKEN", "optional": True}]
