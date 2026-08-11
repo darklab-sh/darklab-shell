@@ -544,7 +544,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Tests
 
-- **The container smoke job now starts correctly in its Alpine CI runner.** The job invokes the POSIX smoke wrapper with the runner's available `sh` shell while preserving pipeline failure handling, so pytest can run and produce its JUnit and duration artifacts without requiring Bash.
+- **The container smoke job now starts correctly in its Alpine CI runner.** The job installs the application's pinned Python dependencies and invokes the POSIX smoke wrapper with the runner's available `sh` shell while preserving pipeline failure handling, so pytest can collect the full registry-backed corpus and produce its JUnit and duration artifacts without requiring Bash.
 - **Container smoke coverage now includes every current user-facing command.** Stored expectations cover GAU help and bounded URL collection, Schemathesis help and version output, SQLMap help, and both maintained bounded Nmap service-review commands. The browser capture helper also waits until the command runner is ready and uses the current HUD save and clear actions, so a fresh session can't mistake the welcome screen for the first command's output or lose a full transcript.
 - **The script-layout architecture guard now ignores Finder's `.DS_Store` metadata.** The exact directory and compatibility-entrypoint allowlists remain enforced, while an already-ignored macOS filesystem artifact no longer causes local failures.
 - **The configured Postgres cold-start smoke now allows for slower shared CI runners.** Its subprocess timeout covers migrations and the release-pinned EPSS/KEV baseline import without turning a functional integration check into a 30-second startup performance gate.

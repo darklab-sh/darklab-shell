@@ -2316,6 +2316,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "container-smoke-durations.txt" in "\n".join(
         container_smoke_job["artifacts"]["paths"]
     )
+    container_smoke_setup = "\n".join(container_smoke_job["before_script"])
+    assert "py3-pip" in container_smoke_setup
+    assert "-r app/requirements.txt" in container_smoke_setup
     container_smoke_script = "\n".join(container_smoke_job["script"])
     assert (
         "sh -o pipefail -c './scripts/container_smoke_test.sh "
