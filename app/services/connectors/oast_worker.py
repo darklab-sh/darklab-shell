@@ -28,6 +28,7 @@ from services.connectors.oast_correlation_lifecycle import (
 from services.connectors.oast_correlations import OastCorrelationError
 from services.connectors.oast_interactions import ingest_oast_interaction
 from services.connectors.oast_observability import (
+    clear_oast_retry,
     log_oast_cleanup_scope_mismatch,
     log_oast_provider_deregistration_failed,
     log_oast_provider_session_failed,
@@ -141,17 +142,24 @@ def process_oast_correlation(
             RuntimeError("configured provider scope changed"),
         )
         return
+    correlation_id = str(correlation.get("id") or "")
+    clear_oast_retry("OAST_PROVIDER_SCOPE_RETRY", correlation_id)
     try:
         session = _load_or_register_session(correlation, settings, token, cfg)
-        if session is None or str(correlation.get("status") or "") != "active":
+        if session is None:
+            return
+        if str(correlation.get("status") or "") != "active":
+            clear_oast_retry("OAST_PROVIDER_RETRY", correlation_id)
             return
         batch = poll_oast_provider_session(settings, token, session)
+        clear_oast_retry("OAST_PROVIDER_RETRY", correlation_id)
         provider_rejected = batch.rejected_count + batch.ignored_shared_count
         if provider_rejected:
             record_oast_provider_rejections(
                 str(correlation.get("id") or ""),
                 provider_rejected,
             )
+        interaction_rejections: dict[str, tuple[OastCorrelationError, int]] = {}
         for interaction in batch.interactions:
             try:
                 ingest_oast_interaction(
@@ -161,7 +169,20 @@ def process_oast_correlation(
                     team_id=str(correlation.get("team_id") or ""),
                 )
             except OastCorrelationError as exc:
-                log_oast_retry("OAST_INTERACTION_REJECTED", correlation, exc)
+                error_code = safe_oast_error_code(exc, "oast_interaction_rejected")
+                previous = interaction_rejections.get(error_code)
+                interaction_rejections[error_code] = (exc, 1 + (previous[1] if previous else 0))
+        if not interaction_rejections:
+            clear_oast_retry("OAST_INTERACTION_REJECTED", correlation_id)
+        for exc, rejected_count in interaction_rejections.values():
+            log_oast_retry(
+                "OAST_INTERACTION_REJECTED",
+                correlation,
+                exc,
+                retryable=False,
+                next_retry_seconds=0,
+                occurrence_count=rejected_count,
+            )
     except Exception as exc:  # noqa: BLE001
         log_oast_retry("OAST_PROVIDER_RETRY", correlation, exc)
 
@@ -183,6 +204,7 @@ def cleanup_oast_provider_session(
         log_oast_retry("OAST_PROVIDER_CLEANUP_RETRY", correlation, exc)
         return False
     discard_oast_provider_session(str(correlation.get("id") or ""), cfg)
+    clear_oast_retry("OAST_PROVIDER_CLEANUP_RETRY", str(correlation.get("id") or ""))
     return True
 
 
@@ -214,18 +236,15 @@ def run_once(
     try:
         token = resolve_oast_token(settings, environ=environ)
     except Exception as exc:  # noqa: BLE001
-        log.warning(
+        log_oast_retry(
             "OAST_PROVIDER_CREDENTIAL_RETRY",
-            extra={
-                "correlation_count": len(correlations) + len(terminal_rows),
-                "error_class": type(exc).__name__,
-                "error_code": safe_oast_error_code(
-                    exc, "oast_provider_credentials_unavailable"
-                ),
-            },
+            None,
+            exc,
+            correlation_count=len(correlations) + len(terminal_rows),
         )
         purge_oast_correlations(now=instant)
         return 0
+    clear_oast_retry("OAST_PROVIDER_CREDENTIAL_RETRY")
     processed = 0
     for correlation in terminal_rows:
         cleanup_oast_provider_session(correlation, settings, token, active_cfg)

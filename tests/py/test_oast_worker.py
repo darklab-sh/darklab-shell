@@ -21,6 +21,7 @@ from services.connectors.oast_config import (
     OastConnectorSettings,
     OastConnectorUnavailable,
 )
+from services.connectors.oast_correlations import OastCorrelationError
 from services.connectors.oast_provider_contracts import (
     OastProviderPollBatch,
     OastProviderSession,
@@ -116,6 +117,36 @@ def test_oast_worker_polls_active_session_and_records_bounded_rejects():
     rejected.assert_called_once_with(_CORRELATION_ID, 3)
     ingest.assert_called_once_with(
         "owner-a", _CORRELATION_ID, interaction, team_id=""
+    )
+
+
+def test_oast_worker_aggregates_interaction_rejections_by_error_code():
+    correlation = _correlation("active")
+    interaction = {
+        "protocol": "dns",
+        "callback_label": _CALLBACK_LABEL,
+        "observed_at": "2026-08-09T12:00:00+00:00",
+        "details": {},
+    }
+    rejected = OastCorrelationError("oast_interaction_scope_mismatch", "private")
+    batch = OastProviderPollBatch((interaction, interaction), 0, 0)
+    with (
+        mock.patch.object(oast_worker, "oast_provider_session_is_staged", return_value=True),
+        mock.patch.object(oast_worker, "load_oast_provider_session", return_value=_session()),
+        mock.patch.object(oast_worker, "poll_oast_provider_session", return_value=batch),
+        mock.patch.object(oast_worker, "ingest_oast_interaction", side_effect=rejected),
+        mock.patch.object(oast_worker, "log_oast_retry") as retry_log,
+    ):
+        oast_worker.process_oast_correlation(
+            correlation, _settings(), "provider-token", {"data_dir": "/tmp/data"}
+        )
+    retry_log.assert_called_once_with(
+        "OAST_INTERACTION_REJECTED",
+        correlation,
+        rejected,
+        retryable=False,
+        next_retry_seconds=0,
+        occurrence_count=2,
     )
 
 
@@ -295,6 +326,36 @@ def test_oast_cleanup_observability_is_bounded_and_redacted():
     assert "/private/spool/path" not in repr(kwargs)
 
 
+def test_oast_retry_observability_suppresses_repeats_with_attempt_context():
+    event = "OAST_TEST_RETRY"
+    correlation = _correlation("active")
+    failure = RuntimeError("provider payload secret")
+    oast_observability.clear_oast_retry(event, _CORRELATION_ID)
+    with (
+        mock.patch.object(
+            oast_observability,
+            "claim_oast_warning",
+            side_effect=((True, 0), (False, 1)),
+        ),
+        mock.patch.object(oast_observability.log, "warning") as warning_log,
+        mock.patch.object(oast_observability.log, "debug") as debug_log,
+    ):
+        oast_observability.log_oast_retry(event, correlation, failure)
+        oast_observability.log_oast_retry(event, correlation, failure)
+
+    warning_log.assert_called_once()
+    assert warning_log.call_args.args == (event,)
+    assert warning_log.call_args.kwargs["extra"]["attempt"] == 1
+    assert warning_log.call_args.kwargs["extra"]["retryable"] is True
+    assert warning_log.call_args.kwargs["extra"]["next_retry_seconds"] == 5.0
+    debug_log.assert_called_once()
+    assert debug_log.call_args.args == ("OAST_PROVIDER_RETRY_SUPPRESSED",)
+    assert debug_log.call_args.kwargs["extra"]["attempt"] == 2
+    assert debug_log.call_args.kwargs["extra"]["suppressed_repeat_count"] == 1
+    assert "provider payload secret" not in repr(warning_log.call_args)
+    assert "provider payload secret" not in repr(debug_log.call_args)
+
+
 def test_oast_readiness_reports_spool_failure_once_without_private_values():
     unavailable = OastProviderSessionSpoolError(
         "oast_provider_spool_unavailable", "private path"
@@ -398,11 +459,18 @@ def test_oast_worker_tick_keeps_live_work_when_credentials_are_unavailable():
             "resolve_oast_token",
             side_effect=OastConnectorUnavailable("oast_token_unavailable", "missing"),
         ),
+        mock.patch.object(oast_worker, "log_oast_retry") as retry_log,
         mock.patch.object(oast_worker, "process_oast_correlation") as process,
         mock.patch.object(oast_worker, "purge_oast_correlations"),
     ):
         assert oast_worker.run_once(cfg={"data_dir": "/tmp/data"}) == 0
     process.assert_not_called()
+    retry_log.assert_called_once()
+    assert retry_log.call_args.args[0:2] == (
+        "OAST_PROVIDER_CREDENTIAL_RETRY",
+        None,
+    )
+    assert retry_log.call_args.kwargs["correlation_count"] == 1
 
 
 def test_oast_worker_state_queries_are_bounded_and_update_active_rejects():

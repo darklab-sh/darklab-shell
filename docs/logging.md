@@ -251,6 +251,7 @@ The current event inventory is:
 | DEBUG | `AI_SUGGESTION_VALIDATION_COMPLETED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
 | DEBUG | `AI_WORKER_BUSY` | AI worker coordination | max_concurrent |
 | DEBUG | `HTTPX_SCREENSHOT_OUTPUT_CLEANED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
+| DEBUG | `OAST_PROVIDER_RETRY_SUPPRESSED` | private OAST retry suppression | retry_event, correlation_id when applicable, correlation_status, correlation_count when applicable, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
 | INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
 | INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, team_id, source, schedule_id, removed |
@@ -362,6 +363,11 @@ The current event inventory is:
 | WARN | `OAST_SESSION_SPOOL_SCAN_DEGRADED` | private OAST session reconciliation | failure_count, error_classes, suppressed_repeat_count |
 | WARN | `OAST_SESSION_SPOOL_UNAVAILABLE` | private OAST readiness check | correlation_id, error_class, error_code, suppressed_repeat_count |
 | WARN | `OAST_PROVIDER_CLEANUP_SCOPE_MISMATCH` | private OAST terminal cleanup | correlation_id, correlation_status, connector_disabled, privacy_acknowledgement_missing, callback_scope_changed, service_origin_changed, suppressed_repeat_count |
+| WARN | `OAST_PROVIDER_SCOPE_RETRY` | private OAST scope recovery | correlation_id, correlation_status, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| WARN | `OAST_PROVIDER_RETRY` | private OAST provider recovery | correlation_id, correlation_status, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| WARN | `OAST_PROVIDER_CLEANUP_RETRY` | private OAST terminal cleanup | correlation_id, correlation_status, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| WARN | `OAST_INTERACTION_REJECTED` | private OAST interaction ingestion | correlation_id, correlation_status, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| WARN | `OAST_PROVIDER_CREDENTIAL_RETRY` | private OAST credential recovery | correlation_count, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
 | WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `CVE_RISK_BOOTSTRAP_UNAVAILABLE` | bundled public-risk bootstrap | reason |
