@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from config import resolve_data_dir
+from services.connectors import zap_observability
 from services.connectors.zap_http import ZapTransportError
 from services.connectors.zap_plan_contracts import (
     ReviewedZapAutomationPlan,
@@ -49,9 +50,7 @@ def _plan_path(job_id: str, cfg: Mapping[str, Any] | None = None) -> Path:
 
 
 def store_zap_job_plan(
-    job_id: str,
-    plan: ReviewedZapAutomationPlan,
-    cfg: Mapping[str, Any] | None = None,
+    job_id: str, plan: ReviewedZapAutomationPlan, cfg: Mapping[str, Any] | None = None
 ) -> None:
     payload = bytes(plan.yaml_bytes)
     if not payload or len(payload) > _MAX_PLAN_BYTES:
@@ -90,9 +89,7 @@ def _summary_from_job(job: Mapping[str, Any]) -> ZapAutomationPlanSummary:
             job_timeout_seconds=int(value["job_timeout_seconds"]),
             report_file=str(value["report_file"]),
             scope_policy_id=str(value["scope_policy_id"]),
-            allowed_target_cidrs_sha256=str(
-                value["allowed_target_cidrs_sha256"]
-            ),
+            allowed_target_cidrs_sha256=str(value["allowed_target_cidrs_sha256"]),
             egress_proxy=str(value["egress_proxy"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -117,11 +114,13 @@ def load_zap_job_plan(
     return ReviewedZapAutomationPlan(yaml_bytes=payload, summary=_summary_from_job(job))
 
 
-def discard_zap_job_plan(job_id: str, cfg: Mapping[str, Any] | None = None) -> None:
+def discard_zap_job_plan(job_id: str, cfg: Mapping[str, Any] | None = None) -> bool:
     try:
         _plan_path(job_id, cfg).unlink(missing_ok=True)
-    except (OSError, ZapTransportError):
-        return
+    except (OSError, ZapTransportError) as exc:
+        zap_observability.log_zap_plan_spool_cleanup_failed(job_id, exc)
+        return False
+    return True
 
 
 def stale_zap_job_plan_ids(
@@ -133,18 +132,22 @@ def stale_zap_job_plan_ids(
     """Return a bounded set of old plan spools eligible for database reconciliation."""
     cutoff = (time.time() if now is None else float(now)) - max(60, int(grace_seconds))
     candidates: list[str] = []
+    scan_errors: dict[str, int] = {}
     for path in sorted(_spool_dir(cfg).glob("zpj_*.yaml"))[:256]:
         try:
             path_stat = path.lstat()
-        except OSError:
+        except OSError as exc:
+            scan_errors[type(exc).__name__] = scan_errors.get(type(exc).__name__, 0) + 1
             continue
         if not stat.S_ISREG(path_stat.st_mode) or path_stat.st_mtime > cutoff:
             continue
         try:
             zap_transfer_paths(path.stem, "report.json")
-        except ZapTransportError:
+        except ZapTransportError as exc:
+            scan_errors[type(exc).__name__] = scan_errors.get(type(exc).__name__, 0) + 1
             continue
         candidates.append(path.stem)
+    zap_observability.log_zap_plan_spool_scan_degraded(scan_errors)
     return tuple(candidates)
 
 

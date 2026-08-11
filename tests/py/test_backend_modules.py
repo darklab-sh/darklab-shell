@@ -3631,6 +3631,7 @@ class TestLoadConfig:
         assert exc_info.value.code == "zap_response_too_large"
 
         from services.connectors import zap_job_artifacts as zap_artifact_module
+        from services.connectors import zap_observability
         from services.connectors import zap_worker as zap_worker_module
         from services.connectors import zap_worker_lock as zap_worker_lock_module
         from services.connectors.zap_job_artifacts import (
@@ -3663,7 +3664,7 @@ class TestLoadConfig:
                 assert stored_plan_path.read_bytes() == safe_plan.yaml_bytes
                 assert stored_plan_path.stat().st_mode & 0o777 == 0o600
                 assert load_zap_job_plan(artifact_job, artifact_cfg) == safe_plan
-                discard_zap_job_plan(job_id, artifact_cfg)
+                assert discard_zap_job_plan(job_id, artifact_cfg) is True
                 assert not stored_plan_path.exists()
                 store_zap_job_plan(job_id, safe_plan, artifact_cfg)
                 os.utime(stored_plan_path, (1, 1))
@@ -3673,6 +3674,60 @@ class TestLoadConfig:
                     grace_seconds=300,
                 ) == (job_id,)
                 discard_zap_job_plan(job_id, artifact_cfg)
+            cleanup_error = OSError("/private/zap/plan.yaml target-secret")
+            private_path = mock.Mock()
+            private_path.unlink.side_effect = cleanup_error
+            with (
+                mock.patch.object(
+                    zap_artifact_module, "_plan_path", return_value=private_path
+                ),
+                mock.patch.object(zap_observability.log, "error") as error_log,
+            ):
+                assert discard_zap_job_plan(job_id, artifact_cfg) is False
+            assert error_log.call_args.args == ("ZAP_PLAN_SPOOL_CLEANUP_FAILED",)
+            assert error_log.call_args.kwargs["extra"] == {
+                "job_id": job_id,
+                "cleanup_stage": "reviewed_plan_spool",
+                "error_class": "OSError",
+            }
+            assert "target-secret" not in repr(error_log.call_args)
+            assert "/private/zap" not in repr(error_log.call_args)
+
+            unreadable_plan = mock.Mock()
+            unreadable_plan.lstat.side_effect = OSError("/private/zap/scan")
+            private_spool = mock.Mock()
+            private_spool.glob.return_value = [unreadable_plan]
+            with (
+                mock.patch.object(
+                    zap_artifact_module, "_spool_dir", return_value=private_spool
+                ),
+                mock.patch.object(
+                    zap_observability, "log_zap_plan_spool_scan_degraded"
+                ) as degraded_log,
+            ):
+                assert stale_zap_job_plan_ids(artifact_cfg, now=601) == ()
+            degraded_log.assert_called_once_with({"OSError": 1})
+
+            assert zap_observability.claim_zap_warning(
+                "ZAP_TEST_WARNING", now=100.0
+            ) == (True, 0)
+            assert zap_observability.claim_zap_warning(
+                "ZAP_TEST_WARNING", now=101.0
+            ) == (False, 1)
+            with (
+                mock.patch.object(
+                    zap_observability, "claim_zap_warning", return_value=(True, 2)
+                ),
+                mock.patch.object(zap_observability.log, "warning") as warning_log,
+            ):
+                zap_observability.log_zap_plan_spool_scan_degraded({"OSError": 3})
+            assert warning_log.call_args.args == ("ZAP_PLAN_SPOOL_SCAN_DEGRADED",)
+            assert warning_log.call_args.kwargs["extra"] == {
+                "failure_count": 3,
+                "error_classes": "OSError",
+                "suppressed_repeat_count": 2,
+            }
+            assert "/private/zap" not in repr(warning_log.call_args)
             with (
                 mock.patch.object(zap_worker_module, "new_zap_job_id", return_value=job_id),
                 mock.patch.object(zap_worker_module, "store_zap_job_plan") as store_plan,

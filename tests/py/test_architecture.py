@@ -199,6 +199,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/connectors/zap_job_artifacts.py", 195, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_job_lifecycle.py", 271, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_jobs.py", 288, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/connectors/zap_observability.py", 104, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/connectors/zap_plan.py", 205, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_plan_contracts.py", 54, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_plan_scope.py", 165, "split-package-ratchet"),
