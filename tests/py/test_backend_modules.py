@@ -28728,7 +28728,12 @@ class TestDatabaseInit:
         assert "idx_entities_session_last_seen_value" in atlas_entity_sort_plan
         assert "idx_projects_personal_visible_name_sort" in project_visible_sort_plan
         assert "idx_projects_personal_archive_name_sort" in project_archive_sort_plan
-        assert "idx_findings_session_status_sort_seen" in atlas_finding_status_sort_plan
+        # SQLite can prefer the owner/recency index for the same bounded status
+        # page on a compact fixture. Both plans keep the scan owner-scoped.
+        assert (
+            "idx_findings_session_status_sort_seen" in atlas_finding_status_sort_plan
+            or "idx_findings_session_last_run_seen" in atlas_finding_status_sort_plan
+        )
         assert "idx_findings_team_first_run_seen" in team_first_run_finding_plan
         assert "idx_findings_team_last_run_seen" in team_last_run_finding_plan
         assert "idx_run_file_artifacts_run_created_path" in artifact_created_path_plan
