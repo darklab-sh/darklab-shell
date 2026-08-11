@@ -547,6 +547,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **The headless API guide now has resource-oriented navigation.** The introduction reflects the full versioned `/api/v1` surface, and a contents list links directly to authentication, shared contracts, Projects and Assessments, connectors, teams, runs, Atlas, automation, streaming, and CLI guidance.
 - **The testing handbook now starts each suite with its purpose and canonical command.** Pytest, Vitest, and Playwright details are grouped by backend, import, connector, evidence, Assessment, browser-journey, and harness topics so contributors can choose a layer before reading its full coverage contract.
 - **The Project Workspaces feature reference is organized by task.** Short sections now separate Assessment state and actions, ZAP/OAST connectors, Project records, finding verification, Web Surface, HTTP profiles, packages, reports, and monitoring so readers can find limits and failure behavior without unpacking page-wide bullets.
 - **The README now gives Project assessments a short start-to-handoff path.** Scannable sections explain how to run a cycle, use reviewed actions, work with optional integrations, review findings, and export the saved context, while detailed limits and safety contracts stay in the focused guides.

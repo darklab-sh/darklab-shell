@@ -1,6 +1,6 @@
 # Headless API and CLI
 
-darklab_shell exposes a small `/api/v1` surface for scripts, CI jobs, and local terminals that need to start runs or read saved data without opening the browser UI. The API uses the same session token, command validation, brokered run lifecycle, artifact storage, project query services, and shared per-IP rate-limit policy as the browser run routes.
+darklab_shell exposes a versioned `/api/v1` headless API for scripts, CI jobs, and local terminals that need to start runs or read saved data without opening the browser UI. The API uses the same session token, command validation, brokered run lifecycle, artifact storage, Project query services, and shared per-IP rate-limit policy as the browser run routes.
 
 The bundled `darklab` CLI is a thin wrapper around this API. Install it from the repo root with:
 
@@ -21,6 +21,32 @@ installs completion for the detected shell, while `darklab completion bash`,
 `darklab completion zsh`, and `darklab completion fish` print the scripts without
 installing them. Completion covers CLI commands, nested command groups, option
 names, and fixed choices such as output formats and notification channel kinds.
+
+---
+
+## Contents
+
+- [Auth](#auth)
+- [Versioning](#versioning)
+- [Common Shapes](#common-shapes)
+- [Routes](#routes)
+  - [Exact OSV package lookup](#exact-osv-package-lookup)
+- [Project Assessments](#project-assessments)
+  - [HTTP profiles](#http-profiles)
+  - [Recommended actions](#recommended-actions)
+  - [External ZAP jobs](#external-zap-jobs)
+  - [Private OAST reservations](#private-oast-reservations)
+  - [Finding and run evidence](#finding-and-run-evidence)
+- [Teams](#teams)
+- [Running Commands](#running-commands)
+- [Atlas](#atlas)
+- [Schedules](#schedules)
+- [Watchers](#watchers)
+- [Notifications](#notifications)
+- [Streaming](#streaming)
+- [CLI Commands](#cli-commands)
+- [CLI Configuration](#cli-configuration)
+- [Related Docs](#related-docs)
 
 ---
 
