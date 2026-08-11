@@ -28434,13 +28434,20 @@ class TestDatabaseInit:
                 )
                 conn.executemany(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, target_id, title, created, last_seen_at) "
-                    "VALUES (?, 'scope-session', ?, ?, 'Plan finding', ?, ?)",
+                    "(id, session_id, run_id, target_id, status, title, created, last_seen_at) "
+                    "VALUES (?, 'scope-session', ?, ?, ?, 'Plan finding', ?, ?)",
                     [
                         (
                             f"finding-plan-{index:03}",
                             "run-1" if index < 40 else f"run-plan-{index:03}",
                             f"target-plan-{index:03}",
+                            (
+                                "new",
+                                "needs_followup",
+                                "important",
+                                "reviewed",
+                                "false_positive",
+                            )[index % 5],
                             timestamp,
                             timestamp,
                         )
