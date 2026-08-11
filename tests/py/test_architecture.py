@@ -1417,6 +1417,12 @@ class TestScriptEntrypointLayout:
         assert actual_directories == expected_directories
         assert actual_top_level_files == expected_top_level_files
 
+        container_smoke_wrapper = (
+            scripts_root / "container_smoke_test.sh"
+        ).read_text(encoding="utf-8")
+        assert 'sh "$ROOT_DIR/scripts/run_pytest.sh"' in container_smoke_wrapper
+        assert "python3 -m pytest" not in container_smoke_wrapper
+
         wrappers = {
             "backup_system.py": "operations/backup_system.py",
             "build_release_payload.py": "release/build_release_payload.py",
