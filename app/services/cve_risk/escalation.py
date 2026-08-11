@@ -475,7 +475,10 @@ def risk_work_page_query(
 
     return (
         "SELECT * FROM cve_risk_work_items WHERE status IN ('pending', 'failed') "
-        "AND attempts < ? AND (next_attempt_at = '' OR next_attempt_at <= ?) "
+        # Empty strings are the immediate-work sentinel and sort before every
+        # normalized ISO timestamp, so this range keeps both cases on the
+        # status/next-attempt index without an OR branch.
+        "AND attempts < ? AND next_attempt_at <= ? "
         "ORDER BY created_at, id LIMIT ?",
         (int(max_attempts), str(due_at or ""), int(limit)),
     )

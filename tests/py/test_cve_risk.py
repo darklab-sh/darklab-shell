@@ -3106,6 +3106,7 @@ def test_failed_work_item_rolls_back_and_retries_without_payload_logging(risk_db
     assert risk_db.execute("SELECT COUNT(*) AS count FROM risk_escalations").fetchone()["count"] == 0
 
     monkeypatch.setattr(escalation, "_process_group", original)
+    assert process_risk_work(risk_db)["escalations"] == 0
     risk_db.execute("UPDATE cve_risk_work_items SET next_attempt_at = ''")
     assert process_risk_work(risk_db)["escalations"] == 1
 
