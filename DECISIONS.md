@@ -41,7 +41,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [URL Entity Host Links](#url-entity-host-links)
   - [Quick Lookup Reuses the Atlas Surface](#quick-lookup-reuses-the-atlas-surface)
 - [Assessment Decisions](#assessment-decisions)
-  - [Assessment Delivery and Runtime Ownership](#assessment-delivery-and-runtime-ownership)
+- [Assessment Catalog and Runtime Ownership](#assessment-catalog-and-runtime-ownership)
   - [Shared CVE Risk Data and Ranking](#shared-cve-risk-data-and-ranking)
   - [Assessment History, Evidence, and Finding Identity](#assessment-history-evidence-and-finding-identity)
   - [Assessment Execution, Secrets, and Packaging](#assessment-execution-secrets-and-packaging)
@@ -206,11 +206,11 @@ A second modal would also duplicate the scrim, focus trap, mobile sheet, close b
 
 ## Assessment Decisions
 
-### Assessment Delivery and Runtime Ownership
+### Assessment Catalog and Runtime Ownership
 
-**CVE risk intelligence ships first, followed by a thin, complete assessment workspace slice.**
+**Five maintained profiles share one frozen Assessment model, while durable background work stays with the scheduler.**
 
-The public EPSS and CISA KEV data path is useful without the assessment workspace, so it lands independently before assessment schema and routes depend on it. The first workspace release then carries the Network and Web profiles through cycle creation, evidence matching, API, desktop, and mobile. Network, Web, API, TLS, and Combined profiles share one schema from the start, but the remaining profiles and scanner integrations do not block validation of that first end-to-end slice.
+Network, Web, API, TLS, and Combined profiles use the same cycle, target, check, evidence, browser, API, and CLI contracts. A cycle freezes its selected profile and applicable target/check rows when it starts, so later catalog changes don't rewrite saved coverage. EPSS and CISA KEV remain independent risk-intelligence inputs: they can prioritize findings without changing whether an Assessment check is covered.
 
 The scheduler owns database-backed feed refresh jobs, leases, and resumable risk-escalation work. Notification workers deliver queued notifications but do not own durable refresh or escalation state, and Redis is not required to preserve either workflow. Optional ZAP, private OAST, and Greenbone systems stay outside the primary image. ZAP has a disabled-by-default operator configuration boundary: its API origin can't carry credentials or a request path, its key comes from an environment reference, every target must resolve inside an explicit CIDR, and concurrency, runtime, TLS, and report-size choices are fixed before any connector call. Its Automation Framework documents are generated locally for review. Safe policy is passive and doesn't submit forms; active scanning requires the separate intrusive-action gate. Protected HTTP profile material isn't written into plans. Reading settings or generating a plan doesn't submit work.
 
