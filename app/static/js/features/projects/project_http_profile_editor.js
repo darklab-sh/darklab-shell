@@ -108,7 +108,6 @@ function profileForm(profile = null) {
   };
   controls.enabled = document.createElement('input');
   controls.enabled.type = 'checkbox';
-  controls.enabled.className = 'form-check';
   controls.enabled.checked = current.enabled !== false;
 
   const content = document.createElement('div');
@@ -149,7 +148,7 @@ function profileForm(profile = null) {
   );
 
   const enabled = document.createElement('label');
-  enabled.className = 'control-row project-http-profile-enabled';
+  enabled.className = 'form-check project-http-profile-enabled';
   const enabledCopy = document.createElement('span');
   enabledCopy.textContent = 'Allow this profile to be selected for assessment runs';
   enabled.append(controls.enabled, enabledCopy);

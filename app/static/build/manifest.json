@@ -416,8 +416,8 @@
       "hash": "2c6f9e64a3dbf233ed8ae70c1e3c104de92e349c9e6f6bbf4d64a93b8ea82fe6"
     },
     "/static/js/features/projects/project_assessment.js": {
-      "path": "/static/build/static-project-assessment.37283fc62380.js",
-      "hash": "3fe33916f54855121512d6b8eca4a857759223012035681bcdb7d08142e235a0"
+      "path": "/static/build/static-project-assessment.b3083d426c06.js",
+      "hash": "2e4795e8e7d998ce54af93f4407891e65e58026a3f130d169cbd9dea39d15102"
     },
     "/static/js/features/projects/project_assessment_actions.js": {
       "path": "/static/build/static-project-assessment-actions.863fd4ccc678.js",
@@ -472,12 +472,12 @@
       "hash": "50d4be7371b557548cbbe68ffec2815dcbe03a7e56655294fb34e292f2c60364"
     },
     "/static/js/features/projects/project_http_profile_editor.js": {
-      "path": "/static/build/static-project-http-profile-editor.36b32fa5e6a2.js",
-      "hash": "aacdc0d07ddafbb3b020f591fce75e55bda2e16d5610bdac7f91c86f69b4052a"
+      "path": "/static/build/static-project-http-profile-editor.2baa62dc493b.js",
+      "hash": "8fa293bad1ea44c853d39778f6aeb56f3d476aec3a6b40e6cfecd2ae04d19169"
     },
     "/static/js/features/projects/project_http_profiles.js": {
-      "path": "/static/build/static-project-http-profiles.df32ecbfccd2.js",
-      "hash": "7722e0239287554809ea0277552dfb56a29c0ae4af799465caf89b3e57492f14"
+      "path": "/static/build/static-project-http-profiles.4216b564eee0.js",
+      "hash": "b2701ac787199bb328c8684116c49c64d79cd480827f52a95e9915366c0054f7"
     },
     "/static/js/features/projects/project_list.js": {
       "path": "/static/build/static-project-list.028be2322699.js",

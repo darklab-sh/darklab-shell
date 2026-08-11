@@ -404,6 +404,11 @@ describe('project assessment controller', () => {
       if (options.body?.text === 'Create an HTTP assessment profile') {
         const fields = [...options.content.querySelectorAll('.project-http-profile-field')]
         const control = label => fields.find(field => field.textContent.startsWith(label))?.querySelector('input, textarea')
+        const enabled = options.content.querySelector('.project-http-profile-enabled')
+        expect(enabled?.tagName).toBe('LABEL')
+        expect(enabled?.classList.contains('form-check')).toBe(true)
+        expect(enabled?.classList.contains('control-row')).toBe(false)
+        expect(enabled?.querySelector('input[type="checkbox"]')?.classList.contains('form-check')).toBe(false)
         control('Profile name').value = 'Admin role'
         control('Authentication role').value = 'admin'
         control('Base URL').value = 'https://example.com/'
