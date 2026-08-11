@@ -541,6 +541,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Anonymous HTTPx Assessment recommendations now keep request bounds.** Runs without a saved HTTP profile use the maintained defaults of 10 requests per second and five workers, while protected runs continue to use the selected profile's limits.
 - **Protected Assessment launches no longer load the same HTTP profile twice during materialization.** The launch reuses the already scoped and validated profile when it builds private tool settings, keeping the safety checks intact while removing the duplicate database query.
 - **The ZAP connector now rechecks its service scheme at the runtime boundary.** Even a caller that supplies connector settings outside the normal validated startup path can't hand the transport a non-HTTP(S) service URL.
 - **Assessment deletion refusals now explain what to do next.** If a stale browser view asks to delete a cycle the server no longer considers archived, the Assessment tab tells the operator to archive it before retrying instead of silently stopping after the deletion preview.

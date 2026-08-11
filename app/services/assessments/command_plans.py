@@ -102,7 +102,6 @@ def command_plan(
             concurrency,
             credential_use,
             protected_suffix,
-            profiled=bool(http_profile),
             nuclei_args=nuclei_profile_args(nuclei_profile),
         ),
     }

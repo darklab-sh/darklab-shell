@@ -13,11 +13,10 @@ def web_command_plans(
     credential_use: str,
     protected_suffix: str,
     *,
-    profiled: bool,
     nuclei_args: tuple[str, ...] = ("-severity", "high,critical"),
 ) -> dict[str, CommandPlan]:
     """Return the maintained web command-plan family for one target."""
-    httpx_bounds = f" -rl {rate} -threads {concurrency}" if profiled else ""
+    httpx_bounds = f" -rl {rate} -threads {concurrency}"
     return {
         "curl": CommandPlan(
             f"curl -q --silent --show-error --head --no-location --noproxy '*' "
@@ -32,7 +31,8 @@ def web_command_plans(
         "httpx": CommandPlan(
             f"httpx -u {target} -status-code -title -tech-detect -json -cpe -silent"
             f"{httpx_bounds}{protected_suffix}",
-            "One approved host or URL with structured response and versioned CPE metadata only.",
+            f"One approved host or URL with structured response and versioned CPE metadata, "
+            f"{rate} requests per second, and concurrency {concurrency}.",
             None,
             None,
             credential_use,

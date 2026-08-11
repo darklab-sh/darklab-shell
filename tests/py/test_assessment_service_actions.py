@@ -3724,7 +3724,9 @@ def test_httpx_assessment_plan_requests_structured_versioned_cpe_output():
     plan = command_plan("httpx", "url", "https://app.example.test")
     assert plan is not None
     assert "-tech-detect -json -cpe -silent" in plan.command
+    assert "-rl 10 -threads 5" in plan.command
     assert "versioned CPE metadata" in plan.boundary
+    assert "10 requests per second, and concurrency 5" in plan.boundary
 
 
 def test_gau_output_carries_historical_url_provenance_only():
