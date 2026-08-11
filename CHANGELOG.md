@@ -527,6 +527,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Active Assessment checks can now record manual decisions in the browser.** Desktop and mobile assessors can mark a check blocked, intentionally skipped, or not applicable with a required reason, then restore its evidence-derived state later. Completed and archived cycles stay read-only, and view-only team members see the same disabled action.
 - **Assessment, Atlas, CVE-risk, Project, run, and workflow helpers now expose stricter Python type contracts.** The runtime code narrows optional JSON, database, and launch values before using them, and shared read helpers accept covariant mappings and sequences where callers already provide them. This keeps Pylance useful without changing the public API or weakening any fail-closed validation boundary.
 - **JavaScript transitive dependencies now include current DOMPurify and Nano ID security fixes.** The lockfile uses DOMPurify 3.4.13 and Nano ID 3.3.18, clearing the reported subtree-XSS and zero-size-generator denial-of-service advisories without changing direct dependency ranges.
 - **JavaScript tooling now uses the patched `js-yaml` 4.3.1 compatibility release.** This clears the high-severity ordered-map denial-of-service advisory in Stylelint's configuration loader without forcing a Stylelint downgrade.

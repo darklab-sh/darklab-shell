@@ -348,8 +348,62 @@ describe('project assessment controller', () => {
   })
 
   it('renders the same truthful coverage and target worklist on desktop and mobile', async () => {
-    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
-    const ctx = makeContext(projectWorkspaceRequest)
+    let currentDetail = structuredClone(detail)
+    const checkStateUpdates = []
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (options.method === 'PATCH' && url.endsWith('/assessments/asmt_1/checks/asmc_1')) {
+        const payload = JSON.parse(options.body)
+        checkStateUpdates.push(payload)
+        const check = currentDetail.checks.checks[0]
+        const cleared = payload.state === 'not_started'
+        currentDetail = {
+          ...currentDetail,
+          checks: {
+            ...currentDetail.checks,
+            checks: [
+              {
+                ...check,
+                state: cleared ? 'covered' : payload.state,
+                state_source: cleared ? 'derived' : 'manual',
+                state_reason: cleared ? 'Saved evidence covers this check.' : payload.reason,
+              },
+              ...currentDetail.checks.checks.slice(1),
+            ],
+          },
+        }
+        return apiResponse({
+          ok: true,
+          check: currentDetail.checks.checks[0],
+          manual_override_cleared: cleared,
+        })
+      }
+      if (/\/assessments\/[^?]+\?/.test(url)) return apiResponse(currentDetail)
+      return responseFor(url, options)
+    })
+    const showConfirm = vi.fn(async (options) => {
+      if (options.body?.text === 'Set a manual check decision') {
+        const state = options.content.querySelector('select')
+        const reason = options.content.querySelector('textarea')
+        const error = options.content.querySelector('[role="alert"]')
+        expect(state.classList.contains('form-select')).toBe(true)
+        expect(reason.classList.contains('form-control')).toBe(true)
+        expect(reason.maxLength).toBe(1000)
+        expect(await options.actions.find(action => action.id === 'save').onActivate()).toBe(false)
+        expect(error.textContent).toContain('reason is required')
+        state.value = 'blocked'
+        reason.value = 'Waiting for the approved maintenance window.'
+        expect(await options.actions.find(action => action.id === 'save').onActivate()).toBe(true)
+        return 'save'
+      }
+      if (options.body?.text === 'Edit this manual check decision') {
+        expect(options.content.querySelector('select').value).toBe('blocked')
+        expect(options.content.querySelector('textarea').value).toBe('Waiting for the approved maintenance window.')
+        expect(await options.actions.find(action => action.id === 'clear').onActivate()).toBe(true)
+        return 'clear'
+      }
+      return options.actions.at(-1).id
+    })
+    const ctx = makeContext(projectWorkspaceRequest, { showConfirm })
     const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
 
     await controller.load('prj_1', { render: false })
@@ -379,12 +433,41 @@ describe('project assessment controller', () => {
       expect(serviceEvidence?.textContent).not.toContain('raw output')
     }
     expect(mobile.classList.contains('is-mobile')).toBe(true)
+    expect(ctx.enhanceAppSelects).toHaveBeenCalledTimes(2)
+    mobile.querySelector('.project-assessment-check-row .btn').click()
+    expect([...document.querySelectorAll('.action-sheet-item')].map(button => button.textContent)).toContain(
+      'Set manual decision',
+    )
+    ;[...document.querySelectorAll('.action-sheet-item')]
+      .find(button => button.textContent === 'Set manual decision')
+      .click()
+    await vi.waitFor(() => expect(checkStateUpdates).toEqual([{
+      state: 'blocked',
+      reason: 'Waiting for the approved maintenance window.',
+    }]))
+    expect(ctx.invalidateProjectOverview).toHaveBeenCalledWith('prj_1')
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Manual check decision saved.')
+
+    controller.renderAssessment(desktop, 'prj_1')
+    const firstCheck = desktop.querySelector('.project-assessment-check-row')
+    expect(firstCheck.textContent).toContain('Blocked')
+    expect(firstCheck.textContent).toContain('Manual decision')
+    ;[...firstCheck.querySelectorAll('button')]
+      .find(button => button.textContent === 'Edit manual decision')
+      .click()
+    await vi.waitFor(() => expect(checkStateUpdates).toEqual([
+      { state: 'blocked', reason: 'Waiting for the approved maintenance window.' },
+      { state: 'not_started', reason: '' },
+    ]))
+    await vi.waitFor(() => expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Manual decision cleared. Saved evidence now determines this check state.',
+    ))
+
     mobile.querySelector('.project-assessment-mobile-actions button').click()
     expect([...document.querySelectorAll('.action-sheet-item')].map(button => button.textContent)).toEqual([
       'Complete cycle',
       'Archive cycle',
     ])
-    expect(ctx.enhanceAppSelects).toHaveBeenCalledTimes(2)
   })
 
   it('manages reusable HTTP profiles in the shared desktop and mobile Assessment surface', async () => {
@@ -1514,9 +1597,14 @@ describe('project assessment controller', () => {
     actions.click()
 
     const items = [...document.querySelectorAll('.action-sheet-item')]
-    expect(items.map(button => button.textContent)).toEqual(['Run Nmap', 'Create finding'])
-    expect(items[0].disabled).toBe(true)
-    expect(items[1].disabled).toBe(false)
+    expect(items.map(button => button.textContent)).toEqual([
+      'Set manual decision',
+      'Run Nmap',
+      'Create finding',
+    ])
+    expect(items[0].disabled).toBe(false)
+    expect(items[1].disabled).toBe(true)
+    expect(items[2].disabled).toBe(false)
   })
 
   it('renders remediation-level cycle deltas with direct current and earlier finding links', async () => {
@@ -1761,6 +1849,13 @@ describe('project assessment controller', () => {
     const lifecycleButtons = [...viewerCycleContainer.querySelectorAll('.project-assessment-cycle-actions button')]
     expect(lifecycleButtons.map(button => button.textContent)).toEqual(['Complete cycle', 'Archive cycle'])
     expect(lifecycleButtons.every(button => button.disabled && button.title.includes('View-only'))).toBe(true)
+    viewerCycleContainer.querySelector('.project-assessment-target-toggle').click()
+    const manualDecisionButtons = [...viewerCycleContainer.querySelectorAll('.project-assessment-check-row button')]
+      .filter(button => button.textContent.includes('manual decision'))
+    expect(manualDecisionButtons).toHaveLength(2)
+    expect(manualDecisionButtons.every(button => (
+      button.disabled && button.title.includes('View-only')
+    ))).toBe(true)
   })
 
   it('confirms forward-only lifecycle changes and previews archived-cycle deletion', async () => {

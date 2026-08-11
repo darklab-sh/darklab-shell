@@ -479,6 +479,20 @@ function createProjectAssessmentRenderer(context, actions) {
   function checkActionItems(projectId, detail, check, returnFocus) {
     const definition = checkDefinition(detail, check);
     const items = [];
+    const canEditCheck = ctx.canMutateProjects?.() !== false
+      && detail?.assessment?.status === 'active';
+    const editCheckTitle = ctx.canMutateProjects?.() === false
+      ? "View-only team members can't change assessment checks. Switch to Personal or ask for operator access."
+      : (detail?.assessment?.status === 'active'
+        ? ''
+        : 'Completed and archived assessment checks are read-only.');
+    items.push({
+      label: check?.state_source === 'manual' ? 'Edit manual decision' : 'Set manual decision',
+      disabled: !canEditCheck,
+      disabledTitle: editCheckTitle,
+      title: editCheckTitle,
+      action: () => act.editCheckState(projectId, detail, check, returnFocus),
+    });
     if (check?.target_type === 'url') {
       const zapState = act.zapStateFor?.(projectId, detail?.assessment?.id, check?.id);
       const zapJob = zapState?.jobs?.[0] || null;

@@ -4,6 +4,7 @@
 // Project Assessment tab state and data controller.
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
+import { openAssessmentCheckStateEditor } from './project_assessment_check_state.js';
 import { launchAssessmentAction } from './project_assessment_actions.js';
 import {
   createProjectAssessmentOastManager,
@@ -561,6 +562,25 @@ function createProjectAssessmentController(context) {
     }
   }
 
+  async function editCheckState(projectId, detail, check, returnFocus = null) {
+    return openAssessmentCheckStateEditor(ctx, {
+      projectId,
+      assessment: detail?.assessment,
+      check,
+      returnFocus,
+      onSaved: async (payload) => {
+        ctx.invalidateProjectOverview?.(projectId);
+        ctx.setProjectWorkspaceMessage?.(
+          payload?.manual_override_cleared
+            ? 'Manual decision cleared. Saved evidence now determines this check state.'
+            : 'Manual check decision saved.',
+        );
+        await loadDetail(projectId, { force: true, render: false });
+        renderViews();
+      },
+    });
+  }
+
   async function openDeltaFinding(projectId, finding, returnFocus = null) {
     const findingId = String(finding?.id || '');
     if (!projectId || !findingId) return false;
@@ -662,6 +682,7 @@ function createProjectAssessmentController(context) {
     deleteCycle,
     createCycle,
     createFinding,
+    editCheckState,
     load,
     loadDetail,
     launchRecommendedAction,
