@@ -98,6 +98,32 @@ function createProjectAssessmentRenderer(context, actions) {
     return definitions.find(item => String(item?.key || '') === String(check?.check_key || '')) || null;
   }
 
+  function manualDecisionActorLabel(actor) {
+    const kind = String(actor?.kind || '');
+    const memberId = String(actor?.member_id || '').trim();
+    if (kind === 'team_member') return memberId ? `team member ${memberId}` : 'a team member';
+    if (kind === 'session') return 'a browser session';
+    return 'an unknown actor';
+  }
+
+  function renderManualDecision(check) {
+    if (check?.state_source !== 'manual') return null;
+    const panel = makeElement('div', 'project-assessment-manual-decision');
+    const reason = String(check?.state_reason || '').trim();
+    panel.appendChild(makeElement(
+      'p',
+      'project-assessment-manual-decision-reason',
+      reason || 'No reason was recorded.',
+    ));
+    const changedAt = displayDate(check?.state_changed_at);
+    panel.appendChild(makeElement(
+      'small',
+      'project-assessment-manual-decision-meta',
+      `Recorded by ${manualDecisionActorLabel(check?.state_actor)}${changedAt ? ` · ${changedAt}` : ''}`,
+    ));
+    return panel;
+  }
+
   function cycleLabel(st, assessment) {
     const profile = profileByKey(st, assessment?.profile_key);
     const title = String(assessment?.title || profile?.label || assessment?.profile_key || 'Assessment');
@@ -855,8 +881,10 @@ function createProjectAssessmentRenderer(context, actions) {
       makeElement('div', 'project-assessment-check-title', definition?.label || check?.check_key || 'Assessment check'),
       makeElement('div', 'project-assessment-check-meta', checkMeta(check)),
     );
-    const purpose = String(definition?.purpose || check?.state_reason || '');
+    const purpose = String(definition?.purpose || '');
     if (purpose) main.appendChild(makeElement('p', 'project-assessment-check-purpose', purpose));
+    const manualDecision = renderManualDecision(check);
+    if (manualDecision) main.appendChild(manualDecision);
     const nucleiRecommendation = check?.nuclei_recommendation;
     if (nucleiRecommendation?.recommended) {
       const recommendation = makeElement('div', 'project-assessment-check-recommendation');

@@ -257,6 +257,9 @@ const detail = {
         recommended_action_key: 'command:dnsrecon',
         state: 'needs_review',
         state_source: 'manual',
+        state_reason: 'Waiting for the approved maintenance window.',
+        state_actor: { kind: 'team_member', member_id: 'tmem_operator' },
+        state_changed_at: '2026-08-05T11:30:00+00:00',
         evidence_count: 1,
         unavailable_evidence_count: 1,
         manual_evidence: {
@@ -501,6 +504,9 @@ describe('project assessment controller', () => {
       expect(surface.textContent).toContain('Service inventory')
       expect(surface.textContent).toContain('Needs review')
       expect(surface.textContent).toContain('Manual decision')
+      expect(surface.textContent).toContain('Waiting for the approved maintenance window.')
+      expect(surface.textContent).toContain('Recorded by team member tmem_operator')
+      expect(surface.textContent).toContain('2026-08-05 11:30:00+00:00')
       const serviceEvidence = surface.querySelector('.project-assessment-nmap-evidence')
       expect(serviceEvidence?.textContent).toContain('Nmap service evidence')
       expect(serviceEvidence?.textContent).toContain('192.0.2.10:445/tcp')

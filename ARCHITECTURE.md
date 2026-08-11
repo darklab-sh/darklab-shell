@@ -834,7 +834,7 @@ Apply rechecks the preview inside the write transaction and rejects stale member
 
 This section is the browser-runtime home for page composition, prompt/composer state, mobile shell behavior, the helper layer that keeps the UI consistent, and the cross-cutting UI primitives that every surface in the shell composes against.
 
-The Assessment workspace keeps manual check decisions behind the existing Project-mutation permission and active-cycle boundary. `project_assessment_check_state.js` owns the shared reason-required editor for blocked, intentionally skipped, and not-applicable states, plus restoring the authoritative evidence-derived state. Desktop buttons and the mobile action sheet open the same editor; completed and archived cycles and view-only memberships keep the action disabled.
+The Assessment workspace keeps manual check decisions behind the existing Project-mutation permission and active-cycle boundary. `project_assessment_check_state.js` owns the shared reason-required editor for blocked, intentionally skipped, and not-applicable states, plus restoring the authoritative evidence-derived state. The shared check renderer keeps the profile purpose separate from the saved decision and shows its reason, privacy-safe actor, and recorded time on desktop and mobile. Desktop buttons and the mobile action sheet open the same editor; completed and archived cycles and view-only memberships keep the action disabled.
 
 ### Frontend Composition
 
