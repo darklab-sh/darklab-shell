@@ -175,6 +175,21 @@ function renderPager(context, actions, projectId, page, state) {
   return pager;
 }
 
+function refreshErrorPanel(context, actions, projectId, message) {
+  const panel = context.emptyProjectPanel(message);
+  const button = makeElement('button', 'btn btn-secondary btn-compact', 'Retry');
+  button.type = 'button';
+  context.bindProjectRuntimePressable?.(button, {
+    onActivate: () => void actions.loadDetail(projectId, {
+      force: true,
+      refreshKind: 'findings',
+      renderStart: true,
+    }),
+  });
+  panel.appendChild(button);
+  return panel;
+}
+
 function renderAssessmentFindingWorklist(context, actions, projectId, state, worklist) {
   const page = worklist || {};
   const rollup = page.rollup || {};
@@ -203,6 +218,16 @@ function renderAssessmentFindingWorklist(context, actions, projectId, state, wor
     ));
   });
   section.appendChild(filters);
+
+  if (state.detailRefreshKind === 'findings' && state.detailLoading) {
+    section.setAttribute('aria-busy', 'true');
+    section.appendChild(context.emptyProjectPanel('Loading prioritized findings...'));
+    return section;
+  }
+  if (state.detailRefreshKind === 'findings' && state.detailError) {
+    section.appendChild(refreshErrorPanel(context, actions, projectId, state.detailError));
+    return section;
+  }
 
   const items = Array.isArray(page.items) ? page.items : [];
   if (!items.length) {

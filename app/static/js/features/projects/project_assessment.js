@@ -34,6 +34,7 @@ function createProjectAssessmentController(context) {
       detailLoading: false,
       detailPromise: null,
       detailGeneration: 0,
+      detailRefreshKind: '',
       creating: false,
       mutating: '',
       error: '',
@@ -66,6 +67,7 @@ function createProjectAssessmentController(context) {
     st.detailGeneration += 1;
     st.detailLoading = false;
     st.detailPromise = null;
+    st.detailRefreshKind = '';
   }
 
   function invalidate(projectId = '') {
@@ -142,10 +144,13 @@ function createProjectAssessmentController(context) {
       st.detail = null;
       st.selectedId = '';
       st.detailError = '';
+      st.detailRefreshKind = '';
       return false;
     }
     st.selectedId = String(selected.id || '');
     if (st.detailLoading && st.detailPromise && options.force !== true) return st.detailPromise;
+    const refreshKind = String(options.refreshKind || st.detailRefreshKind || '');
+    if (refreshKind) st.detailRefreshKind = refreshKind;
     const generation = st.detailGeneration + 1;
     st.detailGeneration = generation;
     st.detailLoading = true;
@@ -161,6 +166,7 @@ function createProjectAssessmentController(context) {
         const payload = await resp.json();
         if (st.detailGeneration !== generation) return false;
         st.detail = payload;
+        st.detailRefreshKind = '';
         loadOastHistoryForDetail(id, st.detail);
         return true;
       } catch (err) {
@@ -181,6 +187,7 @@ function createProjectAssessmentController(context) {
       }
     })();
     st.detailPromise = promise;
+    if (options.renderStart === true) renderViews();
     return promise;
   }
 
@@ -240,6 +247,7 @@ function createProjectAssessmentController(context) {
   function resetDetailState(st, { findings = true } = {}) {
     cancelDetailRequest(st);
     st.detail = null;
+    st.detailRefreshKind = '';
     st.offset = 0;
     st.checksScrollTop = 0;
     st.expandedTargets.clear();
@@ -247,6 +255,15 @@ function createProjectAssessmentController(context) {
       st.findingPriority = '';
       st.findingOffset = 0;
     }
+  }
+
+  function refreshDetailSlice(projectId, kind) {
+    const st = stateFor(projectId);
+    cancelDetailRequest(st);
+    st.detailRefreshKind = kind;
+    const promise = loadDetail(projectId);
+    renderViews();
+    return promise;
   }
 
   async function selectCycle(projectId, assessmentId) {
@@ -286,9 +303,10 @@ function createProjectAssessmentController(context) {
     if (key === 'category') st.category = normalized;
     else if (key === 'state') st.checkState = normalized;
     else return false;
-    resetDetailState(st, { findings: false });
-    renderViews();
-    return loadDetail(projectId);
+    st.offset = 0;
+    st.checksScrollTop = 0;
+    st.expandedTargets.clear();
+    return refreshDetailSlice(projectId, 'checks');
   }
 
   async function setPage(projectId, offset) {
@@ -297,9 +315,7 @@ function createProjectAssessmentController(context) {
     if (nextOffset === st.offset) return false;
     st.offset = nextOffset;
     st.checksScrollTop = 0;
-    st.detail = null;
-    renderViews();
-    return loadDetail(projectId);
+    return refreshDetailSlice(projectId, 'checks');
   }
 
   async function setFindingFilter(projectId, priority) {
@@ -308,9 +324,7 @@ function createProjectAssessmentController(context) {
     if (normalized === st.findingPriority && st.findingOffset === 0) return false;
     st.findingPriority = normalized;
     st.findingOffset = 0;
-    st.detail = null;
-    renderViews();
-    return loadDetail(projectId);
+    return refreshDetailSlice(projectId, 'findings');
   }
 
   async function setFindingPage(projectId, offset) {
@@ -318,9 +332,7 @@ function createProjectAssessmentController(context) {
     const nextOffset = Math.max(0, Number(offset || 0));
     if (nextOffset === st.findingOffset) return false;
     st.findingOffset = nextOffset;
-    st.detail = null;
-    renderViews();
-    return loadDetail(projectId);
+    return refreshDetailSlice(projectId, 'findings');
   }
 
   async function createCycle(projectId, profileKey) {

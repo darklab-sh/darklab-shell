@@ -1090,6 +1090,23 @@ function createProjectAssessmentRenderer(context, actions) {
     });
     section.appendChild(stateFilters);
 
+    if (st.detailRefreshKind === 'checks' && st.detailLoading) {
+      section.setAttribute('aria-busy', 'true');
+      section.appendChild(ctx.emptyProjectPanel('Loading assessment checks...'));
+      return section;
+    }
+    if (st.detailRefreshKind === 'checks' && st.detailError) {
+      section.appendChild(errorPanel(
+        st.detailError,
+        () => void act.loadDetail(projectId, {
+          force: true,
+          refreshKind: 'checks',
+          renderStart: true,
+        }),
+      ));
+      return section;
+    }
+
     const page = detail?.checks || {};
     const checks = Array.isArray(page?.checks) ? page.checks : [];
     if (!checks.length) {

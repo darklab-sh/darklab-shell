@@ -1838,15 +1838,47 @@ describe('project assessment controller', () => {
   })
 
   it('preserves cycle filters, paging, disclosure, and scroll state per project', async () => {
-    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+    let holdNextDetail = false
+    let releaseDetail = null
+    const projectWorkspaceRequest = vi.fn((url, options) => {
+      const response = responseFor(url, options)
+      if (holdNextDetail && url.includes('/assessments/asmt_1?')) {
+        holdNextDetail = false
+        return new Promise((resolve) => {
+          releaseDetail = () => resolve(response)
+        })
+      }
+      return Promise.resolve(response)
+    })
     const controller = DarklabProjectAssessment.createProjectAssessmentController(
       makeContext(projectWorkspaceRequest),
     )
     await controller.load('prj_1', { render: false })
-    await controller.setFilter('prj_1', 'category', 'discovery')
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    holdNextDetail = true
+    const checkRefresh = controller.setFilter('prj_1', 'category', 'discovery')
+    controller.renderAssessment(container, 'prj_1')
+    expect(container.textContent).toContain('Coverage')
+    expect(container.querySelector('.project-assessment-risk-row')).not.toBeNull()
+    expect(container.textContent).toContain('Loading assessment checks...')
+    expect(container.textContent).not.toContain('Loading assessment coverage...')
+    releaseDetail()
+    await checkRefresh
+
     await controller.setFilter('prj_1', 'state', 'needs_review')
     await controller.setPage('prj_1', 50)
-    await controller.setFindingFilter('prj_1', 'epss')
+    holdNextDetail = true
+    const findingRefresh = controller.setFindingFilter('prj_1', 'epss')
+    controller.renderAssessment(container, 'prj_1')
+    expect(container.textContent).toContain('Coverage')
+    expect(container.querySelector('.project-assessment-target-list')).not.toBeNull()
+    expect(container.textContent).toContain('Loading prioritized findings...')
+    expect(container.textContent).not.toContain('Loading assessment coverage...')
+    releaseDetail()
+    await findingRefresh
+
     await controller.setFindingPage('prj_1', 10)
 
     const detailUrls = projectWorkspaceRequest.mock.calls
@@ -1858,8 +1890,6 @@ describe('project assessment controller', () => {
     expect(detailUrls.at(-1)).toContain('finding_priority=epss')
     expect(detailUrls.at(-1)).toContain('finding_offset=10')
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
     controller.renderAssessment(container, 'prj_1')
     container.querySelector('.project-assessment-target-toggle').click()
     const list = container.querySelector('.project-assessment-target-list')
