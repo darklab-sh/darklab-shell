@@ -101,7 +101,44 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 {% else %}
 <p class="muted">No methodology narrative has been written yet.</p>
 {% endif %}
+{% if assessment_context %}
+<h3>Assessment coverage</h3>
+<p><strong>{{ assessment_context.assessment.title }}</strong> · {{ assessment_context.assessment.status }} ·
+{{ assessment_context.rollup.covered_checks }} of {{ assessment_context.methodology.applicable_denominator }} applicable checks covered</p>
+<p>{{ assessment_context.methodology.summary }}</p>
+<table><thead><tr><th>State</th><th>Count</th></tr></thead><tbody>
+<tr><td>Covered</td><td>{{ assessment_context.rollup.covered_checks }}</td></tr>
+<tr><td>Awaiting review</td><td>{{ assessment_context.rollup.checks_awaiting_review }}</td></tr>
+<tr><td>Untested</td><td>{{ assessment_context.rollup.untested_checks }}</td></tr>
+<tr><td>Excluded</td><td>{{ assessment_context.rollup.excluded_checks }}</td></tr>
+<tr><td>Unavailable evidence</td><td>{{ assessment_context.rollup.unavailable_evidence_checks }}</td></tr>
+</tbody></table>
+{% if assessment_context.manual_exclusions %}
+<h3>Manual exclusions</h3>
+<table><thead><tr><th>Check</th><th>Target</th><th>State</th><th>Reason</th></tr></thead><tbody>
+{% for item in assessment_context.manual_exclusions %}
+<tr><td><code>{{ item.check_id }}</code></td><td>{{ item.target_value }}</td><td>{{ item.state|replace("_", " ") }}</td><td>{{ item.reason }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% if assessment_context.unavailable_evidence_warnings or assessment_context.screenshot_warnings %}
+<h3>Coverage warnings</h3><ul>
+{% for item in assessment_context.unavailable_evidence_warnings %}<li><code>{{ item.check_id }}</code>: {{ item.reason }}</li>{% endfor %}
+{% for item in assessment_context.screenshot_warnings %}<li><code>{{ item.artifact_id }}</code>: {{ item.reason }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endif %}
 {% elif section.type == "findings_by_severity" %}
+{% if assessment_context and assessment_context.fix_first["items"] %}
+<h3>Fix first</h3>
+<table><thead><tr><th>Remediation</th><th>Signals</th><th>Observations</th></tr></thead><tbody>
+{% for item in assessment_context.fix_first["items"] %}
+<tr><td>{{ item.title }}<br><code>{{ item.remediation_id }}</code></td>
+<td>{% for reason in item.risk.priority_reasons %}{{ reason }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+<td>{{ item.observation_count }} observations · {{ item.evidence_count }} evidence sources</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
 {% if assessment_finding_changes %}
 <h3>Assessment finding changes</h3>
 <p><strong>{{ assessment_finding_changes.assessment.title }}</strong> ·
@@ -374,6 +411,77 @@ def _append_assessment_finding_changes_markdown(
     lines.append("")
 
 
+def _append_assessment_context_markdown(
+    lines: list[str],
+    context: dict[str, Any],
+) -> None:
+    raw = context.get("assessment_context")
+    if not isinstance(raw, dict):
+        return
+    assessment = raw.get("assessment") if isinstance(raw.get("assessment"), dict) else {}
+    rollup = raw.get("rollup") if isinstance(raw.get("rollup"), dict) else {}
+    methodology = raw.get("methodology") if isinstance(raw.get("methodology"), dict) else {}
+    lines.extend([
+        "",
+        "### Assessment coverage",
+        "",
+        f"- Cycle: {_md(assessment.get('title') or assessment.get('id'))}",
+        f"- Status: {_md(assessment.get('status'))}",
+        f"- Applicable denominator: {int(methodology.get('applicable_denominator') or 0)}",
+        f"- Covered: {int(rollup.get('covered_checks') or 0)}",
+        f"- Awaiting review: {int(rollup.get('checks_awaiting_review') or 0)}",
+        f"- Untested: {int(rollup.get('untested_checks') or 0)}",
+        f"- Excluded: {int(rollup.get('excluded_checks') or 0)}",
+        f"- Unavailable evidence: {int(rollup.get('unavailable_evidence_checks') or 0)}",
+        "",
+        _md(methodology.get("summary")),
+    ])
+    exclusions = raw.get("manual_exclusions") if isinstance(raw.get("manual_exclusions"), list) else []
+    if exclusions:
+        lines.extend(("", "#### Manual exclusions", ""))
+        lines.extend(_markdown_table(
+            ["Check", "Target", "State", "Reason"],
+            [[
+                item.get("check_id"), item.get("target_value"),
+                str(item.get("state") or "").replace("_", " "), item.get("reason"),
+            ] for item in exclusions if isinstance(item, dict)],
+        ))
+    warnings = [
+        *[item for item in raw.get("unavailable_evidence_warnings", []) if isinstance(item, dict)],
+        *[item for item in raw.get("screenshot_warnings", []) if isinstance(item, dict)],
+    ]
+    if warnings:
+        lines.extend(("", "#### Coverage warnings", ""))
+        lines.extend(
+            f"- {_md_code(item.get('check_id') or item.get('artifact_id'))}: {_md(item.get('reason'))}"
+            for item in warnings
+        )
+    lines.append("")
+
+
+def _append_fix_first_markdown(lines: list[str], context: dict[str, Any]) -> None:
+    raw = context.get("assessment_context")
+    fix_first = raw.get("fix_first") if isinstance(raw, dict) else None
+    items = fix_first.get("items") if isinstance(fix_first, dict) else None
+    if not isinstance(items, list) or not items:
+        return
+    lines.extend(("### Fix first", ""))
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        risk = item.get("risk") if isinstance(item.get("risk"), dict) else {}
+        reasons = risk.get("priority_reasons") if isinstance(risk.get("priority_reasons"), list) else []
+        lines.extend([
+            f"#### {_md(item.get('title') or item.get('remediation_id'))}",
+            "",
+            f"- Remediation: {_md_code(item.get('remediation_id'))}",
+            f"- Signals: {_md('; '.join(str(reason) for reason in reasons) or 'No stored CVE-risk signals')}",
+            f"- Evidence: {int(item.get('observation_count') or 0)} observations, "
+            f"{int(item.get('evidence_count') or 0)} evidence sources",
+            "",
+        ])
+
+
 def _target_reference_label(reference: Any) -> str:
     if not isinstance(reference, dict):
         return ""
@@ -434,7 +542,9 @@ def _render_markdown_section(section: dict[str, Any], context: dict[str, Any]) -
         lines.extend(target_table or ["_No targets are selected for this report._"])
     elif section_type == "methodology":
         lines.append(_md(metadata.get("methodology")) or "_No methodology narrative has been written yet._")
+        _append_assessment_context_markdown(lines, context)
     elif section_type == "findings_by_severity":
+        _append_fix_first_markdown(lines, context)
         _append_assessment_finding_changes_markdown(lines, context)
         if not context.get("findings_by_severity"):
             lines.append("_No findings are selected for this report._")
@@ -592,6 +702,7 @@ def render_report_html_from_context(
         runs=context.get("runs") or [],
         targets=context.get("targets") or [],
         findings_by_severity=context.get("findings_by_severity") or [],
+        assessment_context=context.get("assessment_context") or {},
         assessment_finding_changes=context.get("assessment_finding_changes") or {},
         artifacts=context.get("artifacts") or [],
         artifact_warnings=context.get("artifact_warnings") or [],

@@ -129,6 +129,7 @@ def normalize_evidence_package_payload(data):
         "preset": preset,
         "package_format_version": EVIDENCE_PACKAGE_FORMAT_VERSION,
         "include_private_notes": bool(data.get("include_private_notes")),
+        "assessment_id": _trim_text(data.get("assessment_id"), MAX_ENTITY_ID_LEN),
         "selection": selection if isinstance(selection, dict) else None,
         "options": options if isinstance(options, dict) else {},
         "labels": labels,

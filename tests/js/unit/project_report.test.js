@@ -100,17 +100,25 @@ describe('project report controller', () => {
 
   it('loads the draft and renders the report editor with preview/export actions', async () => {
     const { reportApi } = loadReportModule()
-    const apiFetch = vi.fn(async () => apiResponse({
-      report: {
-        updated: '2026-06-04T12:00:00Z',
-        draft: {
-          metadata: { engagement_name: 'Acme engagement' },
-          selection: { run_ids: ['run_1'] },
-          export: { redaction_mode: 'redacted' },
+    const apiFetch = vi.fn(async (url) => {
+      if (url.includes('/assessments?')) {
+        return apiResponse({
+          assessments: [{ id: 'asm_archived', title: 'Earlier network cycle', status: 'archived' }],
+        })
+      }
+      return apiResponse({
+        report: {
+          updated: '2026-06-04T12:00:00Z',
+          draft: {
+            assessment_id: 'asm_archived',
+            metadata: { engagement_name: 'Acme engagement' },
+            selection: { run_ids: ['run_1'] },
+            export: { redaction_mode: 'redacted' },
+          },
         },
-      },
-      templates: [{ id: 'standard', label: 'Standard', sections: [{ type: 'cover', title: 'Cover', enabled: true }] }],
-    }))
+        templates: [{ id: 'standard', label: 'Standard', sections: [{ type: 'cover', title: 'Cover', enabled: true }] }],
+      })
+    })
     const controller = reportApi.createProjectReportController(makeContext(apiFetch))
 
     await controller.load('proj_1', { render: false })
@@ -123,6 +131,8 @@ describe('project report controller', () => {
     expect(dateRange.placeholder).toBe('2026-06-01 to 2026-06-05')
     expect(dateRange.title).toContain('YYYY-MM-DD to YYYY-MM-DD')
     expect(container.querySelector('[data-project-report-selection="run_ids"]').checked).toBe(true)
+    expect(container.querySelector('[data-project-report-assessment]').value).toBe('asm_archived')
+    expect(container.querySelector('[data-project-report-assessment]').textContent).toContain('Earlier network cycle · archived')
     expect(container.querySelector('[data-project-report-action="save"]').textContent).toBe('Save draft')
     expect(container.querySelector('[data-project-report-action="reload"]').textContent).toBe('Reload saved')
     expect(container.querySelector('[data-project-report-template]')).toBeNull()
@@ -417,7 +427,7 @@ describe('project report controller', () => {
         expect.objectContaining({ id: 'reload' }),
       ]),
     }))
-    expect(apiFetch).toHaveBeenCalledTimes(1)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/projects/proj_1/report')).toHaveLength(1)
     expect(st.dirty).toBe(true)
 
     showConfirm.mockResolvedValueOnce('reload')
@@ -426,7 +436,7 @@ describe('project report controller', () => {
       preventDefault: vi.fn(),
     })
     const reloaded = controller.stateFor('proj_1')
-    expect(apiFetch).toHaveBeenCalledTimes(2)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/projects/proj_1/report')).toHaveLength(2)
     expect(reloaded.dirty).toBe(false)
     expect(reloaded.draft.metadata.engagement_name).toBe('Old name')
   })

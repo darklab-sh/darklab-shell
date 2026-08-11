@@ -194,6 +194,44 @@ _PACKAGE_INDEX_TEMPLATE = _PACKAGE_JINJA.from_string("""
 {% endif -%}
 </tbody></table>
 </section>
+{% if assessment_context -%}
+<h2>Assessment Coverage</h2>
+<section class="card">
+<p><strong>{{ assessment_context.assessment.title }}</strong> · {{ assessment_context.assessment.status }} ·
+{{ assessment_context.rollup.covered_checks }} of {{ assessment_context.methodology.applicable_denominator }} applicable checks covered</p>
+<p>{{ assessment_context.methodology.summary }}</p>
+<div class="chips">
+<span class="chip">Awaiting review: {{ assessment_context.rollup.checks_awaiting_review }}</span>
+<span class="chip">Untested: {{ assessment_context.rollup.untested_checks }}</span>
+<span class="chip">Excluded: {{ assessment_context.rollup.excluded_checks }}</span>
+<span class="chip">Unavailable evidence: {{ assessment_context.rollup.unavailable_evidence_checks }}</span>
+</div>
+{% if assessment_context.manual_exclusions -%}
+<h3>Manual exclusions</h3>
+<table><thead><tr><th>Check</th><th>Target</th><th>State</th><th>Reason</th></tr></thead><tbody>
+{% for item in assessment_context.manual_exclusions -%}
+<tr><td><span class="mono">{{ item.check_id }}</span></td><td>{{ item.target_value }}</td><td>{{ item.state }}</td><td>{{ item.reason }}</td></tr>
+{% endfor -%}
+</tbody></table>
+{% endif -%}
+{% if assessment_context.unavailable_evidence_warnings or assessment_context.screenshot_warnings -%}
+<h3>Coverage warnings</h3><ul>
+{% for item in assessment_context.unavailable_evidence_warnings -%}<li><span class="mono">{{ item.check_id }}</span>: {{ item.reason }}</li>{% endfor -%}
+{% for item in assessment_context.screenshot_warnings -%}<li><span class="mono">{{ item.artifact_id }}</span>: {{ item.reason }}</li>{% endfor -%}
+</ul>
+{% endif -%}
+{% if assessment_context.fix_first["items"] -%}
+<h3>Fix first</h3>
+<table><thead><tr><th>Remediation</th><th>Signals</th><th>Observations</th></tr></thead><tbody>
+{% for item in assessment_context.fix_first["items"] -%}
+<tr><td>{{ item.title }}<br><span class="mono">{{ item.remediation_id }}</span></td>
+<td>{% for reason in item.risk.priority_reasons %}{{ reason }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+<td>{{ item.observation_count }} observations · {{ item.evidence_count }} evidence sources</td></tr>
+{% endfor -%}
+</tbody></table>
+{% endif -%}
+</section>
+{% endif -%}
 {% if finding_changes -%}
 <h2>Assessment Finding Changes</h2>
 <section class="card">
@@ -841,6 +879,74 @@ def _append_package_finding_changes_markdown(lines, manifest, run_pages):
         lines.append(f"- Comparison reason: {_package_markdown_text(reasons)}")
 
 
+def _append_package_assessment_context_markdown(lines, manifest):
+    context = manifest.get("assessment_context")
+    if not isinstance(context, dict):
+        return
+    assessment = context.get("assessment") if isinstance(context.get("assessment"), dict) else {}
+    rollup = context.get("rollup") if isinstance(context.get("rollup"), dict) else {}
+    methodology = context.get("methodology") if isinstance(context.get("methodology"), dict) else {}
+    lines.extend([
+        "",
+        "## Assessment Coverage",
+        "",
+        f"- Cycle: {_package_markdown_text(assessment.get('title') or assessment.get('id'))}",
+        f"- Cycle ID: {_package_markdown_code(assessment.get('id'))}",
+        f"- Status: {_package_markdown_text(assessment.get('status'))}",
+        f"- Profile: {_package_markdown_code(assessment.get('profile_key'))} "
+        f"{_package_markdown_text(assessment.get('profile_version'))}",
+        f"- Applicable denominator: {_package_int(methodology.get('applicable_denominator'))}",
+        f"- Covered: {_package_int(rollup.get('covered_checks'))}",
+        f"- Awaiting review: {_package_int(rollup.get('checks_awaiting_review'))}",
+        f"- Untested: {_package_int(rollup.get('untested_checks'))}",
+        f"- Excluded: {_package_int(rollup.get('excluded_checks'))}",
+        f"- Unavailable evidence: {_package_int(rollup.get('unavailable_evidence_checks'))}",
+        "",
+        _package_markdown_text(methodology.get("summary")),
+    ])
+    exclusions = context.get("manual_exclusions")
+    if isinstance(exclusions, list) and exclusions:
+        lines.extend(("", "### Manual exclusions", "", "| Check | Target | State | Reason |", "| --- | --- | --- | --- |"))
+        for item in exclusions:
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"| {_package_markdown_code(item.get('check_id'))} "
+                f"| {_package_markdown_text(item.get('target_value'))} "
+                f"| {_package_markdown_text(item.get('state'))} "
+                f"| {_package_markdown_text(item.get('reason'))} |"
+            )
+    warnings = [
+        *[item for item in context.get("unavailable_evidence_warnings", []) if isinstance(item, dict)],
+        *[item for item in context.get("screenshot_warnings", []) if isinstance(item, dict)],
+    ]
+    if warnings:
+        lines.extend(("", "### Coverage warnings", ""))
+        for item in warnings:
+            lines.append(
+                f"- {_package_markdown_code(item.get('check_id') or item.get('artifact_id'))}: "
+                f"{_package_markdown_text(item.get('reason'))}"
+            )
+    fix_first = context.get("fix_first") if isinstance(context.get("fix_first"), dict) else {}
+    items = fix_first.get("items") if isinstance(fix_first.get("items"), list) else []
+    if items:
+        lines.extend(("", "### Fix first", ""))
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            risk = item.get("risk") if isinstance(item.get("risk"), dict) else {}
+            reasons = risk.get("priority_reasons") if isinstance(risk.get("priority_reasons"), list) else []
+            lines.extend([
+                f"#### {_package_markdown_text(item.get('title') or item.get('remediation_id'))}",
+                "",
+                f"- Remediation: {_package_markdown_code(item.get('remediation_id'))}",
+                f"- Signals: {_package_markdown_text('; '.join(str(reason) for reason in reasons) or 'No stored CVE-risk signals')}",
+                f"- Evidence: {_package_int(item.get('observation_count'))} observations, "
+                f"{_package_int(item.get('evidence_count'))} evidence sources",
+                "",
+            ])
+
+
 def _render_package_index_html(
     package,
     manifest,
@@ -913,6 +1019,9 @@ def _render_package_index_html(
         })
 
     finding_changes = _package_finding_changes(manifest, run_pages)
+    assessment_context = manifest.get("assessment_context")
+    if not isinstance(assessment_context, dict):
+        assessment_context = None
 
     artifact_items = []
     for artifact in artifacts:
@@ -963,6 +1072,7 @@ def _render_package_index_html(
         targets=target_items,
         runs=run_items,
         findings=finding_items,
+        assessment_context=assessment_context,
         finding_changes=finding_changes,
         artifacts=artifact_items,
         export_links=export_links,
@@ -1069,6 +1179,7 @@ def _render_package_readme(
             )
     else:
         lines.append("- No selected findings.")
+    _append_package_assessment_context_markdown(lines, manifest)
     _append_package_finding_changes_markdown(lines, manifest, run_pages)
     lines.extend(["", "## Artifacts", ""])
     if artifacts:
@@ -1163,7 +1274,10 @@ def _package_findings_json_bytes(manifest, generated_at, run_pages):
         "findings",
         exported,
         generated_at,
-        extra={"assessment_finding_changes": manifest.get("assessment_finding_changes")},
+        extra={
+            "assessment_context": manifest.get("assessment_context"),
+            "assessment_finding_changes": manifest.get("assessment_finding_changes"),
+        },
     )
 
 

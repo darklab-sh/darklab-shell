@@ -54,6 +54,7 @@ from services.assessments.evidence_matching import (
     matching_run_rule,
     target_matches,
 )
+from services.assessments.export_context import get_project_assessment_context
 from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
 from services.assessments.handoff import get_project_assessment_finding_changes
 from services.assessments.lifecycle import update_assessment_cycle
@@ -1684,6 +1685,23 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
     assert handoff["assessment"]["id"] == current_assessment_id
     assert handoff["rollup"] == read_model["rollup"]
     assert len(handoff["items"]) == 4
+    export_context = get_project_assessment_context(
+        session_id,
+        project_id,
+        assessment_id=current_assessment_id,
+    )
+    assert export_context is not None
+    assert export_context["selection"]["mode"] == "selected"
+    assert export_context["assessment"]["id"] == current_assessment_id
+    assert export_context["assessment"]["profile_snapshot"]["key"] == "evidence-test"
+    assert export_context["scope"]["target_count"] == 1
+    assert export_context["scope"]["check_count"] == 1
+    assert export_context["rollup"]["applicable_checks"] == 1
+    assert export_context["methodology"]["applicable_denominator"] == 1
+    assert export_context["checks"][0]["evidence_ids"]
+    assert export_context["evidence"][0]["source_run"]["tool"] == "nuclei"
+    assert export_context["fix_first"]["total"] == 3
+    assert export_context["finding_changes"]["rollup"] == read_model["rollup"]
 
     selected_remediation_id = by_vulnerability["CVE-2026-10004"]["remediation_id"]
     selected_handoff = get_project_assessment_finding_changes(

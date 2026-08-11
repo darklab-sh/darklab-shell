@@ -15,6 +15,7 @@ let exportedDarklabProjectPackages = null;
   function createProjectPackagesController(context) {
     const ctx = context || {};
     let wizard = null;
+    const assessmentsByProject = new Map();
     const downloadTimers = new WeakMap();
     const packageJobPollMs = 750;
     const appConfig = typeof importedGetAppConfig === 'function' ? importedGetAppConfig : () => ({});
@@ -110,6 +111,21 @@ let exportedDarklabProjectPackages = null;
 
     function summaryFor(projectId = selectedProjectId()) {
       return ctx.projectSummary?.(projectId) || null;
+    }
+
+    async function loadAssessmentOptions(projectId) {
+      const normalized = String(projectId || '');
+      if (!normalized || assessmentsByProject.has(normalized)) {
+        return assessmentsByProject.get(normalized) || [];
+      }
+      const resp = await ctx.apiFetch(
+        `/projects/${encodeURIComponent(normalized)}/assessments?include_archived=1&limit=100`,
+        { cache: 'no-store' },
+      );
+      const data = await readJsonResponse(resp, 'Unable to load assessment cycles.');
+      const assessments = Array.isArray(data.assessments) ? data.assessments : [];
+      assessmentsByProject.set(normalized, assessments);
+      return assessments;
     }
 
     function items(summary) {
@@ -349,6 +365,7 @@ let exportedDarklabProjectPackages = null;
         selectedArtifactIds = selectableArtifactItems(summary).map(artifact => String(artifact.id || '')).filter(Boolean);
       }
       return {
+        assessmentId: '',
         preset: normalizedPreset,
         step: 1,
         includeArtifacts,
@@ -401,6 +418,10 @@ let exportedDarklabProjectPackages = null;
       if (field === 'notes') {
         wizard.notes = String(value || '');
         wizard.notesTouched = true;
+        return true;
+      }
+      if (field === 'assessment_id') {
+        wizard.assessmentId = String(value || '');
         return true;
       }
       return false;
@@ -491,6 +512,7 @@ let exportedDarklabProjectPackages = null;
       refreshed.includeArtifactsTouched = !!previous.includeArtifactsTouched;
       refreshed.privateNotesTouched = !!previous.privateNotesTouched;
       refreshed.artifactSelectionTouched = !!previous.artifactSelectionTouched;
+      refreshed.assessmentId = String(previous.assessmentId || '');
       if (preserveTouched && previous.nameTouched) {
         refreshed.name = previous.name || '';
       } else {
@@ -534,6 +556,13 @@ let exportedDarklabProjectPackages = null;
       ctx.setProjectWorkspaceMessage?.('');
       ensurePackagePresetCatalog().then(() => {
         refreshWizardAfterAsyncLoad(projectId);
+      });
+      loadAssessmentOptions(projectId).then(() => {
+        if (isWizardActive(projectId)) renderWizardModal();
+      }).catch((err) => {
+        ctx.logClientError?.('failed to load package assessment cycles', err, {
+          project_id: String(projectId || ''),
+        });
       });
       if (!ctx.projectFindingsLoaded(projectId)) {
         ctx.loadProjectFindings(projectId).then(() => {
@@ -581,6 +610,9 @@ let exportedDarklabProjectPackages = null;
     function openWizardFromPackage(projectId, pkg) {
       const summary = summaryFor(projectId);
       const manifest = pkg && typeof pkg.manifest === 'object' && pkg.manifest ? pkg.manifest : {};
+      const assessmentContext = manifest.assessment_context && typeof manifest.assessment_context === 'object'
+        ? manifest.assessment_context
+        : {};
       const preset = String(manifest.preset || pkg?.preset || 'custom') || 'custom';
       const redactionMode = String(pkg?.redaction_mode || manifest.redaction_mode || 'raw') === 'redacted'
         ? 'redacted'
@@ -592,6 +624,7 @@ let exportedDarklabProjectPackages = null;
       const selectedRunIds = manifestIds(manifest, 'run_ids', ctx.projectRunItems(summary));
       wizard = {
         projectId: String(projectId || ''),
+        assessmentId: String(assessmentContext?.assessment?.id || ''),
         preset,
         step: 2,
         includeArtifacts,
@@ -631,6 +664,13 @@ let exportedDarklabProjectPackages = null;
           }
         }).catch(() => {});
       }
+      loadAssessmentOptions(projectId).then(() => {
+        if (isWizardActive(projectId)) renderWizardModal();
+      }).catch((err) => {
+        ctx.logClientError?.('failed to load package assessment cycles', err, {
+          project_id: String(projectId || ''),
+        });
+      });
       ctx.setWorkspaceTab?.('packages');
       ctx.renderProjectExplorer?.();
       renderWizardModal({ focus: true });
@@ -1165,6 +1205,28 @@ let exportedDarklabProjectPackages = null;
       descInput.rows = 3;
       descInput.value = wizard.description;
       descLabel.appendChild(descInput);
+      const assessmentLabel = document.createElement('label');
+      assessmentLabel.textContent = 'Assessment context';
+      const assessmentSelect = document.createElement('select');
+      assessmentSelect.className = 'form-select';
+      assessmentSelect.dataset.projectPackageField = 'assessment_id';
+      const automaticAssessment = document.createElement('option');
+      automaticAssessment.value = '';
+      automaticAssessment.textContent = 'Current or newest saved cycle';
+      assessmentSelect.appendChild(automaticAssessment);
+      (assessmentsByProject.get(String(wizard.projectId || '')) || []).forEach((assessment) => {
+        const id = String(assessment?.id || '');
+        if (!id) return;
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = `${assessment.title || id} · ${String(assessment.status || 'saved')}`;
+        assessmentSelect.appendChild(option);
+      });
+      assessmentSelect.value = String(wizard.assessmentId || '');
+      assessmentLabel.appendChild(assessmentSelect);
+      const assessmentNote = document.createElement('p');
+      assessmentNote.className = 'project-package-wizard-note';
+      assessmentNote.textContent = 'Includes the saved cycle snapshot, coverage, evidence references, fix-first work, and comparison basis. Archived cycles remain selectable.';
       const artifactsLabel = document.createElement('label');
       artifactsLabel.className = 'project-package-selection-row';
       const artifactsInput = document.createElement('input');
@@ -1202,7 +1264,7 @@ let exportedDarklabProjectPackages = null;
         redactionSelect.appendChild(option);
       });
       redactionLabel.appendChild(redactionSelect);
-      form.append(nameLabel, descLabel, redactionLabel, artifactsLabel);
+      form.append(nameLabel, descLabel, assessmentLabel, assessmentNote, redactionLabel, artifactsLabel);
       wrap.appendChild(form);
     }
 
@@ -1243,6 +1305,7 @@ let exportedDarklabProjectPackages = null;
         options,
         redaction_mode: wizard.redactionMode || 'raw',
         include_private_notes: !!wizard.includePrivateNotes,
+        assessment_id: String(wizard.assessmentId || ''),
         counts,
         selected_entity_ids: selectedEntityIds,
         provenance: {
@@ -1491,6 +1554,7 @@ let exportedDarklabProjectPackages = null;
         redaction_mode: String(wizard.redactionMode || 'raw'),
         include_artifacts: !!wizard.includeArtifacts,
         include_private_notes: !!wizard.includePrivateNotes,
+        assessment_id: String(wizard.assessmentId || ''),
         labels: ctx.EntityMetadataClient.parseLabelInput(wizard.labels || ''),
         notes: String(wizard.notes || '').trim(),
         options: {

@@ -145,6 +145,9 @@ def _report_manifest_provenance(
     finding_changes = (context or {}).get("assessment_finding_changes")
     if isinstance(finding_changes, dict) and finding_changes:
         provenance["sources"]["assessment_finding_changes"] = finding_changes
+    assessment_context = (context or {}).get("assessment_context")
+    if isinstance(assessment_context, dict) and assessment_context:
+        provenance["sources"]["assessment_context"] = assessment_context
     if audit_handoff:
         provenance["audit"] = {
             key: str(value)

@@ -20,7 +20,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules, line_entries_from_events, line_events_from_entries, redact_line_entries
-from services.assessments.handoff import get_project_assessment_finding_changes
+from services.assessments.export_context import get_project_assessment_context
 from services.runs.output_model import LineEvent, is_noise_event
 from services.projects.artifacts import (
     artifact_owner_context as _artifact_owner_context,
@@ -887,11 +887,23 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
         manifest.get("findings", []),
         team_id=team_id,
     )
-    manifest["assessment_finding_changes"] = get_project_assessment_finding_changes(
+    assessment_context = get_project_assessment_context(
         session_id,
         project_id,
+        assessment_id=payload["assessment_id"],
         findings=manifest.get("findings", []),
+        selected_artifact_ids=(
+            str(artifact.get("id") or "")
+            for artifact in manifest.get("artifacts", [])
+            if isinstance(artifact, dict)
+        ),
         team_id=team_id,
+    )
+    manifest["assessment_context"] = assessment_context
+    manifest["assessment_finding_changes"] = (
+        assessment_context.get("finding_changes")
+        if isinstance(assessment_context, dict)
+        else None
     )
     redaction_rules = _package_redaction_rules(payload["redaction_mode"])
     if redaction_rules:

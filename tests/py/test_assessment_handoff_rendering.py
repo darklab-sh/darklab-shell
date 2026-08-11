@@ -82,6 +82,74 @@ def _finding_changes() -> dict:
     }
 
 
+def _assessment_context() -> dict:
+    return {
+        "schema_version": 1,
+        "selection": {
+            "mode": "selected",
+            "selected_assessment_id": "asmt_current",
+        },
+        "assessment": _finding_changes()["assessment"],
+        "scope": {
+            "target_count": 1,
+            "check_count": 2,
+            "targets": [{"type": "url", "value": "https://example.test"}],
+        },
+        "rollup": {
+            "applicable_checks": 2,
+            "covered_checks": 1,
+            "checks_awaiting_review": 0,
+            "untested_checks": 0,
+            "excluded_checks": 1,
+            "unavailable_evidence_checks": 1,
+        },
+        "checks": [{"id": "check_covered"}, {"id": "check_skipped"}],
+        "evidence": [{
+            "id": "evidence_current",
+            "check_id": "check_covered",
+            "evidence_type": "run",
+            "evidence_id": "run_current",
+            "source_run": {
+                "tool": "nuclei",
+                "tool_versions": ["3.4.8"],
+                "started_at": "2026-08-05T00:00:00+00:00",
+            },
+        }],
+        "manual_exclusions": [{
+            "check_id": "check_skipped",
+            "target_value": "https://example.test",
+            "state": "skipped",
+            "reason": "Customer excluded this path.",
+        }],
+        "unavailable_evidence_warnings": [{
+            "check_id": "check_covered",
+            "reason": "The source run was removed.",
+        }],
+        "screenshot_warnings": [{
+            "artifact_id": "artifact_capture",
+            "reason": "Screenshot metadata is included, but its file wasn't selected for this export.",
+        }],
+        "methodology": {
+            "summary": "The frozen profile was applied to two applicable checks.",
+            "applicable_denominator": 2,
+        },
+        "fix_first": {
+            "items": [{
+                "title": "Patch the exposed service",
+                "remediation_id": "rmd_example",
+                "observation_count": 1,
+                "evidence_count": 2,
+                "risk": {"priority_reasons": ["Known exploited vulnerability"]},
+            }],
+        },
+        "finding_changes": _finding_changes(),
+        "redaction_boundaries": {
+            "excluded": ["secret values and connector credential references"],
+            "screenshot_files_require_selection": True,
+        },
+    }
+
+
 def _package_manifest() -> dict:
     return {
         "project": {"id": "prj_example", "name": "Example"},
@@ -101,6 +169,7 @@ def _package_manifest() -> dict:
             "raw_line": "CVE-2026-10004 matched",
         }],
         "artifacts": [],
+        "assessment_context": _assessment_context(),
         "assessment_finding_changes": _finding_changes(),
     }
 
@@ -131,13 +200,25 @@ def test_evidence_package_carries_current_and_earlier_assessment_references():
     )
 
     for rendered in (html, readme):
+        assert "Assessment Coverage" in rendered
+        assert "Customer excluded this path" in rendered
+        assert "source run was removed" in rendered
+        assert "Screenshot metadata is included" in rendered
+        assert "Fix first" in rendered
+        assert "Patch the exposed service" in rendered
         assert "Assessment Finding Changes" in rendered
         assert "Current CVE evidence" in rendered
         assert "Earlier CVE evidence" in rendered
         assert "run_current" in rendered
         assert "run_previous" in rendered
         assert "incompatible profile version" in rendered
+    assert "1 of 2 applicable checks covered" in html
+    assert "Applicable denominator: 2" in readme
     assert findings_json["assessment_finding_changes"]["items"][0]["remediation_id"] == "rmd_example"
+    assert findings_json["assessment_context"]["checks"][0]["id"] == "check_covered"
+    assert findings_json["assessment_context"]["evidence"][0]["source_run"]["tool_versions"] == [
+        "3.4.8"
+    ]
 
 
 def test_report_renders_and_records_assessment_finding_change_provenance():
@@ -146,15 +227,23 @@ def test_report_renders_and_records_assessment_finding_change_provenance():
         "draft": {
             "title": "Example",
             "metadata": {},
-            "sections": [{
-                "type": "findings_by_severity",
-                "title": "Findings",
-                "enabled": True,
-            }],
+            "sections": [
+                {
+                    "type": "methodology",
+                    "title": "Methodology",
+                    "enabled": True,
+                },
+                {
+                    "type": "findings_by_severity",
+                    "title": "Findings",
+                    "enabled": True,
+                },
+            ],
             "export": {},
         },
         "counts": {"findings": 1},
         "findings_by_severity": [],
+        "assessment_context": _assessment_context(),
         "assessment_finding_changes": _finding_changes(),
     }
     markdown = render_report_markdown_from_context(context)
@@ -167,9 +256,16 @@ def test_report_renders_and_records_assessment_finding_change_provenance():
     )
 
     for rendered in (markdown, html):
+        assert "Assessment coverage" in rendered
+        assert "frozen profile was applied" in rendered
+        assert "Customer excluded this path" in rendered
+        assert "source run was removed" in rendered
+        assert "Fix first" in rendered
+        assert "Patch the exposed service" in rendered
         assert "Assessment finding changes" in rendered
         assert "Current CVE evidence" in rendered
         assert "Earlier CVE evidence" in rendered
         assert "run_previous" in rendered
         assert "incompatible profile version" in rendered
     assert provenance["sources"]["assessment_finding_changes"]["assessment"]["id"] == "asmt_current"
+    assert provenance["sources"]["assessment_context"]["assessment"]["id"] == "asmt_current"

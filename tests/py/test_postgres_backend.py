@@ -355,7 +355,6 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from services.assessments.version_inference_persistence import persist_version_inference_candidate
     from services.intel.canonical import entity_signature
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
-
     conn = postgres_schema.conn
     pre_comparison_migrations = tuple(
         migration for migration in MIGRATIONS if migration.version < "0044"
@@ -1835,6 +1834,9 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.export_context import (
+        project_assessment_export_context_on_conn,
+    )
     from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
     from services.assessments.handoff import project_assessment_finding_changes_on_conn
     from services.projects.finding_identity import finding_identity_references
@@ -1935,6 +1937,13 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
         remediation_ids=[selected_remediation_id],
     )
     worklist = assessment_finding_worklist_on_conn(conn, "asm-handoff")
+    export_context = project_assessment_export_context_on_conn(
+        conn,
+        "prj-assessment-handoff",
+        assessment_id="asm-handoff",
+        findings=None,
+        selected_artifact_ids=None,
+    )
 
     assert handoff is not None
     assert handoff["rollup"] == {
@@ -1952,6 +1961,12 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
     assert worklist["total"] == 1
     assert worklist["items"][0]["remediation_id"] == selected_remediation_id
     assert worklist["items"][0]["strongest_validation_method"] == "active_confirmation"
+    assert export_context is not None
+    assert export_context["assessment"]["profile_snapshot"] == {}
+    assert export_context["scope"]["target_count"] == 1
+    assert export_context["rollup"]["applicable_checks"] == 1
+    assert export_context["fix_first"]["items"][0]["remediation_id"] == selected_remediation_id
+    assert export_context["finding_changes"]["rollup"]["total"] == 2
 
 
 @pytest.mark.postgres

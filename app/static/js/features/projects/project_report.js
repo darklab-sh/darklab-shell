@@ -86,6 +86,7 @@ let exportedDarklabProjectReport = null;
 
     function defaultDraft() {
       return {
+        assessment_id: '',
         metadata: Object.fromEntries(metadataFields.map(([key]) => [key, ''])),
         sections: [
           ['cover', 'Cover'],
@@ -161,6 +162,7 @@ let exportedDarklabProjectReport = null;
         if (!seen.has(section.type)) sections.push({ ...section });
       });
       return {
+        assessment_id: String(raw.assessment_id || ''),
         metadata: {
           ...base.metadata,
           ...Object.fromEntries(metadataFields.map(([key]) => [key, String(metadata[key] || '')])),
@@ -223,6 +225,7 @@ let exportedDarklabProjectReport = null;
           draft: defaultDraft(),
           preview: null,
           templates: [],
+          assessments: [],
           selectionPages: {},
           selectionPageRequests: {},
           selectionItemLabels: {},
@@ -609,12 +612,26 @@ let exportedDarklabProjectReport = null;
       st.error = '';
       if (render) renderProjectSurfaces();
       try {
-        const resp = await ctx.apiFetch(projectUrl(projectId), { cache: 'no-store' });
+        const [resp, assessments] = await Promise.all([
+          ctx.apiFetch(projectUrl(projectId), { cache: 'no-store' }),
+          ctx.apiFetch(
+            `/projects/${encodeURIComponent(projectId)}/assessments?include_archived=1&limit=100`,
+            { cache: 'no-store' },
+          ).then(assessmentResp => readJsonResponse(assessmentResp, 'Unable to load assessment cycles.'))
+            .then(data => (Array.isArray(data.assessments) ? data.assessments : []))
+            .catch((err) => {
+              ctx.logClientError?.('failed to load report assessment cycles', err, {
+                project_id: String(projectId || ''),
+              });
+              return [];
+            }),
+        ]);
         const data = await readJsonResponse(resp, 'Unable to load report draft.');
         st.report = data.report || null;
         st.updated = String(data.report?.updated || '');
         st.draft = normalizeDraft(data.report?.draft || {});
         st.templates = Array.isArray(data.templates) ? data.templates : [];
+        st.assessments = assessments;
         st.preview = null;
         st.dirty = false;
         st.loaded = true;
@@ -689,6 +706,8 @@ let exportedDarklabProjectReport = null;
       if (redaction) st.draft.export.redaction_mode = String(redaction.value || 'redacted') === 'raw' ? 'raw' : 'redacted';
       const privateNotes = root.querySelector('[data-project-report-export="include_private_notes"]');
       if (privateNotes) st.draft.export.include_private_notes = !!privateNotes.checked;
+      const assessment = root.querySelector('[data-project-report-assessment]');
+      if (assessment) st.draft.assessment_id = String(assessment.value || '');
     }
 
     function requestDraft(st) {
@@ -1018,6 +1037,29 @@ let exportedDarklabProjectReport = null;
       const heading = document.createElement('h3');
       heading.textContent = 'Export';
       section.appendChild(heading);
+      const assessmentLabel = document.createElement('label');
+      assessmentLabel.textContent = 'Assessment context';
+      const assessmentSelect = document.createElement('select');
+      assessmentSelect.className = 'form-select';
+      assessmentSelect.dataset.projectReportAssessment = '1';
+      assessmentSelect.disabled = !canMutateProjects();
+      const automatic = document.createElement('option');
+      automatic.value = '';
+      automatic.textContent = 'Current or newest saved cycle';
+      assessmentSelect.appendChild(automatic);
+      st.assessments.forEach((assessment) => {
+        const id = String(assessment?.id || '');
+        if (!id) return;
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = `${assessment.title || id} · ${String(assessment.status || 'saved')}`;
+        assessmentSelect.appendChild(option);
+      });
+      assessmentSelect.value = String(st.draft.assessment_id || '');
+      assessmentLabel.appendChild(assessmentSelect);
+      const assessmentNote = document.createElement('p');
+      assessmentNote.className = 'project-report-note';
+      assessmentNote.textContent = 'The saved cycle snapshot, coverage, evidence references, fix-first work, and comparison basis are included. Archived cycles remain selectable.';
       const redactionLabel = document.createElement('label');
       redactionLabel.textContent = 'Redaction';
       const redaction = document.createElement('select');
@@ -1047,7 +1089,7 @@ let exportedDarklabProjectReport = null;
       const privateText = document.createElement('span');
       privateText.textContent = 'Include private notes';
       privateLabel.append(privateInput, privateText);
-      section.append(redactionLabel, privateLabel);
+      section.append(assessmentLabel, assessmentNote, redactionLabel, privateLabel);
       if (!canMutate) {
         const note = document.createElement('p');
         note.className = 'project-report-note';

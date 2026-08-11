@@ -524,12 +524,12 @@
       "hash": "d67bccea3d76901393b3932fbca2ffe921bf79e0e1959c9c48c1ceb1a3f7e62d"
     },
     "/static/js/features/projects/project_packages.js": {
-      "path": "/static/build/static-project-packages.0cc995128ee9.js",
-      "hash": "a10cccc91904d97d4b191945b206231699740bd5fe0b22c9fdc1fc935b6d408d"
+      "path": "/static/build/static-project-packages.9d9a68deed31.js",
+      "hash": "75ac2bffac40e1aa299c355dd8cc3b83615c876d4a8245c44b5f2853f7c064f6"
     },
     "/static/js/features/projects/project_report.js": {
-      "path": "/static/build/static-project-report.ccc106380b7d.js",
-      "hash": "93529d098756b6be10229018c902bc914ff36cecce4408ae54743c07cb4e6f3d"
+      "path": "/static/build/static-project-report.16afd08bddbc.js",
+      "hash": "80cb52f3a20b40de8830837ca7e6a78deb8f42117fc9b8988637005582ca8202"
     },
     "/static/js/features/projects/project_runs.js": {
       "path": "/static/build/static-project-runs.6b6d05bd945e.js",

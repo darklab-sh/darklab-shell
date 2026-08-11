@@ -3796,6 +3796,13 @@ describe('shell chrome project workspace', () => {
             artifact_ids: ['artifact-1'],
             target_ids: ['target-1'],
           },
+          assessment_context: {
+            assessment: {
+              id: 'asm-archived',
+              title: 'Archived network cycle',
+              status: 'archived',
+            },
+          },
           provenance: {
             schema_version: 1,
             kind: 'evidence_package',
@@ -3968,6 +3975,18 @@ describe('shell chrome project workspace', () => {
                 },
               },
             ],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/assessments?include_archived=1&limit=100') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            assessments: [{
+              id: 'asm-archived',
+              title: 'Archived network cycle',
+              status: 'archived',
+            }],
           }),
         })
       }
@@ -5184,6 +5203,7 @@ describe('shell chrome project workspace', () => {
     await tick()
     expect(document.querySelector('[data-project-package-field="name"]').value).toBe('Darklab evidence')
     expect(document.querySelector('[data-project-package-field="redaction_mode"]').value).toBe('raw')
+    expect(document.querySelector('[data-project-package-field="assessment_id"]').value).toBe('asm-archived')
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preview')
@@ -5353,6 +5373,10 @@ describe('shell chrome project workspace', () => {
     const packageName = document.querySelector('[data-project-package-field="name"]')
     packageName.value = 'Scoped evidence'
     packageName.dispatchEvent(new Event('input', { bubbles: true }))
+    const packageAssessment = document.querySelector('[data-project-package-field="assessment_id"]')
+    expect(packageAssessment.textContent).toContain('Archived network cycle · archived')
+    packageAssessment.value = 'asm-archived'
+    packageAssessment.dispatchEvent(new Event('change', { bubbles: true }))
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preview')
@@ -5376,6 +5400,7 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.preset).toBe('evidence')
     expect(packagePayload.redaction_mode).toBe('raw')
     expect(packagePayload.include_artifacts).toBe(true)
+    expect(packagePayload.assessment_id).toBe('asm-archived')
     expect(packagePayload.labels).toEqual(['handoff', 'retest'])
     expect(packagePayload.notes).toBe('Package notes for handoff')
     expect(packagePayload.options.index_html).toBe(true)
