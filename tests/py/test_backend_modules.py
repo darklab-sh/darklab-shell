@@ -28433,6 +28433,17 @@ class TestDatabaseInit:
                     [(f"risk-plan-{index:03}",) for index in range(180)],
                 )
                 conn.executemany(
+                    "INSERT INTO risk_escalation_projects (escalation_id, project_id) VALUES (?, ?)",
+                    [
+                        (
+                            f"risk-plan-{risk_index:03}",
+                            f"project-plan-extra-{project_index:03}",
+                        )
+                        for risk_index in range(180)
+                        for project_index in range(10)
+                    ],
+                )
+                conn.executemany(
                     "INSERT INTO findings "
                     "(id, session_id, run_id, target_id, status, title, created, last_seen_at) "
                     "VALUES (?, 'scope-session', ?, ?, ?, 'Plan finding', ?, ?)",
