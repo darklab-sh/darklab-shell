@@ -137,6 +137,9 @@ def _risk_payload(
             "source_version": str(row.get("kev_source_version") or ""),
             "source_published_at": str(kev.get("published_at") or ""),
             "freshness": str(kev.get("status") or "unavailable"),
+            "origin": str(kev.get("origin") or "unavailable"),
+            "age_hours": _number(kev.get("age_hours")),
+            "live_refresh_enabled": bool(kev.get("live_refresh_enabled")),
         },
         "epss": {
             "probability": _number(row.get("epss_probability")),
@@ -146,6 +149,9 @@ def _risk_payload(
             "source_version": str(row.get("epss_source_version") or ""),
             "source_published_at": str(epss.get("published_at") or ""),
             "freshness": str(epss.get("status") or "unavailable"),
+            "origin": str(epss.get("origin") or "unavailable"),
+            "age_hours": _number(epss.get("age_hours")),
+            "live_refresh_enabled": bool(epss.get("live_refresh_enabled")),
         },
         "advisory_status": str(row.get("advisory_status") or "unknown"),
         "cvss": {

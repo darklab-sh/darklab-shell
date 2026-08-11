@@ -15,6 +15,33 @@ function finiteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function feedAgeLabel(value) {
+  const hours = finiteNumber(value);
+  if (hours === null) return '';
+  if (hours < 48) return `${Math.max(0, Math.round(hours))}h old`;
+  return `${Math.max(1, Math.round(hours / 24))}d old`;
+}
+
+function publicFeedLabels(risk) {
+  const labels = [];
+  const feeds = [
+    ['CISA KEV', risk.kev],
+    ['EPSS', risk.epss],
+  ];
+  let refreshDisabled = false;
+  feeds.forEach(([name, feed]) => {
+    const origin = String(feed?.origin || '').toLowerCase();
+    if (!['bundled', 'live', 'local'].includes(origin)) return;
+    const age = feedAgeLabel(feed?.age_hours);
+    labels.push(`${name} ${origin}${age ? ` (${age})` : ''}`);
+    if (feed?.live_refresh_enabled === false) refreshDisabled = true;
+  });
+  if (refreshDisabled) {
+    labels.push('live refresh off; set cve_risk.refresh_enabled: true');
+  }
+  return labels;
+}
+
 function findingRiskSummary(finding) {
   const risk = findingPrimaryRisk(finding);
   if (!risk) return '';
@@ -35,6 +62,7 @@ function findingRiskSummary(finding) {
   else if (cvss === null && String(risk.cvss?.freshness || '') === 'unavailable') {
     labels.push('NVD unavailable');
   }
+  labels.push(...publicFeedLabels(risk));
   return labels.join(' · ');
 }
 

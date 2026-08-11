@@ -19,6 +19,27 @@ describe('finding public CVE risk labels', () => {
     expect(findingPrimaryRisk(finding)).toBe(risk);
     expect(findingRiskSummary(finding)).toBe('CISA KEV · EPSS 18.4% · stale source data');
     expect(findingRiskSummary({ risk: { kev: { listed: false }, epss: {} } })).toBe('');
+    expect(findingRiskSummary({
+      risk: {
+        kev: {
+          listed: true,
+          freshness: 'stale',
+          origin: 'bundled',
+          age_hours: 72,
+          live_refresh_enabled: false,
+        },
+        epss: {
+          probability: 0.1836,
+          freshness: 'stale',
+          origin: 'bundled',
+          age_hours: 48,
+          live_refresh_enabled: false,
+        },
+      },
+    })).toBe(
+      'CISA KEV · EPSS 18.4% · stale source data · CISA KEV bundled (3d old) · '
+      + 'EPSS bundled (2d old) · live refresh off; set cve_risk.refresh_enabled: true',
+    );
   });
 
   it('shows stored CVSS and non-active NVD states without inventing a risk score', () => {

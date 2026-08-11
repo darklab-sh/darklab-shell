@@ -15901,7 +15901,18 @@ class TestCommandCatalogRoute:
             ],
             "pipe_helpers": [],
         }
+        feed_status = [{
+            "source": "epss",
+            "status": "stale",
+            "origin": "bundled",
+            "source_version": "2026-08-01",
+            "model_version": "v2025.03.14",
+            "published_at": "2026-08-01",
+            "age_hours": 72.0,
+            "live_refresh_enabled": False,
+        }]
         with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.content.get_configured_feed_status", return_value=feed_status), \
              mock.patch.dict("config.CFG", {"workspace_enabled": False}):
             index_resp = client.get("/commands/catalog")
             resp = client.get("/commands/catalog/sentinel")
@@ -15921,6 +15932,7 @@ class TestCommandCatalogRoute:
         assert "workspace-tool" not in {item["root"] for item in index_data["commands"]}
         assert index_data["groups"][0]["name"] == "Registry Group"
         assert index_data["groups"][0]["commands"] == index_data["commands"]
+        assert index_data["cve_risk_feeds"] == feed_status
         assert {
             (item["id"], tuple(item["entity_types"]), tuple(item["secret_env_names"]))
             for item in index_data["intel_providers"]

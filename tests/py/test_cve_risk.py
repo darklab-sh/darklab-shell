@@ -1205,6 +1205,23 @@ def test_feed_status_marks_old_bundled_data_stale_and_discloses_refresh_state(ri
     assert status["epss"]["live_refresh_enabled"] is False
     assert status["kev"]["status"] == "unavailable"
 
+    risk_db.execute(
+        "INSERT INTO findings (id, session_id, target_id, title, created) "
+        "VALUES ('finding-bundled-feed', 'session-one', 'target-one', "
+        "'CVE-2026-12345', '2026-08-10')"
+    )
+    risk_db.execute(
+        "INSERT INTO finding_cve_links (finding_id, cve_id, created_at) "
+        "VALUES ('finding-bundled-feed', 'CVE-2026-12345', '2026-08-10')"
+    )
+    findings = [{"id": "finding-bundled-feed", "title": "CVE-2026-12345"}]
+    attach_risk_to_findings(findings, conn=risk_db)
+    enriched = findings[0]["risk"]
+    assert enriched["epss"]["origin"] == "bundled"
+    assert enriched["epss"]["age_hours"] > 24
+    assert enriched["epss"]["live_refresh_enabled"] is False
+    assert enriched["kev"]["origin"] == "unavailable"
+
 
 def test_disabled_refresh_never_opens_the_network(risk_db, monkeypatch):
     monkeypatch.setattr(

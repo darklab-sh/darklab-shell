@@ -7557,6 +7557,28 @@ describe('app helpers', () => {
                 app_native: false,
               },
             ],
+            cve_risk_feeds: [
+              {
+                source: 'epss',
+                status: 'stale',
+                origin: 'bundled',
+                source_version: '2026-08-01',
+                model_version: 'v2025.03.14',
+                published_at: '2026-08-01',
+                age_hours: 72,
+                live_refresh_enabled: false,
+              },
+              {
+                source: 'kev',
+                status: 'current',
+                origin: 'live',
+                source_version: '2026.08.09',
+                model_version: '',
+                published_at: '2026-08-09',
+                age_hours: 12,
+                live_refresh_enabled: false,
+              },
+            ],
           }),
         })
       }
@@ -7604,6 +7626,18 @@ describe('app helpers', () => {
     expect(providerText).toContain('ProjectDiscovery Chaos')
     expect(providerText).toContain('PDCP_API_KEY')
     expect(providerText).not.toContain('VTCLI_APIKEY')
+    expect(providerText).toContain('Public CVE risk data')
+    expect(providerText).toContain('FIRST EPSS')
+    expect(providerText).toContain('stale')
+    expect(providerText).toContain('Bundled source')
+    expect(providerText).toContain('Published 2026-08-01')
+    expect(providerText).toContain('Snapshot age 3d')
+    expect(providerText).toContain('Version 2026-08-01')
+    expect(providerText).toContain('Model v2025.03.14')
+    expect(providerText).toContain('CISA KEV')
+    expect(providerText).toContain('Live source')
+    expect(providerText).toContain('Bundled snapshots may be stale.')
+    expect(providerText).toContain('Set cve_risk.refresh_enabled: true in config.local.yaml')
 
     document.querySelector('.provider-status-close').click()
     await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(true))

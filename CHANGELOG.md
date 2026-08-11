@@ -541,6 +541,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Bundled CVE-risk data is now clearly identified in the browser.** Finding labels across Assessment, Projects, and Atlas include each EPSS/KEV feed's bundled, live, or local origin, snapshot age, and live-refresh state. Options → Secrets → Provider Status shows the same source status, publication date, version, EPSS model, freshness, and exact setting for enabling live refresh.
 - **Web Surface screenshot previews now use the shared pressable contract.** The full-card expand control keeps its image treatment while gaining the same ghost-button interaction foundation as other low-emphasis actions.
 - **Assessment status and work now lead the tab.** Coverage, fix-first findings, progress, and target checks appear before HTTP profile configuration on desktop and mobile, while the profile editor remains available after the assessment content.
 - **Assessment filters and pagers no longer blank the whole tab.** Coverage, cycle context, and the unaffected worklist stay visible while only the changed check or fix-first slice shows its loading or retry state.
