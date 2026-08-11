@@ -14,7 +14,7 @@ import config as app_config
 from core.database_access import get_db_connect
 from services.assessments.http_profiles import get_http_profile
 from services.assessments.recommended_action_queries import load_action_row
-from services.connectors.zap_config import zap_connector_settings
+from services.connectors.zap_config import ZapConnectorSettings, zap_connector_settings
 from services.connectors.zap_job_artifacts import (
     ZapJobArtifactError,
     zap_report_workspace_path,
@@ -34,6 +34,11 @@ from services.connectors.zap_scope import (
     ReviewedZapTarget,
     ZapTargetScopeError,
     review_zap_target,
+)
+from services.connectors.zap_scope_policy import (
+    ReviewedZapScopePolicy,
+    ZapScopePolicyError,
+    review_zap_scope_policy,
 )
 from services.connectors.zap_worker import queue_zap_job
 from services.projects.scope import shared_owner_where
@@ -210,6 +215,19 @@ def _reviewed_targets(
     return tuple(targets)
 
 
+def _review_scanner_scope(
+    settings: ZapConnectorSettings,
+    targets: Sequence[ReviewedZapTarget],
+    reviewer: Callable[
+        [ZapConnectorSettings, Sequence[str]], ReviewedZapScopePolicy
+    ] | None,
+) -> ReviewedZapScopePolicy:
+    hosts = tuple(target.host for target in targets)
+    if reviewer is None:
+        return review_zap_scope_policy(settings, hosts)
+    return reviewer(settings, hosts)
+
+
 def _plan_digest(payload: Mapping[str, Any]) -> str:
     stable = {
         key: value
@@ -235,6 +253,9 @@ def build_assessment_zap_plan(
     team_id: str = "",
     cfg: Mapping[str, Any] | None = None,
     resolve_addresses: Callable[[str], Iterable[str]] | None = None,
+    review_scanner_scope: Callable[
+        [ZapConnectorSettings, Sequence[str]], ReviewedZapScopePolicy
+    ] | None = None,
 ) -> tuple[dict[str, Any], ReviewedZapAutomationPlan]:
     """Re-read scope and return the exact, non-secret ZAP plan for review."""
     selection = _selection(_body(data, submit=False))
@@ -281,6 +302,7 @@ def build_assessment_zap_plan(
                 status_code=409,
             )
         reviewed_targets = _reviewed_targets(urls, settings, resolve_addresses)
+        _review_scanner_scope(settings, reviewed_targets, review_scanner_scope)
         plan = build_zap_automation_plan(
             settings,
             reviewed_targets,
@@ -293,7 +315,7 @@ def build_assessment_zap_plan(
         )
     except AssessmentZapError:
         raise
-    except (ZapPlanError, ZapTargetScopeError) as exc:
+    except (ZapPlanError, ZapScopePolicyError, ZapTargetScopeError) as exc:
         raise _downstream_error(exc) from exc
     preview = {
         "schema_version": _PLAN_SCHEMA_VERSION,
@@ -371,6 +393,9 @@ def confirm_and_queue_assessment_zap_job(
     actor_role: str = "",
     cfg: Mapping[str, Any] | None = None,
     resolve_addresses: Callable[[str], Iterable[str]] | None = None,
+    review_scanner_scope: Callable[
+        [ZapConnectorSettings, Sequence[str]], ReviewedZapScopePolicy
+    ] | None = None,
 ) -> dict[str, Any]:
     """Rebuild, digest-check, and durably queue the reviewed plan bytes."""
     body = _body(data, submit=True)
@@ -396,6 +421,7 @@ def confirm_and_queue_assessment_zap_job(
         team_id=team_id,
         cfg=cfg,
         resolve_addresses=resolve_addresses,
+        review_scanner_scope=review_scanner_scope,
     )
     if supplied_digest != preview["plan_digest"]:
         raise AssessmentZapError(

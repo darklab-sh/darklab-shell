@@ -26,6 +26,7 @@ from services.connectors.zap_plan_scope import (
     scope_pattern,
 )
 from services.connectors.zap_scope import ReviewedZapTarget
+from services.connectors.zap_scope_policy import allowed_target_cidrs_sha256
 
 _MAX_PLAN_BYTES = 65536
 _MAX_BODY_BYTES = 1048576
@@ -163,6 +164,10 @@ def build_zap_automation_plan(
     })
     plan = {
         "env": {
+            "proxy": {
+                "hostname": settings.egress_proxy_host,
+                "port": settings.egress_proxy_port,
+            },
             "contexts": [{
                 "name": context_name,
                 "urls": list(canonical_targets),
@@ -193,5 +198,8 @@ def build_zap_automation_plan(
             job_types=job_types,
             job_timeout_seconds=settings.job_timeout_seconds,
             report_file=_REPORT_FILE,
+            scope_policy_id=settings.scope_policy_id,
+            allowed_target_cidrs_sha256=allowed_target_cidrs_sha256(settings),
+            egress_proxy=f"{settings.egress_proxy_host}:{settings.egress_proxy_port}",
         ),
     )

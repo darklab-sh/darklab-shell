@@ -58,11 +58,13 @@ _SECRET_CONFIG_KEYS = {
     "notifications.smtp.password_secret_id",
     "oast_connector.token_secret_id",
     "zap_connector.api_key_secret_id",
+    "zap_connector.scope_policy_token_secret_id",
 }
 _SENSITIVE_URL_CONFIG_KEYS = {
     "database_url",
     "oast_connector.base_url",
     "zap_connector.base_url",
+    "zap_connector.scope_policy_url",
 }
 _MAX_CONFIG_ERROR_VALUE_CHARS = 120
 _MAX_CONFIG_LOG_PATH_CHARS = 240
@@ -557,6 +559,11 @@ class ZapConnectorConfig(_ConfigModel):
     api_key_secret_id: StrictStr = ""
     tls_verify: StrictBool = True
     allowed_target_cidrs: list[StrictStr] = Field(default_factory=list)
+    scope_policy_url: StrictStr = ""
+    scope_policy_token_secret_id: StrictStr = ""
+    scope_policy_id: StrictStr = ""
+    egress_proxy_host: StrictStr = ""
+    egress_proxy_port: StrictInt = Field(default=0, ge=0, le=65535)
     max_concurrent_jobs: StrictInt = Field(default=1, ge=1, le=8)
     job_timeout_seconds: StrictInt = Field(default=1800, ge=30, le=86400)
     max_report_bytes: StrictInt = Field(default=10485760, ge=1024, le=52428800)
@@ -615,6 +622,84 @@ class ZapConnectorConfig(_ConfigModel):
         if not deduplicated and info.data.get("enabled"):
             raise ValueError("must include at least one network when the connector is enabled")
         return deduplicated
+
+    @field_validator("scope_policy_url")
+    @classmethod
+    def validate_scope_policy_url(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("must be the fixed HTTPS scope-policy endpoint") from exc
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path != "/v1/zap-scope/review"
+            or parsed.query
+            or parsed.fragment
+            or (port is None and parsed.netloc.endswith(":"))
+        ):
+            raise ValueError("must be an HTTPS URL ending in /v1/zap-scope/review")
+        return normalized
+
+    @field_validator("scope_policy_token_secret_id")
+    @classmethod
+    def validate_scope_policy_token_secret_id(
+        cls,
+        value: str,
+        info: ValidationInfo,
+    ) -> str:
+        normalized = value.strip()
+        if not normalized and info.data.get("enabled"):
+            raise ValueError("is required when the connector is enabled")
+        if normalized and not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", normalized):
+            raise ValueError("must name an environment variable")
+        return normalized
+
+    @field_validator("scope_policy_id")
+    @classmethod
+    def validate_scope_policy_id(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if not normalized and info.data.get("enabled"):
+            raise ValueError("is required when the connector is enabled")
+        if normalized and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", normalized):
+            raise ValueError("must contain only letters, numbers, dot, underscore, and dash")
+        return normalized
+
+    @field_validator("egress_proxy_host")
+    @classmethod
+    def validate_egress_proxy_host(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip().rstrip(".").lower()
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        try:
+            ipaddress.ip_address(normalized)
+        except ValueError:
+            if (
+                len(normalized) > 253
+                or not all(
+                    re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                    for label in normalized.split(".")
+                )
+            ):
+                raise ValueError("must be a hostname or IP address") from None
+        return normalized
+
+    @field_validator("egress_proxy_port")
+    @classmethod
+    def validate_egress_proxy_port(cls, value: int, info: ValidationInfo) -> int:
+        if info.data.get("enabled") and value == 0:
+            raise ValueError("must be between 1 and 65535 when the connector is enabled")
+        return value
 
 
 class OastConnectorConfig(_ConfigModel):
@@ -1485,6 +1570,11 @@ def load_config(conf_dir=None, local_conf_dir=None):
             "api_key_secret_id": "",
             "tls_verify": True,
             "allowed_target_cidrs": [],
+            "scope_policy_url": "",
+            "scope_policy_token_secret_id": "",
+            "scope_policy_id": "",
+            "egress_proxy_host": "",
+            "egress_proxy_port": 0,
             "max_concurrent_jobs": 1,
             "job_timeout_seconds": 1800,
             "max_report_bytes": 10485760,

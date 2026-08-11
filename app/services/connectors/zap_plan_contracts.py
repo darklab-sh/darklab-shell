@@ -27,6 +27,9 @@ class ZapAutomationPlanSummary:
     job_types: tuple[str, ...]
     job_timeout_seconds: int
     report_file: str
+    scope_policy_id: str
+    allowed_target_cidrs_sha256: str
+    egress_proxy: str
 
     def to_dict(self) -> dict[str, Any]:
         """Return the non-secret summary intended for operator review."""
@@ -39,6 +42,9 @@ class ZapAutomationPlanSummary:
             "job_types": list(self.job_types),
             "job_timeout_seconds": self.job_timeout_seconds,
             "report_file": self.report_file,
+            "scope_policy_id": self.scope_policy_id,
+            "allowed_target_cidrs_sha256": self.allowed_target_cidrs_sha256,
+            "egress_proxy": self.egress_proxy,
         }
 
 

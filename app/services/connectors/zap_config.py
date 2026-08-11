@@ -29,6 +29,11 @@ class ZapConnectorSettings:
     api_key_secret_id: str
     tls_verify: bool
     allowed_target_cidrs: tuple[str, ...]
+    scope_policy_url: str
+    scope_policy_token_secret_id: str
+    scope_policy_id: str
+    egress_proxy_host: str
+    egress_proxy_port: int
     max_concurrent_jobs: int
     job_timeout_seconds: int
     max_report_bytes: int
@@ -45,16 +50,49 @@ def zap_connector_settings(cfg: Mapping[str, Any] | None = None) -> ZapConnector
         raise ZapConnectorUnavailable(
             "zap_base_url_invalid", "The configured ZAP origin must use HTTP or HTTPS",
         )
-    return ZapConnectorSettings(
+    settings = ZapConnectorSettings(
         enabled=bool(active.get("enabled", False)),
         base_url=base_url,
         api_key_secret_id=str(active.get("api_key_secret_id") or "").strip(),
         tls_verify=bool(active.get("tls_verify", True)),
         allowed_target_cidrs=tuple(str(value) for value in cidrs),
+        scope_policy_url=str(active.get("scope_policy_url") or "").strip(),
+        scope_policy_token_secret_id=str(
+            active.get("scope_policy_token_secret_id") or ""
+        ).strip(),
+        scope_policy_id=str(active.get("scope_policy_id") or "").strip(),
+        egress_proxy_host=str(active.get("egress_proxy_host") or "").strip().lower(),
+        egress_proxy_port=int(active.get("egress_proxy_port") or 0),
         max_concurrent_jobs=int(active.get("max_concurrent_jobs") or 1),
         job_timeout_seconds=int(active.get("job_timeout_seconds") or 1800),
         max_report_bytes=int(active.get("max_report_bytes") or 10485760),
     )
+    if settings.enabled:
+        try:
+            policy = urlsplit(settings.scope_policy_url)
+            policy_port = policy.port
+        except ValueError:
+            policy = urlsplit("")
+            policy_port = None
+        if (
+            policy.scheme != "https"
+            or policy.path != "/v1/zap-scope/review"
+            or not policy.hostname
+            or policy.username is not None
+            or policy.password is not None
+            or policy.query
+            or policy.fragment
+            or (policy_port is None and policy.netloc.endswith(":"))
+            or not settings.scope_policy_token_secret_id
+            or not settings.scope_policy_id
+            or not settings.egress_proxy_host
+            or not 1 <= settings.egress_proxy_port <= 65535
+        ):
+            raise ZapConnectorUnavailable(
+                "zap_scope_policy_invalid",
+                "ZAP scanner-side scope enforcement is not configured safely",
+            )
+    return settings
 
 
 def resolve_zap_api_key(settings: ZapConnectorSettings, *, environ: Mapping[str, str] | None = None) -> str:
@@ -69,3 +107,21 @@ def resolve_zap_api_key(settings: ZapConnectorSettings, *, environ: Mapping[str,
             "The configured ZAP API key is unavailable",
         )
     return api_key
+
+
+def resolve_zap_scope_policy_token(
+    settings: ZapConnectorSettings,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the scanner-side scope-policy token only at its call boundary."""
+    if not settings.enabled:
+        raise ZapConnectorUnavailable("zap_connector_disabled", "ZAP connector is disabled")
+    source = os.environ if environ is None else environ
+    token = str(source.get(settings.scope_policy_token_secret_id) or "")
+    if not token:
+        raise ZapConnectorUnavailable(
+            "zap_scope_policy_token_unavailable",
+            "The configured ZAP scope-policy token is unavailable",
+        )
+    return token

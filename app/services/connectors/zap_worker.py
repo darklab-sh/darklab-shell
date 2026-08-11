@@ -12,12 +12,15 @@ import os
 import signal
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 from config import resolve_effective_cfg
 from runtime_bootstrap import bootstrap_runtime
 from services.atlas.import_workflow import preview_atlas_import
 from services.connectors.zap_config import (
+    ZapConnectorSettings,
     resolve_zap_api_key,
+    resolve_zap_scope_policy_token,
     zap_connector_settings,
 )
 from services.connectors.zap_job_artifacts import (
@@ -44,6 +47,10 @@ from services.connectors.zap_jobs import (
     zap_jobs_for_worker,
 )
 from services.connectors.zap_plan_contracts import ReviewedZapAutomationPlan
+from services.connectors.zap_scope_policy import (
+    allowed_target_cidrs_sha256,
+    review_zap_scope_policy,
+)
 from services.connectors.zap_transport import (
     cancel_zap_automation_plan,
     download_zap_report,
@@ -157,6 +164,33 @@ def _inflight_is_fresh(job: Mapping[str, Any]) -> bool:
     return datetime.now(timezone.utc) - updated.astimezone(timezone.utc) < _RECOVERY_GRACE
 
 
+def _review_job_scope_policy(
+    job: Mapping[str, Any],
+    settings: ZapConnectorSettings,
+    token: str,
+) -> None:
+    summary = job.get("plan_summary")
+    targets = summary.get("targets") if isinstance(summary, Mapping) else None
+    if not isinstance(summary, Mapping) or not isinstance(targets, list):
+        raise ZapJobError(
+            "zap_scope_policy_targets_invalid",
+            "Queued ZAP job is missing its reviewed targets",
+        )
+    expected_proxy = f"{settings.egress_proxy_host}:{settings.egress_proxy_port}"
+    if (
+        summary.get("scope_policy_id") != settings.scope_policy_id
+        or summary.get("allowed_target_cidrs_sha256")
+        != allowed_target_cidrs_sha256(settings)
+        or summary.get("egress_proxy") != expected_proxy
+    ):
+        raise ZapJobError(
+            "zap_scope_policy_changed",
+            "ZAP scanner-side scope policy changed after plan review",
+        )
+    hosts = tuple(urlsplit(str(target)).hostname or "" for target in targets)
+    review_zap_scope_policy(settings, hosts, token=token)
+
+
 def _download_and_preview(job: dict[str, Any], settings, api_key: str, cfg) -> None:
     report = download_zap_report(
         settings,
@@ -176,12 +210,19 @@ def _download_and_preview(job: dict[str, Any], settings, api_key: str, cfg) -> N
     )
 
 
-def process_zap_job(job: dict[str, Any], settings, api_key: str, cfg=None) -> None:
+def process_zap_job(
+    job: dict[str, Any],
+    settings: ZapConnectorSettings,
+    api_key: str,
+    scope_policy_token: str,
+    cfg=None,
+) -> None:
     job_id = str(job.get("id") or "")
     status = str(job.get("status") or "")
     claimed_download = False
     try:
         if status == "queued":
+            _review_job_scope_policy(job, settings, scope_policy_token)
             job = transition_zap_job(job_id, ("queued",), "submitting")
             status = "submitting"
             plan = load_zap_job_plan(job, cfg)
@@ -279,8 +320,25 @@ def run_once(
         if str(job.get("status") or "") == "queued":
             if remote_count >= settings.max_concurrent_jobs:
                 continue
+            try:
+                scope_policy_token = resolve_zap_scope_policy_token(
+                    settings,
+                    environ=environ,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _fail_job(str(job.get("id") or ""), "queued", exc, active_cfg)
+                processed += 1
+                continue
             remote_count += 1
-        process_zap_job(job, settings, api_key, active_cfg)
+        else:
+            scope_policy_token = ""
+        process_zap_job(
+            job,
+            settings,
+            api_key,
+            scope_policy_token,
+            active_cfg,
+        )
         processed += 1
     return processed
 

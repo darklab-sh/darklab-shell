@@ -2893,6 +2893,11 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
         "api_key_secret_id": "DARKLAB_ZAP_API_KEY",
         "tls_verify": True,
         "allowed_target_cidrs": ["203.0.113.0/24"],
+        "scope_policy_url": "https://zap-policy.example.test/v1/zap-scope/review",
+        "scope_policy_token_secret_id": "DARKLAB_ZAP_SCOPE_TOKEN",
+        "scope_policy_id": "assessment-egress-v1",
+        "egress_proxy_host": "zap-egress.example.test",
+        "egress_proxy_port": 8080,
         "max_concurrent_jobs": 1,
         "job_timeout_seconds": 900,
         "max_report_bytes": 1048576,
@@ -2907,6 +2912,21 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
             resolve_addresses=lambda _host: ["203.0.113.10"],
         ),
     )
+    from services.connectors.zap_scope_policy import (
+        ReviewedZapScopePolicy,
+        ZapScopePolicyError,
+        allowed_target_cidrs_sha256,
+    )
+
+    def successful_scope_review(settings, hosts):
+        return ReviewedZapScopePolicy(
+            policy_id=settings.scope_policy_id,
+            allowed_target_cidrs_sha256=allowed_target_cidrs_sha256(settings),
+            egress_proxy_host=settings.egress_proxy_host,
+            egress_proxy_port=settings.egress_proxy_port,
+            scanner_addresses=tuple((host, ("203.0.113.10",)) for host in hosts),
+        )
+
     base = (
         f"/api/v1/projects/{project['id']}/assessments/"
         f"{created['assessment']['id']}/checks/{check['id']}"
@@ -2917,6 +2937,26 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
         "policy_level": "safe",
         "scope_exclusions": ["/app/private"],
     }
+    monkeypatch.setattr(
+        zap_connector,
+        "review_zap_scope_policy",
+        mock.Mock(side_effect=ZapScopePolicyError(
+            "zap_scanner_target_out_of_scope",
+            "ZAP scanner-side DNS resolved a target outside the allowed networks",
+        )),
+    )
+    split_horizon = client.post(
+        base + "/zap-plan",
+        headers=_headers(token),
+        json=selection,
+    )
+    assert split_horizon.status_code == 400
+    assert split_horizon.get_json()["error"]["code"] == "zap_scanner_target_out_of_scope"
+    monkeypatch.setattr(
+        zap_connector,
+        "review_zap_scope_policy",
+        successful_scope_review,
+    )
     preview_response = client.post(
         base + "/zap-plan",
         headers=_headers(token),

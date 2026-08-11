@@ -89,6 +89,11 @@ def _summary_from_job(job: Mapping[str, Any]) -> ZapAutomationPlanSummary:
             job_types=tuple(str(item) for item in value["job_types"]),
             job_timeout_seconds=int(value["job_timeout_seconds"]),
             report_file=str(value["report_file"]),
+            scope_policy_id=str(value["scope_policy_id"]),
+            allowed_target_cidrs_sha256=str(
+                value["allowed_target_cidrs_sha256"]
+            ),
+            egress_proxy=str(value["egress_proxy"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ZapJobArtifactError("zap_plan_invalid", "The queued ZAP plan summary is invalid") from exc

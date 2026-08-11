@@ -473,7 +473,9 @@
 # ZAP runs outside the darklab_shell image. Enabling this section only makes a
 # validated operator-managed connector available; it doesn't submit a scan by
 # itself. Put the API key in the named environment variable, never in YAML.
-# Every submitted Project target must resolve inside one of the explicit CIDRs.
+# Every target must resolve inside the explicit CIDRs from both the app and the
+# scanner-side scope policy. ZAP sends all target traffic through the policy's
+# enforcing proxy, which rechecks DNS and CIDRs for every connection.
 # Server default if unset:
 # zap_connector:
 #   enabled: false
@@ -481,6 +483,11 @@
 #   api_key_secret_id: ""  # Environment variable name holding the ZAP API key.
 #   tls_verify: true
 #   allowed_target_cidrs: []
+#   scope_policy_url: ""  # Exact HTTPS .../v1/zap-scope/review endpoint.
+#   scope_policy_token_secret_id: ""  # Environment variable holding its token.
+#   scope_policy_id: ""  # Stable policy identity returned by the scope service.
+#   egress_proxy_host: ""  # Proxy configured in every generated ZAP plan.
+#   egress_proxy_port: 0
 #   max_concurrent_jobs: 1
 #   job_timeout_seconds: 1800
 #   max_report_bytes: 10485760

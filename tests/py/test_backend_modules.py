@@ -2977,6 +2977,11 @@ class TestLoadConfig:
                         - 192.0.2.10/24
                         - 2001:db8::10/64
                         - 192.0.2.0/24
+                      scope_policy_url: https://zap-policy.example.test/v1/zap-scope/review
+                      scope_policy_token_secret_id: DARKLAB_ZAP_SCOPE_TOKEN
+                      scope_policy_id: assessment-egress-v1
+                      egress_proxy_host: zap-egress.example.test
+                      egress_proxy_port: 8080
                       max_concurrent_jobs: 2
                       job_timeout_seconds: 900
                       max_report_bytes: 8388608
@@ -3007,6 +3012,11 @@ class TestLoadConfig:
             "api_key_secret_id": "DARKLAB_ZAP_API_KEY",
             "tls_verify": True,
             "allowed_target_cidrs": ["192.0.2.0/24", "2001:db8::/64"],
+            "scope_policy_url": "https://zap-policy.example.test/v1/zap-scope/review",
+            "scope_policy_token_secret_id": "DARKLAB_ZAP_SCOPE_TOKEN",
+            "scope_policy_id": "assessment-egress-v1",
+            "egress_proxy_host": "zap-egress.example.test",
+            "egress_proxy_port": 8080,
             "max_concurrent_jobs": 2,
             "job_timeout_seconds": 900,
             "max_report_bytes": 8388608,
@@ -3014,6 +3024,7 @@ class TestLoadConfig:
         from services.connectors.zap_config import (
             ZapConnectorUnavailable,
             resolve_zap_api_key,
+            resolve_zap_scope_policy_token,
             zap_connector_settings,
         )
         from services.connectors.zap_scope import ZapTargetScopeError, review_zap_target
@@ -3028,6 +3039,10 @@ class TestLoadConfig:
             settings,
             environ={"DARKLAB_ZAP_API_KEY": "connector-secret"},
         ) == "connector-secret"
+        assert resolve_zap_scope_policy_token(
+            settings,
+            environ={"DARKLAB_ZAP_SCOPE_TOKEN": "scope-secret"},
+        ) == "scope-secret"
         reviewed_target = review_zap_target(
             "https://app.example.test/login?next=%2F",
             settings,
@@ -3036,6 +3051,101 @@ class TestLoadConfig:
         assert reviewed_target.url == "https://app.example.test/login?next=%2F"
         assert reviewed_target.host == "app.example.test"
         assert reviewed_target.resolved_addresses == ("192.0.2.10", "2001:db8::10")
+        from services.connectors import zap_scope_policy as zap_scope_policy_module
+        from services.connectors.zap_scope_policy import (
+            ZapScopePolicyError,
+            allowed_target_cidrs_sha256,
+            review_zap_scope_policy,
+            review_zap_scope_policy_response,
+        )
+
+        scope_response = {
+            "schema_version": 1,
+            "nonce": "fresh-nonce",
+            "policy_id": "assessment-egress-v1",
+            "allowed_target_cidrs_sha256": allowed_target_cidrs_sha256(settings),
+            "egress_proxy": {"host": "zap-egress.example.test", "port": 8080},
+            "enforcement": {"mode": "cidr_proxy", "dns_recheck": "per_connection"},
+            "targets": [{
+                "host": "app.example.test",
+                "resolved_addresses": ["192.0.2.10", "2001:db8::10"],
+            }],
+        }
+        scanner_review = review_zap_scope_policy_response(
+            settings,
+            [reviewed_target.host],
+            scope_response,
+            nonce="fresh-nonce",
+        )
+        assert scanner_review.scanner_addresses == ((
+            "app.example.test", ("192.0.2.10", "2001:db8::10"),
+        ),)
+
+        class FakeScopePolicyResponse:
+            status = 200
+
+            def __init__(self, payload: bytes):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def getcode(self):
+                return self.status
+
+            def geturl(self):
+                return settings.scope_policy_url
+
+            def read(self, amount: int):
+                return self.payload[:amount]
+
+        policy_requests = []
+
+        class FakeScopePolicyOpener:
+            def open(self, request, *, timeout):
+                policy_requests.append((request, timeout))
+                submitted = json.loads(request.data.decode("utf-8"))
+                return FakeScopePolicyResponse(json.dumps({
+                    **scope_response,
+                    "nonce": submitted["nonce"],
+                }).encode("utf-8"))
+
+        with mock.patch.object(
+            zap_scope_policy_module,
+            "build_opener",
+            return_value=FakeScopePolicyOpener(),
+        ):
+            transported_review = review_zap_scope_policy(
+                settings,
+                [reviewed_target.host],
+                token="scope-secret",
+            )
+        assert transported_review == scanner_review
+        policy_request, policy_timeout = policy_requests[0]
+        policy_headers = {
+            key.casefold(): value for key, value in policy_request.header_items()
+        }
+        assert policy_timeout == 15
+        assert policy_headers["authorization"] == "Bearer scope-secret"
+        assert "scope-secret" not in policy_request.full_url
+        assert b"scope-secret" not in policy_request.data
+        with pytest.raises(ZapScopePolicyError, match="outside") as exc_info:
+            review_zap_scope_policy_response(
+                settings,
+                [reviewed_target.host],
+                {
+                    **scope_response,
+                    "targets": [{
+                        "host": "app.example.test",
+                        "resolved_addresses": ["198.51.100.5"],
+                    }],
+                },
+                nonce="fresh-nonce",
+            )
+        assert exc_info.value.code == "zap_scanner_target_out_of_scope"
         with pytest.raises(ZapTargetScopeError, match="outside") as exc_info:
             review_zap_target(
                 "https://app.example.test",
@@ -3095,6 +3205,10 @@ class TestLoadConfig:
         )
         safe_document = yaml.safe_load(safe_plan.yaml_bytes)
         safe_context = safe_document["env"]["contexts"][0]
+        assert safe_document["env"]["proxy"] == {
+            "hostname": "zap-egress.example.test",
+            "port": 8080,
+        }
         assert safe_document["env"]["parameters"] == {
             "failOnError": True,
             "failOnWarning": False,
@@ -3136,6 +3250,9 @@ class TestLoadConfig:
             "job_types": ["passiveScan-config", "spider", "passiveScan-wait", "report"],
             "job_timeout_seconds": 900,
             "report_file": "darklab-zap-report.json",
+            "scope_policy_id": "assessment-egress-v1",
+            "allowed_target_cidrs_sha256": allowed_target_cidrs_sha256(settings),
+            "egress_proxy": "zap-egress.example.test:8080",
         }
         intrusive_plan = build_zap_automation_plan(
             settings,
@@ -3660,6 +3777,7 @@ class TestLoadConfig:
                 artifact_job,
                 settings,
                 "connector-secret",
+                "scope-secret",
                 cfg,
             )
         transition_job.assert_called_once_with(
@@ -3684,17 +3802,40 @@ class TestLoadConfig:
                 return_value={**submitted_job, "status": "running", "remote_plan_id": "21"},
             ) as record_submission,
             mock.patch.object(zap_worker_module, "load_zap_job_plan", return_value=safe_plan),
+            mock.patch.object(zap_worker_module, "review_zap_scope_policy") as scope_review,
             mock.patch.object(
                 zap_worker_module, "submit_zap_automation_plan", return_value="21",
             ) as submit_plan,
             mock.patch.object(zap_worker_module, "discard_zap_job_plan") as discard_plan,
         ):
             zap_worker_module.process_zap_job(
-                {**artifact_job, "status": "queued"}, settings, "connector-secret", cfg,
+                {**artifact_job, "status": "queued"},
+                settings,
+                "connector-secret",
+                "scope-secret",
+                cfg,
             )
         transition_job.assert_called_once_with(job_id, ("queued",), "submitting")
         record_submission.assert_called_once_with(job_id, "21")
         submit_plan.assert_called_once_with(settings, "connector-secret", job_id, safe_plan)
+        scope_review.assert_called_once_with(
+            settings,
+            ("app.example.test",),
+            token="scope-secret",
+        )
+        with pytest.raises(zap_worker_module.ZapJobError) as exc_info:
+            zap_worker_module._review_job_scope_policy(
+                {
+                    **artifact_job,
+                    "plan_summary": {
+                        **artifact_job["plan_summary"],
+                        "egress_proxy": "changed.example.test:8080",
+                    },
+                },
+                settings,
+                "scope-secret",
+            )
+        assert exc_info.value.code == "zap_scope_policy_changed"
         discard_plan.assert_called_once_with(job_id, cfg)
 
         with mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job:
@@ -3706,6 +3847,7 @@ class TestLoadConfig:
                 },
                 settings,
                 "connector-secret",
+                "scope-secret",
                 cfg,
             )
         transition_job.assert_not_called()
@@ -3721,6 +3863,7 @@ class TestLoadConfig:
                 },
                 settings,
                 "connector-secret",
+                "scope-secret",
                 cfg,
             )
         assert transition_job.call_args.kwargs["error_code"] == "zap_submission_state_uncertain"
@@ -3733,7 +3876,7 @@ class TestLoadConfig:
             mock.patch.object(zap_worker_module, "discard_zap_job_plan"),
         ):
             zap_worker_module.process_zap_job(
-                cancel_job, settings, "connector-secret", cfg,
+                cancel_job, settings, "connector-secret", "scope-secret", cfg,
             )
         cancel_plan.assert_called_once_with(settings, "connector-secret", "21")
         transition_job.assert_called_once_with(job_id, ("cancel_requested",), "canceled")
@@ -3746,7 +3889,7 @@ class TestLoadConfig:
             mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
         ):
             zap_worker_module.process_zap_job(
-                cancel_job, settings, "connector-secret", cfg,
+                cancel_job, settings, "connector-secret", "scope-secret", cfg,
             )
         transition_job.assert_not_called()
 
@@ -3778,10 +3921,13 @@ class TestLoadConfig:
         ):
             assert zap_worker_module.run_once(
                 cfg=cfg,
-                environ={"DARKLAB_ZAP_API_KEY": "connector-secret"},
+                environ={
+                    "DARKLAB_ZAP_API_KEY": "connector-secret",
+                    "DARKLAB_ZAP_SCOPE_TOKEN": "scope-secret",
+                },
             ) == 1
         process_job.assert_called_once_with(
-            queued_jobs[0], settings, "connector-secret", cfg,
+            queued_jobs[0], settings, "connector-secret", "scope-secret", cfg,
         )
         discard_plan.assert_called_once_with(orphan_plan_id, cfg)
 
@@ -3883,6 +4029,15 @@ class TestLoadConfig:
                     - zap-api-key-secret-ref
                 """,
             ),
+            (
+                "zap_connector.scope_policy_token_secret_id",
+                "zap-scope-token-secret-ref",
+                """
+                zap_connector:
+                  scope_policy_token_secret_id:
+                    - zap-scope-token-secret-ref
+                """,
+            ),
         ]
         for key, raw_secret, yaml_text in cases:
             with tempfile.TemporaryDirectory() as tmp:
@@ -3973,6 +4128,33 @@ class TestLoadConfig:
                 "zap_connector.allowed_target_cidrs",
                 "zap_connector:\n  enabled: true\n  base_url: http://zap:8080\n"
                 "  api_key_secret_id: DARKLAB_ZAP_API_KEY\n",
+            ),
+            (
+                "zap_connector.scope_policy_url",
+                "zap_connector:\n  enabled: true\n  base_url: http://zap:8080\n"
+                "  api_key_secret_id: DARKLAB_ZAP_API_KEY\n"
+                "  allowed_target_cidrs: [192.0.2.0/24]\n",
+            ),
+            (
+                "zap_connector.scope_policy_url",
+                "zap_connector:\n"
+                "  scope_policy_url: http://policy.example.test/v1/zap-scope/review\n",
+            ),
+            (
+                "zap_connector.scope_policy_token_secret_id",
+                "zap_connector:\n  scope_policy_token_secret_id: lowercase-token\n",
+            ),
+            (
+                "zap_connector.scope_policy_id",
+                "zap_connector:\n  scope_policy_id: 'unsafe policy'\n",
+            ),
+            (
+                "zap_connector.egress_proxy_host",
+                "zap_connector:\n  egress_proxy_host: 'https://proxy.example.test'\n",
+            ),
+            (
+                "zap_connector.egress_proxy_port",
+                "zap_connector:\n  egress_proxy_port: 65536\n",
             ),
             (
                 "zap_connector.max_concurrent_jobs",
@@ -7995,6 +8177,9 @@ class TestPostgresMigrations:
                 job_types=("passiveScan-config", "spider", "passiveScan-wait", "report"),
                 job_timeout_seconds=900,
                 report_file="darklab-zap-report.json",
+                scope_policy_id="assessment-egress-v1",
+                allowed_target_cidrs_sha256="a" * 64,
+                egress_proxy="zap-egress.example.test:8080",
             )
             zap_job = create_zap_job(
                 "session-a",
