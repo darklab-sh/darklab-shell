@@ -78,14 +78,48 @@ const cycle = {
   started_at: '2026-08-05T10:00:00+00:00',
 }
 
-const profiles = [{
-  key: 'network',
-  version: '1.0.0',
-  label: 'Network assessment',
-  purpose: 'Review exposed network services.',
-  target_types: ['domain', 'ip'],
-  check_count: 2,
-}]
+const profiles = [
+  {
+    key: 'network',
+    version: '1.0',
+    label: 'Network assessment',
+    purpose: 'Review exposed network services.',
+    target_types: ['domain', 'ip'],
+    check_count: 3,
+  },
+  {
+    key: 'web',
+    version: '1.6',
+    label: 'Web assessment',
+    purpose: 'Review reachable web applications.',
+    target_types: ['domain', 'ip', 'url'],
+    check_count: 9,
+  },
+  {
+    key: 'api',
+    version: '1.0',
+    label: 'API assessment',
+    purpose: 'Review a saved API contract.',
+    target_types: ['url'],
+    check_count: 1,
+  },
+  {
+    key: 'tls',
+    version: '1.0',
+    label: 'TLS assessment',
+    purpose: 'Review certificate trust and TLS security settings.',
+    target_types: ['domain', 'ip'],
+    check_count: 2,
+  },
+  {
+    key: 'combined',
+    version: '1.0',
+    label: 'Combined assessment',
+    purpose: 'Review the network, web, API, and TLS surface together.',
+    target_types: ['domain', 'ip', 'url'],
+    check_count: 15,
+  },
+]
 
 const httpProfile = {
   id: 'htp_1',
@@ -2065,11 +2099,19 @@ describe('project assessment controller', () => {
     let cycles = []
     const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
       if (options.method === 'POST') {
-        cycles = [{ ...cycle, id: 'asmt_new' }]
+        const profileKey = JSON.parse(options.body).profile_key
+        const selectedProfile = profiles.find(profile => profile.key === profileKey)
+        cycles = [{
+          ...cycle,
+          id: 'asmt_new',
+          title: selectedProfile.label,
+          profile_key: profileKey,
+          profile_version: selectedProfile.version,
+        }]
         return apiResponse({ assessment: cycles[0] })
       }
       if (/\/assessments\/[^?]+/.test(url)) {
-        return apiResponse({ ...detail, assessment: { ...detail.assessment, id: 'asmt_new' } })
+        return apiResponse({ ...detail, assessment: { ...detail.assessment, ...cycles[0] } })
       }
       return apiResponse({ assessments: cycles, profiles, total: cycles.length, limit: 100, offset: 0, has_more: false })
     })
@@ -2082,16 +2124,23 @@ describe('project assessment controller', () => {
     })
     controller.renderAssessment(container, 'prj_1')
     expect(container.querySelector('button[type="submit"]').disabled).toBe(false)
+    expect([...container.querySelectorAll('select[name="profile_key"] option')].map(option => option.value)).toEqual([
+      'network',
+      'web',
+      'api',
+      'tls',
+      'combined',
+    ])
 
-    await controller.createCycle('prj_1', 'network')
+    await controller.createCycle('prj_1', 'tls')
     expect(projectWorkspaceRequest).toHaveBeenCalledWith('/projects/prj_1/assessments', {
       method: 'POST',
-      body: JSON.stringify({ profile_key: 'network' }),
+      body: JSON.stringify({ profile_key: 'tls' }),
     })
     expect(controller.stateFor('prj_1').selectedId).toBe('asmt_new')
     expect(ctx.invalidateProjectOverview).toHaveBeenCalledWith('prj_1')
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle started.')
-    expect(container.textContent).toContain('Network review')
+    expect(container.textContent).toContain('TLS assessment')
     expect(container.textContent).not.toContain('Loading project assessments...')
 
     const viewerRequest = vi.fn(async () => apiResponse({ assessments: [], profiles, total: 0 }))

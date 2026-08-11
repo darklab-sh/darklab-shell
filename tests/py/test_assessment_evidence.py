@@ -32,6 +32,8 @@ from services.assessments.command_modes import (
     NUCLEI_INTRUSIVE_PROFILE_MODE,
     NUCLEI_SAFE_PROFILE_MODE,
     NUCLEI_STANDARD_PROFILE_MODE,
+    TLS_CERTIFICATE_CHAIN_MODE,
+    TLS_CONFIGURATION_MODE,
     assessment_command_mode,
 )
 from services.assessments.command_plans import command_plan
@@ -762,7 +764,7 @@ def test_dalfox_evidence_modes_keep_discovery_and_active_clean_runs_distinct():
     ) is None
 
 
-def test_nuclei_evidence_modes_keep_reviewed_profiles_distinct():
+def test_assessment_evidence_modes_keep_reviewed_profiles_distinct():
     safe = command_plan("nuclei", "url", "https://example.com")
     standard = command_plan(
         "nuclei", "url", "https://example.com", nuclei_profile="standard",
@@ -785,6 +787,59 @@ def test_nuclei_evidence_modes_keep_reviewed_profiles_distinct():
     ) == NUCLEI_STANDARD_PROFILE_MODE
     assert assessment_command_mode(intrusive.command + " -tags cve") == ""
     assert assessment_command_mode(intrusive.command.replace("-rl 10", "-rl 1001")) == ""
+    certificate = command_plan("sslyze", "domain", "tls.example")
+    configuration = command_plan("testssl", "domain", "tls.example")
+    ipv6_certificate = command_plan("sslyze", "ip", "2001:db8::10")
+    ipv6_configuration = command_plan("testssl", "ip", "2001:db8::10")
+    assert certificate is not None
+    assert configuration is not None
+    assert ipv6_certificate is not None
+    assert ipv6_configuration is not None
+    assert certificate.command == "sslyze --certinfo tls.example"
+    assert configuration.command == (
+        "testssl --fast --severity HIGH https://tls.example"
+    )
+    assert ipv6_certificate.command == "sslyze --certinfo '[2001:db8::10]:443'"
+    assert ipv6_configuration.command == (
+        "testssl --fast --severity HIGH 'https://[2001:db8::10]'"
+    )
+    assert assessment_command_mode(certificate.command) == TLS_CERTIFICATE_CHAIN_MODE
+    assert assessment_command_mode(configuration.command) == TLS_CONFIGURATION_MODE
+    assert assessment_command_mode(certificate.command + " --heartbleed") == ""
+    assert assessment_command_mode(configuration.command + " --full") == ""
+    assert assessment_command_mode(
+        configuration.command.replace("--severity HIGH", "--severity LOW")
+    ) == ""
+    tls_clean_facts = RunEvidenceFacts(
+        run_id="run-tls-clean",
+        command_root="testssl",
+        finished_at="2026-08-11 12:00:00",
+        exit_code=0,
+        target_identities=(EvidenceIdentity("url", "https://tls.example"),),
+        structured_output_kinds=frozenset(),
+        workflow_actions=frozenset(),
+        finding_count=0,
+        command_mode=TLS_CONFIGURATION_MODE,
+    )
+    tls_definition = _profile(rule=_rule(
+        command_roots=["testssl"],
+        command_modes=[TLS_CONFIGURATION_MODE],
+        structured_output_kinds=["findings"],
+        negative_evidence=True,
+        target_match="host_or_descendant",
+    ))["checks"][0]
+    assert matching_run_rule(
+        tls_definition,
+        tls_clean_facts,
+        target_type="domain",
+        target_value="tls.example",
+    )
+    assert matching_run_rule(
+        tls_definition,
+        RunEvidenceFacts(**{**tls_clean_facts.__dict__, "command_mode": ""}),
+        target_type="domain",
+        target_value="tls.example",
+    ) is None
 
 
 def test_run_fact_loader_uses_scan_observations_and_materialized_service_evidence(

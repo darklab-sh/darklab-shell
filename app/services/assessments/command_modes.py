@@ -18,6 +18,11 @@ from services.assessments.command_modes_nuclei import (
     NUCLEI_STANDARD_PROFILE_MODE,
     nuclei_command_mode,
 )
+from services.assessments.command_modes_tls import (
+    TLS_CERTIFICATE_CHAIN_MODE,
+    TLS_CONFIGURATION_MODE,
+    tls_command_mode,
+)
 
 
 ASSESSMENT_COMMAND_MODES = frozenset({
@@ -27,6 +32,8 @@ ASSESSMENT_COMMAND_MODES = frozenset({
     NUCLEI_SAFE_PROFILE_MODE,
     NUCLEI_STANDARD_PROFILE_MODE,
     NUCLEI_INTRUSIVE_PROFILE_MODE,
+    TLS_CERTIFICATE_CHAIN_MODE,
+    TLS_CONFIGURATION_MODE,
 })
 
 
@@ -39,6 +46,8 @@ def assessment_command_mode(command: object) -> str:
         return nuclei_command_mode(tokens)
     if tokens[0].casefold() == "dalfox":
         return dalfox_command_mode(tokens)
+    if tokens[0].casefold() in {"sslyze", "testssl"}:
+        return tls_command_mode(tokens)
     return ""
 
 
@@ -50,5 +59,7 @@ __all__ = [
     "NUCLEI_INTRUSIVE_PROFILE_MODE",
     "NUCLEI_SAFE_PROFILE_MODE",
     "NUCLEI_STANDARD_PROFILE_MODE",
+    "TLS_CERTIFICATE_CHAIN_MODE",
+    "TLS_CONFIGURATION_MODE",
     "assessment_command_mode",
 ]

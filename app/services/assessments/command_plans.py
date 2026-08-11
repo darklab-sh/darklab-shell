@@ -9,6 +9,7 @@ import shlex
 from typing import Any, Mapping
 
 from services.assessments.command_plan_contracts import CommandPlan
+from services.assessments.command_plans_tls import tls_command_plans
 from services.assessments.command_plans_web import web_command_plans
 from services.assessments.nmap_profiles import nmap_profile_suffix
 from services.assessments.nuclei_profiles import nuclei_profile as get_nuclei_profile, nuclei_profile_args
@@ -24,6 +25,8 @@ _COMMAND_TARGET_TYPES = {
     "nuclei": frozenset({"domain", "ip", "url"}),
     "dalfox": frozenset({"domain", "ip", "url"}),
     "sqlmap": frozenset({"url"}),
+    "sslyze": frozenset({"domain", "ip"}),
+    "testssl": frozenset({"domain", "ip"}),
 }
 
 def command_plan(
@@ -104,5 +107,6 @@ def command_plan(
             protected_suffix,
             nuclei_args=nuclei_profile_args(nuclei_profile),
         ),
+        **tls_command_plans(target_type, target_value),
     }
     return plans.get(action_id)

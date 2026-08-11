@@ -661,6 +661,8 @@ def test_project_assessment_browser_routes_cover_lifecycle_and_audit(project_fac
         "network",
         "web",
         "api",
+        "tls",
+        "combined",
     }
     assert all(profile["check_count"] > 0 for profile in list_payload["profiles"])
     assert all("checks" not in profile for profile in list_payload["profiles"])

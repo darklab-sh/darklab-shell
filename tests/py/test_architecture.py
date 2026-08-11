@@ -363,6 +363,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/action_plans.py", 318, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plan_contracts.py", 12, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_modes.py", 83, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/command_modes_tls.py", 33, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_modes_dalfox.py", 83, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/command_modes_dalfox_oast.py",
@@ -370,7 +371,8 @@ _MODULE_SIZE_RATCHET = (
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/services/assessments/command_modes_nuclei.py", 73, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/command_plans.py", 110, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/command_plans.py", 112, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/command_plans_tls.py", 43, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plans_web.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/cyclonedx_component_document.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/cyclonedx_cpe_observations.py", 110, "split-package-ratchet"),

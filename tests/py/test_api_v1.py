@@ -1339,7 +1339,9 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     assert listed["assessments"][0]["id"] == assessment_id
     assert {profile["key"] for profile in listed["profiles"]} == {
         "api",
+        "combined",
         "network",
+        "tls",
         "web",
     }
     assert all(profile["check_count"] > 0 for profile in listed["profiles"])
@@ -1594,6 +1596,76 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         "assessment.evidence_unlink",
     ]
     assert all(row["details"]["source"] == "api_v1" for row in check_audits)
+
+    tls_response = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=headers,
+        json={"profile_key": "tls"},
+    )
+    assert tls_response.status_code == 201
+    tls_cycle = tls_response.get_json()
+    assert tls_cycle["assessment"]["profile_key"] == "tls"
+    assert tls_cycle["checks"]["total"] == 2
+    certificate_check = next(
+        item
+        for item in tls_cycle["checks"]["checks"]
+        if item["check_key"] == "certificate_chain"
+    )
+    tls_action_path = (
+        f"/api/v1/projects/{project['id']}/assessments/"
+        f"{tls_cycle['assessment']['id']}/checks/{certificate_check['id']}/"
+        "recommended-action"
+    )
+    tls_preview = client.get(tls_action_path, headers=headers)
+    assert tls_preview.status_code == 200
+    tls_plan = tls_preview.get_json()["plan"]
+    assert tls_plan["action"] == {
+        "key": "command:sslyze",
+        "kind": "command",
+        "id": "sslyze",
+    }
+    assert tls_plan["display_command"] == (
+        f"sslyze --certinfo {certificate_check['target_value']}"
+    )
+    assert tls_plan["launchable"] is True
+    tls_id = tls_cycle["assessment"]["id"]
+    assert client.patch(
+        f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
+        headers=headers,
+        json={"status": "completed"},
+    ).status_code == 200
+    assert client.patch(
+        f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
+        headers=headers,
+        json={"status": "archived"},
+    ).status_code == 200
+    assert client.delete(
+        f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
+        headers=headers,
+    ).status_code == 200
+
+    combined_response = client.post(
+        f"/api/v1/projects/{project['id']}/assessments",
+        headers=headers,
+        json={"profile_key": "combined"},
+    )
+    assert combined_response.status_code == 201
+    combined = combined_response.get_json()
+    assert combined["assessment"]["profile_key"] == "combined"
+    assert combined["checks"]["total"] == 11
+    assert {item["check_key"] for item in combined["checks"]["checks"]} == {
+        "certificate_chain",
+        "content_discovery",
+        "dns_inventory",
+        "host_reachability",
+        "http_profile",
+        "intrusive_template_validation",
+        "parameter_discovery",
+        "service_discovery",
+        "subdomain_takeover_confirmation",
+        "tls_configuration",
+        "vulnerability_templates",
+    }
 
 
 def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
@@ -7871,6 +7943,23 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         "target_value": "darklab.sh",
         "check_key": "network.port_discovery",
     }
+    profile_summaries = [
+        {
+            "key": key,
+            "version": "1.0",
+            "label": label,
+            "purpose": f"Run the maintained {label.lower()}.",
+            "target_types": target_types,
+            "check_count": check_count,
+        }
+        for key, label, target_types, check_count in (
+            ("network", "Network assessment", ["domain", "ip"], 3),
+            ("web", "Web assessment", ["domain", "ip", "url"], 9),
+            ("api", "API assessment", ["url"], 1),
+            ("tls", "TLS assessment", ["domain", "ip"], 2),
+            ("combined", "Combined assessment", ["domain", "ip", "url"], 15),
+        )
+    ]
 
     class FakeClient:
         def __init__(self, _config):
@@ -7885,6 +7974,7 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
                     "limit": 50,
                     "offset": 0,
                     "has_more": False,
+                    "profiles": profile_summaries,
                 }
             if path == "/projects/prj_cli/assessments/asmt_cli" and method == "GET":
                 return {
@@ -7957,6 +8047,22 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         {"limit": 50, "offset": 0, "status": "archived", "include_archived": True},
         None,
     )
+
+    assert cli_main.main([
+        "assessment",
+        "list",
+        "prj_cli",
+        "--format",
+        "json",
+    ]) == 0
+    list_payload = json.loads(capsys.readouterr().out)
+    assert [profile["key"] for profile in list_payload["profiles"]] == [
+        "network",
+        "web",
+        "api",
+        "tls",
+        "combined",
+    ]
 
     assert cli_main.main(["assessment", "show", "prj_cli", "asmt_cli"]) == 0
     show_output = capsys.readouterr().out

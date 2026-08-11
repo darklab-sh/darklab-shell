@@ -90,11 +90,11 @@ def _clear_catalog_cache():
     profiles.clear_assessment_profile_catalog_cache()
 
 
-def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks():
+def test_shipped_assessment_profiles_define_the_complete_versioned_catalog():
     catalog = profiles.load_assessment_profile_catalog()
 
     by_key = {profile["key"]: profile for profile in catalog.profiles}
-    assert list(by_key) == ["network", "web", "api"]
+    assert list(by_key) == ["network", "web", "api", "tls", "combined"]
     assert {check["key"] for check in by_key["network"]["checks"]} == {
         "host_reachability",
         "service_discovery",
@@ -114,6 +114,8 @@ def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks
     assert by_key["network"]["version"] == "1.0"
     assert by_key["web"]["version"] == "1.6"
     assert by_key["api"]["version"] == "1.0"
+    assert by_key["tls"]["version"] == "1.0"
+    assert by_key["combined"]["version"] == "1.0"
     assert by_key["api"]["target_types"] == ["url"]
     assert by_key["api"]["checks"] == [{
         "key": "openapi_negative_testing",
@@ -144,6 +146,85 @@ def test_shipped_assessment_profiles_define_versioned_network_web_and_api_checks
             "operation and request limits, and keep both failures and a successful clean run."
         ),
     }]
+    assert by_key["tls"]["target_types"] == ["domain", "ip"]
+    assert by_key["tls"]["checks"] == [
+        {
+            "key": "certificate_chain",
+            "version": "1.0",
+            "category": "validation",
+            "label": "Certificate chain",
+            "purpose": (
+                "Validate the certificate chain and trust details presented by the "
+                "approved host."
+            ),
+            "target_types": ["domain", "ip"],
+            "evidence_rules": [{
+                "key": "completed_certificate_chain_review",
+                "version": "1.0",
+                "evidence_types": ["run"],
+                "command_roots": ["sslyze"],
+                "workflow_actions": [],
+                "structured_output_kinds": [],
+                "target_match": "host_or_descendant",
+                "completion": "succeeded",
+                "compatible_versions": ["*"],
+                "negative_evidence": True,
+                "command_modes": ["tls_certificate_chain"],
+            }],
+            "policy_level": "safe",
+            "recommended_action": "command:sslyze",
+            "completion_guidance": (
+                "Run the fixed certificate-chain review and keep the successful result "
+                "whether it records a trust issue or a clean chain."
+            ),
+        },
+        {
+            "key": "tls_configuration",
+            "version": "1.0",
+            "category": "validation",
+            "label": "TLS configuration",
+            "purpose": (
+                "Review the approved host for high-severity TLS protocol, cipher, and "
+                "certificate issues."
+            ),
+            "target_types": ["domain", "ip"],
+            "evidence_rules": [{
+                "key": "completed_tls_configuration_review",
+                "version": "1.0",
+                "evidence_types": ["run", "finding"],
+                "command_roots": ["testssl"],
+                "workflow_actions": [],
+                "structured_output_kinds": ["findings"],
+                "target_match": "host_or_descendant",
+                "completion": "succeeded",
+                "compatible_versions": ["*"],
+                "negative_evidence": True,
+                "command_modes": ["tls_configuration"],
+            }],
+            "policy_level": "standard",
+            "recommended_action": "command:testssl",
+            "completion_guidance": (
+                "Run the fixed fast, high-severity TLS review, examine any saved "
+                "findings, and keep a successful clean run when no issue is found."
+            ),
+        },
+    ]
+    source_checks = {
+        check["key"]: check
+        for profile_key in ("network", "web", "api", "tls")
+        for check in by_key[profile_key]["checks"]
+    }
+    assert by_key["combined"]["target_types"] == ["domain", "ip", "url"]
+    assert [check["key"] for check in by_key["combined"]["checks"]] == [
+        *[check["key"] for check in by_key["network"]["checks"]],
+        *[check["key"] for check in by_key["web"]["checks"]],
+        *[check["key"] for check in by_key["api"]["checks"]],
+        *[check["key"] for check in by_key["tls"]["checks"]],
+    ]
+    assert all(
+        check == source_checks[check["key"]]
+        for check in by_key["combined"]["checks"]
+    )
     for profile in catalog.profiles:
         for check in profile["checks"]:
             action = check["recommended_action"]

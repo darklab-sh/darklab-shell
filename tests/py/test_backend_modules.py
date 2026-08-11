@@ -33216,6 +33216,14 @@ class TestAssessmentHttpProfileExecution:
         assert not is_command_allowed(
             sqlmap.command.removesuffix(" -c [protected]")
         )[0]
+        certificate = command_plan("sslyze", "domain", "tls.example")
+        tls_configuration = command_plan("testssl", "domain", "tls.example")
+        assert certificate is not None
+        assert tls_configuration is not None
+        allowed, reason = is_command_allowed(certificate.command)
+        assert allowed, reason
+        allowed, reason = is_command_allowed(tls_configuration.command)
+        assert allowed, reason
         profile = {
             "include_paths": ["/admin"],
             "exclude_paths": ["/admin/logout"],

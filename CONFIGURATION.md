@@ -113,7 +113,7 @@ The table describes loader behavior after the app process can read the selected 
 
 ## Assessment Profile Catalog
 
-`app/conf/assessment_profiles.yaml` contains the maintained Network and Web assessment profiles. Each profile describes the targets it applies to, its versioned checks, the saved evidence that can satisfy those checks, the action the app should recommend, and the plain-language condition for calling the check complete.
+`app/conf/assessment_profiles.yaml` contains the maintained Network, Web, API, TLS, and Combined assessment profiles. Each profile describes the targets it applies to, its versioned checks, the saved evidence that can satisfy those checks, the action the app should recommend, and the plain-language condition for calling the check complete. TLS uses fixed certificate-chain and fast high-severity configuration reviews for domains and IPs. Combined carries the other four profiles' checks and applies only the checks that fit each confirmed target.
 
 Use `assessment_profiles.local.yaml` to add a deployment-specific profile or replace a shipped profile with the same stable key. A local profile is always a complete definition: individual checks and fields don't merge with the shipped copy. This keeps saved cycle snapshots understandable even after the live catalog changes.
 
