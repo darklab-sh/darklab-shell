@@ -208,9 +208,16 @@ describe('Project Web Surface gallery', () => {
     const preview = test.container.querySelector('.project-web-surface-preview')
     expect(preview.classList.contains('btn')).toBe(true)
     expect(preview.classList.contains('btn-ghost')).toBe(true)
+    expect(preview.dataset.disclosureBound).toBe('1')
+    expect(preview.dataset.pressableBound).toBe('1')
     preview.click()
     expect(preview.getAttribute('aria-expanded')).toBe('true')
+    expect(preview.getAttribute('aria-label')).toBe('Fit screenshot for Darklab sign in')
     expect(preview.closest('.project-web-surface-card').classList.contains('is-expanded')).toBe(true)
+    preview.click()
+    expect(preview.getAttribute('aria-expanded')).toBe('false')
+    expect(preview.getAttribute('aria-label')).toBe('Expand screenshot for Darklab sign in')
+    expect(preview.closest('.project-web-surface-card').classList.contains('is-expanded')).toBe(false)
 
     const atlasButton = [...test.container.querySelectorAll('.project-web-surface-card .project-web-surface-action')]
       .find(button => button.textContent === 'Open URL in Atlas')

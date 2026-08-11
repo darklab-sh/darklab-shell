@@ -848,6 +848,8 @@ describe('project assessment controller', () => {
     const showConfirm = vi.fn(async (options) => {
       if (options.body?.text === 'Set up an external ZAP scan.') {
         const profileSelect = options.content.querySelector('[aria-label="HTTP profile for ZAP scan"]')
+        expect(options.content.querySelector('.project-assessment-zap-targets')
+          ?.classList.contains('nice-scroll')).toBe(true)
         const profileOptions = [...profileSelect.options]
         expect(profileOptions.find(option => option.value === httpProfile.id)?.disabled).toBe(true)
         expect(profileOptions.find(option => option.value === anonymousHttpProfile.id)?.disabled).toBe(false)

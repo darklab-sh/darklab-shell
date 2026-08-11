@@ -3,6 +3,7 @@
 
 // Project Web Surface gallery controller.
 // Loaded on demand when the Project workspace opens the Web Surface tab.
+import { bindDisclosure } from '../../ui/ui_disclosure.js';
 
 let exportedDarklabProjectWebSurface = null;
 
@@ -316,8 +317,7 @@ let exportedDarklabProjectWebSurface = null;
       preview.type = 'button';
       preview.className = 'btn btn-ghost project-web-surface-preview';
       preview.setAttribute('aria-label', `Expand screenshot for ${captureTitle(capture)}`);
-      preview.setAttribute('aria-expanded', 'false');
-      ctx.bindProjectRuntimePressable?.(preview);
+      preview.disabled = true;
       const image = document.createElement('img');
       image.className = 'project-web-surface-image u-hidden';
       image.alt = `Screenshot of ${String(capture?.url || captureTitle(capture))}`;
@@ -328,12 +328,13 @@ let exportedDarklabProjectWebSurface = null;
         ? 'Loading screenshot...'
         : placeholderText(capture);
       preview.append(image, placeholder);
-      preview.addEventListener('click', () => {
-        if (image.classList.contains('u-hidden')) return;
-        const expanded = !card.classList.contains('is-expanded');
-        card.classList.toggle('is-expanded', expanded);
-        preview.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-        preview.setAttribute('aria-label', `${expanded ? 'Fit' : 'Expand'} screenshot for ${captureTitle(capture)}`);
+      bindDisclosure(preview, {
+        panel: card,
+        openClass: 'is-expanded',
+        clearPressStyle: true,
+        onToggle: (expanded) => {
+          preview.setAttribute('aria-label', `${expanded ? 'Fit' : 'Expand'} screenshot for ${captureTitle(capture)}`);
+        },
       });
       if (String(capture?.capture_state || '') === 'current' && capture?.artifact?.file_available) {
         fetchThumbnail(projectId, capture).then((url) => {
@@ -341,6 +342,7 @@ let exportedDarklabProjectWebSurface = null;
           image.src = url;
           image.classList.remove('u-hidden');
           placeholder.classList.add('u-hidden');
+          preview.disabled = false;
         }).catch((err) => {
           placeholder.textContent = 'Screenshot preview is unavailable.';
           ctx.logClientError?.('failed to load Web Surface thumbnail', err, {

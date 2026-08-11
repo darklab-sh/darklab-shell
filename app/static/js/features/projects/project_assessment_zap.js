@@ -99,7 +99,7 @@ function setupContent(detail, check, profiles) {
   content.appendChild(profileField);
 
   const choices = targetChoices(detail, check);
-  const targetGroup = makeElement('fieldset', 'project-assessment-zap-targets');
+  const targetGroup = makeElement('fieldset', 'project-assessment-zap-targets nice-scroll');
   targetGroup.appendChild(makeElement('legend', '', 'Project URL targets'));
   choices.forEach((target) => {
     const label = makeElement('label', 'project-assessment-zap-target');
