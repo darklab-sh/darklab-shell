@@ -1859,12 +1859,19 @@ describe('project assessment controller', () => {
     expect(detailUrls.at(-1)).toContain('finding_offset=10')
 
     const container = document.createElement('div')
+    document.body.appendChild(container)
     controller.renderAssessment(container, 'prj_1')
     container.querySelector('.project-assessment-target-toggle').click()
     const list = container.querySelector('.project-assessment-target-list')
     list.scrollTop = 137
     list.dispatchEvent(new Event('scroll'))
     controller.renderAssessment(container, 'prj_1')
+    const restoredList = container.querySelector('.project-assessment-target-list')
+    expect(restoredList.isConnected).toBe(true)
+    expect(restoredList.scrollTop).toBe(0)
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    expect(restoredList.isConnected).toBe(true)
+    expect(restoredList.scrollTop).toBe(137)
 
     const state = controller.stateFor('prj_1')
     expect(state.category).toBe('discovery')
@@ -1873,7 +1880,6 @@ describe('project assessment controller', () => {
     expect(state.findingPriority).toBe('epss')
     expect(state.findingOffset).toBe(10)
     expect(state.checksScrollTop).toBe(137)
-    expect(container.querySelector('.project-assessment-target-list').scrollTop).toBe(137)
     expect(container.querySelector('.project-assessment-target-toggle').getAttribute('aria-expanded')).toBe('true')
 
     controller.invalidate('prj_1')

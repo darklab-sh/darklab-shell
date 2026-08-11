@@ -1107,8 +1107,8 @@ function createProjectAssessmentRenderer(context, actions) {
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(check);
     });
+    const savedScrollTop = Math.max(0, Number(st.checksScrollTop || 0));
     const list = makeElement('div', 'project-assessment-target-list nice-scroll');
-    list.scrollTop = st.checksScrollTop;
     list.addEventListener('scroll', () => {
       st.checksScrollTop = list.scrollTop;
     }, { passive: true });
@@ -1120,6 +1120,11 @@ function createProjectAssessmentRenderer(context, actions) {
       { mobile },
     )));
     section.appendChild(list);
+    if (savedScrollTop) {
+      requestAnimationFrame(() => {
+        if (list.isConnected) list.scrollTop = savedScrollTop;
+      });
+    }
     const pager = renderPager(projectId, st, page);
     if (pager) section.appendChild(pager);
     return section;

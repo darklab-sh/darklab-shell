@@ -541,6 +541,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Assessment check lists now return to their saved reading position.** The desktop and mobile worklist restores its per-Project scroll offset after the rebuilt list is attached, so rerenders no longer discard it.
 - **Fix-first observation groups now show whether they're open.** Their disclosure changes from `▸ View` to `▾ Hide` when expanded on desktop and mobile, matching the app's other in-place disclosures.
 - **Web Surface status badges now match the rest of the app.** Capture and comparison states use the shared green, amber, and muted badge tones, including their standard borders and theme behavior.
 - **The HTTP profile enabled control now matches other app checkboxes.** Its label uses the shared checkbox row, restoring the standard size, spacing, accent, hover, and keyboard focus treatment in the Assessment editor.
