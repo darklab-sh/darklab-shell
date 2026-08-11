@@ -19322,17 +19322,46 @@ class TestDerivedCommandRegistry:
         )[0]
         sqlmap = by_root["sqlmap"]
         assert sqlmap["policy"]["allow"] == ["sqlmap"]
-        assert {
+        denied_sqlmap_flags = {
             "sqlmap --config-file",
             "sqlmap --dump",
             "sqlmap --os-shell",
             "sqlmap --file-read",
             "sqlmap --technique",
-        }.issubset(
-            set(sqlmap["policy"]["deny"])
-        )
+            "sqlmap --sql-shell",
+            "sqlmap --sql-query",
+            "sqlmap --os-pwn",
+            "sqlmap --os-smbrelay",
+            "sqlmap --os-bof",
+            "sqlmap --priv-esc",
+            "sqlmap --reg-read",
+            "sqlmap --reg-add",
+            "sqlmap --reg-del",
+            "sqlmap --reg-key",
+            "sqlmap --reg-value",
+            "sqlmap --reg-data",
+            "sqlmap --eval",
+            "sqlmap --all",
+            "sqlmap --passwords",
+            "sqlmap --users",
+            "sqlmap --privileges",
+            "sqlmap --roles",
+            "sqlmap --columns",
+            "sqlmap --count",
+            "sqlmap --search",
+            "sqlmap --common-tables",
+            "sqlmap --common-columns",
+            "sqlmap -D",
+            "sqlmap -T",
+            "sqlmap -C",
+            "sqlmap -X",
+        }
+        assert denied_sqlmap_flags.issubset(set(sqlmap["policy"]["deny"]))
         assert is_command_allowed("sqlmap https://darklab.sh/item?id=1")[0]
-        assert not is_command_allowed("sqlmap --config-file settings.ini")[0]
+        for denied_command in sorted(denied_sqlmap_flags):
+            assert not is_command_allowed(
+                f"{denied_command} value https://darklab.sh/item?id=1"
+            )[0]
         assert not is_command_allowed("sqlmap https://darklab.sh/item?id=1 --dump")[0]
         ipinfo = by_root["ipinfo"]
         assert ipinfo["requires_secrets"] == [{"env": "IPINFO_TOKEN", "optional": True}]

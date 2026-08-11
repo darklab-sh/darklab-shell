@@ -6046,7 +6046,7 @@ commands:
         - darklab_shell forces level 1, risk 1, Boolean/Error/Union techniques, and a bounded time limit.
         - Saved Project HTTP profiles pass headers through a short-lived private INI file.
       gotchas:
-        - Extraction, enumeration, OS takeover, stacked queries, time-based checks, redirects, and target fan-out are blocked.
+        - Extraction, enumeration, arbitrary SQL or Python, registry access, OS takeover, stacked queries, time-based checks, redirects, and target fan-out are blocked.
         - This adapter reports detection output only; it does not dump data or execute operating-system commands.
     safe_defaults:
       - Start with one exact URL containing the parameter you want to assess.
@@ -6073,11 +6073,34 @@ commands:
         - sqlmap --level
         - sqlmap --os-cmd
         - sqlmap --os-shell
+        - sqlmap --os-pwn
+        - sqlmap --os-smbrelay
+        - sqlmap --os-bof
+        - sqlmap --priv-esc
+        - sqlmap --sql-shell
+        - sqlmap --sql-query
+        - sqlmap --eval
+        - sqlmap --reg-read
+        - sqlmap --reg-add
+        - sqlmap --reg-del
+        - sqlmap --reg-key
+        - sqlmap --reg-value
+        - sqlmap --reg-data
         - sqlmap --dump
         - sqlmap --dump-all
+        - sqlmap --all
         - sqlmap --dbs
         - sqlmap --tables
         - sqlmap --schema
+        - sqlmap --passwords
+        - sqlmap --users
+        - sqlmap --privileges
+        - sqlmap --roles
+        - sqlmap --columns
+        - sqlmap --count
+        - sqlmap --search
+        - sqlmap --common-tables
+        - sqlmap --common-columns
         - sqlmap --file-read
         - sqlmap --file-write
         - sqlmap --crawl
@@ -6092,6 +6115,10 @@ commands:
         - sqlmap -r
         - sqlmap -m
         - sqlmap -l
+        - sqlmap -D
+        - sqlmap -T
+        - sqlmap -C
+        - sqlmap -X
     runtime_adaptations:
       inject_flags:
         - flags: [--batch]
