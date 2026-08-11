@@ -198,6 +198,10 @@ describe('Project Web Surface gallery', () => {
     expect(test.container.textContent).toContain('metadata conflict')
     expect(test.container.textContent).toContain('Conflicting capture metadata was rejected.')
     expect(test.container.textContent).toContain("package handoff starts in Raw because images can't be redacted automatically")
+    const statuses = [...test.container.querySelectorAll('.project-web-surface-status')]
+    expect(statuses.find(item => item.textContent === 'current')?.classList.contains('badge-tone-green')).toBe(true)
+    expect(statuses.find(item => item.textContent === 'Visual changed')?.classList.contains('badge-tone-amber')).toBe(true)
+    expect(statuses.find(item => item.textContent === 'metadata conflict')?.classList.contains('badge-tone-muted')).toBe(true)
     expect(test.container.querySelectorAll('.project-web-surface-image')).toHaveLength(2)
     expect(globalThis.URL.createObjectURL).toHaveBeenCalledOnce()
 

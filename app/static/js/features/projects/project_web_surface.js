@@ -214,9 +214,9 @@ let exportedDarklabProjectWebSurface = null;
 
     function statusTone(capture) {
       const state = String(capture?.capture_state || 'unavailable');
-      if (state === 'current') return 'is-current';
-      if (state === 'changed') return 'is-warning';
-      return 'is-unavailable';
+      if (state === 'current') return 'badge-tone-green';
+      if (state === 'changed') return 'badge-tone-amber';
+      return 'badge-tone-muted';
     }
 
     function placeholderText(capture) {
@@ -272,9 +272,9 @@ let exportedDarklabProjectWebSurface = null;
 
     function changeTone(capture) {
       const state = String(capture?.comparison?.state || 'incomparable');
-      if (state === 'changed') return 'is-warning';
-      if (state === 'unchanged') return 'is-current';
-      return 'is-unavailable';
+      if (state === 'changed') return 'badge-tone-amber';
+      if (state === 'unchanged') return 'badge-tone-green';
+      return 'badge-tone-muted';
     }
 
     function changeDetail(capture) {

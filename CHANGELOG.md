@@ -541,6 +541,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Web Surface status badges now match the rest of the app.** Capture and comparison states use the shared green, amber, and muted badge tones, including their standard borders and theme behavior.
 - **The HTTP profile enabled control now matches other app checkboxes.** Its label uses the shared checkbox row, restoring the standard size, spacing, accent, hover, and keyboard focus treatment in the Assessment editor.
 - **Informational badges now use a supported theme tone.** Assessment readiness, saved-evidence recommendations, and Team roles use the established cyan badge treatment instead of falling back to an untoned badge.
 - **Selected Assessment filters now remain visibly selected.** Category, check-state, and fix-first priority chips use a stronger border, inset edge, and text weight alongside their pressed state, so the active filter is clear on desktop and mobile without relying on color alone.

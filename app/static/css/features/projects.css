@@ -7115,18 +7115,6 @@ body.mobile-terminal-mode .project-target-editor-form .form-select {
   gap: 5px;
 }
 
-.project-web-surface-status.is-current {
-  color: var(--green);
-}
-
-.project-web-surface-status.is-warning {
-  color: var(--amber);
-}
-
-.project-web-surface-status.is-unavailable {
-  color: var(--theme-muted);
-}
-
 .project-web-surface-url,
 .project-web-surface-meta {
   min-width: 0;
