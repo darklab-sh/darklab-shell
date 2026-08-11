@@ -20258,6 +20258,17 @@ class TestDerivedCommandRegistry:
                         )
                     if command == "wget --directory-prefix=downloads https://ip.darklab.sh":
                         assert f"--directory-prefix={resolve_workspace_path(session_id, 'downloads', cfg)}" in exec_tokens
+                    if command == "nikto -h ip.darklab.sh -o nikto.txt":
+                        rewritten, notice = commands.rewrite_command(
+                            result.exec_command,
+                            session_id=session_id,
+                            cfg=cfg,
+                        )
+                        rewritten_tokens = commands.split_command_argv(rewritten)
+                        assert rewritten_tokens[:4] == [
+                            "python3", "-m", "services.commands.nikto_workspace", "nikto",
+                        ]
+                        assert "output is staged" in str(notice)
                     for original in reads + writes:
                         if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
                             continue
@@ -20289,6 +20300,23 @@ class TestDerivedCommandRegistry:
                 )
                 assert not result.allowed
                 assert "Command not allowed" in result.reason
+
+            from services.commands.nikto_workspace import run_nikto_workspace
+
+            nikto_destination = resolve_workspace_path(session_id, "nikto.txt", cfg)
+
+            def fake_nikto(arguments, *, check):
+                assert check is False
+                output_index = arguments.index("-o") + 1
+                report_format = arguments[arguments.index("-Format") + 1]
+                Path(f"{arguments[output_index]}.{report_format}").write_text("Nikto report\n")
+                return subprocess.CompletedProcess(arguments, 0)
+
+            assert run_nikto_workspace(
+                ["nikto", "-h", "ip.darklab.sh", "-o", str(nikto_destination)],
+                run_command=fake_nikto,
+            ) == 0
+            assert nikto_destination.read_text() == "Nikto report\n"
 
     def test_workspace_rewrites_quote_shell_sensitive_paths(self):
         with tempfile.TemporaryDirectory() as tmp:

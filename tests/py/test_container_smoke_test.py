@@ -110,6 +110,29 @@ def _force_smoke_image_build() -> bool:
     return os.environ.get("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD") == "1"
 
 
+def _smoke_service_environment(items: Sequence[object]) -> list[str]:
+    """Return the required smoke overrides without inheriting disabled dev defaults."""
+    overrides = {
+        "APP_SOURCE_DIR": "/opt/darklab-smoke-source",
+        "RAW_PACKET_SCANNING_ENABLED": "true",
+        "INTERACTIVE_PTY_ENABLED": "true",
+        "WORKSPACE_ENABLED": "true",
+    }
+    environment: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        value = str(item)
+        key, separator, _current = value.partition("=")
+        if separator and key in overrides:
+            value = f"{key}={overrides[key]}"
+            seen.add(key)
+        environment.append(value)
+    for key, value in overrides.items():
+        if key not in seen:
+            environment.append(f"{key}={value}")
+    return environment
+
+
 def _run(cmd: list[str], *, timeout: int, check: bool = True, **kwargs):
     proc = subprocess.run(
         cmd,
@@ -562,6 +585,27 @@ def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
     monkeypatch.setenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", "1")
     assert _force_smoke_image_build() is True
 
+    environment = _smoke_service_environment([
+        "APP_SOURCE_DIR=/app",
+        "RAW_PACKET_SCANNING_ENABLED=false",
+        "INTERACTIVE_PTY_ENABLED=false",
+        "WORKSPACE_ENABLED=false",
+        "REDIS_URL=redis://redis:6379/0",
+    ])
+    assert environment == [
+        "APP_SOURCE_DIR=/opt/darklab-smoke-source",
+        "RAW_PACKET_SCANNING_ENABLED=true",
+        "INTERACTIVE_PTY_ENABLED=true",
+        "WORKSPACE_ENABLED=true",
+        "REDIS_URL=redis://redis:6379/0",
+    ]
+    assert _smoke_service_environment([]) == [
+        "APP_SOURCE_DIR=/opt/darklab-smoke-source",
+        "RAW_PACKET_SCANNING_ENABLED=true",
+        "INTERACTIVE_PTY_ENABLED=true",
+        "WORKSPACE_ENABLED=true",
+    ]
+
 
 def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> None:
     app_dir = tmp_path / "app"
@@ -947,13 +991,11 @@ def _wait_for_workflow_execution(
     raise AssertionError(f"workflow execution did not finish within {timeout}s: {last_payload}")
 
 
-def _workspace_payload_or_skip(base_url: str, session_id: str) -> dict[str, object]:
+def _workspace_payload(base_url: str, session_id: str) -> dict[str, object]:
     status, payload = _json_request(
         f"{base_url}/workspace/files",
         session_id=session_id,
     )
-    if status == 403:
-        pytest.skip("workspace storage is disabled for this container smoke run")
     assert status == 200, f"workspace list failed with HTTP {status}: {payload}"
     return payload
 
@@ -1338,17 +1380,9 @@ def container_smoke_test():
         if "/data" not in tmpfs_mounts:
             tmpfs_mounts.append("/data")
         shell["tmpfs"] = tmpfs_mounts
-        smoke_environment = []
-        for item in shell.get("environment", []):
-            value = str(item)
-            if value.startswith("APP_SOURCE_DIR="):
-                value = "APP_SOURCE_DIR=/opt/darklab-smoke-source"
-            elif value.startswith("RAW_PACKET_SCANNING_ENABLED="):
-                value = "RAW_PACKET_SCANNING_ENABLED=true"
-            elif value.startswith("INTERACTIVE_PTY_ENABLED="):
-                value = "INTERACTIVE_PTY_ENABLED=true"
-            smoke_environment.append(value)
-        shell["environment"] = smoke_environment
+        shell["environment"] = _smoke_service_environment(
+            shell.get("environment", [])
+        )
         shell["environment"].append("APP_LOCAL_CONF_DIR=/config")
         compose_cfg["services"]["raw-target"] = {
             "image": runtime_image_tag,
@@ -1480,6 +1514,7 @@ def container_smoke_test():
                 restricted_url = f"http://{reach_host}:{restricted_host_port}"
                 print(f"[container-smoke-test] waiting for health check: {base_url}", flush=True)
                 _wait_for_health(base_url)
+                _workspace_payload(base_url, _new_smoke_session_id())
                 print(
                     f"[container-smoke-test] waiting for restricted health check: {restricted_url}",
                     flush=True,
@@ -2015,7 +2050,7 @@ def _assert_workspace_smoke_case_matches(
     session_id: str,
     case: Mapping[str, object],
 ) -> None:
-    _workspace_payload_or_skip(base_url, session_id)
+    _workspace_payload(base_url, session_id)
 
     for path, text in _mapping_string_values(case.get("setup_files"), "setup_files").items():
         assert isinstance(text, str), f"setup file {path!r} must contain text"

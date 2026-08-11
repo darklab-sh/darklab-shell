@@ -5393,6 +5393,15 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - python3
+            - -m
+            - services.commands.nikto_workspace
+          position: command_prefix
+          requires_workspace: true
+          notice: "Note: Nikto output is staged before it is saved to the requested session file."
     autocomplete:
       examples:
         - value: nikto -Help
