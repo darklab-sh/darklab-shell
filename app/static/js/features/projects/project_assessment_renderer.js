@@ -339,6 +339,7 @@ function createProjectAssessmentRenderer(context, actions) {
         item.label,
       );
       button.type = 'button';
+      button.dataset.projectAssessmentReturnFocus = `desktop-${item.label.toLowerCase().replaceAll(' ', '-')}`;
       button.disabled = item.disabled;
       if (ctx.canMutateProjects?.() === false) {
         button.title = 'View-only team members cannot change assessment cycles.';
@@ -357,6 +358,7 @@ function createProjectAssessmentRenderer(context, actions) {
     const footer = makeElement('div', 'project-assessment-mobile-actions');
     const button = makeElement('button', 'btn btn-secondary', st.mutating ? 'Working…' : 'Cycle actions');
     button.type = 'button';
+    button.dataset.projectAssessmentReturnFocus = 'mobile-cycle-actions';
     button.disabled = !!st.mutating || ctx.canMutateProjects?.() === false;
     if (ctx.canMutateProjects?.() === false) {
       button.title = 'View-only team members cannot change assessment cycles.';

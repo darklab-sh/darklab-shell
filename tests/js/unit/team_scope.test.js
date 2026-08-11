@@ -139,6 +139,23 @@ describe('team scope selector', () => {
     expect(DarklabTeamScope.activeTeamScopeCan('run_commands')).toBe(false)
     expect(DarklabTeamScope.deniedMessage('run commands in team scope'))
       .toBe("View-only team members can't run commands in team scope. Switch to Personal or ask for operator access.")
+
+    DarklabTeamScope.replaceTeamScopes({
+      teams: [{
+        id: 'team_live_1',
+        name: 'Live team',
+        slug: 'live-team',
+        status: 'archived',
+        member: {
+          role: 'owner',
+          capabilities: ['view_team', 'run_commands', 'mutate_projects'],
+        },
+      }],
+    })
+    expect(DarklabTeamScope.getActiveTeam()).toEqual(expect.objectContaining({ status: 'archived' }))
+    expect(DarklabTeamScope.activeTeamScopeCan('view_team')).toBe(true)
+    expect(DarklabTeamScope.activeTeamScopeCan('run_commands')).toBe(false)
+    expect(DarklabTeamScope.activeTeamScopeCan('mutate_projects')).toBe(false)
   })
 
   it('restores token-scoped team selection before runtime session handlers are ready', async () => {

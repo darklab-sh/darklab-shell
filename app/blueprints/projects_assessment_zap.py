@@ -32,7 +32,7 @@ def _actor_role(session_id: str, team_id: str) -> str:
     if not team_id:
         return ""
     try:
-        scope = project_routes.current_request_scope(session_id, request)
+        scope = project_routes.current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except project_routes.RequestScopeError:
         return ""
     return str((scope.member or {}).get("role") or "")

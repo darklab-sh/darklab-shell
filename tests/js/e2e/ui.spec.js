@@ -1364,7 +1364,7 @@ test.describe('project workspace modal', () => {
     })).toBeVisible()
   })
 
-  test('creates a Project finding from selected Run Details output', async ({ page }, testInfo) => {
+  test('creates a Project finding from Run Details output and attaches a verification run', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     await openProjectsModal(page)
 
@@ -1435,6 +1435,42 @@ test.describe('project workspace modal', () => {
     expect(evidence.evidence).toEqual(expect.arrayContaining([
       expect.objectContaining({ evidence_type: 'run_line', evidence_id: runId, line_number: 1 }),
       expect.objectContaining({ evidence_type: 'run_line', evidence_id: runId, line_number: 2 }),
+    ]))
+
+    await runDetails.locator('.history-run-close').first().click()
+    await expect(runDetails).not.toHaveClass(/\bopen\b/)
+    await openProjectsModal(page)
+    const { runRow: verificationRunRow } = await linkExternalRunToOpenProject(page, testInfo)
+    const verificationRunId = await verificationRunRow
+      .locator('[data-project-action="edit-run-metadata"]')
+      .getAttribute('data-run-id')
+    expect(verificationRunId).toBeTruthy()
+
+    await switchProjectTab(page, 'findings')
+    const findingRow = page.locator('.project-explorer-item').filter({ hasText: 'Saved run output needs review' })
+    await findingRow.locator('[data-project-action="edit-finding-triage"]').click()
+    await expect(editor).toHaveClass(/\bopen\b/)
+    const verificationRun = editor.locator('#finding-triage-verification-run')
+    await expect(verificationRun.locator(`option[value="${verificationRunId}"]`)).toHaveCount(1)
+    await verificationRun.selectOption(verificationRunId)
+    const attachResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/findings/${findingId}/evidence`
+    })
+    await editor.locator('#finding-triage-verification-attach').click()
+    expect((await attachResponse).ok()).toBe(true)
+    await expect(editor.locator('#finding-triage-retest-runs')).toContainText(PROJECT_LINK_RUN_COMMAND)
+
+    const verification = await page.evaluate(async ({ id, finding }) => {
+      const resp = await apiFetch(
+        `/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(finding)}/evidence`,
+        { cache: 'no-store' },
+      )
+      return (await resp.json()).verification
+    }, { id: projectId, finding: findingId })
+    expect(verification.retest_runs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: verificationRunId }),
     ]))
   })
 

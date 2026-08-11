@@ -41,7 +41,7 @@ def _can_manage_references(session_id: str, team_id: str) -> bool:
     if not team_id:
         return True
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError:
         return False
     return role_can(

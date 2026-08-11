@@ -4649,6 +4649,33 @@ class TestTeamRoutes:
             assert explicit_personal_link is None
             assert unassigned_team_link is None
             assert dict(active_team_link) == {"project_id": project_id, "source": "active_project"}
+
+            archived = client.patch(
+                f"/session/teams/{team_id}",
+                headers={"X-Session-ID": owner_token},
+                json={"status": "archived"},
+            )
+            archived_list = client.get(
+                "/projects?include_archived=1",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            archived_detail = client.get(
+                f"/projects/{project_id}",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            archived_create = client.post(
+                "/projects",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                json={"name": "Blocked while archived"},
+            )
+
+            assert archived.status_code == 200
+            assert archived_list.status_code == 200
+            assert project_id in {item["id"] for item in archived_list.get_json()["projects"]}
+            assert archived_detail.status_code == 200
+            assert archived_detail.get_json()["project"]["id"] == project_id
+            assert archived_create.status_code == 409
+            assert archived_create.get_json()["error"] == "team_archived"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()

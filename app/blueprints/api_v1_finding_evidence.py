@@ -109,7 +109,7 @@ def api_project_finding_evidence_link(project_id, finding_id):
         finding_id,
         evidence_link_id=evidence["id"],
         evidence_type=evidence["evidence_type"],
-        created=result["created"],
+        link_created=result["created"],
     ))
     return jsonify({"ok": True, **result}), 201 if result["created"] else 200
 

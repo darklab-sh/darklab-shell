@@ -417,6 +417,14 @@ function createProjectAssessmentController(context) {
     }
   }
 
+  function liveLifecycleFocusTarget(returnFocus) {
+    if (returnFocus?.isConnected) return returnFocus;
+    const key = String(returnFocus?.dataset?.projectAssessmentReturnFocus || '');
+    if (!key || typeof document === 'undefined') return returnFocus;
+    return [...document.querySelectorAll('[data-project-assessment-return-focus]')]
+      .find(node => node.dataset.projectAssessmentReturnFocus === key) || returnFocus;
+  }
+
   async function mutateCycle(projectId, action, request, successMessage, { resetSelection = false } = {}) {
     const id = String(projectId || '');
     const st = stateFor(id);
@@ -514,6 +522,7 @@ function createProjectAssessmentController(context) {
       st.mutating = '';
       renderViews();
     }
+    returnFocus = liveLifecycleFocusTarget(returnFocus);
     if (!preview?.can_delete) {
       const message = preview?.requires_archived
         ? 'Archive this assessment cycle before deleting it.'

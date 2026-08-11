@@ -230,7 +230,7 @@ def _project_owner(required_capability=None):
     if not requested_team_id(request):
         return session_id, "", None
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError as exc:
         payload, status = scope_error_payload(exc)
         return session_id, "", (jsonify(payload), status)
@@ -247,7 +247,7 @@ def _project_owner_any_capability(capabilities):
     if not requested_team_id(request):
         return session_id, "", None
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError as exc:
         payload, status = scope_error_payload(exc)
         return session_id, "", (jsonify(payload), status)
@@ -267,7 +267,7 @@ def _can_manage_project_digest_settings(session_id, team_id):
     if not team_id:
         return True
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError:
         return False
     role = str((scope.member or {}).get("role") or "")
@@ -300,7 +300,7 @@ def _project_actor_member_id(session_id, team_id):
     if not team_id:
         return ""
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError:
         return ""
     return str((scope.member or {}).get("id") or "")
@@ -310,7 +310,7 @@ def _project_audit_fields(session_id, team_id):
     scope = None
     if team_id:
         try:
-            scope = current_request_scope(session_id, request)
+            scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
         except RequestScopeError:
             scope = None
     return route_audit_fields(session_id, request, scope)
@@ -393,7 +393,7 @@ def _project_team_log_context(session_id, team_id):
         return {}
     context = {"team_id": team_id}
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError:
         return context
     member = scope.member or {}

@@ -70,7 +70,7 @@ def project_assessment_action_launch(project_id, assessment_id, check_id):
     team_role = ""
     if team_id:
         try:
-            scope = project_routes.current_request_scope(session_id, request)
+            scope = project_routes.current_request_scope(session_id, request, allow_archived=request.method == "GET")
             team_role = str((scope.member or {}).get("role") or "")
         except project_routes.RequestScopeError:
             team_role = ""

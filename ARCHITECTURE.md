@@ -2418,6 +2418,7 @@ The browser test harness mirrors production constraints rather than abstracting 
 - stable route-test modules opt into a reusable Flask application while keeping function-scoped clients and resetting mutable app config between cases; factory, construction-time config, logging, import, and extension-isolation contracts keep fresh applications
 - GitLab runs the serial `not release_integration` and `release_integration` pytest selections as concurrent required jobs. A node-ID collection guard proves the selections are disjoint and together equal the complete serial suite, while separate JUnit and timing artifacts keep slow files visible.
 - the browser suite also carries focused regressions for the split welcome specs, pipe-stage autocomplete, and the responsive FAQ limits renderer because those are easiest to verify in the real UI
+- the Project Assessment qualification spec runs in bundle and source modes because cycle handoffs, missing-credential recovery, destructive focus restoration, mobile action sheets, and archived team read-only behavior depend on the assembled browser shell rather than isolated module behavior
 
 Keep suite purposes, live inventory commands, focused run commands, and maintenance notes in [tests/README.md](tests/README.md). Keep the rationale behind this layered split in [DECISIONS.md](DECISIONS.md).
 
