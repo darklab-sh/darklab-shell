@@ -223,9 +223,13 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 <h2>CVE risk data sources</h2>
 {% for source in cve_risk_snapshot.sources %}
 <p><strong>{{ source.source|upper }}</strong> — {{ source.attribution }}<br>
-<span class="muted">Version {{ source.source_version or "unavailable" }};
+<span class="muted">Origin {{ source.origin or "unavailable" }};
+version {{ source.source_version or "unavailable" }};
+model {{ source.model_version or "unavailable" }};
 published {{ source.published_at or "unknown" }};
-fetched {{ source.retrieved_at or "unknown" }}; {{ source.status }}.</span></p>
+fetched {{ source.retrieved_at or "unknown" }};
+status {{ source.status or "unavailable" }};
+checksum {{ source.checksum_sha256 or "unavailable" }}.</span></p>
 {% endfor %}
 <p class="muted">{{ cve_risk_snapshot.non_endorsement }}</p>
 </section>
@@ -537,9 +541,13 @@ def render_report_markdown_from_context(
         for source in snapshot.get("sources", []):
             lines.append(
                 f"- **{_md(str(source.get('source') or '').upper())}:** "
-                f"{_md(source.get('attribution'))}; version {_md(source.get('source_version') or 'unavailable')}; "
+                f"{_md(source.get('attribution'))}; origin {_md(source.get('origin') or 'unavailable')}; "
+                f"version {_md(source.get('source_version') or 'unavailable')}; "
+                f"model {_md(source.get('model_version') or 'unavailable')}; "
                 f"published {_md(source.get('published_at') or 'unknown')}; "
-                f"fetched {_md(source.get('retrieved_at') or 'unknown')}; {_md(source.get('status') or 'unavailable')}"
+                f"fetched {_md(source.get('retrieved_at') or 'unknown')}; "
+                f"status {_md(source.get('status') or 'unavailable')}; "
+                f"checksum {_md(source.get('checksum_sha256') or 'unavailable')}"
             )
         lines.extend(("", _md(snapshot.get("non_endorsement")), ""))
     return "\n".join(lines).rstrip() + "\n"

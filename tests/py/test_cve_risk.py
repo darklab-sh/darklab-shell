@@ -3059,10 +3059,13 @@ def test_reports_explain_priority_and_attribute_public_risk_sources():
             "sources": [{
                 "source": "epss",
                 "attribution": "EPSS data provided by FIRST.",
+                "origin": "bundled",
                 "source_version": "v-test",
+                "model_version": "v2025.03.14",
                 "published_at": "2026-08-03",
                 "retrieved_at": "2026-08-04",
                 "status": "current",
+                "checksum_sha256": "a" * 64,
             }],
             "non_endorsement": "FIRST and CISA do not endorse this assessment.",
         },
@@ -3074,4 +3077,7 @@ def test_reports_explain_priority_and_attribute_public_risk_sources():
     for rendered in (markdown, html):
         assert "Listed in CISA KEV" in rendered
         assert "EPSS data provided by FIRST" in rendered
+        assert "origin bundled" in rendered.lower()
+        assert "model v2025.03.14" in rendered.lower()
+        assert "a" * 64 in rendered
         assert "do not endorse this assessment" in rendered
