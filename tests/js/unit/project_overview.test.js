@@ -105,9 +105,13 @@ const overviewPayload = {
         title: 'Internet-facing vulnerable service',
         risk: {
           kev: { listed: true, freshness: 'current' },
-          epss: { probability: 0.42, freshness: 'current' },
+          epss: { probability: 0.42, percentile: 0.97, freshness: 'current' },
           cvss: { score: 9.8, freshness: 'current' },
         },
+      }, {
+        remediation_id: 'rmd_2',
+        rule_identity: 'rule-without-risk-data',
+        title: 'Finding without stored public risk data',
       }],
       total: 4,
       limit: 3,
@@ -390,6 +394,9 @@ describe('project overview controller', () => {
     expect(assessmentText).toContain('4 remediation groups · 1 CISA KEV')
     expect(assessmentText).toContain('CVE-2026-10001')
     expect(assessmentText).toContain('EPSS 42.0%')
+    expect(assessmentText).toContain('EPSS 97.0th percentile')
+    expect(assessmentText).toContain('No stored KEV, EPSS, or NVD data')
+    expect(assessmentText).not.toContain('No stored public exploit signal')
     expect(assessmentText).toContain('1 check references saved evidence that can no longer be opened')
     container.querySelector('[data-project-overview-assessment="asmt_1"]').click()
     expect(ctx.openProjectAssessment).toHaveBeenCalledWith('prj_1', { assessmentId: 'asmt_1' })

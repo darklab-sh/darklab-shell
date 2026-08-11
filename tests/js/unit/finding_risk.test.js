@@ -46,11 +46,14 @@ describe('finding public CVE risk labels', () => {
     expect(findingRiskSummary({
       risk: {
         kev: { listed: false, freshness: 'current' },
-        epss: { freshness: 'current' },
+        epss: { percentile: 0.97, freshness: 'current' },
         advisory_status: 'disputed',
         cvss: { score: 8.8, freshness: 'current' },
+        public_exploit_available: true,
       },
-    })).toBe('CVSS 8.8 · NVD disputed');
+    })).toBe(
+      'EPSS 97.0th percentile · CVSS 8.8 · Public exploit reference available · NVD disputed',
+    );
     expect(findingRiskSummary({
       risk: {
         kev: { listed: false, freshness: 'current' },

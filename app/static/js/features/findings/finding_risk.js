@@ -3,6 +3,8 @@
 
 // Compact, explainable labels for stored public CVE risk signals.
 
+const NO_STORED_CVE_RISK_LABEL = 'No stored KEV, EPSS, or NVD data';
+
 function findingPrimaryRisk(finding) {
   if (finding?.risk && typeof finding.risk === 'object') return finding.risk;
   if (Array.isArray(finding?.cve_risk) && finding.cve_risk[0]) return finding.cve_risk[0];
@@ -49,8 +51,11 @@ function findingRiskSummary(finding) {
   if (risk.kev?.listed) labels.push('CISA KEV');
   const probability = finiteNumber(risk.epss?.probability);
   if (probability !== null) labels.push(`EPSS ${(probability * 100).toFixed(1)}%`);
+  const percentile = finiteNumber(risk.epss?.percentile);
+  if (percentile !== null) labels.push(`EPSS ${(percentile * 100).toFixed(1)}th percentile`);
   const cvss = finiteNumber(risk.cvss?.score);
   if (cvss !== null) labels.push(`CVSS ${cvss.toFixed(1)}`);
+  if (risk.public_exploit_available === true) labels.push('Public exploit reference available');
   const advisoryStatus = String(risk.advisory_status || '').toLowerCase();
   if (['disputed', 'rejected', 'withdrawn'].includes(advisoryStatus)) {
     labels.push(`NVD ${advisoryStatus}`);
@@ -66,4 +71,4 @@ function findingRiskSummary(finding) {
   return labels.join(' · ');
 }
 
-export { findingPrimaryRisk, findingRiskSummary };
+export { NO_STORED_CVE_RISK_LABEL, findingPrimaryRisk, findingRiskSummary };

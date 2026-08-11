@@ -4,7 +4,7 @@
 // Project Overview tab controller.
 // Loaded lazily; shell chrome supplies request, filter, and render callbacks.
 import { renderProjectFindingChangesSummary } from './project_finding_changes.js';
-import { findingRiskSummary } from '../findings/finding_risk.js';
+import { NO_STORED_CVE_RISK_LABEL, findingRiskSummary } from '../findings/finding_risk.js';
 
 let exportedDarklabProjectOverview = null;
 
@@ -544,7 +544,7 @@ let exportedDarklabProjectOverview = null;
           const identity = document.createElement('strong');
           identity.textContent = String(item?.vulnerability_id || item?.rule_identity || item?.title || 'Saved finding');
           const signals = document.createElement('span');
-          signals.textContent = findingRiskSummary(item) || 'No stored public exploit signal';
+          signals.textContent = findingRiskSummary(item) || NO_STORED_CVE_RISK_LABEL;
           row.append(identity, signals);
           list.appendChild(row);
         });

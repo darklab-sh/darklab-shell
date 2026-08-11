@@ -201,6 +201,18 @@ const detail = {
         epss: { probability: 0.42, percentile: 0.97, freshness: 'current' },
         cvss: { score: 9.8, freshness: 'current' },
       },
+    }, {
+      remediation_id: 'rmd_unscored',
+      remediation_group_id: 'rmd_unscored',
+      vulnerability_id: '',
+      rule_identity: 'rule-without-risk-data',
+      title: 'Finding without stored public risk data',
+      severity: 'medium',
+      observation_count: 1,
+      evidence_count: 1,
+      strongest_validation_method: 'captured_observation',
+      observation_summaries: [],
+      priority_context: { confidence: [], exposure: [], assets: [] },
     }],
     total: 12,
     limit: 10,
@@ -1814,7 +1826,10 @@ describe('project assessment controller', () => {
       expect(worklist?.textContent).toContain('CISA KEV · 1')
       expect(worklist?.textContent).toContain('CVE-2026-10001')
       expect(worklist?.textContent).toContain('EPSS 42.0%')
+      expect(worklist?.textContent).toContain('EPSS 97.0th percentile')
       expect(worklist?.textContent).toContain('CVSS 9.8')
+      expect(worklist?.textContent).toContain('No stored KEV, EPSS, or NVD data')
+      expect(worklist?.textContent).not.toContain('No stored public exploit signal')
       expect(worklist?.textContent).toContain('Actively confirmed')
       expect(worklist?.textContent).toContain('last seen')
       const observations = worklist.querySelector('.project-assessment-risk-observation-toggle')

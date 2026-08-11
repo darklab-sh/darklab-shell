@@ -3,7 +3,7 @@
 
 // Remediation-level fix-first worklist shared by desktop and mobile Assessment views.
 
-import { findingRiskSummary } from '../findings/finding_risk.js';
+import { NO_STORED_CVE_RISK_LABEL, findingRiskSummary } from '../findings/finding_risk.js';
 import { bindDisclosure } from '../../ui/ui_disclosure.js';
 
 const priorityFilters = [
@@ -129,7 +129,7 @@ function renderRiskRow(context, actions, projectId, item) {
   row.appendChild(makeElement(
     'div',
     'project-assessment-risk-signals',
-    risk || 'No stored public exploit signal',
+    risk || NO_STORED_CVE_RISK_LABEL,
   ));
   const validation = validationLabels[item?.strongest_validation_method]
     || item?.strongest_validation_method
