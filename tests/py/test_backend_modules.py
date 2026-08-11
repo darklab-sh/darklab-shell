@@ -28476,6 +28476,8 @@ class TestDatabaseInit:
                         for index in range(220)
                     ],
                 )
+                # Keep due work selective enough for SQLite to exercise the
+                # production status/next-attempt index after ANALYZE.
                 conn.executemany(
                     "INSERT INTO cve_risk_work_items "
                     "(id, source, feed_version, cve_id, transition_kind, status, "
@@ -28486,12 +28488,12 @@ class TestDatabaseInit:
                             f"work-plan-{index:03}",
                             f"feed-{index:03}",
                             f"CVE-2026-{index:04}",
-                            "pending" if index % 2 == 0 else "complete",
+                            "pending" if index < 90 else "complete",
                             "",
                             f"2026-08-10T10:{index % 60:02}:00+00:00",
                             timestamp,
                         )
-                        for index in range(180)
+                        for index in range(1800)
                     ],
                 )
                 conn.execute("ANALYZE")
