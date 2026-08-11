@@ -1815,8 +1815,10 @@ describe('project assessment controller', () => {
       expect(worklist?.textContent).toContain('last seen')
       const observations = worklist.querySelector('.project-assessment-risk-observation-toggle')
       expect(observations.getAttribute('aria-expanded')).toBe('false')
+      expect(observations.textContent).toBe('▸View 2 observations')
       observations.click()
       expect(observations.getAttribute('aria-expanded')).toBe('true')
+      expect(observations.textContent).toBe('▾Hide 2 observations')
       expect(worklist.textContent).toContain('Confirmed template match')
       expect(worklist.textContent).toContain('Version match')
     }

@@ -87,9 +87,11 @@ function renderObservations(context, actions, projectId, item) {
   const toggle = makeElement(
     'button',
     'control-row project-assessment-risk-observation-toggle',
-    `View ${observations.length} observations`,
   );
   toggle.type = 'button';
+  const glyph = makeElement('span', 'project-assessment-disclosure', '▸');
+  const label = makeElement('span', '', `View ${observations.length} observations`);
+  toggle.append(glyph, label);
   const list = makeElement('div', 'project-assessment-risk-observation-list');
   observations.forEach((observation) => {
     const row = makeElement('div', 'project-assessment-risk-observation');
@@ -105,6 +107,10 @@ function renderObservations(context, actions, projectId, item) {
     hiddenClass: 'u-hidden',
     openClass: 'is-open',
     clearPressStyle: true,
+    onToggle: (isOpen) => {
+      glyph.textContent = isOpen ? '▾' : '▸';
+      label.textContent = `${isOpen ? 'Hide' : 'View'} ${observations.length} observations`;
+    },
   });
   wrap.append(toggle, list);
   return wrap;
