@@ -271,8 +271,11 @@ class TestMetricsEndpoint:
         )
         app_metrics.record_completed_pty("mtr darklab.sh", 130, 0.5)
         app_metrics.record_workspace_evictions(2, "manual")
+        from services.metrics import assessments as assessment_metrics
         from services.metrics import workflows as workflow_metrics
 
+        assessment_metrics.record_assessment_parser_result("command_registry", "parsed")
+        assessment_metrics.record_assessment_parser_result("raw parser", "raw outcome")
         workflow_metrics.record_workflow_execution_outcome("completed", 2.5)
         workflow_metrics.record_workflow_step_outcome("succeeded", 1.25)
         workflow_metrics.record_workflow_capture_failure("required_missing")
@@ -305,6 +308,16 @@ class TestMetricsEndpoint:
         assert 'darklab_evidence_package_skipped_items_total{kind="item"}' in body
         assert 'darklab_pty_finished_total{exit_code_class="signal",tool="mtr"}' in body
         assert 'darklab_workspace_evictions_total{reason="manual"}' in body
+        assert (
+            'darklab_assessment_parser_results_total{outcome="parsed",parser="command_registry"}'
+            in body
+        )
+        assert (
+            'darklab_assessment_parser_results_total{outcome="fallback_error",parser="command_registry"}'
+            in body
+        )
+        assert "raw parser" not in body
+        assert "raw outcome" not in body
         assert 'darklab_workflow_executions_finished_total{outcome="completed"}' in body
         assert 'darklab_workflow_step_duration_seconds_bucket{le="2.0",outcome="succeeded"}' in body
         assert 'darklab_workflow_capture_failures_total{reason="required_missing"}' in body

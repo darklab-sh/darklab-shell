@@ -843,14 +843,28 @@ def test_assessment_evidence_modes_keep_reviewed_profiles_distinct():
     ) is None
 
 
-def test_run_fact_loader_uses_scan_observations_and_materialized_service_evidence(
+def test_run_fact_loader_reports_parser_fallback_and_uses_materialized_evidence(
     assessment_factory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
     factory, cleanup = assessment_factory
     session_id, project_id, _assessment_id = factory([("domain", "quiet.example")])
     run_id = _seed_linked_run(cleanup, session_id, project_id, "nmap -iL targets.txt")
+    fallback_run_id = _seed_linked_run(
+        cleanup, session_id, project_id, "nmap fallback.example",
+    )
+    parser_results: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "services.assessments.evidence_target_parsing.app_metrics.record_assessment_parser_result",
+        lambda parser, outcome: parser_results.append((parser, outcome)),
+    )
+
+    def failing_target_inputs(_command: str) -> list[dict[str, str]]:
+        raise RuntimeError("private parser input fallback.example")
+
     entity_id = "ent-assessment-" + uuid.uuid4().hex
-    with db_connect() as conn:
+    with db_connect() as conn, caplog.at_level(logging.DEBUG, logger="shell"):
         conn.execute(
             "INSERT INTO entities "
             "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, "
@@ -890,14 +904,51 @@ def test_run_fact_loader_uses_scan_observations_and_materialized_service_evidenc
             run_id,
             command_target_inputs_fn=_target_inputs(),
         )
+        fallback_facts = load_run_evidence_facts(
+            conn,
+            fallback_run_id,
+            command_target_inputs_fn=failing_target_inputs,
+        )
         conn.execute("DELETE FROM scan_target_observations WHERE run_id = ?", (run_id,))
         conn.execute("DELETE FROM entity_run_links WHERE run_id = ?", (run_id,))
         conn.execute("DELETE FROM entities WHERE id = ?", (entity_id,))
         conn.commit()
 
     assert facts is not None
+    assert fallback_facts is not None
     assert EvidenceIdentity("domain", "quiet.example") in facts.target_identities
+    assert fallback_facts.target_identities == (
+        EvidenceIdentity("domain", "fallback.example"),
+    )
     assert {"entities", "ports", "services"}.issubset(facts.structured_output_kinds)
+    fallback_event = next(
+        record
+        for record in caplog.records
+        if record.message == "PROJECT_ASSESSMENT_TARGET_PARSE_FALLBACK"
+    )
+    assert getattr(fallback_event, "run_id") == fallback_run_id
+    assert getattr(fallback_event, "command_root") == "nmap"
+    assert getattr(fallback_event, "parser") == "command_registry"
+    assert getattr(fallback_event, "error_class") == "RuntimeError"
+    result_events = [
+        record
+        for record in caplog.records
+        if record.message == "PROJECT_ASSESSMENT_TARGET_PARSE_RESULT"
+    ]
+    assert [getattr(record, "outcome") for record in result_events] == [
+        "fallback_empty",
+        "fallback_error",
+    ]
+    assert getattr(result_events[0], "parsed_identity_count") == 0
+    assert getattr(result_events[0], "fallback_identity_count") == 0
+    assert getattr(result_events[1], "parsed_identity_count") == 0
+    assert getattr(result_events[1], "fallback_identity_count") == 1
+    assert parser_results == [
+        ("command_registry", "fallback_empty"),
+        ("command_registry", "fallback_error"),
+    ]
+    assert "private parser input" not in caplog.text
+    assert "fallback.example" not in caplog.text
 
 
 def test_reconcile_links_only_compatible_runs_and_is_idempotent(assessment_factory):

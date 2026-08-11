@@ -14,7 +14,7 @@ Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/I
 
 Public CVE risk and advisory events log source names, feed versions, acquisition modes, outcomes, counts, timings, and error classes. Positive and negative NVD persistence events use counts only. They don't enumerate CVEs, package identities, targets, Projects, provider payloads, or finding evidence. Project acknowledgement logs keep only the escalation id, acknowledgement state, and bounded note length; the note itself stays in the database and out of logs.
 
-Assessment evidence matching logs bounded run, Project, team, and result counts after a completed run. Quota skips record the fixed quota reason, and unexpected failures record the exception through the normal error logger. These events don't include commands, target values, finding text, output, profile snapshots, or evidence payloads. History deletion and automatic retention record only how many assessment evidence links became unavailable; the preserved evidence ids and reasons stay in the database and audit boundary rather than application logs.
+Assessment evidence matching logs bounded run, Project, team, and result counts after a completed run. Registry target-parser failures emit one WARNING with the safe run id, normalized command root, fixed parser, and error class before the generic extractor is used; DEBUG records carry only the parser outcome and parsed/fallback identity counts. Quota skips record the fixed quota reason, and unexpected failures record the exception through the normal error logger. These events don't include commands, parser input, target or rejected values, finding text, output, profile snapshots, or evidence payloads. History deletion and automatic retention record only how many assessment evidence links became unavailable; the preserved evidence ids and reasons stay in the database and audit boundary rather than application logs.
 
 Optional run-finalization stages keep the run, owner, Project when applicable, fixed stage, and bounded error class. Caught parser, query, artifact-read, and persistence failures include a sanitized traceback with a bounded source-file, function, and line summary while replacing the exception message and omitting the original source expression. Commands, workspace paths, targets, evidence bodies, reports, and parser payloads stay out of those records. A deterministic Schemathesis Project-link change is a WARNING skip without a traceback or error metric.
 
@@ -238,6 +238,7 @@ The current event inventory is:
 | DEBUG | `SCHEDULE_AFTER_FIRE_UPDATED` | scheduler storage | schedule_id, owner_kind, run_id, fired_at, next_run_at, consecutive_failures |
 | DEBUG | `SCHEDULE_PREVIEW_GENERATED` | browser schedule routes | ip, session, team_id, cron_expr, cadence_preset, timezone, next_fire_count |
 | DEBUG | `SCHEDULES_LISTED` | browser schedule routes | ip, session, team_id, count |
+| DEBUG | `PROJECT_ASSESSMENT_TARGET_PARSE_RESULT` | assessment evidence target parsing | run_id, command_root, parser, outcome, parsed_identity_count, fallback_identity_count |
 | DEBUG | `SCHEDULE_FIRES_LISTED` | browser schedule routes | ip, session, team_id, schedule_id, count, total, limit, offset |
 | DEBUG | `API_SCHEDULES_LISTED` | API schedule routes | ip, session, team_id, count, limit, offset |
 | DEBUG | `API_SCHEDULE_FIRES_LISTED` | API schedule routes | ip, session, team_id, schedule_id, count, total, limit, offset |
@@ -377,6 +378,7 @@ The current event inventory is:
 | WARN | `SCHEDULER_WORKER_DATABASE_INTERRUPTED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type, error_type, sqlstate |
 | WARN | `SCHEDULER_LOCK_RELEASE_SKIPPED` | scheduler worker | phase, error_type, sqlstate |
 | WARN | `SCHEMATHESIS_EVIDENCE_FINALIZE_SKIPPED` | run finalization | run_id, session, team_id, project_id, finalize_stage, reason |
+| WARN | `PROJECT_ASSESSMENT_TARGET_PARSE_FALLBACK` | assessment evidence target parsing | run_id, command_root, parser, error_class |
 | WARN | `ZAP_CANCEL_RETRY` | ZAP connector worker | job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
 | WARN | `ZAP_CANCEL_CREDENTIAL_RETRY` | ZAP connector worker | job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
 | WARN | `ZAP_PLAN_SPOOL_SCAN_DEGRADED` | private ZAP plan reconciliation | failure_count, error_classes, suppressed_repeat_count |

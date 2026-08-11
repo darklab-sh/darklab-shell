@@ -452,7 +452,9 @@ UNHANDLED_EXCEPTIONS = Counter(
     "Unhandled server exceptions by Flask endpoint.",
     ("endpoint",),
 )
+from services.metrics import assessments as assessment_metrics  # noqa: E402
 from services.metrics import workflows as workflow_metrics  # noqa: E402
+LABEL_CARDINALITY_POLICIES.update(assessment_metrics.LABEL_CARDINALITY_POLICIES)
 LABEL_CARDINALITY_POLICIES.update(workflow_metrics.LABEL_CARDINALITY_POLICIES)
 METRIC_DEFINITIONS = (
     HTTP_REQUESTS,
@@ -498,6 +500,7 @@ METRIC_DEFINITIONS = (
     EVIDENCE_PACKAGE_SKIPPED_ITEMS,
     CLIENT_ERRORS,
     UNHANDLED_EXCEPTIONS,
+    *assessment_metrics.METRIC_DEFINITIONS,
     *workflow_metrics.METRIC_DEFINITIONS,
 )
 HISTOGRAM_DEFINITIONS = (
@@ -513,6 +516,7 @@ HISTOGRAM_DEFINITIONS = (
     AI_PROVIDER_PHASE_DURATION,
     EVIDENCE_PACKAGE_BUILD_DURATION,
     EVIDENCE_PACKAGE_ARCHIVE_BYTES,
+    *assessment_metrics.HISTOGRAM_DEFINITIONS,
     *workflow_metrics.HISTOGRAM_DEFINITIONS,
 )
 

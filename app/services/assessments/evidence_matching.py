@@ -11,8 +11,9 @@ from urllib.parse import urlsplit
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
-from core.output_targets import command_root, extract_target
+from core.output_targets import command_root
 from services.assessments.command_modes import assessment_command_mode
+from services.assessments.evidence_target_parsing import command_identities
 from services.assessments.schemathesis_evidence_matching import merge_schemathesis_run_evidence_facts
 from services.commands.registry import command_project_target_inputs
 from services.intel.canonical import (
@@ -71,28 +72,6 @@ def _canonical_identity(value: object, value_type: object = "target") -> Evidenc
 def canonical_evidence_identity(value: object, value_type: object = "target") -> EvidenceIdentity | None:
     """Return the canonical identity used by assessment evidence matching."""
     return _canonical_identity(value, value_type)
-
-
-def _command_identities(command: str, command_target_inputs_fn: Callable[[str], list[dict[str, str]]]) -> set[EvidenceIdentity]:
-    identities: set[EvidenceIdentity] = set()
-    try:
-        inputs = command_target_inputs_fn(command)
-    except Exception:
-        inputs = []
-    for item in inputs if isinstance(inputs, list) else []:
-        if not isinstance(item, Mapping) or str(item.get("target_list_file") or "") == "1":
-            continue
-        identity = _canonical_identity(item.get("value"), item.get("value_type"))
-        if identity is not None:
-            identities.add(identity)
-    if identities:
-        return identities
-    fallback = extract_target(command)
-    for value in str(fallback or "").split(","):
-        identity = _canonical_identity(value)
-        if identity is not None:
-            identities.add(identity)
-    return identities
 
 
 def _entity_facts(conn: Any, run_id: str) -> tuple[set[EvidenceIdentity], set[str]]:
@@ -159,7 +138,13 @@ def load_run_evidence_facts(conn: Any, run_id: str, *,
         return None
     command = str(row["command"] or "")
     root = command_root(command)
-    identities = _command_identities(command, command_target_inputs_fn)
+    identities = command_identities(
+        command,
+        command_target_inputs_fn,
+        _canonical_identity,
+        run_id=str(row["id"]),
+        root=root,
+    )
     entity_identities, structured_kinds = _entity_facts(conn, str(row["id"]))
     identities.update(entity_identities)
     identities.update(_scan_observation_identities(conn, str(row["id"])))
