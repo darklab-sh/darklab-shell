@@ -2126,11 +2126,13 @@ describe('project assessment controller', () => {
   it('confirms forward-only lifecycle changes and previews archived-cycle deletion', async () => {
     let current = { ...cycle }
     let deleted = false
+    let previewCanDelete = false
     const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
       if (url.endsWith('/delete-preview')) {
         return apiResponse({
           preview: {
-            can_delete: true,
+            can_delete: previewCanDelete,
+            requires_archived: true,
             will_delete: { checks: 2, evidence_links: 3 },
           },
         })
@@ -2175,6 +2177,14 @@ describe('project assessment controller', () => {
     expect(current.status).toBe('archived')
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment cycle archived.')
 
+    expect(await controller.deleteCycle('prj_1')).toBe(false)
+    expect(deleted).toBe(false)
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Archive this assessment cycle before deleting it.',
+      { error: true },
+    )
+
+    previewCanDelete = true
     expect(await controller.deleteCycle('prj_1')).toBe(true)
     expect(deleted).toBe(true)
     expect(ctx.showConfirm.mock.calls.at(-1)[0].body.note).toContain('2 saved checks and 3 evidence links')

@@ -514,7 +514,13 @@ function createProjectAssessmentController(context) {
       st.mutating = '';
       renderViews();
     }
-    if (!preview?.can_delete) return false;
+    if (!preview?.can_delete) {
+      const message = preview?.requires_archived
+        ? 'Archive this assessment cycle before deleting it.'
+        : 'This assessment cycle cannot be deleted.';
+      ctx.setProjectWorkspaceMessage?.(message, { error: true });
+      return false;
+    }
     const counts = preview.will_delete || {};
     const confirmed = await confirmLifecycle({
       body: {
