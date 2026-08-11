@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import PurePosixPath
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -28,6 +27,7 @@ from services.intel.canonical import (
     canonical_domain,
     canonical_ip,
     canonical_url,
+    canonical_url_path,
 )
 from services.secrets.storage import InvalidSecretName, normalize_secret_name
 from services.workspace.paths import validate_relative_path
@@ -238,14 +238,14 @@ def _path_prefixes(value: object, label: str) -> list[str]:
         parsed = urlsplit(path)
         if not path.startswith("/") or parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
             raise HttpProfileError(f"HTTP profile {label} entries must be URL path prefixes")
-        if ".." in PurePosixPath(path).parts:
-            raise HttpProfileError(f"HTTP profile {label} entries cannot contain traversal")
-        if path not in seen:
-            seen.add(path)
-            paths.append(path)
+        try:
+            normalized = canonical_url_path(path, reject_dot_segments=True)
+        except CanonicalizationError as exc:
+            raise HttpProfileError(f"HTTP profile {label} entries cannot contain traversal") from exc
+        if normalized not in seen:
+            seen.add(normalized)
+            paths.append(normalized)
     return paths
-
-
 def _capture_rules(value: object) -> list[dict[str, str]]:
     rules: list[dict[str, str]] = []
     seen: set[str] = set()

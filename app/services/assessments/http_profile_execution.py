@@ -24,6 +24,10 @@ from services.assessments.http_profiles import (
     _validate_project_scope,
     _validate_references,
 )
+from services.assessments.http_profile_target_scope import (
+    HttpProfileExecutionError,
+    execution_target as _execution_target,
+)
 from services.secrets.storage import get_secret_value_by_name
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
@@ -33,15 +37,6 @@ _UNSUPPORTED_SECRET_SLOTS = frozenset({
     "client_key_passphrase",
     "proxy_authorization",
 })
-
-
-class HttpProfileExecutionError(ValueError):
-    """A stable protected-profile preview or launch failure."""
-
-    def __init__(self, code: str, message: str, *, status_code: int = 409):
-        super().__init__(message)
-        self.code = code
-        self.status_code = status_code
 
 
 @dataclass(frozen=True)
@@ -60,59 +55,6 @@ def _credential_use(profile: Mapping[str, Any]) -> list[str]:
     if profile.get("file_refs"):
         uses.add("client_certificate")
     return sorted(uses)
-
-
-def _path_in_scope(path: str, prefixes: list[str]) -> bool:
-    return any(path == prefix or path.startswith(prefix.rstrip("/") + "/") for prefix in prefixes)
-
-
-def _execution_target(profile: Mapping[str, Any], target: Mapping[str, str]) -> str:
-    target_type = str(target.get("type") or "")
-    target_value = str(target.get("value") or "")
-    base_url = str(profile.get("base_url") or "")
-    if target_type in {"domain", "ip"}:
-        if str(urlsplit(base_url).hostname or "").casefold() != target_value.strip("[]").casefold():
-            raise HttpProfileExecutionError(
-                "http_profile_scope_mismatch",
-                "The HTTP profile base URL no longer matches this exact Project target.",
-            )
-        return base_url
-    if target_type != "url":
-        raise HttpProfileExecutionError(
-            "http_profile_target_unsupported",
-            "HTTP profiles can only run against saved domain, IP, or URL targets.",
-        )
-    parsed = urlsplit(target_value)
-    host = str(parsed.hostname or "").casefold()
-    if host not in {str(value).casefold() for value in profile.get("allowed_hosts", [])}:
-        raise HttpProfileExecutionError(
-            "http_profile_scope_mismatch",
-            "The HTTP profile does not allow this Project URL host.",
-        )
-    matching_roots = [
-        str(root)
-        for root in profile.get("scope_roots", [])
-        if target_value == str(root) or target_value.startswith(str(root).rstrip("/") + "/")
-    ]
-    if not matching_roots:
-        raise HttpProfileExecutionError(
-            "http_profile_scope_mismatch",
-            "The Project URL is outside this HTTP profile's saved scope roots.",
-        )
-    path = parsed.path or "/"
-    includes = [str(value) for value in profile.get("include_paths", [])]
-    excludes = [str(value) for value in profile.get("exclude_paths", [])]
-    if includes and not _path_in_scope(path, includes):
-        raise HttpProfileExecutionError(
-            "http_profile_scope_mismatch",
-            "The Project URL is outside this HTTP profile's included paths.",
-        )
-    if excludes and _path_in_scope(path, excludes):
-        raise HttpProfileExecutionError(
-            "http_profile_scope_mismatch",
-            "The Project URL is excluded by this HTTP profile.",
-        )
-    return target_value
 
 
 def _unsupported_reason(profile: Mapping[str, Any], tool: str) -> str:

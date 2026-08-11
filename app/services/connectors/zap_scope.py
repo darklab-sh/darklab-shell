@@ -9,9 +9,9 @@ import ipaddress
 import socket
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from urllib.parse import urlsplit
 
 from services.connectors.zap_config import ZapConnectorSettings
+from services.connectors.zap_url_scope import ZapUrlScopeError, review_target_url
 
 _MAX_RESOLVED_ADDRESSES = 16
 
@@ -45,27 +45,10 @@ def review_zap_target(
     """Review one URL immediately before it is supplied to external ZAP."""
     if not settings.enabled:
         raise ZapTargetScopeError("zap_connector_disabled", "ZAP connector is disabled")
-    candidate = str(url or "").strip()
-    if not candidate or any(ord(character) <= 32 or ord(character) == 127 for character in candidate):
-        raise ZapTargetScopeError("zap_target_invalid", "ZAP target must be one HTTP(S) URL")
     try:
-        parsed = urlsplit(candidate)
-        parsed.port
-    except ValueError as exc:
-        raise ZapTargetScopeError("zap_target_invalid", "ZAP target must be one HTTP(S) URL") from exc
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.fragment
-    ):
-        raise ZapTargetScopeError(
-            "zap_target_invalid",
-            "ZAP target must be a credential-free HTTP(S) URL without a fragment",
-        )
-
-    host = parsed.hostname.lower().rstrip(".")
+        candidate, host = review_target_url(url)
+    except (ZapUrlScopeError, ValueError) as exc:
+        raise ZapTargetScopeError("zap_target_invalid", str(exc)) from exc
     try:
         literal = ipaddress.ip_address(host)
         raw_addresses: Iterable[str] = (str(literal),)

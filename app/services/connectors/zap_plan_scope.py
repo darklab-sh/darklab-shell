@@ -7,12 +7,20 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from services.connectors.zap_plan_contracts import ZapPlanError
 from services.connectors.zap_scope import ReviewedZapTarget
+from services.connectors.zap_url_scope import (
+    canonical_reviewed_target_url,
+    normalized_path_prefix,
+)
+from services.intel.canonical import (
+    CanonicalizationError,
+    canonical_url,
+    canonical_url_path,
+)
 
 MAX_TARGETS = 8
 MAX_SCOPE_EXCLUSIONS = 50
@@ -25,22 +33,10 @@ def _path_in_scope(path: str, prefixes: Sequence[str]) -> bool:
 
 
 def _normalized_path_prefix(value: object) -> str:
-    path = str(value or "").strip()
-    parsed = urlsplit(path)
-    if (
-        not path.startswith("/")
-        or len(path) > _MAX_PATH_LENGTH
-        or parsed.scheme
-        or parsed.netloc
-        or parsed.query
-        or parsed.fragment
-        or ".." in PurePosixPath(path).parts
-    ):
-        raise ZapPlanError(
-            "zap_scope_exclusion_invalid",
-            "ZAP scope exclusions must be bounded URL path prefixes",
-        )
-    return path
+    try:
+        return normalized_path_prefix(value, max_length=_MAX_PATH_LENGTH)
+    except (CanonicalizationError, ValueError) as exc:
+        raise ZapPlanError("zap_scope_exclusion_invalid", "ZAP scope exclusions must be bounded URL path prefixes") from exc
 
 
 def _profile_list(profile: Mapping[str, Any], key: str) -> list[str]:
@@ -51,15 +47,10 @@ def _profile_list(profile: Mapping[str, Any], key: str) -> list[str]:
 
 
 def canonical_target_url(target: ReviewedZapTarget) -> str:
-    parsed = urlsplit(target.url)
-    rendered_host = f"[{target.host}]" if ":" in target.host else target.host
-    port = parsed.port
-    if port is not None and not (
-        (parsed.scheme == "http" and port == 80)
-        or (parsed.scheme == "https" and port == 443)
-    ):
-        rendered_host = f"{rendered_host}:{port}"
-    return urlunsplit((parsed.scheme, rendered_host, parsed.path or "/", "", ""))
+    try:
+        return canonical_reviewed_target_url(target.url, target.host)
+    except CanonicalizationError as exc:
+        raise ZapPlanError("zap_target_invalid", "A selected ZAP target is invalid") from exc
 
 
 def _same_origin(left: str, right: str) -> bool:
@@ -140,8 +131,16 @@ def review_zap_plan_scope(
         )
 
     allowed_hosts = {value.casefold() for value in _profile_list(profile, "allowed_hosts")}
-    roots = _profile_list(profile, "scope_roots")
-    includes = _profile_list(profile, "include_paths")
+    try:
+        roots = [canonical_url(value) for value in _profile_list(profile, "scope_roots")]
+        includes = [
+            canonical_url_path(value, reject_dot_segments=True)
+            for value in _profile_list(profile, "include_paths")
+        ]
+    except CanonicalizationError as exc:
+        raise ZapPlanError(
+            "zap_http_profile_invalid", "The selected HTTP profile is invalid"
+        ) from exc
     saved_exclusions = _profile_list(profile, "exclude_paths")
     exclusions = list(dict.fromkeys(
         [_normalized_path_prefix(value) for value in saved_exclusions]

@@ -541,6 +541,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **HTTP profile and ZAP path scope can't be bypassed with dot segments.** Saved roots and request targets now share one RFC-style path normalization boundary before scope comparison or launch. Literal, percent-encoded, and mixed dot segments resolve to the same path, while encoded separators, backslashes, malformed escapes, and nested ambiguous encodings fail closed. Protected Curl, HTTPx, Katana, Nuclei, Dalfox, and SQLmap launches use the normalized target, and ZAP normalizes the target, roots, includes, and exclusions before generating its plan.
 - **Anonymous HTTPx Assessment recommendations now keep request bounds.** Runs without a saved HTTP profile use the maintained defaults of 10 requests per second and five workers, while protected runs continue to use the selected profile's limits.
 - **Protected Assessment launches no longer load the same HTTP profile twice during materialization.** The launch reuses the already scoped and validated profile when it builds private tool settings, keeping the safety checks intact while removing the duplicate database query.
 - **The ZAP connector now rechecks its service scheme at the runtime boundary.** Even a caller that supplies connector settings outside the normal validated startup path can't hand the transport a non-HTTP(S) service URL.

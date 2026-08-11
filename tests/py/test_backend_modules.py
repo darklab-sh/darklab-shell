@@ -3158,6 +3158,38 @@ class TestLoadConfig:
             settings,
             resolve_addresses=lambda _host: ["192.0.2.10"],
         )
+        restricted_profile = {
+            **http_profile,
+            "scope_roots": ["https://app.example.test/allowed"],
+            "include_paths": ["/allowed"],
+            "exclude_paths": ["/secret"],
+        }
+        for path in ("../secret", "%2e%2e/secret", "%2e./secret"):
+            normalized_target = review_zap_target(
+                f"https://app.example.test/allowed/{path}",
+                settings,
+                resolve_addresses=lambda _host: ["192.0.2.10"],
+            )
+            assert normalized_target.url == "https://app.example.test/secret"
+            with pytest.raises(ZapPlanError) as exc_info:
+                build_zap_automation_plan(
+                    settings,
+                    [normalized_target],
+                    restricted_profile,
+                )
+            assert exc_info.value.code == "zap_http_profile_scope_mismatch"
+        for path in (
+            "allowed%2fsecret",
+            "allowed%5csecret",
+            "allowed/%252e%252e/secret",
+        ):
+            with pytest.raises(ZapTargetScopeError) as exc_info:
+                review_zap_target(
+                    f"https://app.example.test/{path}",
+                    settings,
+                    resolve_addresses=lambda _host: ["192.0.2.10"],
+                )
+            assert exc_info.value.code == "zap_target_invalid"
 
         plan_errors = [
             (
@@ -14846,6 +14878,10 @@ class TestIntelServices:
         assert canonical.canonical_entity("url", "HTTP://[2001:0DB8::0001]:8080/path/") == (
             "http://[2001:db8::1]:8080/path"
         )
+        for path in ("../secret", "%2e%2e/secret", "%2e./secret"):
+            assert canonical.canonical_entity(
+                "url", f"https://example.test/allowed/{path}"
+            ) == "https://example.test/secret"
         assert canonical.canonical_entity("port", "Example.com:443") == "example.com:443/tcp"
         assert canonical.canonical_entity("port", "192.0.2.10:53/UDP") == "192.0.2.10:53/udp"
         assert canonical.canonical_entity("port", "[2001:db8::1]:8443/tcp") == "[2001:db8::1]:8443/tcp"
@@ -14859,6 +14895,9 @@ class TestIntelServices:
             ("hash", "not-hex"),
             ("cve", "2024-1234"),
             ("url", "ftp://example.test/file"),
+            ("url", "https://example.test/allowed%2fsecret"),
+            ("url", "https://example.test/allowed%5csecret"),
+            ("url", "https://example.test/allowed/%252e%252e/secret"),
             ("url", "https://example.test/" + ("a" * 2050)),
             ("port", "example.test:0/tcp"),
             ("port", "example.test:65536/tcp"),
@@ -27466,7 +27505,7 @@ class TestDatabaseInit:
                 "HTTP://Example.COM:80/a/../report?next=%2Fadmin#private",
                 "url",
                 "url",
-                "http://example.com/a/../report?next=/admin",
+                "http://example.com/report?next=/admin",
             ),
         ],
     )
@@ -32921,6 +32960,9 @@ class TestAssessmentHttpProfileExecution:
     def test_http_profile_adapters_keep_scope_and_policy_in_explicit_argv(self):
         from services.assessments.command_plans import command_plan
         from services.assessments.http_profile_execution import (
+            HttpProfileExecutionError,
+            _SUPPORTED_TOOLS,
+            _execution_target,
             _scope_arguments,
             _unsupported_reason,
         )
@@ -32993,6 +33035,33 @@ class TestAssessmentHttpProfileExecution:
             "include_paths": ["/admin"],
             "exclude_paths": ["/admin/logout"],
         }
+        scoped_profile = {
+            "base_url": "https://app.example/allowed",
+            "scope_roots": ["https://app.example/allowed"],
+            "allowed_hosts": ["app.example"],
+            "include_paths": ["/allowed"],
+            "exclude_paths": ["/secret"],
+        }
+        assert _SUPPORTED_TOOLS == {
+            "curl", "httpx", "katana", "nuclei", "dalfox", "sqlmap",
+        }
+        assert _execution_target(
+            scoped_profile,
+            {"type": "url", "value": "https://app.example/allowed/./page"},
+        ) == "https://app.example/allowed/page"
+        for path in (
+            "../secret",
+            "%2e%2e/secret",
+            "%2e./secret",
+            "page%2f..%2fsecret",
+            "page%5c..%5csecret",
+        ):
+            with pytest.raises(HttpProfileExecutionError) as exc_info:
+                _execution_target(
+                    scoped_profile,
+                    {"type": "url", "value": f"https://app.example/allowed/{path}"},
+                )
+            assert exc_info.value.code == "http_profile_scope_mismatch"
         katana_scope = _scope_arguments(profile, "katana", "https://app.example/admin")
         assert katana_scope[:2] == ["-fs", "fqdn"]
         assert katana_scope[2::2] == ["-cs", "-cos"]
