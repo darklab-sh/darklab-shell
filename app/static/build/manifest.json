@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.bd5e6f67d1d4.css",
-      "hash": "bd5e6f67d1d49804e02904c1c20a206983c1079c023109d3724f3585f1b1dcd5",
+      "path": "/static/build/app.e4a8b1858b58.css",
+      "hash": "e4a8b1858b58a63f5c4ab7442df14e2d27cb52c2e655eb75053e1b69664c8d2c",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -22,7 +22,7 @@
         "/static/css/core/fonts.css": "914c2b233046e7c8db325a5b6ba796de9bf8ca106b0b5c120c1e4738ddbe4020",
         "/static/css/core/base.css": "905154591bdd0a119b99e830dacc4ed405a53ff5630677e53b31c9b01ce4fb7b",
         "/static/css/shell.css": "9dd99a3cbe48d6f212f31958214b09de7cd356967a700a1876a9ffed15750817",
-        "/static/css/primitives/components.css": "cc2b6e816c3a98d748049e9f9e6e8ad5f252ecd96cfff3b060cb24d20b09ebd3",
+        "/static/css/primitives/components.css": "ca337727884ba26edc956d153ff26317fca1f064ef67a53a33b0ebdae5beca29",
         "/static/css/welcome.css": "a903960078807dddbd3b361e1ae546fde87411f0b29e035b1659dffe346f6ae3",
         "/static/css/shell-chrome.css": "9560cf0be78ace064cc87d3af44beb93af9498ac6354c012aef0e56abb10dcad",
         "/static/css/mobile.css": "239d2b513bd1a8dc652a136e1a115fd5d5f509649bc3e5160aaaff6c9cc9533d",
