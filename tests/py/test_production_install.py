@@ -2316,6 +2316,13 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "container-smoke-durations.txt" in "\n".join(
         container_smoke_job["artifacts"]["paths"]
     )
+    container_smoke_script = "\n".join(container_smoke_job["script"])
+    assert (
+        "sh -o pipefail -c './scripts/container_smoke_test.sh "
+        "| tee test-results/container-smoke-durations.txt'"
+        in container_smoke_script
+    )
+    assert "bash -o pipefail" not in container_smoke_script
     lint_py_setup = "\n".join(parsed_ci["lint-py"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bgit\b", lint_py_setup)
     assert "pip install -q -r app/requirements.txt -r requirements-dev.txt" in lint_py_setup

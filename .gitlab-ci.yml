@@ -341,7 +341,7 @@ container-smoke-test:
       allow_failure: true
   script:
     - mkdir -p test-results
-    - bash -o pipefail -c './scripts/container_smoke_test.sh | tee test-results/container-smoke-durations.txt'
+    - sh -o pipefail -c './scripts/container_smoke_test.sh | tee test-results/container-smoke-durations.txt'
   after_script:
     - python3 scripts/test-support/summarize_pytest_junit.py test-results/container_smoke_test.xml test-results/container-smoke-files.txt --lane container_smoke
   artifacts:
