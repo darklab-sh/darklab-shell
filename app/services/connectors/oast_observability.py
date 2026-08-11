@@ -6,21 +6,24 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from hashlib import sha256
 import logging
 import re
 from threading import Lock
 import time
 from types import TracebackType
+from typing import TypeVar
 
 from services.connectors.oast_config import OastConnectorSettings
+from services.connectors.oast_provider_contracts import OastProviderPollBatch
 
 
 log = logging.getLogger("shell")
 _ERROR_CODE_RE = re.compile(r"[a-z0-9_]{1,80}")
 _WARNING_INTERVAL_SECONDS = 60.0
 _WARNING_STATE_LIMIT = 512
+_PROVIDER_CALL_PHASES = frozenset({"register", "poll", "deregister"})
 _RETRY_FALLBACK_CODES = {
     "OAST_PROVIDER_CLEANUP_RETRY": "oast_provider_cleanup_retry",
     "OAST_PROVIDER_CREDENTIAL_RETRY": "oast_provider_credentials_unavailable",
@@ -29,6 +32,7 @@ _RETRY_FALLBACK_CODES = {
 _warning_lock = Lock()
 _warning_state: OrderedDict[tuple[str, str], tuple[float, int]] = OrderedDict()
 _retry_attempts: OrderedDict[tuple[str, str, str], int] = OrderedDict()
+_ResultT = TypeVar("_ResultT")
 
 
 def _safe_exc_info(
@@ -135,6 +139,95 @@ def clear_oast_retry(event: str, correlation_id: str = "") -> None:
         ]
         for key in stale:
             _retry_attempts.pop(key, None)
+
+
+def _provider_call_attempt(correlation_id: str, phase: str) -> int:
+    retry_event = (
+        "OAST_PROVIDER_CLEANUP_RETRY"
+        if phase == "deregister"
+        else "OAST_PROVIDER_RETRY"
+    )
+    with _warning_lock:
+        attempts = [
+            attempt
+            for (event, identity, _error_code), attempt in _retry_attempts.items()
+            if event == retry_event and identity == correlation_id
+        ]
+    return max(attempts, default=0) + 1
+
+
+def observed_oast_provider_call(
+    correlation: Mapping[str, object],
+    phase: str,
+    operation: Callable[[], _ResultT],
+) -> _ResultT:
+    """Run one fixed provider operation and log only bounded outcome metadata."""
+    selected_phase = str(phase or "").strip().lower()
+    if selected_phase not in _PROVIDER_CALL_PHASES:
+        raise ValueError("unsupported OAST provider call phase")
+    correlation_id = str(correlation.get("id") or "")
+    attempt = _provider_call_attempt(correlation_id, selected_phase)
+    started = time.monotonic()
+    result = operation()
+    accepted_count = 0
+    rejected_count = 0
+    if isinstance(result, OastProviderPollBatch):
+        accepted_count = len(result.interactions)
+        rejected_count = result.rejected_count + result.ignored_shared_count
+    log.debug(
+        "OAST_PROVIDER_CALL_COMPLETED",
+        extra={
+            "correlation_id": correlation_id,
+            "phase": selected_phase,
+            "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
+            "attempt": attempt,
+            "accepted_count": accepted_count,
+            "rejected_count": rejected_count,
+            "duplicate_count": 0,
+        },
+    )
+    return result
+
+
+def log_oast_provider_session_ready(correlation: Mapping[str, object]) -> None:
+    log.info(
+        "OAST_PROVIDER_SESSION_READY",
+        extra={
+            "correlation_id": str(correlation.get("id") or ""),
+            "correlation_status": str(correlation.get("status") or ""),
+        },
+    )
+
+
+def log_oast_interactions_ingested(
+    correlation: Mapping[str, object],
+    *,
+    accepted_count: int,
+    rejected_count: int,
+    duplicate_count: int,
+) -> None:
+    if accepted_count <= 0:
+        return
+    log.info(
+        "OAST_INTERACTIONS_INGESTED",
+        extra={
+            "correlation_id": str(correlation.get("id") or ""),
+            "correlation_status": str(correlation.get("status") or ""),
+            "accepted_count": max(0, int(accepted_count)),
+            "rejected_count": max(0, int(rejected_count)),
+            "duplicate_count": max(0, int(duplicate_count)),
+        },
+    )
+
+
+def log_oast_provider_session_cleaned(correlation: Mapping[str, object]) -> None:
+    log.info(
+        "OAST_PROVIDER_SESSION_CLEANED",
+        extra={
+            "correlation_id": str(correlation.get("id") or ""),
+            "correlation_status": str(correlation.get("status") or ""),
+        },
+    )
 
 
 def log_oast_spool_cleanup_failed(correlation_id: str, exc: BaseException) -> None:
@@ -252,12 +345,16 @@ __all__ = [
     "claim_oast_warning",
     "clear_oast_retry",
     "log_oast_cleanup_scope_mismatch",
+    "log_oast_interactions_ingested",
     "log_oast_provider_deregistration_failed",
+    "log_oast_provider_session_cleaned",
     "log_oast_provider_session_failed",
+    "log_oast_provider_session_ready",
     "log_oast_retry",
     "log_oast_spool_cleanup_failed",
     "log_oast_spool_scan_degraded",
     "log_oast_spool_unavailable",
     "oast_provider_scope_matches",
+    "observed_oast_provider_call",
     "safe_oast_error_code",
 ]

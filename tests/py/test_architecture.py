@@ -186,6 +186,9 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget("app/services/connectors/oast_worker.py", 291, "split-package-ratchet"),
     ModuleSizeBudget(
+        "app/services/connectors/oast_worker_ingestion.py", 76, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
         "app/services/connectors/oast_worker_lock.py", 56, "split-package-ratchet"
     ),
     ModuleSizeBudget(

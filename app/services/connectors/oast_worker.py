@@ -26,14 +26,16 @@ from services.connectors.oast_correlation_lifecycle import (
     purge_oast_correlations,
 )
 from services.connectors.oast_correlations import OastCorrelationError
-from services.connectors.oast_interactions import ingest_oast_interaction
 from services.connectors.oast_observability import (
     clear_oast_retry,
     log_oast_cleanup_scope_mismatch,
     log_oast_provider_deregistration_failed,
+    log_oast_provider_session_cleaned,
     log_oast_provider_session_failed,
+    log_oast_provider_session_ready,
     log_oast_retry,
     oast_provider_scope_matches,
+    observed_oast_provider_call,
     safe_oast_error_code,
 )
 from services.connectors.oast_provider_contracts import OastProviderSession
@@ -51,10 +53,10 @@ from services.connectors.oast_provider_transport import (
     register_oast_provider_session,
 )
 from services.connectors.oast_worker_lock import acquire_oast_worker_lock
+from services.connectors.oast_worker_ingestion import process_oast_provider_batch
 from services.connectors.oast_worker_state import (
     oast_correlations_by_ids,
     oast_correlations_for_worker,
-    record_oast_provider_rejections,
 )
 
 
@@ -95,21 +97,30 @@ def _register_session(
     token: str,
     cfg: Mapping[str, Any],
 ) -> OastProviderSession | None:
-    session = register_oast_provider_session(
-        settings,
-        token,
-        str(correlation.get("callback_label") or ""),
+    session = observed_oast_provider_call(
+        correlation,
+        "register",
+        lambda: register_oast_provider_session(
+            settings,
+            token,
+            str(correlation.get("callback_label") or ""),
+        ),
     )
     try:
         store_oast_provider_session(correlation, session, cfg)
     except OastProviderSessionSpoolError as exc:
         try:
-            deregister_oast_provider_session(settings, token, session)
+            observed_oast_provider_call(
+                correlation,
+                "deregister",
+                lambda: deregister_oast_provider_session(settings, token, session),
+            )
         except Exception as cleanup_exc:  # noqa: BLE001
             log_oast_provider_deregistration_failed(correlation, cleanup_exc)
         discard_oast_provider_session(str(correlation.get("id") or ""), cfg)
         _fail_unrecoverable_session(correlation, exc)
         return None
+    log_oast_provider_session_ready(correlation)
     return session
 
 
@@ -151,38 +162,13 @@ def process_oast_correlation(
         if str(correlation.get("status") or "") != "active":
             clear_oast_retry("OAST_PROVIDER_RETRY", correlation_id)
             return
-        batch = poll_oast_provider_session(settings, token, session)
+        batch = observed_oast_provider_call(
+            correlation,
+            "poll",
+            lambda: poll_oast_provider_session(settings, token, session),
+        )
         clear_oast_retry("OAST_PROVIDER_RETRY", correlation_id)
-        provider_rejected = batch.rejected_count + batch.ignored_shared_count
-        if provider_rejected:
-            record_oast_provider_rejections(
-                str(correlation.get("id") or ""),
-                provider_rejected,
-            )
-        interaction_rejections: dict[str, tuple[OastCorrelationError, int]] = {}
-        for interaction in batch.interactions:
-            try:
-                ingest_oast_interaction(
-                    str(correlation.get("session_id") or ""),
-                    str(correlation.get("id") or ""),
-                    interaction,
-                    team_id=str(correlation.get("team_id") or ""),
-                )
-            except OastCorrelationError as exc:
-                error_code = safe_oast_error_code(exc, "oast_interaction_rejected")
-                previous = interaction_rejections.get(error_code)
-                interaction_rejections[error_code] = (exc, 1 + (previous[1] if previous else 0))
-        if not interaction_rejections:
-            clear_oast_retry("OAST_INTERACTION_REJECTED", correlation_id)
-        for exc, rejected_count in interaction_rejections.values():
-            log_oast_retry(
-                "OAST_INTERACTION_REJECTED",
-                correlation,
-                exc,
-                retryable=False,
-                next_retry_seconds=0,
-                occurrence_count=rejected_count,
-            )
+        process_oast_provider_batch(correlation, batch)
     except Exception as exc:  # noqa: BLE001
         log_oast_retry("OAST_PROVIDER_RETRY", correlation, exc)
 
@@ -199,12 +185,18 @@ def cleanup_oast_provider_session(
         return False
     try:
         session = load_oast_provider_session(correlation, cfg)
-        deregister_oast_provider_session(settings, token, session)
+        observed_oast_provider_call(
+            correlation,
+            "deregister",
+            lambda: deregister_oast_provider_session(settings, token, session),
+        )
     except Exception as exc:  # noqa: BLE001
         log_oast_retry("OAST_PROVIDER_CLEANUP_RETRY", correlation, exc)
         return False
-    discard_oast_provider_session(str(correlation.get("id") or ""), cfg)
+    if not discard_oast_provider_session(str(correlation.get("id") or ""), cfg):
+        return False
     clear_oast_retry("OAST_PROVIDER_CLEANUP_RETRY", str(correlation.get("id") or ""))
+    log_oast_provider_session_cleaned(correlation)
     return True
 
 

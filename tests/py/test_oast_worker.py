@@ -17,6 +17,7 @@ from services.connectors import oast_worker
 from services.connectors import oast_worker_lock
 from services.connectors import oast_observability
 from services.connectors import oast_readiness
+from services.connectors import oast_worker_ingestion
 from services.connectors.oast_config import (
     OastConnectorSettings,
     OastConnectorUnavailable,
@@ -84,6 +85,9 @@ def test_oast_worker_registers_reserved_session_without_polling():
         ) as register,
         mock.patch.object(oast_worker, "store_oast_provider_session") as store,
         mock.patch.object(oast_worker, "poll_oast_provider_session") as poll,
+        mock.patch.object(
+            oast_worker, "log_oast_provider_session_ready"
+        ) as ready_log,
     ):
         oast_worker.process_oast_correlation(
             correlation, _settings(), "provider-token", {"data_dir": "/tmp/data"}
@@ -92,6 +96,7 @@ def test_oast_worker_registers_reserved_session_without_polling():
     register.assert_called_once_with(_settings(), "provider-token", _CALLBACK_LABEL)
     store.assert_called_once_with(correlation, session, {"data_dir": "/tmp/data"})
     poll.assert_not_called()
+    ready_log.assert_called_once_with(correlation)
 
 
 def test_oast_worker_polls_active_session_and_records_bounded_rejects():
@@ -102,21 +107,43 @@ def test_oast_worker_polls_active_session_and_records_bounded_rejects():
         "observed_at": "2026-08-09T12:00:00+00:00",
         "details": {},
     }
-    batch = OastProviderPollBatch((interaction,), 2, 1)
+    batch = OastProviderPollBatch((interaction, interaction), 2, 1)
     with (
         mock.patch.object(oast_worker, "oast_provider_session_is_staged", return_value=True),
         mock.patch.object(oast_worker, "load_oast_provider_session", return_value=_session()),
         mock.patch.object(oast_worker, "poll_oast_provider_session", return_value=batch),
-        mock.patch.object(oast_worker, "record_oast_provider_rejections") as rejected,
-        mock.patch.object(oast_worker, "ingest_oast_interaction") as ingest,
+        mock.patch.object(
+            oast_worker_ingestion, "record_oast_provider_rejections"
+        ) as rejected,
+        mock.patch.object(
+            oast_worker_ingestion,
+            "ingest_oast_interaction",
+            side_effect=(
+                {"created": True, "interaction": {}},
+                {"created": False, "interaction": {}},
+            ),
+        ) as ingest,
+        mock.patch.object(
+            oast_worker_ingestion, "log_oast_interactions_ingested"
+        ) as ingestion_log,
     ):
         oast_worker.process_oast_correlation(
             correlation, _settings(), "provider-token", {"data_dir": "/tmp/data"}
         )
 
     rejected.assert_called_once_with(_CORRELATION_ID, 3)
-    ingest.assert_called_once_with(
-        "owner-a", _CORRELATION_ID, interaction, team_id=""
+    assert ingest.call_count == 2
+    ingest.assert_has_calls(
+        [
+            mock.call("owner-a", _CORRELATION_ID, interaction, team_id=""),
+            mock.call("owner-a", _CORRELATION_ID, interaction, team_id=""),
+        ]
+    )
+    ingestion_log.assert_called_once_with(
+        correlation,
+        accepted_count=1,
+        rejected_count=3,
+        duplicate_count=1,
     )
 
 
@@ -134,8 +161,12 @@ def test_oast_worker_aggregates_interaction_rejections_by_error_code():
         mock.patch.object(oast_worker, "oast_provider_session_is_staged", return_value=True),
         mock.patch.object(oast_worker, "load_oast_provider_session", return_value=_session()),
         mock.patch.object(oast_worker, "poll_oast_provider_session", return_value=batch),
-        mock.patch.object(oast_worker, "ingest_oast_interaction", side_effect=rejected),
-        mock.patch.object(oast_worker, "log_oast_retry") as retry_log,
+        mock.patch.object(
+            oast_worker_ingestion,
+            "ingest_oast_interaction",
+            side_effect=rejected,
+        ),
+        mock.patch.object(oast_worker_ingestion, "log_oast_retry") as retry_log,
     ):
         oast_worker.process_oast_correlation(
             correlation, _settings(), "provider-token", {"data_dir": "/tmp/data"}
@@ -218,13 +249,19 @@ def test_oast_worker_cleans_up_only_after_confirmed_deregistration():
     with (
         mock.patch.object(oast_worker, "load_oast_provider_session", return_value=_session()),
         mock.patch.object(oast_worker, "deregister_oast_provider_session") as deregister,
-        mock.patch.object(oast_worker, "discard_oast_provider_session") as discard,
+        mock.patch.object(
+            oast_worker, "discard_oast_provider_session", return_value=True
+        ) as discard,
+        mock.patch.object(
+            oast_worker, "log_oast_provider_session_cleaned"
+        ) as cleaned_log,
     ):
         assert oast_worker.cleanup_oast_provider_session(
             correlation, _settings(), "provider-token", cfg
         ) is True
     deregister.assert_called_once()
     discard.assert_called_once_with(_CORRELATION_ID, cfg)
+    cleaned_log.assert_called_once_with(correlation)
 
     with (
         mock.patch.object(oast_worker, "load_oast_provider_session", return_value=_session()),
@@ -239,6 +276,21 @@ def test_oast_worker_cleans_up_only_after_confirmed_deregistration():
             correlation, _settings(), "provider-token", cfg
         ) is False
     discard.assert_not_called()
+
+    with (
+        mock.patch.object(oast_worker, "load_oast_provider_session", return_value=_session()),
+        mock.patch.object(oast_worker, "deregister_oast_provider_session"),
+        mock.patch.object(
+            oast_worker, "discard_oast_provider_session", return_value=False
+        ),
+        mock.patch.object(
+            oast_worker, "log_oast_provider_session_cleaned"
+        ) as cleaned_log,
+    ):
+        assert oast_worker.cleanup_oast_provider_session(
+            correlation, _settings(), "provider-token", cfg
+        ) is False
+    cleaned_log.assert_not_called()
 
     changed_settings = OastConnectorSettings(
         **{**_settings().__dict__, "allowed_domain": "changed.example.test"}
@@ -279,6 +331,30 @@ def test_oast_cleanup_observability_is_bounded_and_redacted():
     }
     assert "provider-secret" not in repr(kwargs)
     assert "/private/spool/path" not in repr(kwargs)
+
+    with mock.patch.object(oast_observability.log, "info") as info_log:
+        oast_observability.log_oast_interactions_ingested(
+            _correlation("active"),
+            accepted_count=0,
+            rejected_count=1,
+            duplicate_count=1,
+        )
+        info_log.assert_not_called()
+        oast_observability.log_oast_interactions_ingested(
+            _correlation("active"),
+            accepted_count=1,
+            rejected_count=2,
+            duplicate_count=3,
+        )
+    assert info_log.call_args.args == ("OAST_INTERACTIONS_INGESTED",)
+    assert info_log.call_args.kwargs["extra"] == {
+        "correlation_id": _CORRELATION_ID,
+        "correlation_status": "active",
+        "accepted_count": 1,
+        "rejected_count": 2,
+        "duplicate_count": 3,
+    }
+    assert _CALLBACK_LABEL not in repr(info_log.call_args)
 
     with mock.patch.object(oast_observability.log, "error") as error_log:
         oast_observability.log_oast_provider_deregistration_failed(
@@ -327,7 +403,7 @@ def test_oast_cleanup_observability_is_bounded_and_redacted():
 
 
 def test_oast_retry_observability_suppresses_repeats_with_attempt_context():
-    event = "OAST_TEST_RETRY"
+    event = "OAST_PROVIDER_RETRY"
     correlation = _correlation("active")
     failure = RuntimeError("provider payload secret")
     oast_observability.clear_oast_retry(event, _CORRELATION_ID)
@@ -354,6 +430,30 @@ def test_oast_retry_observability_suppresses_repeats_with_attempt_context():
     assert debug_log.call_args.kwargs["extra"]["suppressed_repeat_count"] == 1
     assert "provider payload secret" not in repr(warning_log.call_args)
     assert "provider payload secret" not in repr(debug_log.call_args)
+
+    private_result = OastProviderPollBatch(({"provider_payload": "private"},), 2, 1)
+    with (
+        mock.patch.object(
+            oast_observability.time, "monotonic", side_effect=(200.0, 200.125)
+        ),
+        mock.patch.object(oast_observability.log, "debug") as debug_log,
+    ):
+        assert oast_observability.observed_oast_provider_call(
+            correlation, "poll", lambda: private_result
+        ) is private_result
+    assert debug_log.call_args.args == ("OAST_PROVIDER_CALL_COMPLETED",)
+    assert debug_log.call_args.kwargs["extra"] == {
+        "correlation_id": _CORRELATION_ID,
+        "phase": "poll",
+        "duration_ms": 125,
+        "attempt": 3,
+        "accepted_count": 1,
+        "rejected_count": 3,
+        "duplicate_count": 0,
+    }
+    assert "provider_payload" not in repr(debug_log.call_args)
+    assert "private" not in repr(debug_log.call_args)
+    oast_observability.clear_oast_retry(event, _CORRELATION_ID)
 
 
 def test_oast_readiness_reports_spool_failure_once_without_private_values():

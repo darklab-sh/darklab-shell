@@ -16,7 +16,7 @@ Public CVE risk and advisory events log source names, feed versions, acquisition
 
 Assessment evidence matching logs bounded run, Project, team, and result counts after a completed run. Quota skips record the fixed quota reason, and unexpected failures record the exception through the normal error logger. These events don't include commands, target values, finding text, output, profile snapshots, or evidence payloads. History deletion and automatic retention record only how many assessment evidence links became unavailable; the preserved evidence ids and reasons stay in the database and audit boundary rather than application logs.
 
-Private OAST cleanup and readiness records keep only a correlation id, fixed cleanup or state flags, counts, and bounded error metadata. They never include the provider URL, callback domain or URL, service token, provider payload, session secret, private key, ciphertext, or spool path. Repeated readiness, stale-scan, and scope-mismatch warnings are suppressed for a bounded interval; the next emitted record reports how many repeats were skipped.
+Private OAST provider, cleanup, and readiness records keep only a correlation id, fixed phase or state flags, timings, attempts, counts, and bounded error metadata. Successful external calls use DEBUG, while provider-ready, positive ingestion, and confirmed terminal cleanup use INFO. They never include the provider URL, callback domain or URL, service token, provider payload, session secret, private key, ciphertext, or spool path. Repeated readiness, stale-scan, and scope-mismatch warnings are suppressed for a bounded interval; the next emitted record reports how many repeats were skipped.
 
 HTTPx screenshot finalization logs only owner/run ids, counts, limits, and fixed failure classes. Storage-limit and cleanup events never include workspace paths, URLs, page titles, technologies, captured bytes, or target values.
 
@@ -252,6 +252,7 @@ The current event inventory is:
 | DEBUG | `AI_WORKER_BUSY` | AI worker coordination | max_concurrent |
 | DEBUG | `HTTPX_SCREENSHOT_OUTPUT_CLEANED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
 | DEBUG | `OAST_PROVIDER_RETRY_SUPPRESSED` | private OAST retry suppression | retry_event, correlation_id when applicable, correlation_status, correlation_count when applicable, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| DEBUG | `OAST_PROVIDER_CALL_COMPLETED` | private OAST provider calls | correlation_id, phase, duration_ms, attempt, accepted_count, rejected_count, duplicate_count |
 | INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
 | INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, team_id, source, schedule_id, removed |
@@ -306,6 +307,9 @@ The current event inventory is:
 | INFO | `ZAP_WORKER_STARTED` | ZAP connector worker | pid |
 | INFO | `ZAP_WORKER_LOCK_HELD` | ZAP connector worker | — |
 | INFO | `ZAP_WORKER_STOPPED` | ZAP connector worker | pid |
+| INFO | `OAST_PROVIDER_SESSION_READY` | private OAST provider registration | correlation_id, correlation_status |
+| INFO | `OAST_INTERACTIONS_INGESTED` | private OAST interaction ingestion | correlation_id, correlation_status, accepted_count, rejected_count, duplicate_count |
+| INFO | `OAST_PROVIDER_SESSION_CLEANED` | private OAST terminal cleanup | correlation_id, correlation_status |
 | INFO | `SCHEDULER_RECOVERY_APPLIED` | scheduler recovery | fired, skipped |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session, cleanup flags, removed/curated/kept counts |

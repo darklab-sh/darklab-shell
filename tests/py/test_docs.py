@@ -35,7 +35,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "c703862fb79264d21dc174cd8d22ea71608892f58dae104ba68ea31c4a4a8677"
+_LOG_EVENT_INVENTORY_HASH = "2e403fa463631d17bba0b256ceac1c7089fbb29a85efe832cd7f3df7c4957306"
 _CHANGELOG_ARCHIVES = (
     _REPO_ROOT / "docs" / "changelog" / "2.x.md",
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",
@@ -774,7 +774,7 @@ class TestLoggingReference:
     def test_event_inventory_was_moved_without_dropping_contracts(self):
         body = _log_event_inventory_body()
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
-        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 281
+        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 285
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()
