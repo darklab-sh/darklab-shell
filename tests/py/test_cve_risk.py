@@ -2963,6 +2963,15 @@ def test_failed_local_nvd_reload_preserves_last_known_good_dataset(risk_db, tmp_
 def test_feed_crossings_use_hysteresis_deduplicate_and_project_once(risk_db):
     _insert_project_finding(risk_db, finding_id="finding-one", project_id="project-one")
     risk_db.execute(
+        "INSERT INTO findings (id, session_id, target_id, title, created) "
+        "VALUES ('finding-no-project', 'session-one', 'target-no-project', "
+        "'Unassigned CVE observation', '2026-08-04')"
+    )
+    risk_db.execute(
+        "INSERT INTO finding_cve_links (finding_id, cve_id, created_at) "
+        "VALUES ('finding-no-project', 'CVE-2026-12345', '2026-08-04')"
+    )
+    risk_db.execute(
         "INSERT INTO projects (id, session_id, name, slug, created, updated) "
         "VALUES ('project-two', 'session-one', 'Two', 'two', '2026-08-04', '2026-08-04')"
     )
@@ -2985,14 +2994,30 @@ def test_feed_crossings_use_hysteresis_deduplicate_and_project_once(risk_db):
         enqueue_changes=True,
     )
     result = process_risk_work(risk_db)
-    assert result["escalations"] == 1
+    assert result["escalations"] == 2
     assert process_risk_work(risk_db)["escalations"] == 0
-    event = risk_db.execute("SELECT * FROM risk_escalations").fetchone()
+    event = risk_db.execute(
+        "SELECT r.* FROM risk_escalations r "
+        "JOIN risk_escalation_projects rp ON rp.escalation_id = r.id "
+        "WHERE rp.project_id = 'project-one'"
+    ).fetchone()
     assert event["transition_kind"] == "epss_activated"
     assert risk_db.execute(
         "SELECT COUNT(*) AS count FROM risk_escalation_projects WHERE escalation_id = ?",
         (event["id"],),
     ).fetchone()["count"] == 2
+    orphan_event = risk_db.execute(
+        "SELECT r.* FROM risk_escalations r WHERE NOT EXISTS ("
+        "SELECT 1 FROM risk_escalation_projects rp WHERE rp.escalation_id = r.id)"
+    ).fetchone()
+    assert orphan_event["transition_kind"] == "epss_activated"
+    project_one_events = list_project_risk_escalations(risk_db, "project-one")
+    project_two_events = list_project_risk_escalations(risk_db, "project-two")
+    assert [item["id"] for item in project_one_events] == [event["id"]]
+    assert [item["id"] for item in project_two_events] == [event["id"]]
+    assert orphan_event["id"] not in {
+        item["id"] for item in project_one_events + project_two_events
+    }
 
     accept_feed(
         risk_db,
@@ -3009,10 +3034,10 @@ def test_feed_crossings_use_hysteresis_deduplicate_and_project_once(risk_db):
         payload_sha256="v4",
         enqueue_changes=True,
     )
-    assert process_risk_work(risk_db)["escalations"] == 1
+    assert process_risk_work(risk_db)["escalations"] == 2
     assert risk_db.execute(
         "SELECT COUNT(*) AS count FROM risk_escalations WHERE transition_kind = 'epss_reset'"
-    ).fetchone()["count"] == 1
+    ).fetchone()["count"] == 2
 
 
 def test_changed_cve_work_resumes_by_owner_without_starving_later_groups(risk_db):

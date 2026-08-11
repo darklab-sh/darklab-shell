@@ -1178,6 +1178,9 @@ test.describe('project workspace modal', () => {
     await expect(root).toContainText('Ports Browser Watch')
     await expect(root).toContainText('Deleted Current Watch')
     await expect(root).toContainText('New open port 443/tcp https')
+    const riskEvent = root.locator(`[data-project-monitoring-risk-id="${fixture.riskEventId}"]`)
+    await expect(riskEvent).toContainText('CVE-2026-10001')
+    await expect(riskEvent).toContainText('Added to CISA KEV')
 
     const availableFire = root.locator(`[data-project-monitoring-fire-id="${fixture.changedFireId}"]`).first()
     await expect(availableFire.locator('[data-project-monitoring-action="details"]').first()).toBeEnabled()

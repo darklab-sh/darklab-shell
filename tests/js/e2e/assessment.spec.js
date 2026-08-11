@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady } from './helpers.js'
+import {
+  browserSessionId,
+  ensurePromptReady,
+  seedProjectMonitoringFixture,
+} from './helpers.js'
 
 async function issueAndActivateSessionToken(page) {
   const token = await page.evaluate(async () => {
@@ -411,10 +415,14 @@ test.describe('project assessment qualification', () => {
       viewport: { width: 390, height: 844 },
     })
 
-    test('archives and deletes a cycle through the shared action sheet', async ({ page }) => {
+    test('archives and deletes a cycle through the shared action sheet', async ({ page }, testInfo) => {
       test.setTimeout(90_000)
       const projectName = `Mobile Assessment ${Date.now()}`
-      await createAssessmentProject(page, projectName)
+      const { project } = await createAssessmentProject(page, projectName)
+      const monitoring = seedProjectMonitoringFixture(testInfo, {
+        sessionId: await browserSessionId(page),
+        projectId: project.id,
+      })
       await page.locator('#hamburger-btn').click()
       await page.locator('#mobile-menu-sheet [data-menu-action="projects"]').click()
       await expect(page.locator('#project-mobile-root')).toBeVisible()
@@ -441,6 +449,45 @@ test.describe('project assessment qualification', () => {
       )
       await confirmAssessmentAction(page, 'delete')
       await expect(assessment).toContainText('Start an assessment')
+
+      const monitoringResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url())
+        return response.request().method() === 'GET'
+          && url.pathname === `/projects/${project.id}/monitoring`
+      })
+      await page.locator('[data-project-mobile-detail-tab="monitoring"]').click()
+      expect((await monitoringResponse).ok()).toBe(true)
+
+      const monitoringRoot = page.locator(
+        `#project-mobile-detail-body [data-project-monitoring-root="${project.id}"].is-mobile`,
+      )
+      await expect(monitoringRoot).toBeVisible({ timeout: 15_000 })
+      const riskRow = monitoringRoot.locator(
+        `[data-project-monitoring-risk-id="${monitoring.riskEventId}"]`,
+      )
+      await expect(riskRow).toContainText('CVE-2026-10001')
+      await expect(riskRow).toContainText('Added to CISA KEV')
+      const watcherRow = monitoringRoot.locator(
+        `[data-project-monitoring-fire-id="${monitoring.changedFireId}"]`,
+      ).first()
+      await expect(watcherRow).toContainText('New')
+
+      await riskRow.locator('[data-project-monitoring-risk-note]').fill('Reviewed on mobile.')
+      const acknowledgeResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url())
+        return response.request().method() === 'PATCH'
+          && url.pathname === `/projects/${project.id}/monitoring/risk-events/${monitoring.riskEventId}`
+      })
+      await riskRow.locator(
+        '[data-project-monitoring-action="ack-risk"][data-ack-state="acknowledged"]',
+      ).click()
+      expect((await acknowledgeResponse).ok()).toBe(true)
+      await expect(monitoringRoot.locator(
+        `[data-project-monitoring-risk-id="${monitoring.riskEventId}"]`,
+      )).toContainText('Acknowledged')
+      await expect(monitoringRoot.locator(
+        `[data-project-monitoring-fire-id="${monitoring.changedFireId}"]`,
+      ).first()).toContainText('New')
     })
   })
 })
