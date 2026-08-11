@@ -41,7 +41,7 @@ def assessment_run_launch_context(
         return AssessmentRunLaunchContext(tuple(trusted_execution_args), context)
     if not reviewed_takeover_launch_plan_matches(plan):
         action = plan.get("action")
-        log.error("ASSESSMENT_TAKEOVER_LAUNCH_CONTRACT_REJECTED", extra={
+        log.warning("ASSESSMENT_TAKEOVER_LAUNCH_CONTRACT_REJECTED", extra={
             "project_id": str(plan.get("project_id") or "")[:64],
             "assessment_id": str(plan.get("assessment_id") or "")[:64],
             "check_id": str(plan.get("check_id") or "")[:64],
@@ -49,6 +49,7 @@ def assessment_run_launch_context(
             "check_key": NUCLEI_TAKEOVER_CHECK_KEY,
             "policy_level": str(plan.get("policy_level") or "")[:32],
             "action_id": str(action.get("id") or "")[:64] if isinstance(action, Mapping) else "",
+            "reason": "reviewed_contract_changed",
         })
         raise AssessmentActionError(
             "takeover_launch_contract_invalid",

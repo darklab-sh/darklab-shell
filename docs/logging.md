@@ -166,6 +166,10 @@ The current event inventory is:
 | DEBUG | `ASSESSMENT_PROFILE_CATALOG_CACHE_HIT` | assessment profile catalog | profile_count, check_count |
 | INFO | `ASSESSMENT_PROFILE_CATALOG_LOADED` | assessment profile catalog initial load and hot reload | load_kind, profile_count, check_count, local_overlay, duration_ms |
 | ERROR | `ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED` | required shipped assessment profile catalog | source_kind, error_code, error_class, traceback; catalog contents and paths are excluded |
+| WARNING | `ASSESSMENT_DALFOX_XSS_LAUNCH_CONTRACT_REJECTED` | reviewed Dalfox XSS launch guardrail | project_id, assessment_id, check_id, check_key, reason |
+| WARNING | `ASSESSMENT_DALFOX_OAST_LAUNCH_CONTRACT_REJECTED` | reviewed private-OAST launch guardrail | project_id, assessment_id, check_id, check_key, reason |
+| WARNING | `ASSESSMENT_TAKEOVER_LAUNCH_CONTRACT_REJECTED` | reviewed Nuclei takeover launch guardrail | project_id, assessment_id, check_id, profile_key, check_key, policy_level, action_id, reason |
+| ERROR | `ASSESSMENT_TAKEOVER_TEMPLATE_VALIDATION_FAILED` | app-owned Nuclei takeover template validation | project_id, assessment_id, check_id, profile_key, check_key, reason, traceback |
 | INFO | `API_PROJECT_ASSESSMENT_CREATED` | API v1 Project assessment create route | ip, session, team_id, project_id, assessment_id, source, profile_key, profile_version, check_count |
 | INFO | `API_PROJECT_ASSESSMENT_UPDATED` | API v1 Project assessment lifecycle route | ip, session, team_id, project_id, assessment_id, source, from_status, to_status, transition_kind, title_changed |
 | INFO | `API_PROJECT_ASSESSMENT_DELETED` | API v1 Project assessment deletion route | ip, session, team_id, project_id, assessment_id, source, check_count, evidence_count |

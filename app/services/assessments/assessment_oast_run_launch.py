@@ -126,7 +126,7 @@ def materialize_assessment_oast_run_launch(
 
 
 def _reject(plan: Mapping[str, Any], reason: str) -> NoReturn:
-    log.error(
+    log.warning(
         "ASSESSMENT_DALFOX_OAST_LAUNCH_CONTRACT_REJECTED",
         extra={
             "project_id": str(plan.get("project_id") or "")[:64],

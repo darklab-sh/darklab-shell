@@ -110,7 +110,7 @@ def materialize_reviewed_dalfox_xss_launch(
 
 
 def _reject(plan: Mapping[str, Any], reason: str) -> NoReturn:
-    log.error("ASSESSMENT_DALFOX_XSS_LAUNCH_CONTRACT_REJECTED", extra={
+    log.warning("ASSESSMENT_DALFOX_XSS_LAUNCH_CONTRACT_REJECTED", extra={
         "project_id": str(plan.get("project_id") or "")[:64],
         "assessment_id": str(plan.get("assessment_id") or "")[:64],
         "check_id": str(plan.get("check_id") or "")[:64],

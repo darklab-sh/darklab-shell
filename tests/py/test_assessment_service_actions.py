@@ -1999,7 +1999,7 @@ def test_assessment_launch_context_binds_reviewed_template_only_to_takeover_chec
 def test_takeover_launch_context_rejects_contract_drift(
     caplog, override, expected_action_id,
 ):
-    with caplog.at_level("ERROR", logger="shell"), pytest.raises(
+    with caplog.at_level("WARNING", logger="shell"), pytest.raises(
         nuclei_takeover_launch.AssessmentActionError,
         match="expected safe launch contract",
     ) as exc_info:
@@ -2016,6 +2016,8 @@ def test_takeover_launch_context_rejects_contract_drift(
     assert record.assessment_id == "asm_takeover"
     assert record.check_id == "ach_takeover"
     assert record.action_id == expected_action_id
+    assert record.reason == "reviewed_contract_changed"
+    assert record.levelname == "WARNING"
 
 
 def test_takeover_launch_context_fails_closed_when_template_validation_fails(
