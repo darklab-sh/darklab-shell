@@ -163,6 +163,9 @@ The current event inventory is:
 | INFO | `PROJECT_ASSESSMENT_EVIDENCE_LINKED` | Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
 | INFO | `PROJECT_ASSESSMENT_EVIDENCE_UNLINKED` | Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
 | INFO / WARN | `PROJECT_ASSESSMENT_BROKER_UNAVAILABLE` | browser/API Assessment launch routes | request_id, session, owner_kind, team_id, project_id, assessment_id, check_id, finding_id, action_kind, source, reason, broker_mode |
+| DEBUG | `ASSESSMENT_PROFILE_CATALOG_CACHE_HIT` | assessment profile catalog | profile_count, check_count |
+| INFO | `ASSESSMENT_PROFILE_CATALOG_LOADED` | assessment profile catalog initial load and hot reload | load_kind, profile_count, check_count, local_overlay, duration_ms |
+| ERROR | `ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED` | required shipped assessment profile catalog | source_kind, error_code, error_class, traceback; catalog contents and paths are excluded |
 | INFO | `API_PROJECT_ASSESSMENT_CREATED` | API v1 Project assessment create route | ip, session, team_id, project_id, assessment_id, source, profile_key, profile_version, check_count |
 | INFO | `API_PROJECT_ASSESSMENT_UPDATED` | API v1 Project assessment lifecycle route | ip, session, team_id, project_id, assessment_id, source, from_status, to_status, transition_kind, title_changed |
 | INFO | `API_PROJECT_ASSESSMENT_DELETED` | API v1 Project assessment deletion route | ip, session, team_id, project_id, assessment_id, source, check_count, evidence_count |

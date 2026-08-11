@@ -316,7 +316,10 @@ def test_shipped_assessment_profiles_define_the_complete_versioned_catalog():
     }
 
 
-def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(tmp_path: Path):
+def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
     shipped = tmp_path / "assessment_profiles.yaml"
     local = tmp_path / "assessment_profiles.local.yaml"
     _write_yaml(shipped, _catalog(_profile("network"), _profile("web")))
@@ -324,17 +327,38 @@ def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(tmp_p
     local_api = _profile("api", label="Operator API")
     _write_yaml(local, _catalog(local_network, local_api))
 
-    catalog = profiles.load_assessment_profile_catalog(
-        shipped_path=shipped,
-        local_path=local,
-        known_command_roots=KNOWN_COMMANDS,
-        known_workflow_ids=KNOWN_WORKFLOWS,
-    )
+    kwargs = {
+        "shipped_path": shipped,
+        "local_path": local,
+        "known_command_roots": KNOWN_COMMANDS,
+        "known_workflow_ids": KNOWN_WORKFLOWS,
+    }
+    with caplog.at_level("DEBUG"):
+        catalog = profiles.load_assessment_profile_catalog(**kwargs)
+        cached = profiles.load_assessment_profile_catalog(**kwargs)
 
     assert [profile["key"] for profile in catalog.profiles] == ["network", "web", "api"]
     assert catalog.profiles[0]["label"] == "Operator network"
     assert catalog.profiles[0]["version"] == "2.0"
     assert catalog.local_profile_keys == ("network", "api")
+    assert cached is catalog
+    loaded = next(
+        record
+        for record in caplog.records
+        if record.message == "ASSESSMENT_PROFILE_CATALOG_LOADED"
+    )
+    assert loaded.load_kind == "initial"
+    assert loaded.profile_count == 3
+    assert loaded.check_count == 3
+    assert loaded.local_overlay is True
+    assert loaded.duration_ms >= 0
+    cache_hit = next(
+        record
+        for record in caplog.records
+        if record.message == "ASSESSMENT_PROFILE_CATALOG_CACHE_HIT"
+    )
+    assert cache_hit.profile_count == 3
+    assert cache_hit.check_count == 3
 
 
 def test_catalog_hot_reload_rejects_bad_local_file_without_replacing_last_good(
@@ -408,6 +432,28 @@ def test_invalid_local_yaml_keeps_the_last_valid_catalog(
 
     assert catalog.profiles[0]["label"] == "Shipped network"
     assert "ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED" in caplog.messages
+
+    profiles.clear_assessment_profile_catalog_cache()
+    shipped.write_text("version: [\n", encoding="utf-8")
+    caplog.clear()
+    with caplog.at_level("ERROR"), pytest.raises(
+        profiles.AssessmentProfileCatalogError
+    ):
+        profiles.load_assessment_profile_catalog(
+            shipped_path=shipped,
+            local_path=local,
+            known_command_roots=KNOWN_COMMANDS,
+            known_workflow_ids=KNOWN_WORKFLOWS,
+        )
+    failed = next(
+        record
+        for record in caplog.records
+        if record.message == "ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED"
+    )
+    assert failed.source_kind == "shipped"
+    assert failed.error_code == "invalid_catalog"
+    assert failed.error_class == "AssessmentProfileCatalogError"
+    assert failed.exc_info
 
 
 @pytest.mark.parametrize(

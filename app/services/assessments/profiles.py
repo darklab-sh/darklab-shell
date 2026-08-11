@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 import yaml
@@ -512,6 +513,31 @@ def clear_assessment_profile_catalog_cache() -> None:
     _CATALOG_CACHE.clear()
 
 
+def _catalog_counts(catalog: AssessmentProfileCatalog) -> tuple[int, int]:
+    return len(catalog.profiles), sum(
+        len(profile.get("checks") or ()) for profile in catalog.profiles
+    )
+
+
+def _log_catalog_loaded(
+    catalog: AssessmentProfileCatalog,
+    *,
+    load_kind: str,
+    started_at: float,
+) -> None:
+    profile_count, check_count = _catalog_counts(catalog)
+    log.info(
+        "ASSESSMENT_PROFILE_CATALOG_LOADED",
+        extra={
+            "load_kind": load_kind,
+            "profile_count": profile_count,
+            "check_count": check_count,
+            "local_overlay": bool(catalog.local_profile_keys),
+            "duration_ms": max(0, int((time.monotonic() - started_at) * 1000)),
+        },
+    )
+
+
 def load_assessment_profile_catalog(
     *,
     shipped_path: str | os.PathLike[str] | None = None,
@@ -540,7 +566,15 @@ def load_assessment_profile_catalog(
     cache = _CATALOG_CACHE.setdefault(cache_key, {"signature": None, "catalog": None})
     cached = cache.get("catalog")
     if cache.get("signature") == signature and isinstance(cached, AssessmentProfileCatalog):
+        profile_count, check_count = _catalog_counts(cached)
+        log.debug(
+            "ASSESSMENT_PROFILE_CATALOG_CACHE_HIT",
+            extra={"profile_count": profile_count, "check_count": check_count},
+        )
         return cached
+
+    started_at = time.monotonic()
+    load_kind = "reload" if isinstance(cached, AssessmentProfileCatalog) else "initial"
 
     try:
         shipped_data = _load_yaml(shipped, required=True)
@@ -552,6 +586,15 @@ def load_assessment_profile_catalog(
         )
     except AssessmentProfileCatalogError as exc:
         if not isinstance(cached, AssessmentProfileCatalog):
+            log.error(
+                "ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED",
+                exc_info=True,
+                extra={
+                    "source_kind": "shipped",
+                    "error_code": "invalid_catalog",
+                    "error_class": type(exc).__name__,
+                },
+            )
             raise
         log.warning(
             "ASSESSMENT_PROFILE_CATALOG_RELOAD_REJECTED",
@@ -569,6 +612,12 @@ def load_assessment_profile_catalog(
             extra={"path": str(local), "error": str(exc)[:240]},
         )
         cache.update({"signature": signature, "catalog": fallback})
+        if not isinstance(cached, AssessmentProfileCatalog):
+            _log_catalog_loaded(
+                fallback,
+                load_kind=load_kind,
+                started_at=started_at,
+            )
         return fallback
     if local_data is None:
         catalog = shipped_catalog
@@ -590,9 +639,16 @@ def load_assessment_profile_catalog(
                 extra={"path": str(local), "error": str(exc)[:240]},
             )
             cache.update({"signature": signature, "catalog": fallback})
+            if not isinstance(cached, AssessmentProfileCatalog):
+                _log_catalog_loaded(
+                    fallback,
+                    load_kind=load_kind,
+                    started_at=started_at,
+                )
             return fallback
 
     cache.update({"signature": signature, "catalog": catalog})
+    _log_catalog_loaded(catalog, load_kind=load_kind, started_at=started_at)
     return catalog
 
 
