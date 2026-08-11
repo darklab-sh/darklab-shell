@@ -7,10 +7,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from hashlib import sha256
 import logging
 import os
-import re
 import signal
 import time
 from typing import Any
@@ -29,6 +27,13 @@ from services.connectors.oast_correlation_lifecycle import (
 )
 from services.connectors.oast_correlations import OastCorrelationError
 from services.connectors.oast_interactions import ingest_oast_interaction
+from services.connectors.oast_observability import (
+    log_oast_cleanup_scope_mismatch,
+    log_oast_provider_deregistration_failed,
+    log_oast_retry,
+    oast_provider_scope_matches,
+    safe_oast_error_code,
+)
 from services.connectors.oast_provider_contracts import OastProviderSession
 from services.connectors.oast_provider_spool import (
     OastProviderSessionSpoolError,
@@ -54,43 +59,12 @@ from services.connectors.oast_worker_state import (
 log = logging.getLogger("shell")
 _STOP = False
 _TICK_SECONDS = 5.0
-_ERROR_CODE_RE = re.compile(r"[a-z0-9_]{1,80}")
 _TERMINAL_STATUSES = frozenset({"closed", "failed", "expired"})
 
 
 def _handle_stop(_signum, _frame) -> None:
     global _STOP
     _STOP = True
-
-
-def _error_code(exc: BaseException, fallback: str) -> str:
-    candidate = str(getattr(exc, "code", "") or "").strip().lower()
-    return candidate if _ERROR_CODE_RE.fullmatch(candidate) else fallback
-
-
-def _provider_scope_matches(
-    correlation: Mapping[str, object],
-    settings: OastConnectorSettings,
-) -> bool:
-    return (
-        settings.enabled
-        and settings.privacy_acknowledged
-        and str(correlation.get("allowed_domain") or "") == settings.allowed_domain
-        and str(correlation.get("service_origin_sha256") or "")
-        == sha256(settings.base_url.encode("utf-8")).hexdigest()
-    )
-
-
-def _log_retry(event: str, correlation: Mapping[str, object], exc: BaseException) -> None:
-    log.warning(
-        event,
-        extra={
-            "correlation_id": str(correlation.get("id") or ""),
-            "correlation_status": str(correlation.get("status") or ""),
-            "error_class": type(exc).__name__,
-            "error_code": _error_code(exc, "oast_provider_retry"),
-        },
-    )
 
 
 def _fail_unrecoverable_session(
@@ -104,13 +78,13 @@ def _fail_unrecoverable_session(
             correlation_id,
             team_id=str(correlation.get("team_id") or ""),
             failed=True,
-            error_code=_error_code(exc, "oast_provider_session_unrecoverable"),
+            error_code=safe_oast_error_code(exc, "oast_provider_session_unrecoverable"),
             error_detail="The private OAST provider session could not be recovered",
         )
     except OastCorrelationError as close_error:
         if close_error.code != "oast_correlation_close_conflict":
             raise
-    _log_retry("OAST_PROVIDER_SESSION_FAILED", correlation, exc)
+    log_oast_retry("OAST_PROVIDER_SESSION_FAILED", correlation, exc)
 
 
 def _register_session(
@@ -129,8 +103,8 @@ def _register_session(
     except OastProviderSessionSpoolError as exc:
         try:
             deregister_oast_provider_session(settings, token, session)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as cleanup_exc:  # noqa: BLE001
+            log_oast_provider_deregistration_failed(correlation, cleanup_exc)
         discard_oast_provider_session(str(correlation.get("id") or ""), cfg)
         _fail_unrecoverable_session(correlation, exc)
         return None
@@ -159,8 +133,8 @@ def process_oast_correlation(
     cfg: Mapping[str, Any],
 ) -> None:
     """Register or poll one live correlation without exposing provider material."""
-    if not _provider_scope_matches(correlation, settings):
-        _log_retry(
+    if not oast_provider_scope_matches(correlation, settings):
+        log_oast_retry(
             "OAST_PROVIDER_SCOPE_RETRY",
             correlation,
             RuntimeError("configured provider scope changed"),
@@ -186,9 +160,9 @@ def process_oast_correlation(
                     team_id=str(correlation.get("team_id") or ""),
                 )
             except OastCorrelationError as exc:
-                _log_retry("OAST_INTERACTION_REJECTED", correlation, exc)
+                log_oast_retry("OAST_INTERACTION_REJECTED", correlation, exc)
     except Exception as exc:  # noqa: BLE001
-        _log_retry("OAST_PROVIDER_RETRY", correlation, exc)
+        log_oast_retry("OAST_PROVIDER_RETRY", correlation, exc)
 
 
 def cleanup_oast_provider_session(
@@ -198,13 +172,14 @@ def cleanup_oast_provider_session(
     cfg: Mapping[str, Any],
 ) -> bool:
     """Deregister and remove one staged terminal provider session."""
-    if not _provider_scope_matches(correlation, settings):
+    if not oast_provider_scope_matches(correlation, settings):
+        log_oast_cleanup_scope_mismatch(correlation, settings)
         return False
     try:
         session = load_oast_provider_session(correlation, cfg)
         deregister_oast_provider_session(settings, token, session)
     except Exception as exc:  # noqa: BLE001
-        _log_retry("OAST_PROVIDER_CLEANUP_RETRY", correlation, exc)
+        log_oast_retry("OAST_PROVIDER_CLEANUP_RETRY", correlation, exc)
         return False
     discard_oast_provider_session(str(correlation.get("id") or ""), cfg)
     return True
@@ -243,7 +218,9 @@ def run_once(
             extra={
                 "correlation_count": len(correlations) + len(terminal_rows),
                 "error_class": type(exc).__name__,
-                "error_code": _error_code(exc, "oast_provider_credentials_unavailable"),
+                "error_code": safe_oast_error_code(
+                    exc, "oast_provider_credentials_unavailable"
+                ),
             },
         )
         purge_oast_correlations(now=instant)

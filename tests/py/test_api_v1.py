@@ -2807,7 +2807,7 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         return SimpleNamespace(run_id=launched_run_id, status="running")
 
     with mock.patch(
-        "services.assessments.assessment_oast.oast_provider_session_is_staged",
+        "services.connectors.oast_readiness.oast_provider_session_is_staged",
         return_value=True,
     ), mock.patch(
         "services.assessments.assessment_oast_run_launch."

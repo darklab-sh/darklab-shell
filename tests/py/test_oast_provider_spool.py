@@ -10,10 +10,12 @@ import json
 import os
 from pathlib import Path
 import stat
+from unittest import mock
 
 import pytest
 
 from services.connectors.oast_provider_crypto import new_oast_provider_session
+from services.connectors import oast_provider_spool
 from services.connectors.oast_provider_spool import (
     OastProviderSessionSpoolError,
     discard_oast_provider_session,
@@ -152,3 +154,30 @@ def test_oast_provider_session_spool_rejects_paths_and_lists_only_old_regular_fi
     with pytest.raises(OastProviderSessionSpoolError) as exc_info:
         load_oast_provider_session(_correlation())
     assert exc_info.value.code == "oast_provider_session_unavailable"
+
+
+def test_oast_provider_session_spool_reports_cleanup_and_scan_failures():
+    cleanup_error = OSError("/private/spool/path secret")
+    with (
+        mock.patch.object(
+            oast_provider_spool, "_session_path", side_effect=cleanup_error
+        ),
+        mock.patch.object(
+            oast_provider_spool.oast_observability, "log_oast_spool_cleanup_failed"
+        ) as cleanup_log,
+    ):
+        assert discard_oast_provider_session(_CORRELATION_ID) is False
+    cleanup_log.assert_called_once_with(_CORRELATION_ID, cleanup_error)
+
+    spool_root = mock.Mock()
+    unreadable = mock.Mock()
+    unreadable.lstat.side_effect = PermissionError("private path")
+    spool_root.glob.return_value = [unreadable]
+    with (
+        mock.patch.object(oast_provider_spool, "_spool_dir", return_value=spool_root),
+        mock.patch.object(
+            oast_provider_spool.oast_observability, "log_oast_spool_scan_degraded"
+        ) as scan_log,
+    ):
+        assert stale_oast_provider_session_ids(now=1001.0) == ()
+    scan_log.assert_called_once_with({"PermissionError": 1})

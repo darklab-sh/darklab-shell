@@ -16,6 +16,8 @@ Public CVE risk and advisory events log source names, feed versions, acquisition
 
 Assessment evidence matching logs bounded run, Project, team, and result counts after a completed run. Quota skips record the fixed quota reason, and unexpected failures record the exception through the normal error logger. These events don't include commands, target values, finding text, output, profile snapshots, or evidence payloads. History deletion and automatic retention record only how many assessment evidence links became unavailable; the preserved evidence ids and reasons stay in the database and audit boundary rather than application logs.
 
+Private OAST cleanup and readiness records keep only a correlation id, fixed cleanup or state flags, counts, and bounded error metadata. They never include the provider URL, callback domain or URL, service token, provider payload, session secret, private key, ciphertext, or spool path. Repeated readiness, stale-scan, and scope-mismatch warnings are suppressed for a bounded interval; the next emitted record reports how many repeats were skipped.
+
 HTTPx screenshot finalization logs only owner/run ids, counts, limits, and fixed failure classes. Storage-limit and cleanup events never include workspace paths, URLs, page titles, technologies, captured bytes, or target values.
 
 ## Level Semantics
@@ -357,6 +359,9 @@ The current event inventory is:
 | WARN | `ZAP_JOB_FAILED` | ZAP connector worker | job_id, phase, error_class |
 | WARN | `ZAP_CANCEL_RETRY` | ZAP connector worker | job_id, error_class |
 | WARN | `ZAP_CANCEL_CREDENTIAL_RETRY` | ZAP connector worker | job_id, error_class |
+| WARN | `OAST_SESSION_SPOOL_SCAN_DEGRADED` | private OAST session reconciliation | failure_count, error_classes, suppressed_repeat_count |
+| WARN | `OAST_SESSION_SPOOL_UNAVAILABLE` | private OAST readiness check | correlation_id, error_class, error_code, suppressed_repeat_count |
+| WARN | `OAST_PROVIDER_CLEANUP_SCOPE_MISMATCH` | private OAST terminal cleanup | correlation_id, correlation_status, connector_disabled, privacy_acknowledgement_missing, callback_scope_changed, service_origin_changed, suppressed_repeat_count |
 | WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `CVE_RISK_BOOTSTRAP_UNAVAILABLE` | bundled public-risk bootstrap | reason |
@@ -498,6 +503,8 @@ The current event inventory is:
 | ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_BOOTSTRAP_FAILED` | scheduler worker | phase, pid (+ traceback) |
 | ERROR | `ZAP_WORKER_TICK_FAILED` | ZAP connector worker | (+ traceback) |
+| ERROR | `OAST_SESSION_SPOOL_CLEANUP_FAILED` | private OAST terminal or orphan cleanup | correlation_id, cleanup_stage, error_class (+ sanitized traceback) |
+| ERROR | `OAST_PROVIDER_DEREGISTRATION_FAILED` | private OAST registration rollback | correlation_id, cleanup_stage, error_class, error_code (+ sanitized traceback) |
 | ERROR | `AI_WORKER_BOOTSTRAP_FAILED` | AI worker startup | phase (+ traceback) |
 | ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Schema migration runner | migration_version, migration_name, error (+ traceback) |

@@ -18,6 +18,7 @@ from typing import Any
 import uuid
 
 from config import resolve_data_dir
+from services.connectors import oast_observability
 from services.connectors.oast_provider_contracts import OastProviderSession
 from services.connectors.oast_provider_crypto import registration_public_key
 from services.secrets.vault import decrypt_secret, encrypt_secret
@@ -250,15 +251,14 @@ def load_oast_provider_session(
         ) from exc
 
 
-def discard_oast_provider_session(
-    correlation_id: str,
-    cfg: Mapping[str, Any] | None = None,
-) -> None:
+def discard_oast_provider_session(correlation_id: str, cfg: Mapping[str, Any] | None = None) -> bool:
     """Best-effort removal for terminal or orphaned provider sessions."""
     try:
         _session_path(correlation_id, cfg).unlink(missing_ok=True)
-    except (OSError, OastProviderSessionSpoolError):
-        return
+    except (OSError, OastProviderSessionSpoolError) as exc:
+        oast_observability.log_oast_spool_cleanup_failed(correlation_id, exc)
+        return False
+    return True
 
 
 def oast_provider_session_is_staged(
@@ -287,10 +287,12 @@ def stale_oast_provider_session_ids(
     """Return a bounded set of old regular session files for reconciliation."""
     cutoff = (time.time() if now is None else float(now)) - max(60, int(grace_seconds))
     candidates: list[str] = []
+    scan_errors: dict[str, int] = {}
     for path in sorted(_spool_dir(cfg).glob("ocr_*.session"))[:_SPOOL_LIMIT]:
         try:
             path_stat = path.lstat()
-        except OSError:
+        except OSError as exc:
+            scan_errors[type(exc).__name__] = scan_errors.get(type(exc).__name__, 0) + 1
             continue
         if (
             not stat.S_ISREG(path_stat.st_mode)
@@ -300,6 +302,7 @@ def stale_oast_provider_session_ids(
         ):
             continue
         candidates.append(path.stem)
+    oast_observability.log_oast_spool_scan_degraded(scan_errors)
     return tuple(candidates)
 
 

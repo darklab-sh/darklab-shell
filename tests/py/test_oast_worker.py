@@ -15,6 +15,8 @@ from unittest import mock
 from core.database_backend import DatabaseBackend
 from services.connectors import oast_worker
 from services.connectors import oast_worker_lock
+from services.connectors import oast_observability
+from services.connectors import oast_readiness
 from services.connectors.oast_config import (
     OastConnectorSettings,
     OastConnectorUnavailable,
@@ -160,6 +162,9 @@ def test_oast_worker_fails_corrupt_or_unstorable_private_sessions():
             oast_worker, "store_oast_provider_session", side_effect=unavailable
         ),
         mock.patch.object(oast_worker, "deregister_oast_provider_session") as deregister,
+        mock.patch.object(
+            oast_worker, "log_oast_provider_deregistration_failed"
+        ) as deregister_log,
         mock.patch.object(oast_worker, "discard_oast_provider_session") as discard,
         mock.patch.object(oast_worker, "close_oast_correlation") as close,
     ):
@@ -167,6 +172,7 @@ def test_oast_worker_fails_corrupt_or_unstorable_private_sessions():
             correlation, _settings(), "provider-token", {"data_dir": "/tmp/data"}
         )
     deregister.assert_called_once_with(_settings(), "provider-token", session)
+    deregister_log.assert_not_called()
     discard.assert_called_once_with(_CORRELATION_ID, {"data_dir": "/tmp/data"})
     assert close.call_args.kwargs["failed"] is True
 
@@ -198,6 +204,125 @@ def test_oast_worker_cleans_up_only_after_confirmed_deregistration():
             correlation, _settings(), "provider-token", cfg
         ) is False
     discard.assert_not_called()
+
+    changed_settings = OastConnectorSettings(
+        **{**_settings().__dict__, "allowed_domain": "changed.example.test"}
+    )
+    with mock.patch.object(
+        oast_worker, "log_oast_cleanup_scope_mismatch"
+    ) as mismatch_log:
+        assert oast_worker.cleanup_oast_provider_session(
+            correlation, changed_settings, "provider-token", cfg
+        ) is False
+    mismatch_log.assert_called_once_with(correlation, changed_settings)
+
+
+def test_oast_cleanup_observability_is_bounded_and_redacted():
+    first = oast_observability.claim_oast_warning(
+        "OAST_TEST_WARNING", _CORRELATION_ID, now=100.0
+    )
+    repeated = oast_observability.claim_oast_warning(
+        "OAST_TEST_WARNING", _CORRELATION_ID, now=101.0
+    )
+    resumed = oast_observability.claim_oast_warning(
+        "OAST_TEST_WARNING", _CORRELATION_ID, now=161.0
+    )
+    assert first == (True, 0)
+    assert repeated == (False, 1)
+    assert resumed == (True, 1)
+
+    sensitive_error = OSError("/private/spool/path provider-secret")
+    with mock.patch.object(oast_observability.log, "error") as error_log:
+        oast_observability.log_oast_spool_cleanup_failed(
+            _CORRELATION_ID, sensitive_error
+        )
+    _, kwargs = error_log.call_args
+    assert kwargs["extra"] == {
+        "correlation_id": _CORRELATION_ID,
+        "cleanup_stage": "local_spool",
+        "error_class": "OSError",
+    }
+    assert "provider-secret" not in repr(kwargs)
+    assert "/private/spool/path" not in repr(kwargs)
+
+    with mock.patch.object(oast_observability.log, "error") as error_log:
+        oast_observability.log_oast_provider_deregistration_failed(
+            _correlation(), sensitive_error
+        )
+    _, kwargs = error_log.call_args
+    assert kwargs["extra"]["cleanup_stage"] == "registration_rollback"
+    assert kwargs["extra"]["error_code"] == "oast_provider_deregistration_failed"
+    assert "provider-secret" not in repr(kwargs)
+    assert "/private/spool/path" not in repr(kwargs)
+
+    changed_settings = OastConnectorSettings(
+        **{**_settings().__dict__, "allowed_domain": "changed.example.test"}
+    )
+    with (
+        mock.patch.object(
+            oast_observability, "claim_oast_warning", return_value=(True, 2)
+        ),
+        mock.patch.object(oast_observability.log, "warning") as warning_log,
+    ):
+        oast_observability.log_oast_cleanup_scope_mismatch(
+            _correlation(), changed_settings
+        )
+    _, kwargs = warning_log.call_args
+    assert kwargs["extra"]["callback_scope_changed"] is True
+    assert kwargs["extra"]["service_origin_changed"] is False
+    assert kwargs["extra"]["suppressed_repeat_count"] == 2
+    assert "changed.example.test" not in repr(kwargs)
+
+
+def test_oast_readiness_reports_spool_failure_once_without_private_values():
+    unavailable = OastProviderSessionSpoolError(
+        "oast_provider_spool_unavailable", "private path"
+    )
+    correlation = _correlation()
+    with (
+        mock.patch.object(
+            oast_readiness,
+            "oast_provider_session_is_staged",
+            side_effect=unavailable,
+        ),
+        mock.patch.object(
+            oast_readiness, "log_oast_spool_unavailable"
+        ) as unavailable_log,
+    ):
+        assert oast_readiness.assessment_oast_provider_ready(correlation) is False
+    unavailable_log.assert_called_once_with(_CORRELATION_ID, unavailable)
+
+
+def test_oast_registration_rollback_reports_provider_cleanup_failure():
+    correlation = _correlation()
+    session = _session()
+    spool_error = OastProviderSessionSpoolError(
+        "oast_provider_session_store_failed", "unavailable"
+    )
+    cleanup_error = RuntimeError("provider response secret")
+    with (
+        mock.patch.object(oast_worker, "oast_provider_session_is_staged", return_value=False),
+        mock.patch.object(
+            oast_worker, "register_oast_provider_session", return_value=session
+        ),
+        mock.patch.object(
+            oast_worker, "store_oast_provider_session", side_effect=spool_error
+        ),
+        mock.patch.object(
+            oast_worker,
+            "deregister_oast_provider_session",
+            side_effect=cleanup_error,
+        ),
+        mock.patch.object(
+            oast_worker, "log_oast_provider_deregistration_failed"
+        ) as cleanup_log,
+        mock.patch.object(oast_worker, "discard_oast_provider_session"),
+        mock.patch.object(oast_worker, "close_oast_correlation"),
+    ):
+        oast_worker.process_oast_correlation(
+            correlation, _settings(), "provider-token", {"data_dir": "/tmp/data"}
+        )
+    cleanup_log.assert_called_once_with(correlation, cleanup_error)
 
 
 def test_oast_worker_tick_reconciles_orphans_terminal_sessions_and_live_work():

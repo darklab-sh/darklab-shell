@@ -24,9 +24,8 @@ from services.connectors.oast_correlations import (
     oast_correlations_for_owner_check,
     reserve_oast_correlation,
 )
-from services.connectors.oast_provider_spool import (
-    OastProviderSessionSpoolError,
-    oast_provider_session_is_staged,
+from services.connectors.oast_readiness import (
+    assessment_oast_provider_ready,
 )
 
 
@@ -38,7 +37,6 @@ _RESERVATION_FIELDS = frozenset({
     "plan_digest",
     "source_run_id",
 })
-_LIVE_STATUSES = frozenset({"reserved", "active"})
 
 
 class AssessmentOastError(ValueError):
@@ -182,15 +180,6 @@ def _timestamp(value: object) -> str | None:
         return value.isoformat()
     text = str(value or "").strip()
     return text or None
-
-
-def assessment_oast_provider_ready(correlation: Mapping[str, Any]) -> bool:
-    if str(correlation.get("status") or "") not in _LIVE_STATUSES:
-        return False
-    try:
-        return oast_provider_session_is_staged(str(correlation.get("id") or ""))
-    except OastProviderSessionSpoolError:
-        return False
 
 
 def _public_correlation(
