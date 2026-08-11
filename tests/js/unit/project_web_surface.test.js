@@ -206,6 +206,8 @@ describe('Project Web Surface gallery', () => {
     expect(globalThis.URL.createObjectURL).toHaveBeenCalledOnce()
 
     const preview = test.container.querySelector('.project-web-surface-preview')
+    expect(preview.classList.contains('btn')).toBe(true)
+    expect(preview.classList.contains('btn-ghost')).toBe(true)
     preview.click()
     expect(preview.getAttribute('aria-expanded')).toBe('true')
     expect(preview.closest('.project-web-surface-card').classList.contains('is-expanded')).toBe(true)

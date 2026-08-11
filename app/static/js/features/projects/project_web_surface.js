@@ -314,7 +314,7 @@ let exportedDarklabProjectWebSurface = null;
     function renderPreview(projectId, capture, card) {
       const preview = document.createElement('button');
       preview.type = 'button';
-      preview.className = 'project-web-surface-preview';
+      preview.className = 'btn btn-ghost project-web-surface-preview';
       preview.setAttribute('aria-label', `Expand screenshot for ${captureTitle(capture)}`);
       preview.setAttribute('aria-expanded', 'false');
       ctx.bindProjectRuntimePressable?.(preview);

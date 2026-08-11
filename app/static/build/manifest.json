@@ -536,8 +536,8 @@
       "hash": "e4ea1d069d07ab099d6529bd52d9e5b1ee901b13f7b7ad0bed7fa959b5cfb5e2"
     },
     "/static/js/features/projects/project_web_surface.js": {
-      "path": "/static/build/static-project-web-surface.21e193b4e22b.js",
-      "hash": "765f8f57bcb3d29817fe506ef614f09874300e66afb2efb74272e9f0fa268184"
+      "path": "/static/build/static-project-web-surface.28a1cb86dd61.js",
+      "hash": "ac2d344fae494da3b9eb3fdc30ca7e202afeac0ae3e774e4d8e2f49dcd18266e"
     },
     "/static/js/features/projects/project_workspace_actions.js": {
       "path": "/static/build/static-project-workspace-actions.1b017a7e8e97.js",
