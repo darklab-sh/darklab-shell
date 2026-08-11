@@ -17,6 +17,7 @@ from services.projects.verification_actions import (
     get_verification_action_plan,
 )
 from services.projects.finding_verification import verification_run_finalized_hook
+from services.runs.broker_observability import log_assessment_broker_unavailable
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.teams.capabilities import Capability
 
@@ -71,6 +72,20 @@ def project_finding_verification_action_launch(project_id, finding_id, check_id)
 
     if not run_routes.broker_available():
         reason = run_routes.broker_unavailable_reason()
+        log_assessment_broker_unavailable(
+            project_routes.log,
+            request_id=request.environ.get("darklab_request_id"),
+            session_id=session_id,
+            team_id=team_id,
+            project_id=project_id,
+            assessment_id=str(plan.get("assessment_id") or ""),
+            check_id=check_id,
+            finding_id=finding_id,
+            action_kind="finding_verification",
+            source="browser",
+            reason=reason,
+            broker_mode=run_routes.broker_mode(),
+        )
         response = jsonify({"error": reason, "code": "broker_unavailable"})
         response.headers["Retry-After"] = "5"
         return response, 503

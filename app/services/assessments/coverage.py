@@ -67,11 +67,16 @@ def enforce_evidence_quotas(conn: Any, candidates: list[dict[str, Any]]) -> None
         return
     owner_additions: dict[tuple[str, str], int] = {}
     project_additions: dict[str, int] = {}
+    project_owner_kinds: dict[str, str] = {}
     for item in missing:
         owner_key = (str(item["session_id"] or ""), str(item["team_id"] or ""))
         owner_additions[owner_key] = owner_additions.get(owner_key, 0) + 1
         project_id = str(item["project_id"] or "")
         project_additions[project_id] = project_additions.get(project_id, 0) + 1
+        project_owner_kinds.setdefault(
+            project_id,
+            "team" if item["team_id"] else "personal",
+        )
     owner_limit = cfg_int(
         "max_project_assessment_evidence_per_owner",
         DEFAULT_MAX_ASSESSMENT_EVIDENCE_PER_OWNER,
@@ -97,7 +102,14 @@ def enforce_evidence_quotas(conn: Any, candidates: list[dict[str, Any]]) -> None
                 (session_id,),
             )
         if owner_limit > 0 and current + added > owner_limit:
-            raise_quota("assessment evidence quota exceeded for this owner")
+            raise_quota(
+                "assessment evidence quota exceeded for this owner",
+                quota_kind="assessment_evidence_owner",
+                owner_kind="team" if team_id else "personal",
+                limit=owner_limit,
+                current_count=current,
+                requested_count=added,
+            )
     for project_id, added in project_additions.items():
         current = _count(
             conn,
@@ -106,7 +118,15 @@ def enforce_evidence_quotas(conn: Any, candidates: list[dict[str, Any]]) -> None
             (project_id,),
         )
         if project_limit > 0 and current + added > project_limit:
-            raise_quota("assessment evidence quota exceeded for this project")
+            raise_quota(
+                "assessment evidence quota exceeded for this project",
+                quota_kind="assessment_evidence_project",
+                owner_kind=project_owner_kinds.get(project_id, "unknown"),
+                project_id=project_id,
+                limit=project_limit,
+                current_count=current,
+                requested_count=added,
+            )
 
 
 def _derived_state(check: Mapping[str, Any], finding_count: int, rule: Mapping[str, Any]) -> tuple[str, str, bool]:

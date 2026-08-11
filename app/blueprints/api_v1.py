@@ -44,6 +44,7 @@ from services.projects.contracts import (
 from services.projects.queries import get_project
 from services.runs.broker import (
     broker_available,  # noqa: F401 - compatibility seam for api_v1_runs/tests
+    broker_mode,  # noqa: F401 - compatibility seam for assessment launch routes/tests
     broker_unavailable_reason,  # noqa: F401 - compatibility seam for api_v1_runs/tests
     publish_run_event,  # noqa: F401 - compatibility seam for api_v1_runs/tests
     stream_run_events,  # noqa: F401 - compatibility seam for api_v1_runs/tests

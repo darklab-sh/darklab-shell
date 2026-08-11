@@ -149,10 +149,22 @@ def _raise_if_quota_would_be_exceeded(
     config_key: str,
     default: int,
     message: str,
+    *,
+    quota_kind: str,
+    owner_kind: str,
+    project_id: str,
 ) -> None:
     limit = cfg_int(config_key, default)
     if limit > 0 and current + added > limit:
-        raise_quota(message)
+        raise_quota(
+            message,
+            quota_kind=quota_kind,
+            owner_kind=owner_kind,
+            project_id=project_id,
+            limit=limit,
+            current_count=current,
+            requested_count=added,
+        )
 
 
 def _enforce_create_quotas(
@@ -163,6 +175,7 @@ def _enforce_create_quotas(
     *,
     team_id: str,
 ) -> None:
+    owner_kind = "team" if team_id else "personal"
     owner_sql, owner_params = shared_owner_where(
         session_id,
         team_id=team_id,
@@ -205,6 +218,9 @@ def _enforce_create_quotas(
         "max_project_assessments_per_owner",
         DEFAULT_MAX_ASSESSMENTS_PER_OWNER,
         "assessment cycle quota exceeded for this owner",
+        quota_kind="assessment_cycle_owner",
+        owner_kind=owner_kind,
+        project_id=project_id,
     )
     _raise_if_quota_would_be_exceeded(
         project_cycle_count,
@@ -212,6 +228,9 @@ def _enforce_create_quotas(
         "max_project_assessments_per_project",
         DEFAULT_MAX_ASSESSMENTS_PER_PROJECT,
         "assessment cycle quota exceeded for this project",
+        quota_kind="assessment_cycle_project",
+        owner_kind=owner_kind,
+        project_id=project_id,
     )
     _raise_if_quota_would_be_exceeded(
         owner_check_count,
@@ -219,6 +238,9 @@ def _enforce_create_quotas(
         "max_project_assessment_checks_per_owner",
         DEFAULT_MAX_ASSESSMENT_CHECKS_PER_OWNER,
         "assessment check quota exceeded for this owner",
+        quota_kind="assessment_check_owner",
+        owner_kind=owner_kind,
+        project_id=project_id,
     )
     _raise_if_quota_would_be_exceeded(
         project_check_count,
@@ -226,6 +248,9 @@ def _enforce_create_quotas(
         "max_project_assessment_checks_per_project",
         DEFAULT_MAX_ASSESSMENT_CHECKS_PER_PROJECT,
         "assessment check quota exceeded for this project",
+        quota_kind="assessment_check_project",
+        owner_kind=owner_kind,
+        project_id=project_id,
     )
 
 

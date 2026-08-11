@@ -368,8 +368,17 @@ def create_http_profile_on_conn(
         "max_project_http_profiles_per_project",
         DEFAULT_MAX_HTTP_PROFILES_PER_PROJECT,
     )
-    if limit > 0 and _project_profile_count(conn, project_id) >= limit:
-        raise_quota("HTTP profile quota exceeded for this Project")
+    current_count = _project_profile_count(conn, project_id)
+    if limit > 0 and current_count >= limit:
+        raise_quota(
+            "HTTP profile quota exceeded for this Project",
+            quota_kind="http_profile_project",
+            owner_kind="team" if team_id else "personal",
+            project_id=project_id,
+            limit=limit,
+            current_count=current_count,
+            requested_count=1,
+        )
     profile_id = _new_profile_id()
     created_at = now()
     conn.execute(

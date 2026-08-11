@@ -20862,6 +20862,10 @@ class TestRunRoute:
         assert filtered == "wrote /reports/nmap.xml and /"
 
     def test_brokered_run_requires_available_broker(self):
+        from services.runs.broker_observability import (
+            log_assessment_broker_unavailable,
+        )
+
         client = get_client()
         with mock.patch.object(shell_app_module.log, "warning") as warning, \
              mock.patch("blueprints.run.broker_available", return_value=False), \
@@ -20874,6 +20878,52 @@ class TestRunRoute:
         assert extra["reason"] == "broker unavailable"
         assert extra["command_root"] == "echo"
         assert extra["broker_mode"] in {"in_process", "redis"}
+
+        assessment_log = mock.Mock()
+        common = {
+            "request_id": "request-1",
+            "session_id": "tok_private-session-token",
+            "team_id": "",
+            "project_id": "prj_1",
+            "assessment_id": "asm_1",
+            "check_id": "ach_1",
+            "finding_id": "fnd_1",
+            "action_kind": "finding_verification",
+            "source": "browser",
+            "broker_mode": "redis",
+        }
+        log_assessment_broker_unavailable(
+            assessment_log,
+            reason="Run broker is disabled by configuration.",
+            **common,
+        )
+        log_assessment_broker_unavailable(
+            assessment_log,
+            reason="Run broker requires Redis, but Redis is not available.",
+            **common,
+        )
+        assessment_log.info.assert_called_once()
+        assessment_log.warning.assert_called_once()
+        info_fields = assessment_log.info.call_args.kwargs["extra"]
+        warning_fields = assessment_log.warning.call_args.kwargs["extra"]
+        assert info_fields["reason"] == "configuration_disabled"
+        assert warning_fields["reason"] == "redis_unavailable"
+        assert warning_fields["owner_kind"] == "personal"
+        assert warning_fields["session"] != common["session_id"]
+        assert set(warning_fields) == {
+            "action_kind",
+            "assessment_id",
+            "broker_mode",
+            "check_id",
+            "finding_id",
+            "owner_kind",
+            "project_id",
+            "reason",
+            "request_id",
+            "session",
+            "source",
+            "team_id",
+        }
 
     def test_brokered_run_missing_runtime_returns_synthetic_stream_reference(self):
         client = get_client()

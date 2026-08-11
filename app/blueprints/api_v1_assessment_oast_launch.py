@@ -26,6 +26,7 @@ from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.projects.contracts import ProjectWorkspaceError
+from services.runs.broker_observability import log_assessment_broker_unavailable
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.teams.capabilities import Capability
 from services.teams.contracts import TeamPermissionDenied
@@ -81,9 +82,23 @@ def api_project_assessment_oast_launch(
         return _error(exc)
 
     if not api_routes.broker_available():
+        reason = api_routes.broker_unavailable_reason()
+        log_assessment_broker_unavailable(
+            api_routes.log,
+            request_id=request.environ.get("darklab_request_id"),
+            session_id=session_id,
+            team_id=owner_scope.team_id,
+            project_id=project_id,
+            assessment_id=assessment_id,
+            check_id=check_id,
+            action_kind="oast_launch",
+            source="api_v1",
+            reason=reason,
+            broker_mode=api_routes.broker_mode(),
+        )
         response, status = api_routes._api_json_error(
             "broker_unavailable",
-            api_routes.broker_unavailable_reason(),
+            reason,
             503,
         )
         response.headers["Retry-After"] = "5"

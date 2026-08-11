@@ -1749,6 +1749,11 @@ def test_evidence_quota_rejects_all_links_before_partial_insert(
     monkeypatch: pytest.MonkeyPatch,
 ):
     factory, cleanup = assessment_factory
+    quota_records = []
+    monkeypatch.setattr(
+        "services.projects.utils.log.warning",
+        lambda event, *, extra: quota_records.append((event, extra)),
+    )
     monkeypatch.setattr(
         "config.CFG",
         build_test_config({"max_project_assessment_evidence_per_project": 1}),
@@ -1776,6 +1781,19 @@ def test_evidence_quota_rejects_all_links_before_partial_insert(
 
     assert int(evidence_count["count"] or 0) == 0
     assert {str(row["state"]) for row in states} == {"not_started"}
+    assert len(quota_records) == 1
+    event, fields = quota_records[0]
+    assert event == "PROJECT_QUOTA_HIT"
+    assert fields == {
+        "quota_kind": "assessment_evidence_project",
+        "owner_kind": "personal",
+        "project_id": project_id,
+        "assessment_id": "",
+        "check_id": "",
+        "limit": 1,
+        "current_count": 0,
+        "requested_count": 2,
+    }
 
 
 def test_completed_run_finalization_reconciles_compatible_assessment_evidence(

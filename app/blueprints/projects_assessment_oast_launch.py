@@ -24,6 +24,7 @@ from services.assessments.recommended_actions import (
 )
 from services.audit.models import AuditEventType
 from services.projects.contracts import ProjectWorkspaceError
+from services.runs.broker_observability import log_assessment_broker_unavailable
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.teams.capabilities import Capability
 
@@ -80,8 +81,22 @@ def project_assessment_oast_launch(
     from blueprints import run as run_routes  # noqa: PLC0415
 
     if not run_routes.broker_available():
+        reason = run_routes.broker_unavailable_reason()
+        log_assessment_broker_unavailable(
+            project_routes.log,
+            request_id=request.environ.get("darklab_request_id"),
+            session_id=session_id,
+            team_id=team_id,
+            project_id=project_id,
+            assessment_id=assessment_id,
+            check_id=check_id,
+            action_kind="oast_launch",
+            source="browser",
+            reason=reason,
+            broker_mode=run_routes.broker_mode(),
+        )
         response = jsonify({
-            "error": run_routes.broker_unavailable_reason(),
+            "error": reason,
             "code": "broker_unavailable",
         })
         response.headers["Retry-After"] = "5"

@@ -409,7 +409,17 @@ def reconcile_assessment_findings_on_conn(conn: Any, assessment_id: str) -> dict
         )
         for remediation_id in sorted(set(current).union(previous)):
             if summary["deltas_written"] >= delta_limit:
-                raise_quota("assessment finding reconciliation quota exceeded")
+                raise_quota(
+                    "assessment finding reconciliation quota exceeded",
+                    quota_kind="assessment_finding_reconciliation",
+                    owner_kind="team" if assessment["team_id"] else "personal",
+                    project_id=str(assessment["project_id"] or ""),
+                    assessment_id=str(assessment["id"] or ""),
+                    check_id=str(check["id"] or ""),
+                    limit=delta_limit,
+                    current_count=summary["deltas_written"],
+                    requested_count=1,
+                )
             _insert_delta(
                 conn,
                 assessment,

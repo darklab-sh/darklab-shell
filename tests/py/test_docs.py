@@ -35,7 +35,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "46f7de55dc15d0700b42bf9be3580447e35f7b49e840f72b59b1c82a6f562a2a"
+_LOG_EVENT_INVENTORY_HASH = "baa87910ce9fa132a98ce892c0b308a558f9a26c5b87d7815d39f90546cc1829"
 _CHANGELOG_ARCHIVES = (
     _REPO_ROOT / "docs" / "changelog" / "2.x.md",
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",

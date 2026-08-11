@@ -277,6 +277,11 @@ def test_create_cycle_enforces_cycle_and_check_quotas_in_the_insert_transaction(
     project_factory,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    quota_records = []
+    monkeypatch.setattr(
+        "services.projects.utils.log.warning",
+        lambda event, *, extra: quota_records.append((event, extra)),
+    )
     monkeypatch.setattr(
         "config.CFG",
         build_test_config({
@@ -289,6 +294,19 @@ def test_create_cycle_enforces_cycle_and_check_quotas_in_the_insert_transaction(
     _add_target(check_session, check_project_id, "domain", "check-quota.example")
     with pytest.raises(ProjectWorkspaceQuotaExceeded, match="check quota"):
         create_assessment_cycle(check_session, check_project_id, "network")
+    assert quota_records[-1] == (
+        "PROJECT_QUOTA_HIT",
+        {
+            "quota_kind": "assessment_check_project",
+            "owner_kind": "personal",
+            "project_id": check_project_id,
+            "assessment_id": "",
+            "check_id": "",
+            "limit": 1,
+            "current_count": 0,
+            "requested_count": 2,
+        },
+    )
     with db_connect() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS count FROM project_assessments WHERE project_id = ?",
@@ -311,6 +329,19 @@ def test_create_cycle_enforces_cycle_and_check_quotas_in_the_insert_transaction(
     create_assessment_cycle(owner_session, str(first_project["id"]), "network")
     with pytest.raises(ProjectWorkspaceQuotaExceeded, match="cycle quota"):
         create_assessment_cycle(owner_session, str(second_project["id"]), "network")
+    assert quota_records[-1] == (
+        "PROJECT_QUOTA_HIT",
+        {
+            "quota_kind": "assessment_cycle_owner",
+            "owner_kind": "personal",
+            "project_id": str(second_project["id"]),
+            "assessment_id": "",
+            "check_id": "",
+            "limit": 1,
+            "current_count": 1,
+            "requested_count": 1,
+        },
+    )
 
 
 def test_read_model_rollups_filters_and_pages_checks(project_factory):
