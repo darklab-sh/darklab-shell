@@ -3631,10 +3631,13 @@ class TestLoadConfig:
         assert exc_info.value.code == "zap_response_too_large"
 
         from services.connectors import zap_job_artifacts as zap_artifact_module
+        from services.connectors import zap_job_queue as zap_job_queue_module
         from services.connectors import zap_observability
         from services.connectors import zap_worker as zap_worker_module
         from services.connectors import zap_worker_observability
         from services.connectors import zap_worker_lock as zap_worker_lock_module
+        from services.connectors import zap_worker_support
+        from services.connectors import zap_worker_telemetry
         from services.connectors.zap_job_artifacts import (
             atlas_draft_id_for_zap_job,
             discard_zap_job_plan,
@@ -3752,16 +3755,93 @@ class TestLoadConfig:
             }
             assert "private target" not in repr(terminal_log.call_args)
             assert "report content" not in repr(terminal_log.call_args)
+
+            private_response = mock.Mock(name="private-provider-response")
+            zap_worker_telemetry.clear_zap_job_telemetry(job_id)
             with (
-                mock.patch.object(zap_worker_module, "new_zap_job_id", return_value=job_id),
-                mock.patch.object(zap_worker_module, "store_zap_job_plan") as store_plan,
                 mock.patch.object(
-                    zap_worker_module,
+                    zap_worker_telemetry.time,
+                    "monotonic",
+                    side_effect=(10.0, 10.042),
+                ),
+                mock.patch.object(zap_worker_telemetry.log, "debug") as debug_log,
+            ):
+                assert zap_worker_telemetry.observed_zap_external_call(
+                    job_id, "submit", lambda: private_response
+                ) is private_response
+            assert debug_log.call_args.args == ("ZAP_EXTERNAL_CALL_COMPLETED",)
+            assert debug_log.call_args.kwargs["extra"] == {
+                "job_id": job_id,
+                "phase": "submit",
+                "attempt": 1,
+                "duration_ms": 41,
+                "outcome_class": "plan_id",
+            }
+            assert "private-provider-response" not in repr(debug_log.call_args)
+
+            with (
+                mock.patch.object(
+                    zap_worker_telemetry.time,
+                    "monotonic",
+                    side_effect=(20.0, 20.012),
+                ),
+                mock.patch.object(zap_worker_telemetry.log, "info") as info_log,
+            ):
+                assert zap_worker_telemetry.observed_zap_state_change(
+                    job_id,
+                    "downloading",
+                    "ready",
+                    "download",
+                    lambda: {"status": "ready"},
+                    report_bytes=17,
+                ) == {"status": "ready"}
+            assert info_log.call_args.args == ("ZAP_JOB_STATE_CHANGED",)
+            assert info_log.call_args.kwargs["extra"] == {
+                "job_id": job_id,
+                "from_status": "downloading",
+                "to_status": "ready",
+                "phase": "download",
+                "duration_ms": 12,
+                "report_bytes": 17,
+            }
+
+            retry_error = RuntimeError("private target and provider response")
+            with (
+                mock.patch.object(zap_worker_telemetry.log, "warning") as warning_log,
+                mock.patch.object(zap_worker_telemetry.log, "debug") as debug_log,
+            ):
+                zap_worker_telemetry.log_zap_retry(
+                    "ZAP_CANCEL_RETRY", job_id, "cancel", retry_error
+                )
+                zap_worker_telemetry.log_zap_retry(
+                    "ZAP_CANCEL_RETRY", job_id, "cancel", retry_error
+                )
+            assert warning_log.call_count == 1
+            assert warning_log.call_args.args == ("ZAP_CANCEL_RETRY",)
+            assert warning_log.call_args.kwargs["extra"]["attempt"] == 1
+            assert warning_log.call_args.kwargs["extra"]["next_attempt"] == 2
+            assert warning_log.call_args.kwargs["extra"]["next_retry_seconds"] == 5.0
+            assert debug_log.call_args.args == ("ZAP_RETRY_SUPPRESSED",)
+            assert debug_log.call_args.kwargs["extra"]["attempt"] == 2
+            assert debug_log.call_args.kwargs["extra"]["suppressed_repeat_count"] == 1
+            assert "private target" not in repr(warning_log.call_args)
+            assert "provider response" not in repr(debug_log.call_args)
+            zap_worker_telemetry.clear_zap_job_telemetry(job_id)
+
+            with (
+                mock.patch.object(
+                    zap_job_queue_module, "new_zap_job_id", return_value=job_id
+                ),
+                mock.patch.object(
+                    zap_job_queue_module, "store_zap_job_plan"
+                ) as store_plan,
+                mock.patch.object(
+                    zap_job_queue_module,
                     "create_zap_job",
                     return_value={**artifact_job, "status": "queued"},
                 ) as create_job,
             ):
-                queued = zap_worker_module.queue_zap_job(
+                queued = zap_job_queue_module.queue_zap_job(
                     "session-a",
                     "prj_a",
                     "asm_a",
@@ -3881,7 +3961,7 @@ class TestLoadConfig:
                 return_value={**submitted_job, "status": "running", "remote_plan_id": "21"},
             ) as record_submission,
             mock.patch.object(zap_worker_module, "load_zap_job_plan", return_value=safe_plan),
-            mock.patch.object(zap_worker_module, "review_zap_scope_policy") as scope_review,
+            mock.patch.object(zap_worker_support, "review_zap_scope_policy") as scope_review,
             mock.patch.object(
                 zap_worker_module, "submit_zap_automation_plan", return_value="21",
             ) as submit_plan,
@@ -3987,11 +4067,15 @@ class TestLoadConfig:
                 side_effect=RuntimeError("temporary failure"),
             ),
             mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+            mock.patch.object(zap_worker_module, "log_zap_retry") as retry_log,
         ):
             zap_worker_module.process_zap_job(
                 cancel_job, settings, "connector-secret", "scope-secret", cfg,
             )
         transition_job.assert_not_called()
+        assert retry_log.call_args.args[:3] == (
+            "ZAP_CANCEL_RETRY", job_id, "cancel"
+        )
 
         queued_jobs = [
             {**artifact_job, "id": "zpj_" + "b" * 32, "status": "queued"},
@@ -4018,6 +4102,9 @@ class TestLoadConfig:
             mock.patch.object(zap_worker_module, "zap_jobs_for_worker", return_value=queued_jobs),
             mock.patch.object(zap_worker_module, "remote_zap_job_count", return_value=1),
             mock.patch.object(zap_worker_module, "process_zap_job") as process_job,
+            mock.patch.object(
+                zap_worker_module, "log_zap_concurrency_deferred"
+            ) as deferred_log,
         ):
             assert zap_worker_module.run_once(
                 cfg=cfg,
@@ -4030,6 +4117,30 @@ class TestLoadConfig:
             queued_jobs[0], settings, "connector-secret", "scope-secret", cfg,
         )
         discard_plan.assert_called_once_with(orphan_plan_id, cfg)
+        deferred_log.assert_called_once_with(1, 1, settings.max_concurrent_jobs)
+
+        with (
+            mock.patch.object(zap_worker_module, "expire_zap_jobs"),
+            mock.patch.object(
+                zap_worker_module, "stale_zap_job_plan_ids", return_value=()
+            ),
+            mock.patch.object(
+                zap_worker_module, "zap_jobs_for_worker", return_value=[cancel_job]
+            ),
+            mock.patch.object(
+                zap_worker_module,
+                "resolve_zap_api_key",
+                side_effect=RuntimeError("private credential failure"),
+            ),
+            mock.patch.object(zap_worker_module, "log_zap_retry") as retry_log,
+            mock.patch.object(zap_worker_module, "_fail_job") as fail_job,
+        ):
+            assert zap_worker_module.run_once(cfg=cfg, environ={}) == 1
+        assert retry_log.call_args.args[:3] == (
+            "ZAP_CANCEL_CREDENTIAL_RETRY", job_id, "cancel"
+        )
+        assert "private credential failure" not in repr(retry_log.call_args.args[:3])
+        fail_job.assert_not_called()
 
     def test_private_oast_config_is_explicit_non_secret_and_disabled_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:

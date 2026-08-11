@@ -198,6 +198,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/connectors/zap_http.py", 172, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_job_artifacts.py", 195, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_job_lifecycle.py", 271, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_job_queue.py", 57, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_jobs.py", 288, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/connectors/zap_observability.py", 104, "split-package-ratchet"
@@ -209,11 +210,17 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/connectors/zap_scope.py", 121, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_scope_policy.py", 263, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_transport.py", 174, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/connectors/zap_worker.py", 375, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_worker.py", 361, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/connectors/zap_worker_observability.py", 65, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/connectors/zap_worker_lock.py", 53, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/connectors/zap_worker_support.py", 67, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/connectors/zap_worker_telemetry.py", 199, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/commands/registry.py", 1150, "split-target-phase1"),
     ModuleSizeBudget("app/services/commands/registry_adaptations.py", 87, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_autocomplete.py", 564, "split-package-ratchet"),

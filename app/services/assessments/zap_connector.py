@@ -40,7 +40,7 @@ from services.connectors.zap_scope_policy import (
     ZapScopePolicyError,
     review_zap_scope_policy,
 )
-from services.connectors.zap_worker import queue_zap_job
+from services.connectors.zap_job_queue import queue_zap_job
 from services.projects.scope import shared_owner_where
 
 

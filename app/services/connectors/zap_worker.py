@@ -6,13 +6,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
 import logging
 import os
 import signal
 import time
 from typing import Any
-from urllib.parse import urlsplit
 
 from config import resolve_effective_cfg
 from runtime_bootstrap import bootstrap_runtime
@@ -29,7 +27,6 @@ from services.connectors.zap_job_artifacts import (
     load_zap_job_plan,
     save_zap_job_report,
     stale_zap_job_plan_ids,
-    store_zap_job_plan,
 )
 from services.connectors.zap_job_lifecycle import (
     expire_zap_jobs,
@@ -41,16 +38,21 @@ from services.connectors.zap_worker_observability import log_zap_job_failed
 from services.connectors.zap_worker_lock import acquire_zap_worker_lock
 from services.connectors.zap_jobs import (
     ZapJobError,
-    create_zap_job,
-    new_zap_job_id,
     remote_zap_job_count,
     staged_zap_job_ids,
     zap_jobs_for_worker,
 )
-from services.connectors.zap_plan_contracts import ReviewedZapAutomationPlan
-from services.connectors.zap_scope_policy import (
-    allowed_target_cidrs_sha256,
-    review_zap_scope_policy,
+from services.connectors.zap_worker_support import (
+    inflight_zap_job_is_fresh as _inflight_is_fresh,
+    review_zap_job_scope_policy as _review_job_scope_policy,
+)
+from services.connectors.zap_worker_telemetry import (
+    clear_zap_job_telemetry,
+    clear_zap_retry,
+    log_zap_concurrency_deferred,
+    log_zap_retry,
+    observed_zap_external_call,
+    observed_zap_state_change,
 )
 from services.connectors.zap_transport import (
     cancel_zap_automation_plan,
@@ -63,50 +65,11 @@ from services.connectors.zap_transport import (
 log = logging.getLogger("shell")
 _STOP = False
 _TICK_SECONDS = 5.0
-_RECOVERY_GRACE = timedelta(minutes=5)
 
 
 def _handle_stop(_signum, _frame) -> None:
     global _STOP
     _STOP = True
-
-
-def queue_zap_job(
-    session_id: str,
-    project_id: str,
-    assessment_id: str,
-    check_id: str,
-    http_profile_id: str,
-    http_profile_revision: int,
-    plan: ReviewedZapAutomationPlan,
-    *,
-    team_id: str = "",
-    actor_member_id: str = "",
-    actor_role: str = "",
-    cfg: Mapping[str, Any] | None = None,
-    conn=None,
-) -> dict[str, Any]:
-    """Durably queue exactly the reviewed plan bytes before a worker can claim them."""
-    job_id = new_zap_job_id()
-    store_zap_job_plan(job_id, plan, cfg)
-    try:
-        return create_zap_job(
-            session_id,
-            project_id,
-            assessment_id,
-            check_id,
-            http_profile_id,
-            http_profile_revision,
-            plan.summary,
-            job_id=job_id,
-            team_id=team_id,
-            actor_member_id=actor_member_id,
-            actor_role=actor_role,
-            conn=conn,
-        )
-    except Exception:
-        discard_zap_job_plan(job_id, cfg)
-        raise
 
 
 def _fail_job(job_id: str, status: str, exc: BaseException, cfg) -> None:
@@ -115,12 +78,18 @@ def _fail_job(job_id: str, status: str, exc: BaseException, cfg) -> None:
     code = str(getattr(exc, "code", "zap_job_failed") or "zap_job_failed")[:80]
     detail = str(exc) if getattr(exc, "code", "") else "The ZAP job failed"
     try:
-        transition_zap_job(
+        observed_zap_state_change(
             job_id,
-            (status,),
+            status,
             "failed",
-            error_code=code,
-            error_detail=detail,
+            "failure",
+            lambda: transition_zap_job(
+                job_id,
+                (status,),
+                "failed",
+                error_code=code,
+                error_detail=detail,
+            ),
         )
     except ZapJobError as transition_error:
         if transition_error.code == "zap_job_transition_conflict":
@@ -128,6 +97,7 @@ def _fail_job(job_id: str, status: str, exc: BaseException, cfg) -> None:
         raise
     discard_zap_job_plan(job_id, cfg)
     log_zap_job_failed(job_id, status, exc)
+    clear_zap_job_telemetry(job_id)
 
 
 def _preview_report(job: Mapping[str, Any], payload: bytes) -> str:
@@ -149,64 +119,36 @@ def _preview_report(job: Mapping[str, Any], payload: bytes) -> str:
     return draft_id
 
 
-def _inflight_is_fresh(job: Mapping[str, Any]) -> bool:
-    value = job.get("updated_at")
-    if isinstance(value, datetime):
-        updated = value
-    else:
-        try:
-            updated = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
-        except ValueError:
-            return False
-    if updated.tzinfo is None:
-        return False
-    return datetime.now(timezone.utc) - updated.astimezone(timezone.utc) < _RECOVERY_GRACE
-
-
-def _review_job_scope_policy(
-    job: Mapping[str, Any],
-    settings: ZapConnectorSettings,
-    token: str,
-) -> None:
-    summary = job.get("plan_summary")
-    targets = summary.get("targets") if isinstance(summary, Mapping) else None
-    if not isinstance(summary, Mapping) or not isinstance(targets, list):
-        raise ZapJobError(
-            "zap_scope_policy_targets_invalid",
-            "Queued ZAP job is missing its reviewed targets",
-        )
-    expected_proxy = f"{settings.egress_proxy_host}:{settings.egress_proxy_port}"
-    if (
-        summary.get("scope_policy_id") != settings.scope_policy_id
-        or summary.get("allowed_target_cidrs_sha256")
-        != allowed_target_cidrs_sha256(settings)
-        or summary.get("egress_proxy") != expected_proxy
-    ):
-        raise ZapJobError(
-            "zap_scope_policy_changed",
-            "ZAP scanner-side scope policy changed after plan review",
-        )
-    hosts = tuple(urlsplit(str(target)).hostname or "" for target in targets)
-    review_zap_scope_policy(settings, hosts, token=token)
-
-
 def _download_and_preview(job: dict[str, Any], settings, api_key: str, cfg) -> None:
-    report = download_zap_report(
-        settings,
-        api_key,
-        str(job["id"]),
-        str(job.get("report_filename") or ""),
+    job_id = str(job["id"])
+    report = observed_zap_external_call(
+        job_id,
+        "download",
+        lambda: download_zap_report(
+            settings,
+            api_key,
+            job_id,
+            str(job.get("report_filename") or ""),
+        ),
     )
     save_zap_job_report(job, report, cfg)
     draft_id = _preview_report(job, report.payload)
-    transition_zap_job(
-        str(job["id"]),
-        ("downloading",),
+    observed_zap_state_change(
+        job_id,
+        "downloading",
         "ready",
+        "download",
+        lambda: transition_zap_job(
+            job_id,
+            ("downloading",),
+            "ready",
+            report_bytes=report.byte_count,
+            report_sha256=report.sha256,
+            import_source_id=draft_id,
+        ),
         report_bytes=report.byte_count,
-        report_sha256=report.sha256,
-        import_source_id=draft_id,
     )
+    clear_zap_job_telemetry(job_id)
 
 
 def process_zap_job(
@@ -222,12 +164,28 @@ def process_zap_job(
     try:
         if status == "queued":
             _review_job_scope_policy(job, settings, scope_policy_token)
-            job = transition_zap_job(job_id, ("queued",), "submitting")
+            job = observed_zap_state_change(
+                job_id,
+                "queued",
+                "submitting",
+                "submit",
+                lambda: transition_zap_job(job_id, ("queued",), "submitting"),
+            )
             status = "submitting"
             plan = load_zap_job_plan(job, cfg)
             try:
-                remote_id = submit_zap_automation_plan(settings, api_key, job_id, plan)
-                job = record_zap_job_submission(job_id, remote_id)
+                remote_id = observed_zap_external_call(
+                    job_id,
+                    "submit",
+                    lambda: submit_zap_automation_plan(settings, api_key, job_id, plan),
+                )
+                job = observed_zap_state_change(
+                    job_id,
+                    "submitting",
+                    "running",
+                    "submit",
+                    lambda: record_zap_job_submission(job_id, remote_id),
+                )
             except Exception as exc:  # noqa: BLE001
                 raise ZapJobError(
                     "zap_submission_state_uncertain",
@@ -254,22 +212,45 @@ def process_zap_job(
                     "ZAP cancellation could not identify the remote plan",
                 )
             try:
-                cancel_zap_automation_plan(settings, api_key, remote_id)
-            except Exception as exc:  # noqa: BLE001
-                log.warning(
-                    "ZAP_CANCEL_RETRY",
-                    extra={"job_id": job_id, "error_class": type(exc).__name__},
+                observed_zap_external_call(
+                    job_id,
+                    "cancel",
+                    lambda: cancel_zap_automation_plan(settings, api_key, remote_id),
                 )
+            except Exception as exc:  # noqa: BLE001
+                log_zap_retry("ZAP_CANCEL_RETRY", job_id, "cancel", exc)
                 return
-            transition_zap_job(job_id, ("cancel_requested",), "canceled")
+            clear_zap_retry("ZAP_CANCEL_RETRY", job_id)
+            observed_zap_state_change(
+                job_id,
+                "cancel_requested",
+                "canceled",
+                "cancel",
+                lambda: transition_zap_job(
+                    job_id, ("cancel_requested",), "canceled"
+                ),
+            )
             discard_zap_job_plan(job_id, cfg)
+            clear_zap_job_telemetry(job_id)
             return
         if status == "running":
-            progress = fetch_zap_plan_progress(settings, api_key, str(job.get("remote_plan_id") or ""))
+            progress = observed_zap_external_call(
+                job_id,
+                "progress",
+                lambda: fetch_zap_plan_progress(
+                    settings, api_key, str(job.get("remote_plan_id") or "")
+                ),
+            )
             job = record_zap_job_progress(job_id, progress)
             if not progress.complete:
                 return
-            job = transition_zap_job(job_id, ("running",), "downloading")
+            job = observed_zap_state_change(
+                job_id,
+                "running",
+                "downloading",
+                "download",
+                lambda: transition_zap_job(job_id, ("running",), "downloading"),
+            )
             status = "downloading"
             claimed_download = True
         if status == "downloading":
@@ -303,21 +284,24 @@ def run_once(
         for job in jobs:
             status = str(job.get("status") or "")
             if status == "cancel_requested":
-                log.warning(
+                log_zap_retry(
                     "ZAP_CANCEL_CREDENTIAL_RETRY",
-                    extra={
-                        "job_id": str(job.get("id") or ""),
-                        "error_class": type(exc).__name__,
-                    },
+                    str(job.get("id") or ""),
+                    "cancel",
+                    exc,
                 )
                 continue
             _fail_job(str(job.get("id") or ""), status, exc, active_cfg)
         return len(jobs)
+    clear_zap_retry("ZAP_CANCEL_CREDENTIAL_RETRY")
     remote_count = remote_zap_job_count()
+    active_count = remote_count
     processed = 0
+    deferred = 0
     for job in jobs:
         if str(job.get("status") or "") == "queued":
             if remote_count >= settings.max_concurrent_jobs:
+                deferred += 1
                 continue
             try:
                 scope_policy_token = resolve_zap_scope_policy_token(
@@ -339,6 +323,9 @@ def run_once(
             active_cfg,
         )
         processed += 1
+    log_zap_concurrency_deferred(
+        deferred, active_count, settings.max_concurrent_jobs
+    )
     return processed
 
 

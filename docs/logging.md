@@ -20,7 +20,7 @@ Private OAST provider, cleanup, and readiness records keep only a correlation id
 
 Private ZAP plan-spool cleanup records keep only a validated job id, fixed cleanup stage, counts, and bounded error classes. They never include filesystem paths, Automation Framework YAML, selected targets, authentication roles, API keys, or report content. Repeated stale-scan warnings are suppressed for a bounded interval, and the next emitted warning reports how many repeats were skipped.
 
-Terminal ZAP job failures use the same validated job id plus fixed state, phase, error-code, and error-class fields. Their sanitized traceback preserves the originating stack without copying exception text, target values, provider responses, plan content, or reports into the record.
+ZAP worker lifecycle records use the same validated job id plus fixed state, phase, attempt, timing, concurrency, outcome-class, and bounded error fields. Successful external calls use DEBUG, durable state changes use INFO, and only the first identical retry uses WARNING until that operation recovers; repeated retries move to DEBUG with a suppression count. Ready-state changes can include the report size, but these records never include remote ids, exception text, target values, provider responses, plan content, credentials, or reports. Terminal failures add a sanitized traceback that preserves the originating stack without copying private values.
 
 HTTPx screenshot finalization logs only owner/run ids, counts, limits, and fixed failure classes. Storage-limit and cleanup events never include workspace paths, URLs, page titles, technologies, captured bytes, or target values.
 
@@ -257,6 +257,9 @@ The current event inventory is:
 | DEBUG | `HTTPX_SCREENSHOT_OUTPUT_CLEANED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
 | DEBUG | `OAST_PROVIDER_RETRY_SUPPRESSED` | private OAST retry suppression | retry_event, correlation_id when applicable, correlation_status, correlation_count when applicable, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
 | DEBUG | `OAST_PROVIDER_CALL_COMPLETED` | private OAST provider calls | correlation_id, phase, duration_ms, attempt, accepted_count, rejected_count, duplicate_count |
+| DEBUG | `ZAP_EXTERNAL_CALL_COMPLETED` | ZAP connector worker | job_id, phase, attempt, duration_ms, outcome_class |
+| DEBUG | `ZAP_CONCURRENCY_DEFERRED` | ZAP connector worker | deferred_count, active_count, configured_limit |
+| DEBUG | `ZAP_RETRY_SUPPRESSED` | ZAP connector retry suppression | retry_event, job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
 | INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
 | INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, team_id, source, schedule_id, removed |
@@ -311,6 +314,7 @@ The current event inventory is:
 | INFO | `ZAP_WORKER_STARTED` | ZAP connector worker | pid |
 | INFO | `ZAP_WORKER_LOCK_HELD` | ZAP connector worker | — |
 | INFO | `ZAP_WORKER_STOPPED` | ZAP connector worker | pid |
+| INFO | `ZAP_JOB_STATE_CHANGED` | ZAP connector worker | job_id, from_status, to_status, phase, duration_ms, report_bytes when ready |
 | INFO | `OAST_PROVIDER_SESSION_READY` | private OAST provider registration | correlation_id, correlation_status |
 | INFO | `OAST_INTERACTIONS_INGESTED` | private OAST interaction ingestion | correlation_id, correlation_status, accepted_count, rejected_count, duplicate_count |
 | INFO | `OAST_PROVIDER_SESSION_CLEANED` | private OAST terminal cleanup | correlation_id, correlation_status |
@@ -365,8 +369,8 @@ The current event inventory is:
 | WARN | `SCHEDULE_FIRE_CLAIM_TIME_INVALID` | scheduler dispatch | schedule_id, owner_kind, session, last_run_at, command_root |
 | WARN | `SCHEDULER_WORKER_DATABASE_INTERRUPTED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type, error_type, sqlstate |
 | WARN | `SCHEDULER_LOCK_RELEASE_SKIPPED` | scheduler worker | phase, error_type, sqlstate |
-| WARN | `ZAP_CANCEL_RETRY` | ZAP connector worker | job_id, error_class |
-| WARN | `ZAP_CANCEL_CREDENTIAL_RETRY` | ZAP connector worker | job_id, error_class |
+| WARN | `ZAP_CANCEL_RETRY` | ZAP connector worker | job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
+| WARN | `ZAP_CANCEL_CREDENTIAL_RETRY` | ZAP connector worker | job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
 | WARN | `ZAP_PLAN_SPOOL_SCAN_DEGRADED` | private ZAP plan reconciliation | failure_count, error_classes, suppressed_repeat_count |
 | WARN | `OAST_SESSION_SPOOL_SCAN_DEGRADED` | private OAST session reconciliation | failure_count, error_classes, suppressed_repeat_count |
 | WARN | `OAST_SESSION_SPOOL_UNAVAILABLE` | private OAST readiness check | correlation_id, error_class, error_code, suppressed_repeat_count |
