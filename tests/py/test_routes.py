@@ -13,6 +13,7 @@ import csv
 import gzip
 import hashlib
 import io
+import inspect
 import json
 import logging
 import os
@@ -47,6 +48,7 @@ import core.process as process
 import services.runs.comparison as run_comparison
 import services.assets.diagnostics as assets_diagnostics
 import services.assessments.http_profile_scope as http_profile_scope_service
+from project_assessment_route_contracts import registered_assessment_mutations
 import services.secrets.vault as secrets_vault
 import services.projects.package_presets as package_presets
 import services.atlas.import_workflow as atlas_import_workflow
@@ -8118,28 +8120,36 @@ class TestProjectRoutes:
         assert finding_count == 0
 
     def test_project_write_routes_are_rate_limited(self):
-        for view in (
-            project_routes.projects_create,
-            project_routes.projects_active_set,
-            project_routes.projects_active_clear,
-            project_routes.projects_update,
-            project_routes.projects_delete,
-            project_routes.projects_links_create,
-            project_routes.projects_links_delete,
-            project_routes.projects_targets_create,
-            project_routes.projects_targets_update,
-            project_routes.projects_targets_delete,
-            project_routes.projects_packages_create,
-            project_routes.projects_packages_delete,
-            project_routes.findings_review_update,
-            project_routes.entity_labels_create,
-            project_routes.entity_labels_delete,
-            project_routes.entity_note_update,
-            project_routes.entity_note_delete,
-        ):
-            assert "__wrapper-limiter-instance" in view.__dict__
-        assert "__wrapper-limiter-instance" in project_routes.projects_packages_download.__dict__
-        assert "__wrapper-limiter-instance" in project_routes.projects_auto_promote_rules_preview.__dict__
+        app = reusable_test_app(__name__)
+        read_only_post_endpoints = {
+            "projects.projects_artifacts_download_ticket",
+            "projects.projects_run_entity_link_preview",
+            "projects.projects_run_entity_unlink_preview",
+        }
+        registered_writes = []
+        for rule in app.url_map.iter_rules():
+            methods = {"POST", "PUT", "PATCH", "DELETE"}.intersection(
+                rule.methods or set()
+            )
+            if not rule.rule.startswith("/projects") or not methods:
+                continue
+            if rule.endpoint in read_only_post_endpoints:
+                assert methods == {"POST"}
+                continue
+            registered_writes.append((rule, app.view_functions[rule.endpoint]))
+
+        assert registered_writes
+        for rule, view in registered_writes:
+            assert "__wrapper-limiter-instance" in view.__dict__, rule.endpoint
+
+        assessment_contracts = registered_assessment_mutations(
+            app,
+            route_prefix="/projects",
+        )
+        assert assessment_contracts
+        for rule, _method, view, capability in assessment_contracts:
+            source = inspect.getsource(view)
+            assert f"Capability.{capability}" in source, rule.endpoint
 
     def test_dynamic_unknown_routes_use_baseline_http_rate_limit(self, monkeypatch):
         client = get_client()

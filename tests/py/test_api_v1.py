@@ -23,6 +23,8 @@ import config
 import core.process as process
 from core.database import DB_PATH
 from core.helpers import get_log_session_id
+from extensions import limiter
+from project_assessment_route_contracts import registered_assessment_mutations
 from services.scheduler.models import CADENCE_PRESETS, Schedule
 from services.watchers.models import WATCHER_OPTION_DEFAULTS, Watcher, WatcherFire
 from werkzeug.serving import make_server
@@ -345,6 +347,9 @@ _TEAM_MANAGEMENT_CAPABILITY_ROUTES = {
 
 def test_api_v1_team_scoped_route_contracts_are_explicit():
     import blueprints.api_v1 as api_blueprint
+    import blueprints.api_v1_assessment_checks as assessment_checks_blueprint
+    import blueprints.api_v1_assessments as assessments_blueprint
+    import blueprints.api_v1_http_profiles as http_profiles_blueprint
 
     for route_name in _API_V1_TEAM_SCOPED_READ_ROUTES:
         source = inspect.getsource(getattr(api_blueprint, route_name))
@@ -361,6 +366,30 @@ def test_api_v1_team_scoped_route_contracts_are_explicit():
             "_request_context(",
         )), route_name
         assert capability_token in source, route_name
+
+    app = reusable_test_app(__name__)
+    assessment_contracts = registered_assessment_mutations(
+        app,
+        route_prefix="/api/v1/projects",
+    )
+    assert assessment_contracts
+    assert limiter.limit_manager.blueprint_limits(app, "api_v1")
+    helper_capabilities = {
+        "MUTATE_PROJECTS": (
+            inspect.getsource(assessments_blueprint._request_context)
+            + inspect.getsource(assessment_checks_blueprint._request_context)
+        ),
+        "MANAGE_SECRETS": inspect.getsource(http_profiles_blueprint._request_context),
+    }
+    for rule, _method, view, capability in assessment_contracts:
+        source = inspect.getsource(view)
+        declared = f"Capability.{capability}" in source
+        if not declared and capability in helper_capabilities:
+            declared = (
+                "_request_context(" in source
+                and f"Capability.{capability}" in helper_capabilities[capability]
+            )
+        assert declared, rule.endpoint
 
 
 def test_team_management_route_capability_contracts_are_explicit():
@@ -2370,6 +2399,101 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     dalfox_start_kwargs["run_cleanup_hook"]()
     assert not dalfox_config_path.parent.exists()
 
+    admin_token = _token(client)
+    team_id = _create_api_team(client, token, name="Protected action revocation")
+    _add_api_team_member(
+        client,
+        token,
+        admin_token,
+        team_id,
+        role="admin",
+    )
+    team_project_response = client.post(
+        "/projects",
+        headers={"X-Session-ID": token, "X-Team-ID": team_id},
+        json={"name": "Revoked protected launch"},
+    )
+    assert team_project_response.status_code == 201
+    team_project_id = team_project_response.get_json()["project"]["id"]
+    _seed_assessment_target(token, team_project_id, team_id=team_id)
+    team_assessment = client.post(
+        f"/api/v1/projects/{team_project_id}/assessments",
+        headers=_team_headers(token, team_id),
+        json={"profile_key": "web"},
+    ).get_json()
+    team_check = next(
+        item for item in team_assessment["checks"]["checks"]
+        if item["check_key"] == "http_profile"
+    )
+    team_secret = client.post(
+        "/session/secrets",
+        headers={"X-Session-ID": token, "X-Team-ID": team_id},
+        json={"name": "TEAM_ASSESSMENT_TOKEN", "value": "team-protected-value"},
+    )
+    assert team_secret.status_code == 201
+    team_profile_response = client.post(
+        f"/api/v1/projects/{team_project_id}/http-profiles",
+        headers=_team_headers(admin_token, team_id),
+        json={
+            "name": "Team administrator",
+            "base_url": f"https://{team_check['target_value']}",
+            "allowed_hosts": [team_check["target_value"]],
+            "headers": [{
+                "name": "X-Assessment-Token",
+                "secret_name": "TEAM_ASSESSMENT_TOKEN",
+            }],
+        },
+    )
+    assert team_profile_response.status_code == 201
+    team_profile_id = team_profile_response.get_json()["profile"]["id"]
+    team_action_path = (
+        f"/api/v1/projects/{team_project_id}/assessments/"
+        f"{team_assessment['assessment']['id']}/checks/{team_check['id']}/"
+        "recommended-action"
+    )
+    team_preview = client.get(
+        team_action_path,
+        headers=_team_headers(admin_token, team_id),
+        query_string={"http_profile_id": team_profile_id},
+    )
+    assert team_preview.status_code == 200
+    assert "team-protected-value" not in team_preview.get_data(as_text=True)
+
+    from services.teams.storage import token_hash
+
+    with sqlite3.connect(DB_PATH) as conn:
+        admin_member_id = conn.execute(
+            "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
+            (team_id, token_hash(admin_token)),
+        ).fetchone()[0]
+    demoted = client.patch(
+        f"/api/v1/teams/{team_id}/members/{admin_member_id}",
+        headers=_headers(token),
+        json={"role": "operator"},
+    )
+    assert demoted.status_code == 200
+    assert demoted.get_json()["member"]["role"] == "operator"
+    protected_paths_before_launch = set(tmp_path.rglob("*"))
+    with mock.patch(
+        "blueprints.api_v1_assessment_action_launch.confirm_recommended_action_plan"
+    ) as confirm, mock.patch(
+        "blueprints.api_v1_assessment_action_launch.materialize_assessment_run_launch"
+    ) as materialize:
+        revoked_launch = client.post(
+            team_action_path,
+            headers=_team_headers(admin_token, team_id),
+            json={
+                "confirmed": True,
+                "http_profile_id": team_profile_id,
+                "plan_digest": team_preview.get_json()["plan"]["plan_digest"],
+            },
+        )
+    assert revoked_launch.status_code == 403
+    assert revoked_launch.get_json()["error"]["code"] == "team_forbidden"
+    confirm.assert_not_called()
+    materialize.assert_not_called()
+    assert set(tmp_path.rglob("*")) == protected_paths_before_launch
+
 
 def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema():
     from services.assessments.schemathesis_schema import review_local_openapi_json
@@ -3599,6 +3723,9 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     client = get_client()
     owner_token = _token(client)
     viewer_token = _token(client)
+    operator_token = _token(client)
+    admin_token = _token(client)
+    outsider_token = _token(client)
     team_id = _create_api_team(client, owner_token, name="Assessment API Team")
     _add_api_team_member(
         client,
@@ -3606,6 +3733,20 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         viewer_token,
         team_id,
         role="viewer",
+    )
+    _add_api_team_member(
+        client,
+        owner_token,
+        operator_token,
+        team_id,
+        role="operator",
+    )
+    _add_api_team_member(
+        client,
+        owner_token,
+        admin_token,
+        team_id,
+        role="admin",
     )
     project_response = client.post(
         "/projects",
@@ -3637,6 +3778,21 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         conn.commit()
     owner_headers = _team_headers(owner_token, team_id)
     viewer_headers = _team_headers(viewer_token, team_id)
+    operator_headers = _team_headers(operator_token, team_id)
+    admin_headers = _team_headers(admin_token, team_id)
+    outsider_headers = _team_headers(outsider_token, team_id)
+    browser_viewer_headers = {
+        "X-Session-ID": viewer_token,
+        "X-Team-ID": team_id,
+    }
+    browser_operator_headers = {
+        "X-Session-ID": operator_token,
+        "X-Team-ID": team_id,
+    }
+    browser_outsider_headers = {
+        "X-Session-ID": outsider_token,
+        "X-Team-ID": team_id,
+    }
 
     created_response = client.post(
         f"/api/v1/projects/{project_id}/assessments",
@@ -3647,15 +3803,34 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     created = json.loads(created_response.data)
     assessment_id = created["assessment"]["id"]
     check_id = created["checks"]["checks"][0]["id"]
+    target_value = created["checks"]["checks"][0]["target_value"]
+    assessment_route = f"/api/v1/projects/{project_id}/assessments/{assessment_id}"
+    browser_assessment_route = f"/projects/{project_id}/assessments/{assessment_id}"
     viewer_list = client.get(
         f"/api/v1/projects/{project_id}/assessments",
         headers=viewer_headers,
     )
-    viewer_update = client.patch(
-        f"/api/v1/projects/{project_id}/assessments/{assessment_id}",
-        headers=viewer_headers,
-        json={"title": "Viewer cannot edit"},
+    browser_viewer_list = client.get(
+        f"/projects/{project_id}/assessments",
+        headers=browser_viewer_headers,
     )
+    with mock.patch(
+        "blueprints.api_v1_assessments.update_assessment_cycle"
+    ) as api_update, mock.patch(
+        "blueprints.projects_assessments.update_assessment_cycle"
+    ) as browser_update:
+        viewer_update = client.patch(
+            assessment_route,
+            headers=viewer_headers,
+            json={"title": "Viewer cannot edit"},
+        )
+        browser_viewer_update = client.patch(
+            browser_assessment_route,
+            headers=browser_viewer_headers,
+            json={"title": "Viewer cannot edit"},
+        )
+    api_update.assert_not_called()
+    browser_update.assert_not_called()
     viewer_check_update = client.patch(
         f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}",
         headers=viewer_headers,
@@ -3679,6 +3854,28 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         headers=viewer_headers,
         json={},
     )
+    action_route = (
+        f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/"
+        f"{check_id}/recommended-action"
+    )
+    browser_action_route = action_route.removeprefix("/api/v1")
+    with mock.patch(
+        "blueprints.api_v1_assessment_action_launch.confirm_recommended_action_plan"
+    ) as api_confirm, mock.patch(
+        "blueprints.projects_assessment_action_launch.confirm_recommended_action_plan"
+    ) as browser_confirm:
+        viewer_action_launch = client.post(
+            action_route,
+            headers=viewer_headers,
+            json={"confirmed": True, "plan_digest": "not-authorized"},
+        )
+        browser_viewer_action_launch = client.post(
+            browser_action_route,
+            headers=browser_viewer_headers,
+            json={"confirmed": True, "plan_digest": "not-authorized"},
+        )
+    api_confirm.assert_not_called()
+    browser_confirm.assert_not_called()
     finding_evidence_route = (
         f"/api/v1/projects/{project_id}/findings/{finding_id}/evidence"
     )
@@ -3689,6 +3886,7 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         json={"evidence_type": "run", "evidence_id": evidence_run_id},
     )
     assert viewer_list.status_code == 200
+    assert browser_viewer_list.status_code == 200
     assert json.loads(viewer_list.data)["assessments"][0]["id"] == assessment_id
     assert viewer_evidence_list.status_code == 200
     viewer_evidence = viewer_evidence_list.get_json()
@@ -3697,39 +3895,120 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     assert viewer_evidence["verification"]["baseline_run_id"] == evidence_run_id
     for response in (
         viewer_update,
+        browser_viewer_update,
         viewer_check_update,
         viewer_evidence_write,
         viewer_oast_reserve,
         viewer_oast_exact,
         viewer_oast_launch,
+        viewer_action_launch,
+        browser_viewer_action_launch,
     ):
         assert response.status_code == 403
-        assert json.loads(response.data)["error"]["code"] == "team_forbidden"
+        payload = json.loads(response.data)
+        error = payload.get("error")
+        code = payload.get("code") or (
+            error.get("code") if isinstance(error, dict) else error
+        )
+        assert code == "team_forbidden"
 
-    owner_check_update = client.patch(
+    operator_update = client.patch(
+        browser_assessment_route,
+        headers=browser_operator_headers,
+        json={"title": "Operator-reviewed cycle"},
+    )
+    assert operator_update.status_code == 200
+    operator_check_update = client.patch(
         f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}",
-        headers=owner_headers,
+        headers=operator_headers,
         json={"state": "skipped", "reason": "Approved scope exclusion"},
     )
-    assert owner_check_update.status_code == 200
+    assert operator_check_update.status_code == 200
+
+    profiles_route = f"/api/v1/projects/{project_id}/http-profiles"
+    profile_payload = {
+        "name": "Team application",
+        "base_url": f"https://{target_value}",
+        "allowed_hosts": [target_value],
+    }
+    operator_profile_create = client.post(
+        profiles_route,
+        headers=operator_headers,
+        json=profile_payload,
+    )
+    admin_profile_create = client.post(
+        profiles_route,
+        headers=admin_headers,
+        json=profile_payload,
+    )
+    assert operator_profile_create.status_code == 403
+    assert operator_profile_create.get_json()["error"]["code"] == "team_forbidden"
+    assert admin_profile_create.status_code == 201
+
     owner_evidence_write = client.post(
         finding_evidence_route,
         headers=owner_headers,
         json={"evidence_type": "run", "evidence_id": evidence_run_id},
     )
     assert owner_evidence_write.status_code == 201
-    actor = json.loads(owner_check_update.data)["check"]["state_actor"]
+    actor = json.loads(operator_check_update.data)["check"]["state_actor"]
     with sqlite3.connect(DB_PATH) as conn:
-        member_id = conn.execute(
+        operator_member_id = conn.execute(
+            "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
+            (team_id, token_hash(operator_token)),
+        ).fetchone()[0]
+        owner_member_id = conn.execute(
             "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
             (team_id, token_hash(owner_token)),
         ).fetchone()[0]
-    assert actor == {"kind": "team_member", "member_id": member_id}
-    assert owner_evidence_write.get_json()["evidence"]["created_by_member_id"] == member_id
+    assert actor == {"kind": "team_member", "member_id": operator_member_id}
+    assert (
+        owner_evidence_write.get_json()["evidence"]["created_by_member_id"]
+        == owner_member_id
+    )
     assert client.get(
         finding_evidence_route,
         headers=viewer_headers,
     ).get_json()["total"] == 1
+
+    outsider_api_read = client.get(assessment_route, headers=outsider_headers)
+    outsider_browser_read = client.get(
+        browser_assessment_route,
+        headers=browser_outsider_headers,
+    )
+    assert outsider_api_read.status_code == 403
+    assert outsider_api_read.get_json()["error"]["code"] == "team_forbidden"
+    assert outsider_browser_read.status_code == 403
+    assert outsider_browser_read.get_json()["error"] == "team_forbidden"
+
+    assert client.patch(
+        assessment_route,
+        headers=owner_headers,
+        json={"status": "completed"},
+    ).status_code == 200
+    assert client.patch(
+        assessment_route,
+        headers=owner_headers,
+        json={"status": "archived"},
+    ).status_code == 200
+    archived_api_list = client.get(
+        f"/api/v1/projects/{project_id}/assessments",
+        headers=viewer_headers,
+        query_string={"include_archived": 1},
+    )
+    archived_browser_read = client.get(
+        browser_assessment_route,
+        headers=browser_viewer_headers,
+    )
+    assert archived_api_list.status_code == 200
+    assert archived_api_list.get_json()["assessments"][0]["status"] == "archived"
+    assert archived_browser_read.status_code == 200
+    archived_mutation = client.patch(
+        assessment_route,
+        headers=operator_headers,
+        json={"title": "Archived cycles are immutable"},
+    )
+    assert archived_mutation.status_code == 409
 
 
 def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(monkeypatch):
