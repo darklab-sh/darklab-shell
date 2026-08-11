@@ -387,6 +387,8 @@
 
 .project-assessment-category-list,
 .project-assessment-state-filters,
+.project-assessment-policy-filters,
+.project-assessment-evidence-filters,
 .project-assessment-check-states {
   display: flex;
   flex-wrap: wrap;
@@ -395,8 +397,23 @@
 }
 
 .project-assessment-category-list .chip,
-.project-assessment-state-filters .chip {
+.project-assessment-state-filters .chip,
+.project-assessment-policy-filters .chip,
+.project-assessment-evidence-filters .chip {
   min-height: 30px;
+}
+
+.project-assessment-check-filters,
+.project-assessment-check-filter-group {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.project-assessment-check-filter-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .project-assessment-target-list {

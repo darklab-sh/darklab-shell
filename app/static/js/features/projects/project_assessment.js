@@ -41,6 +41,8 @@ function createProjectAssessmentController(context) {
       detailError: '',
       category: '',
       checkState: '',
+      policyLevel: '',
+      evidenceState: '',
       findingPriority: '',
       findingLimit: 10,
       findingOffset: 0,
@@ -129,6 +131,8 @@ function createProjectAssessmentController(context) {
     const params = new URLSearchParams({ limit: String(st.limit), offset: String(st.offset) });
     if (st.category) params.set('category', st.category);
     if (st.checkState) params.set('state', st.checkState);
+    if (st.policyLevel) params.set('policy_level', st.policyLevel);
+    if (st.evidenceState) params.set('evidence_state', st.evidenceState);
     params.set('finding_limit', String(st.findingLimit));
     params.set('finding_offset', String(st.findingOffset));
     if (st.findingPriority) params.set('finding_priority', st.findingPriority);
@@ -273,6 +277,8 @@ function createProjectAssessmentController(context) {
     st.selectedId = nextId;
     st.category = '';
     st.checkState = '';
+    st.policyLevel = '';
+    st.evidenceState = '';
     resetDetailState(st);
     renderViews();
     return loadDetail(projectId);
@@ -286,6 +292,8 @@ function createProjectAssessmentController(context) {
     st.selectedId = nextId;
     st.category = String(filters.category || '');
     st.checkState = String(filters.state || '');
+    st.policyLevel = String(filters.policy_level || '');
+    st.evidenceState = String(filters.evidence_state || '');
     st.findingPriority = String(filters.priority || '');
     st.findingOffset = 0;
     resetDetailState(st, { findings: false });
@@ -302,6 +310,8 @@ function createProjectAssessmentController(context) {
     const normalized = String(value || '');
     if (key === 'category') st.category = normalized;
     else if (key === 'state') st.checkState = normalized;
+    else if (key === 'policy_level') st.policyLevel = normalized;
+    else if (key === 'evidence_state') st.evidenceState = normalized;
     else return false;
     st.offset = 0;
     st.checksScrollTop = 0;
@@ -354,6 +364,8 @@ function createProjectAssessmentController(context) {
       st.selectedId = String(payload?.assessment?.id || '');
       st.category = '';
       st.checkState = '';
+      st.policyLevel = '';
+      st.evidenceState = '';
       resetDetailState(st);
       ctx.invalidateProjectOverview?.(id);
       ctx.setProjectWorkspaceMessage?.('Assessment cycle started.');
@@ -417,6 +429,8 @@ function createProjectAssessmentController(context) {
         st.selectedId = '';
         st.category = '';
         st.checkState = '';
+        st.policyLevel = '';
+        st.evidenceState = '';
         resetDetailState(st);
       } else {
         st.loaded = false;

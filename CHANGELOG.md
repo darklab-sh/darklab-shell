@@ -541,6 +541,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Assessment checks can now be filtered by policy and evidence availability.** Desktop and mobile expose the read model's safe, standard, intrusive, destructive, available, unavailable, and no-evidence filters alongside the existing category and state controls, and preserve those choices while paging or refreshing the worklist.
 - **API clients can now discover assessment cycle profiles.** The Project assessment list returns the same bounded profile keys, labels, target types, versions, and check counts as the browser without exposing complete live check definitions, and the OpenAPI contract documents that response.
 - **Bundled CVE-risk data is now clearly identified in the browser.** Finding labels across Assessment, Projects, and Atlas include each EPSS/KEV feed's bundled, live, or local origin, snapshot age, and live-refresh state. Options → Secrets → Provider Status shows the same source status, publication date, version, EPSS model, freshness, and exact setting for enabling live refresh.
 - **CVE-risk report provenance is now complete in rendered exports.** HTML and Markdown reports show each public source's bundled, live, or local origin, source and model versions, publication and retrieval dates, freshness, and checksum alongside the existing attribution and non-endorsement notice.

@@ -32,6 +32,21 @@ const filterStates = [
   'covered',
 ];
 
+const policyFilters = [
+  { value: '', label: 'All policies' },
+  { value: 'safe', label: 'Safe' },
+  { value: 'standard', label: 'Standard' },
+  { value: 'intrusive', label: 'Intrusive' },
+  { value: 'destructive', label: 'Destructive' },
+];
+
+const evidenceFilters = [
+  { value: '', label: 'All evidence' },
+  { value: 'available', label: 'Available' },
+  { value: 'unavailable', label: 'Unavailable' },
+  { value: 'none', label: 'No evidence' },
+];
+
 const findingDeltaLabels = {
   new: 'New',
   persistent: 'Persistent',
@@ -447,6 +462,19 @@ function createProjectAssessmentRenderer(context, actions) {
     chip.setAttribute('aria-pressed', active ? 'true' : 'false');
     ctx.bindProjectRuntimePressable?.(chip, { onActivate, clearPressStyle: true });
     return chip;
+  }
+
+  function checkFilterGroup(label, className, options, selectedValue, onSelect) {
+    const group = makeElement('div', 'project-assessment-check-filter-group');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', `${label} filter`);
+    group.appendChild(makeElement('span', 'project-assessment-check-filter-label', label));
+    const choices = makeElement('div', className);
+    options.forEach(({ value, label: optionLabel }) => {
+      choices.appendChild(filterChip(optionLabel, selectedValue === value, () => onSelect(value)));
+    });
+    group.appendChild(choices);
+    return group;
   }
 
   function renderCategoryProgress(projectId, st, rollups) {
@@ -1081,14 +1109,34 @@ function createProjectAssessmentRenderer(context, actions) {
       'Check worklist',
       'Expand a target to review what is covered, outstanding, excluded, or missing evidence.',
     ));
-    const stateFilters = makeElement('div', 'project-assessment-state-filters');
-    filterStates.forEach((value) => {
-      const label = value ? checkStateLabels[value] : 'All states';
-      stateFilters.appendChild(filterChip(label, st.checkState === value, () => {
-        void act.setFilter(projectId, 'state', value);
-      }));
-    });
-    section.appendChild(stateFilters);
+    const filters = makeElement('div', 'project-assessment-check-filters');
+    filters.append(
+      checkFilterGroup(
+        'State',
+        'project-assessment-state-filters',
+        filterStates.map(value => ({
+          value,
+          label: value ? checkStateLabels[value] : 'All states',
+        })),
+        st.checkState,
+        value => void act.setFilter(projectId, 'state', value),
+      ),
+      checkFilterGroup(
+        'Policy',
+        'project-assessment-policy-filters',
+        policyFilters,
+        st.policyLevel,
+        value => void act.setFilter(projectId, 'policy_level', value),
+      ),
+      checkFilterGroup(
+        'Evidence',
+        'project-assessment-evidence-filters',
+        evidenceFilters,
+        st.evidenceState,
+        value => void act.setFilter(projectId, 'evidence_state', value),
+      ),
+    );
+    section.appendChild(filters);
 
     if (st.detailRefreshKind === 'checks' && st.detailLoading) {
       section.setAttribute('aria-busy', 'true');
