@@ -17,6 +17,7 @@ from typing import TypeVar
 
 from services.connectors.oast_config import OastConnectorSettings
 from services.connectors.oast_provider_contracts import OastProviderPollBatch
+from services.metrics_lazy import app_metrics
 
 
 log = logging.getLogger("shell")
@@ -168,7 +169,17 @@ def observed_oast_provider_call(
     correlation_id = str(correlation.get("id") or "")
     attempt = _provider_call_attempt(correlation_id, selected_phase)
     started = time.monotonic()
-    result = operation()
+    try:
+        result = operation()
+    except Exception:
+        app_metrics.record_assessment_connector_operation(
+            "oast", selected_phase, "error", time.monotonic() - started
+        )
+        raise
+    duration_ms = max(0, int((time.monotonic() - started) * 1000))
+    app_metrics.record_assessment_connector_operation(
+        "oast", selected_phase, "success", duration_ms / 1000.0
+    )
     accepted_count = 0
     rejected_count = 0
     if isinstance(result, OastProviderPollBatch):
@@ -179,7 +190,7 @@ def observed_oast_provider_call(
         extra={
             "correlation_id": correlation_id,
             "phase": selected_phase,
-            "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
+            "duration_ms": duration_ms,
             "attempt": attempt,
             "accepted_count": accepted_count,
             "rejected_count": rejected_count,
@@ -190,6 +201,7 @@ def observed_oast_provider_call(
 
 
 def log_oast_provider_session_ready(correlation: Mapping[str, object]) -> None:
+    app_metrics.record_assessment_connector_operation("oast", "session", "ready")
     log.info(
         "OAST_PROVIDER_SESSION_READY",
         extra={
@@ -221,6 +233,7 @@ def log_oast_interactions_ingested(
 
 
 def log_oast_provider_session_cleaned(correlation: Mapping[str, object]) -> None:
+    app_metrics.record_assessment_connector_operation("oast", "session", "closed")
     log.info(
         "OAST_PROVIDER_SESSION_CLEANED",
         extra={
@@ -279,6 +292,7 @@ def log_oast_provider_session_failed(
     correlation: Mapping[str, object],
     exc: BaseException,
 ) -> None:
+    app_metrics.record_assessment_connector_operation("oast", "session", "failed")
     log.error(
         "OAST_PROVIDER_SESSION_FAILED",
         exc_info=_safe_exc_info(exc, "Private OAST provider session failed"),

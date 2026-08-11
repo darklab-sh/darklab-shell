@@ -19,6 +19,7 @@ from services.assessments.recommended_actions import (
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
+from services.metrics_lazy import app_metrics
 from services.projects.contracts import ProjectWorkspaceError
 from services.runs.broker_observability import log_assessment_broker_unavailable
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
@@ -61,9 +62,14 @@ def api_project_assessment_action_launch(project_id, assessment_id, check_id):
         HttpProfileExecutionError,
         TeamPermissionDenied,
     ) as exc:
+        app_metrics.record_assessment_action("other", "unknown", "rejected")
         return _error(exc)
 
+    action_kind = plan["action"]["kind"]
+    policy_level = plan["policy_level"]
+
     if not api_routes.broker_available():
+        app_metrics.record_assessment_action(action_kind, policy_level, "unavailable")
         reason = api_routes.broker_unavailable_reason()
         log_assessment_broker_unavailable(
             api_routes.log,
@@ -114,18 +120,23 @@ def api_project_assessment_action_launch(project_id, assessment_id, check_id):
             **launch_context.broker_kwargs(),
         )
     except (AssessmentActionError, HttpProfileExecutionError) as exc:
+        app_metrics.record_assessment_action(action_kind, policy_level, "rejected")
         return _error(exc)
     except RunStartRejected as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action(action_kind, policy_level, "rejected")
         return api_routes._api_json_error(exc.code, exc.message, exc.status_code)
     except RunPreparationError as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action(action_kind, policy_level, "rejected")
         return api_routes._api_json_error("command_rejected", str(exc), exc.status_code)
     except RunSpawnError as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action(action_kind, policy_level, "failed")
         return api_routes._api_json_error("spawn_failed", str(exc), 500)
     except Exception:
         _cleanup(protected)
+        app_metrics.record_assessment_action(action_kind, policy_level, "failed")
         raise
 
     launch_details = {
@@ -159,6 +170,7 @@ def api_project_assessment_action_launch(project_id, assessment_id, check_id):
         "action_kind": plan["action"]["kind"],
         "action_id": plan["action"]["id"],
     })
+    app_metrics.record_assessment_action(action_kind, policy_level, "launched")
     return jsonify({
         "run": {
             "id": started.run_id,

@@ -14,6 +14,7 @@ from services.assessments.evidence_matching import (
     load_run_evidence_facts,
     matching_run_rule,
 )
+from services.metrics_lazy import app_metrics
 from services.projects.utils import cfg_int, now, raise_quota
 
 
@@ -163,6 +164,7 @@ def reconcile_run_evidence_on_conn(
         "manual_states_preserved": 0,
     }
     if facts is None:
+        app_metrics.record_assessment_evidence_matches("run", "unavailable")
         return summary
     candidates: list[dict[str, Any]] = []
     profile_cache: dict[str, dict[str, Mapping[str, Any]]] = {}
@@ -196,6 +198,14 @@ def reconcile_run_evidence_on_conn(
             "already_linked": existing is not None,
         })
     summary["checks_matched"] = len(candidates)
+    app_metrics.record_assessment_evidence_matches(
+        "run", "matched", summary["checks_matched"]
+    )
+    app_metrics.record_assessment_evidence_matches(
+        "run",
+        "unmatched",
+        summary["checks_considered"] - summary["checks_matched"],
+    )
     enforce_evidence_quotas(conn, candidates)
     timestamp = facts.finished_at or now()
     for check in candidates:
@@ -245,4 +255,7 @@ def reconcile_run_evidence_on_conn(
         )
         if state != current_state or state_source != current_source:
             summary["states_updated"] += 1
+            app_metrics.record_assessment_check_transition(
+                current_state, state, state_source
+            )
     return summary

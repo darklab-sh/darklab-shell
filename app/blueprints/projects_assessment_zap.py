@@ -16,6 +16,7 @@ from services.assessments.zap_connector import (
     list_assessment_zap_jobs,
 )
 from services.audit.models import AuditEventType
+from services.metrics_lazy import app_metrics
 from services.projects.contracts import ProjectWorkspaceError
 from services.teams.capabilities import Capability
 
@@ -120,6 +121,8 @@ def project_assessment_zap_jobs(project_id, assessment_id, check_id):
             actor_role=_actor_role(session_id, team_id),
         )
     except (AssessmentZapError, ProjectWorkspaceError) as exc:
+        if request.method == "POST":
+            app_metrics.record_assessment_action("zap", "unknown", "rejected")
         return _error(exc)
     _audit(
         AuditEventType.ASSESSMENT_ZAP_JOB_SUBMIT,
@@ -143,6 +146,7 @@ def project_assessment_zap_jobs(project_id, assessment_id, check_id):
             "target_count": job["target_count"],
         },
     )
+    app_metrics.record_assessment_action("zap", job["policy_level"], "launched")
     return jsonify({"job": job}), 202
 
 

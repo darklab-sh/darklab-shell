@@ -103,6 +103,7 @@ class TestMetricsEndpoint:
 
         expected_names = [
             "darklab_app_start_time_seconds",
+            "darklab_assessment_active_cycles",
             "darklab_db_size_bytes",
             "darklab_db_table_rows",
             "darklab_db_fts_orphans",
@@ -127,6 +128,21 @@ class TestMetricsEndpoint:
         assert 'darklab_redis_keys{prefix="ai_provider_slot"} 1.0' in body
         assert 'darklab_redis_keys{prefix="ai_provider_legacy"} 1.0' in body
         assert 'darklab_redis_stream_length{prefix="runstream"} 3.0' in body
+        samples = collectors._assessment_cycle_samples([
+            {
+                "owner_kind": "team" if index % 2 else "personal",
+                "profile_key": f"profile_{index:02d}",
+                "count": 1,
+            }
+            for index in range(40)
+        ] + [{
+            "owner_kind": "personal",
+            "profile_key": "project/private-target",
+            "count": 2,
+        }])
+        assert len({profile for _owner, profile, _count in samples}) <= 32
+        assert any(profile == "other" for _owner, profile, _count in samples)
+        assert all("private-target" not in profile for _owner, profile, _count in samples)
 
     def test_scrape_includes_durable_ai_assist_queue_health(self, monkeypatch, tmp_path):
         db_path = tmp_path / "metrics-ai.db"
@@ -276,6 +292,16 @@ class TestMetricsEndpoint:
 
         assessment_metrics.record_assessment_parser_result("command_registry", "parsed")
         assessment_metrics.record_assessment_parser_result("raw parser", "raw outcome")
+        assessment_metrics.record_assessment_check_transition("not_started", "covered", "derived")
+        assessment_metrics.record_assessment_check_transition("proj_private", "check_private", "run_private")
+        assessment_metrics.record_assessment_evidence_matches("run", "matched", 2)
+        assessment_metrics.record_assessment_evidence_matches("project_private", "run_private")
+        assessment_metrics.record_assessment_action("command", "safe", "launched")
+        assessment_metrics.record_assessment_action("target_private", "policy_private", "outcome_private")
+        assessment_metrics.record_assessment_connector_operation("zap", "submit", "success", 0.25)
+        assessment_metrics.record_assessment_connector_operation(
+            "provider_private", "callback_private", "job_private", float("nan")
+        )
         workflow_metrics.record_workflow_execution_outcome("completed", 2.5)
         workflow_metrics.record_workflow_step_outcome("succeeded", 1.25)
         workflow_metrics.record_workflow_capture_failure("required_missing")
@@ -318,6 +344,39 @@ class TestMetricsEndpoint:
         )
         assert "raw parser" not in body
         assert "raw outcome" not in body
+        assert (
+            'darklab_assessment_check_transitions_total{from_state="not_started",'
+            'source="derived",to_state="covered"}' in body
+        )
+        assert (
+            'darklab_assessment_check_transitions_total{from_state="unknown",'
+            'source="derived",to_state="unknown"}' in body
+        )
+        assert 'darklab_assessment_evidence_matches_total{evidence_kind="run",outcome="matched"}' in body
+        assert 'darklab_assessment_evidence_matches_total{evidence_kind="other",outcome="unavailable"}' in body
+        assert 'darklab_assessment_actions_total{action_kind="command",outcome="launched",policy_level="safe"}' in body
+        assert 'darklab_assessment_actions_total{action_kind="other",outcome="failed",policy_level="unknown"}' in body
+        assert (
+            'darklab_assessment_connector_operations_total{connector="zap",'
+            'outcome="success",phase="submit"}' in body
+        )
+        assert (
+            'darklab_assessment_connector_operation_duration_seconds_bucket{'
+            'connector="zap",le="0.25",outcome="success",phase="submit"}' in body
+        )
+        for private_value in (
+            "proj_private",
+            "check_private",
+            "run_private",
+            "project_private",
+            "target_private",
+            "policy_private",
+            "outcome_private",
+            "provider_private",
+            "callback_private",
+            "job_private",
+        ):
+            assert private_value not in body
         assert 'darklab_workflow_executions_finished_total{outcome="completed"}' in body
         assert 'darklab_workflow_step_duration_seconds_bucket{le="2.0",outcome="succeeded"}' in body
         assert 'darklab_workflow_capture_failures_total{reason="required_missing"}' in body
@@ -340,6 +399,28 @@ class TestMetricsDefinitionDrift:
 
     def test_labeled_metrics_have_cardinality_policies(self):
         app_metrics.validate_metric_definitions()
+
+        forbidden_labels = {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "run_id",
+            "job_id",
+            "correlation_id",
+            "target",
+            "command",
+            "cve",
+            "callback",
+            "provider",
+            "workflow_id",
+        }
+        assessment_metrics = [
+            metric
+            for metric in app_metrics.METRIC_DEFINITIONS
+            if str(getattr(metric, "_name", "")).startswith("darklab_assessment_")
+        ]
+        for metric in assessment_metrics:
+            assert forbidden_labels.isdisjoint(getattr(metric, "_labelnames", ()))
 
         class FakeMetric:
             _name = "darklab_unreviewed_labels"

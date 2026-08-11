@@ -18,6 +18,7 @@ from services.assessments.zap_connector import (
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
+from services.metrics_lazy import app_metrics
 from services.projects.contracts import ProjectWorkspaceError
 from services.teams.capabilities import Capability
 from services.teams.contracts import TeamPermissionDenied
@@ -123,6 +124,8 @@ def api_project_assessment_zap_jobs(project_id, assessment_id, check_id):
         ProjectWorkspaceError,
         TeamPermissionDenied,
     ) as exc:
+        if request.method == "POST":
+            app_metrics.record_assessment_action("zap", "unknown", "rejected")
         return _error(exc)
     _audit(
         AuditEventType.ASSESSMENT_ZAP_JOB_SUBMIT,
@@ -147,6 +150,7 @@ def api_project_assessment_zap_jobs(project_id, assessment_id, check_id):
             "source": "api_v1",
         },
     )
+    app_metrics.record_assessment_action("zap", job["policy_level"], "launched")
     return jsonify({"job": job}), 202
 
 

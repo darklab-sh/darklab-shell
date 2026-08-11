@@ -22,6 +22,7 @@ from services.assessments.coverage import enforce_evidence_quotas
 from services.assessments.evidence_matching import matching_evidence_rule
 from services.assessments.evidence_sources import load_assessment_evidence_source
 from services.assessments.profiles import ASSESSMENT_EVIDENCE_TYPES
+from services.metrics_lazy import app_metrics
 from services.assessments.serialization import row_to_check, row_to_evidence
 from services.projects.scope import shared_owner_where
 from services.projects.utils import now
@@ -208,6 +209,7 @@ def update_manual_check_state_on_conn(
         str(check_id or "").strip(),
     )
     from_state = str(row["state"] or "")
+    from_source = str(row["state_source"] or "")
     if normalized_state == "not_started":
         if str(row["state_source"] or "") != "manual":
             raise AssessmentConflict("assessment check has no manual state to clear")
@@ -259,6 +261,10 @@ def update_manual_check_state_on_conn(
         str(actor_member_id or "").strip(),
         timestamp,
     )
+    if from_state != to_state or from_source != state_source:
+        app_metrics.record_assessment_check_transition(
+            from_state, to_state, state_source
+        )
     return {
         "check": _serialized_check(conn, str(row["id"])),
         "from_state": from_state,
@@ -358,6 +364,7 @@ def link_manual_evidence_on_conn(
         and str(row["state"] or "") in _MANUAL_EXCLUSION_STATES
     )
     from_state = str(row["state"] or "")
+    from_source = str(row["state_source"] or "")
     to_state = from_state
     first_at, last_at = _evidence_times(conn, str(row["id"]))
     if not protected:
@@ -383,6 +390,10 @@ def link_manual_evidence_on_conn(
         str(actor_member_id or "").strip(),
         timestamp,
     )
+    if not protected and (from_state != to_state or from_source != "derived"):
+        app_metrics.record_assessment_check_transition(
+            from_state, to_state, "derived"
+        )
     return {
         "evidence": _serialized_evidence(conn, evidence_link_id),
         "check": _serialized_check(conn, str(row["id"])),
@@ -440,6 +451,7 @@ def unlink_manual_evidence_on_conn(
         and str(row["state"] or "") in _MANUAL_EXCLUSION_STATES
     )
     from_state = str(row["state"] or "")
+    from_source = str(row["state_source"] or "")
     to_state = from_state
     first_at, last_at = _evidence_times(conn, str(row["id"]))
     if not protected:
@@ -468,6 +480,10 @@ def unlink_manual_evidence_on_conn(
         str(actor_member_id or "").strip(),
         timestamp,
     )
+    if not protected and (from_state != to_state or from_source != "derived"):
+        app_metrics.record_assessment_check_transition(
+            from_state, to_state, "derived"
+        )
     return {
         "deleted": deleted,
         "check": _serialized_check(conn, str(row["id"])),

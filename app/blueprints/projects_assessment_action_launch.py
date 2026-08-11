@@ -17,6 +17,7 @@ from services.assessments.recommended_actions import (
     confirm_recommended_action_plan,
 )
 from services.audit.models import AuditEventType
+from services.metrics_lazy import app_metrics
 from services.projects.contracts import ProjectWorkspaceError
 from services.runs.broker_observability import log_assessment_broker_unavailable
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
@@ -57,11 +58,16 @@ def project_assessment_action_launch(project_id, assessment_id, check_id):
             actor_member_id=actor_member_id,
         )
     except (ProjectWorkspaceError, AssessmentActionError, HttpProfileExecutionError) as exc:
+        app_metrics.record_assessment_action("other", "unknown", "rejected")
         return _error(exc)
+
+    action_kind = plan["action"]["kind"]
+    policy_level = plan["policy_level"]
 
     from blueprints import run as run_routes  # noqa: PLC0415
 
     if not run_routes.broker_available():
+        app_metrics.record_assessment_action(action_kind, policy_level, "unavailable")
         reason = run_routes.broker_unavailable_reason()
         log_assessment_broker_unavailable(
             project_routes.log,
@@ -117,18 +123,23 @@ def project_assessment_action_launch(project_id, assessment_id, check_id):
             **launch_context.broker_kwargs(),
         )
     except (AssessmentActionError, HttpProfileExecutionError) as exc:
+        app_metrics.record_assessment_action(action_kind, policy_level, "rejected")
         return _error(exc)
     except RunStartRejected as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action(action_kind, policy_level, "rejected")
         return jsonify({"error": exc.message, "code": exc.code}), exc.status_code
     except RunPreparationError as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action(action_kind, policy_level, "rejected")
         return jsonify({"error": str(exc), "code": "command_rejected"}), exc.status_code
     except RunSpawnError as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action(action_kind, policy_level, "failed")
         return jsonify({"error": str(exc), "code": "spawn_failed"}), 500
     except Exception:
         _cleanup(protected)
+        app_metrics.record_assessment_action(action_kind, policy_level, "failed")
         raise
 
     launch_details = {
@@ -161,6 +172,7 @@ def project_assessment_action_launch(project_id, assessment_id, check_id):
         "action_kind": plan["action"]["kind"],
         "action_id": plan["action"]["id"],
     })
+    app_metrics.record_assessment_action(action_kind, policy_level, "launched")
     return jsonify({
         "run": {
             "run_id": started.run_id,

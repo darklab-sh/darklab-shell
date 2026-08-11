@@ -23,6 +23,7 @@ from services.assessments.recommended_actions import (
     HttpProfileExecutionError,
 )
 from services.audit.models import AuditEventType
+from services.metrics_lazy import app_metrics
 from services.projects.contracts import ProjectWorkspaceError
 from services.runs.broker_observability import log_assessment_broker_unavailable
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
@@ -76,11 +77,15 @@ def project_assessment_oast_launch(
         HttpProfileExecutionError,
         ProjectWorkspaceError,
     ) as exc:
+        app_metrics.record_assessment_action("oast", "unknown", "rejected")
         return _error(exc)
+
+    policy_level = launch.plan["policy_level"]
 
     from blueprints import run as run_routes  # noqa: PLC0415
 
     if not run_routes.broker_available():
+        app_metrics.record_assessment_action("oast", policy_level, "unavailable")
         reason = run_routes.broker_unavailable_reason()
         log_assessment_broker_unavailable(
             project_routes.log,
@@ -147,20 +152,25 @@ def project_assessment_oast_launch(
         )
     except (AssessmentActionError, AssessmentOastError, HttpProfileExecutionError) as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action("oast", policy_level, "rejected")
         return _error(exc)
     except RunStartRejected as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action("oast", policy_level, "rejected")
         return jsonify({"error": exc.message, "code": exc.code}), exc.status_code
     except RunPreparationError as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action("oast", policy_level, "rejected")
         return jsonify({"error": str(exc), "code": "command_rejected"}), exc.status_code
     except RunSpawnError as exc:
         _cleanup(protected)
+        app_metrics.record_assessment_action("oast", policy_level, "failed")
         if isinstance(exc.__cause__, AssessmentOastError):
             return _error(exc.__cause__)
         return jsonify({"error": str(exc), "code": "spawn_failed"}), 500
     except Exception:
         _cleanup(protected)
+        app_metrics.record_assessment_action("oast", policy_level, "failed")
         raise
 
     plan = launch.plan
@@ -195,6 +205,7 @@ def project_assessment_oast_launch(
             **launch_details,
         },
     )
+    app_metrics.record_assessment_action("oast", policy_level, "launched")
     return jsonify({
         "correlation_id": launch.correlation_id,
         "run": {

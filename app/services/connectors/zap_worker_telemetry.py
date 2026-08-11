@@ -12,6 +12,7 @@ import time
 from typing import Any, TypeVar
 
 from services.connectors.zap_worker_observability import safe_zap_error_code
+from services.metrics_lazy import app_metrics
 
 
 log = logging.getLogger("shell")
@@ -71,14 +72,24 @@ def observed_zap_external_call(
     attempt = _CALL_ATTEMPTS.get(attempt_key, 0) + 1
     _CALL_ATTEMPTS[attempt_key] = attempt
     started_at = time.monotonic()
-    result = operation()
+    try:
+        result = operation()
+    except Exception:
+        app_metrics.record_assessment_connector_operation(
+            "zap", safe_phase, "error", time.monotonic() - started_at
+        )
+        raise
+    duration_ms = _duration_ms(started_at)
+    app_metrics.record_assessment_connector_operation(
+        "zap", safe_phase, "success", duration_ms / 1000.0
+    )
     log.debug(
         "ZAP_EXTERNAL_CALL_COMPLETED",
         extra={
             "job_id": safe_job_id,
             "phase": safe_phase,
             "attempt": attempt,
-            "duration_ms": _duration_ms(started_at),
+            "duration_ms": duration_ms,
             "outcome_class": _OUTCOME_CLASSES.get(safe_phase, "completed"),
         },
     )
@@ -109,6 +120,10 @@ def observed_zap_state_change(
     if safe_to_status == "ready":
         fields["report_bytes"] = max(0, int(report_bytes))
     log.info("ZAP_JOB_STATE_CHANGED", extra=fields)
+    if safe_to_status in {"ready", "canceled", "failed"}:
+        app_metrics.record_assessment_connector_operation(
+            "zap", "job", safe_to_status, fields["duration_ms"] / 1000.0
+        )
     return result
 
 

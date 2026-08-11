@@ -24,6 +24,8 @@ Private ZAP plan-spool cleanup records keep only a validated job id, fixed clean
 
 ZAP worker lifecycle records use the same validated job id plus fixed state, phase, attempt, timing, concurrency, outcome-class, and bounded error fields. Successful external calls use DEBUG, durable state changes use INFO, and only the first identical retry uses WARNING until that operation recovers; repeated retries move to DEBUG with a suppression count. Ready-state changes can include the report size, but these records never include remote ids, exception text, target values, provider responses, plan content, credentials, or reports. Terminal failures add a sanitized traceback that preserves the originating stack without copying private values.
 
+Prometheus tracks active Assessment cycles by personal or team owner and a capped profile key, check transitions by bounded state and manual or derived source, derived evidence matches by type and outcome, action outcomes by fixed action and policy, parser outcomes, and ZAP/OAST operations and durations by fixed connector phase and outcome. The label contracts don't accept Project, assessment, check, run, job, correlation, workflow, target, command, CVE, callback, or provider values. Unknown values fold into fixed fallback labels, and scrape-time profile keys are normalized and capped rather than growing with stored data.
+
 HTTPx screenshot finalization logs only owner/run ids, counts, limits, and fixed failure classes. Storage-limit and cleanup events never include workspace paths, URLs, page titles, technologies, captured bytes, or target values.
 
 ## Level Semantics
