@@ -30,6 +30,7 @@ from services.connectors.oast_interactions import ingest_oast_interaction
 from services.connectors.oast_observability import (
     log_oast_cleanup_scope_mismatch,
     log_oast_provider_deregistration_failed,
+    log_oast_provider_session_failed,
     log_oast_retry,
     oast_provider_scope_matches,
     safe_oast_error_code,
@@ -84,7 +85,7 @@ def _fail_unrecoverable_session(
     except OastCorrelationError as close_error:
         if close_error.code != "oast_correlation_close_conflict":
             raise
-    log_oast_retry("OAST_PROVIDER_SESSION_FAILED", correlation, exc)
+    log_oast_provider_session_failed(correlation, exc)
 
 
 def _register_session(

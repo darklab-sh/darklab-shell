@@ -505,6 +505,7 @@ The current event inventory is:
 | ERROR | `ZAP_WORKER_TICK_FAILED` | ZAP connector worker | (+ traceback) |
 | ERROR | `OAST_SESSION_SPOOL_CLEANUP_FAILED` | private OAST terminal or orphan cleanup | correlation_id, cleanup_stage, error_class (+ sanitized traceback) |
 | ERROR | `OAST_PROVIDER_DEREGISTRATION_FAILED` | private OAST registration rollback | correlation_id, cleanup_stage, error_class, error_code (+ sanitized traceback) |
+| ERROR | `OAST_PROVIDER_SESSION_FAILED` | private OAST terminal session failure | correlation_id, from_status, to_status, error_class, error_code (+ sanitized traceback) |
 | ERROR | `AI_WORKER_BOOTSTRAP_FAILED` | AI worker startup | phase (+ traceback) |
 | ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Schema migration runner | migration_version, migration_name, error (+ traceback) |

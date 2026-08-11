@@ -134,6 +134,25 @@ def log_oast_provider_deregistration_failed(
     )
 
 
+def log_oast_provider_session_failed(
+    correlation: Mapping[str, object],
+    exc: BaseException,
+) -> None:
+    log.error(
+        "OAST_PROVIDER_SESSION_FAILED",
+        exc_info=_safe_exc_info(exc, "Private OAST provider session failed"),
+        extra={
+            "correlation_id": str(correlation.get("id") or ""),
+            "from_status": str(correlation.get("status") or ""),
+            "to_status": "failed",
+            "error_class": type(exc).__name__,
+            "error_code": safe_oast_error_code(
+                exc, "oast_provider_session_unrecoverable"
+            ),
+        },
+    )
+
+
 def log_oast_cleanup_scope_mismatch(
     correlation: Mapping[str, object],
     settings: OastConnectorSettings,
@@ -185,6 +204,7 @@ __all__ = [
     "claim_oast_warning",
     "log_oast_cleanup_scope_mismatch",
     "log_oast_provider_deregistration_failed",
+    "log_oast_provider_session_failed",
     "log_oast_retry",
     "log_oast_spool_cleanup_failed",
     "log_oast_spool_scan_degraded",
