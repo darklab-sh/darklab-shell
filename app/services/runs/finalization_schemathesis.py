@@ -18,6 +18,7 @@ from services.assessments.schemathesis_report_context import (
 )
 from services.metrics_lazy import app_metrics
 from services.runs.completion_policy_contracts import RunCompletionPolicy
+from services.runs.finalization_observability import log_finalize_error
 from services.runs.persistence import run_finalize_savepoint
 
 
@@ -47,13 +48,16 @@ def persist_schemathesis_evidence_for_finalize(
         return None
     project_id = str((active_project_link or {}).get("project_id") or "")
     if not project_id or project_id != context.project_id:
-        _log_failure(
-            session_id,
-            team_id,
-            run_id,
-            context.project_id,
-            "project_link_changed",
-            RuntimeError("reviewed Schemathesis Project link changed"),
+        log.warning(
+            "SCHEMATHESIS_EVIDENCE_FINALIZE_SKIPPED",
+            extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "team_id": team_id,
+                "project_id": context.project_id,
+                "finalize_stage": "schemathesis_evidence",
+                "reason": "project_link_changed",
+            },
         )
         return None
     try:
@@ -103,14 +107,17 @@ def _log_failure(
     exc: Exception,
 ) -> None:
     app_metrics.record_run_finalize_error("schemathesis_evidence")
-    log.error("SCHEMATHESIS_EVIDENCE_FINALIZE_ERROR", extra={
-        "run_id": run_id,
-        "session": get_log_session_id(session_id),
-        "team_id": team_id,
-        "project_id": project_id,
-        "error_code": error_code,
-        "error_class": type(exc).__name__,
-    })
+    log_finalize_error(
+        log,
+        "SCHEMATHESIS_EVIDENCE_FINALIZE_ERROR",
+        exc,
+        "schemathesis_evidence",
+        run_id=run_id,
+        session=get_log_session_id(session_id),
+        team_id=team_id,
+        project_id=project_id,
+        error_code=error_code,
+    )
 
 
 __all__ = ["persist_schemathesis_evidence_for_finalize"]

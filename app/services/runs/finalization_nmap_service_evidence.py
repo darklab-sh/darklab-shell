@@ -14,6 +14,7 @@ from services.assessments.nmap_service_evidence_persistence import (
     persist_nmap_xml_service_observations,
 )
 from services.metrics_lazy import app_metrics
+from services.runs.finalization_observability import log_finalize_error
 from services.runs.persistence import run_finalize_savepoint
 
 log = logging.getLogger("shell")
@@ -59,12 +60,15 @@ def persist_nmap_service_evidence_for_finalize(
         )
     except Exception as exc:
         app_metrics.record_run_finalize_error("nmap_evidence")
-        log.error("NMAP_SERVICE_EVIDENCE_FINALIZE_ERROR", extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "team_id": team_id,
-            "error_class": type(exc).__name__,
-        })
+        log_finalize_error(
+            log,
+            "NMAP_SERVICE_EVIDENCE_FINALIZE_ERROR",
+            exc,
+            "nmap_service_evidence",
+            run_id=run_id,
+            session=get_log_session_id(session_id),
+            team_id=team_id,
+        )
         return None
     log.info("NMAP_SERVICE_EVIDENCE_FINALIZED", extra={
         "run_id": run_id,

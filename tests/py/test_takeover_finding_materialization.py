@@ -256,3 +256,6 @@ def test_takeover_finalize_failure_rolls_back_its_savepoint_and_keeps_the_run_pa
     metric.assert_called_once_with("takeover_confirmation")
     assert error_log.call_args.args == ("TAKEOVER_CONFIRMATION_FINALIZE_ERROR",)
     assert error_log.call_args.kwargs["extra"]["error_class"] == "RuntimeError"
+    assert error_log.call_args.kwargs["extra"]["finalize_stage"] == "takeover_confirmation"
+    assert error_log.call_args.kwargs["exc_info"][2] is not None
+    assert "materialization failed" not in repr(error_log.call_args.kwargs["exc_info"][:2])

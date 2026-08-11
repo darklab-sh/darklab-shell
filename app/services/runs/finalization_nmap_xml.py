@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from core.helpers import get_log_session_id
 from services.metrics_lazy import app_metrics
+from services.runs.finalization_observability import log_finalize_error
 from services.runs.workspace_artifact_metadata import (
     NMAP_XML_SOURCE_FLAG,
     NMAP_XML_STRUCTURED_OUTPUT,
@@ -66,12 +67,15 @@ def load_nmap_xml_for_finalize(
         return read_owner_workspace_text_file_fn(workspace_owner, workspace_path, cfg)
     except Exception as exc:
         app_metrics.record_run_finalize_error("nmap_evidence")
-        log.error("NMAP_STRUCTURED_EVIDENCE_READ_ERROR", extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "team_id": team_id,
-            "error_class": type(exc).__name__,
-        })
+        log_finalize_error(
+            log,
+            "NMAP_STRUCTURED_EVIDENCE_READ_ERROR",
+            exc,
+            "nmap_structured_evidence_read",
+            run_id=run_id,
+            session=get_log_session_id(session_id),
+            team_id=team_id,
+        )
         return None
 
 

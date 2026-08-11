@@ -15,6 +15,7 @@ from services.assessments.nmap_inference_materialization import (
 )
 from services.atlas.materializer import materialize_run_entities
 from services.metrics_lazy import app_metrics
+from services.runs.finalization_observability import log_finalize_error
 from services.runs.persistence import run_finalize_savepoint
 
 log = logging.getLogger("shell")
@@ -103,12 +104,15 @@ def materialize_nmap_inferences_for_finalize(
         )
     except Exception as exc:
         app_metrics.record_run_finalize_error("version_inference")
-        log.error("NMAP_VERSION_INFERENCE_FINALIZE_ERROR", extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "team_id": team_id,
-            "error_class": type(exc).__name__,
-        })
+        log_finalize_error(
+            log,
+            "NMAP_VERSION_INFERENCE_FINALIZE_ERROR",
+            exc,
+            "nmap_version_inference",
+            run_id=run_id,
+            session=get_log_session_id(session_id),
+            team_id=team_id,
+        )
         return None
     log.info("NMAP_VERSION_INFERENCE_FINALIZED", extra={
         "run_id": run_id,

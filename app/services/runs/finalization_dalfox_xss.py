@@ -14,6 +14,7 @@ from services.assessments.dalfox_xss_finding_materialization import (
     materialize_dalfox_xss_findings,
 )
 from services.metrics_lazy import app_metrics
+from services.runs.finalization_observability import log_finalize_error
 from services.runs.persistence import run_finalize_savepoint
 
 
@@ -46,13 +47,16 @@ def materialize_dalfox_xss_findings_for_finalize(
         )
     except Exception as exc:
         app_metrics.record_run_finalize_error("dalfox_xss_findings")
-        log.error("DALFOX_XSS_FINDINGS_FINALIZE_ERROR", extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "team_id": team_id,
-            "project_id": project_id,
-            "error_class": type(exc).__name__,
-        })
+        log_finalize_error(
+            log,
+            "DALFOX_XSS_FINDINGS_FINALIZE_ERROR",
+            exc,
+            "dalfox_xss_findings",
+            run_id=run_id,
+            session=get_log_session_id(session_id),
+            team_id=team_id,
+            project_id=project_id,
+        )
         return []
     if findings:
         recorded_findings.extend(findings)

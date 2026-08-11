@@ -12,6 +12,7 @@ from typing import Any, Callable
 from core.helpers import get_log_session_id
 from services.assessments.takeover_finding_materialization import materialize_takeover_confirmation
 from services.metrics_lazy import app_metrics
+from services.runs.finalization_observability import log_finalize_error
 from services.runs.persistence import run_finalize_savepoint
 
 
@@ -44,13 +45,16 @@ def materialize_takeover_confirmation_for_finalize(
         )
     except Exception as exc:
         app_metrics.record_run_finalize_error("takeover_confirmation")
-        log.error("TAKEOVER_CONFIRMATION_FINALIZE_ERROR", extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "team_id": team_id,
-            "project_id": project_id,
-            "error_class": type(exc).__name__,
-        })
+        log_finalize_error(
+            log,
+            "TAKEOVER_CONFIRMATION_FINALIZE_ERROR",
+            exc,
+            "takeover_confirmation",
+            run_id=run_id,
+            session=get_log_session_id(session_id),
+            team_id=team_id,
+            project_id=project_id,
+        )
         return None
     if finding:
         recorded_findings.append(finding)

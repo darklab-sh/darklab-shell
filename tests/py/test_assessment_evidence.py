@@ -87,6 +87,7 @@ from services.projects.crud import create_project, delete_project
 from services.projects.links import link_run_to_project_on_conn
 from services.projects.targets import add_project_target
 from services.runs.finalization import save_completed_run
+from services.runs.finalization_nmap_xml import load_nmap_xml_for_finalize
 from services.runs.finalization_schemathesis import persist_schemathesis_evidence_for_finalize
 from services.runs.completion_policy_contracts import RunCompletionPolicy
 from services.runs.output_model import LineEvent, to_wire
@@ -1179,6 +1180,7 @@ def test_reconcile_moves_finding_rules_to_needs_review(assessment_factory):
 def test_reviewed_schemathesis_report_persists_safe_idempotent_evidence_and_coverage(
     assessment_factory,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
     factory, cleanup = assessment_factory
     target = "https://api.example.test/v1"
@@ -1390,6 +1392,62 @@ def test_reviewed_schemathesis_report_persists_safe_idempotent_evidence_and_cove
     assert incomplete_clean_facts.target_identities == ()
     assert "api_operations" in incomplete_clean_facts.structured_output_kinds
     assert drift.value.code == "contract_changed"
+
+    caplog.clear()
+    metric_errors: list[str] = []
+    monkeypatch.setattr(
+        "services.runs.finalization_schemathesis.app_metrics.record_run_finalize_error",
+        metric_errors.append,
+    )
+    with db_connect() as conn, caplog.at_level(logging.WARNING, logger="shell"):
+        skipped = persist_schemathesis_evidence_for_finalize(
+            conn,
+            session_id,
+            "",
+            run_id,
+            observed_at,
+            {"project_id": "prj_changed"},
+            [],
+            RunCompletionPolicy(schemathesis_execution=execution),
+        )
+    assert skipped is None
+    skipped_event = next(
+        record
+        for record in caplog.records
+        if record.message == "SCHEMATHESIS_EVIDENCE_FINALIZE_SKIPPED"
+    )
+    assert skipped_event.levelno == logging.WARNING
+    assert getattr(skipped_event, "reason") == "project_link_changed"
+    assert getattr(skipped_event, "finalize_stage") == "schemathesis_evidence"
+    assert metric_errors == []
+
+    def fail_schemathesis_persistence(*_args, **_kwargs):
+        raise RuntimeError("private report and target details")
+
+    caplog.clear()
+    with db_connect() as conn, caplog.at_level(logging.ERROR, logger="shell"):
+        failed = persist_schemathesis_evidence_for_finalize(
+            conn,
+            session_id,
+            "",
+            run_id,
+            observed_at,
+            {"project_id": project_id},
+            [],
+            RunCompletionPolicy(schemathesis_execution=execution),
+            persist_reviewed_schemathesis_report_fn=fail_schemathesis_persistence,
+        )
+    assert failed is None
+    failed_event = next(
+        record
+        for record in caplog.records
+        if record.message == "SCHEMATHESIS_EVIDENCE_FINALIZE_ERROR"
+    )
+    assert failed_event.exc_info is not None
+    assert getattr(failed_event, "finalize_stage") == "schemathesis_evidence"
+    assert metric_errors == ["schemathesis_evidence"]
+    assert "private report" not in caplog.text
+    assert "target details" not in caplog.text
 
 
 def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
@@ -1941,8 +1999,40 @@ def test_completed_run_nmap_inference_failure_rolls_back_only_the_optional_hook(
         if record.message == "NMAP_VERSION_INFERENCE_FINALIZE_ERROR"
     )
     assert getattr(event, "error_class") == "RuntimeError"
+    assert getattr(event, "finalize_stage") == "nmap_version_inference"
+    assert event.exc_info is not None
     assert not hasattr(event, "workspace_path")
     assert "reports/scan.xml CVE-2026-12345 rollback.example" not in caplog.text
+
+    caplog.clear()
+
+    def fail_nmap_xml_read(*_args):
+        raise RuntimeError("reports/private.xml sensitive target")
+
+    with caplog.at_level(logging.ERROR, logger="shell"):
+        assert load_nmap_xml_for_finalize(
+            session_id,
+            "",
+            run_id,
+            0,
+            [{
+                "workspace_path": "reports/private.xml",
+                "kind": "output",
+                "structured_output": "nmap_xml",
+                "source_flag": "-oX",
+            }],
+            object(),
+            read_owner_workspace_text_file_fn=fail_nmap_xml_read,
+        ) is None
+    read_event = next(
+        record
+        for record in caplog.records
+        if record.message == "NMAP_STRUCTURED_EVIDENCE_READ_ERROR"
+    )
+    assert read_event.exc_info is not None
+    assert getattr(read_event, "finalize_stage") == "nmap_structured_evidence_read"
+    assert "reports/private.xml" not in caplog.text
+    assert "sensitive target" not in caplog.text
 
 
 def test_completed_run_nmap_service_failure_keeps_version_inference(
@@ -2000,6 +2090,8 @@ def test_completed_run_nmap_service_failure_keeps_version_inference(
         if record.message == "NMAP_SERVICE_EVIDENCE_FINALIZE_ERROR"
     )
     assert getattr(event, "error_class") == "RuntimeError"
+    assert getattr(event, "finalize_stage") == "nmap_service_evidence"
+    assert event.exc_info is not None
     assert "reports/service.xml private service output" not in caplog.text
 
 

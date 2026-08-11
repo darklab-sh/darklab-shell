@@ -571,18 +571,21 @@ _MODULE_SIZE_RATCHET = (
         "app/services/runs/finalization_dalfox_xss.py", 75, "split-package-ratchet"
     ),
     ModuleSizeBudget(
-        "app/services/runs/finalization_schemathesis.py", 116, "split-package-ratchet"
+        "app/services/runs/finalization_schemathesis.py", 120, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/runs/finalization_nmap_evidence.py", 64, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/runs/finalization_nmap_service_evidence.py",
-        75,
+        79,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
-        "app/services/runs/finalization_nmap_xml.py", 75, "split-package-ratchet"
+        "app/services/runs/finalization_nmap_xml.py", 79, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/runs/finalization_observability.py", 52, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/runs/finalization_summaries.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/finalization_takeover.py", 70, "split-package-ratchet"),

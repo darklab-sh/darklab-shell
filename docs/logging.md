@@ -16,6 +16,8 @@ Public CVE risk and advisory events log source names, feed versions, acquisition
 
 Assessment evidence matching logs bounded run, Project, team, and result counts after a completed run. Quota skips record the fixed quota reason, and unexpected failures record the exception through the normal error logger. These events don't include commands, target values, finding text, output, profile snapshots, or evidence payloads. History deletion and automatic retention record only how many assessment evidence links became unavailable; the preserved evidence ids and reasons stay in the database and audit boundary rather than application logs.
 
+Optional run-finalization stages keep the run, owner, Project when applicable, fixed stage, and bounded error class. Caught parser, query, artifact-read, and persistence failures include a sanitized traceback with a bounded source-file, function, and line summary while replacing the exception message and omitting the original source expression. Commands, workspace paths, targets, evidence bodies, reports, and parser payloads stay out of those records. A deterministic Schemathesis Project-link change is a WARNING skip without a traceback or error metric.
+
 Private OAST provider, cleanup, and readiness records keep only a correlation id, fixed phase or state flags, timings, attempts, counts, and bounded error metadata. Successful external calls use DEBUG, while provider-ready, positive ingestion, and confirmed terminal cleanup use INFO. They never include the provider URL, callback domain or URL, service token, provider payload, session secret, private key, ciphertext, or spool path. Repeated readiness, stale-scan, and scope-mismatch warnings are suppressed for a bounded interval; the next emitted record reports how many repeats were skipped.
 
 Private ZAP plan-spool cleanup records keep only a validated job id, fixed cleanup stage, counts, and bounded error classes. They never include filesystem paths, Automation Framework YAML, selected targets, authentication roles, API keys, or report content. Repeated stale-scan warnings are suppressed for a bounded interval, and the next emitted warning reports how many repeats were skipped.
@@ -270,7 +272,12 @@ The current event inventory is:
 | INFO | `ATLAS_ENTITIES_CAPTURED` | run finalization | run_id, session, team_id, count, entity_type_counts, port_entity_count, scan_observation_count |
 | INFO | `NMAP_VERSION_INFERENCE_FINALIZED` | run finalization | run_id, session, team_id, observation_count, candidate_count, attempted_count, materialized_count, finding_created_count, source_created_count, rejected_count, skipped_count, truncated |
 | WARN | `NMAP_VERSION_INFERENCE_ARTIFACT_REJECTED` | run finalization | run_id, session, team_id, marked_artifact_count |
-| ERROR | `NMAP_VERSION_INFERENCE_FINALIZE_ERROR` | run finalization | run_id, session, team_id, error_class |
+| ERROR | `NMAP_VERSION_INFERENCE_FINALIZE_ERROR` | run finalization | run_id, session, team_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `NMAP_SERVICE_EVIDENCE_FINALIZE_ERROR` | run finalization | run_id, session, team_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `NMAP_STRUCTURED_EVIDENCE_READ_ERROR` | run finalization | run_id, session, team_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `DALFOX_XSS_FINDINGS_FINALIZE_ERROR` | run finalization | run_id, session, team_id, project_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `TAKEOVER_CONFIRMATION_FINALIZE_ERROR` | run finalization | run_id, session, team_id, project_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `SCHEMATHESIS_EVIDENCE_FINALIZE_ERROR` | run finalization | run_id, session, team_id, project_id, finalize_stage, error_code, error_class (+ sanitized traceback) |
 | INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, team_id, source, schedule_id, fire_status, fired_at, run_id, last_error |
 | INFO | `API_SCHEDULE_CREATED` | API schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `API_SCHEDULE_UPDATED` | API schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
@@ -369,6 +376,7 @@ The current event inventory is:
 | WARN | `SCHEDULE_FIRE_CLAIM_TIME_INVALID` | scheduler dispatch | schedule_id, owner_kind, session, last_run_at, command_root |
 | WARN | `SCHEDULER_WORKER_DATABASE_INTERRUPTED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type, error_type, sqlstate |
 | WARN | `SCHEDULER_LOCK_RELEASE_SKIPPED` | scheduler worker | phase, error_type, sqlstate |
+| WARN | `SCHEMATHESIS_EVIDENCE_FINALIZE_SKIPPED` | run finalization | run_id, session, team_id, project_id, finalize_stage, reason |
 | WARN | `ZAP_CANCEL_RETRY` | ZAP connector worker | job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
 | WARN | `ZAP_CANCEL_CREDENTIAL_RETRY` | ZAP connector worker | job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
 | WARN | `ZAP_PLAN_SPOOL_SCAN_DEGRADED` | private ZAP plan reconciliation | failure_count, error_classes, suppressed_repeat_count |

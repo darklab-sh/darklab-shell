@@ -323,3 +323,6 @@ def test_dalfox_xss_finalize_failure_rolls_back_its_savepoint_and_keeps_run_safe
     metric.assert_called_once_with("dalfox_xss_findings")
     assert error_log.call_args.args == ("DALFOX_XSS_FINDINGS_FINALIZE_ERROR",)
     assert error_log.call_args.kwargs["extra"]["error_class"] == "RuntimeError"
+    assert error_log.call_args.kwargs["extra"]["finalize_stage"] == "dalfox_xss_findings"
+    assert error_log.call_args.kwargs["exc_info"][2] is not None
+    assert "materialization failed" not in repr(error_log.call_args.kwargs["exc_info"][:2])
