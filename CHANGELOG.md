@@ -541,6 +541,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Assessment status and work now lead the tab.** Coverage, fix-first findings, progress, and target checks appear before HTTP profile configuration on desktop and mobile, while the profile editor remains available after the assessment content.
 - **Assessment filters and pagers no longer blank the whole tab.** Coverage, cycle context, and the unaffected worklist stay visible while only the changed check or fix-first slice shows its loading or retry state.
 - **Assessment check lists now return to their saved reading position.** The desktop and mobile worklist restores its per-Project scroll offset after the rebuilt list is attached, so rerenders no longer discard it.
 - **Fix-first observation groups now show whether they're open.** Their disclosure changes from `▸ View` to `▾ Hide` when expanded on desktop and mobile, matching the app's other in-place disclosures.

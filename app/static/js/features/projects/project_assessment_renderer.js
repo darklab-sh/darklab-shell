@@ -1156,6 +1156,14 @@ function createProjectAssessmentRenderer(context, actions) {
     return panel;
   }
 
+  function appendAssessmentTail(root, projectId, st, selected, { mobile = false } = {}) {
+    root.appendChild(act.renderHttpProfiles(projectId, { mobile }));
+    if (mobile) {
+      const actions = renderMobileLifecycleActions(projectId, st, selected);
+      if (actions) root.appendChild(actions);
+    }
+  }
+
   function renderContent(projectId, st, selected, { mobile = false } = {}) {
     const root = makeElement('div', `project-assessment-root${mobile ? ' is-mobile' : ''}`);
     root.dataset.projectAssessmentRoot = String(projectId || '');
@@ -1177,16 +1185,20 @@ function createProjectAssessmentRenderer(context, actions) {
     if (!st.assessments.some(item => item?.status === 'active')) {
       root.appendChild(renderStartCard(projectId, st));
     }
-    root.appendChild(act.renderHttpProfiles(projectId, { mobile }));
     if (st.detailLoading && !st.detail) {
       root.appendChild(ctx.emptyProjectPanel('Loading assessment coverage...'));
+      appendAssessmentTail(root, projectId, st, selected, { mobile });
       return root;
     }
     if (st.detailError && !st.detail) {
       root.appendChild(errorPanel(st.detailError, () => void act.loadDetail(projectId)));
+      appendAssessmentTail(root, projectId, st, selected, { mobile });
       return root;
     }
-    if (!st.detail) return root;
+    if (!st.detail) {
+      appendAssessmentTail(root, projectId, st, selected, { mobile });
+      return root;
+    }
     root.append(
       renderCoverage(st.detail.rollup),
       renderAssessmentFindingWorklist(ctx, act, projectId, st, st.detail.finding_worklist),
@@ -1194,10 +1206,7 @@ function createProjectAssessmentRenderer(context, actions) {
       renderCategoryProgress(projectId, st, st.detail.category_rollups),
       renderChecks(projectId, st, st.detail, { mobile }),
     );
-    if (mobile) {
-      const actions = renderMobileLifecycleActions(projectId, st, selected);
-      if (actions) root.appendChild(actions);
-    }
+    appendAssessmentTail(root, projectId, st, selected, { mobile });
     return root;
   }
 

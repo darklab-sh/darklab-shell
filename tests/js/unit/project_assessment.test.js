@@ -507,6 +507,10 @@ describe('project assessment controller', () => {
       expect(surface.textContent).toContain('1Coveredof 2 applicable')
       expect(surface.textContent).toContain('1Awaiting review')
       expect(surface.textContent).toContain('1Evidence unavailablesaved source was removed')
+      const sectionHeadings = [...surface.querySelectorAll('.project-assessment-section h3')]
+        .map(heading => heading.textContent)
+      expect(sectionHeadings.indexOf('Coverage')).toBeLessThan(sectionHeadings.indexOf('HTTP profiles'))
+      expect(sectionHeadings.indexOf('Check worklist')).toBeLessThan(sectionHeadings.indexOf('HTTP profiles'))
       expect(surface.querySelector('.project-assessment-target-list')?.classList.contains('nice-scroll')).toBe(true)
       const disclosure = surface.querySelector('.project-assessment-target-toggle')
       expect(disclosure?.getAttribute('aria-expanded')).toBe('false')
