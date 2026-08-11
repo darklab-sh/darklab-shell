@@ -9,6 +9,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from config import resolve_effective_cfg
 
@@ -33,17 +34,20 @@ class ZapConnectorSettings:
     max_report_bytes: int
 
 
-def zap_connector_settings(
-    cfg: Mapping[str, Any] | None = None,
-) -> ZapConnectorSettings:
+def zap_connector_settings(cfg: Mapping[str, Any] | None = None) -> ZapConnectorSettings:
     """Return the normalized, non-secret ZAP connector settings."""
     raw = resolve_effective_cfg(cfg).get("zap_connector")
     active = raw if isinstance(raw, Mapping) else {}
     raw_cidrs = active.get("allowed_target_cidrs")
     cidrs = raw_cidrs if isinstance(raw_cidrs, (list, tuple)) else []
+    base_url = str(active.get("base_url") or "").strip().rstrip("/")
+    if base_url and urlsplit(base_url).scheme not in {"http", "https"}:
+        raise ZapConnectorUnavailable(
+            "zap_base_url_invalid", "The configured ZAP origin must use HTTP or HTTPS",
+        )
     return ZapConnectorSettings(
         enabled=bool(active.get("enabled", False)),
-        base_url=str(active.get("base_url") or "").strip().rstrip("/"),
+        base_url=base_url,
         api_key_secret_id=str(active.get("api_key_secret_id") or "").strip(),
         tls_verify=bool(active.get("tls_verify", True)),
         allowed_target_cidrs=tuple(str(value) for value in cidrs),
@@ -53,11 +57,7 @@ def zap_connector_settings(
     )
 
 
-def resolve_zap_api_key(
-    settings: ZapConnectorSettings,
-    *,
-    environ: Mapping[str, str] | None = None,
-) -> str:
+def resolve_zap_api_key(settings: ZapConnectorSettings, *, environ: Mapping[str, str] | None = None) -> str:
     """Resolve the API key only at the connector call boundary."""
     if not settings.enabled:
         raise ZapConnectorUnavailable("zap_connector_disabled", "ZAP connector is disabled")

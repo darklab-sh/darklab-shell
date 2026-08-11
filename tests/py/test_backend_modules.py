@@ -3021,6 +3021,9 @@ class TestLoadConfig:
         settings = zap_connector_settings(cfg)
         assert settings.allowed_target_cidrs == ("192.0.2.0/24", "2001:db8::/64")
         assert settings.base_url == "https://zap.example.test"
+        with pytest.raises(ZapConnectorUnavailable, match="HTTP or HTTPS") as exc_info:
+            zap_connector_settings({"zap_connector": {"base_url": "file:///tmp/zap"}})
+        assert exc_info.value.code == "zap_base_url_invalid"
         assert resolve_zap_api_key(
             settings,
             environ={"DARKLAB_ZAP_API_KEY": "connector-secret"},

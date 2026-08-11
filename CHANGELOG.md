@@ -541,6 +541,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **The ZAP connector now rechecks its service scheme at the runtime boundary.** Even a caller that supplies connector settings outside the normal validated startup path can't hand the transport a non-HTTP(S) service URL.
 - **Assessment deletion refusals now explain what to do next.** If a stale browser view asks to delete a cycle the server no longer considers archived, the Assessment tab tells the operator to archive it before retrying instead of silently stopping after the deletion preview.
 - **Assessment evidence is now visible without opening each editor.** Every returned check includes a bounded newest-first preview of matched and manual evidence, and desktop, mobile, and API clients receive a cycle-wide recent-evidence list with source type, opaque source id, availability, match origin, check, target, and observation time.
 - **Assessment checks can now be filtered by policy and evidence availability.** Desktop and mobile expose the read model's safe, standard, intrusive, destructive, available, unavailable, and no-evidence filters alongside the existing category and state controls, and preserve those choices while paging or refreshing the worklist.
