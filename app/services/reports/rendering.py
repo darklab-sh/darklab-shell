@@ -104,7 +104,8 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 {% if assessment_context %}
 <h3>Assessment coverage</h3>
 <p><strong>{{ assessment_context.assessment.title }}</strong> · {{ assessment_context.assessment.status }} ·
-{{ assessment_context.rollup.covered_checks }} of {{ assessment_context.methodology.applicable_denominator }} applicable checks covered</p>
+{{ assessment_context.rollup.covered_checks }} of \
+{{ assessment_context.methodology.applicable_denominator }} applicable checks covered</p>
 <p>{{ assessment_context.methodology.summary }}</p>
 <table><thead><tr><th>State</th><th>Count</th></tr></thead><tbody>
 <tr><td>Covered</td><td>{{ assessment_context.rollup.covered_checks }}</td></tr>
@@ -117,14 +118,17 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 <h3>Manual exclusions</h3>
 <table><thead><tr><th>Check</th><th>Target</th><th>State</th><th>Reason</th></tr></thead><tbody>
 {% for item in assessment_context.manual_exclusions %}
-<tr><td><code>{{ item.check_id }}</code></td><td>{{ item.target_value }}</td><td>{{ item.state|replace("_", " ") }}</td><td>{{ item.reason }}</td></tr>
+<tr><td><code>{{ item.check_id }}</code></td><td>{{ item.target_value }}</td>
+<td>{{ item.state|replace("_", " ") }}</td><td>{{ item.reason }}</td></tr>
 {% endfor %}
 </tbody></table>
 {% endif %}
 {% if assessment_context.unavailable_evidence_warnings or assessment_context.screenshot_warnings %}
 <h3>Coverage warnings</h3><ul>
-{% for item in assessment_context.unavailable_evidence_warnings %}<li><code>{{ item.check_id }}</code>: {{ item.reason }}</li>{% endfor %}
-{% for item in assessment_context.screenshot_warnings %}<li><code>{{ item.artifact_id }}</code>: {{ item.reason }}</li>{% endfor %}
+{% for item in assessment_context.unavailable_evidence_warnings %}
+<li><code>{{ item.check_id }}</code>: {{ item.reason }}</li>{% endfor %}
+{% for item in assessment_context.screenshot_warnings %}
+<li><code>{{ item.artifact_id }}</code>: {{ item.reason }}</li>{% endfor %}
 </ul>
 {% endif %}
 {% endif %}

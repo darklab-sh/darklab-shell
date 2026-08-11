@@ -198,7 +198,8 @@ _PACKAGE_INDEX_TEMPLATE = _PACKAGE_JINJA.from_string("""
 <h2>Assessment Coverage</h2>
 <section class="card">
 <p><strong>{{ assessment_context.assessment.title }}</strong> · {{ assessment_context.assessment.status }} ·
-{{ assessment_context.rollup.covered_checks }} of {{ assessment_context.methodology.applicable_denominator }} applicable checks covered</p>
+{{ assessment_context.rollup.covered_checks }} of \
+{{ assessment_context.methodology.applicable_denominator }} applicable checks covered</p>
 <p>{{ assessment_context.methodology.summary }}</p>
 <div class="chips">
 <span class="chip">Awaiting review: {{ assessment_context.rollup.checks_awaiting_review }}</span>
@@ -210,14 +211,17 @@ _PACKAGE_INDEX_TEMPLATE = _PACKAGE_JINJA.from_string("""
 <h3>Manual exclusions</h3>
 <table><thead><tr><th>Check</th><th>Target</th><th>State</th><th>Reason</th></tr></thead><tbody>
 {% for item in assessment_context.manual_exclusions -%}
-<tr><td><span class="mono">{{ item.check_id }}</span></td><td>{{ item.target_value }}</td><td>{{ item.state }}</td><td>{{ item.reason }}</td></tr>
+<tr><td><span class="mono">{{ item.check_id }}</span></td>
+<td>{{ item.target_value }}</td><td>{{ item.state }}</td><td>{{ item.reason }}</td></tr>
 {% endfor -%}
 </tbody></table>
 {% endif -%}
 {% if assessment_context.unavailable_evidence_warnings or assessment_context.screenshot_warnings -%}
 <h3>Coverage warnings</h3><ul>
-{% for item in assessment_context.unavailable_evidence_warnings -%}<li><span class="mono">{{ item.check_id }}</span>: {{ item.reason }}</li>{% endfor -%}
-{% for item in assessment_context.screenshot_warnings -%}<li><span class="mono">{{ item.artifact_id }}</span>: {{ item.reason }}</li>{% endfor -%}
+{% for item in assessment_context.unavailable_evidence_warnings -%}
+<li><span class="mono">{{ item.check_id }}</span>: {{ item.reason }}</li>{% endfor -%}
+{% for item in assessment_context.screenshot_warnings -%}
+<li><span class="mono">{{ item.artifact_id }}</span>: {{ item.reason }}</li>{% endfor -%}
 </ul>
 {% endif -%}
 {% if assessment_context.fix_first["items"] -%}
@@ -936,11 +940,12 @@ def _append_package_assessment_context_markdown(lines, manifest):
                 continue
             risk = item.get("risk") if isinstance(item.get("risk"), dict) else {}
             reasons = risk.get("priority_reasons") if isinstance(risk.get("priority_reasons"), list) else []
+            signal_text = "; ".join(str(reason) for reason in reasons) or "No stored CVE-risk signals"
             lines.extend([
                 f"#### {_package_markdown_text(item.get('title') or item.get('remediation_id'))}",
                 "",
                 f"- Remediation: {_package_markdown_code(item.get('remediation_id'))}",
-                f"- Signals: {_package_markdown_text('; '.join(str(reason) for reason in reasons) or 'No stored CVE-risk signals')}",
+                f"- Signals: {_package_markdown_text(signal_text)}",
                 f"- Evidence: {_package_int(item.get('observation_count'))} observations, "
                 f"{_package_int(item.get('evidence_count'))} evidence sources",
                 "",
