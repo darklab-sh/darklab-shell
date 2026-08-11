@@ -74,20 +74,29 @@ def _validate_response_url(url: str, settings: Mapping[str, Any]) -> None:
         raise FeedValidationError("CVE risk feed redirected outside the configured HTTPS allowlist")
 
 
-def _download(
-    conn: Any,
-    source: str,
-    settings: Mapping[str, Any],
-) -> tuple[bytes | None, str, str]:
+def _feed_validators(conn: Any, source: str) -> tuple[str, str]:
     row = conn.execute(
         "SELECT etag, last_modified FROM cve_risk_sources WHERE source = ?",
         (source,),
     ).fetchone()
+    return (
+        str(row["etag"] or "") if row else "",
+        str(row["last_modified"] or "") if row else "",
+    )
+
+
+def _download(
+    source: str,
+    settings: Mapping[str, Any],
+    *,
+    etag: str,
+    last_modified: str,
+) -> tuple[bytes | None, str, str]:
     headers = {"User-Agent": "darklab_shell-cve-risk-refresh/1"}
-    if row and str(row["etag"] or ""):
-        headers["If-None-Match"] = str(row["etag"])
-    if row and str(row["last_modified"] or ""):
-        headers["If-Modified-Since"] = str(row["last_modified"])
+    if etag:
+        headers["If-None-Match"] = etag
+    if last_modified:
+        headers["If-Modified-Since"] = last_modified
     request = Request(_allowed_url(source, settings), headers=headers)
     timeout = max(3, min(int(settings.get("http_timeout_seconds") or 30), 120))
     max_bytes = max(1024, min(int(settings.get("max_download_bytes") or 67108864), 268435456))
@@ -104,10 +113,23 @@ def _download(
             )
     except HTTPError as exc:
         if exc.code == 304:
-            return None, str(row["etag"] or "") if row else "", str(
-                row["last_modified"] or ""
-            ) if row else ""
+            return None, etag, last_modified
         raise
+
+
+def _retry_delay_seconds(attempt: int) -> int:
+    return min(2 ** max(0, attempt - 1), 4)
+
+
+def _effective_lease_seconds(settings: Mapping[str, Any]) -> int:
+    """Cover the configured request, retry, backoff, and bounded parse window."""
+    timeout = max(3, min(int(settings.get("http_timeout_seconds") or 30), 120))
+    attempts = max(1, min(int(settings.get("max_attempts") or 3), 5))
+    max_bytes = max(1024, min(int(settings.get("max_download_bytes") or 67108864), 268435456))
+    retry_seconds = sum(_retry_delay_seconds(attempt) for attempt in range(1, attempts))
+    parse_seconds = max(60, (max_bytes + 1048575) // 1048576)
+    operation_seconds = (timeout * attempts) + retry_seconds + parse_seconds + 30
+    return max(int(settings.get("lease_seconds") or 300), operation_seconds)
 
 
 def _acquire_lease(conn: Any, source: str, *, owner: str, now: datetime, lease_seconds: int) -> bool:
@@ -134,6 +156,46 @@ def _release_lease(conn: Any, source: str, owner: str, *, now: str) -> None:
     )
 
 
+def _renew_owned_lease(
+    conn: Any,
+    source: str,
+    owner: str,
+    *,
+    now: datetime,
+    lease_seconds: int,
+) -> bool:
+    now_text = now.isoformat()
+    expires = (now + timedelta(seconds=max(30, lease_seconds))).isoformat()
+    result = conn.execute(
+        "UPDATE cve_risk_refresh_leases SET lease_expires_at = ?, updated_at = ? "
+        "WHERE source = ? AND lease_owner = ? AND lease_expires_at >= ?",
+        (expires, now_text, source, owner, now_text),
+    )
+    return int(getattr(result, "rowcount", 0) or 0) == 1
+
+
+def _record_refresh_audit(
+    conn: Any,
+    source: str,
+    result: Mapping[str, Any],
+    *,
+    cfg: Mapping[str, Any] | None,
+) -> None:
+    record_event(
+        AuditEventType.CVE_RISK_REFRESH,
+        target_id=source,
+        details={
+            "source": source,
+            "outcome": str(result.get("outcome") or "unknown"),
+            "record_count": int(result.get("record_count") or 0),
+            "source_version": str(result.get("version") or ""),
+            "origin": "live",
+        },
+        conn=conn,
+        cfg=cfg,
+    )
+
+
 def refresh_source(
     conn: Any,
     source: str,
@@ -145,61 +207,64 @@ def refresh_source(
     if source not in KNOWN_SOURCES:
         raise ValueError("unsupported CVE risk source")
     settings = cve_risk_cfg(cfg)
-    current = now or datetime.now(timezone.utc)
+    requested_now = now or datetime.now(timezone.utc)
+    current = (
+        requested_now.replace(tzinfo=timezone.utc)
+        if requested_now.tzinfo is None
+        else requested_now.astimezone(timezone.utc)
+    )
     if not bool(settings.get("refresh_enabled", False)) and not force:
         return {"source": source, "outcome": "disabled"}
     interval = int(settings.get("refresh_interval_seconds") or 86400)
     if not force and not _source_due(conn, source, now=current, interval_seconds=interval):
         return {"source": source, "outcome": "not_due"}
+    etag, last_modified = _feed_validators(conn, source)
     owner = "crl_" + uuid.uuid4().hex
+    lease_seconds = _effective_lease_seconds(settings)
     if not _acquire_lease(
         conn,
         source,
         owner=owner,
         now=current,
-        lease_seconds=int(settings.get("lease_seconds") or 300),
+        lease_seconds=lease_seconds,
     ):
+        conn.commit()
         return {"source": source, "outcome": "lease_held"}
+    conn.commit()
     attempted_at = current.isoformat()
     max_attempts = max(1, min(int(settings.get("max_attempts") or 3), 5))
-    result: dict[str, Any] = {
-        "source": source,
-        "outcome": "failed",
-        "error": "retry_exhausted",
-    }
+    lease_started = time.monotonic()
+
+    def lease_now() -> datetime:
+        return current + timedelta(seconds=max(0.0, time.monotonic() - lease_started))
+
+    downloaded: tuple[bytes | None, str, str] | None = None
+    parsed = None
+    terminal_error: BaseException | None = None
+    terminal_attempt = max_attempts
     try:
         for attempt in range(1, max_attempts + 1):
             try:
-                payload, etag, last_modified = _download(conn, source, settings)
-                if payload is None:
-                    conn.execute(
-                        "UPDATE cve_risk_sources SET last_attempt_at = ?, last_error = '' WHERE source = ?",
-                        (attempted_at, source),
-                    )
-                    CVE_RISK_REFRESHES.labels(source=source, outcome="not_modified").inc()
-                    result = {"source": source, "outcome": "not_modified"}
-                    break
-                parsed = parse_source(source, payload)
-                result = accept_feed(
-                    conn,
-                    parsed,
-                    origin="live",
-                    payload_sha256=sha256_bytes(payload),
-                    retrieved_at=attempted_at,
-                    enqueue_changes=True,
+                parsed = None
+                downloaded = _download(
+                    source,
+                    settings,
                     etag=etag,
                     last_modified=last_modified,
                 )
-                result["outcome"] = "accepted"
-                CVE_RISK_REFRESHES.labels(source=source, outcome="accepted").inc()
-                CVE_RISK_RECORDS.labels(source=source).set(len(parsed.records))
-                log.info("CVE_RISK_REFRESH_COMPLETED", extra={
-                    "source": source,
-                    "source_version": parsed.version,
-                    "record_count": len(parsed.records),
-                    "outcome": "accepted",
-                    "attempt": attempt,
-                })
+                if downloaded[0] is not None:
+                    if not _renew_owned_lease(
+                        conn,
+                        source,
+                        owner,
+                        now=lease_now(),
+                        lease_seconds=lease_seconds,
+                    ):
+                        conn.commit()
+                        return {"source": source, "outcome": "lease_lost"}
+                    conn.commit()
+                    parsed = parse_source(source, downloaded[0])
+                terminal_attempt = attempt
                 break
             except (HTTPError, URLError, TimeoutError, socket.timeout, FeedValidationError) as exc:
                 if attempt < max_attempts:
@@ -209,32 +274,93 @@ def refresh_source(
                         "max_attempts": max_attempts,
                         "error_type": type(exc).__name__,
                     })
-                    time.sleep(min(2 ** (attempt - 1), 4))
+                    if not _renew_owned_lease(
+                        conn,
+                        source,
+                        owner,
+                        now=lease_now(),
+                        lease_seconds=lease_seconds,
+                    ):
+                        conn.commit()
+                        return {"source": source, "outcome": "lease_lost"}
+                    conn.commit()
+                    time.sleep(_retry_delay_seconds(attempt))
                     continue
-                mark_feed_failure(conn, source, str(exc), attempted_at=attempted_at)
-                CVE_RISK_REFRESHES.labels(source=source, outcome="failed").inc()
-                log.error("CVE_RISK_REFRESH_FAILED", exc_info=True, extra={
-                    "source": source,
-                    "attempts": max_attempts,
-                    "error_type": type(exc).__name__,
-                })
-                result = {"source": source, "outcome": "failed", "error": type(exc).__name__}
-        record_event(
-            AuditEventType.CVE_RISK_REFRESH,
-            target_id=source,
-            details={
+                terminal_error = exc
+
+        if not _renew_owned_lease(
+            conn,
+            source,
+            owner,
+            now=lease_now(),
+            lease_seconds=lease_seconds,
+        ):
+            conn.commit()
+            return {"source": source, "outcome": "lease_lost"}
+
+        if terminal_error is not None:
+            mark_feed_failure(conn, source, str(terminal_error), attempted_at=attempted_at)
+            result = {
                 "source": source,
-                "outcome": str(result.get("outcome") or "unknown"),
-                "record_count": int(result.get("record_count") or 0),
-                "source_version": str(result.get("version") or ""),
-                "origin": "live",
-            },
-            conn=conn,
-            cfg=cfg,
-        )
+                "outcome": "failed",
+                "error": type(terminal_error).__name__,
+            }
+        elif downloaded is not None and downloaded[0] is None:
+            conn.execute(
+                "UPDATE cve_risk_sources SET last_attempt_at = ?, last_error = '' WHERE source = ?",
+                (attempted_at, source),
+            )
+            result = {"source": source, "outcome": "not_modified"}
+        elif downloaded is not None and parsed is not None:
+            payload, response_etag, response_last_modified = downloaded
+            assert payload is not None
+            result = accept_feed(
+                conn,
+                parsed,
+                origin="live",
+                payload_sha256=sha256_bytes(payload),
+                retrieved_at=attempted_at,
+                enqueue_changes=True,
+                etag=response_etag,
+                last_modified=response_last_modified,
+            )
+            result["outcome"] = "accepted"
+        else:
+            raise RuntimeError("CVE risk refresh ended without a terminal result")
+
+        _record_refresh_audit(conn, source, result, cfg=cfg)
+        _release_lease(conn, source, owner, now=lease_now().isoformat())
+        conn.commit()
+
+        outcome = str(result["outcome"])
+        CVE_RISK_REFRESHES.labels(source=source, outcome=outcome).inc()
+        if parsed is not None:
+            CVE_RISK_RECORDS.labels(source=source).set(len(parsed.records))
+            log.info("CVE_RISK_REFRESH_COMPLETED", extra={
+                "source": source,
+                "source_version": parsed.version,
+                "record_count": len(parsed.records),
+                "outcome": "accepted",
+                "attempt": terminal_attempt,
+            })
+        elif terminal_error is not None:
+            log.error("CVE_RISK_REFRESH_FAILED", exc_info=(
+                type(terminal_error), terminal_error, terminal_error.__traceback__
+            ), extra={
+                "source": source,
+                "attempts": max_attempts,
+                "error_type": type(terminal_error).__name__,
+            })
         return result
-    finally:
-        _release_lease(conn, source, owner, now=datetime.now(timezone.utc).isoformat())
+    except BaseException:
+        conn.rollback()
+        try:
+            _release_lease(conn, source, owner, now=lease_now().isoformat())
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            log.exception("CVE_RISK_REFRESH_LEASE_RELEASE_FAILED", extra={"source": source})
+        raise
 
 
 def refresh_due_feeds(

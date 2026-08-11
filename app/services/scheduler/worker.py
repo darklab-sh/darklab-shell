@@ -161,7 +161,9 @@ def run_once(*, limit: int = 50) -> int:
         from services.cve_risk.links import sync_finding_cve_links  # noqa: PLC0415
 
         sync_finding_cve_links(conn)
+        conn.commit()
         refresh_due_feeds(conn, now=datetime.fromisoformat(now))
+        conn.commit()
         process_risk_work(conn)
         schedules = due_schedules(conn, now=now, limit=limit)
         log.debug("SCHEDULER_TICK", extra={"now": now, "limit": limit, "due_count": len(schedules)})

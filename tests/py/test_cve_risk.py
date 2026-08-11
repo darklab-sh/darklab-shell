@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -1297,6 +1297,124 @@ def test_failed_refresh_retains_last_known_good_snapshot(risk_db, monkeypatch):
     assert row["source_version"] == "v-good:2026-08-03"
     assert row["checksum_sha256"] == "good-sha"
     assert row["last_error"]
+
+
+def test_slow_refresh_does_not_hold_the_sqlite_writer_lock(tmp_path, monkeypatch):
+    from threading import Event, Thread
+
+    db_path = tmp_path / "cve-refresh-lock.db"
+    with sqlite3.connect(db_path) as setup:
+        setup.row_factory = sqlite3.Row
+        run_migrations(setup, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+        setup.commit()
+
+    download_started = Event()
+    release_download = Event()
+    worker_result: dict[str, Any] = {}
+    worker_errors: list[BaseException] = []
+
+    def blocked_download(*_args, **_kwargs):
+        download_started.set()
+        assert release_download.wait(5), "test did not release the blocked feed download"
+        return None, "", ""
+
+    def run_refresh():
+        try:
+            with sqlite3.connect(db_path, timeout=0.5) as worker_conn:
+                worker_conn.row_factory = sqlite3.Row
+                worker_result.update(refresh.refresh_source(
+                    worker_conn,
+                    "epss",
+                    force=True,
+                    cfg={"cve_risk": {"allowed_hosts": ["epss.cyentia.com"]}},
+                ))
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            worker_errors.append(exc)
+
+    monkeypatch.setattr(refresh, "_download", blocked_download)
+    thread = Thread(target=run_refresh, daemon=True)
+    thread.start()
+    try:
+        assert download_started.wait(5), "refresh did not reach the blocked downloader"
+        with sqlite3.connect(db_path, timeout=0.5) as unrelated:
+            unrelated.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("writer-during-refresh", "2026-08-11T00:00:00+00:00", ""),
+            )
+            unrelated.commit()
+    finally:
+        release_download.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert worker_errors == []
+    assert worker_result == {"source": "epss", "outcome": "not_modified"}
+    with sqlite3.connect(db_path) as verify:
+        assert verify.execute(
+            "SELECT COUNT(*) FROM session_tokens WHERE token = 'writer-during-refresh'"
+        ).fetchone()[0] == 1
+        assert verify.execute(
+            "SELECT lease_owner FROM cve_risk_refresh_leases WHERE source = 'epss'"
+        ).fetchone()[0] == ""
+
+
+def test_expired_refresh_lease_cannot_publish_or_clear_new_owner(tmp_path, monkeypatch):
+    db_path = tmp_path / "cve-refresh-owner.db"
+    with sqlite3.connect(db_path) as setup:
+        setup.row_factory = sqlite3.Row
+        run_migrations(setup, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+        setup.commit()
+
+    settings = {
+        "allowed_hosts": ["epss.cyentia.com"],
+        "http_timeout_seconds": 120,
+        "max_attempts": 5,
+        "max_download_bytes": 268435456,
+        "lease_seconds": 30,
+    }
+    effective_lease = refresh._effective_lease_seconds(settings)
+    assert effective_lease == 897
+    started_at = datetime.fromisoformat("2026-08-11T00:00:00+00:00")
+
+    def steal_expired_lease(*_args, **_kwargs):
+        with sqlite3.connect(db_path) as thief:
+            thief.row_factory = sqlite3.Row
+            assert refresh._acquire_lease(
+                thief,
+                "epss",
+                owner="crl_new_owner",
+                now=started_at + timedelta(seconds=effective_lease + 1),
+                lease_seconds=effective_lease,
+            )
+            thief.commit()
+        return b"stale owner must not parse or publish this", "", ""
+
+    monkeypatch.setattr(refresh, "_download", steal_expired_lease)
+    with sqlite3.connect(db_path) as stale:
+        stale.row_factory = sqlite3.Row
+        result = refresh.refresh_source(
+            stale,
+            "epss",
+            force=True,
+            now=started_at,
+            cfg={"cve_risk": settings},
+        )
+        refresh._release_lease(
+            stale,
+            "epss",
+            "crl_stale_owner",
+            now=started_at.isoformat(),
+        )
+        stale.commit()
+
+    assert result == {"source": "epss", "outcome": "lease_lost"}
+    with sqlite3.connect(db_path) as verify:
+        assert verify.execute(
+            "SELECT lease_owner FROM cve_risk_refresh_leases WHERE source = 'epss'"
+        ).fetchone()[0] == "crl_new_owner"
+        assert verify.execute(
+            "SELECT COUNT(*) FROM cve_risk_sources WHERE source = 'epss'"
+        ).fetchone()[0] == 0
 
 
 def test_redirect_validation_rejects_non_https_and_unlisted_hosts():

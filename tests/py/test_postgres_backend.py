@@ -12,7 +12,7 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit
@@ -1955,9 +1955,17 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
 
 
 @pytest.mark.postgres
-def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schema):
+def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(
+    postgres_dsn,
+    postgres_schema,
+    monkeypatch,
+):
+    import psycopg
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.cve_risk import refresh
     from services.cve_risk.nvd_advisory import persist_external_nvd_lookup
     from services.cve_risk.parsers import ParsedFeed
     from services.cve_risk.store import accept_feed, get_cve_risk
@@ -2031,6 +2039,46 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(postgres_schem
     assert risk["cvss_score"] == 8.8
     assert risk["advisory_status"] == "active"
     assert {source["source"] for source in risk["sources"]} == {"epss", "kev", "nvd"}
+
+    refresh_started = datetime(2026, 8, 11, tzinfo=timezone.utc)
+    refresh_settings = {
+        "allowed_hosts": ["epss.cyentia.com"],
+        "http_timeout_seconds": 3,
+        "max_attempts": 1,
+        "max_download_bytes": 1024,
+        "lease_seconds": 30,
+    }
+    effective_lease = refresh._effective_lease_seconds(refresh_settings)
+    schema_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+
+    def steal_expired_lease(*_args, **_kwargs):
+        with psycopg.connect(schema_dsn, row_factory=dict_row) as thief_raw:
+            thief = PostgresSqliteCompatConnection(thief_raw)
+            assert refresh._acquire_lease(
+                thief,
+                "epss",
+                owner="crl_postgres_new_owner",
+                now=refresh_started + timedelta(seconds=effective_lease + 1),
+                lease_seconds=effective_lease,
+            )
+            thief.commit()
+        return b"the stale owner must not replace the accepted feed", "", ""
+
+    monkeypatch.setattr(refresh, "_download", steal_expired_lease)
+    assert refresh.refresh_source(
+        conn,
+        "epss",
+        force=True,
+        now=refresh_started,
+        cfg={"cve_risk": refresh_settings},
+    ) == {"source": "epss", "outcome": "lease_lost"}
+    assert conn.execute(
+        "SELECT lease_owner FROM cve_risk_refresh_leases WHERE source = ?",
+        ("epss",),
+    ).fetchone()["lease_owner"] == "crl_postgres_new_owner"
+    assert get_cve_risk("CVE-2026-12345", conn=conn)["epss_source_version"] == (
+        "v-test:2026-08-04"
+    )
 
 
 @pytest.mark.postgres

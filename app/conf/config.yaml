@@ -434,6 +434,10 @@
 # The `providers` built-in shows each feed's version, age, origin, and current
 # refresh setting. HTTPS_PROXY/NO_PROXY are honored by Python's standard HTTP
 # client when a live refresh is enabled.
+# A source lease is committed before network work starts. `lease_seconds` is a
+# minimum; the effective lease is extended to cover the configured attempts,
+# backoff, download size, and parse allowance. A worker must still own that
+# lease before it can publish an accepted feed or failure state.
 # NVD and OSV advisory storage are separate opt-ins. Their local modes load an
 # operator-managed dataset during startup and keep the last accepted snapshot
 # after a bad reload. OSV external mode sends one exact PURL and version only
