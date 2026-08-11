@@ -14,6 +14,7 @@ from services.commands.registry_validation import (
     SHELL_CHAIN_RE,
     is_allowed_by_policy,
     is_denied,
+    sqlmap_detection_only_restriction_reason,
     split_command_argv,
 )
 from services.commands.raw_packets import raw_packet_command_restriction_reason
@@ -156,6 +157,14 @@ def validate_command(
         )
 
     command_tokens = split_command_argv(command_to_validate.strip())
+    sqlmap_reason = sqlmap_detection_only_restriction_reason(command_tokens)
+    if sqlmap_reason:
+        return result_cls(
+            False,
+            sqlmap_reason,
+            display_command=command,
+            exec_command=command_to_validate,
+        )
     if not is_allowed_by_policy(command_tokens, allowed, allow_grouping):
         return result_cls(
             False,

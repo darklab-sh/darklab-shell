@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import re
+import shlex
 from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import urlsplit
@@ -37,6 +38,15 @@ _UNSUPPORTED_SECRET_SLOTS = frozenset({
     "client_key_passphrase",
     "proxy_authorization",
 })
+
+
+def _sqlmap_validation_command(target_value: str, concurrency: object) -> str:
+    """Return the narrow carrier validated before app-owned SQLmap bounds are added."""
+    threads = min(max(int(concurrency or 5), 1), 10)
+    return (
+        f"sqlmap -u {shlex.quote(target_value)} --threads {threads} --ignore-redirects "
+        "--disable-coloring --no-logging"
+    )
 
 
 @dataclass(frozen=True)
@@ -211,21 +221,28 @@ def materialize_http_profile_launch(
     actor_member_id: str = "",
 ) -> ProtectedHttpLaunch:
     """Revalidate and materialize one selected profile immediately before launch."""
-    selected = plan.get("http_profile")
-    if not isinstance(selected, Mapping) or not str(selected.get("id") or ""):
-        return ProtectedHttpLaunch(
-            str(plan.get("display_command") or ""),
-            (),
-            (),
-            None,
-            {},
-        )
-    tool = str((plan.get("action") or {}).get("id") or "")
+    action = plan.get("action")
+    tool = str(action.get("id") or "") if isinstance(action, Mapping) else ""
     raw_target = plan.get("target")
     target = {
         "type": str(raw_target.get("type") or ""),
         "value": str(raw_target.get("value") or ""),
     } if isinstance(raw_target, Mapping) else {"type": "", "value": ""}
+    selected = plan.get("http_profile")
+    selected_summary = selected if isinstance(selected, Mapping) else {}
+    if not isinstance(selected, Mapping) or not str(selected.get("id") or ""):
+        return ProtectedHttpLaunch(
+            _sqlmap_validation_command(
+                target["value"],
+                selected_summary.get("concurrency"),
+            )
+            if tool == "sqlmap"
+            else str(plan.get("display_command") or ""),
+            (),
+            (),
+            None,
+            {},
+        )
     profile_id = str(selected.get("id") or "")
     with get_db_connect()() as conn:
         summary, target_value, unavailable, profile = load_http_profile_plan_context(
@@ -280,7 +297,11 @@ def materialize_http_profile_launch(
             status_code=503,
         ) from exc
     return ProtectedHttpLaunch(
-        execution_command=protected_command.command,
+        execution_command=(
+            _sqlmap_validation_command(target_value, summary.get("concurrency"))
+            if tool == "sqlmap"
+            else protected_command.command
+        ),
         trusted_execution_args=tuple(trusted_args) + tool_material.trusted_args,
         private_values=tuple(private_values) + tool_material.private_values,
         cleanup=tool_material.cleanup,

@@ -19143,7 +19143,7 @@ class TestDerivedCommandRegistry:
         assert grep["autocomplete"]["pipe_command"] is True
         assert grep["autocomplete"]["flags"][0]["value"] == "-i"
 
-    def test_commands_registry_rejects_interactive_pty_with_required_secrets(self):
+    def test_commands_registry_rejects_invalid_semantic_contracts(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "commands.yaml"
             path.write_text(textwrap.dedent("""
@@ -19165,6 +19165,48 @@ class TestDerivedCommandRegistry:
             with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
                 with pytest.raises(ValueError, match="cannot combine interactive PTY mode with requires_secrets"):
                     load_commands_registry()
+
+            invalid_registries = (
+                (
+                    "duplicate command registry root in commands: probe",
+                    """
+                    commands:
+                      - root: probe
+                      - root: probe
+                    """,
+                ),
+                (
+                    "command registry roots cannot appear in commands and pipe_helpers: probe",
+                    """
+                    commands:
+                      - root: probe
+                    pipe_helpers:
+                      - root: probe
+                        autocomplete:
+                          pipe:
+                            enabled: true
+                    """,
+                ),
+                (
+                    "pipe helper must declare autocomplete.pipe.enabled: grep",
+                    """
+                    pipe_helpers:
+                      - root: grep
+                        autocomplete:
+                          flags:
+                            - value: -i
+                    """,
+                ),
+            )
+            for index, (message, body) in enumerate(invalid_registries):
+                invalid_path = Path(tmp) / f"invalid-{index}.yaml"
+                invalid_path.write_text(textwrap.dedent(body))
+                with mock.patch(
+                    "services.commands.registry.COMMANDS_REGISTRY_FILE",
+                    str(invalid_path),
+                ):
+                    with pytest.raises(ValueError, match=re.escape(message)):
+                        load_commands_registry()
 
     def test_secret_show_consumers_marks_required_and_optional(self):
         providers = [
@@ -19714,6 +19756,8 @@ class TestDerivedCommandRegistry:
     def test_real_registry_commands_have_root_descriptions(self):
         registry = load_commands_registry()
         by_root = {str(item.get("root") or ""): item for item in registry.get("commands", [])}
+        command_roots = [str(item.get("root") or "") for item in registry.get("commands", [])]
+        pipe_roots = [str(item.get("root") or "") for item in registry.get("pipe_helpers", [])]
         sqlmap_sections = [
             section
             for section in ("commands", "pipe_helpers")
@@ -19728,6 +19772,13 @@ class TestDerivedCommandRegistry:
         ]
 
         assert missing == []
+        assert len(command_roots) == len(set(command_roots))
+        assert len(pipe_roots) == len(set(pipe_roots))
+        assert set(command_roots).isdisjoint(pipe_roots)
+        assert all(
+            bool((item.get("autocomplete") or {}).get("pipe_command"))
+            for item in registry.get("pipe_helpers", [])
+        )
         assert sqlmap_sections == ["commands"]
         dalfox = by_root["dalfox"]
         assert dalfox["policy"]["allow"] == ["dalfox"]
@@ -19768,10 +19819,13 @@ class TestDerivedCommandRegistry:
             "sqlmap --technique",
             "sqlmap --sql-shell",
             "sqlmap --sql-query",
+            "sqlmap --sql-file",
             "sqlmap --os-pwn",
             "sqlmap --os-smbrelay",
             "sqlmap --os-bof",
             "sqlmap --priv-esc",
+            "sqlmap --udf-inject",
+            "sqlmap --shared-lib",
             "sqlmap --reg-read",
             "sqlmap --reg-add",
             "sqlmap --reg-del",
@@ -19789,6 +19843,20 @@ class TestDerivedCommandRegistry:
             "sqlmap --search",
             "sqlmap --common-tables",
             "sqlmap --common-columns",
+            "sqlmap --file-dest",
+            "sqlmap --preprocess",
+            "sqlmap --postprocess",
+            "sqlmap --second-url",
+            "sqlmap --second-req",
+            "sqlmap --csrf-url",
+            "sqlmap --safe-url",
+            "sqlmap --safe-req",
+            "sqlmap --dns-domain",
+            "sqlmap --shell",
+            "sqlmap --wizard",
+            "sqlmap --purge",
+            "sqlmap -d",
+            "sqlmap -g",
             "sqlmap -D",
             "sqlmap -T",
             "sqlmap -C",
@@ -19796,10 +19864,34 @@ class TestDerivedCommandRegistry:
         }
         assert denied_sqlmap_flags.issubset(set(sqlmap["policy"]["deny"]))
         assert is_command_allowed("sqlmap https://darklab.sh/item?id=1")[0]
+        assert commands.validate_command(
+            "sqlmap -u https://darklab.sh/item?id=1 -p id --smart --fresh-queries"
+        ).allowed
         for denied_command in sorted(denied_sqlmap_flags):
             assert not is_command_allowed(
                 f"{denied_command} value https://darklab.sh/item?id=1"
             )[0]
+        blocked_sqlmap_commands = (
+            "sqlmap -u https://darklab.sh/item?id=1 --config-file=attacker.ini",
+            "sqlmap -u https://darklab.sh/item?id=1 --os-pwn",
+            "sqlmap -u https://darklab.sh/item?id=1 --reg-read",
+            "sqlmap -u https://darklab.sh/item?id=1 --sql-shell",
+            "sqlmap -u https://darklab.sh/item?id=1 --technique=ST",
+            "sqlmap -u https://darklab.sh/item?id=1 --preprocess attacker.py",
+            "sqlmap -u https://darklab.sh/item?id=1 --udf-inject",
+            "sqlmap -u https://darklab.sh/item?id=1 --file-write payload",
+            "sqlmap -u https://darklab.sh/item?id=1 --sql-file queries.sql",
+            "sqlmap -m targets.txt",
+            "sqlmap -g inurl:item.php?id=",
+            "sqlmap -d sqlite:///tmp/owned.db",
+            "sqlmap -u https://darklab.sh/item?id=1 --random-agent",
+            "sqlmap https://darklab.sh/one?id=1 https://darklab.sh/two?id=2",
+            "sqlmap -u https://user:secret@darklab.sh/item?id=1",
+        )
+        for raw_command in blocked_sqlmap_commands:
+            validation = commands.validate_command(raw_command)
+            assert not validation.allowed, raw_command
+            assert validation.exec_command == raw_command
         assert not is_command_allowed("sqlmap https://darklab.sh/item?id=1 --dump")[0]
         ipinfo = by_root["ipinfo"]
         assert ipinfo["requires_secrets"] == [{"env": "IPINFO_TOKEN", "optional": True}]
@@ -33361,6 +33453,7 @@ class TestAssessmentHttpProfileExecution:
             _execution_target,
             _scope_arguments,
             _unsupported_reason,
+            materialize_http_profile_launch,
         )
         from services.assessments.http_profile_material import (
             private_file_values,
@@ -33423,10 +33516,40 @@ class TestAssessmentHttpProfileExecution:
         assert sqlmap is not None
         assert sqlmap.command.endswith("--no-logging -c [protected]")
         assert "--batch --level 1 --risk 1 --technique BEU" in sqlmap.command
+        assert "--threads 2" in sqlmap.command
         assert sqlmap.time_limit_seconds == 120
         assert not is_command_allowed(
             sqlmap.command.removesuffix(" -c [protected]")
         )[0]
+        sqlmap_launch = materialize_http_profile_launch(
+            "tok-sqlmap",
+            "prj-sqlmap",
+            {
+                "action": {"id": "sqlmap"},
+                "target": {
+                    "type": "url",
+                    "value": "https://app.example/item?id=1",
+                },
+                "http_profile": {"concurrency": 2},
+                "display_command": sqlmap.command.removesuffix(" -c [protected]"),
+            },
+        )
+        carrier_validation = commands.validate_command(sqlmap_launch.execution_command)
+        assert carrier_validation.allowed
+        rewritten_sqlmap, _notice = commands.rewrite_command(
+            carrier_validation.exec_command
+        )
+        rewritten_tokens = shlex.split(rewritten_sqlmap)
+        assert rewritten_tokens[0:3] == [
+            "sqlmap",
+            "-u",
+            "https://app.example/item?id=1",
+        ]
+        assert rewritten_tokens[rewritten_tokens.index("--threads") + 1] == "2"
+        assert rewritten_tokens[rewritten_tokens.index("--level") + 1] == "1"
+        assert rewritten_tokens[rewritten_tokens.index("--risk") + 1] == "1"
+        assert rewritten_tokens[rewritten_tokens.index("--technique") + 1] == "BEU"
+        assert rewritten_tokens[rewritten_tokens.index("--time-limit") + 1] == "120"
         certificate = command_plan("sslyze", "domain", "tls.example")
         tls_configuration = command_plan("testssl", "domain", "tls.example")
         assert certificate is not None

@@ -17,6 +17,7 @@ def web_command_plans(
 ) -> dict[str, CommandPlan]:
     """Return the maintained web command-plan family for one target."""
     httpx_bounds = f" -rl {rate} -threads {concurrency}"
+    sqlmap_threads = min(concurrency, 10)
     return {
         "curl": CommandPlan(
             f"curl -q --silent --show-error --head --no-location --noproxy '*' "
@@ -69,7 +70,7 @@ def web_command_plans(
         ),
         "sqlmap": CommandPlan(
             f"sqlmap -u {target} --batch --level 1 --risk 1 --technique BEU "
-            f"--timeout 10 --retries 1 --threads {concurrency} --time-limit 120 "
+            f"--timeout 10 --retries 1 --threads {sqlmap_threads} --time-limit 120 "
             f"--ignore-redirects --disable-coloring --no-logging{protected_suffix}",
             "One approved URL, detection-only SQL injection checks using Boolean, "
             "Error, and Union techniques; no redirects, extraction, or takeover actions.",

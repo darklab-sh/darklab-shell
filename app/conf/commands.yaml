@@ -6079,7 +6079,10 @@ commands:
         - sqlmap --priv-esc
         - sqlmap --sql-shell
         - sqlmap --sql-query
+        - sqlmap --sql-file
         - sqlmap --eval
+        - sqlmap --udf-inject
+        - sqlmap --shared-lib
         - sqlmap --reg-read
         - sqlmap --reg-add
         - sqlmap --reg-del
@@ -6103,6 +6106,7 @@ commands:
         - sqlmap --common-columns
         - sqlmap --file-read
         - sqlmap --file-write
+        - sqlmap --file-dest
         - sqlmap --crawl
         - sqlmap --forms
         - sqlmap --tor
@@ -6112,6 +6116,19 @@ commands:
         - sqlmap --session-file
         - sqlmap --save
         - sqlmap --offline
+        - sqlmap --preprocess
+        - sqlmap --postprocess
+        - sqlmap --second-url
+        - sqlmap --second-req
+        - sqlmap --csrf-url
+        - sqlmap --safe-url
+        - sqlmap --safe-req
+        - sqlmap --dns-domain
+        - sqlmap --shell
+        - sqlmap --wizard
+        - sqlmap --purge
+        - sqlmap -d
+        - sqlmap -g
         - sqlmap -r
         - sqlmap -m
         - sqlmap -l

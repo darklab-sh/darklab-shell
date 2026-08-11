@@ -21044,6 +21044,24 @@ class TestRunRoute:
         assert json.loads(resp.data) == {"error": "blocked"}
         popen.assert_not_called()
 
+        dangerous_sqlmap_commands = (
+            "sqlmap -u https://darklab.sh/item?id=1 --config-file attacker.ini",
+            "sqlmap -u https://darklab.sh/item?id=1 --os-pwn",
+            "sqlmap -u https://darklab.sh/item?id=1 --preprocess attacker.py",
+        )
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("blueprints.run.subprocess.Popen") as sqlmap_popen, \
+             mock.patch("blueprints.run._brokered_synthetic_run") as synthetic:
+            responses = [
+                client.post("/runs", json={"command": command})
+                for command in dangerous_sqlmap_commands
+            ]
+
+        assert [response.status_code for response in responses] == [403, 403, 403]
+        assert all(json.loads(response.data).get("error") for response in responses)
+        sqlmap_popen.assert_not_called()
+        synthetic.assert_not_called()
+
     def test_brokered_run_starts_real_process_and_registers_active_run(self, caplog):
         from blueprints import run as run_routes
 
