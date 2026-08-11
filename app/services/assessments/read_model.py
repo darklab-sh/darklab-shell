@@ -99,67 +99,46 @@ def _validated_check_filters(filters: Mapping[str, object] | None) -> dict[str, 
     return normalized
 
 
-def _check_filter_params(filters: dict[str, str]) -> tuple[object, ...]:
-    return (
-        filters["category"],
-        filters["category"],
-        filters["state"],
-        filters["state"],
-        filters["target_type"],
-        filters["target_type"],
-        filters["policy_level"],
-        filters["policy_level"],
-        filters["evidence_state"],
-        filters["evidence_state"],
-        filters["evidence_state"],
-        filters["evidence_state"],
-    )
+def _check_filter_clause(filters: dict[str, str]) -> tuple[str, tuple[object, ...]]:
+    clauses: list[str] = []
+    params: list[object] = []
+    for column in ("category", "state", "target_type", "policy_level"):
+        value = filters[column]
+        if not value:
+            continue
+        clauses.append(f"AND c.{column} = ? ")
+        params.append(value)
+    evidence_state = filters["evidence_state"]
+    if evidence_state == "available":
+        clauses.append(
+            "AND EXISTS (SELECT 1 FROM project_assessment_evidence e "
+            "WHERE e.check_id = c.id AND e.source_state = 'available') "
+        )
+    elif evidence_state == "unavailable":
+        clauses.append(
+            "AND EXISTS (SELECT 1 FROM project_assessment_evidence e "
+            "WHERE e.check_id = c.id AND e.source_state = 'unavailable') "
+        )
+    elif evidence_state == "none":
+        clauses.append(
+            "AND NOT EXISTS (SELECT 1 FROM project_assessment_evidence e "
+            "WHERE e.check_id = c.id) "
+        )
+    return "".join(clauses), tuple(params)
 
 
-_CHECK_FILTER_SQL = (
-    "AND (? = '' OR c.category = ?) "
-    "AND (? = '' OR c.state = ?) "
-    "AND (? = '' OR c.target_type = ?) "
-    "AND (? = '' OR c.policy_level = ?) "
-    "AND (? = '' "
-    "OR (? = 'available' AND EXISTS ("
-    "SELECT 1 FROM project_assessment_evidence ea "
-    "WHERE ea.check_id = c.id AND ea.source_state = 'available'"
-    ")) "
-    "OR (? = 'unavailable' AND EXISTS ("
-    "SELECT 1 FROM project_assessment_evidence eu "
-    "WHERE eu.check_id = c.id AND eu.source_state = 'unavailable'"
-    ")) "
-    "OR (? = 'none' AND NOT EXISTS ("
-    "SELECT 1 FROM project_assessment_evidence en WHERE en.check_id = c.id"
-    ")))"
-)
-
-
-def _check_page(
-    conn: Any,
+def assessment_check_page_query(
     assessment_id: str,
     filters: Mapping[str, object] | None,
     *,
-    session_id: str,
-    team_id: str,
-    project_id: str,
     limit: int,
     offset: int,
-) -> dict[str, Any]:
+) -> tuple[str, tuple[object, ...]]:
+    """Return the bounded check-page query used by the Assessment read model."""
+
     normalized = _validated_check_filters(filters)
-    params = _check_filter_params(normalized)
-    total_query = "".join((
-        "SELECT COUNT(*) AS count FROM project_assessment_checks c ",
-        "WHERE c.assessment_id = ? ",
-        _CHECK_FILTER_SQL,
-    ))
-    total_row = conn.execute(
-        total_query,
-        (assessment_id, *params),
-    ).fetchone()
-    total = int(total_row["count"] or 0) if total_row else 0
-    page_query = "".join((
+    filter_sql, filter_params = _check_filter_clause(normalized)
+    query = "".join((
         "SELECT c.id, c.assessment_id, c.category, c.check_key, ",
         "c.target_entity_id, c.target_type, c.target_value, c.applicability, ",
         "c.policy_level, c.state, c.state_source, c.state_reason, ",
@@ -175,13 +154,45 @@ def _check_page(
         "WHERE e.check_id = c.id AND e.source_state = 'unavailable') ",
         "AS unavailable_evidence_count ",
         "FROM project_assessment_checks c WHERE c.assessment_id = ? ",
-        _CHECK_FILTER_SQL,
+        filter_sql,
         " ORDER BY c.category ASC, c.target_type ASC, ",
         "LOWER(c.target_value) ASC, c.check_key ASC, c.id ASC LIMIT ? OFFSET ?",
     ))
+    return query, (assessment_id, *filter_params, limit, offset)
+
+
+def _check_page(
+    conn: Any,
+    assessment_id: str,
+    filters: Mapping[str, object] | None,
+    *,
+    session_id: str,
+    team_id: str,
+    project_id: str,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    normalized = _validated_check_filters(filters)
+    filter_sql, filter_params = _check_filter_clause(normalized)
+    total_query = "".join((
+        "SELECT COUNT(*) AS count FROM project_assessment_checks c ",
+        "WHERE c.assessment_id = ? ",
+        filter_sql,
+    ))
+    total_row = conn.execute(
+        total_query,
+        (assessment_id, *filter_params),
+    ).fetchone()
+    total = int(total_row["count"] or 0) if total_row else 0
+    page_query, page_params = assessment_check_page_query(
+        assessment_id,
+        normalized,
+        limit=limit,
+        offset=offset,
+    )
     rows = conn.execute(
         page_query,
-        (assessment_id, *params, limit, offset),
+        page_params,
     ).fetchall()
     checks = [
         check
@@ -299,36 +310,27 @@ def list_assessment_cycles(
         ).fetchone()
         if not project:
             return None
-        filter_params = (
-            normalized_status,
-            normalized_status,
-            1 if include_archived else 0,
+        cycle_where_sql, cycle_where_params = _assessment_cycle_filter(
+            normalized_project_id,
+            status=normalized_status,
+            include_archived=include_archived,
         )
         total_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM project_assessments a "
-            "WHERE a.project_id = ? AND (? = '' OR a.status = ?) "
-            "AND (? = 1 OR a.status != 'archived')",
-            (normalized_project_id, *filter_params),
+            "SELECT COUNT(*) AS count FROM project_assessments a WHERE "
+            + cycle_where_sql,
+            cycle_where_params,
         ).fetchone()
         total = int(total_row["count"] or 0) if total_row else 0
-        list_query = "".join((
-            "SELECT ",
-            ASSESSMENT_COLUMNS,
-            " FROM project_assessments a WHERE a.project_id = ? ",
-            "AND (? = '' OR a.status = ?) ",
-            "AND (? = 1 OR a.status != 'archived') ",
-            "ORDER BY CASE a.status ",
-            "WHEN 'active' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END, ",
-            "a.updated_at DESC, a.id DESC LIMIT ? OFFSET ?",
-        ))
+        list_query, list_params = assessment_cycle_page_query(
+            normalized_project_id,
+            status=normalized_status,
+            include_archived=include_archived,
+            limit=safe_limit,
+            offset=safe_offset,
+        )
         rows = conn.execute(
             list_query,
-            (
-                normalized_project_id,
-                *filter_params,
-                safe_limit,
-                safe_offset,
-            ),
+            list_params,
         ).fetchall()
         assessments = []
         for row in rows:
@@ -343,3 +345,49 @@ def list_assessment_cycles(
             safe_limit,
             safe_offset,
         )
+
+
+def assessment_cycle_page_query(
+    project_id: str,
+    *,
+    status: str = "",
+    include_archived: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[str, tuple[object, ...]]:
+    """Return the bounded cycle-list query used by the Assessment read model."""
+
+    normalized_status = _normalized_filter(status, "status")
+    if normalized_status and normalized_status not in ASSESSMENT_STATUSES:
+        raise AssessmentError("assessment status filter is unsupported")
+    where_sql, where_params = _assessment_cycle_filter(
+        project_id,
+        status=normalized_status,
+        include_archived=include_archived,
+    )
+    query = "".join((
+        "SELECT ",
+        ASSESSMENT_COLUMNS,
+        " FROM project_assessments a WHERE ",
+        where_sql,
+        "ORDER BY CASE a.status ",
+        "WHEN 'active' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END, ",
+        "a.updated_at DESC, a.id DESC LIMIT ? OFFSET ?",
+    ))
+    return query, (*where_params, int(limit), int(offset))
+
+
+def _assessment_cycle_filter(
+    project_id: str,
+    *,
+    status: str,
+    include_archived: bool,
+) -> tuple[str, tuple[object, ...]]:
+    clauses = ["a.project_id = ? "]
+    params: list[object] = [str(project_id or "").strip()]
+    if status:
+        clauses.append("AND a.status = ? ")
+        params.append(status)
+    elif not include_archived:
+        clauses.append("AND a.status != 'archived' ")
+    return "".join(clauses), tuple(params)

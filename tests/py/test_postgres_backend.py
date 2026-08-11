@@ -2261,9 +2261,14 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
 
 
 @pytest.mark.postgres
-def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema):
+def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.read_model import (
+        assessment_check_page_query,
+        assessment_cycle_page_query,
+    )
     from services.atlas.lookup_resolve import exact_lookup_candidate_query
     from services.atlas.scope import (
         entity_scope_params,
@@ -2276,11 +2281,16 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
         project_finding_owner_clause,
     )
     from services.projects.scope import shared_owner_where
+    from services.cve_risk.escalation import (
+        project_risk_escalation_page_query,
+        risk_work_page_query,
+    )
+    from services.cve_risk.links import changed_cve_observation_query
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     compat = PostgresSqliteCompatConnection(conn)
-    for index in range(40):
+    for index in range(160):
         project_id = "project-one-id" if index == 0 else f"project-{index}"
         slug = "project-one" if index == 0 else f"project-{index}"
         status = "archived" if index % 9 == 0 else "active"
@@ -2298,7 +2308,131 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
                 f"2026-02-{(index % 28) + 1:02}T00:00:00+00:00",
             ),
         )
-    conn.execute("ANALYZE projects")
+    timestamp = "2026-08-10T12:00:00+00:00"
+    compat.executemany(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, completed_at, archived_at, created_at, updated_at) "
+        "VALUES (?, 'scope-session', '', 'project-one-id', ?, 'network', '1.0', ?, "
+        "?, ?, ?, ?, ?, ?)",
+        [
+            (
+                f"assessment-plan-{index:03}",
+                f"Plan {index:03}",
+                Jsonb({}),
+                "completed" if index < 80 else "archived",
+                timestamp,
+                timestamp,
+                None if index < 80 else timestamp,
+                timestamp,
+                f"2026-08-10T12:{index % 60:02}:00+00:00",
+            )
+            for index in range(160)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, completed_at, created_at, updated_at) "
+        "VALUES (?, 'scope-session', '', ?, ?, 'network', '1.0', ?, "
+        "'completed', ?, ?, ?, ?)",
+        [
+            (
+                f"assessment-plan-extra-{index:03}",
+                f"project-{index}",
+                f"Extra Plan {index:03}",
+                Jsonb({}),
+                timestamp,
+                timestamp,
+                timestamp,
+                timestamp,
+            )
+            for index in range(1, 160)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, "
+        "target_value_hash, state, created_at, updated_at) "
+        "VALUES (?, 'assessment-plan-000', ?, ?, 'domain', ?, ?, ?, ?, ?)",
+        [
+            (
+                f"check-plan-{index:03}",
+                "discovery" if index % 2 == 0 else "validation",
+                f"check-{index:03}",
+                f"host-{index:03}.example",
+                f"hash-{index:03}",
+                "covered" if index % 3 == 0 else "not_started",
+                timestamp,
+                timestamp,
+            )
+            for index in range(240)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO risk_escalations "
+        "(id, owner_session_id, owner_team_id, remediation_id, cve_id, source, "
+        "transition_kind, feed_version, created_at, updated_at) "
+        "VALUES (?, 'scope-session', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
+        [
+            (
+                f"risk-plan-{index:03}",
+                f"remediation-plan-{index:03}",
+                f"CVE-2026-{index:04}",
+                f"feed-{index:03}",
+                f"2026-08-10T11:{index % 60:02}:00+00:00",
+                timestamp,
+            )
+            for index in range(180)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO risk_escalation_projects (escalation_id, project_id) "
+        "VALUES (?, 'project-one-id')",
+        [(f"risk-plan-{index:03}",) for index in range(180)],
+    )
+    compat.executemany(
+        "INSERT INTO findings (id, session_id, target_id, title, created) "
+        "VALUES (?, 'scope-session', ?, 'Plan finding', ?)",
+        [
+            (f"finding-plan-{index:03}", f"target-plan-{index:03}", timestamp)
+            for index in range(220)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO finding_cve_links (finding_id, cve_id, created_at) VALUES (?, ?, ?)",
+        [
+            (
+                f"finding-plan-{index:03}",
+                "CVE-2026-9999" if index < 40 else f"CVE-2026-{index:04}",
+                timestamp,
+            )
+            for index in range(220)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO cve_risk_work_items "
+        "(id, source, feed_version, cve_id, transition_kind, status, "
+        "next_attempt_at, created_at, updated_at) "
+        "VALUES (?, 'epss', ?, ?, 'changed', ?, ?, ?, ?)",
+        [
+            (
+                f"work-plan-{index:03}",
+                f"feed-{index:03}",
+                f"CVE-2026-{index:04}",
+                "pending" if index % 2 == 0 else "complete",
+                "",
+                f"2026-08-10T10:{index % 60:02}:00+00:00",
+                timestamp,
+            )
+            for index in range(180)
+        ],
+    )
+    conn.execute(
+        "ANALYZE projects, project_assessments, project_assessment_checks, "
+        "project_assessment_evidence, risk_escalations, risk_escalation_projects, "
+        "findings, finding_cve_links, cve_risk_work_items"
+    )
     conn.execute("SET enable_seqscan = off")
     try:
         atlas_entity_plan = _postgres_plan_text(compat.execute(
@@ -2411,6 +2545,52 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
             "EXPLAIN (COSTS OFF) SELECT rel_path FROM run_output_artifacts WHERE run_id = ?",
             ("run-artifact-1",),
         ).fetchall())
+        assessment_cycle_sql, assessment_cycle_params = assessment_cycle_page_query(
+            "project-one-id",
+            status="completed",
+            include_archived=True,
+            limit=25,
+            offset=25,
+        )
+        assessment_cycle_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + assessment_cycle_sql,
+            assessment_cycle_params,
+        ).fetchall())
+        assessment_check_sql, assessment_check_params = assessment_check_page_query(
+            "assessment-plan-000",
+            {"state": "covered"},
+            limit=25,
+            offset=25,
+        )
+        assessment_check_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + assessment_check_sql,
+            assessment_check_params,
+        ).fetchall())
+        project_risk_sql, project_risk_params = project_risk_escalation_page_query(
+            "project-one-id",
+            start="2026-08-10T00:00:00+00:00",
+            limit=25,
+        )
+        project_risk_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + project_risk_sql,
+            project_risk_params,
+        ).fetchall())
+        changed_cve_sql, changed_cve_params = changed_cve_observation_query(
+            "CVE-2026-9999"
+        )
+        changed_cve_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + changed_cve_sql,
+            changed_cve_params,
+        ).fetchall())
+        risk_work_sql, risk_work_params = risk_work_page_query(
+            max_attempts=5,
+            due_at=timestamp,
+            limit=25,
+        )
+        risk_work_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + risk_work_sql,
+            risk_work_params,
+        ).fetchall())
     finally:
         conn.execute("RESET enable_seqscan")
         conn.commit()
@@ -2441,6 +2621,15 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
     assert "idx_run_file_artifacts_run_created_path" in artifact_created_path_plan
     assert "idx_run_file_artifacts_run_created_id" in artifact_created_id_plan
     assert "run_output_artifacts_pkey" in output_artifact_plan
+    assert "idx_project_assessments_project_updated" in assessment_cycle_plan
+    assert (
+        "idx_project_assessment_checks_assessment_state" in assessment_check_plan
+        or "idx_project_assessment_checks_assessment_category" in assessment_check_plan
+    )
+    assert "idx_project_assessment_evidence_check_observed" in assessment_check_plan
+    assert "idx_risk_escalation_projects_project" in project_risk_plan
+    assert "idx_finding_cve_links_cve" in changed_cve_plan
+    assert "idx_cve_risk_work_items_due" in risk_work_plan
 
 
 @pytest.mark.postgres

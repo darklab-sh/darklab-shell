@@ -384,11 +384,14 @@ def process_risk_work(
     activation = float(settings.get("epss_activation_probability") or 0.10)
     reset = float(settings.get("epss_reset_probability") or 0.08)
     due_at = _now()
+    work_query, work_params = risk_work_page_query(
+        max_attempts=max_attempts,
+        due_at=due_at,
+        limit=batch,
+    )
     rows = conn.execute(
-        "SELECT * FROM cve_risk_work_items WHERE status IN ('pending', 'failed') "
-        "AND attempts < ? AND (next_attempt_at = '' OR next_attempt_at <= ?) "
-        "ORDER BY created_at, id LIMIT ?",
-        (max_attempts, due_at, batch),
+        work_query,
+        work_params,
     ).fetchall()
     completed = 0
     escalations = 0
@@ -465,6 +468,19 @@ def process_risk_work(
     }
 
 
+def risk_work_page_query(
+    *, max_attempts: int, due_at: str, limit: int
+) -> tuple[str, tuple[object, ...]]:
+    """Return the bounded due-work query used by the risk processor."""
+
+    return (
+        "SELECT * FROM cve_risk_work_items WHERE status IN ('pending', 'failed') "
+        "AND attempts < ? AND (next_attempt_at = '' OR next_attempt_at <= ?) "
+        "ORDER BY created_at, id LIMIT ?",
+        (int(max_attempts), str(due_at or ""), int(limit)),
+    )
+
+
 def list_project_risk_escalations(
     conn: Any,
     project_id: str,
@@ -473,20 +489,13 @@ def list_project_risk_escalations(
     end: str = "",
     limit: int = 25,
 ) -> list[dict[str, Any]]:
-    clauses = ["rp.project_id = ?"]
-    params: list[Any] = [project_id]
-    if start:
-        clauses.append("r.created_at >= ?")
-        params.append(start)
-    if end:
-        clauses.append("r.created_at <= ?")
-        params.append(end)
-    params.append(max(1, min(int(limit), 100)))
-    where_sql = " AND ".join(clauses)
-    rows = conn.execute(
-        _PROJECT_RISK_ESCALATIONS_SQL.format(where_sql=where_sql),
-        tuple(params),
-    ).fetchall()
+    query, params = project_risk_escalation_page_query(
+        project_id,
+        start=start,
+        end=end,
+        limit=limit,
+    )
+    rows = conn.execute(query, params).fetchall()
     return [{
         "id": str(row["id"]),
         "kind": "risk_escalation",
@@ -508,6 +517,28 @@ def list_project_risk_escalations(
         "ack_at": str(row["ack_at"] or ""),
         "created": str(row["created_at"]),
     } for row in rows]
+
+
+def project_risk_escalation_page_query(
+    project_id: str,
+    *,
+    start: str = "",
+    end: str = "",
+    limit: int = 25,
+) -> tuple[str, tuple[object, ...]]:
+    """Return the bounded Project risk-event query used by Monitoring."""
+
+    clauses = ["rp.project_id = ?"]
+    params: list[Any] = [project_id]
+    if start:
+        clauses.append("r.created_at >= ?")
+        params.append(start)
+    if end:
+        clauses.append("r.created_at <= ?")
+        params.append(end)
+    params.append(max(1, min(int(limit), 100)))
+    where_sql = " AND ".join(clauses)
+    return _PROJECT_RISK_ESCALATIONS_SQL.format(where_sql=where_sql), tuple(params)
 
 
 def acknowledge_escalation(

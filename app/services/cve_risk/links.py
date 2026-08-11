@@ -131,14 +131,24 @@ def linked_cve_ids(conn: Any) -> set[str]:
 
 
 def observations_for_cve(conn: Any, cve_id: str) -> list[dict[str, Any]]:
+    query, params = changed_cve_observation_query(cve_id)
     rows = conn.execute(
+        query,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def changed_cve_observation_query(cve_id: str) -> tuple[str, tuple[str]]:
+    """Return the changed-CVE lookup used before remediation grouping."""
+
+    return (
         "SELECT f.* FROM finding_cve_links l JOIN findings f ON f.id = l.finding_id "
         "WHERE l.cve_id = ? AND COALESCE(f.suppressed, FALSE) = FALSE "
         "AND COALESCE(f.status, f.review_state, 'new') NOT IN ('false_positive', 'resolved') "
         "ORDER BY f.created, f.id",
         (str(cve_id).upper(),),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    )
 
 
 def group_observations(

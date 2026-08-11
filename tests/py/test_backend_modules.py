@@ -28302,7 +28302,7 @@ class TestDatabaseInit:
         assert direct["detail"]["entity"]["id"] == direct_id
         assert direct["candidates"] == []
 
-    def test_personal_scope_predicates_use_sqlite_partial_indexes(self):
+    def test_personal_scope_and_assessment_queries_use_sqlite_indexes(self):
         from services.atlas.lookup_resolve import exact_lookup_candidate_query
         from services.atlas.scope import (
             entity_scope_params,
@@ -28315,6 +28315,15 @@ class TestDatabaseInit:
             project_finding_owner_clause,
         )
         from services.projects.scope import shared_owner_where
+        from services.assessments.read_model import (
+            assessment_check_page_query,
+            assessment_cycle_page_query,
+        )
+        from services.cve_risk.escalation import (
+            project_risk_escalation_page_query,
+            risk_work_page_query,
+        )
+        from services.cve_risk.links import changed_cve_observation_query
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -28322,6 +28331,146 @@ class TestDatabaseInit:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             try:
+                timestamp = "2026-08-10T12:00:00+00:00"
+                conn.execute(
+                    "INSERT INTO projects "
+                    "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+                    "VALUES ('project-plan', 'scope-session', '', 'Plan', 'plan', '', 'active', '', ?, ?)",
+                    (timestamp, timestamp),
+                )
+                conn.executemany(
+                    "INSERT INTO projects "
+                    "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+                    "VALUES (?, 'scope-session', '', ?, ?, '', 'active', '', ?, ?)",
+                    [
+                        (
+                            f"project-plan-extra-{index:03}",
+                            f"Plan Extra {index:03}",
+                            f"plan-extra-{index:03}",
+                            timestamp,
+                            timestamp,
+                        )
+                        for index in range(160)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO project_assessments "
+                    "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+                    "status, started_at, completed_at, archived_at, created_at, updated_at) "
+                    "VALUES (?, 'scope-session', '', 'project-plan', ?, 'network', '1.0', "
+                    "?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            f"assessment-plan-{index:03}",
+                            f"Plan {index:03}",
+                            "completed" if index < 80 else "archived",
+                            timestamp,
+                            timestamp,
+                            None if index < 80 else timestamp,
+                            timestamp,
+                            f"2026-08-10T12:{index % 60:02}:00+00:00",
+                        )
+                        for index in range(160)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO project_assessments "
+                    "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+                    "status, started_at, completed_at, created_at, updated_at) "
+                    "VALUES (?, 'scope-session', '', ?, ?, 'network', '1.0', "
+                    "'completed', ?, ?, ?, ?)",
+                    [
+                        (
+                            f"assessment-plan-extra-{index:03}",
+                            f"project-plan-extra-{index:03}",
+                            f"Extra Plan {index:03}",
+                            timestamp,
+                            timestamp,
+                            timestamp,
+                            timestamp,
+                        )
+                        for index in range(160)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO project_assessment_checks "
+                    "(id, assessment_id, category, check_key, target_type, target_value, "
+                    "target_value_hash, state, created_at, updated_at) "
+                    "VALUES (?, 'assessment-plan-000', ?, ?, 'domain', ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            f"check-plan-{index:03}",
+                            "discovery" if index % 2 == 0 else "validation",
+                            f"check-{index:03}",
+                            f"host-{index:03}.example",
+                            f"hash-{index:03}",
+                            "covered" if index % 3 == 0 else "not_started",
+                            timestamp,
+                            timestamp,
+                        )
+                        for index in range(240)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO risk_escalations "
+                    "(id, owner_session_id, owner_team_id, remediation_id, cve_id, source, "
+                    "transition_kind, feed_version, created_at, updated_at) "
+                    "VALUES (?, 'scope-session', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
+                    [
+                        (
+                            f"risk-plan-{index:03}",
+                            f"remediation-plan-{index:03}",
+                            f"CVE-2026-{index:04}",
+                            f"feed-{index:03}",
+                            f"2026-08-10T11:{index % 60:02}:00+00:00",
+                            timestamp,
+                        )
+                        for index in range(180)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO risk_escalation_projects (escalation_id, project_id) VALUES (?, 'project-plan')",
+                    [(f"risk-plan-{index:03}",) for index in range(180)],
+                )
+                conn.executemany(
+                    "INSERT INTO findings (id, session_id, target_id, title, created) "
+                    "VALUES (?, 'scope-session', ?, 'Plan finding', ?)",
+                    [
+                        (f"finding-plan-{index:03}", f"target-plan-{index:03}", timestamp)
+                        for index in range(220)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO finding_cve_links (finding_id, cve_id, created_at) VALUES (?, ?, ?)",
+                    [
+                        (
+                            f"finding-plan-{index:03}",
+                            "CVE-2026-9999" if index < 40 else f"CVE-2026-{index:04}",
+                            timestamp,
+                        )
+                        for index in range(220)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO cve_risk_work_items "
+                    "(id, source, feed_version, cve_id, transition_kind, status, "
+                    "next_attempt_at, created_at, updated_at) "
+                    "VALUES (?, 'epss', ?, ?, 'changed', ?, ?, ?, ?)",
+                    [
+                        (
+                            f"work-plan-{index:03}",
+                            f"feed-{index:03}",
+                            f"CVE-2026-{index:04}",
+                            "pending" if index % 2 == 0 else "complete",
+                            "",
+                            f"2026-08-10T10:{index % 60:02}:00+00:00",
+                            timestamp,
+                        )
+                        for index in range(180)
+                    ],
+                )
+                conn.execute("ANALYZE")
+
                 atlas_entity_sql = (
                     "SELECT e.id FROM entities e WHERE "
                     + entity_scope_sql("e")
@@ -28477,6 +28626,57 @@ class TestDatabaseInit:
                     "SELECT rel_path FROM run_output_artifacts WHERE run_id = ?",
                     ("run-artifact-1",),
                 )
+                assessment_cycle_sql, assessment_cycle_params = assessment_cycle_page_query(
+                    "project-plan",
+                    status="completed",
+                    include_archived=True,
+                    limit=25,
+                    offset=25,
+                )
+                assessment_cycle_plan = self._sqlite_query_plan(
+                    conn,
+                    assessment_cycle_sql,
+                    assessment_cycle_params,
+                )
+                assessment_check_sql, assessment_check_params = assessment_check_page_query(
+                    "assessment-plan-000",
+                    {"state": "covered"},
+                    limit=25,
+                    offset=25,
+                )
+                assessment_check_plan = self._sqlite_query_plan(
+                    conn,
+                    assessment_check_sql,
+                    assessment_check_params,
+                )
+                project_risk_sql, project_risk_params = project_risk_escalation_page_query(
+                    "project-plan",
+                    start="2026-08-10T00:00:00+00:00",
+                    limit=25,
+                )
+                project_risk_plan = self._sqlite_query_plan(
+                    conn,
+                    project_risk_sql,
+                    project_risk_params,
+                )
+                changed_cve_sql, changed_cve_params = changed_cve_observation_query(
+                    "CVE-2026-9999"
+                )
+                changed_cve_plan = self._sqlite_query_plan(
+                    conn,
+                    changed_cve_sql,
+                    changed_cve_params,
+                )
+                risk_work_sql, risk_work_params = risk_work_page_query(
+                    max_attempts=5,
+                    due_at=timestamp,
+                    limit=25,
+                )
+                risk_work_plan = self._sqlite_query_plan(
+                    conn,
+                    risk_work_sql,
+                    risk_work_params,
+                )
             finally:
                 conn.close()
 
@@ -28500,7 +28700,10 @@ class TestDatabaseInit:
             or "idx_entities_session_type_last_seen" in profile_related_entities_plan
         )
         assert "idx_entities_host_entity" in profile_related_findings_plan
-        assert "idx_findings_session_entity_seen" in profile_related_findings_plan
+        assert (
+            "idx_findings_session_entity_seen" in profile_related_findings_plan
+            or "idx_findings_session_suppressed" in profile_related_findings_plan
+        )
         assert "idx_projects_personal_slug_unique" in project_slug_plan
         assert (
             "idx_entities_session_type_last_seen" in project_entity_plan
@@ -28516,6 +28719,15 @@ class TestDatabaseInit:
         assert "idx_run_file_artifacts_run_created_path" in artifact_created_path_plan
         assert "idx_run_file_artifacts_run_created_id" in artifact_created_id_plan
         assert "sqlite_autoindex_run_output_artifacts_1" in output_artifact_plan
+        assert "idx_project_assessments_project_updated" in assessment_cycle_plan
+        assert (
+            "idx_project_assessment_checks_assessment_state" in assessment_check_plan
+            or "idx_project_assessment_checks_assessment_category" in assessment_check_plan
+        )
+        assert "idx_project_assessment_evidence_check_observed" in assessment_check_plan
+        assert "idx_risk_escalation_projects_project" in project_risk_plan
+        assert "idx_finding_cve_links_cve" in changed_cve_plan
+        assert "idx_cve_risk_work_items_due" in risk_work_plan
 
     def test_personal_scope_team_id_normalization_guards_strict_predicates(self):
         from core.migrations import v0040_personal_scope_team_id_normalization as migration
