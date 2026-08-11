@@ -17,7 +17,8 @@ def assessment_detail_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "required": ["assessment", "rollup", "category_rollups", "target_rollups",
-                     "recent_evidence", "finding_deltas", "finding_worklist", "checks"],
+                     "recent_evidence", "finding_deltas", "finding_worklist",
+                     "retest_queue", "checks"],
         "properties": {
             "assessment": _ref("AssessmentCycle"),
             "rollup": _ref("AssessmentRollup"),
@@ -32,6 +33,7 @@ def assessment_detail_schema() -> dict[str, Any]:
             "recent_evidence": _ref("AssessmentEvidencePage"),
             "finding_deltas": _ref("AssessmentFindingDeltaPage"),
             "finding_worklist": _ref("AssessmentFindingWorklistPage"),
+            "retest_queue": _ref("AssessmentRetestQueue"),
             "checks": _ref("AssessmentCheckPage"),
         },
         "additionalProperties": False,

@@ -1416,6 +1416,31 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         },
         "source_finding_count": 0,
     }
+    assert filtered["retest_queue"] == {
+        "groups": [],
+        "rollup": {
+            "ready_to_verify": 0,
+            "needs_retest": 0,
+            "total_findings": 0,
+            "group_count": 0,
+            "batch_launchable_groups": 0,
+            "individual_only_groups": 0,
+        },
+        "batch_max_findings": 10,
+        "truncated": False,
+        "grouping_contract": (
+            "Findings share a group only when Project target, Assessment check, action, "
+            "and HTTP role/profile are identical. Different values stay individual."
+        ),
+        "partial_failure_contract": (
+            "One shared run is linked to each finding independently after completion; "
+            "one failed evidence link doesn't remove successful links."
+        ),
+        "disposition_contract": (
+            "Retest evidence can suggest verified or needs retest, but a person must save "
+            "the final finding disposition."
+        ),
+    }
     assert cross_scope.status_code == 404
     assert json.loads(cross_scope.data)["error"]["code"] == "not_found"
 
@@ -7700,6 +7725,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     ]
     assert "finding_deltas" in schemas["AssessmentDetail"]["required"]
     assert "finding_worklist" in schemas["AssessmentDetail"]["required"]
+    assert "retest_queue" in schemas["AssessmentDetail"]["required"]
     assert "target_rollups" in schemas["AssessmentDetail"]["required"]
     assert "recent_evidence" in schemas["AssessmentDetail"]["required"]
     assert schemas["AssessmentDetail"]["properties"]["recent_evidence"] == {
@@ -7718,6 +7744,19 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     }
     assert schemas["AssessmentDetail"]["properties"]["finding_worklist"] == {
         "$ref": "#/components/schemas/AssessmentFindingWorklistPage"
+    }
+    assert schemas["AssessmentDetail"]["properties"]["retest_queue"] == {
+        "$ref": "#/components/schemas/AssessmentRetestQueue"
+    }
+    assert schemas["AssessmentRetestQueue"]["properties"]["groups"] == {
+        "type": "array",
+        "maxItems": 50,
+        "items": {"$ref": "#/components/schemas/AssessmentRetestGroup"},
+    }
+    assert schemas["AssessmentRetestBatch"]["properties"]["max_findings"] == {
+        "type": "integer",
+        "minimum": 2,
+        "maximum": 10,
     }
     assert schemas["AssessmentFindingWorklistPage"]["properties"]["items"] == {
         "type": "array",

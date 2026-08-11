@@ -468,7 +468,7 @@ def get_finding_verification_context(
         )
 
 
-def _link_completed_verification_run(
+def link_completed_verification_run(
     session_id: str,
     project_id: str,
     finding_id: str,
@@ -531,7 +531,7 @@ def verification_run_finalized_hook(
             })
             return
         try:
-            linked = _link_completed_verification_run(
+            linked = link_completed_verification_run(
                 session_id,
                 project_id,
                 finding_id,

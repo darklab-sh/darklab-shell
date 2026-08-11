@@ -297,6 +297,105 @@ const detail = {
     },
     source_finding_count: 13,
   },
+  retest_queue: {
+    groups: [{
+      id: 'rtg_shared',
+      project_id: 'prj_1',
+      assessment_id: 'asmt_1',
+      grouping: {
+        project_target: { entity_id: 'ent_1', type: 'domain', value: 'example.com' },
+        assessment_check: { id: 'asmc_1', key: 'service_inventory' },
+        action: { key: 'command:nmap', id: 'nmap', kind: 'command' },
+        http_profile: {
+          id: '', name: 'No saved HTTP profile', role: 'none', credential_use: 'none',
+        },
+      },
+      items: [{
+        finding_id: 'fnd_confirmed',
+        title: 'Confirmed template match',
+        severity: 'critical',
+        verification_status: 'ready_to_verify',
+        check_id: 'asmc_1',
+        comparison: {
+          available: true,
+          state: 'compatible',
+          reason: 'The original and retest runs used the same target and action.',
+          left_run_id: 'run_original',
+          right_run_id: 'run_retest',
+        },
+        human_disposition_required: true,
+      }, {
+        finding_id: 'fnd_inferred',
+        title: 'Version match',
+        severity: 'high',
+        verification_status: 'needs_retest',
+        check_id: 'asmc_1',
+        comparison: {
+          available: false,
+          state: 'not_started',
+          reason: 'No completed retest evidence is linked to this finding yet.',
+          left_run_id: 'run_original',
+          right_run_id: '',
+        },
+        human_disposition_required: true,
+      }],
+      finding_count: 2,
+      batch: {
+        launchable: true,
+        unavailable_reason: '',
+        max_findings: 10,
+        plan_digest: 'b'.repeat(64),
+        display_command: 'nmap -sT -sV example.com',
+        requires_confirmation: true,
+      },
+    }, {
+      id: 'rtg_individual',
+      project_id: 'prj_1',
+      assessment_id: 'asmt_1',
+      grouping: {
+        project_target: { entity_id: 'ent_1', type: 'domain', value: 'example.com' },
+        assessment_check: { id: 'asmc_2', key: 'dns_inventory' },
+        action: { key: 'command:dnsrecon', id: 'dnsrecon', kind: 'command' },
+        http_profile: {
+          id: '', name: 'No saved HTTP profile', role: 'none', credential_use: 'none',
+        },
+      },
+      items: [{
+        finding_id: 'fnd_dns',
+        title: 'DNS delegation needs review',
+        severity: 'medium',
+        verification_status: 'ready_to_verify',
+        check_id: 'asmc_2',
+        comparison: {
+          available: false,
+          state: 'not_started',
+          reason: 'No completed retest evidence is linked to this finding yet.',
+        },
+      }],
+      finding_count: 1,
+      batch: {
+        launchable: false,
+        unavailable_reason: "A shared batch needs at least two findings; use the finding's individual action.",
+        max_findings: 10,
+        plan_digest: 'c'.repeat(64),
+        display_command: 'dnsrecon -d example.com',
+        requires_confirmation: true,
+      },
+    }],
+    rollup: {
+      ready_to_verify: 2,
+      needs_retest: 1,
+      total_findings: 3,
+      group_count: 2,
+      batch_launchable_groups: 1,
+      individual_only_groups: 1,
+    },
+    batch_max_findings: 10,
+    truncated: false,
+    grouping_contract: 'Findings share a group only when Project target, Assessment check, action, and HTTP role/profile are identical. Different values stay individual.',
+    partial_failure_contract: "One shared run is linked to each finding independently after completion; one failed evidence link doesn't remove successful links.",
+    disposition_contract: 'Retest evidence can suggest verified or needs retest, but a person must save the final finding disposition.',
+  },
   checks: {
     checks: [
       {
@@ -1912,7 +2011,9 @@ describe('project assessment controller', () => {
       expect(surface.textContent).toContain('Some checks have a compatible earlier baseline')
       expect(surface.textContent).toContain('CVE-2026-10001')
       expect(surface.textContent).toContain('1 current observation')
-      const buttons = [...surface.querySelectorAll('.project-assessment-delta-evidence .btn')]
+      const buttons = [...surface.querySelectorAll(
+        '.project-assessment-deltas .project-assessment-delta-evidence .btn',
+      )]
       expect(buttons.map(button => button.textContent)).toEqual([
         'Current template match',
         'Earlier template match',
@@ -1924,11 +2025,18 @@ describe('project assessment controller', () => {
       expect.objectContaining({ id: 'fnd_current' }),
       expect.objectContaining({ projectId: 'prj_1', canEdit: true }),
     )
-    expect(mobile.querySelector('.project-assessment-delta-evidence .btn')?.getBoundingClientRect).toBeDefined()
+    expect(mobile.querySelector(
+      '.project-assessment-deltas .project-assessment-delta-evidence .btn',
+    )?.getBoundingClientRect).toBeDefined()
   })
 
   it('renders and filters a remediation-level fix-first worklist on desktop and mobile', async () => {
-    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url.includes('/retest-groups/rtg_shared') && options.method === 'POST') {
+        return apiResponse({ run: { run_id: 'run_shared_retest', status: 'running' } })
+      }
+      return responseFor(url, options)
+    })
     const ctx = makeContext(projectWorkspaceRequest)
     const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
     await controller.load('prj_1', { render: false })
@@ -1956,7 +2064,31 @@ describe('project assessment controller', () => {
       expect(observations.textContent).toBe('▾Hide 2 observations')
       expect(worklist.textContent).toContain('Confirmed template match')
       expect(worklist.textContent).toContain('Version match')
+      const queue = surface.querySelector('.project-assessment-retests')
+      expect(queue?.textContent).toContain('Retest queue')
+      expect(queue?.textContent).toContain('Project target, Assessment check, action, and HTTP role/profile')
+      expect(queue?.textContent).toContain('Compatible original and retest evidence is ready to compare.')
+      expect(queue?.textContent).toContain('No completed retest evidence is linked to this finding yet.')
+      expect(queue?.textContent).toContain('A shared batch needs at least two findings')
+      expect(queue?.textContent).toContain('a person must save the final finding disposition')
     }
+
+    desktop.querySelector('.project-assessment-retests .btn-primary').click()
+    await vi.waitFor(() => expect(ctx.attachActiveRunFromMonitor).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run_shared_retest' }),
+    ))
+    expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      '/projects/prj_1/assessments/asmt_1/retest-groups/rtg_shared',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true, plan_digest: 'b'.repeat(64) }),
+      },
+    )
+    expect(ctx.showConfirm.mock.calls.at(-1)[0].body.note).toContain(
+      'linked to each finding independently',
+    )
+    expect(ctx.closeProjectWorkspace).toHaveBeenCalledWith({ refocus: false })
 
     desktop.querySelectorAll('.project-assessment-risk-observation .btn')[0].click()
     await vi.waitFor(() => expect(openFindingTriageEditor).toHaveBeenCalledWith(

@@ -511,7 +511,7 @@ from blueprints.projects_targets import (  # noqa: E402,F401
     projects_targets_list,
     projects_targets_update,
 )
-from blueprints import projects_assessment_action_launch, projects_assessment_actions, projects_assessment_checks, projects_assessment_oast, projects_assessment_oast_launch, projects_assessment_zap, projects_assessments, projects_finding_evidence, projects_finding_merges, projects_finding_triage, projects_http_profiles, projects_verification_actions  # noqa: E402,F401,E501
+from blueprints import projects_assessment_action_launch, projects_assessment_actions, projects_assessment_checks, projects_assessment_oast, projects_assessment_oast_launch, projects_assessment_zap, projects_assessments, projects_finding_evidence, projects_finding_merges, projects_finding_triage, projects_http_profiles, projects_retest_queue, projects_verification_actions  # noqa: E402,F401,E501
 from blueprints.projects_auto_promote import (  # noqa: E402,F401
     projects_auto_promote_rules_apply,
     projects_auto_promote_rules_create,

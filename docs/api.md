@@ -243,7 +243,7 @@ Create a cycle with a profile key and optional title:
 }
 ```
 
-The cycle detail endpoint accepts `category`, `state`, `target_type`, `policy_level`, and `evidence_state` filters plus `limit` and `offset`. Its response keeps cycle and category rollups separate from the bounded `checks` page, including `total`, `limit`, `offset`, and `has_more`. Each check includes up to three newest evidence links, while `recent_evidence` returns up to 20 newest sources across the whole cycle with their check and target context.
+The cycle detail endpoint accepts `category`, `state`, `target_type`, `policy_level`, and `evidence_state` filters plus `limit` and `offset`. Its response keeps cycle and category rollups separate from the bounded `checks` page, including `total`, `limit`, `offset`, and `has_more`. Each check includes up to three newest evidence links, while `recent_evidence` returns up to 20 newest sources across the whole cycle with their check and target context. The read-only `retest_queue` considers up to 50 findings marked `ready_to_verify` or `needs_retest` and groups them only when Project target, Assessment check, action, and HTTP role/profile match exactly. Its batch metadata explains why a group remains individual or whether two to ten safe, credential-free plans share one exact command. A comparison can suggest a disposition, but it doesn't change the saved finding status.
 
 An active check accepts `blocked`, `skipped`, or `not_applicable` together with a reason. Send `not_started` without a reason to clear that decision and return to the state derived from saved evidence. Link evidence with its saved type and id:
 

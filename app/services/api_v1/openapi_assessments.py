@@ -9,6 +9,7 @@ from typing import Any
 
 from services.api_v1.openapi_assessment_deltas import assessment_delta_schemas
 from services.api_v1.openapi_assessment_evidence import assessment_evidence_schemas
+from services.api_v1.openapi_assessment_retests import assessment_retest_schemas
 from services.api_v1.openapi_assessment_worklist import (
     assessment_detail_schema, assessment_worklist_query_params, assessment_worklist_schemas,
 )
@@ -79,6 +80,7 @@ def assessment_schemas() -> dict[str, Any]:
     return {
         **assessment_delta_schemas(),
         **assessment_evidence_schemas(),
+        **assessment_retest_schemas(),
         **assessment_worklist_schemas(),
         "AssessmentEvidenceRuleSnapshot": {
             "type": "object",

@@ -1144,6 +1144,9 @@
           "recent_evidence": {
             "$ref": "#/components/schemas/AssessmentEvidencePage"
           },
+          "retest_queue": {
+            "$ref": "#/components/schemas/AssessmentRetestQueue"
+          },
           "rollup": {
             "$ref": "#/components/schemas/AssessmentRollup"
           },
@@ -1162,6 +1165,7 @@
           "recent_evidence",
           "finding_deltas",
           "finding_worklist",
+          "retest_queue",
           "checks"
         ],
         "type": "object"
@@ -2856,6 +2860,367 @@
           "purpose",
           "target_types",
           "check_count"
+        ],
+        "type": "object"
+      },
+      "AssessmentRetestBatch": {
+        "additionalProperties": false,
+        "properties": {
+          "display_command": {
+            "type": "string"
+          },
+          "launchable": {
+            "type": "boolean"
+          },
+          "max_findings": {
+            "maximum": 10,
+            "minimum": 2,
+            "type": "integer"
+          },
+          "plan_digest": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "unavailable_reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "launchable",
+          "unavailable_reason",
+          "max_findings",
+          "plan_digest",
+          "display_command",
+          "requires_confirmation"
+        ],
+        "type": "object"
+      },
+      "AssessmentRetestComparison": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "left_run_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "right_run_id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "not_started",
+              "compatible",
+              "incomparable",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "reason",
+          "left_run_id",
+          "right_run_id"
+        ],
+        "type": "object"
+      },
+      "AssessmentRetestGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "batch": {
+            "$ref": "#/components/schemas/AssessmentRetestBatch"
+          },
+          "finding_count": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "grouping": {
+            "$ref": "#/components/schemas/AssessmentRetestQueueGrouping"
+          },
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentRetestQueueItem"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "assessment_id",
+          "grouping",
+          "items",
+          "finding_count",
+          "batch"
+        ],
+        "type": "object"
+      },
+      "AssessmentRetestQueue": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_max_findings": {
+            "enum": [
+              10
+            ],
+            "type": "integer"
+          },
+          "disposition_contract": {
+            "type": "string"
+          },
+          "grouping_contract": {
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentRetestGroup"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "partial_failure_contract": {
+            "type": "string"
+          },
+          "rollup": {
+            "$ref": "#/components/schemas/AssessmentRetestQueueRollup"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "groups",
+          "rollup",
+          "batch_max_findings",
+          "truncated",
+          "grouping_contract",
+          "partial_failure_contract",
+          "disposition_contract"
+        ],
+        "type": "object"
+      },
+      "AssessmentRetestQueueGrouping": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "",
+                  "command",
+                  "workflow"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          },
+          "assessment_check": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "key"
+            ],
+            "type": "object"
+          },
+          "http_profile": {
+            "additionalProperties": false,
+            "properties": {
+              "credential_use": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "role",
+              "credential_use"
+            ],
+            "type": "object"
+          },
+          "project_target": {
+            "additionalProperties": false,
+            "properties": {
+              "entity_id": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "domain",
+                  "ip",
+                  "url"
+                ],
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entity_id",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "project_target",
+          "assessment_check",
+          "action",
+          "http_profile"
+        ],
+        "type": "object"
+      },
+      "AssessmentRetestQueueItem": {
+        "additionalProperties": false,
+        "properties": {
+          "action_plan": {
+            "$ref": "#/components/schemas/FindingVerificationActionPlan"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/AssessmentRetestComparison"
+          },
+          "finding_id": {
+            "type": "string"
+          },
+          "human_disposition_required": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "suggestion": {
+            "$ref": "#/components/schemas/FindingVerificationSuggestion"
+          },
+          "title": {
+            "type": "string"
+          },
+          "verification_status": {
+            "enum": [
+              "ready_to_verify",
+              "needs_retest"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "finding_id",
+          "title",
+          "severity",
+          "verification_status",
+          "check_id",
+          "action_plan",
+          "comparison",
+          "suggestion",
+          "human_disposition_required"
+        ],
+        "type": "object"
+      },
+      "AssessmentRetestQueueRollup": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_launchable_groups": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "group_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "individual_only_groups": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "needs_retest": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ready_to_verify": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_findings": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ready_to_verify",
+          "needs_retest",
+          "total_findings",
+          "group_count",
+          "batch_launchable_groups",
+          "individual_only_groups"
         ],
         "type": "object"
       },

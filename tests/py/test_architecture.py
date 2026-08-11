@@ -34,6 +34,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_assessment_deltas.py",
     "openapi_assessment_evidence.py",
     "openapi_assessment_oast.py",
+    "openapi_assessment_retests.py",
     "openapi_assessment_worklist.py",
     "openapi_assessment_zap.py",
     "openapi_assessments.py",
@@ -268,6 +269,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_http_profiles.py", 214, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_manual_findings.py", 165, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_finding_merges.py", 145, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_retest_queue.py", 165, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_links.py", 242, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_metadata.py", 158, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_monitoring.py", 239, "split-package-ratchet"),
@@ -337,10 +339,15 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/api_v1/openapi_assessment_evidence.py", 66, "split-package-ratchet"
     ),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_assessment_retests.py",
+        179,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_worklist.py", 195, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_oast.py", 287, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_zap.py", 330, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/api_v1/openapi_assessments.py", 728, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_assessments.py", 729, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_advisory.py", 66, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_risk.py", 94, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_finding_details.py", 47, "split-package-ratchet"),
@@ -481,7 +488,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/mutations.py", 493, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/profile_summaries.py", 27, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/profiles.py", 686, "cohesive-ratchet"),
-    ModuleSizeBudget("app/services/assessments/read_model.py", 258, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/read_model.py", 266, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/read_model_queries.py", 162, "split-package-ratchet"
     ),
@@ -501,6 +508,12 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/reconciliation_read.py", 231, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/reconciliation_read_filters.py", 90, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/recommended_actions.py", 107, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/retest_finalization.py",
+        104,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget("app/services/assessments/retest_queue.py", 368, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/recommended_action_profiles.py", 35, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/recommended_action_queries.py", 41, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/schema.py", 10, "split-package-ratchet"),
@@ -936,8 +949,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 263
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "5cc4fdac428290171393e77c4dbcd0df758aebd530a5a199d99ad7ac8127ae7e"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 264
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "2d2cdc5447a16d37e5e634f2d1b667522ec15db3e788553094d9436813ed8931"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

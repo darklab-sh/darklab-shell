@@ -21,6 +21,7 @@ def _expected_capability(path: str, method: str) -> str:
             part in path
             for part in (
                 "/recommended-action",
+                "/retest-groups/",
                 "/zap-jobs",
                 "/oast-correlations",
             )

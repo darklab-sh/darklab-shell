@@ -20,6 +20,7 @@ from services.assessments.manual_evidence_read import attach_manual_evidence
 from services.assessments.nmap_service_evidence_read import attach_nmap_service_evidence
 from services.assessments.nuclei_recommendations import attach_nuclei_recommendations
 from services.assessments.reconciliation_read import assessment_finding_delta_read_model
+from services.assessments.retest_queue import assessment_retest_queue_on_conn
 from services.assessments.read_model_queries import (
     assessment_check_page_query,
     assessment_cycle_filter as _assessment_cycle_filter,
@@ -173,6 +174,13 @@ def get_assessment_read_model(
                 limit=safe_finding_limit,
                 offset=safe_finding_offset,
             ),
+            "retest_queue": assessment_retest_queue_on_conn(
+                conn,
+                str(session_id or "").strip(),
+                str(project_id or "").strip(),
+                str(row["id"]),
+                team_id=str(team_id or "").strip(),
+            ),
             "checks": _check_page(
                 conn,
                 str(row["id"]),
@@ -227,7 +235,7 @@ def list_assessment_cycles(
             include_archived=include_archived,
         )
         total_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM project_assessments a WHERE "
+            "SELECT COUNT(*) AS count FROM project_assessments a WHERE "  # nosec B608
             + cycle_where_sql,
             cycle_where_params,
         ).fetchone()

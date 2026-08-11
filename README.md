@@ -97,6 +97,8 @@ Atlas can preview external scanner reports before saving any rows. Alongside Nuc
 
 A Project assessment's **Fix first** section ranks the current cycle's saved issues, while Overview shows a compact version that opens the same cycle and priority filter. Risk stays separate from coverage, so a high-priority finding never makes an untested check look complete.
 
+The Assessment tab also keeps a **Retest queue** for findings marked ready to verify or needing another retest. It groups work only when the Project target, frozen check, action, and HTTP role/profile all match. Two to ten findings can share one safe, credential-free command; other groups explain why they need individual runs. When a shared run finishes, darklab_shell keeps each successful evidence link even if another link fails, and an assessor still reviews the result before saving the final disposition.
+
 On an active Assessment cycle, an assessor can mark a check blocked, intentionally skipped, or not applicable with a required reason, then restore the state calculated from saved evidence later. The check shows that reason, when it was recorded, and whether it came from a team member or browser session. Completed and archived cycles stay read-only, and view-only team members can review these decisions without changing them.
 
 Use **Manage evidence** on an active check to link a compatible saved Project run, workflow execution, finding, Atlas entity, artifact, or screenshot by its ID. The same control lists recent manual links and can remove one without deleting the saved source; each change recalculates the check against its frozen evidence rules.

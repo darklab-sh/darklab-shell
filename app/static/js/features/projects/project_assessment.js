@@ -701,6 +701,69 @@ function createProjectAssessmentController(context) {
     }
   }
 
+  async function launchRetestGroup(projectId, group, returnFocus = null) {
+    const assessmentId = String(group?.assessment_id || stateFor(projectId).selectedId || '');
+    const groupId = String(group?.id || '');
+    const planDigest = String(group?.batch?.plan_digest || '');
+    const launchKey = `${String(projectId || '')}:${assessmentId}:retest:${groupId}`;
+    if (!projectId || !assessmentId || !groupId || !planDigest
+      || !group?.batch?.launchable || actionLaunches.has(launchKey)) return false;
+    if (ctx.canRunCommands?.() === false) {
+      ctx.setProjectWorkspaceMessage?.(
+        "View-only team members can't start retest runs. Switch to Personal or ask for operator access.",
+        { error: true },
+      );
+      return false;
+    }
+    actionLaunches.add(launchKey);
+    try {
+      const findingCount = Number(group?.finding_count || group?.items?.length || 0);
+      const choice = await ctx.showConfirm?.({
+        body: {
+          text: `Start one shared retest for ${findingCount.toLocaleString()} findings?`,
+          note: 'The exact safe command runs once. Completed evidence is linked to each finding independently, and a person must still save every final disposition.',
+        },
+        tone: 'warning',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'launch', label: 'Start shared retest', role: 'warning' },
+        ],
+        returnFocus,
+        refocusOnResolve: false,
+      });
+      if (choice !== 'launch') return false;
+      const resp = await ctx.projectWorkspaceRequest(
+        `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/retest-groups/${encodeURIComponent(groupId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirmed: true, plan_digest: planDigest }),
+        },
+      );
+      if (!resp.ok) throw await responseError(resp, 'Could not start this shared retest.');
+      const payload = await resp.json();
+      const run = payload?.run;
+      if (!run?.run_id) throw new Error('The shared retest started without a run identifier.');
+      const attached = await ctx.attachActiveRunFromMonitor?.(run);
+      if (!attached) {
+        throw new Error('The shared retest started, but it could not open in a terminal. Open it from History.');
+      }
+      ctx.closeProjectWorkspace?.({ refocus: false });
+      return true;
+    } catch (err) {
+      ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not start this shared retest.', { error: true });
+      logFailure('PROJECT_ASSESSMENT_CLIENT_RETEST_BATCH_LAUNCH_FAILED', err, {
+        phase: 'retest_batch',
+        project_id: String(projectId || ''),
+        assessment_id: assessmentId,
+        group_id: groupId,
+      });
+      return false;
+    } finally {
+      actionLaunches.delete(launchKey);
+    }
+  }
+
   function openOast(projectId, detail, check, returnFocus = null) {
     return oastManager.open(
       projectId,
@@ -750,6 +813,7 @@ function createProjectAssessmentController(context) {
     load,
     loadDetail,
     launchRecommendedAction,
+    launchRetestGroup,
     cancelZap: zapManager.cancel,
     openOast,
     openOastRunDetails: oastManager.openRunDetails,

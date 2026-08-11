@@ -24,6 +24,7 @@ from services.assessments.cleanup import (
     RUN_EVIDENCE_UNAVAILABLE_REASON,
     mark_run_evidence_unavailable_on_conn,
 )
+from services.assessments.action_plans import AssessmentActionError
 from services.assessments.contracts import AssessmentError
 from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.assessments.command_modes import (
@@ -66,6 +67,11 @@ from services.assessments.reconciliation_cleanup import (
     reconciliation_deletion_counts,
 )
 from services.assessments.reconciliation_read import assessment_finding_delta_read_model
+from services.assessments.retest_finalization import retest_batch_run_finalized_hook
+from services.assessments.retest_queue import (
+    assessment_retest_queue_on_conn,
+    confirmed_retest_batch_plan_on_conn,
+)
 from services.assessments.recommended_actions import (
     confirm_recommended_action_plan,
     get_recommended_action_plan,
@@ -83,8 +89,12 @@ from services.assessments.schemathesis_report_contracts import (
 )
 from services.assessments.schemathesis_schema import review_local_openapi_json
 from services.assessments.storage import create_assessment_cycle
-from services.projects.contracts import ProjectWorkspaceQuotaExceeded
+from services.projects.contracts import (
+    ProjectWorkspaceNotFound,
+    ProjectWorkspaceQuotaExceeded,
+)
 from services.projects.crud import create_project, delete_project
+from services.projects.finding_evidence import link_finding_evidence_on_conn
 from services.projects.links import link_run_to_project_on_conn
 from services.projects.targets import add_project_target
 from services.runs.finalization import save_completed_run
@@ -1504,6 +1514,7 @@ def test_reviewed_schemathesis_report_persists_safe_idempotent_evidence_and_cove
 
 def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
     assessment_factory,
+    caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ):
     factory, cleanup = assessment_factory
@@ -1513,6 +1524,7 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
         target_match="host_or_descendant",
     )
     profile = _profile(rule=finding_rule)
+    profile["checks"][0]["policy_level"] = "safe"
     session_id, project_id, previous_assessment_id = factory(
         [("domain", "delta.example")],
         profile=profile,
@@ -1564,6 +1576,7 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
     )
     current = create_assessment_cycle(session_id, project_id, "evidence-test")
     current_assessment_id = str(current["assessment"]["id"])
+    current_check_id = str(current["checks"]["checks"][0]["id"])
     with db_connect() as conn:
         conn.execute(
             "INSERT INTO finding_triage_details "
@@ -1702,6 +1715,118 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
     assert export_context["evidence"][0]["source_run"]["tool"] == "nuclei"
     assert export_context["fix_first"]["total"] == 3
     assert export_context["finding_changes"]["rollup"] == read_model["rollup"]
+
+    queued_finding_ids = [
+        by_vulnerability["CVE-2026-10001"]["current_findings"][0]["id"],
+        by_vulnerability["CVE-2026-10003"]["current_findings"][0]["id"],
+    ]
+    with db_connect() as conn:
+        for finding_id in queued_finding_ids:
+            conn.execute(
+                "INSERT INTO finding_triage_details "
+                "(id, session_id, finding_id, remediation, verification_steps, "
+                "verification_status, verification_notes, created, updated) "
+                "VALUES (?, ?, ?, '', '', 'ready_to_verify', '', ?, ?)",
+                (
+                    "ftri-retest-queue-" + uuid.uuid4().hex,
+                    session_id,
+                    finding_id,
+                    "2026-08-05 12:30:00",
+                    "2026-08-05 12:30:00",
+                ),
+            )
+            link_finding_evidence_on_conn(
+                conn,
+                session_id,
+                project_id,
+                finding_id,
+                {"evidence_type": "assessment_check", "evidence_id": current_check_id},
+            )
+        queue = assessment_retest_queue_on_conn(
+            conn,
+            session_id,
+            project_id,
+            current_assessment_id,
+        )
+        assert queue["rollup"] == {
+            "ready_to_verify": 2,
+            "needs_retest": 0,
+            "total_findings": 2,
+            "group_count": 1,
+            "batch_launchable_groups": 1,
+            "individual_only_groups": 0,
+        }
+        group = queue["groups"][0]
+        assert group["finding_count"] == 2
+        assert group["batch"]["launchable"] is True
+        assert group["grouping"]["project_target"]["value"] == "delta.example"
+        assert group["grouping"]["assessment_check"]["key"] == "service_discovery"
+        assert group["grouping"]["action"]["key"] == "command:nmap"
+        assert group["grouping"]["http_profile"]["role"] == "none"
+        assert all(item["human_disposition_required"] for item in group["items"])
+        confirmed = confirmed_retest_batch_plan_on_conn(
+            conn,
+            session_id,
+            project_id,
+            current_assessment_id,
+            group["id"],
+            {"confirmed": True, "plan_digest": group["batch"]["plan_digest"]},
+        )
+        assert confirmed["id"] == group["id"]
+        conn.execute(
+            "UPDATE finding_triage_details SET verification_status = 'needs_retest' "
+            "WHERE finding_id = ?",
+            (queued_finding_ids[1],),
+        )
+        refreshed_queue = assessment_retest_queue_on_conn(
+            conn,
+            session_id,
+            project_id,
+            current_assessment_id,
+        )
+        with pytest.raises(AssessmentActionError, match="retest batch changed"):
+            confirmed_retest_batch_plan_on_conn(
+                conn,
+                session_id,
+                project_id,
+                current_assessment_id,
+                group["id"],
+                {"confirmed": True, "plan_digest": group["batch"]["plan_digest"]},
+            )
+        conn.commit()
+    assert refreshed_queue["rollup"]["ready_to_verify"] == 1
+    assert refreshed_queue["rollup"]["needs_retest"] == 1
+
+    link_calls: list[str] = []
+
+    def link_retest(_session_id, _project_id, finding_id, *_args, **_kwargs):
+        link_calls.append(finding_id)
+        if finding_id == queued_finding_ids[0]:
+            raise ProjectWorkspaceNotFound("finding evidence changed")
+        return {"created": True}
+
+    monkeypatch.setattr(
+        "services.assessments.retest_finalization.link_completed_verification_run",
+        link_retest,
+    )
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="shell"):
+        retest_batch_run_finalized_hook(session_id, refreshed_queue["groups"][0])(
+            "run_shared_retest",
+            {
+                "finalize_summary": {"persisted": True},
+                "active_project_link": {"project_id": project_id},
+            },
+        )
+    assert len(link_calls) == 2
+    assert set(link_calls) == set(queued_finding_ids)
+    linked_event = next(
+        record
+        for record in caplog.records
+        if record.message == "PROJECT_RETEST_BATCH_EVIDENCE_LINKED"
+    )
+    assert getattr(linked_event, "linked_count") == 1
+    assert getattr(linked_event, "failed_count") == 1
 
     selected_remediation_id = by_vulnerability["CVE-2026-10004"]["remediation_id"]
     selected_handoff = get_project_assessment_finding_changes(

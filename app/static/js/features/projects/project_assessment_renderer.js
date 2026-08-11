@@ -558,6 +558,137 @@ function createProjectAssessmentRenderer(context, actions) {
     return section;
   }
 
+  function retestStatusLabel(status) {
+    const labels = {
+      ready_to_verify: 'Ready to verify',
+      needs_retest: 'Needs retest',
+    };
+    return labels[String(status || '')] || 'Awaiting review';
+  }
+
+  function renderRetestQueue(projectId, queue) {
+    const data = queue || {};
+    const rollup = data.rollup || {};
+    const groups = Array.isArray(data.groups) ? data.groups : [];
+    const section = makeElement('section', 'project-assessment-section project-assessment-retests');
+    section.appendChild(sectionHeading(
+      'Retest queue',
+      data.grouping_contract
+        || 'Findings are grouped only when their target, check, action, and HTTP role are identical.',
+    ));
+    const cards = makeElement('div', 'project-assessment-summary-grid');
+    cards.append(
+      summaryCard(rollup.ready_to_verify || 0, 'Ready to verify', 'saved findings'),
+      summaryCard(
+        rollup.needs_retest || 0,
+        'Needs retest',
+        'saved findings',
+        Number(rollup.needs_retest || 0) ? 'attention' : '',
+      ),
+      summaryCard(rollup.batch_launchable_groups || 0, 'Shared batches', 'safe compatible groups'),
+      summaryCard(rollup.individual_only_groups || 0, 'Individual only', 'mismatched or single findings'),
+    );
+    section.appendChild(cards);
+    if (!groups.length) {
+      section.appendChild(makeElement(
+        'p',
+        'project-assessment-delta-empty',
+        'No findings are ready to verify or marked for another retest in this cycle.',
+      ));
+      return section;
+    }
+    const list = makeElement('div', 'project-assessment-delta-list');
+    groups.forEach((group) => {
+      const grouping = group?.grouping || {};
+      const target = grouping.project_target || {};
+      const check = grouping.assessment_check || {};
+      const action = grouping.action || {};
+      const profile = grouping.http_profile || {};
+      const row = makeElement('article', 'panel-row project-assessment-delta-row');
+      const heading = makeElement('div', 'project-assessment-delta-heading');
+      heading.append(
+        makeElement('strong', '', target.value || 'Saved Project target'),
+        badge(`${Number(group?.finding_count || 0)} finding${Number(group?.finding_count || 0) === 1 ? '' : 's'}`),
+      );
+      row.appendChild(heading);
+      row.appendChild(makeElement(
+        'div',
+        'project-assessment-delta-meta',
+        [
+          check.key || check.id || 'Assessment check',
+          action.key || 'No shared action',
+          `${profile.role || 'none'} · ${profile.name || 'No saved HTTP profile'}`,
+        ].join(' · '),
+      ));
+      const findings = makeElement('div', 'project-assessment-delta-evidence-grid');
+      (Array.isArray(group?.items) ? group.items : []).forEach((item) => {
+        const finding = makeElement('div', 'project-assessment-delta-evidence');
+        finding.append(
+          makeElement('strong', '', item?.title || 'Saved finding'),
+          badge(retestStatusLabel(item?.verification_status), item?.verification_status === 'needs_retest' ? 'amber' : 'cyan'),
+        );
+        const comparison = item?.comparison || {};
+        finding.appendChild(makeElement(
+          'span',
+          'project-assessment-delta-empty',
+          comparison.available
+            ? 'Compatible original and retest evidence is ready to compare.'
+            : (comparison.reason || 'No compatible evidence comparison is available yet.'),
+        ));
+        const open = makeElement('button', 'btn btn-secondary btn-compact', 'Open finding');
+        open.type = 'button';
+        open.title = comparison.available
+          ? 'Open the finding to compare evidence and save a human disposition'
+          : 'Open the finding to review evidence and verification steps';
+        ctx.bindProjectRuntimePressable?.(open, {
+          onActivate: () => void act.openDeltaFinding(
+            projectId,
+            { id: item?.finding_id, title: item?.title, severity: item?.severity },
+            open,
+          ),
+        });
+        finding.appendChild(open);
+        findings.appendChild(finding);
+      });
+      row.appendChild(findings);
+      const reason = String(group?.batch?.unavailable_reason || '');
+      if (group?.batch?.launchable) {
+        const launch = makeElement('button', 'btn btn-primary btn-compact', 'Start shared retest');
+        launch.type = 'button';
+        launch.disabled = ctx.canRunCommands?.() === false;
+        launch.title = launch.disabled
+          ? "View-only team members can't start retest runs."
+          : `Run one reviewed command for up to ${Number(group?.batch?.max_findings || 0)} compatible findings`;
+        ctx.bindProjectRuntimePressable?.(launch, {
+          onActivate: () => void act.launchRetestGroup(projectId, group, launch),
+        });
+        row.appendChild(launch);
+      } else if (reason) {
+        row.appendChild(makeElement(
+          'p',
+          'project-assessment-delta-reason',
+          `${reason} Open each finding to use its individual verification action.`,
+        ));
+      }
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    section.appendChild(makeElement(
+      'p',
+      'project-assessment-delta-limit',
+      data.disposition_contract
+        || 'Retest evidence can suggest an outcome, but a person must save the final finding disposition.',
+    ));
+    if (data.truncated) {
+      section.appendChild(makeElement(
+        'p',
+        'project-assessment-delta-limit',
+        'This queue is bounded. Finish or reclassify the visible findings to load more.',
+      ));
+    }
+    return section;
+  }
+
   function filterChip(label, active, onActivate) {
     const chip = makeElement('button', `chip${active ? ' is-active' : ''}`, label);
     chip.type = 'button';
@@ -1354,6 +1485,7 @@ function createProjectAssessmentRenderer(context, actions) {
     root.append(
       renderCoverage(st.detail.rollup),
       renderAssessmentFindingWorklist(ctx, act, projectId, st, st.detail.finding_worklist),
+      renderRetestQueue(projectId, st.detail.retest_queue),
       renderFindingDeltas(projectId, st.detail.finding_deltas),
       renderCategoryProgress(projectId, st, st.detail.category_rollups),
       renderChecks(projectId, st, st.detail, { mobile }),
