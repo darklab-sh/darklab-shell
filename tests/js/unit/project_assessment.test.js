@@ -661,6 +661,7 @@ describe('project assessment controller', () => {
     expect(container.textContent).toContain(ready.files_path)
     expect(container.textContent).not.toContain('Open Atlas findings')
     expect(container.textContent).toContain('Review Atlas import')
+    expect(container.querySelector('.project-assessment-zap-status .badge')?.classList.contains('badge-tone-cyan')).toBe(true)
     ;[...container.querySelectorAll('.project-assessment-zap-actions .btn')]
       .find(button => button.textContent === 'Review Atlas import')?.click()
     await Promise.resolve()
@@ -1091,6 +1092,7 @@ describe('project assessment controller', () => {
     for (const surface of [desktop, mobile]) {
       const recommendation = surface.querySelector('.project-assessment-check-recommendation')
       expect(recommendation?.textContent).toContain('Recommended from saved evidence')
+      expect(recommendation?.querySelector('.badge')?.classList.contains('badge-tone-cyan')).toBe(true)
       expect(recommendation?.textContent).toContain('1 version-based CVE candidate')
       expect(recommendation?.textContent).toContain('Review its exact bounds')
     }
@@ -1173,6 +1175,7 @@ describe('project assessment controller', () => {
     for (const surface of [desktop, mobile]) {
       const recommendation = surface.querySelector('.project-assessment-service-recommendations')
       expect(recommendation?.textContent).toContain('Suggested next actions')
+      expect(recommendation?.querySelector('.badge')?.classList.contains('badge-tone-cyan')).toBe(true)
       expect(recommendation?.textContent).toContain('Review HTTPS surface')
       expect(recommendation?.textContent).toContain('443/tcp · https · nginx 1.26')
       expect(recommendation?.textContent).toContain('445/tcp · smb')

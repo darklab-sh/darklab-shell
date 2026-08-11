@@ -692,7 +692,7 @@ function createProjectAssessmentRenderer(context, actions) {
 
   function zapStatusTone(status) {
     if (status === 'imported') return 'green';
-    if (status === 'ready') return 'blue';
+    if (status === 'ready') return 'cyan';
     if (['queued', 'submitting', 'running', 'downloading', 'cancel_requested'].includes(status)) return 'amber';
     if (['failed', 'expired'].includes(status)) return 'red';
     return 'muted';
@@ -840,7 +840,7 @@ function createProjectAssessmentRenderer(context, actions) {
     if (nucleiRecommendation?.recommended) {
       const recommendation = makeElement('div', 'project-assessment-check-recommendation');
       recommendation.append(
-        badge('Recommended from saved evidence', 'blue'),
+        badge('Recommended from saved evidence', 'cyan'),
         makeElement('p', '', String(nucleiRecommendation.summary || '')),
       );
       if (nucleiRecommendation.source_truncated) {
@@ -914,7 +914,7 @@ function createProjectAssessmentRenderer(context, actions) {
     const heading = makeElement('div', 'project-assessment-service-recommendation-heading');
     heading.append(
       makeElement('strong', '', 'Suggested next actions'),
-      badge('Saved service evidence', 'blue'),
+      badge('Saved service evidence', 'cyan'),
     );
     section.appendChild(heading);
     actions.forEach((action) => {
