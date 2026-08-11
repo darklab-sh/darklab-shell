@@ -1341,6 +1341,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     filtered = json.loads(filtered_response.data)
     assert filtered["checks"]["total"] == 1
     assert filtered["checks"]["checks"][0]["id"] == check_id
+    assert sum(item["total_checks"] for item in filtered["target_rollups"]) == 3
     assert filtered["finding_deltas"] == {
         "comparison": {
             "status": "pending",
@@ -7215,6 +7216,15 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     ]
     assert "finding_deltas" in schemas["AssessmentDetail"]["required"]
     assert "finding_worklist" in schemas["AssessmentDetail"]["required"]
+    assert "target_rollups" in schemas["AssessmentDetail"]["required"]
+    assert schemas["AssessmentDetail"]["properties"]["target_rollups"] == {
+        "type": "array",
+        "items": {"$ref": "#/components/schemas/AssessmentTargetRollup"},
+    }
+    assert schemas["AssessmentTargetRollup"]["properties"]["total_checks"] == {
+        "type": "integer",
+        "minimum": 0,
+    }
     assert schemas["AssessmentDetail"]["properties"]["finding_deltas"] == {
         "$ref": "#/components/schemas/AssessmentFindingDeltaPage"
     }

@@ -1706,6 +1706,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
     from services.assessments.manual_evidence_read import attach_manual_evidence
     from services.assessments.mutations import update_manual_check_state_on_conn
+    from services.assessments.target_rollups import assessment_target_rollups
 
     raw_conn = postgres_schema.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
@@ -1760,6 +1761,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
     ).fetchone()
     checks = [{"id": "chk-state"}]
     attach_manual_evidence(conn, checks)
+    target_rollups = assessment_target_rollups(conn, "asm-state")
 
     assert changed["check"]["state"] == "blocked"
     assert changed["check"]["state_actor"] == {
@@ -1782,6 +1784,18 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
         "offset": 0,
         "has_more": False,
     }
+    assert target_rollups == [{
+        "target_entity_id": "",
+        "target_type": "domain",
+        "target_value": "state.example",
+        "total_checks": 1,
+        "applicable_checks": 1,
+        "covered_checks": 0,
+        "checks_awaiting_review": 0,
+        "untested_checks": 0,
+        "excluded_checks": 1,
+        "unavailable_evidence_checks": 0,
+    }]
 
 
 @pytest.mark.postgres

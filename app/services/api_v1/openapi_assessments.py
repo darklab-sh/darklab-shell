@@ -221,6 +221,29 @@ def assessment_schemas() -> dict[str, Any]:
             },
             "additionalProperties": False,
         },
+        "AssessmentTargetRollup": {
+            "type": "object",
+            "required": [
+                "target_entity_id", "target_type", "target_value",
+                "total_checks", "applicable_checks", "covered_checks",
+                "checks_awaiting_review", "untested_checks", "excluded_checks",
+                "unavailable_evidence_checks",
+            ],
+            "properties": {
+                "target_entity_id": {"type": "string"},
+                "target_type": {"type": "string"},
+                "target_value": {"type": "string"},
+                **{
+                    key: {"type": "integer", "minimum": 0}
+                    for key in (
+                        "total_checks", "applicable_checks", "covered_checks",
+                        "checks_awaiting_review", "untested_checks", "excluded_checks",
+                        "unavailable_evidence_checks",
+                    )
+                },
+            },
+            "additionalProperties": False,
+        },
         "AssessmentCycle": {
             "type": "object",
             "required": [

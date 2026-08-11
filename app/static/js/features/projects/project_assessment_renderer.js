@@ -474,6 +474,12 @@ function createProjectAssessmentRenderer(context, actions) {
     return [check?.target_type || 'target', check?.target_entity_id || check?.target_value || 'unknown'].join(':');
   }
 
+  function targetRollup(detail, check) {
+    const key = targetKey(check);
+    const rollups = Array.isArray(detail?.target_rollups) ? detail.target_rollups : [];
+    return rollups.find(item => targetKey(item) === key) || null;
+  }
+
   function checkMeta(check) {
     const parts = [String(check?.policy_level || ''), `${Number(check?.evidence_count || 0)} evidence`];
     if (Number(check?.unavailable_evidence_count || 0) > 0) {
@@ -1006,6 +1012,7 @@ function createProjectAssessmentRenderer(context, actions) {
 
   function renderTargetGroup(projectId, st, detail, checks, { mobile = false } = {}) {
     const representative = checks[0] || {};
+    const rollup = targetRollup(detail, representative);
     const key = targetKey(representative);
     const open = st.expandedTargets.has(key);
     const group = makeElement('section', 'project-assessment-target-group');
@@ -1015,10 +1022,10 @@ function createProjectAssessmentRenderer(context, actions) {
     const label = makeElement('span', 'project-assessment-target-label');
     label.append(
       makeElement('strong', '', representative?.target_value || representative?.target_entity_id || 'Project-wide checks'),
-      makeElement('small', '', `${representative?.target_type || 'project'} · ${checks.length} check${checks.length === 1 ? '' : 's'}`),
+      makeElement('small', '', `${representative?.target_type || 'project'} · ${Number(rollup?.total_checks ?? checks.length)} check${Number(rollup?.total_checks ?? checks.length) === 1 ? '' : 's'}`),
     );
-    const covered = checks.filter(check => check?.state === 'covered').length;
-    const review = checks.filter(check => check?.state === 'needs_review').length;
+    const covered = Number(rollup?.covered_checks ?? checks.filter(check => check?.state === 'covered').length);
+    const review = Number(rollup?.checks_awaiting_review ?? checks.filter(check => check?.state === 'needs_review').length);
     const counts = makeElement(
       'span',
       'project-assessment-target-counts',

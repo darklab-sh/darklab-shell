@@ -316,8 +316,8 @@ def test_create_cycle_enforces_cycle_and_check_quotas_in_the_insert_transaction(
 def test_read_model_rollups_filters_and_pages_checks(project_factory):
     session_id, project = project_factory()
     project_id = str(project["id"])
-    _add_target(session_id, project_id, "domain", "rollup.example")
-    _add_target(session_id, project_id, "url", "https://rollup.example/app")
+    domain_target = _add_target(session_id, project_id, "domain", "rollup.example")
+    url_target = _add_target(session_id, project_id, "url", "https://rollup.example/app")
     created = create_assessment_cycle(session_id, project_id, "network")
     assessment_id = created["assessment"]["id"]
     with db_connect() as conn:
@@ -384,6 +384,35 @@ def test_read_model_rollups_filters_and_pages_checks(project_factory):
     assert {item["category"] for item in read["category_rollups"]} == {
         "discovery",
         "enumeration",
+    }
+    target_rollups = {
+        item["target_value"]: item for item in read["target_rollups"]
+    }
+    assert target_rollups == {
+        "rollup.example": {
+            "target_entity_id": domain_target["id"],
+            "target_type": "domain",
+            "target_value": "rollup.example",
+            "total_checks": 2,
+            "applicable_checks": 2,
+            "covered_checks": 1,
+            "checks_awaiting_review": 1,
+            "untested_checks": 0,
+            "excluded_checks": 0,
+            "unavailable_evidence_checks": 1,
+        },
+        "https://rollup.example/app": {
+            "target_entity_id": url_target["id"],
+            "target_type": "url",
+            "target_value": "https://rollup.example/app",
+            "total_checks": 1,
+            "applicable_checks": 1,
+            "covered_checks": 0,
+            "checks_awaiting_review": 0,
+            "untested_checks": 0,
+            "excluded_checks": 1,
+            "unavailable_evidence_checks": 0,
+        },
     }
 
     unavailable = get_assessment_read_model(

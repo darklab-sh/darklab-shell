@@ -17,12 +17,8 @@ def assessment_detail_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "required": [
-            "assessment",
-            "rollup",
-            "category_rollups",
-            "finding_deltas",
-            "finding_worklist",
-            "checks",
+            "assessment", "rollup", "category_rollups", "target_rollups",
+            "finding_deltas", "finding_worklist", "checks",
         ],
         "properties": {
             "assessment": _ref("AssessmentCycle"),
@@ -30,6 +26,10 @@ def assessment_detail_schema() -> dict[str, Any]:
             "category_rollups": {
                 "type": "array",
                 "items": _ref("AssessmentCategoryRollup"),
+            },
+            "target_rollups": {
+                "type": "array",
+                "items": _ref("AssessmentTargetRollup"),
             },
             "finding_deltas": _ref("AssessmentFindingDeltaPage"),
             "finding_worklist": _ref("AssessmentFindingWorklistPage"),

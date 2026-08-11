@@ -35,6 +35,7 @@ from services.assessments.summary import (
     assessment_category_rollups,
     assessment_rollup,
 )
+from services.assessments.target_rollups import assessment_target_rollups
 from services.projects.scope import shared_owner_where
 from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
 
@@ -239,6 +240,7 @@ def get_assessment_read_model(
             "assessment": row_to_assessment(row),
             "rollup": assessment_rollup(conn, str(row["id"])),
             "category_rollups": assessment_category_rollups(conn, str(row["id"])),
+            "target_rollups": assessment_target_rollups(conn, str(row["id"])),
             "finding_deltas": assessment_finding_delta_read_model(conn, str(row["id"])),
             "finding_worklist": assessment_finding_worklist_on_conn(
                 conn,

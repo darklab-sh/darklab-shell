@@ -1132,12 +1132,19 @@
           },
           "rollup": {
             "$ref": "#/components/schemas/AssessmentRollup"
+          },
+          "target_rollups": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentTargetRollup"
+            },
+            "type": "array"
           }
         },
         "required": [
           "assessment",
           "rollup",
           "category_rollups",
+          "target_rollups",
           "finding_deltas",
           "finding_worklist",
           "checks"
@@ -2852,6 +2859,61 @@
         "required": [
           "kind",
           "member_id"
+        ],
+        "type": "object"
+      },
+      "AssessmentTargetRollup": {
+        "additionalProperties": false,
+        "properties": {
+          "applicable_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "checks_awaiting_review": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "covered_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "excluded_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "target_entity_id": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "target_value": {
+            "type": "string"
+          },
+          "total_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unavailable_evidence_checks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "untested_checks": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target_entity_id",
+          "target_type",
+          "target_value",
+          "total_checks",
+          "applicable_checks",
+          "covered_checks",
+          "checks_awaiting_review",
+          "untested_checks",
+          "excluded_checks",
+          "unavailable_evidence_checks"
         ],
         "type": "object"
       },

@@ -469,6 +469,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/serialization.py", 128, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/storage.py", 357, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/summary.py", 106, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/target_rollups.py", 32, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/zap_connector.py", 516, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/actors.py", 39, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/artifact_queries.py", 249, "split-package-ratchet"),

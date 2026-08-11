@@ -156,6 +156,18 @@ const detail = {
     applicable_checks: 2,
     covered_checks: 1,
   }],
+  target_rollups: [{
+    target_entity_id: 'ent_1',
+    target_type: 'domain',
+    target_value: 'example.com',
+    total_checks: 7,
+    applicable_checks: 7,
+    covered_checks: 5,
+    checks_awaiting_review: 2,
+    untested_checks: 0,
+    excluded_checks: 0,
+    unavailable_evidence_checks: 1,
+  }],
   finding_worklist: {
     items: [{
       remediation_id: 'rmd_1',
@@ -507,6 +519,8 @@ describe('project assessment controller', () => {
       expect(surface.textContent).toContain('Waiting for the approved maintenance window.')
       expect(surface.textContent).toContain('Recorded by team member tmem_operator')
       expect(surface.textContent).toContain('2026-08-05 11:30:00+00:00')
+      expect(surface.textContent).toContain('domain · 7 checks')
+      expect(surface.textContent).toContain('5 covered · 2 review')
       const serviceEvidence = surface.querySelector('.project-assessment-nmap-evidence')
       expect(serviceEvidence?.textContent).toContain('Nmap service evidence')
       expect(serviceEvidence?.textContent).toContain('192.0.2.10:445/tcp')
