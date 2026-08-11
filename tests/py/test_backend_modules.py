@@ -28710,6 +28710,7 @@ class TestDatabaseInit:
         assert (
             "idx_findings_session_entity_seen" in profile_related_findings_plan
             or "idx_findings_session_suppressed" in profile_related_findings_plan
+            or "idx_findings_session_last_run_seen" in profile_related_findings_plan
         )
         assert "idx_projects_personal_slug_unique" in project_slug_plan
         assert (
