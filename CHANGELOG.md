@@ -547,6 +547,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **The configuration guide now inventories every Assessment-owned `app/conf` catalog.** Assessment profiles, package presets, report templates, and the reviewed takeover template now state their overlay or replacement boundary and exactly when a change takes effect.
 - **Assessment qualification decisions now distinguish enforced limits from measured release evidence.** The decision record lists the actual Project and owner capacity caps without presenting them as unrecorded workload benchmarks, points image sizing to the per-release measurement contract, and states the current public-exploit ranking boundary without future proposal language.
 - **The Assessment decision record now describes the shipped five-profile catalog.** Network, Web, API, TLS, and Combined cycles share one frozen model across the browser, API, and CLI, while EPSS and KEV remain independent risk signals. Release-sequencing language no longer describes the current runtime as an earlier partial profile set.
 - **The container smoke wrapper now uses the repository's pytest launcher.** A repository virtualenv is selected when it's available, while CI continues to use its installed `pytest` command. Contributors can run the documented wrapper without first changing `PATH` or accidentally selecting a system Python that lacks the test dependencies.

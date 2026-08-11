@@ -70,6 +70,8 @@ The installer keeps the host overlay tree at `0700` with files at `0600`. Contai
 |--------------|-------------------------------|----------------------------|----------|
 | `app/conf/config.yaml` | `conf/config.local.yaml` | `app/conf/config.local.yaml` | Overrides application YAML fine-tuning settings |
 | `app/conf/assessment_profiles.yaml` | `conf/assessment_profiles.local.yaml` | `app/conf/assessment_profiles.local.yaml` | Adds complete profiles or replaces a complete profile with the same key |
+| `app/conf/package_presets.yaml` | `conf/package_presets.local.yaml` | `app/conf/package_presets.local.yaml` | Replaces the complete evidence-package preset catalog when selected by `package_presets_file` |
+| `app/conf/report_templates.yaml` | `conf/report_templates.local.yaml` | `app/conf/report_templates.local.yaml` | Replaces the complete engagement-report template catalog when selected by `report_templates_file` |
 | `app/conf/commands.yaml` | `conf/commands.local.yaml` | `app/conf/commands.local.yaml` | Adds new command roots and merges same-root entries into the base registry |
 | `app/conf/faq.yaml` | `conf/faq.local.yaml` | `app/conf/faq.local.yaml` | Appends local FAQ entries |
 | `app/conf/welcome.yaml` | `conf/welcome.local.yaml` | `app/conf/welcome.local.yaml` | Appends local welcome samples |
@@ -84,7 +86,7 @@ A theme overlay can change a shipped theme but doesn't create a new theme-select
 
 Malformed shipped or local theme YAML falls back to the valid values that remain. The container logs `THEME_OVERLAY_LOAD_FAILED` with only the bounded path, source type, and parser error type; it never includes theme contents or the raw parser message.
 
-Package presets and report templates are complete replacement catalogs rather than merge overlays. Select `package_presets.local.yaml` or `report_templates.local.yaml` in `config.local.yaml`; relative filenames containing `.local.` resolve from the operator root. `tour.yaml` and `wordlists.yaml` are image-owned catalogs and don't have local overlay filenames.
+Package presets and report templates are complete replacement catalogs rather than merge overlays. Select `package_presets.local.yaml` or `report_templates.local.yaml` in `config.local.yaml`; relative filenames containing `.local.` resolve from the operator root. `tour.yaml`, `wordlists.yaml`, and the reviewed takeover template under `app/conf/nuclei/` are image-owned catalogs and don't have local overlay filenames.
 
 ---
 
@@ -95,6 +97,9 @@ The table describes loader behavior after the app process can read the selected 
 | File | When changes take effect |
 |------|--------------------------|
 | `conf/assessment_profiles.yaml` | Immediately for the next assessment-profile read; invalid reloads keep the last valid catalog |
+| Selected `package_presets.yaml` or `package_presets.local.yaml` | Immediately after the readable file changes; invalid replacements fall back to the shipped catalog |
+| Selected `report_templates.yaml` or `report_templates.local.yaml` | Immediately after the readable file changes; invalid replacements fall back to the shipped catalog |
+| `conf/nuclei/takeovers/github-pages-dangling-domain.yaml` | With the release image that ships it; this reviewed template has no operator override |
 | `conf/faq.yaml` | Immediately; re-read on every request |
 | `conf/ascii.txt` | On next page load |
 | `conf/ascii_mobile.txt` | On next page load |
@@ -568,6 +573,9 @@ See [Logging Reference](docs/logging.md) for level semantics, event names, field
 | Path | Purpose |
 |------|---------|
 | `app/conf/config.yaml` | Main application settings |
+| `app/conf/assessment_profiles.yaml` | Maintained Network, Web, API, TLS, and Combined assessment profiles; complete local profiles can add to or replace this catalog by key |
+| `app/conf/package_presets.yaml` | Shipped evidence-package preset catalog; `package_presets_file` can select a complete operator-owned replacement |
+| `app/conf/report_templates.yaml` | Shipped engagement-report template catalog; `report_templates_file` can select a complete operator-owned replacement |
 | `app/conf/commands.yaml` | Command registry for catalog grouping, autocomplete, allow/deny policy, runtime adaptations, encrypted secret requirements, workspace flags, and smoke-test examples |
 | `app/conf/faq.yaml` | Operator FAQ entries appended to the built-in, section-grouped FAQ |
 | `app/conf/welcome.yaml` | Welcome command samples and featured sample metadata |
@@ -578,6 +586,7 @@ See [Logging Reference](docs/logging.md) for level semantics, event names, field
 | `app/conf/app_hints_mobile.txt` | Mobile rotating welcome hints |
 | `app/conf/wordlists.yaml` | Curated SecLists categories for the `wordlist` command and autocomplete |
 | `app/conf/workflows.yaml` | Operator-configured guided workflows shown in the Workflows panel after built-in workflow entries |
+| `app/conf/nuclei/takeovers/github-pages-dangling-domain.yaml` | Image-owned, digest-pinned GitHub Pages takeover confirmation template; it has no local override and changes only with a reviewed release image |
 | `app/conf/themes/` | Named theme variants used by the shell, permalink pages, diagnostics, and HTML export |
 | `app/conf/theme_dark.yaml.example` | Generated dark-theme reference template |
 | `app/conf/theme_light.yaml.example` | Generated light-theme reference template |
