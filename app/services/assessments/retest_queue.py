@@ -44,7 +44,7 @@ def _queue_rows(
         "WHERE ",
         owner_sql,
         " AND link.project_id = ? AND link.evidence_type = 'assessment_check' ",
-        "AND c.assessment_id = ? AND f.suppressed = 0 ",
+        "AND c.assessment_id = ? AND COALESCE(f.suppressed, FALSE) = FALSE ",
         "AND triage.verification_status IN ('ready_to_verify', 'needs_retest') ",
         "ORDER BY triage.verification_status, f.id, c.id LIMIT ?",
     ))
