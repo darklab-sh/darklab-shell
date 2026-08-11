@@ -19,6 +19,7 @@ from services.assessments.lifecycle import (
     preview_assessment_deletion,
     update_assessment_cycle,
 )
+from services.assessments.profile_summaries import list_assessment_profile_summaries
 from services.assessments.read_model import (
     get_assessment_read_model,
     list_assessment_cycles,
@@ -136,6 +137,7 @@ def api_project_assessments(project_id):
         return _assessment_api_error(exc)
     if page is None:
         return api_routes._api_json_error("not_found", "Project not found.", 404)
+    page["profiles"] = list_assessment_profile_summaries()
     return jsonify(page)
 
 

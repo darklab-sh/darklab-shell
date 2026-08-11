@@ -378,11 +378,25 @@ def assessment_schemas() -> dict[str, Any]:
             },
             "additionalProperties": False,
         },
+        "AssessmentProfileSummary": {
+            "type": "object",
+            "required": ["key", "version", "label", "purpose", "target_types", "check_count"],
+            "properties": {
+                **{
+                    key: {"type": "string"}
+                    for key in ("key", "version", "label", "purpose")
+                },
+                "target_types": {"type": "array", "items": {"type": "string"}},
+                "check_count": {"type": "integer", "minimum": 0},
+            },
+            "additionalProperties": False,
+        },
         "AssessmentCyclePage": {
             "type": "object",
-            "required": ["assessments", "total", "limit", "offset", "has_more"],
+            "required": ["assessments", "profiles", "total", "limit", "offset", "has_more"],
             "properties": {
                 "assessments": {"type": "array", "items": _ref("AssessmentCycle")},
+                "profiles": {"type": "array", "items": _ref("AssessmentProfileSummary")},
                 "total": {"type": "integer"},
                 "limit": {"type": "integer"},
                 "offset": {"type": "integer"},

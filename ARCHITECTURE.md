@@ -278,7 +278,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/api/v1/projects/<project_id>/runs` | Returns a read-only paged project run response using project query services. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Returns a read-only paged project Atlas entity response using project query services. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Returns a read-only paged evidence package list for one project. |
-| `GET` | `/api/v1/projects/<project_id>/assessments` | Returns a bounded assessment-cycle page for one Project, with status and archived-visibility filters. |
+| `GET` | `/api/v1/projects/<project_id>/assessments` | Returns a bounded assessment-cycle page for one Project, with status and archived-visibility filters plus bounded summaries of the available cycle profiles. |
 | `POST` | `/api/v1/projects/<project_id>/assessments` | Creates an active cycle from a validated profile snapshot; team scope requires Project mutation permission. |
 | `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Returns one cycle's safe profile snapshot, truthful rollups, and a bounded, filtered check page. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Renames an active cycle or advances it to completed or archived. |

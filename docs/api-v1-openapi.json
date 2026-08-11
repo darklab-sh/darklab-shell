@@ -973,12 +973,19 @@
           "offset": {
             "type": "integer"
           },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentProfileSummary"
+            },
+            "type": "array"
+          },
           "total": {
             "type": "integer"
           }
         },
         "required": [
           "assessments",
+          "profiles",
           "total",
           "limit",
           "offset",
@@ -2796,6 +2803,42 @@
           "purpose",
           "target_types",
           "checks"
+        ],
+        "type": "object"
+      },
+      "AssessmentProfileSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "check_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "target_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "version",
+          "label",
+          "purpose",
+          "target_types",
+          "check_count"
         ],
         "type": "object"
       },

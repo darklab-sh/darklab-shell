@@ -125,7 +125,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
-| `GET` | `/api/v1/projects/<project_id>/assessments` | Assessment-cycle page with status, archived-visibility, limit, and offset controls. |
+| `GET` | `/api/v1/projects/<project_id>/assessments` | Assessment-cycle page with status, archived-visibility, limit, and offset controls plus the available profile keys and labels. |
 | `POST` | `/api/v1/projects/<project_id>/assessments` | Create an active assessment cycle from a saved profile definition. |
 | `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | One assessment cycle with coverage, finding-change, and fix-first rollups plus independently paged check and remediation worklists. Check filters use `category`, `state`, `target_type`, `policy_level`, and `evidence_state`; fix-first filters use `finding_priority`, `finding_limit`, and `finding_offset`. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Rename, complete, or archive an assessment cycle. |
@@ -231,6 +231,8 @@ That action sends only those two values to OSV. It doesn't upload an SBOM, saved
 ## Project Assessments
 
 Assessment routes reuse the browser's saved cycle, check, and evidence services. List and detail reads work in personal or team scope. Team writes require the same Project mutation permission as the browser, so a viewer can inspect a cycle but can't change it.
+
+The list response includes bounded summaries of the available profiles. Use a summary's `key` as `profile_key` when creating a cycle; the response doesn't expose the profiles' complete check definitions.
 
 Create a cycle with a profile key and optional title:
 

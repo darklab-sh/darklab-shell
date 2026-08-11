@@ -1337,6 +1337,13 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     listed = json.loads(listed_response.data)
     assert listed["total"] == 1
     assert listed["assessments"][0]["id"] == assessment_id
+    assert {profile["key"] for profile in listed["profiles"]} == {
+        "api",
+        "network",
+        "web",
+    }
+    assert all(profile["check_count"] > 0 for profile in listed["profiles"])
+    assert all("checks" not in profile for profile in listed["profiles"])
     assert filtered_response.status_code == 200
     filtered = json.loads(filtered_response.data)
     assert filtered["checks"]["total"] == 1
@@ -7062,6 +7069,15 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert paths["/projects/{project_id}/assessments"]["post"]["requestBody"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/AssessmentCreateRequest"}
+    assert paths["/projects/{project_id}/assessments"]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentCyclePage"
+    }
+    assert schemas["AssessmentCyclePage"]["properties"]["profiles"]["items"] == {
+        "$ref": "#/components/schemas/AssessmentProfileSummary"
+    }
+    assert schemas["AssessmentProfileSummary"]["additionalProperties"] is False
     assert paths[assessment_path]["get"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/AssessmentDetail"}
