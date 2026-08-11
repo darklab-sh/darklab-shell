@@ -8359,7 +8359,10 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
                         "state_reason": reason,
                     },
                 }
-            if path == "/projects/prj_cli/findings/fnd_cli/verification-actions/asmc_cli":
+            if path == (
+                "/projects/prj_cli/assessments/asmt_cli/checks/asmc_cli/"
+                "recommended-action"
+            ):
                 plan = {
                     "action": {"key": "command:nmap", "kind": "command", "id": "nmap"},
                     "target": {"type": "domain", "value": "darklab.sh"},
@@ -8496,7 +8499,7 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         "assessment",
         "start-action",
         "prj_cli",
-        "fnd_cli",
+        "asmt_cli",
         "asmc_cli",
     ]) == 0
     preview_output = capsys.readouterr().out
@@ -8504,7 +8507,7 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
     assert "Preview only. Re-run with --confirm" in preview_output
     assert calls[-1] == (
         "GET",
-        "/projects/prj_cli/findings/fnd_cli/verification-actions/asmc_cli",
+        "/projects/prj_cli/assessments/asmt_cli/checks/asmc_cli/recommended-action",
         None,
         None,
     )
@@ -8514,8 +8517,16 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         "assessment",
         "start-action",
         "prj_cli",
-        "fnd_cli",
+        "asmt_cli",
         "asmc_cli",
+        "--http-profile-id",
+        "htp_cli",
+        "--source-run-id",
+        "run_cli_source",
+        "--parameter-observation-id",
+        "dpx_cli",
+        "--schema-artifact-id",
+        "art_cli_schema",
         "--confirm",
         "--workspace-cwd",
         "evidence",
@@ -8527,17 +8538,26 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
     assert calls[call_count:] == [
         (
             "GET",
-            "/projects/prj_cli/findings/fnd_cli/verification-actions/asmc_cli",
-            None,
+            "/projects/prj_cli/assessments/asmt_cli/checks/asmc_cli/recommended-action",
+            {
+                "http_profile_id": "htp_cli",
+                "source_run_id": "run_cli_source",
+                "parameter_observation_id": "dpx_cli",
+                "schema_artifact_id": "art_cli_schema",
+            },
             None,
         ),
         (
             "POST",
-            "/projects/prj_cli/findings/fnd_cli/verification-actions/asmc_cli",
+            "/projects/prj_cli/assessments/asmt_cli/checks/asmc_cli/recommended-action",
             None,
             {
                 "confirmed": True,
                 "plan_digest": "a" * 64,
+                "http_profile_id": "htp_cli",
+                "source_run_id": "run_cli_source",
+                "parameter_observation_id": "dpx_cli",
+                "schema_artifact_id": "art_cli_schema",
                 "workspace_cwd": "evidence",
             },
         ),

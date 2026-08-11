@@ -313,11 +313,15 @@ def _parser() -> argparse.ArgumentParser:
 
     assessment_start_action = assessment_sub.add_parser(
         "start-action",
-        help="Preview or explicitly start a finding verification action.",
+        help="Preview or explicitly start an Assessment check recommendation.",
     )
     assessment_start_action.add_argument("project_id")
-    assessment_start_action.add_argument("finding_id")
+    assessment_start_action.add_argument("assessment_id")
     assessment_start_action.add_argument("check_id")
+    assessment_start_action.add_argument("--http-profile-id")
+    assessment_start_action.add_argument("--source-run-id")
+    assessment_start_action.add_argument("--parameter-observation-id")
+    assessment_start_action.add_argument("--schema-artifact-id")
     assessment_start_action.add_argument(
         "--confirm",
         action="store_true",
@@ -1985,26 +1989,37 @@ def _assessment(client: DarklabClient, args: argparse.Namespace) -> int:
             return 0
         case "start-action":
             action_path = (
-                f"/projects/{args.project_id}/findings/{args.finding_id}/"
-                f"verification-actions/{args.check_id}"
+                f"{base_path}/{args.assessment_id}/checks/{args.check_id}/"
+                "recommended-action"
             )
-            preview = client.request("GET", action_path)
+            selections = {
+                key: value
+                for key, value in {
+                    "http_profile_id": args.http_profile_id,
+                    "source_run_id": args.source_run_id,
+                    "parameter_observation_id": args.parameter_observation_id,
+                    "schema_artifact_id": args.schema_artifact_id,
+                }.items()
+                if value
+            }
+            preview = client.request("GET", action_path, params=selections or None)
             plan = preview.get("plan") if isinstance(preview, dict) else {}
             plan = plan if isinstance(plan, dict) else {}
             if not args.confirm:
                 if args.format == "json":
                     return _print_payload(preview, "json")
-                _print_verification_action_plan(plan)
+                _print_assessment_action_plan(plan)
                 print("Preview only. Re-run with --confirm to start this action.")
                 return 0
             if not plan.get("launchable"):
-                return die(str(plan.get("unavailable_reason") or "verification action is unavailable"))
+                return die(str(plan.get("unavailable_reason") or "assessment action is unavailable"))
             payload = client.request(
                 "POST",
                 action_path,
                 body={
                     "confirmed": True,
                     "plan_digest": str(plan.get("plan_digest") or ""),
+                    **selections,
                     **({"workspace_cwd": args.workspace_cwd} if args.workspace_cwd else {}),
                 },
             )
@@ -2017,7 +2032,7 @@ def _assessment(client: DarklabClient, args: argparse.Namespace) -> int:
     return die("unknown assessment command")
 
 
-def _print_verification_action_plan(plan: dict[str, Any]) -> None:
+def _print_assessment_action_plan(plan: dict[str, Any]) -> None:
     raw_target = plan.get("target")
     raw_action = plan.get("action")
     raw_http_profile = plan.get("http_profile")

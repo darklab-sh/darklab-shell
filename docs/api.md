@@ -286,11 +286,17 @@ darklab assessment show prj_123 asmt_123
 darklab assessment checks prj_123 asmt_123 --state not_started --policy-level safe
 darklab assessment set-state prj_123 asmt_123 asmc_123 blocked --reason "Waiting for authorization"
 darklab assessment clear-state prj_123 asmt_123 asmc_123
-darklab assessment start-action prj_123 fnd_123 asmc_123
-darklab assessment start-action prj_123 fnd_123 asmc_123 --confirm
+darklab assessment start-action prj_123 asmt_123 asmc_123
+darklab assessment start-action prj_123 asmt_123 asmc_123 --confirm
+darklab assessment start-action prj_123 asmt_123 asmc_123 \
+  --http-profile-id htp_123 --confirm
+darklab assessment start-action prj_123 asmt_123 asmc_123 \
+  --source-run-id run_123 --parameter-observation-id dpx_123 --confirm
+darklab assessment start-action prj_123 asmt_123 asmc_123 \
+  --schema-artifact-id art_123 --confirm
 ```
 
-List and check commands support `text`, `json`, and `ndjson`. Cycle detail, state mutations, and verification actions support `text` and `json`. `start-action` is a read-only preview unless `--confirm` is present; even then, the server recomputes the plan and rejects a changed target, stale plan, unsupported command, or disallowed policy. Selecting `--status archived` includes archived cycles automatically; use `--include-archived` to include them without narrowing to that status. Use the global `--team` option or saved CLI team scope for team-owned Projects; the server still makes the permission decision.
+List and check commands support `text`, `json`, and `ndjson`. Cycle detail, state mutations, and recommended actions support `text` and `json`. `start-action` is a read-only preview unless `--confirm` is present; even then, the server recomputes the plan and rejects a changed target, stale plan, unsupported command, or disallowed policy. The optional HTTP-profile, saved Dalfox observation, and Schemathesis schema flags select the same saved inputs as the browser. ZAP and private OAST use their dedicated review, queue or reservation, and launch routes because those connectors have extra lifecycle steps. Selecting `--status archived` includes archived cycles automatically; use `--include-archived` to include them without narrowing to that status. Use the global `--team` option or saved CLI team scope for team-owned Projects; the server still makes the permission decision.
 
 ---
 
@@ -624,7 +630,7 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab assessment checks <project_id> <assessment_id> [--category NAME] [--state STATE] [--target-type TYPE] [--policy-level LEVEL] [--evidence-state available\|unavailable\|none] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page and filter checks for one cycle. `--limit` defaults to 50 and caps at 200. |
 | `darklab assessment set-state <project_id> <assessment_id> <check_id> blocked\|skipped\|not_applicable --reason TEXT [--format text\|json]` | Save a reasoned manual decision on an active check. |
 | `darklab assessment clear-state <project_id> <assessment_id> <check_id> [--format text\|json]` | Clear a manual decision and restore the check's evidence-derived state. |
-| `darklab assessment start-action <project_id> <finding_id> <check_id> [--confirm] [--workspace-cwd PATH] [--format text\|json]` | Preview a finding's saved verification action. Add `--confirm` to start the freshly revalidated bounded command and link its run to the Project. |
+| `darklab assessment start-action <project_id> <assessment_id> <check_id> [--http-profile-id ID] [--source-run-id ID] [--parameter-observation-id ID] [--schema-artifact-id ID] [--confirm] [--workspace-cwd PATH] [--format text\|json]` | Preview the saved check's recommended action. Add `--confirm` to start the freshly revalidated bounded action and link its run to the Project. The optional ids select a protected HTTP profile, reviewed Dalfox observation, or saved Schemathesis schema when that check requires one. |
 | `darklab team list\|status [--format text\|json]` | List joined teams or show the active CLI scope. |
 | `darklab team create <name> [--slug SLUG] [--display-name NAME] [--format text\|json]` | Create a team and print the one-time recovery code. |
 | `darklab team switch <team-id\|slug\|name\|personal>` | Save the active CLI team scope, or clear it with `personal`. |
