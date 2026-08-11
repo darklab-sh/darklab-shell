@@ -65,7 +65,7 @@ Fresh installations keep a few capabilities disabled until you choose to enable 
 | [Interactive PTY](CONFIGURATION.md#enable-interactive-pty) | Real terminal sessions for approved interactive tools | `INTERACTIVE_PTY_ENABLED=true` |
 | [Raw-packet scanning](CONFIGURATION.md#raw-packet-scanning) | Capability-backed SYN and other approved raw scanner modes | `RAW_PACKET_SCANNING_ENABLED=true` |
 
-After changing one of these settings, run `docker compose up -d --force-recreate shell`. Interactive PTY uses Redis in normal multi-worker deployments, while raw-packet modes still activate only when their runtime readiness checks pass. Postgres and AI assists are separate optional deployment services covered in [Configuration](CONFIGURATION.md#environment-variables-and-env).
+After changing one of these settings, run `docker compose up -d --force-recreate shell`. Interactive PTY uses Redis in normal multi-worker deployments, while raw-packet modes still activate only when their runtime readiness checks pass. Postgres, AI assists, and the private ZAP/OAST connector workers are optional deployment services covered in [Configuration](CONFIGURATION.md#environment-variables-and-env).
 
 ---
 
@@ -291,6 +291,8 @@ The installed `release-manifest.json` records both registry index references, th
 `/data` is durable and contains the default SQLite database, saved output artifacts, and the app-owned vault key. Files workspaces use temporary storage by default and are wiped when the shell container restarts; configure the volume backend before relying on Files for durable evidence. Redis stores coordination and cache state, so a restart can interrupt active work but does not replace the durable database.
 
 Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, and `remove` for production lifecycle work. When the installation includes `compose.operator.yaml`, Compose-backed lifecycle steps automatically use it alongside the release-owned `compose.yaml`. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
+
+Assessments can hand reviewed work to operator-managed ZAP and private OAST services. The production stack includes one isolated worker profile for each connector, so enabling either service doesn't require a custom process supervisor. Keep the provider and policy credentials in the installation's private `.env`, then follow [Running ZAP and OAST workers](CONFIGURATION.md#running-zap-and-oast-workers) to connect, start, and monitor them.
 
 ---
 

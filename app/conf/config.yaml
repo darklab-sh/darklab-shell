@@ -484,11 +484,11 @@
 # zap_connector:
 #   enabled: false
 #   base_url: ""  # HTTP(S) origin only, such as http://zap:8080.
-#   api_key_secret_id: ""  # Environment variable name holding the ZAP API key.
+#   api_key_secret_id: DARKLAB_ZAP_API_KEY  # Name only; value stays in .env.
 #   tls_verify: true
 #   allowed_target_cidrs: []
 #   scope_policy_url: ""  # Exact HTTPS .../v1/zap-scope/review endpoint.
-#   scope_policy_token_secret_id: ""  # Environment variable holding its token.
+#   scope_policy_token_secret_id: DARKLAB_ZAP_SCOPE_POLICY_TOKEN
 #   scope_policy_id: ""  # Stable policy identity returned by the scope service.
 #   egress_proxy_host: ""  # Proxy configured in every generated ZAP plan.
 #   egress_proxy_port: 0
@@ -507,7 +507,7 @@
 # oast_connector:
 #   enabled: false
 #   base_url: ""  # Credential-free HTTPS origin for the private service.
-#   token_secret_id: ""  # Environment variable name holding its access token.
+#   token_secret_id: DARKLAB_OAST_TOKEN  # Name only; value stays in .env.
 #   allowed_domain: ""  # Exact callback DNS suffix, without a wildcard.
 #   tls_verify: true
 #   callback_retention_seconds: 604800

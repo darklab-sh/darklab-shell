@@ -406,7 +406,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `oast_connector` | see nested defaults | Server-side only. Disabled-by-default safety boundary for an operator-managed private Interactsh-compatible service |
 | `oast_connector.enabled` | `false` | Makes the validated private OAST settings available. Enabling requires every identity, privacy, and retention field below; it doesn't allocate a callback or contact the service |
 | `oast_connector.base_url` | _(empty)_ | HTTPS origin for the private service, without credentials, a path, query, or fragment. The service must use Interactsh's default 20-character correlation id and 13-character nonce lengths |
-| `oast_connector.token_secret_id` | _(empty)_ | Environment variable name that holds the service token. The token value doesn't enter YAML, config diagnostics, or connector settings |
+| `oast_connector.token_secret_id` | _(empty)_ | Environment variable name that holds the service token. Production Compose provides `DARKLAB_OAST_TOKEN`; the token value doesn't enter YAML, config diagnostics, or connector settings |
 | `oast_connector.allowed_domain` | _(empty)_ | Exact DNS suffix reserved for this private callback service, without a wildcard or IP address. The app prepends one random 33-character alphanumeric callback label using the service's default id and nonce lengths |
 | `oast_connector.tls_verify` | `true` | Verifies the private service's TLS certificate. Turning this off is an explicit operator choice |
 | `oast_connector.callback_retention_seconds` | `604800` | Required callback-data retention policy, from 300 to 2592000 seconds |
@@ -414,11 +414,11 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `zap_connector` | see nested defaults | Server-side only. Disabled-by-default connection and safety limits for an operator-managed OWASP ZAP service |
 | `zap_connector.enabled` | `false` | Makes the validated connector configuration available. Enabling it doesn't submit a scan by itself and requires the ZAP origin, both secret references, at least one target CIDR, and the scanner-side scope policy and proxy fields |
 | `zap_connector.base_url` | _(empty)_ | HTTP or HTTPS origin for the operator-managed ZAP API, without credentials, a path, query, or fragment |
-| `zap_connector.api_key_secret_id` | _(empty)_ | Environment variable name that holds the ZAP API key. The key value doesn't enter YAML, config diagnostics, or connector settings |
+| `zap_connector.api_key_secret_id` | _(empty)_ | Environment variable name that holds the ZAP API key. Production Compose provides `DARKLAB_ZAP_API_KEY`; the key value doesn't enter YAML, config diagnostics, or connector settings |
 | `zap_connector.tls_verify` | `true` | Verifies the ZAP service's TLS certificate for HTTPS connections. Turning this off is an explicit operator choice |
 | `zap_connector.allowed_target_cidrs` | `[]` | IPv4 and IPv6 networks ZAP may receive as scan targets. The app and scanner-side policy must both resolve every hostname entirely inside this list |
 | `zap_connector.scope_policy_url` | _(empty)_ | Exact HTTPS endpoint for the scanner-side policy service, ending in `/v1/zap-scope/review`. It must share the enforcing proxy's network and DNS view |
-| `zap_connector.scope_policy_token_secret_id` | _(empty)_ | Environment variable name that holds the scope-policy bearer token. The token value doesn't enter YAML, plan summaries, logs, or stored jobs |
+| `zap_connector.scope_policy_token_secret_id` | _(empty)_ | Environment variable name that holds the scope-policy bearer token. Production Compose provides `DARKLAB_ZAP_SCOPE_POLICY_TOKEN`; the token value doesn't enter YAML, plan summaries, logs, or stored jobs |
 | `zap_connector.scope_policy_id` | _(empty)_ | Stable identity for the deployed CIDR policy. The service must return this exact value with the configured CIDR digest and proxy binding |
 | `zap_connector.egress_proxy_host` | _(empty)_ | Hostname or IP address of the scanner-side CIDR-enforcing HTTP proxy added to every ZAP Automation Framework plan |
 | `zap_connector.egress_proxy_port` | `0` | Port for the enforcing proxy. Enabling the connector requires a value from 1 to 65535 |
@@ -467,11 +467,87 @@ The connector uses ZAP's transfer directory to upload its reviewed Automation Fr
 
 The scope-policy service and egress proxy are one deployment boundary. Put them on ZAP's network so they use the same DNS view as the scanner. The fixed policy endpoint accepts the current policy id, CIDR digest, proxy host and port, a fresh nonce, and one to eight target hostnames. It must return that nonce and identity, report every current address, and attest `mode: cidr_proxy` with `dns_recheck: per_connection`. The proxy must independently resolve and check every outbound connection against the same CIDRs; an attestation alone isn't a substitute for blocking disallowed traffic. Don't give the ZAP container another direct route to assessment targets. Preview, confirmation, and the worker's final pre-submit check all stop when the service is unavailable, reports a different policy or proxy, or sees any address outside the configured networks.
 
-When `zap_connector.enabled` is `true`, run one `python -m services.connectors.zap_worker` process as a supervised sibling of the web, scheduler, and notification processes. Give it the same release, configuration, app-data directory, workspace, database, and both ZAP secret environment variables used by the web process. A deployment-wide database or file lock makes a duplicate worker exit cleanly. The worker keeps reviewed plans in a private app-data spool only until submission or cleanup, saves completed reports through the owner's normal Files quota, and creates an Atlas preview. It never applies that preview; the operator still reviews the import summary and warnings before choosing **Apply** in Atlas.
+The production `zap` Compose profile runs exactly one ZAP worker from the same release image and gives it the same configuration, app data, workspace, database, Redis service, and connector credentials as the web process. A deployment-wide database or file lock makes a duplicate worker exit cleanly. The worker keeps reviewed plans in a private app-data spool only until submission or cleanup, saves completed reports through the owner's normal Files quota, and creates an Atlas preview. It never applies that preview; the operator still reviews the import summary and warnings before choosing **Apply** in Atlas.
 
 The private OAST settings are a server-side safety boundary, not a background connection. darklab_shell accepts no public callback default, keeps the service token in the named environment variable, and requires an exact callback suffix plus an acknowledged retention policy before enabling the connector. Reading the settings doesn't register with the service, allocate a callback domain, or start polling for interactions. The maintained blind-XSS check can show its redacted command without contacting the service. Confirming that current plan reserves an app-owned callback identity for 15 minutes, or less when the configured retention is shorter; the list stays redacted, and one exact status read exposes the callback only after the private worker has staged it. The Assessment check recovers that state after a reload and shows only safe counts, worker state, and callback and cleanup deadlines; it never stores or renders the callback address. A separate fresh ready-only confirmation rebuilds the plan, rechecks the provider scope and staged session, starts the Project-linked run, and binds the callback to that run. The public command and response keep the redacted placeholder, while the callback reaches only the protected process-start boundary. A normalized interaction is accepted only while that exact identity is active. The app keeps a small DNS, HTTP, SMTP, or LDAP summary, hashes a provider event id, drops HTTP query strings and fragments, and doesn't retain raw headers, bodies, client addresses, credentials, or other provider fields. Duplicate interactions don't create new evidence, each identity is limited to 64 summaries, and terminal state becomes eligible for cleanup at its fixed retention deadline. Creating, expiring, recording, or deleting app-owned state still makes no provider request.
 
-When `oast_connector.enabled` is `true`, run one `python -m services.connectors.oast_worker` process as a supervised sibling of the web, scheduler, and notification processes. Give it the same release, configuration, app-data directory, database, `SECRETS_MASTER_KEY`, and configured token environment variable as the web process. A deployment-wide database or file lock makes a duplicate worker exit cleanly. The worker registers only callback reservations already approved and saved by the app, polls only correlations activated for a source run, and retries temporary provider or credential failures until the correlation's fixed deadline. Keep the app master key stable across restarts: without it, the worker can't recover the short-lived private provider session and fails that correlation closed. Terminal sessions are deregistered before their encrypted spool files are removed when the configured provider is reachable; the service's acknowledged retention policy is still the cleanup backstop during an outage.
+The production `oast` Compose profile runs exactly one private OAST worker from the same release image and gives it the same configuration, app data, workspace, database, Redis service, vault key, and provider credential as the web process. A deployment-wide database or file lock makes a duplicate worker exit cleanly. The worker registers only callback reservations already approved and saved by the app, polls only correlations activated for a source run, and retries temporary provider or credential failures until the correlation's fixed deadline. Keep the app master key stable across restarts: without it, the worker can't recover the short-lived private provider session and fails that correlation closed. Terminal sessions are deregistered before their encrypted spool files are removed when the configured provider is reachable; the service's acknowledged retention policy is still the cleanup backstop during an outage.
+
+### Running ZAP and OAST workers
+
+The release Compose file contains both connector workers. They use a read-only root filesystem, a private `/tmp` tmpfs, and the same `./conf`, `./data`, and `./workspaces` mounts as the app. They don't publish ports or receive the scanner capabilities granted to the `shell` service.
+
+Put the connector settings in installed `conf/config.local.yaml`. The shipped Compose credential names are fixed so values can stay in the private `.env` file:
+
+```yaml
+zap_connector:
+  enabled: true
+  base_url: "https://zap-control.internal:8080"
+  api_key_secret_id: DARKLAB_ZAP_API_KEY
+  tls_verify: true
+  allowed_target_cidrs:
+    - 192.0.2.0/24
+  scope_policy_url: "https://zap-policy.internal/v1/zap-scope/review"
+  scope_policy_token_secret_id: DARKLAB_ZAP_SCOPE_POLICY_TOKEN
+  scope_policy_id: production-assessment-scope
+  egress_proxy_host: zap-egress.internal
+  egress_proxy_port: 3128
+
+oast_connector:
+  enabled: true
+  base_url: "https://interactsh.internal"
+  token_secret_id: DARKLAB_OAST_TOKEN
+  allowed_domain: callbacks.example.internal
+  tls_verify: true
+  callback_retention_seconds: 604800
+  privacy_acknowledged: true
+```
+
+Use values that match your own services and approved networks. Then set the private values and profiles in `.env`:
+
+```env
+DARKLAB_ZAP_API_KEY=replace-with-zap-key
+DARKLAB_ZAP_SCOPE_POLICY_TOKEN=replace-with-policy-token
+DARKLAB_OAST_TOKEN=replace-with-oast-token
+COMPOSE_PROFILES=zap,oast
+```
+
+If the deployment also uses bundled Postgres, include `postgres` in `COMPOSE_PROFILES`; both workers use the same `DATABASE_*` values and wait for that service's health check. The shell and workers use the same app-owned `/data/.secrets_master_key` by default. When `SECRETS_MASTER_KEY` is set instead, Compose passes the same value to the shell and OAST worker.
+
+The shell and ZAP worker must be able to reach the ZAP API and scope-policy service. The private OAST worker must be able to reach its provider. When those services live on operator-managed Docker networks, add the networks without editing the release-owned Compose file:
+
+```yaml
+# compose.operator.yaml
+services:
+  shell:
+    networks: [default, zap-control]
+  zap-worker:
+    networks: [default, zap-control]
+  oast-worker:
+    networks: [default, oast-control]
+
+networks:
+  zap-control:
+    external: true
+  oast-control:
+    external: true
+```
+
+Keep ZAP's target traffic behind the configured enforcing proxy and don't give the ZAP scanner another route to assessment targets. The `zap-control` network is for API and policy traffic; it doesn't replace the scanner-side CIDR enforcement described above.
+
+Validate and start the selected services:
+
+```bash
+docker compose --env-file .env -f compose.yaml -f compose.operator.yaml config --quiet
+docker compose --env-file .env -f compose.yaml -f compose.operator.yaml up -d \
+  --force-recreate shell zap-worker oast-worker
+docker compose --env-file .env -f compose.yaml -f compose.operator.yaml ps \
+  shell zap-worker oast-worker
+docker compose --env-file .env -f compose.yaml -f compose.operator.yaml logs \
+  --tail=100 zap-worker oast-worker
+```
+
+Omit `-f compose.operator.yaml` when the deployment doesn't need an override, and list only the worker profiles you enabled. Healthy containers report `ZAP_WORKER_STARTED` or `OAST_WORKER_STARTED`. A worker that loses its database, Redis service, provider, credential, or policy path keeps durable work queued or retryable and records a bounded error. Check its logs and network, correct `.env` or `config.local.yaml`, then run `docker compose restart zap-worker` or `docker compose restart oast-worker`. Run one replica of each worker; the deployment lock rejects duplicates.
 
 Release images include dated FIRST EPSS and CISA KEV snapshots, so saved CVE findings can be ranked without network access. Run `providers` or open **Options → Secrets → Provider Status** to see each snapshot's bundled, live, or local source, freshness, publication date, version, model, age, and whether live refresh is enabled. Finding labels repeat the source and age when those signals affect ranking. When `cve_risk.refresh_enabled` is `true`, the scheduler downloads only the fixed public bulk feeds over allowlisted HTTPS; Python's standard `HTTPS_PROXY` and `NO_PROXY` settings still apply. Each source lease is committed before a download begins, and acceptance or failure is published only if that same worker still owns the lease. A slow provider therefore doesn't hold SQLite's writer lock, and an expired worker can't replace data accepted by its successor. A rejected, oversized, malformed, or failed download leaves the last accepted snapshot in place.
 
@@ -907,6 +983,9 @@ cp .env.example .env
 # POSTGRES_USER=darklab
 # POSTGRES_PASSWORD=
 # SECRETS_MASTER_KEY=
+# DARKLAB_ZAP_API_KEY=
+# DARKLAB_ZAP_SCOPE_POLICY_TOKEN=
+# DARKLAB_OAST_TOKEN=
 ```
 
 For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and diagnostics state, while `AI_WORKER_ENABLED=1` starts the worker process that drains queued provider calls. The summary and next-command feature flags control which Run Details cards appear. Without the worker, new assists can be queued but won't complete until a worker is running.
@@ -929,7 +1008,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `SCHEDULER_ENABLED` | Docker entrypoint | Starts the scheduled-run worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Scratch directory created and exported for `prometheus_client` multiprocess metrics |
-| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `llama`, `postgres`, or a comma-separated combination such as `llama,postgres` when you want profile-gated services included without passing `--profile` |
+| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Available values are `llama`, `postgres`, `zap`, and `oast`; combine the ones the deployment uses, such as `postgres,zap,oast` |
 | `AI_WORKER_ENABLED` | Docker entrypoint | Starts the AI worker beside Gunicorn when set to `1`. Leave it `0` when AI is disabled or when another process is responsible for draining the AI queue |
 | `AI_ENABLED` / `AI_PROVIDER` / `AI_BASE_URL` / `AI_MODEL` | Docker Compose, Flask app | Core AI provider settings. `AI_ENABLED` permits AI routes and diagnostics; `AI_PROVIDER` is currently `openai_compatible`; `AI_BASE_URL` points at the provider; `AI_MODEL` is sent to chat completions and checked by `/diag` |
 | `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted personal or team vault for the queued request scope; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
@@ -949,6 +1028,9 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `DATABASE_POSTGRES_JIT` | Flask app | Optional environment override for the YAML Postgres JIT setting |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
 | `SECRETS_MASTER_KEY` | Flask app and private OAST worker | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault and short-lived private OAST provider sessions. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
+| `DARKLAB_ZAP_API_KEY` | ZAP worker | ZAP API key used by the shipped `zap` worker profile when `zap_connector.api_key_secret_id` names this variable |
+| `DARKLAB_ZAP_SCOPE_POLICY_TOKEN` | Flask app and ZAP worker | Bearer token used for scanner-side scope attestations when `zap_connector.scope_policy_token_secret_id` names this variable |
+| `DARKLAB_OAST_TOKEN` | Private OAST worker | Private Interactsh-compatible service token used by the shipped `oast` worker profile when `oast_connector.token_secret_id` names this variable |
 
 If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production stack keeps those defaults unless `.env` changes them. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
 
@@ -1109,7 +1191,7 @@ Every supported local overlay in `conf/` is active under the production `/config
 docker compose restart shell
 ```
 
-SQLite and Redis start by default. The installer generates a private Postgres password but doesn't enable Postgres; set `COMPOSE_PROFILES=postgres`, `DATABASE_BACKEND=postgres`, and keep the generated `DATABASE_URL` when you choose that backend. The `llama` profile is independent and can be combined as `COMPOSE_PROFILES=postgres,llama`.
+SQLite and Redis start by default. The installer generates a private Postgres password but doesn't enable Postgres; set `COMPOSE_PROFILES=postgres`, `DATABASE_BACKEND=postgres`, and keep the generated `DATABASE_URL` when you choose that backend. The `llama`, `zap`, and `oast` profiles are independent and can be combined with Postgres. The connector profiles start the release's dedicated workers only after their YAML settings and private `.env` credentials are configured; see [Running ZAP and OAST workers](#running-zap-and-oast-workers).
 
 `/data` is the durable app boundary. Redis has persistence disabled because it holds coordination and cache state. Files are disabled by default. Set `WORKSPACE_ENABLED=true`, `WORKSPACE_BACKEND=volume`, and `WORKSPACE_ROOT=/workspaces` in `.env` for persistent Files. The production Compose file already maps `./workspaces` to that path.
 

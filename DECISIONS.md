@@ -501,6 +501,8 @@ Files enablement/storage, database selection and DSN, interactive PTY enablement
 
 Files quotas, PTY limits, database pool/JIT behavior, AI timeouts and queue/rate/output/network limits, retention, notifications, and UI behavior are application-only tuning and remain in `config.local.yaml`. Environment overrides for database and AI tuning remain available to process-managed deployments, but shipped Compose files pass them as empty unless the operator sets them; the loader ignores those empty values so they don't silently shadow YAML.
 
+ZAP and private OAST execution use profile-gated worker services in the release Compose file. Each service selects one allowlisted image process role instead of overriding the image command, shares the app's configuration and durable storage, and receives only the fixed environment bindings needed by that connector. Running the loops inside Gunicorn workers was rejected because request-process restarts and concurrency would make singleton ownership unreliable. Requiring a separate host supervisor was also rejected because it would leave the documented production stack incomplete. The worker services publish no ports, receive no scanner capabilities, and use a role-specific health marker on tmpfs.
+
 ### Network Copyleft with GNU AGPLv3
 
 **darklab_shell's original source code and documentation use `AGPL-3.0-only`.**
@@ -551,7 +553,7 @@ SecLists is the only single exclusion that would cut the image nearly in half, b
 
 ### Startup Sequence (entrypoint.sh)
 
-Container starts as root → `entrypoint.sh` runs → fixes `/data` ownership (Docker volume mounts reset ownership to the host user) → sets `/tmp` to `1777` → pre-creates `/tmp/.config/nuclei`, `/tmp/.config/uncover`, `/tmp/.cache` owned by scanner → `gosu appuser gunicorn ...`
+Container starts as root → `entrypoint.sh` runs → fixes durable mount ownership and stages private configuration → sets `/tmp` to `1777` → dispatches an allowlisted connector-worker role or continues with web-only scanner and firewall setup → drops to `appuser` through `gosu` for the selected worker or Gunicorn.
 
 **Why `gosu` instead of `su`?** `su` forks an extra process; `gosu` does `exec` which replaces the process, giving Gunicorn PID 1 semantics.
 

@@ -999,6 +999,16 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED"] == (
         "${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}"
     )
+    assert shell["environment"]["SECRETS_MASTER_KEY"] == "${SECRETS_MASTER_KEY:-}"
+    assert shell["environment"]["DARKLAB_ZAP_API_KEY"] == (
+        "${DARKLAB_ZAP_API_KEY:-}"
+    )
+    assert shell["environment"]["DARKLAB_ZAP_SCOPE_POLICY_TOKEN"] == (
+        "${DARKLAB_ZAP_SCOPE_POLICY_TOKEN:-}"
+    )
+    assert shell["environment"]["DARKLAB_OAST_TOKEN"] == (
+        "${DARKLAB_OAST_TOKEN:-}"
+    )
     assert shell["environment"]["WORKSPACE_ENABLED"] == "${WORKSPACE_ENABLED:-false}"
     assert shell["environment"]["WORKSPACE_BACKEND"] == "${WORKSPACE_BACKEND:-tmpfs}"
     assert shell["environment"]["WORKSPACE_ROOT"] == (
@@ -1026,8 +1036,66 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "# INTERACTIVE_PTY_ENABLED=true" in env_example
     assert "# RAW_PACKET_SCANNING_ENABLED=true" in env_example
     assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in env_example
+    assert "# DARKLAB_ZAP_API_KEY=" in env_example
+    assert "# DARKLAB_ZAP_SCOPE_POLICY_TOKEN=" in env_example
+    assert "# DARKLAB_OAST_TOKEN=" in env_example
     assert services["postgres"]["profiles"] == ["postgres"]
     assert services["llama"]["profiles"] == ["llama"]
+    worker_contracts = {
+        "zap-worker": {
+            "profile": "zap",
+            "role": "zap-worker",
+            "credentials": {
+                "DARKLAB_ZAP_API_KEY": "${DARKLAB_ZAP_API_KEY:-}",
+                "DARKLAB_ZAP_SCOPE_POLICY_TOKEN": (
+                    "${DARKLAB_ZAP_SCOPE_POLICY_TOKEN:-}"
+                ),
+            },
+        },
+        "oast-worker": {
+            "profile": "oast",
+            "role": "oast-worker",
+            "credentials": {
+                "SECRETS_MASTER_KEY": "${SECRETS_MASTER_KEY:-}",
+                "DARKLAB_OAST_TOKEN": "${DARKLAB_OAST_TOKEN:-}",
+            },
+        },
+    }
+    for service_name, contract in worker_contracts.items():
+        worker = services[service_name]
+        assert worker["image"] == shell["image"]
+        assert worker["profiles"] == [contract["profile"]]
+        assert worker["init"] is True
+        assert worker["read_only"] is True
+        assert worker["restart"] == "unless-stopped"
+        assert worker["tmpfs"] == ["/tmp"]
+        assert worker["volumes"] == [
+            "./conf:/config:ro",
+            "./data:/data",
+            "./workspaces:/workspaces",
+        ]
+        assert "ports" not in worker
+        assert "cap_add" not in worker
+        assert "command" not in worker
+        environment = worker["environment"]
+        assert environment["DARKLAB_PROCESS_ROLE"] == contract["role"]
+        assert environment["REDIS_URL"] == "redis://redis:6379/0"
+        assert environment["APP_LOCAL_CONF_DIR"] == "/config"
+        assert environment["DATABASE_BACKEND"] == "${DATABASE_BACKEND:-sqlite}"
+        assert environment["DATABASE_URL"] == "${DATABASE_URL:-}"
+        assert environment["WORKSPACE_ROOT"] == (
+            "${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}"
+        )
+        for name, value in contract["credentials"].items():
+            assert environment[name] == value
+        assert worker["depends_on"]["redis"] == {"condition": "service_healthy"}
+        assert worker["depends_on"]["postgres"] == {
+            "condition": "service_healthy",
+            "required": False,
+        }
+        health_command = " ".join(worker["healthcheck"]["test"])
+        assert contract["role"] in health_command
+        assert "/tmp/darklab-process-role.ready" in health_command
     assert all("container_name" not in service for service in services.values())
     development_services = development_compose["services"]
     development_shell = development_compose["services"]["shell"]
@@ -1187,6 +1255,14 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert entrypoint.index("/usr/local/libexec/darklab-stage-runtime-source") < (
         entrypoint.index("stage_local_config_overlays")
     )
+    process_dispatch = entrypoint.index("run_process_role")
+    assert process_dispatch < entrypoint.index("RAW_PACKET_FIREWALL_READY_FILE")
+    assert 'process_role="${DARKLAB_PROCESS_ROLE:-web}"' in entrypoint
+    assert 'process_module="services.connectors.zap_worker"' in entrypoint
+    assert 'process_module="services.connectors.oast_worker"' in entrypoint
+    assert 'echo "PROCESS_ROLE_INVALID role=$process_role"' in entrypoint
+    assert 'exec gosu appuser python -m "$process_module"' in entrypoint
+    assert "/tmp/darklab-process-role.ready" in entrypoint
     assert 'cp -R "${source_dir%/}/."' in source_stager
     assert 'chmod -R u+rX,a-w "$runtime_dir"' in source_stager
     assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=$stage" in source_stager

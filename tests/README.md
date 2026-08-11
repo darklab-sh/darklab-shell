@@ -107,7 +107,10 @@ The fast command covers normal backend and route behavior. The complementary
 publication, signing, and backup/restore paths. Its publisher coverage runs the
 real release shell script against stubbed Docker, registry state, and runner
 identity so first publication, retry, and immutable-tag conflicts stay aligned
-with CI without contacting a registry. CI runs both required serial
+with CI without contacting a registry. Production Compose coverage also pins
+the isolated ZAP/OAST worker profiles, shared durable mounts and database
+settings, fixed credential bindings, read-only runtime, health checks, and the
+entrypoint's allowlisted process-role dispatch. CI runs both required serial
 lanes at the same time, retains separate JUnit, slow-test, and file-timing
 reports, and verifies that their node IDs are disjoint and add up to the
 unchanged complete suite. Use `npm run test:pytest`, not just the fast command,
