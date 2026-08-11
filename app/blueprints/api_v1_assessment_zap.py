@@ -210,7 +210,7 @@ def api_project_assessment_zap_job(project_id, assessment_id, check_id, job_id):
                 "assessment_id": assessment_id,
                 "check_id": check_id,
                 "job_id": job_id,
-                "status": job["status"],
+                "job_status": job["status"],
                 "source": "api_v1",
             },
         )

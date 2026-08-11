@@ -35,7 +35,41 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "90729d54fb2fdf9655247303c20c440faba04b00e16889ab8d38c8aa9bc1798a"
+_LOG_EVENT_INVENTORY_HASH = "6c226ae9bafe1107f2a165155b834247194557ab89b0e556cd7086616e71e286"
+_ASSESSMENT_LOG_SOURCE_GLOBS = (
+    "app/blueprints/projects_assessment*.py",
+    "app/blueprints/api_v1_assessment*.py",
+    "app/blueprints/projects_http_profiles.py",
+    "app/blueprints/api_v1_http_profiles.py",
+    "app/blueprints/projects_manual_findings.py",
+    "app/blueprints/api_v1_manual_findings.py",
+    "app/blueprints/projects_finding_evidence.py",
+    "app/blueprints/api_v1_finding_evidence.py",
+    "app/services/assessments/*.py",
+    "app/services/connectors/oast*.py",
+    "app/services/connectors/zap*.py",
+    "app/services/runs/broker_observability.py",
+    "app/services/runs/finalization*.py",
+    "app/services/runs/schemathesis_completion.py",
+)
+_ASSESSMENT_LOG_EVENT_PREFIXES = (
+    "ASSESSMENT_",
+    "PROJECT_ASSESSMENT_",
+    "API_PROJECT_ASSESSMENT_",
+    "PROJECT_HTTP_PROFILE_",
+    "API_PROJECT_HTTP_PROFILE_",
+    "PROJECT_MANUAL_FINDING_",
+    "API_PROJECT_MANUAL_FINDING_",
+    "PROJECT_FINDING_EVIDENCE_",
+    "API_PROJECT_FINDING_EVIDENCE_",
+    "OAST_",
+    "ZAP_",
+    "DALFOX_",
+    "SCHEMATHESIS_",
+    "TAKEOVER_",
+    "NMAP_",
+    "HTTPX_",
+)
 _CHANGELOG_ARCHIVES = (
     _REPO_ROOT / "docs" / "changelog" / "2.x.md",
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",
@@ -345,6 +379,45 @@ def _log_event_inventory_body() -> str:
     )
     assert match, "Could not find docs/logging.md event inventory"
     return match.group("body")
+
+
+def _assessment_log_event_literals() -> set[str]:
+    paths: set[Path] = set()
+    for pattern in _ASSESSMENT_LOG_SOURCE_GLOBS:
+        paths.update(_REPO_ROOT.glob(pattern))
+    events: set[str] = set()
+    logging_methods = {
+        "critical",
+        "debug",
+        "error",
+        "exception",
+        "info",
+        "warn",
+        "warning",
+    }
+    for path in sorted(paths):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Attribute):
+                callable_name = node.func.attr
+            elif isinstance(node.func, ast.Name):
+                callable_name = node.func.id
+            else:
+                continue
+            if callable_name not in logging_methods and "log" not in callable_name.lower():
+                continue
+            values = [*node.args, *(keyword.value for keyword in node.keywords)]
+            for value in values:
+                if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+                    continue
+                event = value.value
+                if re.fullmatch(r"[A-Z][A-Z0-9_]+", event) and event.startswith(
+                    _ASSESSMENT_LOG_EVENT_PREFIXES
+                ):
+                    events.add(event)
+    return events
 
 
 # ── Stable asset and repository-layout contracts ─────────────────────────────
@@ -773,8 +846,11 @@ class TestChangelogArchives:
 class TestLoggingReference:
     def test_event_inventory_was_moved_without_dropping_contracts(self):
         body = _log_event_inventory_body()
+        documented = set(re.findall(r"`([A-Z][A-Z0-9_]+)`", body))
+        missing = sorted(_assessment_log_event_literals() - documented)
+        assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
-        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 304
+        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 338
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()

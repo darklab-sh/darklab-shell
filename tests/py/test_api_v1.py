@@ -2899,11 +2899,13 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
 
 
 def test_assessment_zap_routes_review_queue_scope_and_cancel(
+    caplog,
     monkeypatch,
     tmp_path,
 ):
     from services.assessments import zap_connector
 
+    caplog.set_level("INFO", logger="shell")
     client = get_client()
     token = _token(client)
     other_token = _token(client)
@@ -3097,15 +3099,48 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     canceled_job = canceled.get_json()["job"]
     assert canceled_job["status"] == "canceled"
     assert canceled_job["cancelable"] is False
+    cancel_record = next(
+        record
+        for record in caplog.records
+        if record.message == "API_PROJECT_ASSESSMENT_ZAP_JOB_CANCEL_REQUESTED"
+    )
+    assert cancel_record.job_status == "canceled"
+    assert not hasattr(cancel_record, "status")
     second_cancel = client.delete(job_path, headers=_headers(token))
     assert second_cancel.status_code == 409
     assert second_cancel.get_json()["error"]["code"] == "zap_job_not_cancelable"
+
+    browser_base = base.removeprefix("/api/v1")
+    browser_queued = client.post(
+        browser_base + "/zap-jobs",
+        headers={"X-Session-ID": token},
+        json={**selection, "confirmed": True, "plan_digest": plan["plan_digest"]},
+    )
+    assert browser_queued.status_code == 202
+    browser_job = browser_queued.get_json()["job"]
+    browser_canceled = client.delete(
+        browser_base + f"/zap-jobs/{browser_job['id']}",
+        headers={"X-Session-ID": token},
+    )
+    assert browser_canceled.status_code == 200
+    browser_cancel_record = next(
+        record
+        for record in caplog.records
+        if record.message == "PROJECT_ASSESSMENT_ZAP_JOB_CANCEL_REQUESTED"
+    )
+    assert browser_cancel_record.job_status == "canceled"
+    assert not hasattr(browser_cancel_record, "status")
     audit_rows = _audit_event_rows(target_id=check["id"])
     assert [row["event_type"] for row in audit_rows] == [
         "assessment.zap_job_submit",
         "assessment.zap_job_cancel",
+        "assessment.zap_job_submit",
+        "assessment.zap_job_cancel",
     ]
-    assert all(row["details"]["job_id"] == job["id"] for row in audit_rows)
+    assert {row["details"]["job_id"] for row in audit_rows} == {
+        job["id"],
+        browser_job["id"],
+    }
     assert all("target" not in row["details"] for row in audit_rows)
 
 
