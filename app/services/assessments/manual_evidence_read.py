@@ -14,20 +14,16 @@ from services.projects.utils import page_payload
 ASSESSMENT_MANUAL_EVIDENCE_PER_CHECK = 20
 
 
-def attach_manual_evidence(
-    conn: Any,
-    checks: list[dict[str, Any]],
-) -> None:
+def attach_manual_evidence(conn: Any, checks: list[dict[str, Any]]) -> None:
     """Attach newest-first manual evidence links for each returned check."""
     check_ids = [str(check.get("id") or "") for check in checks if check.get("id")]
-    grouped: dict[str, list[dict[str, Any]]] = {
-        check_id: [] for check_id in check_ids
-    }
+    grouped: dict[str, list[dict[str, Any]]] = {check_id: [] for check_id in check_ids}
     totals: dict[str, int] = {check_id: 0 for check_id in check_ids}
     if check_ids:
         placeholders = ",".join("?" for _ in check_ids)
-        rows = conn.execute(
-            "SELECT * FROM (SELECT e.*, "
+        # Check IDs stay bound; only generated parameter markers are interpolated.
+        query = (
+            "SELECT * FROM (SELECT e.*, "  # nosec B608
             "ROW_NUMBER() OVER (PARTITION BY e.check_id "
             "ORDER BY e.observed_at DESC, e.id DESC) AS item_rank, "
             "COUNT(*) OVER (PARTITION BY e.check_id) AS item_total "
@@ -35,7 +31,10 @@ def attach_manual_evidence(
             "WHERE e.linked_by = 'manual' AND e.check_id IN ("
             + placeholders
             + ")) ranked WHERE item_rank <= ? "
-            "ORDER BY check_id ASC, observed_at DESC, id DESC",  # nosec
+            "ORDER BY check_id ASC, observed_at DESC, id DESC"
+        )
+        rows = conn.execute(
+            query,
             (*check_ids, ASSESSMENT_MANUAL_EVIDENCE_PER_CHECK),
         ).fetchall()
         for row in rows:
