@@ -348,7 +348,7 @@ def test_read_model_rollups_filters_and_pages_checks(project_factory):
             "observed_at, unavailable_at, unavailable_reason, match_rule_key, "
             "match_rule_version, linked_by, created_at, updated_at) "
             "VALUES (?, ?, ?, 'run', 'deleted-run', 'unavailable', ?, ?, ?, "
-            "'completed_dns_inventory', '1.0', 'derived', ?, ?)",
+            "'completed_dns_inventory', '1.0', 'manual', ?, ?)",
             (
                 "aev_" + uuid.uuid4().hex,
                 assessment_id,
@@ -396,6 +396,19 @@ def test_read_model_rollups_filters_and_pages_checks(project_factory):
     assert [item["check_key"] for item in unavailable["checks"]["checks"]] == [
         "dns_inventory"
     ]
+    assert unavailable["checks"]["checks"][0]["manual_evidence"] == {
+        "evidence": [{
+            **unavailable["checks"]["checks"][0]["manual_evidence"]["evidence"][0],
+            "evidence_type": "run",
+            "evidence_id": "deleted-run",
+            "source_state": "unavailable",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
     covered = get_assessment_read_model(
         session_id,
         project_id,

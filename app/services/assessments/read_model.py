@@ -19,6 +19,7 @@ from services.assessments.contracts import (
     AssessmentError,
 )
 from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
+from services.assessments.manual_evidence_read import attach_manual_evidence
 from services.assessments.nmap_service_evidence_read import attach_nmap_service_evidence
 from services.assessments.nuclei_recommendations import attach_nuclei_recommendations
 from services.assessments.reconciliation_read import assessment_finding_delta_read_model
@@ -203,6 +204,7 @@ def _check_page(
     attach_nmap_service_evidence(
         conn, checks, session_id=session_id, team_id=team_id,
     )
+    attach_manual_evidence(conn, checks)
     return page_payload("checks", checks, total, limit, offset)
 
 

@@ -5,6 +5,7 @@
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
 import { openAssessmentCheckStateEditor } from './project_assessment_check_state.js';
+import { openAssessmentEvidenceEditor } from './project_assessment_evidence.js';
 import { launchAssessmentAction } from './project_assessment_actions.js';
 import {
   createProjectAssessmentOastManager,
@@ -581,6 +582,25 @@ function createProjectAssessmentController(context) {
     });
   }
 
+  async function manageCheckEvidence(projectId, detail, check, returnFocus = null) {
+    return openAssessmentEvidenceEditor(ctx, {
+      projectId,
+      detail,
+      check,
+      returnFocus,
+      onSaved: async (_payload, action) => {
+        ctx.invalidateProjectOverview?.(projectId);
+        ctx.setProjectWorkspaceMessage?.(
+          action === 'unlinked'
+            ? 'Assessment evidence link removed. The saved source was kept.'
+            : 'Saved evidence linked to the assessment check.',
+        );
+        await loadDetail(projectId, { force: true, render: false });
+        renderViews();
+      },
+    });
+  }
+
   async function openDeltaFinding(projectId, finding, returnFocus = null) {
     const findingId = String(finding?.id || '');
     if (!projectId || !findingId) return false;
@@ -683,6 +703,7 @@ function createProjectAssessmentController(context) {
     createCycle,
     createFinding,
     editCheckState,
+    manageCheckEvidence,
     load,
     loadDetail,
     launchRecommendedAction,

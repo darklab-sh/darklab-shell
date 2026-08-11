@@ -1470,6 +1470,20 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         "has_more": False,
     }
     assert assessment_check["nmap_service_evidence"]["observations"] == run_evidence["observations"]
+    assert assessment_check["manual_evidence"] == {
+        "evidence": [{
+            **assessment_check["manual_evidence"]["evidence"][0],
+            "id": linked["evidence"]["id"],
+            "evidence_type": "run",
+            "evidence_id": run_id,
+            "source_state": "available",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
     assert cross_run_evidence.status_code == 404
     assert cross_browser_evidence.status_code == 404
 
@@ -7185,6 +7199,13 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     ]
     assert schemas["AssessmentCheck"]["properties"]["nmap_service_evidence"] == {
         "$ref": "#/components/schemas/NmapServiceEvidencePage",
+    }
+    assert schemas["AssessmentCheck"]["properties"]["manual_evidence"] == {
+        "$ref": "#/components/schemas/AssessmentEvidencePage",
+    }
+    assert schemas["AssessmentEvidencePage"]["properties"]["evidence"] == {
+        "type": "array",
+        "items": {"$ref": "#/components/schemas/AssessmentEvidence"},
     }
     assert paths[run_evidence_path]["get"]["responses"]["200"]["content"][
         "application/json"

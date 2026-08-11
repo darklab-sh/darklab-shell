@@ -87,6 +87,7 @@
     "/static/js/features/projects/project_assessment.js",
     "/static/js/features/projects/project_assessment_actions.js",
     "/static/js/features/projects/project_assessment_check_state.js",
+    "/static/js/features/projects/project_assessment_evidence.js",
     "/static/js/features/projects/project_assessment_oast.js",
     "/static/js/features/projects/project_assessment_zap.js",
     "/static/js/features/projects/project_assessment_renderer.js",

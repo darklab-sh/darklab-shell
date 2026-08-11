@@ -1704,6 +1704,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.manual_evidence_read import attach_manual_evidence
     from services.assessments.mutations import update_manual_check_state_on_conn
 
     raw_conn = postgres_schema.conn
@@ -1733,6 +1734,15 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
         "'domain', 'state.example', 'state-hash', ?, ?)",
         (timestamp, timestamp),
     )
+    conn.execute(
+        "INSERT INTO project_assessment_evidence "
+        "(id, assessment_id, check_id, evidence_type, evidence_id, source_state, "
+        "observed_at, unavailable_reason, match_rule_key, match_rule_version, "
+        "linked_by, created_at, updated_at) VALUES "
+        "('aev-state', 'asm-state', 'chk-state', 'run', 'run-state', "
+        "'available', ?, '', 'completed_run', '1.0', 'manual', ?, ?)",
+        (timestamp, timestamp, timestamp),
+    )
 
     changed = update_manual_check_state_on_conn(
         conn,
@@ -1748,6 +1758,8 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
         "SELECT state_changed_by_session_id, state_changed_by_member_id, "
         "state_changed_at FROM project_assessment_checks WHERE id = 'chk-state'"
     ).fetchone()
+    checks = [{"id": "chk-state"}]
+    attach_manual_evidence(conn, checks)
 
     assert changed["check"]["state"] == "blocked"
     assert changed["check"]["state_actor"] == {
@@ -1757,6 +1769,19 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
     assert actor["state_changed_by_session_id"] == "assessment-state"
     assert actor["state_changed_by_member_id"] == "member-state"
     assert actor["state_changed_at"] is not None
+    assert checks[0]["manual_evidence"] == {
+        "evidence": [{
+            **checks[0]["manual_evidence"]["evidence"][0],
+            "id": "aev-state",
+            "evidence_type": "run",
+            "evidence_id": "run-state",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
 
 
 @pytest.mark.postgres

@@ -674,6 +674,9 @@
             "nullable": true,
             "type": "string"
           },
+          "manual_evidence": {
+            "$ref": "#/components/schemas/AssessmentEvidencePage"
+          },
           "nmap_service_evidence": {
             "$ref": "#/components/schemas/NmapServiceEvidencePage"
           },
@@ -1270,6 +1273,37 @@
           "from_state",
           "to_state",
           "manual_state_preserved"
+        ],
+        "type": "object"
+      },
+      "AssessmentEvidencePage": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentEvidence"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "evidence",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
         ],
         "type": "object"
       },

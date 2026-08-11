@@ -493,6 +493,13 @@ function createProjectAssessmentRenderer(context, actions) {
       title: editCheckTitle,
       action: () => act.editCheckState(projectId, detail, check, returnFocus),
     });
+    items.push({
+      label: 'Manage evidence',
+      disabled: !canEditCheck,
+      disabledTitle: editCheckTitle,
+      title: editCheckTitle,
+      action: () => act.manageCheckEvidence(projectId, detail, check, returnFocus),
+    });
     if (check?.target_type === 'url') {
       const zapState = act.zapStateFor?.(projectId, detail?.assessment?.id, check?.id);
       const zapJob = zapState?.jobs?.[0] || null;

@@ -126,8 +126,18 @@ const detail = {
     ...cycle,
     profile_snapshot: {
       checks: [
-        { key: 'service_inventory', label: 'Service inventory', purpose: 'Record exposed services.' },
-        { key: 'dns_inventory', label: 'DNS inventory', purpose: 'Review DNS records.' },
+        {
+          key: 'service_inventory',
+          label: 'Service inventory',
+          purpose: 'Record exposed services.',
+          evidence_rules: [{ evidence_types: ['run', 'atlas_entity'] }],
+        },
+        {
+          key: 'dns_inventory',
+          label: 'DNS inventory',
+          purpose: 'Review DNS records.',
+          evidence_rules: [{ evidence_types: ['run'] }],
+        },
       ],
     },
   },
@@ -208,6 +218,13 @@ const detail = {
         state_source: 'derived',
         evidence_count: 2,
         unavailable_evidence_count: 0,
+        manual_evidence: {
+          evidence: [],
+          total: 0,
+          limit: 20,
+          offset: 0,
+          has_more: false,
+        },
         nmap_service_evidence: {
           observations: [{
             id: 'obs_1',
@@ -242,6 +259,13 @@ const detail = {
         state_source: 'manual',
         evidence_count: 1,
         unavailable_evidence_count: 1,
+        manual_evidence: {
+          evidence: [],
+          total: 0,
+          limit: 20,
+          offset: 0,
+          has_more: false,
+        },
       },
     ],
     total: 75,
@@ -350,7 +374,38 @@ describe('project assessment controller', () => {
   it('renders the same truthful coverage and target worklist on desktop and mobile', async () => {
     let currentDetail = structuredClone(detail)
     const checkStateUpdates = []
+    const evidenceUpdates = []
     const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (options.method === 'POST' && url.endsWith('/assessments/asmt_1/checks/asmc_1/evidence')) {
+        const payload = JSON.parse(options.body)
+        evidenceUpdates.push({ method: 'POST', payload })
+        const evidence = {
+          id: 'aev_manual_1',
+          evidence_type: payload.evidence_type,
+          evidence_id: payload.evidence_id,
+          source_state: 'available',
+          linked_by: 'manual',
+        }
+        currentDetail.checks.checks[0].manual_evidence = {
+          evidence: [evidence],
+          total: 1,
+          limit: 20,
+          offset: 0,
+          has_more: false,
+        }
+        return apiResponse({ ok: true, evidence, check: currentDetail.checks.checks[0] })
+      }
+      if (options.method === 'DELETE' && url.endsWith('/assessments/asmt_1/checks/asmc_1/evidence/aev_manual_1')) {
+        evidenceUpdates.push({ method: 'DELETE', linkId: 'aev_manual_1' })
+        currentDetail.checks.checks[0].manual_evidence = {
+          evidence: [],
+          total: 0,
+          limit: 20,
+          offset: 0,
+          has_more: false,
+        }
+        return apiResponse({ ok: true, deleted: { id: 'aev_manual_1' }, check: currentDetail.checks.checks[0] })
+      }
       if (options.method === 'PATCH' && url.endsWith('/assessments/asmt_1/checks/asmc_1')) {
         const payload = JSON.parse(options.body)
         checkStateUpdates.push(payload)
@@ -381,6 +436,27 @@ describe('project assessment controller', () => {
       return responseFor(url, options)
     })
     const showConfirm = vi.fn(async (options) => {
+      if (options.body?.text === 'Manage linked evidence') {
+        const type = options.content.querySelector('[aria-label="Saved evidence type"]')
+        const evidenceId = options.content.querySelector('input')
+        const error = options.content.querySelector('[role="alert"]')
+        expect(type.classList.contains('form-select')).toBe(true)
+        expect(evidenceId.classList.contains('form-control')).toBe(true)
+        expect(evidenceId.maxLength).toBe(512)
+        const remove = options.actions.find(action => action.id === 'remove')
+        if (remove) {
+          const existing = options.content.querySelector('[aria-label="Existing manual evidence link"]')
+          expect(existing.value).toBe('aev_manual_1')
+          expect(await remove.onActivate()).toBe(true)
+          return 'remove'
+        }
+        expect(await options.actions.find(action => action.id === 'link').onActivate()).toBe(false)
+        expect(error.textContent).toContain('ID is required')
+        type.value = 'run'
+        evidenceId.value = 'run_manual_1'
+        expect(await options.actions.find(action => action.id === 'link').onActivate()).toBe(true)
+        return 'link'
+      }
       if (options.body?.text === 'Set a manual check decision') {
         const state = options.content.querySelector('select')
         const reason = options.content.querySelector('textarea')
@@ -435,9 +511,36 @@ describe('project assessment controller', () => {
     expect(mobile.classList.contains('is-mobile')).toBe(true)
     expect(ctx.enhanceAppSelects).toHaveBeenCalledTimes(2)
     mobile.querySelector('.project-assessment-check-row .btn').click()
-    expect([...document.querySelectorAll('.action-sheet-item')].map(button => button.textContent)).toContain(
+    expect([...document.querySelectorAll('.action-sheet-item')].map(button => button.textContent)).toEqual([
       'Set manual decision',
-    )
+      'Manage evidence',
+      'Run Nmap',
+      'Create finding',
+    ])
+    ;[...document.querySelectorAll('.action-sheet-item')]
+      .find(button => button.textContent === 'Manage evidence')
+      .click()
+    await vi.waitFor(() => expect(evidenceUpdates).toEqual([{
+      method: 'POST',
+      payload: { evidence_type: 'run', evidence_id: 'run_manual_1' },
+    }]))
+    await vi.waitFor(() => expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Saved evidence linked to the assessment check.',
+    ))
+
+    controller.renderAssessment(desktop, 'prj_1')
+    ;[...desktop.querySelector('.project-assessment-check-row').querySelectorAll('button')]
+      .find(button => button.textContent === 'Manage evidence')
+      .click()
+    await vi.waitFor(() => expect(evidenceUpdates).toEqual([
+      { method: 'POST', payload: { evidence_type: 'run', evidence_id: 'run_manual_1' } },
+      { method: 'DELETE', linkId: 'aev_manual_1' },
+    ]))
+    await vi.waitFor(() => expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Assessment evidence link removed. The saved source was kept.',
+    ))
+
+    mobile.querySelector('.project-assessment-check-row .btn').click()
     ;[...document.querySelectorAll('.action-sheet-item')]
       .find(button => button.textContent === 'Set manual decision')
       .click()
@@ -1599,12 +1702,14 @@ describe('project assessment controller', () => {
     const items = [...document.querySelectorAll('.action-sheet-item')]
     expect(items.map(button => button.textContent)).toEqual([
       'Set manual decision',
+      'Manage evidence',
       'Run Nmap',
       'Create finding',
     ])
     expect(items[0].disabled).toBe(false)
-    expect(items[1].disabled).toBe(true)
-    expect(items[2].disabled).toBe(false)
+    expect(items[1].disabled).toBe(false)
+    expect(items[2].disabled).toBe(true)
+    expect(items[3].disabled).toBe(false)
   })
 
   it('renders remediation-level cycle deltas with direct current and earlier finding links', async () => {

@@ -32,6 +32,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_atlas_profile.py",
     "openapi_assessment_actions.py",
     "openapi_assessment_deltas.py",
+    "openapi_assessment_evidence.py",
     "openapi_assessment_oast.py",
     "openapi_assessment_worklist.py",
     "openapi_assessment_zap.py",
@@ -314,6 +315,9 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_actions.py", 89, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_deltas.py", 277, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_assessment_evidence.py", 66, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_worklist.py", 195, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_oast.py", 287, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_assessment_zap.py", 330, "split-package-ratchet"),
@@ -379,6 +383,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/evidence_matching.py", 346, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/evidence_sources.py", 330, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/finding_worklist.py", 165, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/manual_evidence_read.py", 58, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/http_profile_contracts.py", 34, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/httpx_version_observations.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/httpx_stored_nvd.py", 70, "split-package-ratchet"),
