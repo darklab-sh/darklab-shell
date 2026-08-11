@@ -4658,12 +4658,11 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from core.migrations.runner import run_migrations_with_advisory_lock
     from core import database as core_database
     from services.atlas.materializer import materialize_run_entities
+    from services.assessments.coverage import reconcile_run_evidence_on_conn
     from services.projects import findings as project_findings
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
-    session_id = str(uuid.uuid4())
-
     @contextmanager
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
@@ -4672,20 +4671,33 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     client = app.test_client()
+    bootstrap_session_id = str(uuid.uuid4())
+    token_resp = client.get(
+        "/session/token/generate",
+        headers={"X-Session-ID": bootstrap_session_id},
+    )
+    session_id = json.loads(token_resp.data)["session_token"]
+    browser_headers = {"X-Session-ID": session_id}
+    api_headers = {"Authorization": f"Bearer {session_id}"}
     create_resp = client.post(
         "/projects",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"name": "Postgres Case", "description": "route smoke"},
     )
     project = json.loads(create_resp.data)["project"]
     target_resp = client.post(
         f"/projects/{project['id']}/targets",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"type": "domain", "value": "darklab.sh", "source_detail": {"source": "manual"}},
+    )
+    secret_resp = client.post(
+        "/session/secrets",
+        headers=browser_headers,
+        json={"name": "POSTGRES_ASSESSMENT_TOKEN", "value": "postgres-route-secret"},
     )
     http_profile_resp = client.post(
         f"/projects/{project['id']}/http-profiles",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={
             "name": "Administrator",
             "role": "administrator",
@@ -4693,6 +4705,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             "scope_roots": ["https://darklab.sh/admin"],
             "allowed_hosts": ["darklab.sh"],
             "include_paths": ["/admin"],
+            "secret_refs": {"bearer_token": "POSTGRES_ASSESSMENT_TOKEN"},
             "token_capture_rules": [{
                 "name": "csrf",
                 "source": "header",
@@ -4707,34 +4720,52 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     http_profile = json.loads(http_profile_resp.data)["profile"]
     http_profile_get_resp = client.get(
         f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
+    )
+    api_http_profile_get_resp = client.get(
+        f"/api/v1/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=api_headers,
     )
     http_profile_update_resp = client.patch(
         f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"revision": http_profile["revision"], "enabled": False},
     )
-    http_profile_delete_resp = client.delete(
-        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
-        headers={"X-Session-ID": session_id},
+    assessment_resp = client.post(
+        f"/projects/{project['id']}/assessments",
+        headers=browser_headers,
+        json={"profile_key": "network", "title": "Postgres route assessment"},
     )
+    assessment = json.loads(assessment_resp.data)
+    assessment_id = assessment["assessment"]["id"]
     active_resp = client.post(
         "/projects/active",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"project_id": project["id"]},
     )
     run_id = "run-" + uuid.uuid4().hex
     conn.execute(
         """
-        INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_search_text)
-        VALUES (%s, %s, 'external', %s, %s, %s, %s)
+        INSERT INTO runs (
+            id, session_id, run_kind, command, started, finished, exit_code,
+            output_preview, output_search_text
+        )
+        VALUES (%s, %s, 'external', %s, %s, %s, 0, %s, %s)
         """,
-        (run_id, session_id, "host darklab.sh", "2026-05-17T00:00:00Z", "[]", "darklab.sh"),
+        (
+            run_id,
+            session_id,
+            "nmap -sT -sV darklab.sh",
+            "2026-05-17T00:00:00Z",
+            "2026-05-17T00:01:00Z",
+            "[]",
+            "darklab.sh",
+        ),
     )
     conn.commit()
     link_resp = client.post(
         f"/projects/{project['id']}/links",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"entity_type": "run", "entity_id": run_id},
     )
     with _postgres_db_connect() as compat_conn:
@@ -4824,32 +4855,49 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             "'httpx_screenshot', 'image/png', 'image', ?)",
             ("rfa_" + uuid.uuid4().hex[:16], session_id, run_id, "2026-05-17T00:00:03Z"),
         )
+        assessment_reconciliation = reconcile_run_evidence_on_conn(compat_conn, run_id)
     conn.commit()
     run_entity_preview_resp = client.post(
         f"/projects/{project['id']}/links/run-entities/preview",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"run_ids": [run_id]},
     )
-    list_resp = client.get("/projects?include_counts=1", headers={"X-Session-ID": session_id})
-    targets_resp = client.get(f"/projects/{project['id']}/targets", headers={"X-Session-ID": session_id})
-    links_resp = client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id})
+    list_resp = client.get("/projects?include_counts=1", headers=browser_headers)
+    targets_resp = client.get(f"/projects/{project['id']}/targets", headers=browser_headers)
+    links_resp = client.get(f"/projects/{project['id']}/links", headers=browser_headers)
     findings_resp = client.get(
-        f"/projects/{project['id']}/findings?command_root=host&severity=high&scope=finding",
-        headers={"X-Session-ID": session_id},
+        f"/projects/{project['id']}/findings?command_root=nmap&severity=high&scope=finding",
+        headers=browser_headers,
     )
     findings_review_resp = client.post(
         f"/projects/{project['id']}/findings/review",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"finding_ids": [recorded_findings[0]["id"], "missing-finding"], "review_state": "important"},
     )
     web_surface_resp = client.get(
         f"/projects/{project['id']}/web-surface",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
     )
     filtered_web_surface_resp = client.get(
         f"/projects/{project['id']}/web-surface?target=darklab.sh&status_code=200"
         "&technology=nginx&profile_role=authenticated&visual_hash=visual-darklab",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
+    )
+    browser_assessment_resp = client.get(
+        f"/projects/{project['id']}/assessments/{assessment_id}?state=covered&limit=10",
+        headers=browser_headers,
+    )
+    api_assessment_list_resp = client.get(
+        f"/api/v1/projects/{project['id']}/assessments?status=active&limit=1",
+        headers=api_headers,
+    )
+    api_assessment_detail_resp = client.get(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
+        headers=api_headers,
+    )
+    http_profile_delete_resp = client.delete(
+        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=browser_headers,
     )
     prefs_row = conn.execute(
         "SELECT preferences FROM session_preferences WHERE session_id = %s",
@@ -4860,9 +4908,14 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         (session_id, "darklab.sh:443/tcp"),
     ).fetchone()
 
+    assert token_resp.status_code == 200
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
+    assert secret_resp.status_code == 201
     assert http_profile_resp.status_code == 201
+    assert http_profile["secret_refs"] == {
+        "bearer_token": {"name": "POSTGRES_ASSESSMENT_TOKEN", "available": True}
+    }
     assert json.loads(http_profile_get_resp.data)["profile"]["token_capture_rules"] == [{
         "name": "csrf",
         "source": "header",
@@ -4870,7 +4923,28 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         "target": "header",
         "target_name": "X-CSRF-Token",
     }]
+    assert api_http_profile_get_resp.status_code == 200
+    assert json.loads(api_http_profile_get_resp.data)["profile"]["secret_refs"] == {
+        "bearer_token": {"name": "POSTGRES_ASSESSMENT_TOKEN", "available": True}
+    }
     assert json.loads(http_profile_update_resp.data)["profile"]["enabled"] is False
+    assert assessment_resp.status_code == 201
+    assert assessment_reconciliation["checks_matched"] >= 1
+    assert assessment_reconciliation["evidence_linked"] >= 1
+    assert browser_assessment_resp.status_code == 200
+    browser_assessment = json.loads(browser_assessment_resp.data)
+    assert browser_assessment["checks"]["total"] >= 1
+    assert all(check["state"] == "covered" for check in browser_assessment["checks"]["checks"])
+    assert api_assessment_list_resp.status_code == 200
+    assert json.loads(api_assessment_list_resp.data)["assessments"][0]["id"] == assessment_id
+    assert api_assessment_detail_resp.status_code == 200
+    api_assessment = json.loads(api_assessment_detail_resp.data)
+    service_check = next(
+        check for check in api_assessment["checks"]["checks"]
+        if check["check_key"] == "service_discovery"
+    )
+    assert service_check["state"] == "covered"
+    assert service_check["evidence_previews"]["evidence"][0]["evidence_id"] == run_id
     assert http_profile_delete_resp.status_code == 200
     assert active_resp.status_code == 200
     assert link_resp.status_code == 201
