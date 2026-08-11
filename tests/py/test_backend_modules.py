@@ -3633,6 +3633,7 @@ class TestLoadConfig:
         from services.connectors import zap_job_artifacts as zap_artifact_module
         from services.connectors import zap_observability
         from services.connectors import zap_worker as zap_worker_module
+        from services.connectors import zap_worker_observability
         from services.connectors import zap_worker_lock as zap_worker_lock_module
         from services.connectors.zap_job_artifacts import (
             atlas_draft_id_for_zap_job,
@@ -3728,6 +3729,29 @@ class TestLoadConfig:
                 "suppressed_repeat_count": 2,
             }
             assert "/private/zap" not in repr(warning_log.call_args)
+
+            try:
+                raise ZapTransportError(
+                    "zap_report_invalid", "private target and report content"
+                )
+            except ZapTransportError as terminal_error:
+                with mock.patch.object(
+                    zap_worker_observability.log, "error"
+                ) as terminal_log:
+                    zap_worker_observability.log_zap_job_failed(
+                        job_id, "downloading", terminal_error
+                    )
+            assert terminal_log.call_args.args == ("ZAP_JOB_FAILED",)
+            assert terminal_log.call_args.kwargs["extra"] == {
+                "job_id": job_id,
+                "from_status": "downloading",
+                "to_status": "failed",
+                "phase": "downloading",
+                "error_code": "zap_report_invalid",
+                "error_class": "ZapTransportError",
+            }
+            assert "private target" not in repr(terminal_log.call_args)
+            assert "report content" not in repr(terminal_log.call_args)
             with (
                 mock.patch.object(zap_worker_module, "new_zap_job_id", return_value=job_id),
                 mock.patch.object(zap_worker_module, "store_zap_job_plan") as store_plan,
@@ -3909,6 +3933,7 @@ class TestLoadConfig:
         with (
             mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
             mock.patch.object(zap_worker_module, "discard_zap_job_plan"),
+            mock.patch.object(zap_worker_module, "log_zap_job_failed") as failure_log,
         ):
             zap_worker_module.process_zap_job(
                 {
@@ -3923,6 +3948,26 @@ class TestLoadConfig:
             )
         assert transition_job.call_args.kwargs["error_code"] == "zap_submission_state_uncertain"
         assert transition_job.call_args.args[:3] == (job_id, ("submitting",), "failed")
+        assert failure_log.call_args.args[:2] == (job_id, "submitting")
+        assert failure_log.call_args.args[2].code == "zap_submission_state_uncertain"
+
+        transition_conflict = zap_worker_module.ZapJobError(
+            "zap_job_transition_conflict", "changed"
+        )
+        with (
+            mock.patch.object(
+                zap_worker_module,
+                "transition_zap_job",
+                side_effect=transition_conflict,
+            ),
+            mock.patch.object(zap_worker_module, "discard_zap_job_plan") as discard_plan,
+            mock.patch.object(zap_worker_module, "log_zap_job_failed") as failure_log,
+        ):
+            zap_worker_module._fail_job(
+                job_id, "running", RuntimeError("private provider response"), cfg
+            )
+        discard_plan.assert_not_called()
+        failure_log.assert_not_called()
 
         cancel_job = {**artifact_job, "status": "cancel_requested", "remote_plan_id": "21"}
         with (

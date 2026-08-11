@@ -37,6 +37,7 @@ from services.connectors.zap_job_lifecycle import (
     record_zap_job_submission,
     transition_zap_job,
 )
+from services.connectors.zap_worker_observability import log_zap_job_failed
 from services.connectors.zap_worker_lock import acquire_zap_worker_lock
 from services.connectors.zap_jobs import (
     ZapJobError,
@@ -122,13 +123,11 @@ def _fail_job(job_id: str, status: str, exc: BaseException, cfg) -> None:
             error_detail=detail,
         )
     except ZapJobError as transition_error:
-        if transition_error.code != "zap_job_transition_conflict":
-            raise
+        if transition_error.code == "zap_job_transition_conflict":
+            return
+        raise
     discard_zap_job_plan(job_id, cfg)
-    log.warning(
-        "ZAP_JOB_FAILED",
-        extra={"job_id": job_id, "phase": status, "error_class": type(exc).__name__},
-    )
+    log_zap_job_failed(job_id, status, exc)
 
 
 def _preview_report(job: Mapping[str, Any], payload: bytes) -> str:

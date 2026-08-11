@@ -20,6 +20,8 @@ Private OAST provider, cleanup, and readiness records keep only a correlation id
 
 Private ZAP plan-spool cleanup records keep only a validated job id, fixed cleanup stage, counts, and bounded error classes. They never include filesystem paths, Automation Framework YAML, selected targets, authentication roles, API keys, or report content. Repeated stale-scan warnings are suppressed for a bounded interval, and the next emitted warning reports how many repeats were skipped.
 
+Terminal ZAP job failures use the same validated job id plus fixed state, phase, error-code, and error-class fields. Their sanitized traceback preserves the originating stack without copying exception text, target values, provider responses, plan content, or reports into the record.
+
 HTTPx screenshot finalization logs only owner/run ids, counts, limits, and fixed failure classes. Storage-limit and cleanup events never include workspace paths, URLs, page titles, technologies, captured bytes, or target values.
 
 ## Level Semantics
@@ -363,7 +365,6 @@ The current event inventory is:
 | WARN | `SCHEDULE_FIRE_CLAIM_TIME_INVALID` | scheduler dispatch | schedule_id, owner_kind, session, last_run_at, command_root |
 | WARN | `SCHEDULER_WORKER_DATABASE_INTERRUPTED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type, error_type, sqlstate |
 | WARN | `SCHEDULER_LOCK_RELEASE_SKIPPED` | scheduler worker | phase, error_type, sqlstate |
-| WARN | `ZAP_JOB_FAILED` | ZAP connector worker | job_id, phase, error_class |
 | WARN | `ZAP_CANCEL_RETRY` | ZAP connector worker | job_id, error_class |
 | WARN | `ZAP_CANCEL_CREDENTIAL_RETRY` | ZAP connector worker | job_id, error_class |
 | WARN | `ZAP_PLAN_SPOOL_SCAN_DEGRADED` | private ZAP plan reconciliation | failure_count, error_classes, suppressed_repeat_count |
@@ -516,6 +517,7 @@ The current event inventory is:
 | ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_BOOTSTRAP_FAILED` | scheduler worker | phase, pid (+ traceback) |
 | ERROR | `ZAP_WORKER_TICK_FAILED` | ZAP connector worker | (+ traceback) |
+| ERROR | `ZAP_JOB_FAILED` | ZAP connector worker | job_id, from_status, to_status, phase, error_code, error_class (+ sanitized traceback) |
 | ERROR | `ZAP_PLAN_SPOOL_CLEANUP_FAILED` | private ZAP plan cleanup | job_id, cleanup_stage, error_class (+ sanitized traceback) |
 | ERROR | `OAST_SESSION_SPOOL_CLEANUP_FAILED` | private OAST terminal or orphan cleanup | correlation_id, cleanup_stage, error_class (+ sanitized traceback) |
 | ERROR | `OAST_PROVIDER_DEREGISTRATION_FAILED` | private OAST registration rollback | correlation_id, cleanup_stage, error_class, error_code (+ sanitized traceback) |
