@@ -3,6 +3,8 @@
 
 // Manual Assessment check decisions shared by desktop and mobile surfaces.
 
+import { logAssessmentClientFailure } from './project_assessment_client_log.js';
+
 const MANUAL_STATE_OPTIONS = [
   { value: 'blocked', label: 'Blocked' },
   { value: 'skipped', label: 'Intentionally skipped' },
@@ -86,8 +88,7 @@ async function openAssessmentCheckStateEditor(context, options = {}) {
   if (typeof ctx.showConfirm !== 'function') {
     const err = new Error('Assessment check decisions are unavailable.');
     ctx.setProjectWorkspaceMessage?.(err.message, { error: true });
-    ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_CHECK_STATE_CONFIRM_UNAVAILABLE', err, {
-      page: 'project_assessment',
+    logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_CHECK_STATE_CONFIRM_UNAVAILABLE', err, {
       phase: 'check_state',
       project_id: projectId,
       assessment_id: assessmentId,
@@ -118,8 +119,7 @@ async function openAssessmentCheckStateEditor(context, options = {}) {
     } catch (err) {
       editor.error.textContent = err?.message || 'Could not save this assessment decision.';
       editor.error.hidden = false;
-      ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_CHECK_STATE_UPDATE_FAILED', err, {
-        page: 'project_assessment',
+      logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_CHECK_STATE_UPDATE_FAILED', err, {
         phase: 'check_state',
         project_id: projectId,
         assessment_id: assessmentId,
@@ -172,8 +172,7 @@ async function openAssessmentCheckStateEditor(context, options = {}) {
       err?.message || 'Could not open the assessment decision editor.',
       { error: true },
     );
-    ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_CHECK_STATE_CONFIRM_FAILED', err, {
-      page: 'project_assessment',
+    logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_CHECK_STATE_CONFIRM_FAILED', err, {
       phase: 'check_state',
       project_id: projectId,
       assessment_id: assessmentId,

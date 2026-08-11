@@ -13,6 +13,7 @@ import {
 } from './project_assessment_oast.js';
 import { createProjectAssessmentZapManager } from './project_assessment_zap.js';
 import { createProjectHttpProfileManager } from './project_http_profiles.js';
+import { logAssessmentClientFailure } from './project_assessment_client_log.js';
 import { openContextualFindingRecord } from '../findings/finding_record_context.js';
 import { openFindingTriageEditor } from '../findings/finding_triage_bridge.js';
 
@@ -97,8 +98,8 @@ function createProjectAssessmentController(context) {
     return new Error(fallback);
   }
 
-  function logFailure(message, err, details = {}) {
-    ctx.logClientError?.(message, err, { page: 'project_assessment', ...details });
+  function logFailure(event, err, details = {}) {
+    logAssessmentClientFailure(ctx, event, err, details);
   }
 
   function renderViews() {
@@ -598,7 +599,8 @@ function createProjectAssessmentController(context) {
       logFailure('PROJECT_ASSESSMENT_CLIENT_FINDING_EDITOR_FAILED', err, {
         phase: 'finding_editor',
         project_id: String(projectId || ''),
-        assessment_check_id: String(check?.id || ''),
+        assessment_id: String(check?.assessment_id || stateFor(projectId).selectedId || ''),
+        check_id: String(check?.id || ''),
       });
       return false;
     }
@@ -666,7 +668,7 @@ function createProjectAssessmentController(context) {
       logFailure('PROJECT_ASSESSMENT_CLIENT_DELTA_FINDING_OPEN_FAILED', err, {
         phase: 'finding_delta',
         project_id: String(projectId || ''),
-        finding_id: findingId,
+        assessment_id: String(stateFor(projectId).selectedId || ''),
       });
       return false;
     }

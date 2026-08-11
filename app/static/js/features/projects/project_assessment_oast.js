@@ -4,6 +4,7 @@
 // Private OAST reservation recovery, readiness polling, and guarded launch.
 
 import { attachActiveRunFromMonitor as importedAttachActiveRunFromMonitor } from '../../runner_bridge.js';
+import { logAssessmentClientFailure } from './project_assessment_client_log.js';
 import {
   chooseHttpProfile,
   chooseParameterEvidence,
@@ -147,13 +148,12 @@ function createProjectAssessmentOastManager(context, hooks = {}) {
     st.pollTimer?.unref?.();
   }
 
-  function logFailure(message, err, st, phase) {
-    ctx.logClientError?.(message, err, {
-      page: 'project_assessment',
+  function logFailure(event, err, st, phase) {
+    logAssessmentClientFailure(ctx, event, err, {
       phase,
       project_id: st.projectId,
       assessment_id: st.assessmentId,
-      assessment_check_id: st.checkId,
+      check_id: st.checkId,
       correlation_id: text(currentCorrelation(st)?.id),
     });
   }

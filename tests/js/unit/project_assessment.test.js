@@ -20,15 +20,20 @@ vi.mock('../../../app/static/js/features/findings/finding_triage_bridge.js', () 
 
 import { DarklabProjectAssessment } from '../../../app/static/js/features/projects/project_assessment.js'
 import { launchAssessmentAction } from '../../../app/static/js/features/projects/project_assessment_actions.js'
+import { assessmentClientLogLevel } from '../../../app/static/js/features/projects/project_assessment_client_log.js'
 
-function apiResponse(payload = {}, { ok = true } = {}) {
-  return { ok, json: vi.fn(async () => payload) }
+function apiResponse(payload = {}, { ok = true, status = ok ? 200 : 400 } = {}) {
+  return { ok, status, json: vi.fn(async () => payload) }
 }
 
 function makeContext(projectWorkspaceRequest, overrides = {}) {
   return {
     projectWorkspaceRequest,
-    projectResponseError: vi.fn(async (_resp, fallback) => new Error(fallback)),
+    projectResponseError: vi.fn(async (resp, fallback) => {
+      const error = new Error(fallback)
+      error.status = Number(resp?.status || 0)
+      return error
+    }),
     formatDate: vi.fn(value => String(value || '').replace('T', ' ')),
     bindProjectRuntimePressable: vi.fn((element, options = {}) => {
       if (typeof options.onActivate === 'function') {
@@ -2311,7 +2316,10 @@ describe('project assessment controller', () => {
   it('rejects failed lifecycle mutation responses without claiming success', async () => {
     const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
       if (options.method === 'PATCH') {
-        return apiResponse({ error: 'assessment update rejected' }, { ok: false })
+        return apiResponse(
+          { error: 'assessment update rejected' },
+          { ok: false, status: 409 },
+        )
       }
       return responseFor(url, options)
     })
@@ -2326,6 +2334,23 @@ describe('project assessment controller', () => {
       { error: true },
     )
     expect(ctx.setProjectWorkspaceMessage).not.toHaveBeenCalledWith('Assessment cycle completed.')
+    const failureLog = ctx.logClientError.mock.calls.find(([event]) => (
+      event === 'PROJECT_ASSESSMENT_CLIENT_COMPLETE_FAILED'
+    ))
+    expect(failureLog).toBeTruthy()
+    expect(failureLog[2]).toEqual({
+      page: 'project_assessment',
+      event: 'PROJECT_ASSESSMENT_CLIENT_COMPLETE_FAILED',
+      level: 'warning',
+      phase: 'lifecycle',
+      action: 'complete',
+      project_id: 'prj_1',
+      assessment_id: 'asmt_1',
+      status: 409,
+    })
+    expect(assessmentClientLogLevel(Object.assign(new Error('server'), { status: 503 }))).toBe('error')
+    expect(assessmentClientLogLevel(new TypeError('Failed to fetch'))).toBe('warning')
+    expect(assessmentClientLogLevel(new ReferenceError('missing helper'))).toBe('error')
   })
 
   it('supersedes a stale detail load when a lifecycle reload is forced', async () => {

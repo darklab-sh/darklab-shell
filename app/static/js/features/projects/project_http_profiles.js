@@ -5,6 +5,7 @@
 
 import { openActionSheet } from '../../ui/ui_action_sheet.js';
 import { openHttpProfileEditor } from './project_http_profile_editor.js';
+import { logAssessmentClientFailure } from './project_assessment_client_log.js';
 
 function createProjectHttpProfileManager(context, hooks = {}) {
   const ctx = context || {};
@@ -30,8 +31,8 @@ function createProjectHttpProfileManager(context, hooks = {}) {
     hooks.renderViews?.();
   }
 
-  function logFailure(message, err, details = {}) {
-    ctx.logClientError?.(message, err, { page: 'project_assessment', ...details });
+  function logFailure(event, err, details = {}) {
+    logAssessmentClientFailure(ctx, event, err, details);
   }
 
   function restoreFocus(target) {

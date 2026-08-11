@@ -3,6 +3,8 @@
 
 // Reviewed ZAP setup, durable job recovery, and result handoff for Assessment.
 
+import { logAssessmentClientFailure } from './project_assessment_client_log.js';
+
 const activeStatuses = new Set([
   'queued',
   'submitting',
@@ -241,13 +243,13 @@ function createProjectAssessmentZapManager(context, hooks = {}) {
     hooks.renderViews?.();
   }
 
-  function logFailure(message, err, st, phase) {
-    ctx.logClientError?.(message, err, {
-      page: 'project_assessment',
+  function logFailure(event, err, st, phase, details = {}) {
+    logAssessmentClientFailure(ctx, event, err, {
       phase,
       project_id: st.projectId,
       assessment_id: st.assessmentId,
-      assessment_check_id: st.checkId,
+      check_id: st.checkId,
+      job_id: text(details.job_id),
     });
   }
 
@@ -287,7 +289,13 @@ function createProjectAssessmentZapManager(context, hooks = {}) {
     } catch (err) {
       stopPolling(st);
       st.error = err?.message || 'Could not refresh this ZAP job.';
-      logFailure('PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED', err, st, 'zap_job_refresh');
+      logFailure(
+        'PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED',
+        err,
+        st,
+        'zap_job_refresh',
+        { job_id: jobId },
+      );
       renderViews();
       return false;
     }
@@ -516,7 +524,13 @@ function createProjectAssessmentZapManager(context, hooks = {}) {
     } catch (err) {
       st.error = err?.message || 'Could not cancel this ZAP scan.';
       ctx.setProjectWorkspaceMessage?.(st.error, { error: true });
-      logFailure('PROJECT_ASSESSMENT_CLIENT_ZAP_CANCEL_FAILED', err, st, 'zap_cancel');
+      logFailure(
+        'PROJECT_ASSESSMENT_CLIENT_ZAP_CANCEL_FAILED',
+        err,
+        st,
+        'zap_cancel',
+        { job_id: job?.id },
+      );
       return false;
     } finally {
       st.mutating = '';
@@ -532,10 +546,9 @@ function createProjectAssessmentZapManager(context, hooks = {}) {
       return true;
     } catch (err) {
       ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open Files.', { error: true });
-      ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_ZAP_FILES_OPEN_FAILED', err, {
-        page: 'project_assessment',
+      logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_ZAP_FILES_OPEN_FAILED', err, {
         phase: 'zap_files_handoff',
-        zap_job_id: text(job?.id),
+        job_id: text(job?.id),
       });
       return false;
     }
@@ -557,10 +570,10 @@ function createProjectAssessmentZapManager(context, hooks = {}) {
       return true;
     } catch (err) {
       ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open Atlas.', { error: true });
-      ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_ZAP_ATLAS_OPEN_FAILED', err, {
-        page: 'project_assessment',
+      logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_ZAP_ATLAS_OPEN_FAILED', err, {
         phase: 'zap_atlas_handoff',
         project_id: text(projectId),
+        job_id: text(job?.id),
       });
       return false;
     }

@@ -90,7 +90,9 @@ let exportedDarklabProjectWorkspaceShell = null;
 
     function normalizeProjectError(err) {
       if (String(err?.message || '') === 'team_forbidden') {
-        return new Error(projectWriteDeniedMessage());
+        const error = new Error(projectWriteDeniedMessage());
+        error.status = Number(err?.status || 0);
+        return error;
       }
       return err;
     }
@@ -170,7 +172,9 @@ let exportedDarklabProjectWorkspaceShell = null;
         if (data && data.error) message = data.error;
       } catch (_) {}
       if (message === 'team_forbidden') message = projectWriteDeniedMessage();
-      return new Error(message || fallback);
+      const error = new Error(message || fallback);
+      error.status = Number(resp.status || 0);
+      return error;
     }
 
     async function createProjectFromName(name, input) {

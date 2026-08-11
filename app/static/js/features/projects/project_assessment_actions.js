@@ -4,6 +4,7 @@
 // Guarded preview, confirmation, and terminal handoff for Assessment actions.
 
 import { attachActiveRunFromMonitor as importedAttachActiveRunFromMonitor } from '../../runner_bridge.js';
+import { logAssessmentClientFailure } from './project_assessment_client_log.js';
 
 function text(value, fallback = '') {
   const normalized = String(value || '').trim();
@@ -11,7 +12,9 @@ function text(value, fallback = '') {
 }
 
 function responseError(payload, status, fallback) {
-  return new Error(text(payload?.error, status ? `HTTP ${status}` : fallback));
+  const error = new Error(text(payload?.error, status ? `HTTP ${status}` : fallback));
+  error.status = Number(status || 0);
+  return error;
 }
 
 function restoreFocus(target) {
@@ -350,11 +353,11 @@ async function launchAssessmentAction(context, options = {}) {
       err?.message || 'Could not start this assessment action.',
       { error: true },
     );
-    ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_ACTION_LAUNCH_FAILED', err, {
-      page: 'project_assessment',
+    logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_ACTION_LAUNCH_FAILED', err, {
+      phase: 'action_launch',
       project_id: projectId,
       assessment_id: assessmentId,
-      assessment_check_id: checkId,
+      check_id: checkId,
     });
     return false;
   } finally {

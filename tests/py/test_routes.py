@@ -13652,6 +13652,57 @@ class TestClientLogRoute:
         assert debug_extra["context"] == "TEAM_SCOPE_CHANGED"
         assert debug_extra["client_message"] == '{"scope":"team"}'
 
+        with mock.patch.object(shell_assets.log, "error") as mock_error:
+            assessment_resp = client.post("/log", json={
+                "event": "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
+                "level": "error",
+                "context": "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
+                "message": "Internal server error",
+                "details": {
+                    "page": "project_assessment",
+                    "phase": "zap_job_refresh",
+                    "project_id": "prj_1",
+                    "assessment_id": "asm_1",
+                    "check_id": "ach_1",
+                    "correlation_id": "ocr_1",
+                    "job_id": "zaj_1",
+                    "profile_key": "web",
+                    "status": 500,
+                    "assessment_check_id": "legacy-check-id",
+                    "zap_job_id": "legacy-job-id",
+                    "target_value": "https://private.example.test",
+                    "callback_url": "https://callback.example.test",
+                    "command": "secret command",
+                    "response_body": "private response",
+                    "finding_text": "private finding",
+                },
+            })
+        assert assessment_resp.status_code == 200
+        mock_error.assert_called_once()
+        assert mock_error.call_args.args == (
+            "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
+        )
+        assessment_extra = mock_error.call_args.kwargs["extra"]
+        assert assessment_extra["client_details"] == {
+            "assessment_id": "asm_1",
+            "check_id": "ach_1",
+            "correlation_id": "ocr_1",
+            "job_id": "zaj_1",
+            "page": "project_assessment",
+            "phase": "zap_job_refresh",
+            "profile_key": "web",
+            "project_id": "prj_1",
+            "status": 500,
+        }
+        serialized = json.dumps(assessment_extra)
+        assert "private.example.test" not in serialized
+        assert "callback.example.test" not in serialized
+        assert "secret command" not in serialized
+        assert "private response" not in serialized
+        assert "private finding" not in serialized
+        assert "legacy-check-id" not in serialized
+        assert "legacy-job-id" not in serialized
+
     def test_routes_supported_levels_and_counts_only_warning_and_error_metrics(self):
         client = get_client()
         metrics = mock.Mock()

@@ -46,7 +46,9 @@ let DarklabEntityMetadata = null;
         const data = await resp.json();
         if (data && data.error) message = data.error;
       } catch (_) {}
-      throw new Error(message);
+      const error = new Error(message);
+      error.status = Number(resp.status || 0);
+      throw error;
     }
     if (method !== 'GET' && method !== 'HEAD' && typeof onWrite === 'function') {
       onWrite(resp);

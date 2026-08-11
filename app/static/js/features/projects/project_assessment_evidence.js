@@ -3,6 +3,8 @@
 
 // Manual Assessment evidence controls shared by desktop and mobile surfaces.
 
+import { logAssessmentClientFailure } from './project_assessment_client_log.js';
+
 const MAX_EVIDENCE_ID_LENGTH = 512;
 const EVIDENCE_TYPE_LABELS = {
   run: 'Saved run',
@@ -146,8 +148,7 @@ async function openAssessmentEvidenceEditor(context, options = {}) {
   if (typeof ctx.showConfirm !== 'function') {
     const err = new Error('Assessment evidence controls are unavailable.');
     ctx.setProjectWorkspaceMessage?.(err.message, { error: true });
-    ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_EVIDENCE_CONFIRM_UNAVAILABLE', err, {
-      page: 'project_assessment',
+    logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_EVIDENCE_CONFIRM_UNAVAILABLE', err, {
       phase: 'evidence',
       project_id: projectId,
       assessment_id: assessmentId,
@@ -175,8 +176,7 @@ async function openAssessmentEvidenceEditor(context, options = {}) {
     } catch (err) {
       editor.error.textContent = err?.message || fallback;
       editor.error.hidden = false;
-      ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_EVIDENCE_UPDATE_FAILED', err, {
-        page: 'project_assessment',
+      logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_EVIDENCE_UPDATE_FAILED', err, {
         phase: 'evidence',
         action,
         project_id: projectId,
@@ -253,8 +253,7 @@ async function openAssessmentEvidenceEditor(context, options = {}) {
       err?.message || 'Could not open the assessment evidence editor.',
       { error: true },
     );
-    ctx.logClientError?.('PROJECT_ASSESSMENT_CLIENT_EVIDENCE_CONFIRM_FAILED', err, {
-      page: 'project_assessment',
+    logAssessmentClientFailure(ctx, 'PROJECT_ASSESSMENT_CLIENT_EVIDENCE_CONFIRM_FAILED', err, {
       phase: 'evidence',
       project_id: projectId,
       assessment_id: assessmentId,
