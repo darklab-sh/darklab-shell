@@ -2029,7 +2029,7 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     monkeypatch,
     tmp_path,
 ):
-    from services.assessments import http_profile_runtime
+    from services.assessments import http_profile_execution, http_profile_runtime
 
     client = get_client()
     token = _token(client)
@@ -2098,11 +2098,19 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     monkeypatch.setattr(http_profile_runtime, "_scanner_user_exists", lambda: False)
     monkeypatch.setattr(http_profile_runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
     started = SimpleNamespace(run_id="run_protected_http", status="running")
+    profile_row = mock.Mock(wraps=http_profile_execution._profile_row)
+    plan_context = mock.Mock(wraps=http_profile_execution.load_http_profile_plan_context)
     with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
          mock.patch(
              "blueprints.api_v1._start_brokered_run_service",
              return_value=started,
          ) as start_run, \
+         mock.patch.object(http_profile_execution, "_profile_row", profile_row), \
+         mock.patch.object(http_profile_execution, "load_http_profile_plan_context", plan_context), \
+         mock.patch(
+             "services.assessments.recommended_action_profiles.load_http_profile_plan_context",
+             plan_context,
+         ), \
          mock.patch("blueprints.api_v1.log.info") as info_log:
         launched = client.post(
             action_path,
@@ -2115,6 +2123,8 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
         )
 
     assert launched.status_code == 202
+    assert plan_context.call_count >= 1
+    assert profile_row.call_count == plan_context.call_count
     start_kwargs = start_run.call_args.kwargs
     assert start_kwargs["original_command"].endswith("-rl 3 -threads 2")
     assert "[protected]" not in start_kwargs["original_command"]

@@ -8,7 +8,6 @@ from typing import Any
 from services.assessments.dalfox_oast_contracts import DALFOX_OAST_ACTION_KEY
 from services.assessments.http_profile_execution import load_http_profile_plan_context
 
-
 def selected_http_profile_context(
     conn: Any,
     row: Any,
@@ -26,7 +25,7 @@ def selected_http_profile_context(
     _kind, separator, tool = action_key.partition(":")
     if action_key == DALFOX_OAST_ACTION_KEY:
         tool = "dalfox"
-    return load_http_profile_plan_context(
+    summary, target_value, unavailable, _profile = load_http_profile_plan_context(
         conn,
         session_id,
         project_id,
@@ -36,3 +35,4 @@ def selected_http_profile_context(
         team_id=team_id,
         actor_member_id=actor_member_id,
     )
+    return summary, target_value, unavailable

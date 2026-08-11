@@ -140,8 +140,8 @@ def load_http_profile_plan_context(
     tool: str,
     team_id: str = "",
     actor_member_id: str = "",
-) -> tuple[dict[str, Any], str, str]:
-    """Return a safe profile summary, execution target, and recoverable error."""
+) -> tuple[dict[str, Any], str, str, dict[str, Any]]:
+    """Return safe plan context and the same scoped profile used to build it."""
     row = _profile_row(conn, session_id, project_id, profile_id, team_id=team_id)
     if not row:
         raise HttpProfileExecutionError(
@@ -161,10 +161,10 @@ def load_http_profile_plan_context(
         "concurrency": int(profile["concurrency"]),
     }
     if not profile["enabled"]:
-        return summary, "", "The selected HTTP profile is disabled."
+        return summary, "", "The selected HTTP profile is disabled.", profile
     unsupported = _unsupported_reason(profile, tool)
     if unsupported:
-        return summary, "", unsupported
+        return summary, "", unsupported, profile
     try:
         _validate_project_scope(conn, session_id, project_id, profile, team_id=team_id)
         _validate_references(
@@ -176,10 +176,10 @@ def load_http_profile_plan_context(
         )
         target_value = _execution_target(profile, target)
     except HttpProfileExecutionError as exc:
-        return summary, "", str(exc)
+        return summary, "", str(exc), profile
     except HttpProfileError:
-        return summary, "", "The selected HTTP profile has missing or unavailable references."
-    return summary, target_value, ""
+        return summary, "", "The selected HTTP profile has missing or unavailable references.", profile
+    return summary, target_value, "", profile
 
 
 def _resolved_headers(
@@ -286,7 +286,7 @@ def materialize_http_profile_launch(
     } if isinstance(raw_target, Mapping) else {"type": "", "value": ""}
     profile_id = str(selected.get("id") or "")
     with get_db_connect()() as conn:
-        summary, target_value, unavailable = load_http_profile_plan_context(
+        summary, target_value, unavailable, profile = load_http_profile_plan_context(
             conn,
             session_id,
             project_id,
@@ -296,8 +296,6 @@ def materialize_http_profile_launch(
             team_id=team_id,
             actor_member_id=actor_member_id,
         )
-        row = _profile_row(conn, session_id, project_id, profile_id, team_id=team_id)
-        profile = _internal_profile(row)
     if unavailable or summary["revision"] != int(selected.get("revision") or 0):
         raise HttpProfileExecutionError(
             "http_profile_changed",
