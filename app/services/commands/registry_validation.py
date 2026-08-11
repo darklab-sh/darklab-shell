@@ -7,7 +7,6 @@ from functools import lru_cache
 import re
 import shlex
 import shutil
-from urllib.parse import urlsplit
 
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
@@ -25,34 +24,6 @@ PATH_TMP_RE = re.compile(r'(?<![\w:/])/tmp\b')
 # strings as a substring.
 LOOPBACK_RE = re.compile(r'\blocalhost\b|127\.0\.0\.1|\b0\.0\.0\.0\b|\[::1\]', re.IGNORECASE)
 
-_SQLMAP_SAFE_BOOLEAN_FLAGS = frozenset({
-    "--batch",
-    "--disable-coloring",
-    "--flush-session",
-    "--fresh-queries",
-    "--help",
-    "--hh",
-    "--ignore-redirects",
-    "--no-logging",
-    "--smart",
-    "--text-only",
-    "--titles",
-    "--version",
-})
-_SQLMAP_SAFE_VALUE_FLAGS = frozenset({
-    "-p",
-    "-u",
-    "--param-exclude",
-    "--param-filter",
-    "--skip",
-    "--test-parameter",
-    "--threads",
-    "--url",
-})
-_SQLMAP_TARGET_FLAGS = frozenset({"-u", "--url"})
-_SQLMAP_HELP_FLAGS = frozenset({"--help", "--hh", "--version"})
-
-
 def split_command_argv(command: str) -> list[str]:
     """Split a shell-like command string into argv tokens for simple root-command inspection."""
     # Validation works on argv-style tokens only. The app never invokes a shell
@@ -61,64 +32,6 @@ def split_command_argv(command: str) -> list[str]:
         return shlex.split(command)
     except ValueError:
         return command.strip().split()
-
-
-def sqlmap_detection_only_restriction_reason(command_tokens: list[str]) -> str:
-    """Require one HTTP target and only reviewed detection-only SQLmap flags."""
-    if not command_tokens or command_tokens[0].casefold() != "sqlmap":
-        return ""
-
-    targets: list[str] = []
-    help_requested = False
-    index = 1
-    while index < len(command_tokens):
-        token = command_tokens[index]
-        flag, separator, attached_value = token.partition("=")
-        if flag in _SQLMAP_SAFE_BOOLEAN_FLAGS:
-            if separator:
-                return "SQLmap only accepts reviewed detection options and one HTTP(S) URL."
-            help_requested = help_requested or flag in _SQLMAP_HELP_FLAGS
-            index += 1
-            continue
-        if flag in _SQLMAP_SAFE_VALUE_FLAGS:
-            if separator:
-                value = attached_value
-            else:
-                index += 1
-                if index >= len(command_tokens):
-                    return "SQLmap option values cannot be empty."
-                value = command_tokens[index]
-            if not value:
-                return "SQLmap option values cannot be empty."
-            if flag == "--threads":
-                try:
-                    threads = int(value)
-                except (TypeError, ValueError):
-                    return "SQLmap threads must be between 1 and 10."
-                if not 1 <= threads <= 10:
-                    return "SQLmap threads must be between 1 and 10."
-            if flag in _SQLMAP_TARGET_FLAGS:
-                targets.append(value)
-            index += 1
-            continue
-        if token.startswith("-"):
-            return "SQLmap only accepts reviewed detection options and one HTTP(S) URL."
-        targets.append(token)
-        index += 1
-
-    if help_requested and not targets:
-        return ""
-    if len(targets) != 1:
-        return "SQLmap requires exactly one HTTP(S) URL."
-    parsed = urlsplit(targets[0])
-    if (
-        parsed.scheme.casefold() not in {"http", "https"}
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-    ):
-        return "SQLmap requires one credential-free HTTP(S) URL."
-    return ""
 
 
 @lru_cache(maxsize=4096)
