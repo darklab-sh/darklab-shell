@@ -233,6 +233,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/registry_web_review_workflows.py", 53, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_faq.py", 505, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_loader.py", 744, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_semantics.py", 39, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/commands/registry_sqlmap.py", 77, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_runtime.py", 173, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_secret_specs.py", 157, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_smoke.py", 199, "split-package-ratchet"),

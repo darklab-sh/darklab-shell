@@ -455,6 +455,9 @@ def normalize_commands_registry_entry(
         else:
             entry["feature_required"] = str(feature_required).strip().lower()
     if pipe_helper:
+        raw_autocomplete = raw_entry.get("autocomplete")
+        raw_pipe = raw_autocomplete.get("pipe") if isinstance(raw_autocomplete, dict) else None
+        entry["_pipe_contract_declared"] = isinstance(raw_pipe, dict) and "enabled" in raw_pipe
         return entry
 
     raw_policy_value = raw_entry.get("policy")

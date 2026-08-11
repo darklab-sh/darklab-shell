@@ -23,7 +23,7 @@ def validate_commands_registry_semantics(
             if (
                 require_pipe_contracts
                 and section == "pipe_helpers"
-                and not bool((entry.get("autocomplete") or {}).get("pipe_command"))
+                and not bool(entry.get("_pipe_contract_declared"))
             ):
                 raise ValueError(f"pipe helper must declare autocomplete.pipe.enabled: {root}")
         roots_by_section[section] = roots
@@ -34,3 +34,6 @@ def validate_commands_registry_semantics(
             "command registry roots cannot appear in commands and pipe_helpers: "
             + ", ".join(sorted(overlaps))
         )
+    if require_pipe_contracts:
+        for entry in registry.get("pipe_helpers", []) or []:
+            entry.pop("_pipe_contract_declared", None)
