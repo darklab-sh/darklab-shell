@@ -1704,6 +1704,10 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.evidence_read import (
+        attach_evidence_previews,
+        recent_assessment_evidence,
+    )
     from services.assessments.manual_evidence_read import attach_manual_evidence
     from services.assessments.mutations import update_manual_check_state_on_conn
     from services.assessments.target_rollups import assessment_target_rollups
@@ -1760,7 +1764,9 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
         "state_changed_at FROM project_assessment_checks WHERE id = 'chk-state'"
     ).fetchone()
     checks = [{"id": "chk-state"}]
+    attach_evidence_previews(conn, checks)
     attach_manual_evidence(conn, checks)
+    recent_evidence = recent_assessment_evidence(conn, "asm-state")
     target_rollups = assessment_target_rollups(conn, "asm-state")
 
     assert changed["check"]["state"] == "blocked"
@@ -1775,6 +1781,29 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
         "evidence": [{
             **checks[0]["manual_evidence"]["evidence"][0],
             "id": "aev-state",
+            "evidence_type": "run",
+            "evidence_id": "run-state",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert checks[0]["evidence_previews"] == {
+        "evidence": checks[0]["manual_evidence"]["evidence"],
+        "total": 1,
+        "limit": 3,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert recent_evidence == {
+        "evidence": [{
+            **recent_evidence["evidence"][0],
+            "id": "aev-state",
+            "check_key": "open_ports",
+            "target_type": "domain",
+            "target_value": "state.example",
             "evidence_type": "run",
             "evidence_id": "run-state",
             "linked_by": "manual",

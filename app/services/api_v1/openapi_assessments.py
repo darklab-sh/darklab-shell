@@ -10,9 +10,7 @@ from typing import Any
 from services.api_v1.openapi_assessment_deltas import assessment_delta_schemas
 from services.api_v1.openapi_assessment_evidence import assessment_evidence_schemas
 from services.api_v1.openapi_assessment_worklist import (
-    assessment_detail_schema,
-    assessment_worklist_query_params,
-    assessment_worklist_schemas,
+    assessment_detail_schema, assessment_worklist_query_params, assessment_worklist_schemas,
 )
 
 
@@ -318,6 +316,7 @@ def assessment_schemas() -> dict[str, Any]:
                 "available_evidence_count",
                 "unavailable_evidence_count",
                 "nmap_service_evidence",
+                "evidence_previews",
                 "created_at",
                 "updated_at",
             ],
@@ -360,6 +359,7 @@ def assessment_schemas() -> dict[str, Any]:
                 "available_evidence_count": {"type": "integer", "minimum": 0},
                 "unavailable_evidence_count": {"type": "integer", "minimum": 0},
                 "nmap_service_evidence": _ref("NmapServiceEvidencePage"),
+                "evidence_previews": _ref("AssessmentEvidencePage"),
                 "manual_evidence": _ref("AssessmentEvidencePage"),
                 "created_at": nullable_string,
                 "updated_at": nullable_string,

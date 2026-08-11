@@ -168,6 +168,36 @@ const detail = {
     excluded_checks: 0,
     unavailable_evidence_checks: 1,
   }],
+  recent_evidence: {
+    evidence: [{
+      id: 'aev_recent_1',
+      check_id: 'asmc_2',
+      check_key: 'dns_inventory',
+      target_type: 'domain',
+      target_value: 'example.com',
+      evidence_type: 'run',
+      evidence_id: 'run_deleted_1',
+      source_state: 'unavailable',
+      unavailable_reason: 'The source run was deleted.',
+      observed_at: '2026-08-05T11:30:00+00:00',
+      linked_by: 'manual',
+    }, {
+      id: 'aev_recent_2',
+      check_id: 'asmc_1',
+      check_key: 'service_inventory',
+      target_type: 'domain',
+      target_value: 'example.com',
+      evidence_type: 'run',
+      evidence_id: 'run_nmap_1',
+      source_state: 'available',
+      observed_at: '2026-08-05T11:00:00+00:00',
+      linked_by: 'derived',
+    }],
+    total: 2,
+    limit: 20,
+    offset: 0,
+    has_more: false,
+  },
   finding_worklist: {
     items: [{
       remediation_id: 'rmd_1',
@@ -242,6 +272,20 @@ const detail = {
         state_source: 'derived',
         evidence_count: 2,
         unavailable_evidence_count: 0,
+        evidence_previews: {
+          evidence: [{
+            id: 'aev_recent_2',
+            evidence_type: 'run',
+            evidence_id: 'run_nmap_1',
+            source_state: 'available',
+            observed_at: '2026-08-05T11:00:00+00:00',
+            linked_by: 'derived',
+          }],
+          total: 4,
+          limit: 3,
+          offset: 0,
+          has_more: true,
+        },
         manual_evidence: {
           evidence: [],
           total: 0,
@@ -286,6 +330,21 @@ const detail = {
         state_changed_at: '2026-08-05T11:30:00+00:00',
         evidence_count: 1,
         unavailable_evidence_count: 1,
+        evidence_previews: {
+          evidence: [{
+            id: 'aev_recent_1',
+            evidence_type: 'run',
+            evidence_id: 'run_deleted_1',
+            source_state: 'unavailable',
+            unavailable_reason: 'The source run was deleted.',
+            observed_at: '2026-08-05T11:30:00+00:00',
+            linked_by: 'manual',
+          }],
+          total: 1,
+          limit: 3,
+          offset: 0,
+          has_more: false,
+        },
         manual_evidence: {
           evidence: [],
           total: 0,
@@ -531,6 +590,12 @@ describe('project assessment controller', () => {
         .toBe('All policies')
       expect(surface.querySelector('[aria-label="Evidence filter"] .chip.is-active')?.textContent)
         .toBe('All evidence')
+      const recentEvidence = surface.querySelector('.project-assessment-recent-evidence')
+      expect(recentEvidence?.textContent).toContain('Recent evidence')
+      expect(recentEvidence?.textContent).toContain('DNS inventory')
+      expect(recentEvidence?.textContent).toContain('run_deleted_1')
+      expect(recentEvidence?.textContent).toContain('Unavailable')
+      expect(recentEvidence?.textContent).toContain('Linked manually')
       expect(surface.querySelector('.project-assessment-target-list')?.classList.contains('nice-scroll')).toBe(true)
       const disclosure = surface.querySelector('.project-assessment-target-toggle')
       expect(disclosure?.getAttribute('aria-expanded')).toBe('false')
@@ -551,6 +616,8 @@ describe('project assessment controller', () => {
       expect(serviceEvidence?.textContent).toContain('Message Signingdisabled')
       expect(serviceEvidence?.textContent).toContain('Nmap 7.95')
       expect(serviceEvidence?.textContent).not.toContain('raw output')
+      expect(surface.querySelector('.project-assessment-check-evidence')?.textContent)
+        .toContain('Newest evidenceRunrun_nmap_1Matched automatically')
     }
     expect(mobile.classList.contains('is-mobile')).toBe(true)
     expect(ctx.enhanceAppSelects).toHaveBeenCalledTimes(2)

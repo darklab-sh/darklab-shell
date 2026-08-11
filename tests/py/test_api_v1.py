@@ -1478,10 +1478,39 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         "has_more": False,
     }
     assert assessment_check["nmap_service_evidence"]["observations"] == run_evidence["observations"]
+    assert assessment_check["evidence_previews"] == {
+        "evidence": [{
+            **assessment_check["evidence_previews"]["evidence"][0],
+            "id": linked["evidence"]["id"],
+            "evidence_type": "run",
+            "evidence_id": run_id,
+            "source_state": "available",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 3,
+        "offset": 0,
+        "has_more": False,
+    }
     assert assessment_check["manual_evidence"] == {
         "evidence": [{
             **assessment_check["manual_evidence"]["evidence"][0],
             "id": linked["evidence"]["id"],
+            "evidence_type": "run",
+            "evidence_id": run_id,
+            "source_state": "available",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert assessment_evidence_response.get_json()["recent_evidence"] == {
+        "evidence": [{
+            **assessment_evidence_response.get_json()["recent_evidence"]["evidence"][0],
+            "id": linked["evidence"]["id"],
+            "check_key": "service_discovery",
             "evidence_type": "run",
             "evidence_id": run_id,
             "source_state": "available",
@@ -7220,6 +7249,9 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert schemas["AssessmentCheck"]["properties"]["manual_evidence"] == {
         "$ref": "#/components/schemas/AssessmentEvidencePage",
     }
+    assert schemas["AssessmentCheck"]["properties"]["evidence_previews"] == {
+        "$ref": "#/components/schemas/AssessmentEvidencePage",
+    }
     assert schemas["AssessmentEvidencePage"]["properties"]["evidence"] == {
         "type": "array",
         "items": {"$ref": "#/components/schemas/AssessmentEvidence"},
@@ -7233,6 +7265,10 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert "finding_deltas" in schemas["AssessmentDetail"]["required"]
     assert "finding_worklist" in schemas["AssessmentDetail"]["required"]
     assert "target_rollups" in schemas["AssessmentDetail"]["required"]
+    assert "recent_evidence" in schemas["AssessmentDetail"]["required"]
+    assert schemas["AssessmentDetail"]["properties"]["recent_evidence"] == {
+        "$ref": "#/components/schemas/AssessmentEvidencePage",
+    }
     assert schemas["AssessmentDetail"]["properties"]["target_rollups"] == {
         "type": "array",
         "items": {"$ref": "#/components/schemas/AssessmentTargetRollup"},

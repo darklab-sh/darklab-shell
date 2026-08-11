@@ -18,6 +18,7 @@ from services.assessments.contracts import (
     ASSESSMENT_STATUSES,
     AssessmentError,
 )
+from services.assessments.evidence_read import attach_evidence_previews, recent_assessment_evidence
 from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
 from services.assessments.manual_evidence_read import attach_manual_evidence
 from services.assessments.nmap_service_evidence_read import attach_nmap_service_evidence
@@ -38,7 +39,6 @@ from services.assessments.summary import (
 from services.assessments.target_rollups import assessment_target_rollups
 from services.projects.scope import shared_owner_where
 from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
-
 
 def _normalized_filter(value: object, label: str) -> str:
     normalized = str(value or "").strip().lower()
@@ -205,6 +205,7 @@ def _check_page(
     attach_nmap_service_evidence(
         conn, checks, session_id=session_id, team_id=team_id,
     )
+    attach_evidence_previews(conn, checks)
     attach_manual_evidence(conn, checks)
     return page_payload("checks", checks, total, limit, offset)
 
@@ -241,6 +242,7 @@ def get_assessment_read_model(
             "rollup": assessment_rollup(conn, str(row["id"])),
             "category_rollups": assessment_category_rollups(conn, str(row["id"])),
             "target_rollups": assessment_target_rollups(conn, str(row["id"])),
+            "recent_evidence": recent_assessment_evidence(conn, str(row["id"])),
             "finding_deltas": assessment_finding_delta_read_model(conn, str(row["id"])),
             "finding_worklist": assessment_finding_worklist_on_conn(
                 conn,

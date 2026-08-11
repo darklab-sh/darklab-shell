@@ -381,6 +381,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/coverage.py", 225, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/deletion_preview.py", 70, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/evidence_matching.py", 346, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/evidence_read.py", 91, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/evidence_sources.py", 330, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/finding_worklist.py", 165, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/manual_evidence_read.py", 58, "split-package-ratchet"),

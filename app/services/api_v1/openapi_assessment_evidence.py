@@ -34,11 +34,11 @@ def assessment_evidence_schemas() -> dict[str, Any]:
                 "updated_at",
             ],
             "properties": {
-                "id": {"type": "string"},
-                "assessment_id": {"type": "string"},
-                "check_id": {"type": "string"},
-                "evidence_type": {"type": "string"},
-                "evidence_id": {"type": "string"},
+                **{key: {"type": "string"} for key in (
+                        "id", "assessment_id", "check_id", "evidence_type", "evidence_id",
+                        "check_key", "target_type", "target_value",
+                    )
+                },
                 "source_state": {"type": "string", "enum": ["available", "unavailable"]},
                 "observed_at": nullable_string,
                 "unavailable_at": nullable_string,

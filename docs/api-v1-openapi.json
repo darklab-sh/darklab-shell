@@ -663,6 +663,9 @@
             "minimum": 0,
             "type": "integer"
           },
+          "evidence_previews": {
+            "$ref": "#/components/schemas/AssessmentEvidencePage"
+          },
           "first_evidence_at": {
             "nullable": true,
             "type": "string"
@@ -769,6 +772,7 @@
           "available_evidence_count",
           "unavailable_evidence_count",
           "nmap_service_evidence",
+          "evidence_previews",
           "created_at",
           "updated_at"
         ],
@@ -1137,6 +1141,9 @@
           "finding_worklist": {
             "$ref": "#/components/schemas/AssessmentFindingWorklistPage"
           },
+          "recent_evidence": {
+            "$ref": "#/components/schemas/AssessmentEvidencePage"
+          },
           "rollup": {
             "$ref": "#/components/schemas/AssessmentRollup"
           },
@@ -1152,6 +1159,7 @@
           "rollup",
           "category_rollups",
           "target_rollups",
+          "recent_evidence",
           "finding_deltas",
           "finding_worklist",
           "checks"
@@ -1165,6 +1173,9 @@
             "type": "string"
           },
           "check_id": {
+            "type": "string"
+          },
+          "check_key": {
             "type": "string"
           },
           "created_at": {
@@ -1202,6 +1213,12 @@
               "available",
               "unavailable"
             ],
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "target_value": {
             "type": "string"
           },
           "unavailable_at": {

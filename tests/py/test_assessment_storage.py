@@ -381,6 +381,22 @@ def test_read_model_rollups_filters_and_pages_checks(project_factory):
     assert read["checks"]["total"] == 3
     assert read["checks"]["limit"] == 2
     assert read["checks"]["has_more"] is True
+    assert read["recent_evidence"] == {
+        "evidence": [{
+            **read["recent_evidence"]["evidence"][0],
+            "check_key": "dns_inventory",
+            "target_type": "domain",
+            "target_value": "rollup.example",
+            "evidence_type": "run",
+            "evidence_id": "deleted-run",
+            "source_state": "unavailable",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
     assert {item["category"] for item in read["category_rollups"]} == {
         "discovery",
         "enumeration",
@@ -435,6 +451,13 @@ def test_read_model_rollups_filters_and_pages_checks(project_factory):
         }],
         "total": 1,
         "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert unavailable["checks"]["checks"][0]["evidence_previews"] == {
+        "evidence": unavailable["checks"]["checks"][0]["manual_evidence"]["evidence"],
+        "total": 1,
+        "limit": 3,
         "offset": 0,
         "has_more": False,
     }

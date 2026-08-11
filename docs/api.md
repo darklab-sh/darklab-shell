@@ -243,7 +243,7 @@ Create a cycle with a profile key and optional title:
 }
 ```
 
-The cycle detail endpoint accepts `category`, `state`, `target_type`, `policy_level`, and `evidence_state` filters plus `limit` and `offset`. Its response keeps cycle and category rollups separate from the bounded `checks` page, including `total`, `limit`, `offset`, and `has_more`.
+The cycle detail endpoint accepts `category`, `state`, `target_type`, `policy_level`, and `evidence_state` filters plus `limit` and `offset`. Its response keeps cycle and category rollups separate from the bounded `checks` page, including `total`, `limit`, `offset`, and `has_more`. Each check includes up to three newest evidence links, while `recent_evidence` returns up to 20 newest sources across the whole cycle with their check and target context.
 
 An active check accepts `blocked`, `skipped`, or `not_applicable` together with a reason. Send `not_started` without a reason to clear that decision and return to the state derived from saved evidence. Link evidence with its saved type and id:
 

@@ -47,6 +47,15 @@ const evidenceFilters = [
   { value: 'none', label: 'No evidence' },
 ];
 
+const evidenceTypeLabels = {
+  artifact: 'Artifact',
+  atlas_entity: 'Atlas entity',
+  finding: 'Finding',
+  run: 'Run',
+  screenshot: 'Screenshot',
+  workflow_execution: 'Workflow execution',
+};
+
 const findingDeltaLabels = {
   new: 'New',
   persistent: 'Persistent',
@@ -137,6 +146,97 @@ function createProjectAssessmentRenderer(context, actions) {
       `Recorded by ${manualDecisionActorLabel(check?.state_actor)}${changedAt ? ` · ${changedAt}` : ''}`,
     ));
     return panel;
+  }
+
+  function renderEvidenceItem(detail, evidence, { recent = false } = {}) {
+    const item = makeElement('div', 'project-assessment-evidence-item');
+    const heading = makeElement('div', 'project-assessment-evidence-item-heading');
+    const evidenceType = String(evidence?.evidence_type || 'evidence');
+    heading.append(
+      makeElement('strong', '', evidenceTypeLabels[evidenceType] || evidenceType),
+      makeElement('code', '', String(evidence?.evidence_id || 'Unknown source')),
+    );
+    if (evidence?.source_state === 'unavailable') {
+      heading.appendChild(badge('Unavailable', 'red'));
+    }
+    item.appendChild(heading);
+    const meta = [];
+    if (recent) {
+      const definition = checkDefinition(detail, evidence);
+      meta.push(String(definition?.label || evidence?.check_key || 'Assessment check'));
+      const target = [evidence?.target_type, evidence?.target_value].filter(Boolean).join(' · ');
+      if (target) meta.push(target);
+    }
+    meta.push(evidence?.linked_by === 'manual' ? 'Linked manually' : 'Matched automatically');
+    const observedAt = displayDate(evidence?.observed_at);
+    if (observedAt) meta.push(observedAt);
+    item.appendChild(makeElement('small', 'project-assessment-evidence-meta', meta.join(' · ')));
+    if (evidence?.unavailable_reason) {
+      item.appendChild(makeElement(
+        'p',
+        'project-assessment-evidence-unavailable',
+        String(evidence.unavailable_reason),
+      ));
+    }
+    if (
+      recent
+      && evidenceType === 'run'
+      && evidence?.source_state !== 'unavailable'
+      && typeof ctx.openHistoryRunDetails === 'function'
+    ) {
+      const open = makeElement('button', 'btn btn-secondary btn-compact', 'Run details');
+      open.type = 'button';
+      ctx.bindProjectRuntimePressable?.(open, {
+        onActivate: () => {
+          ctx.closeProjectWorkspace?.({ refocus: false });
+          ctx.openHistoryRunDetails({ id: String(evidence?.evidence_id || ''), command: '' });
+        },
+      });
+      item.appendChild(open);
+    }
+    return item;
+  }
+
+  function renderCheckEvidence(detail, check) {
+    const page = check?.evidence_previews || {};
+    const evidence = Array.isArray(page?.evidence) ? page.evidence : [];
+    if (!evidence.length) return null;
+    const panel = makeElement('aside', 'project-assessment-check-evidence');
+    panel.appendChild(makeElement('strong', '', 'Newest evidence'));
+    evidence.forEach(item => panel.appendChild(renderEvidenceItem(detail, item)));
+    if (Number(page.total || 0) > evidence.length) {
+      panel.appendChild(makeElement(
+        'small',
+        'project-assessment-evidence-limit',
+        `Showing the newest ${evidence.length} of ${Number(page.total)} evidence links.`,
+      ));
+    }
+    return panel;
+  }
+
+  function renderRecentEvidence(detail) {
+    const section = makeElement('section', 'project-assessment-section project-assessment-recent-evidence');
+    section.appendChild(sectionHeading(
+      'Recent evidence',
+      'Review the newest saved sources matched or linked across this cycle.',
+    ));
+    const page = detail?.recent_evidence || {};
+    const evidence = Array.isArray(page?.evidence) ? page.evidence : [];
+    if (!evidence.length) {
+      section.appendChild(ctx.emptyProjectPanel('No evidence is saved for this assessment cycle yet.'));
+      return section;
+    }
+    const list = makeElement('div', 'project-assessment-recent-evidence-list');
+    evidence.forEach(item => list.appendChild(renderEvidenceItem(detail, item, { recent: true })));
+    section.appendChild(list);
+    if (page.has_more) {
+      section.appendChild(makeElement(
+        'small',
+        'project-assessment-evidence-limit',
+        `Showing the newest ${evidence.length} of ${Number(page.total || evidence.length)} evidence links.`,
+      ));
+    }
+    return section;
   }
 
   function cycleLabel(st, assessment) {
@@ -919,6 +1019,8 @@ function createProjectAssessmentRenderer(context, actions) {
     if (purpose) main.appendChild(makeElement('p', 'project-assessment-check-purpose', purpose));
     const manualDecision = renderManualDecision(check);
     if (manualDecision) main.appendChild(manualDecision);
+    const evidencePreview = renderCheckEvidence(detail, check);
+    if (evidencePreview) main.appendChild(evidencePreview);
     const nucleiRecommendation = check?.nuclei_recommendation;
     if (nucleiRecommendation?.recommended) {
       const recommendation = makeElement('div', 'project-assessment-check-recommendation');
@@ -1253,6 +1355,7 @@ function createProjectAssessmentRenderer(context, actions) {
       renderFindingDeltas(projectId, st.detail.finding_deltas),
       renderCategoryProgress(projectId, st, st.detail.category_rollups),
       renderChecks(projectId, st, st.detail, { mobile }),
+      renderRecentEvidence(st.detail),
     );
     appendAssessmentTail(root, projectId, st, selected, { mobile });
     return root;
