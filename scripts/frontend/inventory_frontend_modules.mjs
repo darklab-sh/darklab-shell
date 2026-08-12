@@ -1120,8 +1120,10 @@ function cloneInventoryValue(value) {
     : JSON.parse(JSON.stringify(value));
 }
 
-function analyzeSource(source, file, root = ROOT) {
-  const content = readFileSync(file, 'utf8');
+function analyzeSource(source, file, root = ROOT, contentOverride = undefined) {
+  const content = typeof contentOverride === 'string'
+    ? contentOverride
+    : readFileSync(file, 'utf8');
   const linter = new Linter({ configType: 'flat' });
 
   function verifyWithSourceType(sourceType) {
@@ -1719,14 +1721,38 @@ function reconcilePublisherDiscovery(allModules) {
   };
 }
 
-function buildFrontendInventoryReport({ root = ROOT, allowlistPath = defaultAllowlistPath(root) } = {}) {
+function buildFrontendInventoryReport({
+  root = ROOT,
+  allowlistPath = defaultAllowlistPath(root),
+  virtualSources = {},
+} = {}) {
   const allowlist = loadAllowlist(allowlistPath);
   const jsRoot = resolve(root, 'app/static/js');
   const sources = collectFiles(jsRoot).map((rel) => ({
     source: `/static/js/${rel}`,
     file: resolve(jsRoot, rel),
   }));
-  const modules = sources.map(({ source, file }) => analyzeSourceCached(source, file, root));
+  if (!virtualSources || typeof virtualSources !== 'object' || Array.isArray(virtualSources)) {
+    throw new Error('virtualSources must be an object keyed by /static/js/*.js source paths');
+  }
+  const sourceNames = new Set(sources.map(({ source }) => source));
+  const virtualModules = Object.entries(virtualSources)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([source, content]) => {
+      if (!source.startsWith('/static/js/') || !source.endsWith('.js') || source.includes('..')) {
+        throw new Error(`Invalid virtual frontend source path: ${source}`);
+      }
+      if (sourceNames.has(source)) {
+        throw new Error(`Virtual frontend source duplicates a repository module: ${source}`);
+      }
+      sourceNames.add(source);
+      const relativeSource = source.slice('/static/js/'.length);
+      return analyzeSource(source, resolve(jsRoot, relativeSource), root, String(content));
+    });
+  const modules = [
+    ...sources.map(({ source, file }) => analyzeSourceCached(source, file, root)),
+    ...virtualModules,
+  ];
   const definitionMap = new Map();
   const publishMap = new Map();
   for (const module of modules) {

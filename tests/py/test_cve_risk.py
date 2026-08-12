@@ -1214,7 +1214,9 @@ def test_feed_status_marks_old_bundled_data_stale_and_discloses_refresh_state(ri
         "INSERT INTO finding_cve_links (finding_id, cve_id, created_at) "
         "VALUES ('finding-bundled-feed', 'CVE-2026-12345', '2026-08-10')"
     )
-    findings = [{"id": "finding-bundled-feed", "title": "CVE-2026-12345"}]
+    findings: list[dict[str, Any]] = [
+        {"id": "finding-bundled-feed", "title": "CVE-2026-12345"}
+    ]
     attach_risk_to_findings(findings, conn=risk_db)
     enriched = findings[0]["risk"]
     assert enriched["epss"]["origin"] == "bundled"

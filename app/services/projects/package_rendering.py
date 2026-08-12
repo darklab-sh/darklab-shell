@@ -887,9 +887,12 @@ def _append_package_assessment_context_markdown(lines, manifest):
     context = manifest.get("assessment_context")
     if not isinstance(context, dict):
         return
-    assessment = context.get("assessment") if isinstance(context.get("assessment"), dict) else {}
-    rollup = context.get("rollup") if isinstance(context.get("rollup"), dict) else {}
-    methodology = context.get("methodology") if isinstance(context.get("methodology"), dict) else {}
+    raw_assessment = context.get("assessment")
+    assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    raw_rollup = context.get("rollup")
+    rollup = raw_rollup if isinstance(raw_rollup, dict) else {}
+    raw_methodology = context.get("methodology")
+    methodology = raw_methodology if isinstance(raw_methodology, dict) else {}
     lines.extend([
         "",
         "## Assessment Coverage",
@@ -931,15 +934,19 @@ def _append_package_assessment_context_markdown(lines, manifest):
                 f"- {_package_markdown_code(item.get('check_id') or item.get('artifact_id'))}: "
                 f"{_package_markdown_text(item.get('reason'))}"
             )
-    fix_first = context.get("fix_first") if isinstance(context.get("fix_first"), dict) else {}
-    items = fix_first.get("items") if isinstance(fix_first.get("items"), list) else []
+    raw_fix_first = context.get("fix_first")
+    fix_first = raw_fix_first if isinstance(raw_fix_first, dict) else {}
+    raw_items = fix_first.get("items")
+    items = raw_items if isinstance(raw_items, list) else []
     if items:
         lines.extend(("", "### Fix first", ""))
         for item in items:
             if not isinstance(item, dict):
                 continue
-            risk = item.get("risk") if isinstance(item.get("risk"), dict) else {}
-            reasons = risk.get("priority_reasons") if isinstance(risk.get("priority_reasons"), list) else []
+            raw_risk = item.get("risk")
+            risk = raw_risk if isinstance(raw_risk, dict) else {}
+            raw_reasons = risk.get("priority_reasons")
+            reasons = raw_reasons if isinstance(raw_reasons, list) else []
             signal_text = "; ".join(str(reason) for reason in reasons) or "No stored CVE-risk signals"
             lines.extend([
                 f"#### {_package_markdown_text(item.get('title') or item.get('remediation_id'))}",

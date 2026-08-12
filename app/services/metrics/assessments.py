@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any
+from typing import Any, cast
 
 from prometheus_client import Counter, Histogram
 
@@ -256,7 +256,8 @@ HISTOGRAM_DEFINITIONS = (ASSESSMENT_CONNECTOR_DURATION,)
 
 def _count(value: object) -> int:
     try:
-        return max(0, int(value))
+        numeric_value = cast(str | bytes | bytearray | int | float, value)
+        return max(0, int(numeric_value))
     except (TypeError, ValueError):
         return 0
 
@@ -321,7 +322,8 @@ def record_assessment_connector_operation(
     if duration_seconds is None:
         return
     try:
-        duration = float(duration_seconds)
+        numeric_duration = cast(str | bytes | bytearray | int | float, duration_seconds)
+        duration = float(numeric_duration)
     except (TypeError, ValueError):
         duration = 0.0
     if not math.isfinite(duration):

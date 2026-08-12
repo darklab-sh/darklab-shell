@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import secrets
 from datetime import datetime, timezone
+from typing import cast
 
 from config import resolve_effective_cfg
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
@@ -114,7 +115,8 @@ def metadata_filter_values(filters, key, max_len, *, lower=False):
 
 def _quota_count(value: object, default: int = 0) -> int:
     try:
-        parsed = int(value)
+        numeric_value = cast(str | bytes | bytearray | int | float, value)
+        parsed = int(numeric_value)
     except (TypeError, ValueError):
         parsed = default
     return max(0, parsed)

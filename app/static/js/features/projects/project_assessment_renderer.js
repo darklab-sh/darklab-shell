@@ -1345,7 +1345,35 @@ function createProjectAssessmentRenderer(context, actions) {
       'Expand a target to review what is covered, outstanding, excluded, or missing evidence.',
     ));
     const filters = makeElement('div', 'project-assessment-check-filters');
+    const activeFilterCount = [
+      st.category,
+      st.checkState,
+      st.policyLevel,
+      st.evidenceState,
+    ].filter(Boolean).length;
+    const filterSummary = makeElement('div', 'project-assessment-check-filter-summary');
+    const filterStatus = makeElement(
+      'span',
+      'project-assessment-check-filter-status',
+      activeFilterCount
+        ? `${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} applied`
+        : 'No filters applied',
+    );
+    filterStatus.setAttribute('aria-live', 'polite');
+    const clearFilters = makeElement(
+      'button',
+      'btn btn-ghost btn-compact project-assessment-clear-filters',
+      'Clear filters',
+    );
+    clearFilters.type = 'button';
+    clearFilters.disabled = activeFilterCount === 0;
+    if (clearFilters.disabled) clearFilters.title = 'No filters are applied.';
+    ctx.bindProjectRuntimePressable?.(clearFilters, {
+      onActivate: () => void act.clearFilters(projectId),
+    });
+    filterSummary.append(filterStatus, clearFilters);
     filters.append(
+      filterSummary,
       checkFilterGroup(
         'State',
         'project-assessment-state-filters',

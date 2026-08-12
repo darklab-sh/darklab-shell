@@ -347,18 +347,18 @@ def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(
         for record in caplog.records
         if record.message == "ASSESSMENT_PROFILE_CATALOG_LOADED"
     )
-    assert loaded.load_kind == "initial"
-    assert loaded.profile_count == 3
-    assert loaded.check_count == 3
-    assert loaded.local_overlay is True
-    assert loaded.duration_ms >= 0
+    assert getattr(loaded, "load_kind") == "initial"
+    assert getattr(loaded, "profile_count") == 3
+    assert getattr(loaded, "check_count") == 3
+    assert getattr(loaded, "local_overlay") is True
+    assert getattr(loaded, "duration_ms") >= 0
     cache_hit = next(
         record
         for record in caplog.records
         if record.message == "ASSESSMENT_PROFILE_CATALOG_CACHE_HIT"
     )
-    assert cache_hit.profile_count == 3
-    assert cache_hit.check_count == 3
+    assert getattr(cache_hit, "profile_count") == 3
+    assert getattr(cache_hit, "check_count") == 3
 
 
 def test_catalog_hot_reload_rejects_bad_local_file_without_replacing_last_good(
@@ -450,9 +450,9 @@ def test_invalid_local_yaml_keeps_the_last_valid_catalog(
         for record in caplog.records
         if record.message == "ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED"
     )
-    assert failed.source_kind == "shipped"
-    assert failed.error_code == "invalid_catalog"
-    assert failed.error_class == "AssessmentProfileCatalogError"
+    assert getattr(failed, "source_kind") == "shipped"
+    assert getattr(failed, "error_code") == "invalid_catalog"
+    assert getattr(failed, "error_class") == "AssessmentProfileCatalogError"
     assert failed.exc_info
 
 

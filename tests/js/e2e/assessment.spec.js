@@ -214,7 +214,36 @@ test.describe('project assessment qualification', () => {
     await expect(assessment).toContainText('Network assessment')
     await expect(assessment).toContainText('0Coveredof 2 applicable')
     await expect(assessment).toContainText('2Untested')
+    const categoryChip = assessment.locator('.project-assessment-category-list .chip').filter({
+      hasText: 'discovery',
+    })
+    await expect(categoryChip).toBeVisible()
+    const chipPadding = await categoryChip.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        left: Number.parseFloat(style.paddingLeft),
+        right: Number.parseFloat(style.paddingRight),
+      }
+    })
+    expect(chipPadding.left).toBeGreaterThanOrEqual(8)
+    expect(chipPadding.right).toBeGreaterThanOrEqual(8)
+    await categoryChip.click()
+    const clearFilters = assessment.getByRole('button', { name: 'Clear filters' })
+    await expect(assessment.locator('.project-assessment-check-filter-status'))
+      .toHaveText('1 filter applied')
+    await expect(clearFilters).toBeEnabled()
+    await clearFilters.click()
+    await expect(assessment.locator('.project-assessment-check-filter-status'))
+      .toHaveText('No filters applied')
+    await expect(clearFilters).toBeDisabled()
+    await expect(assessment.getByRole('button', { name: 'All categories' }))
+      .toHaveAttribute('aria-pressed', 'true')
     await assessment.locator('.project-assessment-target-toggle').click()
+    const firstCheckRow = assessment.locator('.project-assessment-check-row').first()
+    await expect(firstCheckRow).toBeVisible()
+    expect(await firstCheckRow.evaluate((element) => (
+      Number.parseFloat(getComputedStyle(element).paddingTop)
+    ))).toBeGreaterThanOrEqual(8)
     await page.evaluate(() => {
       window.__darklabRunnerHandlers.attachActiveRunFromMonitor = async (run) => {
         window.__assessmentAttachedRun = run

@@ -320,6 +320,19 @@ function createProjectAssessmentController(context) {
     return refreshDetailSlice(projectId, 'checks');
   }
 
+  async function clearFilters(projectId) {
+    const st = stateFor(projectId);
+    if (!st.category && !st.checkState && !st.policyLevel && !st.evidenceState) return false;
+    st.category = '';
+    st.checkState = '';
+    st.policyLevel = '';
+    st.evidenceState = '';
+    st.offset = 0;
+    st.checksScrollTop = 0;
+    st.expandedTargets.clear();
+    return refreshDetailSlice(projectId, 'checks');
+  }
+
   async function setPage(projectId, offset) {
     const st = stateFor(projectId);
     const nextOffset = Math.max(0, Number(offset || 0));
@@ -805,6 +818,7 @@ function createProjectAssessmentController(context) {
   }
 
   const renderer = createProjectAssessmentRenderer(ctx, {
+    clearFilters,
     deleteCycle,
     createCycle,
     createFinding,
@@ -856,6 +870,7 @@ function createProjectAssessmentController(context) {
   }
 
   return {
+    clearFilters,
     createCycle,
     deleteCycle,
     focusCycle,

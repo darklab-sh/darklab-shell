@@ -1762,7 +1762,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
         "SELECT state_changed_by_session_id, state_changed_by_member_id, "
         "state_changed_at FROM project_assessment_checks WHERE id = 'chk-state'"
     ).fetchone()
-    checks = [{"id": "chk-state"}]
+    checks: list[dict[str, Any]] = [{"id": "chk-state"}]
     attach_evidence_previews(conn, checks)
     attach_manual_evidence(conn, checks)
     recent_evidence = recent_assessment_evidence(conn, "asm-state")
@@ -2067,7 +2067,11 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(
     schema_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
 
     def steal_expired_lease(*_args, **_kwargs):
-        with psycopg.connect(schema_dsn, row_factory=dict_row) as thief_raw:
+        thief_raw = psycopg.Connection[dict[str, Any]].connect(
+            schema_dsn,
+            row_factory=dict_row,
+        )
+        with thief_raw:
             thief = PostgresSqliteCompatConnection(thief_raw)
             assert refresh._acquire_lease(
                 thief,
@@ -2091,7 +2095,9 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(
         "SELECT lease_owner FROM cve_risk_refresh_leases WHERE source = ?",
         ("epss",),
     ).fetchone()["lease_owner"] == "crl_postgres_new_owner"
-    assert get_cve_risk("CVE-2026-12345", conn=conn)["epss_source_version"] == (
+    refreshed_risk = get_cve_risk("CVE-2026-12345", conn=conn)
+    assert refreshed_risk is not None
+    assert refreshed_risk["epss_source_version"] == (
         "v-test:2026-08-04"
     )
 

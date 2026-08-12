@@ -9,7 +9,7 @@ import base64
 import re
 import shlex
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 from urllib.parse import urlsplit
 
 from core.database_access import get_db_connect
@@ -42,7 +42,8 @@ _UNSUPPORTED_SECRET_SLOTS = frozenset({
 
 def _sqlmap_validation_command(target_value: str, concurrency: object) -> str:
     """Return the narrow carrier validated before app-owned SQLmap bounds are added."""
-    threads = min(max(int(concurrency or 5), 1), 10)
+    numeric_concurrency = cast(str | bytes | bytearray | int | float, concurrency or 5)
+    threads = min(max(int(numeric_concurrency), 1), 10)
     return (
         f"sqlmap -u {shlex.quote(target_value)} --threads {threads} --ignore-redirects "
         "--disable-coloring --no-logging"

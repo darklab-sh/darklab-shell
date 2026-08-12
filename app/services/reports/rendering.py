@@ -422,9 +422,12 @@ def _append_assessment_context_markdown(
     raw = context.get("assessment_context")
     if not isinstance(raw, dict):
         return
-    assessment = raw.get("assessment") if isinstance(raw.get("assessment"), dict) else {}
-    rollup = raw.get("rollup") if isinstance(raw.get("rollup"), dict) else {}
-    methodology = raw.get("methodology") if isinstance(raw.get("methodology"), dict) else {}
+    raw_assessment = raw.get("assessment")
+    assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    raw_rollup = raw.get("rollup")
+    rollup = raw_rollup if isinstance(raw_rollup, dict) else {}
+    raw_methodology = raw.get("methodology")
+    methodology = raw_methodology if isinstance(raw_methodology, dict) else {}
     lines.extend([
         "",
         "### Assessment coverage",
@@ -473,8 +476,10 @@ def _append_fix_first_markdown(lines: list[str], context: dict[str, Any]) -> Non
     for item in items:
         if not isinstance(item, dict):
             continue
-        risk = item.get("risk") if isinstance(item.get("risk"), dict) else {}
-        reasons = risk.get("priority_reasons") if isinstance(risk.get("priority_reasons"), list) else []
+        raw_risk = item.get("risk")
+        risk = raw_risk if isinstance(raw_risk, dict) else {}
+        raw_reasons = risk.get("priority_reasons")
+        reasons = raw_reasons if isinstance(raw_reasons, list) else []
         lines.extend([
             f"#### {_md(item.get('title') or item.get('remediation_id'))}",
             "",

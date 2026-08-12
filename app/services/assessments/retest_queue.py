@@ -73,12 +73,10 @@ def _comparison_summary(context: dict[str, Any]) -> dict[str, Any]:
             "right_run_id": "",
         }
     newest = retests[0]
-    comparison = newest.get("comparison") if isinstance(newest.get("comparison"), dict) else {}
-    compatibility = (
-        newest.get("compatibility")
-        if isinstance(newest.get("compatibility"), dict)
-        else {}
-    )
+    raw_comparison = newest.get("comparison")
+    comparison = raw_comparison if isinstance(raw_comparison, dict) else {}
+    raw_compatibility = newest.get("compatibility")
+    compatibility = raw_compatibility if isinstance(raw_compatibility, dict) else {}
     return {
         "available": bool(comparison.get("available")),
         "state": str(compatibility.get("state") or "unavailable"),
@@ -89,13 +87,12 @@ def _comparison_summary(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def _group_key(plan: dict[str, Any]) -> tuple[str, ...]:
-    target = plan.get("target") if isinstance(plan.get("target"), dict) else {}
-    action = plan.get("action") if isinstance(plan.get("action"), dict) else {}
-    profile = (
-        plan.get("http_profile")
-        if isinstance(plan.get("http_profile"), dict)
-        else {}
-    )
+    raw_target = plan.get("target")
+    target = raw_target if isinstance(raw_target, dict) else {}
+    raw_action = plan.get("action")
+    action = raw_action if isinstance(raw_action, dict) else {}
+    raw_profile = plan.get("http_profile")
+    profile = raw_profile if isinstance(raw_profile, dict) else {}
     return (
         str(target.get("entity_id") or ""),
         str(target.get("type") or ""),

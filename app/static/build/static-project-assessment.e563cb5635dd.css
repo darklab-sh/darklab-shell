@@ -108,6 +108,8 @@
 
 .project-assessment-risk-filters .chip {
   min-height: 30px;
+  padding: 4px 11px;
+  line-height: 1.2;
 }
 
 .project-assessment-risk-observation-toggle {
@@ -401,6 +403,8 @@
 .project-assessment-policy-filters .chip,
 .project-assessment-evidence-filters .chip {
   min-height: 30px;
+  padding: 4px 11px;
+  line-height: 1.2;
 }
 
 .project-assessment-check-filters,
@@ -408,6 +412,24 @@
   display: grid;
   gap: 7px;
   min-width: 0;
+}
+
+.project-assessment-check-filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px 12px;
+  min-width: 0;
+}
+
+.project-assessment-check-filter-status {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.project-assessment-clear-filters {
+  min-height: 28px;
 }
 
 .project-assessment-check-filter-label {
@@ -526,6 +548,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: start;
+  padding: 9px 10px;
 }
 
 .project-assessment-check-main {
@@ -1014,6 +1037,14 @@
 }
 
 .project-assessment-root.is-mobile .project-assessment-check-states .btn {
+  min-height: 44px;
+}
+
+.project-assessment-root.is-mobile .project-assessment-category-list .chip,
+.project-assessment-root.is-mobile .project-assessment-state-filters .chip,
+.project-assessment-root.is-mobile .project-assessment-policy-filters .chip,
+.project-assessment-root.is-mobile .project-assessment-evidence-filters .chip,
+.project-assessment-root.is-mobile .project-assessment-clear-filters {
   min-height: 44px;
 }
 
