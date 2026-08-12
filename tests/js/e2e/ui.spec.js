@@ -1178,6 +1178,9 @@ test.describe('project workspace modal', () => {
     await expect(root).toContainText('Ports Browser Watch')
     await expect(root).toContainText('Deleted Current Watch')
     await expect(root).toContainText('New open port 443/tcp https')
+    const riskEvent = root.locator(`[data-project-monitoring-risk-id="${fixture.riskEventId}"]`)
+    await expect(riskEvent).toContainText('CVE-2026-10001')
+    await expect(riskEvent).toContainText('Added to CISA KEV')
 
     const availableFire = root.locator(`[data-project-monitoring-fire-id="${fixture.changedFireId}"]`).first()
     await expect(availableFire.locator('[data-project-monitoring-action="details"]').first()).toBeEnabled()
@@ -1305,6 +1308,173 @@ test.describe('project workspace modal', () => {
       && (run.labels || []).some((label) => label.label === 'reviewed')
       && run.note?.body === 'Run triaged from Playwright'
     ))).toBe(true)
+  })
+
+  test('creates and edits an assessor-authored Project finding', async ({ page }) => {
+    test.setTimeout(45_000)
+    await openProjectsModal(page)
+
+    const projectId = await createActiveProject(page, `Manual Finding ${Date.now()}`)
+    await page.locator('#project-explorer-body [data-project-action="new-target"]').click()
+    await expectProjectTargetEditorReady(page, 'Add Target')
+    await fillProjectTargetEditor(page, {
+      value: 'manual-finding.playwright.example',
+      labels: '',
+      notes: '',
+    })
+    await page.locator('#project-target-submit').click()
+    await expect(page.locator('#project-target-editor-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await switchProjectTab(page, 'findings')
+    await page.locator('[data-project-action="create-manual-finding"]').click()
+    const editor = page.locator('#finding-triage-overlay')
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await expect(editor.locator('#finding-triage-title')).toHaveText('CREATE FINDING')
+    await expect(editor.locator('#finding-record-target')).toContainText('manual-finding.playwright.example')
+    await editor.locator('#finding-record-title').fill('Public administration endpoint')
+    await editor.locator('#finding-record-severity').selectOption('high')
+    await editor.locator('#finding-record-confidence').selectOption('high')
+    await editor.locator('#finding-record-summary').fill('The administration endpoint is reachable without authentication.')
+    await editor.locator('#finding-record-cwes').fill('CWE-306')
+    await editor.locator('#finding-record-references').fill('https://example.test/advisories/admin-endpoint')
+    const createResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/findings`
+    })
+    await editor.locator('#finding-record-save').click()
+    expect((await createResponse).status()).toBe(201)
+    await expect(editor).not.toHaveClass(/\bopen\b/)
+
+    const findingRow = page.locator('.project-explorer-item').filter({ hasText: 'Public administration endpoint' })
+    await expect(findingRow).toBeVisible()
+    await expect(findingRow.locator('[data-project-action="edit-manual-finding"]')).toBeVisible()
+    await findingRow.locator('[data-project-action="edit-manual-finding"]').click()
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await expect(editor.locator('#finding-triage-title')).toHaveText('EDIT FINDING')
+    await expect(editor.locator('#finding-record-target')).toBeDisabled()
+    await editor.locator('#finding-record-title').fill('Public administration endpoint allows anonymous access')
+    const updateResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'PATCH'
+        && url.pathname.startsWith(`/projects/${projectId}/findings/`)
+    })
+    await editor.locator('#finding-record-save').click()
+    expect((await updateResponse).ok()).toBe(true)
+    await expect(editor).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('.project-explorer-item').filter({
+      hasText: 'Public administration endpoint allows anonymous access',
+    })).toBeVisible()
+  })
+
+  test('creates a Project finding from Run Details output and attaches a verification run', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+
+    const projectId = await createActiveProject(page, `Run Evidence ${Date.now()}`)
+    await page.locator('#project-explorer-body [data-project-action="new-target"]').click()
+    await expectProjectTargetEditorReady(page, 'Add Target')
+    await fillProjectTargetEditor(page, {
+      value: 'projects.playwright.example',
+      labels: '',
+      notes: '',
+    })
+    await page.locator('#project-target-submit').click()
+    await expect(page.locator('#project-target-editor-overlay')).not.toHaveClass(/\bopen\b/)
+
+    const { runRow, command } = await linkExternalRunToOpenProject(page, testInfo)
+    const runId = await runRow.locator('[data-project-action="edit-run-metadata"]').getAttribute('data-run-id')
+    expect(runId).toBeTruthy()
+    await page.locator('.project-workspace-close').click()
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await page.evaluate(async (run) => window.openHistoryRunDetails(run), { id: runId, command })
+    const runDetails = page.locator('#history-run-overlay')
+    await expect(runDetails).toHaveClass(/\bopen\b/)
+    await runDetails.locator('[data-history-run-tab="output"]').click()
+    const selectLines = runDetails.locator('[data-history-run-action="select-evidence-lines"]')
+    await expect(selectLines).toBeVisible({ timeout: 15_000 })
+    await selectLines.click()
+    await runDetails.locator('[data-history-run-evidence-line]').filter({
+      hasText: 'external fixture output',
+    }).click()
+    await runDetails.locator('[data-history-run-evidence-line]').filter({
+      hasText: `command: ${command}`,
+    }).click()
+    await expect(runDetails.locator('.history-run-output-evidence-count')).toHaveText('2 lines selected')
+    const createFinding = runDetails.locator('[data-history-run-action="create-finding-from-evidence"]')
+    await createFinding.click()
+
+    const editor = page.locator('#finding-triage-overlay')
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await page.keyboard.press('Escape')
+    await expect(editor).not.toHaveClass(/\bopen\b/)
+    await expect(runDetails).toHaveClass(/\bopen\b/)
+    await expect(createFinding).toBeFocused()
+    await createFinding.click()
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await expect(editor.locator('#finding-record-target')).toContainText('projects.playwright.example')
+    await editor.locator('#finding-record-title').fill('Saved run output needs review')
+    const createResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/findings`
+    })
+    await editor.locator('#finding-record-save').click()
+    const createdResponse = await createResponse
+    expect(createdResponse.status()).toBe(201)
+    const created = await createdResponse.json()
+    const findingId = created.finding?.id || ''
+    expect(findingId).toBeTruthy()
+    await expect(editor).not.toHaveClass(/\bopen\b/)
+
+    const evidence = await page.evaluate(async ({ id, finding }) => {
+      const resp = await apiFetch(
+        `/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(finding)}/evidence`,
+        { cache: 'no-store' },
+      )
+      return resp.json()
+    }, { id: projectId, finding: findingId })
+    expect(evidence.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ evidence_type: 'run_line', evidence_id: runId, line_number: 1 }),
+      expect.objectContaining({ evidence_type: 'run_line', evidence_id: runId, line_number: 2 }),
+    ]))
+
+    await runDetails.locator('.history-run-close').first().click()
+    await expect(runDetails).not.toHaveClass(/\bopen\b/)
+    await openProjectsModal(page)
+    const { runRow: verificationRunRow } = await linkExternalRunToOpenProject(page, testInfo)
+    const verificationRunId = await verificationRunRow
+      .locator('[data-project-action="edit-run-metadata"]')
+      .getAttribute('data-run-id')
+    expect(verificationRunId).toBeTruthy()
+
+    await switchProjectTab(page, 'findings')
+    const findingRow = page.locator('.project-explorer-item').filter({ hasText: 'Saved run output needs review' })
+    await findingRow.locator('[data-project-action="edit-finding-triage"]').click()
+    await expect(editor).toHaveClass(/\bopen\b/)
+    const verificationRun = editor.locator('#finding-triage-verification-run')
+    await expect(verificationRun.locator(`option[value="${verificationRunId}"]`)).toHaveCount(1)
+    await verificationRun.selectOption(verificationRunId)
+    const attachResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/projects/${projectId}/findings/${findingId}/evidence`
+    })
+    await editor.locator('#finding-triage-verification-attach').click()
+    expect((await attachResponse).ok()).toBe(true)
+    await expect(editor.locator('#finding-triage-retest-runs')).toContainText(PROJECT_LINK_RUN_COMMAND)
+
+    const verification = await page.evaluate(async ({ id, finding }) => {
+      const resp = await apiFetch(
+        `/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(finding)}/evidence`,
+        { cache: 'no-store' },
+      )
+      return (await resp.json()).verification
+    }, { id: projectId, finding: findingId })
+    expect(verification.retest_runs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: verificationRunId }),
+    ]))
   })
 
   test('creates, previews, applies, and shows an Atlas auto-promote rule', async ({ page }, testInfo) => {

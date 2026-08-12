@@ -200,6 +200,21 @@ async function ensureHealthy(page, timeoutMs = 120_000) {
   }
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.locator('#cmd').waitFor({ timeout: timeoutMs })
+  await page.waitForFunction(
+    () => {
+      const activeTab = typeof window.APP_STATE_API?.getActiveTab === 'function'
+        ? window.APP_STATE_API.getActiveTab()
+        : null
+      const input = document.getElementById('cmd')
+      return !!activeTab
+        && input instanceof HTMLInputElement
+        && typeof window.DarklabRunner?.submitVisibleComposerCommand === 'function'
+        && typeof window.DarklabRunner?.hasRunnerHandler === 'function'
+        && window.DarklabRunner.hasRunnerHandler('submitVisibleComposerCommand')
+    },
+    undefined,
+    { timeout: timeoutMs },
+  )
 }
 
 async function startCommand(page, command) {
@@ -236,18 +251,21 @@ async function waitForOutputToSettle(page, timeoutMs, stableMs) {
 
 async function saveCurrentOutput(page, command, destination, timeouts) {
   const lineCount = await page.locator('.tab-panel.active .output .line').count()
-  const saveButton = page.locator('.tab-panel.active [data-action="save"]')
+  const saveWrap = page.locator('#hud-actions .hud-save-wrap')
+  await saveWrap.locator('[data-action="save-menu"]').click()
+  const saveTxtButton = saveWrap.locator('[data-action="save-txt"]')
+  await saveTxtButton.waitFor({ state: 'visible', timeout: timeouts.saveTimeoutMs })
 
   if (lineCount > 0) {
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: timeouts.saveTimeoutMs }),
-      saveButton.click(),
+      saveTxtButton.click(),
     ])
     await download.saveAs(destination)
     return { exported: true, note: '' }
   }
 
-  await saveButton.click()
+  await saveTxtButton.click()
   const toast = page.locator('#permalink-toast')
   await toast.waitFor({ state: 'visible', timeout: timeouts.toastTimeoutMs })
   const note = (await toast.textContent())?.trim() || 'No output to export'
@@ -256,7 +274,7 @@ async function saveCurrentOutput(page, command, destination, timeouts) {
 }
 
 async function clearOutput(page) {
-  await page.locator('.tab-panel.active [data-action="clear"]').click()
+  await page.locator('#hud-actions [data-action="clear"]').click()
   await page.waitForFunction(() => document.querySelectorAll('.tab-panel.active .output .line').length === 0, null, { timeout: 15_000 })
 }
 

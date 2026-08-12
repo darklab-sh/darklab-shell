@@ -100,17 +100,25 @@ describe('project report controller', () => {
 
   it('loads the draft and renders the report editor with preview/export actions', async () => {
     const { reportApi } = loadReportModule()
-    const apiFetch = vi.fn(async () => apiResponse({
-      report: {
-        updated: '2026-06-04T12:00:00Z',
-        draft: {
-          metadata: { engagement_name: 'Acme engagement' },
-          selection: { run_ids: ['run_1'] },
-          export: { redaction_mode: 'redacted' },
+    const apiFetch = vi.fn(async (url) => {
+      if (url.includes('/assessments?')) {
+        return apiResponse({
+          assessments: [{ id: 'asm_archived', title: 'Earlier network cycle', status: 'archived' }],
+        })
+      }
+      return apiResponse({
+        report: {
+          updated: '2026-06-04T12:00:00Z',
+          draft: {
+            assessment_id: 'asm_archived',
+            metadata: { engagement_name: 'Acme engagement' },
+            selection: { run_ids: ['run_1'] },
+            export: { redaction_mode: 'redacted' },
+          },
         },
-      },
-      templates: [{ id: 'standard', label: 'Standard', sections: [{ type: 'cover', title: 'Cover', enabled: true }] }],
-    }))
+        templates: [{ id: 'standard', label: 'Standard', sections: [{ type: 'cover', title: 'Cover', enabled: true }] }],
+      })
+    })
     const controller = reportApi.createProjectReportController(makeContext(apiFetch))
 
     await controller.load('proj_1', { render: false })
@@ -123,6 +131,8 @@ describe('project report controller', () => {
     expect(dateRange.placeholder).toBe('2026-06-01 to 2026-06-05')
     expect(dateRange.title).toContain('YYYY-MM-DD to YYYY-MM-DD')
     expect(container.querySelector('[data-project-report-selection="run_ids"]').checked).toBe(true)
+    expect(container.querySelector('[data-project-report-assessment]').value).toBe('asm_archived')
+    expect(container.querySelector('[data-project-report-assessment]').textContent).toContain('Earlier network cycle · archived')
     expect(container.querySelector('[data-project-report-action="save"]').textContent).toBe('Save draft')
     expect(container.querySelector('[data-project-report-action="reload"]').textContent).toBe('Reload saved')
     expect(container.querySelector('[data-project-report-template]')).toBeNull()
@@ -181,6 +191,58 @@ describe('project report controller', () => {
     expect(renderedChips.map(chip => chip.textContent)).toEqual(['provenance', 'source: not recorded'])
     expect(renderedChips[0].title).toContain('evidence package')
     expect(renderedChips[1].title).toContain('older package')
+  })
+
+  it('adds a Web Surface screenshot to the existing report selection without embedding image bytes', async () => {
+    const { reportApi } = loadReportModule()
+    const apiFetch = vi.fn(async () => apiResponse({
+      report: {
+        updated: '2026-08-07T12:00:00Z',
+        draft: {
+          selection: { artifact_ids: ['artifact_existing'] },
+          selection_modes: { artifact_ids: 'manual' },
+          export: { redaction_mode: 'redacted' },
+        },
+      },
+      templates: [],
+    }))
+    const context = makeContext(apiFetch)
+    const controller = reportApi.createProjectReportController(context)
+
+    const st = await controller.includeArtifact('proj_1', 'artifact_screenshot')
+
+    expect(st.draft.selection.artifact_ids).toEqual(['artifact_existing', 'artifact_screenshot'])
+    expect(st.draft.selection_modes.artifact_ids).toBe('manual')
+    expect(st.draft.export.redaction_mode).toBe('redacted')
+    expect(st.dirty).toBe(true)
+    expect(st.notice).toContain('image stays behind authenticated artifact storage')
+    expect(context.renderProjectExplorer).toHaveBeenCalled()
+  })
+
+  it('clears a conflicting all-artifacts filter so the handed-off screenshot stays selected', async () => {
+    const { reportApi } = loadReportModule()
+    const apiFetch = vi.fn(async () => apiResponse({
+      report: {
+        draft: {
+          selection_modes: { artifact_ids: 'all' },
+          selection_filters: { artifact_ids: { q: 'text evidence' } },
+          selection_exclude_ids: { artifact_ids: ['artifact_screenshot'] },
+        },
+      },
+      templates: [],
+    }))
+    const controller = reportApi.createProjectReportController(makeContext(apiFetch))
+
+    const st = await controller.includeArtifact('proj_1', {
+      id: 'artifact_screenshot',
+      display_name: 'login-page.png',
+      workspace_path: 'captures/login-page.png',
+    })
+
+    expect(st.draft.selection_modes.artifact_ids).toBe('all')
+    expect(st.draft.selection_exclude_ids.artifact_ids).toEqual([])
+    expect(st.draft.selection_filters.artifact_ids).toEqual({ q: '' })
+    expect(st.notice).toContain('artifact filter was cleared')
   })
 
   it('shows template choices only when more than one template is configured', async () => {
@@ -365,7 +427,7 @@ describe('project report controller', () => {
         expect.objectContaining({ id: 'reload' }),
       ]),
     }))
-    expect(apiFetch).toHaveBeenCalledTimes(1)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/projects/proj_1/report')).toHaveLength(1)
     expect(st.dirty).toBe(true)
 
     showConfirm.mockResolvedValueOnce('reload')
@@ -374,7 +436,7 @@ describe('project report controller', () => {
       preventDefault: vi.fn(),
     })
     const reloaded = controller.stateFor('proj_1')
-    expect(apiFetch).toHaveBeenCalledTimes(2)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/projects/proj_1/report')).toHaveLength(2)
     expect(reloaded.dirty).toBe(false)
     expect(reloaded.draft.metadata.engagement_name).toBe('Old name')
   })

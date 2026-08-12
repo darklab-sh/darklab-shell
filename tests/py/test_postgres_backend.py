@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit
@@ -270,10 +271,90 @@ def test_postgres_backend_smoke_exercises_phase6_contract(postgres_schema):
 
 
 @pytest.mark.postgres
+def test_postgres_oast_worker_state_queries_and_reject_counter(postgres_schema):
+    from services.connectors.oast_worker_state import (
+        oast_correlations_by_ids,
+        oast_correlations_for_worker,
+        record_oast_provider_rejections,
+    )
+
+    raw_conn = postgres_schema.conn
+    raw_conn.execute(
+        "CREATE TABLE oast_correlations (id TEXT PRIMARY KEY, status TEXT, "
+        "created_at TIMESTAMPTZ, callback_label TEXT, allowed_domain TEXT, "
+        "rejected_count INTEGER, updated_at TIMESTAMPTZ)"
+    )
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    rows = (
+        (
+            "ocr_0123456789abcdef0123456789abcdef",
+            "reserved",
+            "2026-08-09T10:00:00+00:00",
+        ),
+        (
+            "ocr_11111111111111111111111111111111",
+            "active",
+            "2026-08-09T11:00:00+00:00",
+        ),
+        (
+            "ocr_22222222222222222222222222222222",
+            "closed",
+            "2026-08-09T09:00:00+00:00",
+        ),
+    )
+    for correlation_id, status, created_at in rows:
+        conn.execute(
+            "INSERT INTO oast_correlations VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (
+                correlation_id,
+                status,
+                created_at,
+                "abcdefghijklmnopqrstuvwxy01234567",
+                "callbacks.example.test",
+                created_at,
+            ),
+        )
+
+    work = oast_correlations_for_worker(conn=conn)
+    selected = oast_correlations_by_ids(
+        [rows[0][0], "../../invalid", rows[2][0]],
+        conn=conn,
+    )
+    updated = record_oast_provider_rejections(
+        rows[1][0],
+        3,
+        now=datetime(2026, 8, 9, 12, tzinfo=timezone.utc),
+        conn=conn,
+    )
+
+    assert [row["status"] for row in work] == ["active", "reserved"]
+    assert set(selected) == {rows[0][0], rows[2][0]}
+    assert updated == 1
+    assert conn.execute(
+        "SELECT rejected_count FROM oast_correlations WHERE id = ?",
+        (rows[1][0],),
+    ).fetchone()["rejected_count"] == 3
+
+
+@pytest.mark.postgres
 def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-
+    from services.assessments.cyclonedx_stored_nvd import correlate_cyclonedx_json_with_stored_nvd
+    from services.assessments.httpx_inference_materialization import (
+        materialize_httpx_json_version_inferences,
+    )
+    from services.assessments.nessus_inference_materialization import (
+        materialize_nessus_import_version_inferences,
+    )
+    from services.assessments.nessus_stored_nvd import correlate_nessus_import_with_stored_nvd
+    from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
+    from services.assessments.httpx_stored_nvd import correlate_httpx_json_with_stored_nvd
+    from services.assessments.nmap_stored_nvd import correlate_nmap_xml_with_stored_nvd
+    from services.assessments.stored_nvd_inference import materialize_stored_nvd_cpe_candidate_page
+    from services.assessments.version_inference_persistence import persist_version_inference_candidate
+    from services.intel.canonical import entity_signature
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
     conn = postgres_schema.conn
     pre_comparison_migrations = tuple(
         migration for migration in MIGRATIONS if migration.version < "0044"
@@ -308,6 +389,31 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
             "2026-07-13T09:00:00Z",
         ),
     )
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, run_id, line_number, severity, tool_root, kind, subject_key, "
+        "raw_line, created) VALUES (%s, %s, '', 7, 'medium', 'nessus', 'finding', %s, %s, %s)",
+        (
+            "finding-import-before-0051",
+            "migration-session",
+            "domain:imported.darklab.sh",
+            "[medium] imported service finding",
+            "2026-07-13T09:30:00Z",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO atlas_finding_import_occurrences "
+        "(finding_id, batch_id, row_number, snippet, observed_at, created, updated) "
+        "VALUES (%s, %s, 7, %s, %s, %s, %s)",
+        (
+            "finding-import-before-0051",
+            "batch-before-0051",
+            "[medium] imported service finding",
+            "2026-07-13T09:30:00Z",
+            "2026-07-13T09:30:00Z",
+            "2026-07-13T09:30:00Z",
+        ),
+    )
     applied.extend(run_migrations_with_advisory_lock(conn, head_migrations))
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
@@ -321,6 +427,25 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     assert backfilled_occurrence["comparison_key"] == (
         "raw:scanner\x1ffinding\x1fdomain:darklab.sh\x1f[high] exposed service"
     )
+    imported_provenance = conn.execute(
+        "SELECT origin, validation_method, summary, impact, reproduction_steps, confidence, "
+        "cve_ids_json, cwe_ids_json, cvss_vector, cvss_score, references_json "
+        "FROM findings WHERE id = %s",
+        ("finding-import-before-0051",),
+    ).fetchone()
+    assert imported_provenance == {
+        "origin": "import",
+        "validation_method": "imported_assertion",
+        "summary": "",
+        "impact": "",
+        "reproduction_steps": "",
+        "confidence": "unknown",
+        "cve_ids_json": [],
+        "cwe_ids_json": [],
+        "cvss_vector": "",
+        "cvss_score": None,
+        "references_json": [],
+    }
     conn.execute(
         "INSERT INTO runs (id, session_id, command, started) VALUES (%s, %s, %s, %s)",
         ("run-after-0044", "migration-session", "scanner darklab.sh", "2026-07-13T10:00:00Z"),
@@ -347,7 +472,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("finding-after-0044",),
     ).fetchone()
     triggered_finding = conn.execute(
-        "SELECT first_run_id, last_run_id, occurrence_count, status, kind, signature_hash "
+        "SELECT first_run_id, last_run_id, occurrence_count, status, kind, signature_hash, "
+        "origin, validation_method "
         "FROM findings WHERE id = %s",
         ("finding-after-0044",),
     ).fetchone()
@@ -362,6 +488,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "status": "important",
         "kind": "finding",
         "signature_hash": "fingerprint-after-0044",
+        "origin": "run",
+        "validation_method": "captured_observation",
     }
 
     assert applied == [
@@ -410,6 +538,34 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0043",
         "0044",
         "0045",
+        "0046",
+        "0047",
+        "0048",
+        "0049",
+        "0050",
+        "0051",
+        "0052",
+        "0053",
+        "0054",
+        "0055",
+        "0056",
+        "0057",
+        "0058",
+        "0059",
+        "0060",
+        "0061",
+        "0062",
+        "0063",
+        "0064",
+        "0065",
+        "0066",
+        "0067",
+        "0068",
+        "0069",
+        "0070",
+        "0071",
+        "0072",
+        "0073",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -445,6 +601,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'counts_json',
                 'warning_summary_json'
             ))
+            OR (table_name = 'atlas_import_evidence' AND column_name IN (
+                'row_number',
+                'source_detail_json'
+            ))
             OR (table_name = 'atlas_entity_import_links' AND column_name IN (
                 'occurrence_count',
                 'source_detail_json',
@@ -458,6 +618,121 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
                 'attempts',
                 'status'
             ))
+            OR (table_name = 'project_digest_settings' AND column_name = 'risk_escalations_enabled')
+            OR (table_name = 'cve_risk_records' AND column_name = 'kev_listed')
+            OR (table_name = 'cve_risk_records' AND column_name IN (
+                'advisory_status',
+                'cvss_score',
+                'cwe_ids_json',
+                'nvd_origin'
+            ))
+            OR (table_name = 'cve_advisory_sources' AND column_name IN (
+                'acquisition_mode',
+                'record_count'
+            ))
+            OR (table_name = 'cve_advisory_cpe_matches' AND column_name IN (
+                'all_versions',
+                'source_version'
+            ))
+            OR (table_name = 'package_advisories' AND column_name IN (
+                'source_advisory_id',
+                'schema_version',
+                'affected_versions_json',
+                'lookup_key_hash'
+            ))
+            OR (table_name = 'risk_escalation_states' AND column_name IN (
+                'kev_listed',
+                'epss_active'
+            ))
+            OR (table_name = 'risk_escalations' AND column_name IN (
+                'model_changed',
+                'old_source_version',
+                'new_source_version'
+            ))
+            OR (table_name = 'cve_risk_work_items' AND column_name IN (
+                'old_source_version',
+                'new_source_version'
+            ))
+            OR (table_name = 'project_assessments' AND column_name IN (
+                'profile_snapshot',
+                'started_at'
+            ))
+            OR (table_name = 'project_assessment_checks' AND column_name IN (
+                'state_changed_by_session_id',
+                'state_changed_by_member_id',
+                'state_changed_at'
+            ))
+            OR (table_name = 'project_http_profiles' AND column_name IN (
+                'headers_json',
+                'secret_refs_json',
+                'file_refs_json',
+                'enabled',
+                'created_at'
+            ))
+            OR (table_name = 'zap_connector_jobs' AND column_name IN (
+                'plan_summary_json',
+                'progress_json',
+                'created_at',
+                'submitted_at',
+                'finished_at',
+                'expires_at'
+            ))
+            OR (table_name = 'oast_correlations' AND column_name IN (
+                'created_at',
+                'updated_at',
+                'activated_at',
+                'closed_at',
+                'active_until',
+                'purge_at'
+            ))
+            OR (table_name = 'oast_interactions' AND column_name IN (
+                'summary_json',
+                'observed_at',
+                'received_at'
+            ))
+            OR (table_name = 'schemathesis_run_evidence' AND column_name IN (
+                'running_time_seconds',
+                'missing_operations_json',
+                'observed_at',
+                'created_at'
+            ))
+            OR (table_name = 'schemathesis_operation_evidence' AND column_name IN (
+                'response_statuses_json',
+                'failure_examples_json',
+                'created_at'
+            ))
+            OR (table_name = 'nmap_service_observations' AND column_name IN (
+                'fields_json',
+                'fields_truncated',
+                'collection_truncated',
+                'observed_at',
+                'created_at'
+            ))
+            OR (table_name = 'findings' AND column_name IN (
+                'origin',
+                'validation_method',
+                'summary',
+                'impact',
+                'reproduction_steps',
+                'confidence',
+                'cve_ids_json',
+                'cwe_ids_json',
+                'cvss_vector',
+                'cvss_score',
+                'references_json',
+                'manual_revision',
+                'manual_created_by_session_id',
+                'manual_created_by_member_id',
+                'manual_updated_by_session_id',
+                'manual_updated_by_member_id',
+                'manual_updated_at'
+            ))
+            OR (table_name = 'finding_evidence_links' AND column_name = 'created_at')
+            OR (table_name = 'workflow_execution_children' AND column_name IN (
+                'created',
+                'started',
+                'finished'
+            ))
         )
         """,
         (postgres_schema.schema,),
@@ -470,9 +745,36 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "project_auto_promote_rules",
         "atlas_import_drafts",
         "atlas_import_batches",
+        "atlas_import_evidence",
         "atlas_entity_import_links",
         "atlas_finding_import_occurrences",
         "run_output_summary_status",
+        "cve_risk_sources",
+        "cve_risk_records",
+        "cve_risk_refresh_leases",
+        "cve_risk_work_items",
+        "cve_advisory_sources",
+        "cve_advisory_lookup_cache",
+        "cve_advisory_cpe_matches",
+        "package_advisories",
+        "package_advisory_ranges",
+        "finding_cve_links",
+        "risk_escalation_states",
+        "risk_escalations",
+        "risk_escalation_observations",
+        "risk_escalation_projects",
+        "project_assessments",
+        "project_assessment_checks",
+        "project_assessment_evidence",
+        "project_http_profiles",
+        "zap_connector_jobs",
+        "oast_correlations",
+        "oast_interactions",
+        "nmap_service_observations",
+        "schemathesis_operation_evidence",
+        "schemathesis_run_evidence",
+        "finding_evidence_links",
+        "workflow_execution_children",
         "schema_migrations",
     }.issubset({row["table_name"] for row in table_rows})
     assert {
@@ -492,6 +794,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("atlas_import_drafts", "warning_summary_json", "jsonb"),
         ("atlas_import_batches", "counts_json", "jsonb"),
         ("atlas_import_batches", "warning_summary_json", "jsonb"),
+        ("atlas_import_evidence", "row_number", "bigint"),
+        ("atlas_import_evidence", "source_detail_json", "jsonb"),
         ("atlas_entity_import_links", "occurrence_count", "bigint"),
         ("atlas_entity_import_links", "source_detail_json", "jsonb"),
         ("atlas_entity_import_links", "created_entity", "boolean"),
@@ -499,6 +803,85 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("atlas_finding_import_occurrences", "source_detail_json", "jsonb"),
         ("run_output_summary_status", "attempts", "integer"),
         ("run_output_summary_status", "status", "text"),
+        ("project_digest_settings", "risk_escalations_enabled", "boolean"),
+        ("cve_risk_records", "kev_listed", "boolean"),
+        ("cve_risk_records", "advisory_status", "text"),
+        ("cve_risk_records", "cvss_score", "real"),
+        ("cve_risk_records", "cwe_ids_json", "text"),
+        ("cve_risk_records", "nvd_origin", "text"),
+        ("cve_advisory_sources", "acquisition_mode", "text"),
+        ("cve_advisory_sources", "record_count", "integer"),
+        ("cve_advisory_cpe_matches", "all_versions", "boolean"),
+        ("cve_advisory_cpe_matches", "source_version", "text"),
+        ("package_advisories", "source_advisory_id", "text"),
+        ("package_advisories", "schema_version", "text"),
+        ("package_advisories", "affected_versions_json", "text"),
+        ("package_advisories", "lookup_key_hash", "text"),
+        ("risk_escalation_states", "kev_listed", "boolean"),
+        ("risk_escalation_states", "epss_active", "boolean"),
+        ("risk_escalations", "model_changed", "boolean"),
+        ("risk_escalations", "old_source_version", "text"),
+        ("risk_escalations", "new_source_version", "text"),
+        ("cve_risk_work_items", "old_source_version", "text"),
+        ("cve_risk_work_items", "new_source_version", "text"),
+        ("project_assessments", "profile_snapshot", "jsonb"),
+        ("project_assessments", "started_at", "timestamp with time zone"),
+        ("project_assessment_checks", "state_changed_by_session_id", "text"),
+        ("project_assessment_checks", "state_changed_by_member_id", "text"),
+        ("project_assessment_checks", "state_changed_at", "timestamp with time zone"),
+        ("project_http_profiles", "headers_json", "jsonb"),
+        ("project_http_profiles", "secret_refs_json", "jsonb"),
+        ("project_http_profiles", "file_refs_json", "jsonb"),
+        ("project_http_profiles", "enabled", "boolean"),
+        ("project_http_profiles", "created_at", "timestamp with time zone"),
+        ("zap_connector_jobs", "plan_summary_json", "jsonb"),
+        ("zap_connector_jobs", "progress_json", "jsonb"),
+        ("zap_connector_jobs", "created_at", "timestamp with time zone"),
+        ("zap_connector_jobs", "submitted_at", "timestamp with time zone"),
+        ("zap_connector_jobs", "finished_at", "timestamp with time zone"),
+        ("zap_connector_jobs", "expires_at", "timestamp with time zone"),
+        ("oast_correlations", "created_at", "timestamp with time zone"),
+        ("oast_correlations", "updated_at", "timestamp with time zone"),
+        ("oast_correlations", "activated_at", "timestamp with time zone"),
+        ("oast_correlations", "closed_at", "timestamp with time zone"),
+        ("oast_correlations", "active_until", "timestamp with time zone"),
+        ("oast_correlations", "purge_at", "timestamp with time zone"),
+        ("oast_interactions", "summary_json", "jsonb"),
+        ("oast_interactions", "observed_at", "timestamp with time zone"),
+        ("oast_interactions", "received_at", "timestamp with time zone"),
+        ("schemathesis_run_evidence", "running_time_seconds", "double precision"),
+        ("schemathesis_run_evidence", "missing_operations_json", "jsonb"),
+        ("schemathesis_run_evidence", "observed_at", "timestamp with time zone"),
+        ("schemathesis_run_evidence", "created_at", "timestamp with time zone"),
+        ("schemathesis_operation_evidence", "response_statuses_json", "jsonb"),
+        ("schemathesis_operation_evidence", "failure_examples_json", "jsonb"),
+        ("schemathesis_operation_evidence", "created_at", "timestamp with time zone"),
+        ("nmap_service_observations", "fields_json", "jsonb"),
+        ("nmap_service_observations", "fields_truncated", "boolean"),
+        ("nmap_service_observations", "collection_truncated", "boolean"),
+        ("nmap_service_observations", "observed_at", "timestamp with time zone"),
+        ("nmap_service_observations", "created_at", "timestamp with time zone"),
+        ("findings", "origin", "text"),
+        ("findings", "validation_method", "text"),
+        ("findings", "summary", "text"),
+        ("findings", "impact", "text"),
+        ("findings", "reproduction_steps", "text"),
+        ("findings", "confidence", "text"),
+        ("findings", "cve_ids_json", "jsonb"),
+        ("findings", "cwe_ids_json", "jsonb"),
+        ("findings", "cvss_vector", "text"),
+        ("findings", "cvss_score", "double precision"),
+        ("findings", "references_json", "jsonb"),
+        ("findings", "manual_revision", "integer"),
+        ("findings", "manual_created_by_session_id", "text"),
+        ("findings", "manual_created_by_member_id", "text"),
+        ("findings", "manual_updated_by_session_id", "text"),
+        ("findings", "manual_updated_by_member_id", "text"),
+        ("findings", "manual_updated_at", "text"),
+        ("finding_evidence_links", "created_at", "timestamp with time zone"),
+        ("workflow_execution_children", "created", "timestamp with time zone"),
+        ("workflow_execution_children", "started", "timestamp with time zone"),
+        ("workflow_execution_children", "finished", "timestamp with time zone"),
     }
     runs_index_rows = conn.execute(
         """
@@ -543,6 +926,414 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_project_auto_promote_rules_project_updated",
         "idx_project_auto_promote_rules_run_scan",
     }.issubset({row["indexname"] for row in auto_promote_index_rows})
+    risk_index_rows = conn.execute(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename IN (
+            'cve_risk_records',
+            'cve_risk_work_items',
+            'cve_advisory_lookup_cache',
+            'cve_advisory_cpe_matches',
+            'package_advisories',
+            'finding_cve_links',
+            'risk_escalation_states',
+            'risk_escalations',
+            'risk_escalation_projects'
+        )
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_cve_risk_records_kev_epss",
+        "idx_cve_risk_records_cvss",
+        "idx_cve_advisory_lookup_cache_expiry",
+        "idx_cve_advisory_cpe_product",
+        "idx_cve_advisory_cpe_source_version",
+        "idx_package_advisories_source_version",
+        "idx_package_advisories_lookup",
+        "idx_package_advisories_correlation",
+        "idx_cve_risk_work_items_due",
+        "idx_finding_cve_links_cve",
+        "idx_risk_escalation_states_cve",
+        "idx_risk_escalations_owner_created",
+        "idx_risk_escalations_cve_created",
+        "idx_risk_escalation_projects_project",
+    }.issubset({row["indexname"] for row in risk_index_rows})
+    assessment_index_rows = conn.execute(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename IN (
+            'project_assessments',
+            'project_assessment_checks',
+            'project_assessment_evidence',
+            'project_http_profiles',
+            'zap_connector_jobs',
+            'oast_correlations',
+            'oast_interactions',
+            'nmap_service_observations',
+            'schemathesis_operation_evidence',
+            'schemathesis_run_evidence',
+            'finding_evidence_links',
+            'finding_version_inference_sources'
+        )
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_project_assessments_active_project",
+        "idx_project_assessments_project_updated",
+        "idx_project_assessments_personal_status",
+        "idx_project_assessments_team_status",
+        "idx_project_assessment_checks_assessment_state",
+        "idx_project_assessment_checks_assessment_category",
+        "idx_project_assessment_checks_target",
+        "idx_project_assessment_evidence_check_observed",
+        "idx_project_assessment_evidence_assessment_type",
+        "idx_project_assessment_evidence_source",
+        "idx_project_http_profiles_project_name",
+        "idx_project_http_profiles_project_enabled",
+        "idx_project_http_profiles_personal_updated",
+        "idx_project_http_profiles_team_updated",
+        "idx_zap_connector_jobs_project_created",
+        "idx_zap_connector_jobs_personal_created",
+        "idx_zap_connector_jobs_team_created",
+        "idx_zap_connector_jobs_active_expiry",
+        "idx_oast_correlations_project_created",
+        "idx_oast_correlations_personal_created",
+        "idx_oast_correlations_team_created",
+        "idx_oast_correlations_check_created",
+        "idx_oast_correlations_active_expiry",
+        "idx_oast_correlations_terminal_purge",
+        "idx_oast_correlations_run_check",
+        "idx_oast_interactions_correlation_observed",
+        "idx_oast_interactions_finding_observed",
+        "idx_schemathesis_run_evidence_owner_project",
+        "idx_schemathesis_run_evidence_check_observed",
+        "idx_schemathesis_run_evidence_run",
+        "idx_schemathesis_operation_evidence_report",
+        "idx_nmap_service_observations_owner_run",
+        "idx_nmap_service_observations_target_seen",
+        "idx_nmap_service_observations_kind_seen",
+        "idx_finding_evidence_owner_finding",
+        "idx_finding_evidence_project",
+        "idx_finding_evidence_source",
+        "idx_finding_version_inference_identity",
+        "idx_finding_version_inference_finding",
+        "idx_finding_version_inference_source",
+    }.issubset({row["indexname"] for row in assessment_index_rows})
+    compat = PostgresSqliteCompatConnection(conn)
+    compat.execute(
+        "INSERT INTO cve_risk_records (cve_id, updated_at) VALUES (?, ?)",
+        ("CVE-2026-62001", "2026-08-07T12:00:00+00:00"),
+    )
+    compat.execute(
+        "INSERT INTO cve_advisory_cpe_matches ("
+        "source, cve_id, match_criteria_id, criteria, cpe_part, cpe_vendor, cpe_product, "
+        "criteria_version, version_start_including, version_end_excluding, all_versions, "
+        "source_version, origin, fetched_at, expires_at) VALUES ("
+        "'nvd', ?, ?, ?, 'a', 'example', 'postgres', '*', '1.0', '2.0', FALSE, ?, "
+        "'local', ?, ?)",
+        (
+            "CVE-2026-62001",
+            "00000000-0000-4000-8000-000000006201",
+            "cpe:2.3:a:example:postgres:*:*:*:*:*:*:*:*",
+            "2026-08-07",
+            "2026-08-07T12:00:00+00:00",
+            "2026-08-14T12:00:00+00:00",
+        ),
+    )
+    nvd_counts_before_read = tuple(conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM cve_advisory_cpe_matches), "
+        "(SELECT COUNT(*) FROM findings)"
+    ).fetchone())
+    postgres_correlation = correlate_stored_nvd_cpe_page(
+        compat,
+        {"cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*"},
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_correlation["matches"][0]["vulnerability_id"] == "CVE-2026-62001"
+    assert postgres_correlation["matches"][0]["advisory_source_state"] == "current"
+    postgres_candidates = materialize_stored_nvd_cpe_candidate_page(
+        compat,
+        {
+            "cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*",
+            "observation_id": "obs-postgres-62001",
+            "target": "db.example.test",
+        },
+        source_id="import-postgres-1",
+        source_kind="import",
+        observed_at="2026-08-08T11:00:00+00:00",
+        tool_version="cyclonedx 1.6",
+        parser_version="cyclonedx-v1",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_candidates["candidates"][0]["source"]["batch_id"] == "import-postgres-1"
+    assert postgres_candidates["candidates"][0]["advisory_match_criteria_id"].endswith("6201")
+    postgres_nmap_candidates = correlate_nmap_xml_with_stored_nvd(
+        compat,
+        """<nmaprun version="7.96"><host><address addr="2001:db8::10" addrtype="ipv6"/>
+        <ports><port protocol="tcp" portid="5432"><state state="open"/><service name="postgresql">
+        <cpe>cpe:/a:example:postgres:1.5</cpe></service></port></ports></host></nmaprun>""",
+        source_run_id="run-postgres-nmap-1",
+        observed_at="2026-08-08T11:00:00+00:00",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_nmap_candidates["candidate_count"] == 1
+    assert postgres_nmap_candidates["observations"][0]["target"] == "[2001:db8::10]:5432/tcp"
+    postgres_httpx_candidates = correlate_httpx_json_with_stored_nvd(
+        compat,
+        {
+            "url": "https://db.example.test",
+            "timestamp": "2026-08-08T11:00:00Z",
+            "tech": ["Postgres:1.5"],
+            "cpe": [{
+                "product": "postgres",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-postgres-httpx-1",
+        tool_version="httpx 1.10.0",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_httpx_candidates["candidate_count"] == 1
+    assert postgres_httpx_candidates["observations"][0]["candidates"][0]["source"] == {
+        "kind": "run",
+        "observation_id": postgres_httpx_candidates["observations"][0]["observation_id"],
+        "observed_at": "2026-08-08T11:00:00Z",
+        "tool_version": "httpx 1.10.0",
+        "run_id": "run-postgres-httpx-1",
+        "parser_version": "httpx-json-cpe-v1",
+    }
+    postgres_cyclonedx_candidates = correlate_cyclonedx_json_with_stored_nvd(
+        compat,
+        json.dumps({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "components": [{
+                "type": "application",
+                "bom-ref": "component-postgres-1.5",
+                "name": "postgres",
+                "version": "1.5",
+                "cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*",
+            }],
+        }).encode(),
+        source_batch_id="batch-postgres-cyclonedx-nvd-1",
+        observed_at="2026-08-08T11:00:00Z",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_cyclonedx_candidates["candidate_count"] == 1
+    assert postgres_cyclonedx_candidates["observations"][0]["candidates"][0]["source"]["batch_id"] == (
+        "batch-postgres-cyclonedx-nvd-1"
+    )
+    assert tuple(conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM cve_advisory_cpe_matches), "
+        "(SELECT COUNT(*) FROM findings)"
+    ).fetchone()) == nvd_counts_before_read
+    compat.execute(
+        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "VALUES (?, ?, ?, ?, ?, 0)",
+        (
+            "run-postgres-nmap-1",
+            "version-postgres-owner",
+            "nmap -sV 2001:db8::10",
+            "2026-08-08T10:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) "
+        "VALUES (?, ?, 'port', ?, ?, ?, ?, 1, ?)",
+        (
+            "entity-postgres-version-port",
+            "version-postgres-owner",
+            "[2001:db8::10]:5432/tcp",
+            "signature-postgres-version-port",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, ?, ?, ?, 1)",
+        (
+            "entity-postgres-version-port",
+            "run-postgres-nmap-1",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    postgres_candidate = postgres_nmap_candidates["observations"][0]["candidates"][0]
+    postgres_inference = persist_version_inference_candidate(
+        compat,
+        "version-postgres-owner",
+        postgres_candidate,
+    )
+    repeated_postgres_inference = persist_version_inference_candidate(
+        compat,
+        "version-postgres-owner",
+        postgres_candidate,
+    )
+    assert postgres_inference is not None
+    assert postgres_inference["created"] is True
+    assert postgres_inference["source_created"] is True
+    assert repeated_postgres_inference == {
+        **postgres_inference,
+        "created": False,
+        "source_created": False,
+    }
+    postgres_inference_row = compat.execute(
+        "SELECT validation_method, occurrence_count, run_id, cve_ids_json FROM findings WHERE id = ?",
+        (postgres_inference["finding_id"],),
+    ).fetchone()
+    assert dict(postgres_inference_row) == {
+        "validation_method": "version_inference",
+        "occurrence_count": 1,
+        "run_id": "run-postgres-nmap-1",
+        "cve_ids_json": ["CVE-2026-62001"],
+    }
+    assert compat.execute(
+        "SELECT COUNT(*) AS count FROM finding_version_inference_sources WHERE finding_id = ?",
+        (postgres_inference["finding_id"],),
+    ).fetchone()["count"] == 1
+    compat.execute(
+        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "VALUES (?, ?, ?, ?, ?, 0)",
+        (
+            "run-postgres-httpx-1",
+            "version-postgres-owner",
+            "httpx -u https://db.example.test -json",
+            "2026-08-08T10:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) "
+        "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, ?)",
+        (
+            "entity-postgres-version-url",
+            "version-postgres-owner",
+            "https://db.example.test",
+            "signature-postgres-version-url",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES (?, ?, ?, ?, 1)",
+        (
+            "entity-postgres-version-url",
+            "run-postgres-httpx-1",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    postgres_httpx_inference = materialize_httpx_json_version_inferences(
+        compat,
+        "version-postgres-owner",
+        {
+            "url": "https://db.example.test",
+            "timestamp": "2026-08-08T11:00:00Z",
+            "tech": ["Postgres:1.5"],
+            "cpe": [{
+                "product": "postgres",
+                "vendor": "example",
+                "cpe": "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*",
+            }],
+        },
+        source_run_id="run-postgres-httpx-1",
+        tool_version="httpx 1.10.0",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_httpx_inference["materialized_count"] == 1
+    assert postgres_httpx_inference["finding_created_count"] == 1
+    assert compat.execute(
+        "SELECT tool_root FROM findings WHERE entity_id = 'entity-postgres-version-url'"
+    ).fetchone()["tool_root"] == "httpx"
+    nessus_target = "db-import.example.test"
+    nessus_cpe = "cpe:2.3:a:example:postgres:1.5:*:*:*:*:*:*:*"
+    nessus_target_key = entity_signature("domain", nessus_target)
+    compat.execute(
+        "INSERT INTO atlas_import_batches "
+        "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
+        "VALUES ('import-postgres-nessus-1', 'version-postgres-owner', 'Nessus', "
+        "'nessus_xml', 'Postgres Nessus', ?, ?, 'applied')",
+        ("2026-08-08T11:00:00+00:00", "2026-08-08T11:00:00+00:00"),
+    )
+    compat.execute(
+        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) "
+        "VALUES ('entity-postgres-nessus', 'version-postgres-owner', 'domain', ?, ?, ?, ?, 1, ?)",
+        (
+            nessus_target,
+            "signature-postgres-nessus",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    compat.execute(
+        "INSERT INTO atlas_entity_import_links "
+        "(entity_id, batch_id, first_observed_at, last_observed_at, occurrence_count, created, updated) "
+        "VALUES ('entity-postgres-nessus', 'import-postgres-nessus-1', ?, ?, 1, ?, ?)",
+        ("2026-08-08T11:00:00+00:00",) * 4,
+    )
+    compat.execute(
+        "INSERT INTO atlas_import_evidence "
+        "(id, batch_id, evidence_type, subject_key, label, row_number, external_id, observed_at, "
+        "source_detail_json, created, updated) VALUES ('impe-postgres-nessus-1', "
+        "'import-postgres-nessus-1', 'nessus_service_version', ?, 'Postgres 1.5', 1, '1234', "
+        "?, ?, ?, ?)",
+        (
+            f"{nessus_target_key}\x1f{nessus_cpe}",
+            "2026-08-08T11:00:00+00:00",
+            Jsonb({
+                "adapter": "nessus",
+                "target_kind": "domain",
+                "target_value": nessus_target,
+                "target_key": nessus_target_key,
+                "cpe": nessus_cpe,
+                "version": "1.5",
+                "tool_version": "Nessus 10.9.1",
+                "parser_version": "nessus-xml-cpe-v1",
+            }),
+            "2026-08-08T11:00:00+00:00",
+            "2026-08-08T11:00:00+00:00",
+        ),
+    )
+    postgres_nessus_candidates = correlate_nessus_import_with_stored_nvd(
+        compat,
+        "version-postgres-owner",
+        source_batch_id="import-postgres-nessus-1",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_nessus_candidates["candidate_count"] == 1
+    assert postgres_nessus_candidates["observations"][0]["observation_id"] == (
+        "impe-postgres-nessus-1"
+    )
+    postgres_nessus_inference = materialize_nessus_import_version_inferences(
+        compat,
+        "version-postgres-owner",
+        source_batch_id="import-postgres-nessus-1",
+        now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
+    )
+    assert postgres_nessus_inference["materialized_count"] == 1
+    assert dict(compat.execute(
+        "SELECT validation_method, origin FROM findings WHERE entity_id = 'entity-postgres-nessus'"
+    ).fetchone()) == {"validation_method": "version_inference", "origin": "import"}
     import_index_rows = conn.execute(
         """
         SELECT tablename, indexname
@@ -551,6 +1342,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         AND tablename IN (
             'atlas_import_drafts',
             'atlas_import_batches',
+            'atlas_import_evidence',
             'atlas_entity_import_links',
             'atlas_finding_import_occurrences'
         )
@@ -561,6 +1353,8 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_atlas_import_drafts_scope_created",
         "idx_atlas_import_drafts_expires",
         "idx_atlas_import_batches_scope_applied",
+        "idx_atlas_import_evidence_batch",
+        "idx_atlas_import_evidence_project_type",
         "idx_atlas_entity_import_links_batch",
         "idx_atlas_entity_import_links_entity_seen",
         "idx_atlas_finding_import_occurrences_batch",
@@ -569,9 +1363,933 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
 
 
 @pytest.mark.postgres
-def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema):
+def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
+    postgres_schema,
+    monkeypatch,
+):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.dalfox_parameter_evidence import (
+        resolve_project_dalfox_parameter_evidence,
+    )
+    from services.assessments.dalfox_parameter_observations import (
+        DalfoxParameterObservationState,
+    )
+    from services.assessments.dalfox_xss_command import reviewed_dalfox_xss_command_plan
+    from services.assessments.dalfox_xss_finding_materialization import (
+        materialize_dalfox_xss_findings,
+    )
+    from services.assessments.dalfox_xss_observations import DalfoxXssObservationState
+    from services.runs.output_model import LineEvent, LineSignal, to_wire
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    timestamp = "2026-08-08T10:00:00+00:00"
+    target = "https://app.example.test/search?q=one"
+    run_id = "run-dalfox-parameter-pg"
+    command = (
+        f"dalfox {target} --only-discovery --skip-mining-dict "
+        "--format jsonl --no-color"
+    )
+    state = DalfoxParameterObservationState(command, run_id)
+    summary_line = json.dumps({"meta": {
+        "dalfox_version": "v3.1.2",
+        "mode": "only_discovery",
+        "params_discovered": 1,
+    }})
+    observation_line = json.dumps({"url": target, "param": "q", "location": "Query"})
+    summary = state.metadata(summary_line)["source_detail"]
+    observation = state.metadata(observation_line)["source_detail"]
+    observation_id = observation["parameter_observations"][0]["observation_id"]
+    preview = json.dumps([
+        to_wire(LineEvent(text=summary_line, source_detail=summary)),
+        to_wire(LineEvent(text=observation_line, source_detail=observation)),
+    ])
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, status, created, updated) "
+        "VALUES ('prj-dalfox-parameter-pg', 'dalfox-parameter-pg', '', "
+        "'Dalfox parameter', 'dalfox-parameter', 'active', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, output_line_count) VALUES (?, 'dalfox-parameter-pg', '', "
+        "'external', ?, ?, ?, 0, ?, 2)",
+        (run_id, command, timestamp, timestamp, preview),
+    )
+    conn.execute(
+        "INSERT INTO project_links "
+        "(id, project_id, entity_type, entity_id, created) VALUES "
+        "('pl-dalfox-parameter-pg', 'prj-dalfox-parameter-pg', 'run', ?, ?)",
+        (run_id, timestamp),
+    )
+
+    evidence = resolve_project_dalfox_parameter_evidence(
+        conn,
+        "dalfox-parameter-pg",
+        "",
+        "prj-dalfox-parameter-pg",
+        run_id,
+        str(observation_id),
+        expected_target=target,
+    )
+
+    assert evidence is not None
+    assert evidence.parameter == "q"
+    assert evidence.location == "Query"
+    assert resolve_project_dalfox_parameter_evidence(
+        conn,
+        "another-owner",
+        "",
+        "prj-dalfox-parameter-pg",
+        run_id,
+        str(observation_id),
+        expected_target=target,
+    ) is None
+
+    plan = reviewed_dalfox_xss_command_plan(evidence)
+    assert plan is not None
+    active_run_id = "run-dalfox-xss-pg"
+    xss_state = DalfoxXssObservationState(
+        plan.command,
+        active_run_id,
+        evidence.xss_context(request_limit=int(plan.request_limit or 0)),
+    )
+    xss_lines = [
+        json.dumps({"meta": {
+            "dalfox_version": "v3.1.2",
+            "targets": [target],
+            "findings_count": 1,
+            "total_requests": 64,
+            "scan_duration_ms": 1000,
+        }}),
+        json.dumps({
+            "type": "V",
+            "method": "GET",
+            "param": "q",
+            "payload": "reviewed-postgres-payload",
+            "evidence": "reviewed browser execution",
+            "cwe": "CWE-79",
+        }),
+    ]
+    xss_entries = [
+        to_wire(LineEvent(
+            text=line,
+            line_index=index,
+            signals=(LineSignal.findings,) if index else (),
+            source_detail=xss_state.metadata(line).get("source_detail", {}),
+        ))
+        for index, line in enumerate(xss_lines)
+    ]
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, output_line_count) VALUES (?, 'dalfox-parameter-pg', '', "
+        "'external', ?, ?, ?, 0, ?, 2)",
+        (active_run_id, plan.command, timestamp, timestamp, json.dumps(xss_entries)),
+    )
+    conn.execute(
+        "INSERT INTO project_links "
+        "(id, project_id, entity_type, entity_id, created) VALUES "
+        "('pl-dalfox-xss-pg', 'prj-dalfox-parameter-pg', 'run', ?, ?)",
+        (active_run_id, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO entities "
+        "(id, session_id, team_id, type, canonical_value, signature_hash, "
+        "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
+        "('ent-dalfox-xss-pg', 'dalfox-parameter-pg', '', 'url', ?, "
+        "'sig-dalfox-xss-pg', ?, ?, 1, ?)",
+        (target, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO entity_run_links "
+        "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+        "VALUES ('ent-dalfox-xss-pg', ?, ?, ?, 1)",
+        (active_run_id, timestamp, timestamp),
+    )
+
+    findings = materialize_dalfox_xss_findings(
+        conn,
+        "dalfox-parameter-pg",
+        "",
+        "prj-dalfox-parameter-pg",
+        active_run_id,
+        plan.command,
+        0,
+        xss_entries,
+    )
+
+    assert len(findings) == 1
+    assert findings[0]["validation_method"] == "active_confirmation"
+    assert findings[0]["cwe_ids"] == ["CWE-79"]
+
+
+@pytest.mark.postgres
+def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.cleanup import (
+        RUN_EVIDENCE_UNAVAILABLE_REASON,
+        mark_run_evidence_unavailable_on_conn,
+    )
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    timestamp = "2026-08-04T12:00:00+00:00"
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "VALUES ('prj-assessment-cleanup', 'assessment-cleanup', '', 'Cleanup', 'cleanup', '', "
+        "'active', '', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, created_at, updated_at) "
+        "VALUES ('asm-cleanup', 'assessment-cleanup', '', 'prj-assessment-cleanup', "
+        "'Cleanup', 'network', '1.0', ?, 'active', ?, ?, ?)",
+        (Jsonb({}), timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, target_value_hash, "
+        "state, first_evidence_at, last_evidence_at, created_at, updated_at) "
+        "VALUES ('chk-cleanup', 'asm-cleanup', 'discovery', 'open_ports', 'domain', "
+        "'cleanup.example', 'cleanup-hash', 'covered', ?, ?, ?, ?)",
+        (timestamp, timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_evidence "
+        "(id, assessment_id, check_id, evidence_type, evidence_id, observed_at, "
+        "match_rule_key, match_rule_version, created_at, updated_at) "
+        "VALUES ('aev-cleanup', 'asm-cleanup', 'chk-cleanup', 'run', 'run-cleanup', ?, "
+        "'completed-scan', '1.0', ?, ?)",
+        (timestamp, timestamp, timestamp),
+    )
+
+    assert mark_run_evidence_unavailable_on_conn(conn, ["run-cleanup"]) == 1
+    assert mark_run_evidence_unavailable_on_conn(conn, ["run-cleanup"]) == 0
+    evidence = conn.execute(
+        "SELECT evidence_id, source_state, observed_at, unavailable_at, unavailable_reason "
+        "FROM project_assessment_evidence WHERE id = 'aev-cleanup'"
+    ).fetchone()
+    check = conn.execute(
+        "SELECT state, first_evidence_at, last_evidence_at "
+        "FROM project_assessment_checks WHERE id = 'chk-cleanup'"
+    ).fetchone()
+
+    assert evidence["evidence_id"] == "run-cleanup"
+    assert evidence["source_state"] == "unavailable"
+    assert evidence["observed_at"] is not None
+    assert evidence["unavailable_at"] is not None
+    assert evidence["unavailable_reason"] == RUN_EVIDENCE_UNAVAILABLE_REASON
+    assert check["state"] == "covered"
+    assert check["first_evidence_at"] is not None
+    assert check["last_evidence_at"] is not None
+
+
+@pytest.mark.postgres
+def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.lifecycle import (
+        delete_assessment_cycle,
+        preview_assessment_deletion,
+        update_assessment_cycle,
+    )
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    timestamp = "2026-08-04T12:00:00+00:00"
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "VALUES ('prj-assessment-lifecycle', 'assessment-lifecycle', '', 'Lifecycle', "
+        "'lifecycle', '', 'active', '', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, created_at, updated_at) "
+        "VALUES ('asm-lifecycle', 'assessment-lifecycle', '', "
+        "'prj-assessment-lifecycle', 'Lifecycle', 'network', '1.0', ?, "
+        "'active', ?, ?, ?)",
+        (Jsonb({}), timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, "
+        "target_value_hash, created_at, updated_at) VALUES "
+        "('chk-lifecycle', 'asm-lifecycle', 'discovery', 'open_ports', "
+        "'domain', 'lifecycle.example', 'lifecycle-hash', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO schemathesis_run_evidence "
+        "(id, session_id, project_id, assessment_id, check_id, run_id, "
+        "schema_artifact_id, schema_sha256, schema_version, profile_key, profile_version, "
+        "tool_version, seed, stop_reason, running_time_seconds, expected_operation_count, "
+        "observed_operation_count, case_count, failure_count, missing_operations_json, "
+        "observed_at, created_at) VALUES ('str-lifecycle', 'assessment-lifecycle', "
+        "'prj-assessment-lifecycle', 'asm-lifecycle', 'chk-lifecycle', 'run-lifecycle', "
+        "'rfa_0123456789abcdef', ?, '3.1.0', 'api', '1.0', '4.24.3', 1, 'completed', "
+        "2.5, 1, 1, 2, 1, ?, ?, ?)",
+        ("a" * 64, Jsonb([]), timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO schemathesis_operation_evidence "
+        "(id, report_id, operation_key, method, path, status, case_count, failure_count, "
+        "response_statuses_json, failure_examples_json, created_at) VALUES "
+        "('sop-lifecycle', 'str-lifecycle', 'GET /items', 'GET', '/items', 'failure', "
+        "2, 1, ?, ?, ?)",
+        (Jsonb([500]), Jsonb([]), timestamp),
+    )
+
+    completed = update_assessment_cycle(
+        "assessment-lifecycle",
+        "prj-assessment-lifecycle",
+        "asm-lifecycle",
+        {"status": "completed"},
+        conn=conn,
+    )
+    assert completed["assessment"]["completed_at"] is not None
+    update_assessment_cycle(
+        "assessment-lifecycle",
+        "prj-assessment-lifecycle",
+        "asm-lifecycle",
+        {"status": "archived"},
+        conn=conn,
+    )
+    preview = preview_assessment_deletion(
+        "assessment-lifecycle",
+        "prj-assessment-lifecycle",
+        "asm-lifecycle",
+        conn=conn,
+    )
+    assert preview["can_delete"] is True
+    assert preview["will_delete"]["checks"] == 1
+    assert preview["will_delete"]["schemathesis_reports"] == 1
+    assert preview["will_delete"]["schemathesis_operations"] == 1
+    deleted = delete_assessment_cycle(
+        "assessment-lifecycle",
+        "prj-assessment-lifecycle",
+        "asm-lifecycle",
+        conn=conn,
+    )
+    assert deleted["source_records_deleted"] is False
+    assert conn.execute(
+        "SELECT id FROM project_assessments WHERE id = 'asm-lifecycle'"
+    ).fetchone() is None
+    assert conn.execute("SELECT id FROM schemathesis_run_evidence").fetchone() is None
+    assert conn.execute("SELECT id FROM schemathesis_operation_evidence").fetchone() is None
+    assert conn.execute(
+        "SELECT id FROM projects WHERE id = 'prj-assessment-lifecycle'"
+    ).fetchone() is not None
+
+
+@pytest.mark.postgres
+def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.evidence_read import (
+        attach_evidence_previews,
+        recent_assessment_evidence,
+    )
+    from services.assessments.manual_evidence_read import attach_manual_evidence
+    from services.assessments.mutations import update_manual_check_state_on_conn
+    from services.assessments.target_rollups import assessment_target_rollups
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    timestamp = "2026-08-04T12:00:00+00:00"
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "VALUES ('prj-assessment-state', 'assessment-state', '', 'State', "
+        "'state', '', 'active', '', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, created_at, updated_at) "
+        "VALUES ('asm-state', 'assessment-state', '', 'prj-assessment-state', "
+        "'State', 'network', '1.0', ?, 'active', ?, ?, ?)",
+        (Jsonb({"checks": [{"key": "open_ports", "evidence_rules": []}]}), timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, "
+        "target_value_hash, created_at, updated_at) VALUES "
+        "('chk-state', 'asm-state', 'discovery', 'open_ports', "
+        "'domain', 'state.example', 'state-hash', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_evidence "
+        "(id, assessment_id, check_id, evidence_type, evidence_id, source_state, "
+        "observed_at, unavailable_reason, match_rule_key, match_rule_version, "
+        "linked_by, created_at, updated_at) VALUES "
+        "('aev-state', 'asm-state', 'chk-state', 'run', 'run-state', "
+        "'available', ?, '', 'completed_run', '1.0', 'manual', ?, ?)",
+        (timestamp, timestamp, timestamp),
+    )
+
+    changed = update_manual_check_state_on_conn(
+        conn,
+        "assessment-state",
+        "prj-assessment-state",
+        "asm-state",
+        "chk-state",
+        "blocked",
+        reason="Maintenance window",
+        actor_member_id="member-state",
+    )
+    actor = conn.execute(
+        "SELECT state_changed_by_session_id, state_changed_by_member_id, "
+        "state_changed_at FROM project_assessment_checks WHERE id = 'chk-state'"
+    ).fetchone()
+    checks: list[dict[str, Any]] = [{"id": "chk-state"}]
+    attach_evidence_previews(conn, checks)
+    attach_manual_evidence(conn, checks)
+    recent_evidence = recent_assessment_evidence(conn, "asm-state")
+    target_rollups = assessment_target_rollups(conn, "asm-state")
+
+    assert changed["check"]["state"] == "blocked"
+    assert changed["check"]["state_actor"] == {
+        "kind": "team_member",
+        "member_id": "member-state",
+    }
+    assert actor["state_changed_by_session_id"] == "assessment-state"
+    assert actor["state_changed_by_member_id"] == "member-state"
+    assert actor["state_changed_at"] is not None
+    assert checks[0]["manual_evidence"] == {
+        "evidence": [{
+            **checks[0]["manual_evidence"]["evidence"][0],
+            "id": "aev-state",
+            "evidence_type": "run",
+            "evidence_id": "run-state",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert checks[0]["evidence_previews"] == {
+        "evidence": checks[0]["manual_evidence"]["evidence"],
+        "total": 1,
+        "limit": 3,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert recent_evidence == {
+        "evidence": [{
+            **recent_evidence["evidence"][0],
+            "id": "aev-state",
+            "check_key": "open_ports",
+            "target_type": "domain",
+            "target_value": "state.example",
+            "evidence_type": "run",
+            "evidence_id": "run-state",
+            "linked_by": "manual",
+        }],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "has_more": False,
+    }
+    assert target_rollups == [{
+        "target_entity_id": "",
+        "target_type": "domain",
+        "target_value": "state.example",
+        "total_checks": 1,
+        "applicable_checks": 1,
+        "covered_checks": 0,
+        "checks_awaiting_review": 0,
+        "untested_checks": 0,
+        "excluded_checks": 1,
+        "unavailable_evidence_checks": 0,
+    }]
+
+
+@pytest.mark.postgres
+def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
+    postgres_schema,
+    monkeypatch,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.export_context import (
+        project_assessment_export_context_on_conn,
+    )
+    from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
+    from services.assessments.handoff import project_assessment_finding_changes_on_conn
+    from services.projects.finding_identity import finding_identity_references
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    timestamp = "2026-08-06T12:00:00+00:00"
+    conn.execute(
+        "INSERT INTO projects "
+        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "VALUES ('prj-assessment-handoff', 'assessment-handoff', '', 'Handoff', "
+        "'handoff', '', 'active', '', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, created_at, updated_at) "
+        "VALUES ('asm-handoff', 'assessment-handoff', '', 'prj-assessment-handoff', "
+        "'Handoff', 'network', '1.0', ?, 'active', ?, ?, ?)",
+        (Jsonb({}), timestamp, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, "
+        "target_value_hash, created_at, updated_at) VALUES "
+        "('chk-handoff', 'asm-handoff', 'validation', 'known_cves', "
+        "'domain', 'handoff.example', 'handoff-hash', ?, ?)",
+        (timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO project_assessment_check_comparisons "
+        "(id, current_assessment_id, current_check_id, compatibility_state, reason, "
+        "computed_at) VALUES ('cmp-handoff', 'asm-handoff', 'chk-handoff', "
+        "'comparable', '', ?)",
+        (timestamp,),
+    )
+    finding = {
+        "id": "finding-handoff",
+        "session_id": "assessment-handoff",
+        "team_id": "",
+        "subject_key": "handoff.example",
+        "signature_hash": "signature-handoff",
+        "origin": "run",
+        "validation_method": "active_confirmation",
+    }
+    selected_remediation_id = finding_identity_references(
+        finding,
+        ["CVE-2026-10001"],
+    )[0]["remediation_id"]
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, team_id, subject_key, signature_hash, origin, "
+        "validation_method, severity, status, title, cve_ids_json, first_seen_at, "
+        "last_seen_at, created) VALUES (?, ?, '', ?, ?, ?, ?, 'critical', 'new', "
+        "'Postgres worklist finding', ?, ?, ?, ?)",
+        (
+            finding["id"],
+            finding["session_id"],
+            finding["subject_key"],
+            finding["signature_hash"],
+            finding["origin"],
+            finding["validation_method"],
+            Jsonb(["CVE-2026-10001"]),
+            timestamp,
+            timestamp,
+            timestamp,
+        ),
+    )
+    for suffix, state in (("selected", "regressed"), ("other", "new")):
+        remediation_id = selected_remediation_id if suffix == "selected" else "rmd-other"
+        observations = Jsonb([{"finding_id": finding["id"]}]) if suffix == "selected" else Jsonb([])
+        conn.execute(
+            "INSERT INTO project_assessment_finding_deltas "
+            "(id, comparison_id, current_assessment_id, current_check_id, remediation_id, "
+            "identity_kind, vulnerability_id, rule_identity, affected_subject, delta_state, "
+            "current_observations_json, previous_observations_json, "
+            "current_evidence_ids_json, previous_evidence_ids_json, computed_at) "
+            "VALUES (?, 'cmp-handoff', 'asm-handoff', 'chk-handoff', ?, 'vulnerability', "
+            "'CVE-2026-10001', 'known-cves', 'entity:handoff', ?, ?, ?, ?, ?, ?)",
+            (
+                f"delta-{suffix}",
+                remediation_id,
+                state,
+                observations,
+                Jsonb([]),
+                Jsonb([f"evidence-{suffix}"]),
+                Jsonb([]),
+                timestamp,
+            ),
+        )
+
+    handoff = project_assessment_finding_changes_on_conn(
+        conn,
+        "prj-assessment-handoff",
+        remediation_ids=[selected_remediation_id],
+    )
+    worklist = assessment_finding_worklist_on_conn(conn, "asm-handoff")
+    export_context = project_assessment_export_context_on_conn(
+        conn,
+        "prj-assessment-handoff",
+        assessment_id="asm-handoff",
+        findings=None,
+        selected_artifact_ids=None,
+    )
+
+    assert handoff is not None
+    assert handoff["rollup"] == {
+        "regressed": 1,
+        "new": 0,
+        "persistent": 0,
+        "not_observed": 0,
+        "incomparable": 0,
+        "total": 1,
+    }
+    assert [item["remediation_id"] for item in handoff["items"]] == [
+        selected_remediation_id,
+    ]
+    assert handoff["items"][0]["current_evidence_ids"] == ["evidence-selected"]
+    assert worklist["total"] == 1
+    assert worklist["items"][0]["remediation_id"] == selected_remediation_id
+    assert worklist["items"][0]["strongest_validation_method"] == "active_confirmation"
+    assert export_context is not None
+    assert export_context["assessment"]["profile_snapshot"] == {}
+    assert export_context["scope"]["target_count"] == 1
+    assert export_context["rollup"]["applicable_checks"] == 1
+    assert export_context["fix_first"]["items"][0]["remediation_id"] == selected_remediation_id
+    assert export_context["finding_changes"]["rollup"]["total"] == 2
+
+
+@pytest.mark.postgres
+def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(
+    postgres_dsn,
+    postgres_schema,
+    monkeypatch,
+):
+    import psycopg
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.cve_risk import refresh
+    from services.cve_risk.nvd_advisory import persist_external_nvd_lookup
+    from services.cve_risk.parsers import ParsedFeed
+    from services.cve_risk.store import accept_feed, get_cve_risk
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    accept_feed(
+        conn,
+        ParsedFeed(
+            source="epss",
+            version="v-test:2026-08-04",
+            model_version="v-test",
+            published_at="2026-08-04T00:00:00Z",
+            records=({
+                "cve_id": "CVE-2026-12345",
+                "epss_probability": 0.18,
+                "epss_percentile": 0.94,
+            },),
+        ),
+        origin="bundled",
+        payload_sha256="epss-postgres-sha",
+        enqueue_changes=False,
+    )
+    accept_feed(
+        conn,
+        ParsedFeed(
+            source="kev",
+            version="2026.08.04",
+            model_version="",
+            published_at="2026-08-04T01:00:00Z",
+            records=({
+                "cve_id": "CVE-2026-12345",
+                "kev_date_added": "2026-08-01",
+                "kev_due_date": "2026-08-22",
+                "kev_required_action": "Apply mitigations.",
+                "kev_known_ransomware_campaign_use": "Known",
+                "kev_vendor_project": "Example",
+                "kev_product": "Server",
+                "kev_vulnerability_name": "Example issue",
+            },),
+        ),
+        origin="bundled",
+        payload_sha256="kev-postgres-sha",
+        enqueue_changes=False,
+    )
+    persist_external_nvd_lookup(
+        conn,
+        "CVE-2026-12345",
+        {
+            "status": "active",
+            "published": "2026-08-01T00:00:00Z",
+            "last_modified": "2026-08-04T02:00:00Z",
+            "severity": "HIGH",
+            "score": 8.8,
+            "cvss_version": "3.1",
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "cwes": ["CWE-79"],
+        },
+        cfg={"cve_risk": {"advisory_mode": "external"}},
+    )
+    raw_conn.commit()
+
+    risk = get_cve_risk("cve-2026-12345", conn=conn)
+
+    assert risk is not None
+    assert risk["epss_probability"] == 0.18
+    assert risk["epss_percentile"] == 0.94
+    assert risk["kev_listed"] is True
+    assert risk["kev_due_date"] == "2026-08-22"
+    assert risk["cvss_score"] == 8.8
+    assert risk["advisory_status"] == "active"
+    assert {source["source"] for source in risk["sources"]} == {"epss", "kev", "nvd"}
+
+    refresh_started = datetime(2026, 8, 11, tzinfo=timezone.utc)
+    refresh_settings = {
+        "allowed_hosts": ["epss.cyentia.com"],
+        "http_timeout_seconds": 3,
+        "max_attempts": 1,
+        "max_download_bytes": 1024,
+        "lease_seconds": 30,
+    }
+    effective_lease = refresh._effective_lease_seconds(refresh_settings)
+    schema_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+
+    def steal_expired_lease(*_args, **_kwargs):
+        thief_raw = psycopg.Connection[dict[str, Any]].connect(
+            schema_dsn,
+            row_factory=dict_row,
+        )
+        with thief_raw:
+            thief = PostgresSqliteCompatConnection(thief_raw)
+            assert refresh._acquire_lease(
+                thief,
+                "epss",
+                owner="crl_postgres_new_owner",
+                now=refresh_started + timedelta(seconds=effective_lease + 1),
+                lease_seconds=effective_lease,
+            )
+            thief.commit()
+        return b"the stale owner must not replace the accepted feed", "", ""
+
+    monkeypatch.setattr(refresh, "_download", steal_expired_lease)
+    assert refresh.refresh_source(
+        conn,
+        "epss",
+        force=True,
+        now=refresh_started,
+        cfg={"cve_risk": refresh_settings},
+    ) == {"source": "epss", "outcome": "lease_lost"}
+    assert conn.execute(
+        "SELECT lease_owner FROM cve_risk_refresh_leases WHERE source = ?",
+        ("epss",),
+    ).fetchone()["lease_owner"] == "crl_postgres_new_owner"
+    refreshed_risk = get_cve_risk("CVE-2026-12345", conn=conn)
+    assert refreshed_risk is not None
+    assert refreshed_risk["epss_source_version"] == (
+        "v-test:2026-08-04"
+    )
+
+
+@pytest.mark.postgres
+def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
+    postgres_schema,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.cyclonedx_stored_osv import correlate_cyclonedx_json_with_stored_osv
+    from services.assessments.osv_package_correlation import correlate_stored_osv_package_page
+    from services.cve_risk.osv_external_store import accept_external_osv_query
+    from services.cve_risk.osv_parser import parse_osv_dataset
+    from services.cve_risk.osv_store import accept_local_osv_dataset
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    payload = json.dumps([{
+        "schema_version": "1.6.0",
+        "id": "GHSA-postgres-osv-test",
+        "modified": "2026-08-07T12:00:00Z",
+        "published": "2026-08-06T12:00:00Z",
+        "aliases": ["CVE-2026-12345"],
+        "summary": "Postgres OSV applicability",
+        "affected": [{
+            "package": {
+                "ecosystem": "PyPI",
+                "name": "requests",
+                "purl": "pkg:pypi/requests",
+            },
+            "versions": ["2.30.0"],
+            "ranges": [{
+                "type": "SEMVER",
+                "events": [{"introduced": "2.0.0"}, {"fixed": "2.32.0"}],
+            }],
+        }],
+    }]).encode()
+    parsed = parse_osv_dataset(payload)
+
+    result = accept_local_osv_dataset(
+        conn,
+        parsed,
+        checksum=hashlib.sha256(payload).hexdigest(),
+        now=datetime.fromisoformat("2026-08-07T13:00:00+00:00"),
+    )
+    raw_conn.commit()
+
+    advisory = dict(conn.execute(
+        "SELECT source_advisory_id, normalized_vulnerability_id, package_purl, "
+        "schema_version, source_version, affected_versions_json "
+        "FROM package_advisories WHERE source = 'osv'"
+    ).fetchone())
+    stored_range = dict(conn.execute(
+        "SELECT range_index, range_type, events_json FROM package_advisory_ranges"
+    ).fetchone())
+    source = dict(conn.execute(
+        "SELECT acquisition_mode, origin, status, checksum_sha256, record_count "
+        "FROM cve_advisory_sources WHERE source = 'osv'"
+    ).fetchone())
+
+    assert result == {
+        "source": "osv",
+        "outcome": "loaded",
+        "record_count": 1,
+        "exact_version_count": 1,
+        "range_count": 1,
+    }
+    assert advisory == {
+        "source_advisory_id": "GHSA-postgres-osv-test",
+        "normalized_vulnerability_id": "CVE-2026-12345",
+        "package_purl": "pkg:pypi/requests",
+        "schema_version": "1.6.0",
+        "source_version": parsed.version,
+        "affected_versions_json": '["2.30.0"]',
+    }
+    assert stored_range == {
+        "range_index": 0,
+        "range_type": "SEMVER",
+        "events_json": '[{"introduced":"2.0.0"},{"fixed":"2.32.0"}]',
+    }
+    assert source == {
+        "acquisition_mode": "local",
+        "origin": "local",
+        "status": "current",
+        "checksum_sha256": hashlib.sha256(payload).hexdigest(),
+        "record_count": 1,
+    }
+    row_counts_before_read = tuple(conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM package_advisories), "
+        "(SELECT COUNT(*) FROM package_advisory_ranges)"
+    ).fetchone())
+    correlation = correlate_stored_osv_package_page(
+        conn,
+        {"purl": "pkg:pypi/requests@2.31.0"},
+        now=datetime.fromisoformat("2026-08-08T13:00:00+00:00"),
+    )
+    assert correlation["candidate_advisory_count"] == 1
+    assert correlation["rejected_candidate_count"] == 0
+    assert correlation["matches"][0]["vulnerability_id"] == "CVE-2026-12345"
+    assert correlation["matches"][0]["match_basis"] == "exact_purl_semver_range"
+    assert correlation["matches"][0]["advisory_origin"] == "local"
+    cyclonedx_correlation = correlate_cyclonedx_json_with_stored_osv(
+        conn,
+        json.dumps({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "components": [{
+                "type": "library",
+                "bom-ref": "pkg:pypi/requests@2.31.0",
+                "name": "requests",
+                "version": "2.31.0",
+                "purl": "pkg:pypi/requests@2.31.0",
+            }],
+        }).encode(),
+        source_batch_id="batch-postgres-cyclonedx-1",
+        observed_at="2026-08-08T12:30:00Z",
+        now=datetime.fromisoformat("2026-08-08T13:00:00+00:00"),
+    )
+    assert cyclonedx_correlation["candidate_count"] == 1
+    assert cyclonedx_correlation["observations"][0]["candidates"][0]["source"] == {
+        "kind": "import",
+        "observation_id": cyclonedx_correlation["observations"][0]["observation_id"],
+        "observed_at": "2026-08-08T12:30:00Z",
+        "tool_version": "CycloneDX 1.6",
+        "batch_id": "batch-postgres-cyclonedx-1",
+        "parser_version": "cyclonedx-component-v1",
+    }
+    assert tuple(conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM package_advisories), "
+        "(SELECT COUNT(*) FROM package_advisory_ranges)"
+    ).fetchone()) == row_counts_before_read
+
+    external = accept_external_osv_query(
+        conn,
+        package_purl="pkg:pypi/requests",
+        lookup_key_hash="a" * 64,
+        parsed=parsed,
+        now=datetime.fromisoformat("2026-08-07T14:00:00+00:00"),
+        source_url="https://api.osv.dev/v1/query",
+    )
+    raw_conn.commit()
+
+    external_source = dict(conn.execute(
+        "SELECT acquisition_mode, origin, status, record_count "
+        "FROM cve_advisory_sources WHERE source = 'osv'"
+    ).fetchone())
+    cache = dict(conn.execute(
+        "SELECT lookup_kind, lookup_key_hash, result_state, record_count "
+        "FROM cve_advisory_lookup_cache WHERE source = 'osv'"
+    ).fetchone())
+    external_advisory = dict(conn.execute(
+        "SELECT origin, lookup_key_hash FROM package_advisories "
+        "WHERE source = 'osv' AND origin = 'external'"
+    ).fetchone())
+    assert external == {
+        "source": "osv",
+        "outcome": "stored",
+        "record_count": 1,
+        "exact_version_count": 1,
+        "range_count": 1,
+    }
+    assert external_source == {
+        "acquisition_mode": "external",
+        "origin": "external",
+        "status": "current",
+        "record_count": 1,
+    }
+    assert cache == {
+        "lookup_kind": "purl_version",
+        "lookup_key_hash": "a" * 64,
+        "result_state": "positive",
+        "record_count": 1,
+    }
+    assert external_advisory == {
+        "origin": "external",
+        "lookup_key_hash": "a" * 64,
+    }
+
+
+@pytest.mark.postgres
+def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.assessments.read_model import (
+        assessment_check_page_query,
+        assessment_cycle_page_query,
+    )
     from services.atlas.lookup_resolve import exact_lookup_candidate_query
     from services.atlas.scope import (
         entity_scope_params,
@@ -584,11 +2302,16 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
         project_finding_owner_clause,
     )
     from services.projects.scope import shared_owner_where
+    from services.cve_risk.escalation import (
+        project_risk_escalation_page_query,
+        risk_work_page_query,
+    )
+    from services.cve_risk.links import changed_cve_observation_query
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     compat = PostgresSqliteCompatConnection(conn)
-    for index in range(40):
+    for index in range(160):
         project_id = "project-one-id" if index == 0 else f"project-{index}"
         slug = "project-one" if index == 0 else f"project-{index}"
         status = "archived" if index % 9 == 0 else "active"
@@ -606,7 +2329,131 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
                 f"2026-02-{(index % 28) + 1:02}T00:00:00+00:00",
             ),
         )
-    conn.execute("ANALYZE projects")
+    timestamp = "2026-08-10T12:00:00+00:00"
+    compat.executemany(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, completed_at, archived_at, created_at, updated_at) "
+        "VALUES (?, 'scope-session', '', 'project-one-id', ?, 'network', '1.0', ?, "
+        "?, ?, ?, ?, ?, ?)",
+        [
+            (
+                f"assessment-plan-{index:03}",
+                f"Plan {index:03}",
+                Jsonb({}),
+                "completed" if index < 80 else "archived",
+                timestamp,
+                timestamp,
+                None if index < 80 else timestamp,
+                timestamp,
+                f"2026-08-10T12:{index % 60:02}:00+00:00",
+            )
+            for index in range(160)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO project_assessments "
+        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "profile_snapshot, status, started_at, completed_at, created_at, updated_at) "
+        "VALUES (?, 'scope-session', '', ?, ?, 'network', '1.0', ?, "
+        "'completed', ?, ?, ?, ?)",
+        [
+            (
+                f"assessment-plan-extra-{index:03}",
+                f"project-{index}",
+                f"Extra Plan {index:03}",
+                Jsonb({}),
+                timestamp,
+                timestamp,
+                timestamp,
+                timestamp,
+            )
+            for index in range(1, 160)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO project_assessment_checks "
+        "(id, assessment_id, category, check_key, target_type, target_value, "
+        "target_value_hash, state, created_at, updated_at) "
+        "VALUES (?, 'assessment-plan-000', ?, ?, 'domain', ?, ?, ?, ?, ?)",
+        [
+            (
+                f"check-plan-{index:03}",
+                "discovery" if index % 2 == 0 else "validation",
+                f"check-{index:03}",
+                f"host-{index:03}.example",
+                f"hash-{index:03}",
+                "covered" if index % 3 == 0 else "not_started",
+                timestamp,
+                timestamp,
+            )
+            for index in range(240)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO risk_escalations "
+        "(id, owner_session_id, owner_team_id, remediation_id, cve_id, source, "
+        "transition_kind, feed_version, created_at, updated_at) "
+        "VALUES (?, 'scope-session', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
+        [
+            (
+                f"risk-plan-{index:03}",
+                f"remediation-plan-{index:03}",
+                f"CVE-2026-{index:04}",
+                f"feed-{index:03}",
+                f"2026-08-10T11:{index % 60:02}:00+00:00",
+                timestamp,
+            )
+            for index in range(180)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO risk_escalation_projects (escalation_id, project_id) "
+        "VALUES (?, 'project-one-id')",
+        [(f"risk-plan-{index:03}",) for index in range(180)],
+    )
+    compat.executemany(
+        "INSERT INTO findings (id, session_id, target_id, title, created) "
+        "VALUES (?, 'scope-session', ?, 'Plan finding', ?)",
+        [
+            (f"finding-plan-{index:03}", f"target-plan-{index:03}", timestamp)
+            for index in range(220)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO finding_cve_links (finding_id, cve_id, created_at) VALUES (?, ?, ?)",
+        [
+            (
+                f"finding-plan-{index:03}",
+                "CVE-2026-9999" if index < 40 else f"CVE-2026-{index:04}",
+                timestamp,
+            )
+            for index in range(220)
+        ],
+    )
+    compat.executemany(
+        "INSERT INTO cve_risk_work_items "
+        "(id, source, feed_version, cve_id, transition_kind, status, "
+        "next_attempt_at, created_at, updated_at) "
+        "VALUES (?, 'epss', ?, ?, 'changed', ?, ?, ?, ?)",
+        [
+            (
+                f"work-plan-{index:03}",
+                f"feed-{index:03}",
+                f"CVE-2026-{index:04}",
+                "pending" if index % 2 == 0 else "complete",
+                "",
+                f"2026-08-10T10:{index % 60:02}:00+00:00",
+                timestamp,
+            )
+            for index in range(180)
+        ],
+    )
+    conn.execute(
+        "ANALYZE projects, project_assessments, project_assessment_checks, "
+        "project_assessment_evidence, risk_escalations, risk_escalation_projects, "
+        "findings, finding_cve_links, cve_risk_work_items"
+    )
     conn.execute("SET enable_seqscan = off")
     try:
         atlas_entity_plan = _postgres_plan_text(compat.execute(
@@ -719,6 +2566,52 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
             "EXPLAIN (COSTS OFF) SELECT rel_path FROM run_output_artifacts WHERE run_id = ?",
             ("run-artifact-1",),
         ).fetchall())
+        assessment_cycle_sql, assessment_cycle_params = assessment_cycle_page_query(
+            "project-one-id",
+            status="completed",
+            include_archived=True,
+            limit=25,
+            offset=25,
+        )
+        assessment_cycle_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + assessment_cycle_sql,
+            assessment_cycle_params,
+        ).fetchall())
+        assessment_check_sql, assessment_check_params = assessment_check_page_query(
+            "assessment-plan-000",
+            {"state": "covered"},
+            limit=25,
+            offset=25,
+        )
+        assessment_check_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + assessment_check_sql,
+            assessment_check_params,
+        ).fetchall())
+        project_risk_sql, project_risk_params = project_risk_escalation_page_query(
+            "project-one-id",
+            start="2026-08-10T00:00:00+00:00",
+            limit=25,
+        )
+        project_risk_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + project_risk_sql,
+            project_risk_params,
+        ).fetchall())
+        changed_cve_sql, changed_cve_params = changed_cve_observation_query(
+            "CVE-2026-9999"
+        )
+        changed_cve_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + changed_cve_sql,
+            changed_cve_params,
+        ).fetchall())
+        risk_work_sql, risk_work_params = risk_work_page_query(
+            max_attempts=5,
+            due_at=timestamp,
+            limit=25,
+        )
+        risk_work_plan = _postgres_plan_text(compat.execute(
+            "EXPLAIN (COSTS OFF) " + risk_work_sql,
+            risk_work_params,
+        ).fetchall())
     finally:
         conn.execute("RESET enable_seqscan")
         conn.commit()
@@ -749,6 +2642,15 @@ def test_personal_scope_predicates_use_postgres_partial_indexes(postgres_schema)
     assert "idx_run_file_artifacts_run_created_path" in artifact_created_path_plan
     assert "idx_run_file_artifacts_run_created_id" in artifact_created_id_plan
     assert "run_output_artifacts_pkey" in output_artifact_plan
+    assert "idx_project_assessments_project_updated" in assessment_cycle_plan
+    assert (
+        "idx_project_assessment_checks_assessment_state" in assessment_check_plan
+        or "idx_project_assessment_checks_assessment_category" in assessment_check_plan
+    )
+    assert "idx_project_assessment_evidence_check_observed" in assessment_check_plan
+    assert "idx_risk_escalation_projects_project" in project_risk_plan
+    assert "idx_finding_cve_links_cve" in changed_cve_plan
+    assert "idx_cve_risk_work_items_due" in risk_work_plan
 
 
 @pytest.mark.postgres
@@ -1380,7 +3282,10 @@ finally:
         env=env,
         text=True,
         capture_output=True,
-        timeout=30,
+        # This is a functional cold-start smoke, not a startup-time SLA. A new
+        # schema also imports the release-pinned EPSS/KEV baseline, which can
+        # exceed 30 seconds on a contended shared CI runner.
+        timeout=90,
         check=False,
     )
 
@@ -2061,6 +3966,17 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
 def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, postgres_schema):
     from app import create_app
     from blueprints import workflows as workflow_routes
+    from services.workflows.compiler import compile_execution_definition
+    from services.workflows.fanout_children import (
+        initialize_fanout_children,
+        list_fanout_children,
+    )
+    from services.workflows.fanout_child_lifecycle import (
+        bind_fanout_child_run,
+        claim_fanout_child,
+        finalize_fanout_child_run,
+        reset_launching_fanout_child_for_recovery,
+    )
     from services.workflows.storage import (
         active_execution_page_for_recovery,
         bind_step_run,
@@ -2081,7 +3997,9 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "WHERE table_schema = current_schema() AND "
         "((table_name = 'workflow_executions' AND column_name IN "
         "('definition_snapshot', 'input_values', 'variables')) OR "
-        "(table_name = 'workflow_execution_steps' AND column_name = 'capture_names'))"
+        "(table_name = 'workflow_execution_steps' AND column_name = 'capture_names') OR "
+        "(table_name = 'workflow_execution_children' AND column_name IN "
+        "('created', 'started', 'finished')))"
     ).fetchall()
     workflow_column_types = {
         (row["table_name"], row["column_name"]): row["data_type"]
@@ -2092,12 +4010,16 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         ("workflow_executions", "input_values"): "jsonb",
         ("workflow_executions", "variables"): "jsonb",
         ("workflow_execution_steps", "capture_names"): "jsonb",
+        ("workflow_execution_children", "created"): "timestamp with time zone",
+        ("workflow_execution_children", "started"): "timestamp with time zone",
+        ("workflow_execution_children", "finished"): "timestamp with time zone",
     }
     workflow_index_names = {
         row["indexname"]
         for row in conn.execute(
             "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() "
-            "AND tablename IN ('workflow_executions', 'workflow_execution_steps')"
+            "AND tablename IN "
+            "('workflow_executions', 'workflow_execution_steps', 'workflow_execution_children')"
         ).fetchall()
     }
     assert {
@@ -2107,6 +4029,8 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "idx_workflow_execution_steps_execution_step",
         "idx_workflow_execution_steps_execution_order",
         "idx_workflow_execution_steps_run",
+        "idx_workflow_execution_children_execution_status",
+        "idx_workflow_execution_children_run",
     } <= workflow_index_names
 
     @contextmanager
@@ -2295,6 +4219,218 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         item["id"] for item in list_executions(session_id)
     }
 
+    fanout_definition = compile_execution_definition({
+        "version": 3,
+        "id": "postgres_fanout",
+        "title": "Postgres fan-out",
+        "inputs": [],
+        "steps": [{
+            "id": "collect",
+            "cmd": "echo hosts",
+            "captures": [{
+                "name": "hosts",
+                "kind": "collection",
+                "source": "json_pointer",
+                "pointer": "/hosts",
+            }],
+        }, {
+            "id": "probe",
+            "cmd": "httpx -u {{hosts}} -silent",
+            "for_each": {
+                "collection": "hosts",
+                "failure_mode": "continue",
+                "retries": 1,
+                "max_parallel": 2,
+                "max_failures": 1,
+            },
+        }],
+    })
+    fanout_execution = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="postgres_fanout",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    fanout_step_id = str(fanout_execution["steps"][1]["step_id"])
+    fanout_children = initialize_fanout_children(fanout_execution["id"], fanout_step_id, 3)
+    assert [(child["ordinal"], child["status"]) for child in fanout_children] == [
+        (0, "pending"),
+        (1, "pending"),
+        (2, "pending"),
+    ]
+    assert list_fanout_children(fanout_execution["id"], fanout_step_id) == fanout_children
+    assert all(child["run_id"] == "" and child["error_code"] == "" for child in fanout_children)
+    assert claim_step_for_launch(fanout_execution["id"], fanout_step_id) is not None
+    claimed_child = claim_fanout_child(fanout_execution["id"], fanout_step_id, 0)
+    assert claimed_child is not None and claimed_child["status"] == "launching"
+    claimed_child_id = str(claimed_child["id"])
+    assert reset_launching_fanout_child_for_recovery(claimed_child_id) is True
+    assert claim_fanout_child(fanout_execution["id"], fanout_step_id, 0) is not None
+    assert bind_fanout_child_run(claimed_child_id, "run-pg-fanout-0") is True
+    second_child = claim_fanout_child(fanout_execution["id"], fanout_step_id, 1)
+    assert second_child is not None
+    assert claim_fanout_child(fanout_execution["id"], fanout_step_id, 2) is None
+    retried_child = finalize_fanout_child_run(
+        "run-pg-fanout-0",
+        2,
+        error_code="worker_unavailable",
+    )
+    assert retried_child is not None and retried_child["retry_child_id"]
+    retry_child_id = str(retried_child["retry_child_id"])
+    assert claim_fanout_child(
+        fanout_execution["id"],
+        fanout_step_id,
+        0,
+        attempt=2,
+    ) is not None
+    assert bind_fanout_child_run(retry_child_id, "run-pg-fanout-0-retry") is True
+    assert finalize_fanout_child_run("run-pg-fanout-0-retry", 0) is not None
+    unbound_third = claim_fanout_child(fanout_execution["id"], fanout_step_id, 2)
+    assert unbound_third is not None
+    assert bind_fanout_child_run(str(second_child["id"]), "run-pg-fanout-1") is True
+    assert finalize_fanout_child_run(
+        "run-pg-fanout-1",
+        2,
+        error_code="scope_rejected",
+    ) is not None
+    assert reset_launching_fanout_child_for_recovery(str(unbound_third["id"])) is False
+    final_fanout_children = list_fanout_children(fanout_execution["id"], fanout_step_id)
+    assert [
+        (child["ordinal"], child["attempt"], child["status"], child["error_code"])
+        for child in final_fanout_children
+    ] == [
+        (0, 1, "failed", "worker_unavailable"),
+        (0, 2, "succeeded", ""),
+        (1, 1, "failed", "scope_rejected"),
+        (2, 1, "skipped", "failure_limit"),
+    ]
+    checkpoint = conn.execute(
+        "SELECT fanout_checkpoint FROM workflow_execution_steps "
+        "WHERE execution_id = %s AND step_id = %s",
+        (fanout_execution["id"], fanout_step_id),
+    ).fetchone()["fanout_checkpoint"]
+    assert checkpoint == {
+        "pending": [], "running": [], "completed": [0], "failed": [1],
+        "skipped": [2], "cancelled": False,
+    }
+    failed_fanout_parent = get_execution(
+        str(fanout_execution["session_id"]),
+        str(fanout_execution["id"]),
+    )
+    assert failed_fanout_parent is not None
+    assert failed_fanout_parent["status"] == "failed"
+    assert failed_fanout_parent["steps"][1]["status"] == "failed"
+    assert failed_fanout_parent["steps"][1]["error_code"] == "fanout_failure_limit"
+
+    from blueprints import run as run_routes
+    from services.runs.start import BrokeredRunStartResult
+    from services.workflows import executions
+
+    runtime_fanout = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="postgres_runtime_fanout",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    runtime_fanout_id = str(runtime_fanout["id"])
+    assert claim_step_for_launch(runtime_fanout_id, "collect") is not None
+    assert bind_step_run(runtime_fanout_id, "collect", "run-pg-fanout-collector")
+    assert finalize_run_step(
+        "run-pg-fanout-collector",
+        0,
+        collection_captures={"hosts": ["one.example", "two.example"]},
+    ) is not None
+    runtime_commands: list[str] = []
+
+    def _start_runtime_child(**kwargs):
+        runtime_commands.append(str(kwargs["original_command"]))
+        run_id = "run-pg-fanout-runtime-" + uuid.uuid4().hex
+        kwargs["run_created_hook"](run_id, None)
+        return BrokeredRunStartResult(run_id, "external", "succeeded", 0)
+
+    with monkeypatch.context() as fanout_patch:
+        fanout_patch.setattr(run_routes, "broker_available", lambda: True)
+        fanout_patch.setattr(run_routes, "interactive_pty_spec_for_command", lambda _command: None)
+        fanout_patch.setattr(run_routes, "resolves_exact_special_builtin_command", lambda _command: False)
+        fanout_patch.setattr(run_routes, "resolve_builtin_command", lambda _command: None)
+        fanout_patch.setattr(run_routes, "_start_brokered_run_service", _start_runtime_child)
+        executions.launch_execution_step(runtime_fanout_id)
+
+    runtime_stored = get_execution(session_id, runtime_fanout_id)
+    assert runtime_stored is not None
+    assert runtime_stored["status"] == "completed"
+    assert runtime_commands == [
+        "httpx -u one.example -silent",
+        "httpx -u two.example -silent",
+    ]
+    assert [
+        (child["ordinal"], child["status"])
+        for child in list_fanout_children(runtime_fanout_id, "probe")
+    ] == [(0, "succeeded"), (1, "succeeded")]
+
+    recovery_fanout = create_execution(
+        session_id=session_id,
+        team_id="",
+        workflow_id="postgres_recovery_fanout",
+        workflow_source="config",
+        definition=fanout_definition,
+        inputs={},
+    )
+    recovery_fanout_id = str(recovery_fanout["id"])
+    assert claim_step_for_launch(recovery_fanout_id, "collect") is not None
+    assert bind_step_run(recovery_fanout_id, "collect", "run-pg-recovery-collector")
+    assert finalize_run_step(
+        "run-pg-recovery-collector",
+        0,
+        collection_captures={"hosts": ["one.example", "two.example"]},
+    ) is not None
+    recovery_children = initialize_fanout_children(recovery_fanout_id, "probe", 2)
+    assert claim_step_for_launch(recovery_fanout_id, "probe") is not None
+    assert claim_fanout_child(recovery_fanout_id, "probe", 0) is not None
+    assert claim_fanout_child(recovery_fanout_id, "probe", 1) is not None
+    completed_recovery_run_id = "run-pg-recovery-completed-" + uuid.uuid4().hex
+    assert bind_fanout_child_run(
+        str(recovery_children[0]["id"]),
+        completed_recovery_run_id,
+    )
+    recovery_finished = datetime.now(timezone.utc)
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, command, started, finished, exit_code, output_preview, "
+        "output_line_count) VALUES (%s, %s, 'httpx -u one.example -silent', %s, %s, 0, '[]', 0)",
+        (completed_recovery_run_id, session_id, recovery_finished, recovery_finished),
+    )
+    conn.commit()
+    runtime_commands.clear()
+    with monkeypatch.context() as recovery_patch:
+        recovery_patch.setattr(run_routes, "broker_available", lambda: True)
+        recovery_patch.setattr(
+            run_routes,
+            "interactive_pty_spec_for_command",
+            lambda _command: None,
+        )
+        recovery_patch.setattr(
+            run_routes,
+            "resolves_exact_special_builtin_command",
+            lambda _command: False,
+        )
+        recovery_patch.setattr(run_routes, "resolve_builtin_command", lambda _command: None)
+        recovery_patch.setattr(run_routes, "_start_brokered_run_service", _start_runtime_child)
+        assert executions.recover_workflow_execution(recovery_fanout_id) == "recovered"
+
+    recovered_fanout = get_execution(session_id, recovery_fanout_id)
+    assert recovered_fanout is not None and recovered_fanout["status"] == "completed"
+    assert runtime_commands == ["httpx -u two.example -silent"]
+    assert [
+        (child["ordinal"], child["status"])
+        for child in list_fanout_children(recovery_fanout_id, "probe")
+    ] == [(0, "succeeded"), (1, "succeeded")]
+    assert executions.recover_workflow_execution(recovery_fanout_id) == "ignored"
+
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
 
@@ -2319,6 +4455,51 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
             yield PostgresSqliteCompatConnection(raw_conn)
 
     monkeypatch.setattr(core_database, "db_connect", _concurrent_postgres_connect)
+    serial_fanout_definition = json.loads(json.dumps(fanout_definition))
+    serial_fanout_definition["steps"][1]["for_each"]["max_parallel"] = 1
+    contended_fanout = create_execution(
+        session_id=str(uuid.uuid4()),
+        team_id="",
+        workflow_id="postgres_fanout_contention",
+        workflow_source="config",
+        definition=serial_fanout_definition,
+        inputs={},
+    )
+    contended_step_id = str(contended_fanout["steps"][1]["step_id"])
+    initialize_fanout_children(contended_fanout["id"], contended_step_id, 2)
+    assert claim_step_for_launch(contended_fanout["id"], contended_step_id) is not None
+    child_claim_barrier = Barrier(2)
+
+    def claim_child_concurrently(ordinal: int) -> dict[str, object] | None:
+        child_claim_barrier.wait()
+        return claim_fanout_child(contended_fanout["id"], contended_step_id, ordinal)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        child_claims = list(pool.map(claim_child_concurrently, range(2)))
+
+    assert sum(claim is not None for claim in child_claims) == 1
+    assert sorted(
+        str(child["status"])
+        for child in list_fanout_children(contended_fanout["id"], contended_step_id)
+    ) == ["launching", "pending"]
+    claimed_for_cancel = next(claim for claim in child_claims if claim is not None)
+    contended_run_id = "run-pg-fanout-cancel-" + uuid.uuid4().hex
+    assert bind_fanout_child_run(str(claimed_for_cancel["id"]), contended_run_id) is True
+    canceled_fanout = cancel_execution(
+        str(contended_fanout["session_id"]),
+        str(contended_fanout["id"]),
+    )
+    assert canceled_fanout is not None
+    assert canceled_fanout["_canceled_run_ids"] == [contended_run_id]
+    assert sorted(
+        (str(child["status"]), str(child["error_code"]))
+        for child in list_fanout_children(contended_fanout["id"], contended_step_id)
+    ) == [("canceled", "cancelled"), ("canceled", "cancelled")]
+    assert canceled_fanout["steps"][1]["fanout_checkpoint"] == {
+        "pending": [], "running": [], "completed": [], "failed": [],
+        "skipped": [0, 1], "cancelled": True,
+    }
+
     barrier = Barrier(2)
     concurrent_session_id = str(uuid.uuid4())
     definition = {
@@ -2465,6 +4646,46 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     client = app.test_client()
     token_resp = client.get("/session/token/generate", headers={"X-Session-ID": source_session_id})
     destination_token = json.loads(token_resp.data)["session_token"]
+    disposition_sql = (
+        "INSERT INTO finding_remediation_dispositions "
+        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "rule_identity, review_state, remediation, created_at, updated_at, "
+        "remediation_updated_at) "
+        "VALUES (%s, '', 'subject:postgres-migration', 'rule', "
+        "'RULE:postgres-migration', 'postgres-migration', %s, %s, %s, %s, %s)"
+    )
+    conn.execute(
+        disposition_sql,
+        (
+            source_session_id,
+            "reviewed",
+            "Use the source guidance.",
+            "2026-05-16T00:00:00Z",
+            "2026-05-17T00:00:00Z",
+            "2026-05-19T00:00:00Z",
+        ),
+    )
+    conn.execute(
+        disposition_sql,
+        (
+            destination_token,
+            "important",
+            "Keep the older destination guidance only when it is newer.",
+            "2026-05-15T00:00:00Z",
+            "2026-05-18T00:00:00Z",
+            "2026-05-16T00:00:00Z",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO finding_remediation_merge_members "
+        "(session_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
+        "vulnerability_id, rule_identity, created_by_session_id, created_at) "
+        "VALUES (%s, '', 'rmg_postgres_migration', 'entity:postgres-migration', "
+        "'vulnerability', 'CVE-2026-12345', 'CVE-2026-12345', "
+        "'observation:postgres-migration', %s, '2026-05-19T00:00:00Z')",
+        (source_session_id, source_session_id),
+    )
+    conn.commit()
     info_resp = client.get("/session/token/info", headers={"X-Session-ID": destination_token})
     verify_resp = client.post(
         "/session/token/verify",
@@ -2533,6 +4754,17 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
         "SELECT COUNT(*) AS count FROM session_variables WHERE session_id = %s",
         (destination_token,),
     ).fetchone()["count"]
+    migrated_disposition = conn.execute(
+        "SELECT session_id, review_state, remediation, created_at, updated_at, "
+        "remediation_updated_at "
+        "FROM finding_remediation_dispositions "
+        "WHERE affected_subject = 'subject:postgres-migration'",
+    ).fetchone()
+    migrated_merge_member = conn.execute(
+        "SELECT session_id, merge_id, created_by_session_id "
+        "FROM finding_remediation_merge_members "
+        "WHERE affected_subject = 'entity:postgres-migration'",
+    ).fetchone()
     source_workflow_execution = get_execution(source_session_id, workflow_execution["id"])
     migrated_workflow_execution = get_execution(destination_token, workflow_execution["id"])
 
@@ -2552,6 +4784,9 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert json.loads(migrate_resp.data)["migrated_variables"] == 1
     assert json.loads(migrate_resp.data)["migrated_recent_values"] == 1
     assert json.loads(migrate_resp.data)["migrated_workflow_executions"] == 1
+    assert json.loads(migrate_resp.data)["migrated_finding_remediation_dispositions"] == 1
+    assert json.loads(migrate_resp.data)["migrated_finding_remediation_guidance"] == 1
+    assert json.loads(migrate_resp.data)["migrated_finding_remediation_merge_members"] == 1
     assert migrated_run["session_id"] == destination_token
     assert migrated_snapshot["session_id"] == destination_token
     assert migrated_prefs["preferences"]["pref_theme_name"] == "darklab_obsidian.yaml"
@@ -2562,6 +4797,15 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert int(source_recent_count) == 0
     assert int(migrated_stars) == 1
     assert int(migrated_variables) == 1
+    assert migrated_disposition["session_id"] == destination_token
+    assert migrated_disposition["review_state"] == "important"
+    assert migrated_disposition["remediation"] == "Use the source guidance."
+    assert migrated_disposition["created_at"].isoformat() == "2026-05-15T00:00:00+00:00"
+    assert migrated_disposition["updated_at"].isoformat() == "2026-05-18T00:00:00+00:00"
+    assert migrated_disposition["remediation_updated_at"].isoformat() == "2026-05-19T00:00:00+00:00"
+    assert migrated_merge_member["session_id"] == destination_token
+    assert migrated_merge_member["merge_id"] == "rmg_postgres_migration"
+    assert migrated_merge_member["created_by_session_id"] == destination_token
     assert source_workflow_execution is None
     assert migrated_workflow_execution is not None
     assert migrated_workflow_execution["session_id"] == destination_token
@@ -2624,12 +4868,11 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from core.migrations.runner import run_migrations_with_advisory_lock
     from core import database as core_database
     from services.atlas.materializer import materialize_run_entities
+    from services.assessments.coverage import reconcile_run_evidence_on_conn
     from services.projects import findings as project_findings
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
-    session_id = str(uuid.uuid4())
-
     @contextmanager
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
@@ -2638,34 +4881,101 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
     client = app.test_client()
+    bootstrap_session_id = str(uuid.uuid4())
+    token_resp = client.get(
+        "/session/token/generate",
+        headers={"X-Session-ID": bootstrap_session_id},
+    )
+    session_id = json.loads(token_resp.data)["session_token"]
+    browser_headers = {"X-Session-ID": session_id}
+    api_headers = {"Authorization": f"Bearer {session_id}"}
     create_resp = client.post(
         "/projects",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"name": "Postgres Case", "description": "route smoke"},
     )
     project = json.loads(create_resp.data)["project"]
     target_resp = client.post(
         f"/projects/{project['id']}/targets",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"type": "domain", "value": "darklab.sh", "source_detail": {"source": "manual"}},
     )
+    secret_resp = client.post(
+        "/session/secrets",
+        headers=browser_headers,
+        json={"name": "POSTGRES_ASSESSMENT_TOKEN", "value": "postgres-route-secret"},
+    )
+    http_profile_resp = client.post(
+        f"/projects/{project['id']}/http-profiles",
+        headers=browser_headers,
+        json={
+            "name": "Administrator",
+            "role": "administrator",
+            "base_url": "https://darklab.sh/admin",
+            "scope_roots": ["https://darklab.sh/admin"],
+            "allowed_hosts": ["darklab.sh"],
+            "include_paths": ["/admin"],
+            "secret_refs": {"bearer_token": "POSTGRES_ASSESSMENT_TOKEN"},
+            "token_capture_rules": [{
+                "name": "csrf",
+                "source": "header",
+                "selector": "X-CSRF-Token",
+                "target": "header",
+                "target_name": "X-CSRF-Token",
+            }],
+            "rate_limit_per_second": 4,
+            "concurrency": 2,
+        },
+    )
+    http_profile = json.loads(http_profile_resp.data)["profile"]
+    http_profile_get_resp = client.get(
+        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=browser_headers,
+    )
+    api_http_profile_get_resp = client.get(
+        f"/api/v1/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=api_headers,
+    )
+    http_profile_update_resp = client.patch(
+        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=browser_headers,
+        json={"revision": http_profile["revision"], "enabled": False},
+    )
+    assessment_resp = client.post(
+        f"/projects/{project['id']}/assessments",
+        headers=browser_headers,
+        json={"profile_key": "network", "title": "Postgres route assessment"},
+    )
+    assessment = json.loads(assessment_resp.data)
+    assessment_id = assessment["assessment"]["id"]
     active_resp = client.post(
         "/projects/active",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"project_id": project["id"]},
     )
     run_id = "run-" + uuid.uuid4().hex
     conn.execute(
         """
-        INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_search_text)
-        VALUES (%s, %s, 'external', %s, %s, %s, %s)
+        INSERT INTO runs (
+            id, session_id, run_kind, command, started, finished, exit_code,
+            output_preview, output_search_text
+        )
+        VALUES (%s, %s, 'external', %s, %s, %s, 0, %s, %s)
         """,
-        (run_id, session_id, "host darklab.sh", "2026-05-17T00:00:00Z", "[]", "darklab.sh"),
+        (
+            run_id,
+            session_id,
+            "nmap -sT -sV darklab.sh",
+            "2026-05-17T00:00:00Z",
+            "2026-05-17T00:01:00Z",
+            "[]",
+            "darklab.sh",
+        ),
     )
     conn.commit()
     link_resp = client.post(
         f"/projects/{project['id']}/links",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"entity_type": "run", "entity_id": run_id},
     )
     with _postgres_db_connect() as compat_conn:
@@ -2701,6 +5011,21 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             seen_at="2026-05-17T00:00:02Z",
             command="nmap darklab.sh",
         )
+        materialize_run_entities(
+            compat_conn,
+            session_id,
+            run_id,
+            [{
+                "text": "https://darklab.sh/login [200]",
+                "entities": [{
+                    "type": "url",
+                    "value": "https://darklab.sh/login",
+                    "canonical_value": "https://darklab.sh/login",
+                }],
+            }],
+            seen_at="2026-05-17T00:00:03Z",
+            command="httpx -ss -srd captures -u https://darklab.sh/login",
+        )
         recorded_findings = project_findings.record_run_findings(
             compat_conn,
             session_id,
@@ -2712,23 +5037,77 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
                 "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
             }],
         )
+        compat_conn.execute(
+            "UPDATE runs SET output_preview = ? WHERE id = ?",
+            (
+                json.dumps([{
+                    "source_detail": {
+                        "screenshots": [{
+                            "url": "https://darklab.sh/login",
+                            "artifact_path": "captures/darklab.png",
+                            "status_code": 200,
+                            "title": "Darklab",
+                            "technologies": ["nginx"],
+                            "profile_role": "authenticated",
+                            "visual_hash": "visual-darklab",
+                            "source_run_id": run_id,
+                        }],
+                    },
+                }]),
+                run_id,
+            ),
+        )
+        compat_conn.execute(
+            "INSERT INTO run_file_artifacts "
+            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "detected_by, content_type, preview_type, created) "
+            "VALUES (?, ?, ?, 'captures/darklab.png', 'darklab.png', 'screenshot', 16, "
+            "'httpx_screenshot', 'image/png', 'image', ?)",
+            ("rfa_" + uuid.uuid4().hex[:16], session_id, run_id, "2026-05-17T00:00:03Z"),
+        )
+        assessment_reconciliation = reconcile_run_evidence_on_conn(compat_conn, run_id)
     conn.commit()
     run_entity_preview_resp = client.post(
         f"/projects/{project['id']}/links/run-entities/preview",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"run_ids": [run_id]},
     )
-    list_resp = client.get("/projects?include_counts=1", headers={"X-Session-ID": session_id})
-    targets_resp = client.get(f"/projects/{project['id']}/targets", headers={"X-Session-ID": session_id})
-    links_resp = client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id})
+    list_resp = client.get("/projects?include_counts=1", headers=browser_headers)
+    targets_resp = client.get(f"/projects/{project['id']}/targets", headers=browser_headers)
+    links_resp = client.get(f"/projects/{project['id']}/links", headers=browser_headers)
     findings_resp = client.get(
-        f"/projects/{project['id']}/findings?command_root=host&severity=high&scope=finding",
-        headers={"X-Session-ID": session_id},
+        f"/projects/{project['id']}/findings?command_root=nmap&severity=high&scope=finding",
+        headers=browser_headers,
     )
     findings_review_resp = client.post(
         f"/projects/{project['id']}/findings/review",
-        headers={"X-Session-ID": session_id},
+        headers=browser_headers,
         json={"finding_ids": [recorded_findings[0]["id"], "missing-finding"], "review_state": "important"},
+    )
+    web_surface_resp = client.get(
+        f"/projects/{project['id']}/web-surface",
+        headers=browser_headers,
+    )
+    filtered_web_surface_resp = client.get(
+        f"/projects/{project['id']}/web-surface?target=darklab.sh&status_code=200"
+        "&technology=nginx&profile_role=authenticated&visual_hash=visual-darklab",
+        headers=browser_headers,
+    )
+    browser_assessment_resp = client.get(
+        f"/projects/{project['id']}/assessments/{assessment_id}?state=covered&limit=10",
+        headers=browser_headers,
+    )
+    api_assessment_list_resp = client.get(
+        f"/api/v1/projects/{project['id']}/assessments?status=active&limit=1",
+        headers=api_headers,
+    )
+    api_assessment_detail_resp = client.get(
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
+        headers=api_headers,
+    )
+    http_profile_delete_resp = client.delete(
+        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=browser_headers,
     )
     prefs_row = conn.execute(
         "SELECT preferences FROM session_preferences WHERE session_id = %s",
@@ -2739,8 +5118,44 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         (session_id, "darklab.sh:443/tcp"),
     ).fetchone()
 
+    assert token_resp.status_code == 200
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
+    assert secret_resp.status_code == 201
+    assert http_profile_resp.status_code == 201
+    assert http_profile["secret_refs"] == {
+        "bearer_token": {"name": "POSTGRES_ASSESSMENT_TOKEN", "available": True}
+    }
+    assert json.loads(http_profile_get_resp.data)["profile"]["token_capture_rules"] == [{
+        "name": "csrf",
+        "source": "header",
+        "selector": "X-CSRF-Token",
+        "target": "header",
+        "target_name": "X-CSRF-Token",
+    }]
+    assert api_http_profile_get_resp.status_code == 200
+    assert json.loads(api_http_profile_get_resp.data)["profile"]["secret_refs"] == {
+        "bearer_token": {"name": "POSTGRES_ASSESSMENT_TOKEN", "available": True}
+    }
+    assert json.loads(http_profile_update_resp.data)["profile"]["enabled"] is False
+    assert assessment_resp.status_code == 201
+    assert assessment_reconciliation["checks_matched"] >= 1
+    assert assessment_reconciliation["evidence_linked"] >= 1
+    assert browser_assessment_resp.status_code == 200
+    browser_assessment = json.loads(browser_assessment_resp.data)
+    assert browser_assessment["checks"]["total"] >= 1
+    assert all(check["state"] == "covered" for check in browser_assessment["checks"]["checks"])
+    assert api_assessment_list_resp.status_code == 200
+    assert json.loads(api_assessment_list_resp.data)["assessments"][0]["id"] == assessment_id
+    assert api_assessment_detail_resp.status_code == 200
+    api_assessment = json.loads(api_assessment_detail_resp.data)
+    service_check = next(
+        check for check in api_assessment["checks"]["checks"]
+        if check["check_key"] == "service_discovery"
+    )
+    assert service_check["state"] == "covered"
+    assert service_check["evidence_previews"]["evidence"][0]["evidence_id"] == run_id
+    assert http_profile_delete_resp.status_code == 200
     assert active_resp.status_code == 200
     assert link_resp.status_code == 201
     assert run_entity_preview_resp.status_code == 200
@@ -2753,6 +5168,26 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert json.loads(targets_resp.data)["targets"][0]["source_detail"] == {"source": "manual"}
     assert json.loads(links_resp.data)["links"][0]["entity_id"] == run_id
     assert findings_review_resp.status_code == 200
+    assert web_surface_resp.status_code == 200
+    web_capture = json.loads(web_surface_resp.data)["captures"][0]
+    assert web_capture["url"] == "https://darklab.sh/login"
+    assert web_capture["title"] == "Darklab"
+    assert web_capture["metadata_state"] == "available"
+    assert web_capture["capture_state"] == "unavailable"
+    assert web_capture["artifact"]["content_type"] == "image/png"
+    assert web_capture["source_run"]["id"] == run_id
+    assert web_capture["url_entity_id"]
+    assert web_capture["host_entity_id"]
+    assert web_capture["comparison"] == {
+        "state": "no_baseline",
+        "basis": "exact_url_and_profile_role",
+    }
+    assert filtered_web_surface_resp.status_code == 200
+    filtered_web_surface = json.loads(filtered_web_surface_resp.data)
+    assert filtered_web_surface["total"] == 1
+    assert filtered_web_surface["candidate_total"] == 1
+    assert filtered_web_surface["candidate_truncated"] is False
+    assert filtered_web_surface["captures"][0]["artifact"]["content_type"] == "image/png"
     assert [item["id"] for item in json.loads(findings_resp.data)["findings"]] == [
         recorded_findings[0]["id"]
     ]
@@ -2760,6 +5195,75 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert prefs_row["preferences"]["pref_active_project_id"] == project["id"]
     assert port_row is not None
     assert port_row["attributes_json"] == {"service": "https", "version": "nginx"}
+
+
+@pytest.mark.postgres
+def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_schema):
+    from app import create_app
+    from core import database as core_database
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+
+    app = create_app()
+    app.config["TESTING"] = True
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    session_id = str(uuid.uuid4())
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield PostgresSqliteCompatConnection(conn)
+
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    client = app.test_client()
+    project_response = client.post(
+        "/projects",
+        headers={"X-Session-ID": session_id},
+        json={"name": "Postgres Manual Finding"},
+    )
+    project = project_response.get_json()["project"]
+    target_response = client.post(
+        f"/projects/{project['id']}/targets",
+        headers={"X-Session-ID": session_id},
+        json={"type": "domain", "value": "manual-postgres.example"},
+    )
+    target = target_response.get_json()["target"]
+    created_response = client.post(
+        f"/projects/{project['id']}/findings",
+        headers={"X-Session-ID": session_id},
+        json={
+            "target_id": target["id"],
+            "title": "Postgres manual finding",
+            "severity": "medium",
+            "cve_ids": ["CVE-2026-12345"],
+        },
+    )
+    created = created_response.get_json()["finding"]
+    updated_response = client.patch(
+        f"/projects/{project['id']}/findings/{created['id']}",
+        headers={"X-Session-ID": session_id},
+        json={"expected_revision": 1, "severity": "high"},
+    )
+    updated = updated_response.get_json()["finding"]
+    stored = conn.execute(
+        "SELECT manual_revision, cve_ids_json FROM findings WHERE id = %s",
+        (created["id"],),
+    ).fetchone()
+    cve_link = conn.execute(
+        "SELECT cve_id, link_source FROM finding_cve_links WHERE finding_id = %s",
+        (created["id"],),
+    ).fetchone()
+
+    assert project_response.status_code == 201
+    assert target_response.status_code == 201
+    assert created_response.status_code == 201
+    assert updated_response.status_code == 200
+    assert updated["manual_revision"] == 2
+    assert updated["observation_id"] == created["observation_id"]
+    assert updated["remediation_id"] == created["remediation_id"]
+    assert stored == {"manual_revision": 2, "cve_ids_json": ["CVE-2026-12345"]}
+    assert cve_link == {"cve_id": "CVE-2026-12345", "link_source": "manual"}
 
 
 @pytest.mark.postgres
@@ -3850,6 +6354,82 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
     finally:
         conn.close()
     return db_path
+
+
+@pytest.mark.postgres
+def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkeypatch):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments.nmap_service_evidence_persistence import (
+        persist_nmap_xml_service_observations,
+    )
+    from services.assessments.nmap_service_evidence_read import (
+        nmap_service_evidence_for_run_on_conn,
+    )
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    observed_at = "2026-08-09T00:01:00+00:00"
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview) "
+        "VALUES ('run-nmap-service-pg', 'nmap-owner-pg', '', 'external', "
+        "'nmap -sV -oX scan.xml 192.0.2.10', ?, ?, 0, '[]')",
+        (observed_at, observed_at),
+    )
+    payload = """<nmaprun version="7.95"><host>
+<address addr="192.0.2.10" addrtype="ipv4"/><ports><port protocol="tcp" portid="445">
+<state state="open"/><service name="microsoft-ds"/><script id="smb2-security-mode">
+<elem key="message_signing">disabled</elem></script></port></ports></host>
+<runstats><finished time="1786233600"/></runstats></nmaprun>"""
+
+    first = persist_nmap_xml_service_observations(
+        conn,
+        "nmap-owner-pg",
+        payload,
+        source_run_id="run-nmap-service-pg",
+        observed_at=observed_at,
+    )
+    repeated = persist_nmap_xml_service_observations(
+        conn,
+        "nmap-owner-pg",
+        payload,
+        source_run_id="run-nmap-service-pg",
+        observed_at=observed_at,
+    )
+    row = raw_conn.execute(
+        "SELECT fields_json, fields_truncated, collection_truncated "
+        "FROM nmap_service_observations WHERE run_id = %s",
+        ("run-nmap-service-pg",),
+    ).fetchone()
+
+    assert first["created_count"] == 1
+    assert repeated["created_count"] == 0
+    assert row == {
+        "fields_json": [{"path": ["message_signing"], "value": "disabled"}],
+        "fields_truncated": False,
+        "collection_truncated": False,
+    }
+    page = nmap_service_evidence_for_run_on_conn(
+        conn,
+        "nmap-owner-pg",
+        "run-nmap-service-pg",
+        limit=1,
+    )
+    assert page is not None
+    assert page["total"] == 1
+    assert page["observations"][0]["fields"] == [
+        {"path": ["message_signing"], "value": "disabled"},
+    ]
+    assert nmap_service_evidence_for_run_on_conn(
+        conn, "other-owner-pg", "run-nmap-service-pg",
+    ) is None
+    conn.execute("DELETE FROM runs WHERE id = ?", ("run-nmap-service-pg",))
+    assert raw_conn.execute(
+        "SELECT COUNT(*) AS count FROM nmap_service_observations",
+    ).fetchone()["count"] == 0
 
 
 @pytest.mark.postgres

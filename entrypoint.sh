@@ -116,6 +116,42 @@ fi
 # (nuclei templates, ProjectDiscovery config, etc.) to the tmpfs mount
 chmod 1777 /tmp 2>/dev/null || true
 
+# The release image runs one of three supported process roles. Connector
+# workers share the web process's staged configuration and durable mounts, but
+# they don't need the scanner user's packet capabilities or Gunicorn's helper
+# workers. Dispatch them before web-only firewall and process setup.
+PROCESS_ROLE_READY_FILE="/tmp/darklab-process-role.ready"
+rm -f "$PROCESS_ROLE_READY_FILE"
+
+run_process_role() {
+    process_role="${DARKLAB_PROCESS_ROLE:-web}"
+    case "$process_role" in
+        web)
+            return
+            ;;
+        zap-worker)
+            process_module="services.connectors.zap_worker"
+            ;;
+        oast-worker)
+            process_module="services.connectors.oast_worker"
+            ;;
+        *)
+            echo "PROCESS_ROLE_INVALID role=$process_role" >&2
+            exit 64
+            ;;
+    esac
+
+    printf '%s\n' "$process_role" > "$PROCESS_ROLE_READY_FILE" || {
+        echo "PROCESS_ROLE_READY_FAILED role=$process_role" >&2
+        exit 1
+    }
+    chown root:root "$PROCESS_ROLE_READY_FILE"
+    chmod 0444 "$PROCESS_ROLE_READY_FILE"
+    exec gosu appuser python -m "$process_module"
+}
+
+run_process_role
+
 RAW_PACKET_FIREWALL_READY_FILE="/tmp/darklab-raw-packet-firewall.ready"
 rm -f "$RAW_PACKET_FIREWALL_READY_FILE"
 

@@ -16,6 +16,8 @@ from core.database_backend import (
     sqlite_schema_objects,
     sqlite_table_names,
 )
+from services.shared_schema import SHARED_TABLES
+
 UNIFIED_BASELINE_APP_TABLES: tuple[str, ...] = (
     "ai_run_assists",
     "ai_suggestion_validations",
@@ -64,7 +66,17 @@ UNIFIED_BASELINE_APP_TABLES: tuple[str, ...] = (
     "watchers",
 )
 
-SHARED_APP_TABLES: tuple[str, ...] = (*UNIFIED_BASELINE_APP_TABLES, "workflow_execution_steps", "workflow_executions")
+SHARED_APP_TABLES: tuple[str, ...] = (
+    *UNIFIED_BASELINE_APP_TABLES,
+    *SHARED_TABLES,
+    "atlas_import_evidence",
+    "workflow_execution_children",
+    "workflow_execution_steps",
+    "workflow_executions",
+    "zap_connector_jobs",
+    "oast_correlations",
+    "oast_interactions",
+)
 SQLITE_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "runs_fts",
     "runs_fts_config",
@@ -870,14 +882,13 @@ def _constraint_matches_drop(table_name: str, constraint_name: str, constraint: 
 
 
 def _shared_index_names(inventory: SchemaInventory) -> tuple[str, ...]:
-    backend_specific_suffixes = ("_trgm",)
     return tuple(
         sorted(
             name
             for name, index in inventory.indexes.items()
             if index.table_name in SHARED_APP_TABLES
             and not name.startswith("sqlite_autoindex")
-            and not name.endswith(backend_specific_suffixes)
+            and not name.endswith(("_trgm",))
         )
     )
 
@@ -894,8 +905,7 @@ def _shared_trigger_names(inventory: SchemaInventory) -> tuple[str, ...]:
 
 
 def _inventory_artifact_names(inventory: SchemaInventory) -> set[str]:
-    artifacts = set(inventory.fts_artifacts)
-    artifacts.update(inventory.extensions)
+    artifacts = {*inventory.fts_artifacts, *inventory.extensions}
     if inventory.backend == DatabaseBackend.POSTGRES:
         artifacts.add("schema_migrations")
     return artifacts

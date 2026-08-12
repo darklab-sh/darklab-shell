@@ -160,12 +160,12 @@
         <div class="surface-header">
           <div>
             <span class="faq-title" id="atlas-import-title">IMPORT ATLAS DATA</span>
-            <div class="atlas-import-subtitle" id="atlas-import-subtitle">External findings and entities</div>
+            <div class="atlas-import-subtitle" id="atlas-import-subtitle">External findings, entities, and evidence</div>
           </div>
           <button type="button" class="close-btn" id="atlas-import-close" aria-label="Close import">✕</button>
         </div>
         <div class="atlas-import-body nice-scroll">
-          <section class="atlas-import-section">
+          <section id="atlas-import-source" class="atlas-import-section">
             <div class="atlas-detail-section-title">Source</div>
             <div class="atlas-import-grid">
               <label class="form-field">
@@ -173,9 +173,12 @@
                 <select id="atlas-import-format" class="form-select form-control-compact">
                   <option value="nuclei_jsonl">Nuclei JSONL</option>
                   <option value="nessus_xml">Nessus XML</option>
+                  <option value="greenbone_xml">Greenbone XML</option>
                   <option value="zap_json">OWASP ZAP JSON</option>
                   <option value="zap_xml">OWASP ZAP XML</option>
                   <option value="burp_xml">Burp Suite XML</option>
+                  <option value="sarif_json">SARIF 2.1 JSON</option>
+                  <option value="cyclonedx_json">CycloneDX JSON</option>
                   <option value="generic_csv">Generic CSV</option>
                   <option value="generic_jsonl">Generic JSONL</option>
                 </select>

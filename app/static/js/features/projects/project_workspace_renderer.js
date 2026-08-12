@@ -76,6 +76,8 @@ let exportedDarklabProjectWorkspaceRenderer = null;
         content.classList.add('project-explorer-tab-panel-details');
         ctx.renderProjectDetails(content, project, summary);
       } else if (activeTab === 'overview') ctx.renderProjectOverview(content, projectId, summary);
+      else if (activeTab === 'assessment') ctx.renderProjectAssessment(content, projectId, summary);
+      else if (activeTab === 'web-surface') ctx.renderProjectWebSurface(content, projectId, summary);
       else if (activeTab === 'runs') ctx.renderProjectRuns(content, projectId, summary);
       else if (activeTab === 'entities') ctx.renderProjectEntities(content, projectId, summary);
       else if (activeTab === 'findings') ctx.renderProjectFindings(content, projectId, summary);

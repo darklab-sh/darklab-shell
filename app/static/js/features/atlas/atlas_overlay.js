@@ -34,6 +34,8 @@ import { apiFetch as importedApiFetch, logClientError as importedLogClientError 
 import { openFindingsBoard as importedOpenFindingsBoard } from '../findings/findings_board_bridge.js';
 import { openHistoryRunDetails as importedOpenHistoryRunDetails } from '../history/history_run_modal_state_bridge.js';
 import { DarklabFindingTriageEditor as importedFindingTriageEditor } from '../findings/finding_triage_bridge.js';
+import { openContextualFindingRecord as importedOpenContextualFindingRecord } from '../findings/finding_record_context.js';
+import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
 import {
   DarklabTeamScope as importedTeamScope,
   activeTeamScopeCan as importedActiveTeamScopeCan,
@@ -85,6 +87,9 @@ let exportedCycleAtlasTab = null;
   const entityRowApi = (typeof importedAtlasEntityRow !== 'undefined' && importedAtlasEntityRow) || {};
   const findingTriageEditor = (typeof importedFindingTriageEditor !== 'undefined' && importedFindingTriageEditor) || null;
   const metadataApi = (typeof importedEntityMetadata !== 'undefined' && importedEntityMetadata) || {};
+  const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
+    ? importedFindingRiskSummary
+    : () => '';
   const teamScope = (typeof importedTeamScope !== 'undefined' && importedTeamScope)
     || {
       activeTeamScopeCan: (typeof importedActiveTeamScopeCan !== 'undefined' && importedActiveTeamScopeCan)
@@ -103,6 +108,10 @@ let exportedCycleAtlasTab = null;
   const copyTextToClipboard = (typeof importedCopyTextToClipboard !== 'undefined' && importedCopyTextToClipboard) || null;
   const downloadBlobAsAttachment = (typeof importedDownloadBlobAsAttachment !== 'undefined' && importedDownloadBlobAsAttachment) || null;
   const markInteractionSurfaceReady = (typeof importedMarkInteractionSurfaceReady !== 'undefined' && importedMarkInteractionSurfaceReady) || null;
+  const openContextualFindingRecord = (
+    typeof importedOpenContextualFindingRecord !== 'undefined'
+    && importedOpenContextualFindingRecord
+  ) || null;
   const portalDropdownMenu = (typeof importedPortalDropdownMenu !== 'undefined' && importedPortalDropdownMenu) || null;
   const refocusComposerAfterAction = (typeof importedRefocusComposerAfterAction !== 'undefined' && importedRefocusComposerAfterAction) || null;
   const setComposerValue = (typeof importedSetComposerValue !== 'undefined' && importedSetComposerValue) || null;
@@ -141,6 +150,8 @@ let exportedCycleAtlasTab = null;
   const importBtn = document.getElementById('atlas-import-btn');
   const importOverlay = document.getElementById('atlas-import-overlay');
   const importModal = document.getElementById('atlas-import-modal');
+  const importSubtitle = document.getElementById('atlas-import-subtitle');
+  const importSourceSection = document.getElementById('atlas-import-source');
   const importCloseBtn = document.getElementById('atlas-import-close');
   const importCancelBtn = document.getElementById('atlas-import-cancel');
   const importFormatSelect = document.getElementById('atlas-import-format');
@@ -168,14 +179,18 @@ let exportedCycleAtlasTab = null;
   const paginationSummary = document.getElementById('atlas-pagination-summary');
   const prevBtn = document.getElementById('atlas-prev-btn');
   const nextBtn = document.getElementById('atlas-next-btn');
+  const compressedImportAccept = '.gz,.zip,application/gzip,application/zip';
   const importAcceptByFormat = {
-    burp_xml: '.xml,application/xml,text/xml',
-    generic_csv: '.csv,text/csv',
-    generic_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
-    nessus_xml: '.nessus,.xml,application/xml,text/xml',
-    nuclei_jsonl: '.jsonl,application/x-ndjson,application/jsonl,application/json',
-    zap_json: '.json,application/json',
-    zap_xml: '.xml,application/xml,text/xml',
+    burp_xml: `.xml,application/xml,text/xml,${compressedImportAccept}`,
+    generic_csv: `.csv,text/csv,${compressedImportAccept}`,
+    generic_jsonl: `.jsonl,application/x-ndjson,application/jsonl,application/json,${compressedImportAccept}`,
+    greenbone_xml: `.xml,application/xml,text/xml,${compressedImportAccept}`,
+    nessus_xml: `.nessus,.xml,application/xml,text/xml,${compressedImportAccept}`,
+    nuclei_jsonl: `.jsonl,application/x-ndjson,application/jsonl,application/json,${compressedImportAccept}`,
+    sarif_json: `.sarif,.json,application/sarif+json,application/json,${compressedImportAccept}`,
+    cyclonedx_json: `.json,application/vnd.cyclonedx+json,application/json,${compressedImportAccept}`,
+    zap_json: `.json,application/json,${compressedImportAccept}`,
+    zap_xml: `.xml,application/xml,text/xml,${compressedImportAccept}`,
   };
 
   function ensureBulkActionLayout() {
@@ -276,6 +291,8 @@ let exportedCycleAtlasTab = null;
       open: false,
       previewLoading: false,
       applyLoading: false,
+      sourceMode: 'upload',
+      preparedLabel: '',
       draftId: '',
       rowSetDigest: '',
       preview: null,
@@ -552,6 +569,13 @@ let exportedCycleAtlasTab = null;
     return detailApi.text ? detailApi.text(value, fallback) : (String(value ?? '').trim() || fallback);
   }
 
+  function formatImportDate(value) {
+    const raw = text(value);
+    if (!raw) return '';
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? raw : date.toLocaleString();
+  }
+
   function selectorValue(value) {
     if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
       return CSS.escape(String(value));
@@ -818,6 +842,8 @@ let exportedCycleAtlasTab = null;
       logImportClientError('failed to load atlas project filters', err);
     });
     await refreshAtlas({ resetOffset: true, initialLoad: options.initialLoad });
+    const importDraftId = String(options && options.importDraftId || '').trim();
+    if (importDraftId) await openPreparedImportDraft(importDraftId);
   }
 
   function closeAtlas(options = {}) {
@@ -1613,9 +1639,21 @@ let exportedCycleAtlasTab = null;
     importFileInput.setAttribute('accept', importAcceptByFormat[importFormatSelect.value] || '');
   }
 
-  function resetImportFlow() {
+  function syncImportSourceMode() {
+    const prepared = state.importFlow.sourceMode === 'prepared';
+    importSourceSection?.classList.toggle('u-hidden', prepared);
+    if (importSubtitle) {
+      importSubtitle.textContent = prepared
+        ? (state.importFlow.preparedLabel || 'Prepared report · review before applying')
+        : 'External findings, entities, and evidence';
+    }
+  }
+
+  function resetImportFlow({ sourceMode = 'upload' } = {}) {
     state.importFlow.previewLoading = false;
     state.importFlow.applyLoading = false;
+    state.importFlow.sourceMode = sourceMode;
+    state.importFlow.preparedLabel = '';
     state.importFlow.draftId = '';
     state.importFlow.rowSetDigest = '';
     state.importFlow.preview = null;
@@ -1626,6 +1664,7 @@ let exportedCycleAtlasTab = null;
       importPreviewHost.classList.add('u-hidden');
     }
     if (importApplyBtn) importApplyBtn.disabled = true;
+    syncImportSourceMode();
   }
 
   function setImportModalOpen(open) {
@@ -1646,13 +1685,16 @@ let exportedCycleAtlasTab = null;
     renderImportPreview();
     if (typeof syncModalOverlayState === 'function') syncModalOverlayState();
     window.setTimeout(() => {
-      const focusTarget = importFormatSelect || importModal;
+      const focusTarget = state.importFlow.sourceMode === 'prepared'
+        ? importModal
+        : (importFormatSelect || importModal);
       focusTarget?.focus?.({ preventScroll: true });
     }, 0);
   }
 
   function openImportModal() {
     setExportMenuOpen(false);
+    resetImportFlow();
     setImportModalOpen(true);
   }
 
@@ -1667,8 +1709,10 @@ let exportedCycleAtlasTab = null;
       ['Rows', counts.rows],
       ['Entities', counts.entity_valid],
       ['Findings', counts.finding_valid],
+      ['Evidence', counts.evidence_valid],
       ['New', counts.new],
       ['Updated', counts.updated],
+      ['Skipped', counts.skipped],
       ['Warnings', counts.warnings],
     ].forEach(([label, value]) => {
       const item = document.createElement('div');
@@ -1746,6 +1790,12 @@ let exportedCycleAtlasTab = null;
     const preview = flow.preview;
     const result = flow.result;
     if (!preview && !result) {
+      if (flow.sourceMode === 'prepared' && flow.previewLoading) {
+        importPreviewHost.classList.remove('u-hidden');
+        importPreviewHost.append(node('div', 'atlas-empty-inline', 'Loading prepared preview...'));
+        if (importApplyBtn) importApplyBtn.disabled = true;
+        return;
+      }
       importPreviewHost.classList.add('u-hidden');
       if (importApplyBtn) importApplyBtn.disabled = true;
       return;
@@ -1753,6 +1803,16 @@ let exportedCycleAtlasTab = null;
     importPreviewHost.classList.remove('u-hidden');
     if (preview) {
       const counts = preview.counts || {};
+      if (flow.sourceMode === 'prepared') {
+        const preparedDetails = [
+          text(preview.source_tool),
+          text(preview.filename),
+          preview.expires_at ? `review by ${formatImportDate(preview.expires_at)}` : '',
+        ].filter(Boolean).join(' · ');
+        if (preparedDetails) {
+          importPreviewHost.append(node('div', 'atlas-muted atlas-import-prepared-detail', preparedDetails));
+        }
+      }
       importPreviewHost.append(
         node('div', 'atlas-detail-section-title', 'Preview'),
         importCountGrid(counts),
@@ -1769,6 +1829,10 @@ let exportedCycleAtlasTab = null;
         importOptionControl('import_findings', 'Import findings', 'Add findings and their import occurrence sources.', options, {
           checked: importOptionAvailable(options, 'import_findings'),
           disabled: !importOptionAvailable(options, 'import_findings'),
+        }),
+        importOptionControl('import_evidence', 'Import evidence', 'Keep SBOM components, dependency edges, and VEX dispositions with this import batch.', options, {
+          checked: importOptionAvailable(options, 'import_evidence'),
+          disabled: !importOptionAvailable(options, 'import_evidence'),
         }),
         importOptionControl('link_to_project', 'Link imported entities to this project', hasProject ? state.projectName || 'Project context' : 'Open Atlas from a project to link rows.', options, {
           checked: false,
@@ -1792,6 +1856,10 @@ let exportedCycleAtlasTab = null;
           text(row.severity),
           text(row.title, row.signature_hash || 'finding'),
         ].filter(Boolean).join(' · ')),
+        importSampleRows('Evidence sample', samples.evidence, row => [
+          text(row.evidence_type, 'evidence'),
+          text(row.label, row.subject_key || ''),
+        ].filter(Boolean).join(' · ')),
         importWarningRows(preview.warnings),
       );
       importPreviewHost.append(sampleGrid);
@@ -1807,6 +1875,7 @@ let exportedCycleAtlasTab = null;
           countLabel(counts.entities_updated, 'entity updated', 'entities updated'),
           countLabel(counts.findings_created, 'finding created', 'findings created'),
           countLabel(counts.findings_updated, 'finding updated', 'findings updated'),
+          countLabel(counts.evidence_imported, 'evidence record imported', 'evidence records imported'),
           countLabel(counts.project_links_added, 'project link added', 'project links added'),
           countLabel(counts.project_links_existing, 'project link already existed', 'project links already existed'),
           countLabel(counts.project_targets_created, 'project target created', 'project targets created'),
@@ -1841,6 +1910,7 @@ let exportedCycleAtlasTab = null;
   }
 
   async function previewImportFile() {
+    if (state.importFlow.sourceMode === 'prepared') return;
     if (!importFileInput || !importFormatSelect) return;
     const file = importFileInput.files && importFileInput.files[0] ? importFileInput.files[0] : null;
     if (!file) {
@@ -1871,6 +1941,45 @@ let exportedCycleAtlasTab = null;
       logImportClientError('failed to preview atlas import', err);
       if (importStatus) importStatus.textContent = '';
       showToastSafe(err && err.message ? err.message : 'Failed to preview import', 'error');
+    } finally {
+      state.importFlow.previewLoading = false;
+      syncImportApplyState();
+    }
+  }
+
+  async function openPreparedImportDraft(draftId) {
+    resetImportFlow({ sourceMode: 'prepared' });
+    state.importFlow.previewLoading = true;
+    setImportModalOpen(true);
+    if (importStatus) importStatus.textContent = 'Loading prepared preview...';
+    syncImportApplyState();
+    try {
+      const resp = await api()(`/atlas/imports/drafts/${encodeURIComponent(draftId)}`, {
+        cache: 'no-store',
+      });
+      if (!resp.ok) throw await atlasMutationError(resp, 'Failed to load prepared import');
+      const data = await resp.json();
+      state.importFlow.draftId = String(data.draft_id || '');
+      state.importFlow.rowSetDigest = String(data.row_set_digest || '');
+      state.importFlow.preview = data;
+      state.importFlow.preparedLabel = [
+        text(data.import_name, 'Prepared report'),
+        text(data.source_tool),
+      ].filter(Boolean).join(' · ');
+      syncImportSourceMode();
+      if (importStatus) importStatus.textContent = 'Review ready';
+      renderImportPreview();
+    } catch (err) {
+      logImportClientError('failed to load prepared atlas import', err, {
+        source: 'prepared_import',
+      });
+      const message = err?.message || 'Failed to load prepared import';
+      if (importStatus) importStatus.textContent = message;
+      if (importPreviewHost) {
+        importPreviewHost.replaceChildren(node('div', 'atlas-empty-inline', message));
+        importPreviewHost.classList.remove('u-hidden');
+      }
+      showToastSafe(message, 'error');
     } finally {
       state.importFlow.previewLoading = false;
       syncImportApplyState();
@@ -2044,6 +2153,7 @@ let exportedCycleAtlasTab = null;
       text(finding.severity),
       text(finding.tool_root),
       text(finding.entity_value || finding.subject_key),
+      summarizeFindingRisk(finding),
     ].filter(Boolean).join(' · ');
     main.append(title, meta);
 
@@ -2212,6 +2322,11 @@ let exportedCycleAtlasTab = null;
       triageDisabledReason: teamScopeDeniedMessage('triage Atlas rows'),
       canDeleteAtlasRows: canDeleteAtlasRows(),
       deleteDisabledReason: teamScopeDeniedMessage('delete Atlas rows'),
+      canCreateFinding: !!(
+        state.projectId
+        && ['domain', 'ip', 'url'].includes(String(state.detail?.entity?.type || ''))
+      ),
+      findingDisabledReason: teamScopeDeniedMessage('create Atlas findings'),
       isLinkedToActiveProject: (entity) => {
         const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
         return !!activeId && (Array.isArray(entity.project_links) ? entity.project_links : [])
@@ -2228,6 +2343,7 @@ let exportedCycleAtlasTab = null;
       onOpenEntity: (entity) => openEntityFromRelatedEntity(entity),
       onCleanRunAtlas: (run) => confirmCleanRunAtlas(run),
       onDeleteEntity: () => confirmDeleteEntity(),
+      onCreateFinding: (entity) => createFindingForAtlasEntity(entity),
       onSuppressEntity: (entity) => updateSuppression(entity, !entity.suppressed),
       onPageRuns: (offset) => pageEntityDetail('runs', offset),
       onPageFindings: (offset) => pageEntityDetail('findings', offset),
@@ -2409,6 +2525,7 @@ let exportedCycleAtlasTab = null;
       onOpenEntity: (item) => openEntityFromFinding(item),
       onDeleteFinding: (item) => confirmDeleteFinding(item),
       onEditTriage: (item) => openFindingTriageEditor(item),
+      onEditFinding: (item) => editAtlasManualFinding(item),
       onSuppressFinding: (item) => updateSuppression(item, !item.suppressed),
     };
   }
@@ -2950,7 +3067,9 @@ let exportedCycleAtlasTab = null;
       throw new Error('Finding triage editor is not available.');
     }
     await findingTriageEditor.open(current, {
+      projectId: state.projectId,
       canEdit: canTriageAtlasRows(),
+      canRun: activeTeamScopeCan('run_commands'),
       onSaved: async (triage) => {
         const compact = findingTriageEditor.compactTriage(triage);
         if (currentTab().id !== 'findings' && state.selectedId) {
@@ -2969,6 +3088,63 @@ let exportedCycleAtlasTab = null;
         renderDetail();
       },
     });
+  }
+
+  async function refreshAfterManualFindingSave(action = 'created') {
+    if (currentTab().id === 'findings') await refreshAtlas();
+    else if (state.selectedId) await loadDetail(state.selectedId, { renderLoading: false });
+    broadcastProjectWorkspaceChange('atlas_manual_finding_saved', state.projectId);
+    showToastSafe(action === 'updated' ? 'Finding updated' : 'Finding created', 'success');
+  }
+
+  async function createFindingForAtlasEntity(entity) {
+    const target = entity && typeof entity === 'object' ? entity : state.detail?.entity;
+    const targetId = String(target?.id || '');
+    if (!state.projectId || !targetId || !['domain', 'ip', 'url'].includes(String(target?.type || ''))) return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('create Atlas findings');
+      return;
+    }
+    try {
+      if (typeof openContextualFindingRecord !== 'function') throw new Error('Finding editor is unavailable.');
+      await openContextualFindingRecord({
+        projectId: state.projectId,
+        targetId,
+        canEdit: true,
+        evidence: [{
+          evidence_type: 'atlas_entity',
+          evidence_id: targetId,
+          label: String(target.canonical_value || targetId),
+        }],
+        onSaved: async () => refreshAfterManualFindingSave('created'),
+      });
+    } catch (err) {
+      logImportClientError('failed to open Atlas finding editor', err);
+      showToastSafe(err?.message || 'Failed to open finding editor', 'error');
+    }
+  }
+
+  async function editAtlasManualFinding(finding) {
+    const targetId = String(finding?.entity_id || '');
+    if (!state.projectId || !targetId || String(finding?.origin || '') !== 'manual') return;
+    if (!canTriageAtlasRows()) {
+      showAtlasPermissionDenied('edit Atlas findings');
+      return;
+    }
+    try {
+      if (typeof openContextualFindingRecord !== 'function') throw new Error('Finding editor is unavailable.');
+      await openContextualFindingRecord({
+        projectId: state.projectId,
+        targetId,
+        finding,
+        canEdit: true,
+        onSaved: async () => refreshAfterManualFindingSave('updated'),
+        onConflict: async () => refreshAfterFindingMutation(finding.id),
+      });
+    } catch (err) {
+      logImportClientError('failed to open Atlas manual finding editor', err);
+      showToastSafe(err?.message || 'Failed to open finding editor', 'error');
+    }
   }
 
   async function updateFindingReviewState(finding, reviewState) {

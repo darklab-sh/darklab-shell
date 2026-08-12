@@ -123,6 +123,7 @@ _EXPECTED_BUILTIN_ROOTS = {
     "uname",
     "uniq",
     "uptime",
+    "urlscope",
     "var",
     "version",
     "watch",
@@ -987,6 +988,89 @@ class TestIsCommandAllowedEdges:
             ("amass-subdomains.txt", "output"),
         ]
 
+    @pytest.mark.parametrize(
+        ("display_command", "exec_command"),
+        [
+            (
+                "nmap -sV -oX reports/scan.xml -oN reports/plain.xml darklab.sh",
+                "nmap -sV -oX /workspace/session-1/reports/scan.xml "
+                "-oN /workspace/session-1/reports/plain.xml darklab.sh",
+            ),
+            (
+                "nmap -sV -oXreports/scan.xml -oNreports/plain.xml darklab.sh",
+                "nmap -sV -oX/workspace/session-1/reports/scan.xml "
+                "-oN/workspace/session-1/reports/plain.xml darklab.sh",
+            ),
+        ],
+    )
+    def test_workspace_artifact_capture_tags_validated_nmap_xml_output(
+        self,
+        display_command,
+        exec_command,
+    ):
+        from blueprints.run import _workspace_artifacts_from_validation
+
+        validation = commands.CommandValidationResult(
+            True,
+            display_command=display_command,
+            exec_command=exec_command,
+            workspace_writes=["reports/scan.xml", "reports/plain.xml"],
+        )
+
+        artifacts = _workspace_artifacts_from_validation(validation, "session-1")
+
+        assert artifacts == [
+            {
+                "workspace_path": "reports/scan.xml",
+                "display_name": "scan.xml",
+                "kind": "output",
+                "detected_by": "workspace_flag",
+                "structured_output": "nmap_xml",
+                "source_flag": "-oX",
+            },
+            {
+                "workspace_path": "reports/plain.xml",
+                "display_name": "plain.xml",
+                "kind": "output",
+                "detected_by": "workspace_flag",
+            },
+        ]
+
+    def test_workspace_artifact_capture_does_not_guess_nmap_xml_intent(self):
+        from blueprints.run import _workspace_artifacts_from_validation
+
+        cases = [
+            commands.CommandValidationResult(
+                True,
+                display_command="httpx -oX reports/scan.xml darklab.sh",
+                exec_command="httpx -oX /workspace/session-1/reports/scan.xml darklab.sh",
+                workspace_writes=["reports/scan.xml"],
+            ),
+            commands.CommandValidationResult(
+                True,
+                display_command="nmap -sV -oX reports/scan.xml darklab.sh",
+                exec_command="nmap -sV -oX /workspace/session-1/reports/scan.xml darklab.sh",
+                workspace_writes=["scan.xml", "reports/scan.xml"],
+            ),
+            commands.CommandValidationResult(
+                False,
+                display_command="nmap -sV -oX reports/scan.xml darklab.sh",
+                exec_command="nmap -sV -oX /workspace/session-1/reports/scan.xml darklab.sh",
+                workspace_writes=["reports/scan.xml"],
+            ),
+            commands.CommandValidationResult(
+                True,
+                display_command="nmap -oX first.xml -oX second.xml darklab.sh",
+                exec_command="nmap -oX /workspace/session-1/first.xml "
+                "-oX /workspace/session-1/second.xml darklab.sh",
+                workspace_writes=["first.xml", "second.xml"],
+            ),
+        ]
+
+        for validation in cases:
+            artifacts = _workspace_artifacts_from_validation(validation, "session-1")
+            assert all("structured_output" not in artifact for artifact in artifacts)
+
     def test_restricted_command_input_cidrs_block_inline_literal_targets(self):
         registry = {
             "commands": [
@@ -1567,6 +1651,7 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("diff --last") == "diff"
             assert resolve_builtin_command("diff file:expected.txt run:run-1") == "diff"
             assert resolve_builtin_command("rm targets.txt") == "rm"
+            assert resolve_builtin_command("urlscope example.com candidates.txt scoped.txt") == "urlscope"
 
     def test_workspace_builtin_commands_are_hidden_when_disabled(self):
         with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
@@ -1577,6 +1662,7 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("diff run:run-1 run:run-2") == "diff"
             assert resolve_builtin_command("diff --last") == "diff"
             assert resolve_builtin_command("rm targets.txt") is None
+            assert resolve_builtin_command("urlscope example.com candidates.txt scoped.txt") is None
 
     def test_tour_builtin_command_is_hidden_when_disabled(self):
         with mock.patch.dict("config.CFG", {"tour_enabled": False}):

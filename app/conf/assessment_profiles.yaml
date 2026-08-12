@@ -1,0 +1,380 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+version: 1
+profiles:
+  - key: network
+    version: "1.0"
+    label: Network assessment
+    purpose: Confirm reachability, exposed services, and the DNS records that shape the approved network surface.
+    target_types: [domain, ip]
+    checks:
+      - &network_host_reachability
+        key: host_reachability
+        version: "1.0"
+        category: discovery
+        label: Host reachability
+        purpose: Establish whether the approved host responds to a bounded reachability check.
+        target_types: [domain, ip]
+        evidence_rules:
+          - key: completed_reachability_run
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [ping, fping, nmap]
+            workflow_actions: []
+            structured_output_kinds: []
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:ping
+        completion_guidance: Run a bounded reachability check against the approved host and review both successful replies and a clean no-response result.
+      - &network_service_discovery
+        key: service_discovery
+        version: "1.0"
+        category: discovery
+        label: Service discovery
+        purpose: Record the reachable TCP services exposed by the approved host.
+        target_types: [domain, ip]
+        evidence_rules:
+          - key: completed_service_scan
+            version: "1.0"
+            evidence_types: [run, atlas_entity]
+            command_roots: [nmap, naabu, rustscan, masscan]
+            workflow_actions: []
+            structured_output_kinds: [ports, services]
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:nmap
+        completion_guidance: Complete an approved service scan and review the saved port and service evidence, including a clean result with no reachable services.
+      - &network_dns_inventory
+        key: dns_inventory
+        version: "1.0"
+        category: discovery
+        label: DNS inventory
+        purpose: Capture the DNS records and resolved hosts that affect the approved domain.
+        target_types: [domain]
+        evidence_rules:
+          - key: completed_dns_inventory
+            version: "1.0"
+            evidence_types: [run, atlas_entity]
+            command_roots: [dig, dnsrecon, dnsx]
+            workflow_actions: []
+            structured_output_kinds: [dns_records, entities]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:dnsrecon
+        completion_guidance: Collect the domain's current DNS records and review resolved hosts, delegation, and an explicit clean result when a record type is absent.
+
+  - key: web
+    version: "1.6"
+    label: Web assessment
+    purpose: Map reachable web applications, discover their exposed content, and review structured vulnerability checks.
+    target_types: [domain, ip, url]
+    checks:
+      - &web_http_profile
+        key: http_profile
+        version: "1.0"
+        category: discovery
+        label: HTTP service profile
+        purpose: Record status, title, technologies, redirects, and other basic HTTP response context.
+        target_types: [domain, ip, url]
+        evidence_rules:
+          - key: completed_http_profile
+            version: "1.0"
+            evidence_types: [run, atlas_entity]
+            command_roots: [httpx, curl]
+            workflow_actions: []
+            structured_output_kinds: [http_responses, entities]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:httpx
+        completion_guidance: Probe the approved host or URL and review the saved response profile, redirects, technologies, and clean unreachable result when applicable.
+      - &web_content_discovery
+        key: content_discovery
+        version: "1.0"
+        category: enumeration
+        label: Web content discovery
+        purpose: Discover reachable paths and related URLs within the approved web scope.
+        target_types: [domain, url]
+        evidence_rules:
+          - key: completed_content_discovery
+            version: "1.0"
+            evidence_types: [run, atlas_entity]
+            command_roots: [katana, gobuster, ffuf]
+            workflow_actions: []
+            structured_output_kinds: [entities, http_responses]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:katana
+        completion_guidance: Complete a bounded crawl or content-discovery run and review the saved in-scope URLs, response context, and any explicit clean result.
+      - &web_vulnerability_templates
+        key: vulnerability_templates
+        version: "1.0"
+        category: validation
+        label: Web vulnerability templates
+        purpose: Apply reviewed vulnerability templates to the approved web target and retain positive or clean evidence.
+        target_types: [domain, ip, url]
+        evidence_rules:
+          - key: completed_nuclei_templates
+            version: "1.1"
+            evidence_types: [run, finding]
+            command_roots: [nuclei]
+            command_modes: [nuclei_standard_profile]
+            workflow_actions: []
+            structured_output_kinds: [findings]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:nuclei
+        completion_guidance: Run the approved template set, review every saved finding, and retain a successful clean run when no template matches.
+      - &web_intrusive_template_validation
+        key: intrusive_template_validation
+        version: "1.0"
+        category: validation
+        label: Intrusive web template validation
+        purpose: Run the reviewed headless and low-aggression DAST template families against one separately approved web target.
+        target_types: [domain, ip, url]
+        evidence_rules:
+          - key: completed_intrusive_nuclei_templates
+            version: "1.0"
+            evidence_types: [run, finding]
+            command_roots: [nuclei]
+            command_modes: [nuclei_intrusive_profile]
+            workflow_actions: []
+            structured_output_kinds: [findings]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: intrusive
+        recommended_action: command:nuclei
+        completion_guidance: Enable maintained intrusive actions, review the exact headless and DAST plan, confirm it for this target, and retain both findings and a successful clean run.
+      - &web_subdomain_takeover_confirmation
+        key: subdomain_takeover_confirmation
+        version: "1.0"
+        category: validation
+        label: Subdomain takeover confirmation
+        purpose: >-
+          Check one approved domain for a reviewed dangling-provider fingerprint without
+          claiming the resource.
+        target_types: [domain]
+        evidence_rules:
+          - key: completed_takeover_confirmation
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [nuclei]
+            workflow_actions: []
+            structured_output_kinds: []
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:nuclei
+        completion_guidance: >-
+          Run the reviewed provider fingerprint and compare any match with saved DNS evidence
+          for the exact hostname. The check never claims a resource or performs a takeover.
+      - &web_parameter_discovery
+        key: parameter_discovery
+        version: "1.0"
+        category: enumeration
+        label: Web parameter discovery
+        purpose: Discover request parameters on the approved target without sending XSS payloads.
+        target_types: [domain, ip, url]
+        evidence_rules:
+          - key: completed_parameter_discovery
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [dalfox]
+            command_modes: [dalfox_parameter_discovery]
+            workflow_actions: []
+            structured_output_kinds: []
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:dalfox
+        completion_guidance: Run the bounded discovery pass and review its saved parameter inventory, including a successful clean result when no parameters are found.
+      - &web_xss_validation
+        key: xss_validation
+        version: "1.0"
+        category: validation
+        label: XSS validation
+        purpose: Validate one saved query-parameter observation with separately confirmed reflected and DOM XSS checks.
+        target_types: [url]
+        evidence_rules:
+          - key: completed_xss_validation
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [dalfox]
+            command_modes: [dalfox_xss_validation]
+            workflow_actions: []
+            structured_output_kinds: [findings]
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: intrusive
+        recommended_action: command:dalfox
+        completion_guidance: Review the saved parameter, confirm the bounded active plan, and retain both confirmed evidence and a successful clean result.
+      - &web_blind_xss_validation
+        key: blind_xss_validation
+        version: "1.0"
+        category: validation
+        label: Blind XSS validation
+        purpose: Send bounded blind-XSS probes for one saved query parameter through the configured private callback service.
+        target_types: [url]
+        evidence_rules:
+          - key: completed_blind_xss_validation
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [dalfox]
+            command_modes: [dalfox_oast_validation]
+            workflow_actions: []
+            structured_output_kinds: [findings]
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: false
+        policy_level: intrusive
+        recommended_action: oast_private_callback
+        completion_guidance: Review one saved query parameter, prepare the private callback, confirm the bounded run, and review any callback evidence before the reservation closes.
+      - &web_sql_injection_detection
+        key: sql_injection_detection
+        version: "1.0"
+        category: validation
+        label: SQL injection detection
+        purpose: Check one approved parameterized URL for conservative SQL injection indicators without extracting data.
+        target_types: [url]
+        evidence_rules:
+          - key: completed_sql_injection_detection
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [sqlmap]
+            workflow_actions: []
+            structured_output_kinds: []
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:sqlmap
+        completion_guidance: Run the detection-only pass and review the saved output; no extraction or operating-system actions are part of this check.
+
+  - key: api
+    version: "1.0"
+    label: API assessment
+    purpose: Review a saved API contract and run bounded negative tests against its read-only operations.
+    target_types: [url]
+    checks:
+      - &api_openapi_negative_testing
+        key: openapi_negative_testing
+        version: "1.0"
+        category: validation
+        label: OpenAPI negative testing
+        purpose: Exercise the approved API's saved GET and HEAD operations with bounded invalid inputs.
+        target_types: [url]
+        evidence_rules:
+          - key: completed_openapi_negative_testing
+            version: "1.0"
+            evidence_types: [run, run_artifact, finding]
+            command_roots: [schemathesis]
+            workflow_actions: []
+            structured_output_kinds: [artifacts, findings]
+            target_match: exact
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:schemathesis
+        completion_guidance: Choose one unchanged OpenAPI JSON artifact, review the exact read-only operation and request limits, and keep both failures and a successful clean run.
+
+  - key: tls
+    version: "1.0"
+    label: TLS assessment
+    purpose: Review certificate trust and the security settings exposed by approved TLS hosts.
+    target_types: [domain, ip]
+    checks:
+      - &tls_certificate_chain
+        key: certificate_chain
+        version: "1.0"
+        category: validation
+        label: Certificate chain
+        purpose: Validate the certificate chain and trust details presented by the approved host.
+        target_types: [domain, ip]
+        evidence_rules:
+          - key: completed_certificate_chain_review
+            version: "1.0"
+            evidence_types: [run]
+            command_roots: [sslyze]
+            command_modes: [tls_certificate_chain]
+            workflow_actions: []
+            structured_output_kinds: []
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: safe
+        recommended_action: command:sslyze
+        completion_guidance: Run the fixed certificate-chain review and keep the successful result whether it records a trust issue or a clean chain.
+      - &tls_configuration
+        key: tls_configuration
+        version: "1.0"
+        category: validation
+        label: TLS configuration
+        purpose: Review the approved host for high-severity TLS protocol, cipher, and certificate issues.
+        target_types: [domain, ip]
+        evidence_rules:
+          - key: completed_tls_configuration_review
+            version: "1.0"
+            evidence_types: [run, finding]
+            command_roots: [testssl]
+            command_modes: [tls_configuration]
+            workflow_actions: []
+            structured_output_kinds: [findings]
+            target_match: host_or_descendant
+            completion: succeeded
+            compatible_versions: ["*"]
+            negative_evidence: true
+        policy_level: standard
+        recommended_action: command:testssl
+        completion_guidance: Run the fixed fast, high-severity TLS review, examine any saved findings, and keep a successful clean run when no issue is found.
+
+  - key: combined
+    version: "1.0"
+    label: Combined assessment
+    purpose: Review the approved network, web, API, and TLS surface in one assessment cycle.
+    target_types: [domain, ip, url]
+    checks:
+      - *network_host_reachability
+      - *network_service_discovery
+      - *network_dns_inventory
+      - *web_http_profile
+      - *web_content_discovery
+      - *web_vulnerability_templates
+      - *web_intrusive_template_validation
+      - *web_subdomain_takeover_confirmation
+      - *web_parameter_discovery
+      - *web_xss_validation
+      - *web_blind_xss_validation
+      - *web_sql_injection_detection
+      - *api_openapi_negative_testing
+      - *tls_certificate_chain
+      - *tls_configuration

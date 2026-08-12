@@ -152,6 +152,37 @@ function renderWorkflowExecutionStep(step, options) {
     captures.textContent = `Captured: ${captureNames.join(', ')}`;
     summary.appendChild(captures);
   }
+  const fanout = step?.fanout_summary;
+  const fanoutTotal = Number(fanout?.total || 0);
+  if (Number.isFinite(fanoutTotal) && fanoutTotal > 0) {
+    const progress = document.createElement('span');
+    progress.className = 'workflow-execution-fanout';
+    const count = value => Math.min(fanoutTotal, Math.max(0, Number(value || 0)));
+    const pending = count(fanout?.pending);
+    const running = count(fanout?.running);
+    const succeeded = count(fanout?.succeeded);
+    const failed = count(fanout?.failed);
+    const skipped = count(fanout?.skipped);
+    const finished = Math.min(fanoutTotal, succeeded + failed + skipped);
+    const parts = [`${finished}/${fanoutTotal} finished`];
+    if (pending) parts.push(`${pending} pending`);
+    if (running) parts.push(`${running} active`);
+    if (succeeded) parts.push(`${succeeded} succeeded`);
+    if (failed) parts.push(`${failed} failed`);
+    if (skipped) parts.push(`${skipped} skipped`);
+    if (fanout?.cancelled) parts.push('cancelled');
+    progress.textContent = `Fan-out: ${parts.join(' · ')}`;
+    summary.appendChild(progress);
+    const samples = Array.isArray(fanout?.failure_samples)
+      ? fanout.failure_samples.filter(Boolean).slice(0, 3).map(value => String(value))
+      : [];
+    if (samples.length) {
+      const failures = document.createElement('span');
+      failures.className = 'workflow-execution-fanout-failures';
+      failures.textContent = `Failure codes: ${samples.join(', ')}`;
+      summary.appendChild(failures);
+    }
+  }
   row.appendChild(summary);
 
   const runId = String(step?.run_id || '').trim();

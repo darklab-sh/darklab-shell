@@ -12,10 +12,12 @@ from typing import Any
 
 import config as _config
 from core.database_access import get_db_connect
+from services.assessments.export_context import get_project_assessment_context
+from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.projects.artifacts import artifact_owner_context
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.findings import list_project_findings
-from services.projects.metadata import _finding_triage_by_id
+from services.projects.metadata import _full_finding_triage_by_id
 from services.projects.packages import (
     redact_package_value,
     redacted_artifact_derivative_reason,
@@ -307,7 +309,12 @@ def _attach_full_finding_triage(session_id: str, findings: list[dict[str, Any]],
     if not finding_ids:
         return
     with get_db_connect()() as conn:
-        triage_by_id = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
+        triage_by_id = _full_finding_triage_by_id(
+            conn,
+            session_id,
+            finding_ids,
+            team_id=team_id,
+        )
     for finding in findings:
         triage = triage_by_id.get(str(finding.get("id") or ""))
         if triage:
@@ -493,6 +500,23 @@ def compose_report_context(
             ),
         )
     attach_finding_target_references(selected["findings"], target_reference_targets)
+    assessment_context = get_project_assessment_context(
+        session_id,
+        selected_project_id,
+        assessment_id=str(normalized_draft.get("assessment_id") or ""),
+        findings=selected["findings"],
+        selected_artifact_ids=(
+            str(artifact.get("id") or "")
+            for artifact in selected["artifacts"]
+            if isinstance(artifact, dict)
+        ),
+        team_id=team_id,
+    ) if session_id and selected_project_id else None
+    assessment_finding_changes = (
+        assessment_context.get("finding_changes")
+        if isinstance(assessment_context, dict)
+        else None
+    )
     selected["artifacts"], artifact_warnings = _attach_artifact_previews(
         session_id,
         selected["artifacts"],
@@ -516,6 +540,9 @@ def compose_report_context(
         "artifacts": selected["artifacts"],
         "artifact_warnings": artifact_warnings,
         "export": normalized_draft.get("export") or {},
+        "cve_risk_snapshot": build_cve_risk_snapshot(selected["findings"]),
+        "assessment_context": assessment_context,
+        "assessment_finding_changes": assessment_finding_changes,
     }
     if not bool(context["export"].get("include_private_notes")):
         context = _strip_notes(context)

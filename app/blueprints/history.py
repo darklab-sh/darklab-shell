@@ -1394,3 +1394,6 @@ def delete_share(share_id):
         "deleted": deleted_count > 0,
     })
     return jsonify({"ok": True})
+
+
+from blueprints import history_run_evidence as _history_run_evidence  # noqa: E402,F401

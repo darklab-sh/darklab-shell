@@ -55,7 +55,9 @@ def tokenize_command(command: str) -> list[str]:
         return str(command or "").split()
 
 
-def nuclei_template_provenance(command: str | list[str]) -> dict[str, Any]:
+def nuclei_template_provenance(
+    command: str | list[str], *, template_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     tokens = command if isinstance(command, list) else tokenize_command(str(command or ""))
     if not tokens or str(tokens[0]).lower() != "nuclei":
         return {}
@@ -88,6 +90,8 @@ def nuclei_template_provenance(command: str | list[str]) -> dict[str, Any]:
     pin_hint = _pin_hint(explicit_templates)
     if pin_hint:
         provenance["pin_hint"] = pin_hint
+    if source_kind == "managed_cache" and template_snapshot:
+        provenance["template_snapshot"] = dict(template_snapshot)
     log.debug("NUCLEI_TEMPLATE_PROVENANCE_CLASSIFIED", extra={
         "source_kind": source_kind,
         "template_path_count": len(explicit_templates),
@@ -107,8 +111,14 @@ def nuclei_line_template_id(text: str) -> str:
     return stripped[1:closing].strip()[:160]
 
 
-def nuclei_source_detail(command: str, *, line_text: str = "", row: dict[str, Any] | None = None) -> dict[str, Any]:
-    provenance = nuclei_template_provenance(command)
+def nuclei_source_detail(
+    command: str,
+    *,
+    line_text: str = "",
+    row: dict[str, Any] | None = None,
+    template_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    provenance = nuclei_template_provenance(command, template_snapshot=template_snapshot)
     detail: dict[str, Any] = {"adapter": "nuclei"}
     template_id = ""
     row_template_path = ""
@@ -134,6 +144,8 @@ def nuclei_source_detail(command: str, *, line_text: str = "", row: dict[str, An
         if row_template_path:
             provenance["template_paths"] = [_safe_path(row_template_path)]
             provenance["template_path_count"] = 1
+        if source_kind == "managed_cache" and template_snapshot:
+            provenance["template_snapshot"] = dict(template_snapshot)
     if template_id:
         detail["template_id"] = template_id[:160]
     if row_template_path:

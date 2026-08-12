@@ -32,6 +32,7 @@ from services.commands.registry import (
 from services.commands.builtins import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
 from services.intel.registry import app_native_secret_consumers, provider_status_catalog
+from services.cve_risk.store import get_configured_feed_status
 from services.teams.request_scope import RequestScopeError, current_request_scope, scope_error_payload
 from services.workflows.user_workflows import list_user_workflows
 from services.commands.wordlists import wordlist_autocomplete_items
@@ -149,6 +150,9 @@ def _frontend_config_payload():
         "permalink_retention_days": cfg["permalink_retention_days"],
         "workspace_enabled":       bool(cfg.get("workspace_enabled", False)),
         "interactive_pty_enabled": bool(cfg.get("interactive_pty_enabled", False)),
+        "assessment_intrusive_actions_enabled": bool(
+            cfg.get("assessment_intrusive_actions_enabled", False)
+        ),
         "ai_enabled":              bool(cfg.get("ai_enabled", False)),
         "ai_feature_summary":      bool(cfg.get("ai_feature_summary", False)),
         "ai_feature_next_commands": bool(cfg.get("ai_feature_next_commands", False)),
@@ -302,6 +306,7 @@ def command_catalog_index():
             *app_native_secret_consumers(),
         ],
         "intel_providers": provider_status_catalog(),
+        "cve_risk_feeds": get_configured_feed_status(),
     })
 
 

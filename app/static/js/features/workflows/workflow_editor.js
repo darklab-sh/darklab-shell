@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Workflows v2 definition editor.
+// Durable workflow definition editor.
 import { bindPressable } from '../../ui/ui_pressable.js';
 import { syncAppSelect as importedSyncAppSelect } from '../../ui/ui_helpers.js';
 
@@ -22,6 +22,20 @@ const WORKFLOW_CAPTURE_SOURCES = [
   ['entity', 'First structured entity'],
   ['json_pointer', 'JSON Pointer'],
 ];
+const WORKFLOW_CAPTURE_KINDS = [
+  ['scalar', 'Single value'],
+  ['collection', 'Collection'],
+];
+const WORKFLOW_FANOUT_FAILURE_MODES = [
+  ['fail_fast', 'Stop after first failure'],
+  ['continue', 'Continue within failure limit'],
+];
+const WORKFLOW_COLLECTION_ITEM_LIMIT = 32;
+const WORKFLOW_FANOUT_LIMITS = {
+  retries: [0, 3],
+  maxParallel: [1, 8],
+  maxFailures: [0, 32],
+};
 
 function editorRefs() {
   return {
@@ -50,6 +64,31 @@ function textInput(className, value = '', placeholder = '', maxLength = 120) {
   input.placeholder = placeholder;
   input.maxLength = maxLength;
   return input;
+}
+
+function numberInput(className, value, min, max) {
+  const input = document.createElement('input');
+  input.className = `form-control ${className}`;
+  input.type = 'number';
+  input.inputMode = 'numeric';
+  input.min = String(min);
+  input.max = String(max);
+  input.step = '1';
+  input.value = String(value);
+  return input;
+}
+
+function optionSelect(className, label, options, value) {
+  const select = document.createElement('select');
+  select.className = `form-select ${className}`;
+  select.setAttribute('aria-label', label);
+  options.forEach(([optionValue, optionLabel]) => addTransitionOption(
+    select,
+    optionValue,
+    optionLabel,
+  ));
+  select.value = String(value || options[0]?.[0] || '');
+  return select;
 }
 
 function field(labelText, control, path, { wide = false } = {}) {
@@ -193,6 +232,14 @@ function createCaptureSourceSelect(value) {
   return select;
 }
 
+function updateCaptureKind(row) {
+  const kind = row.querySelector('.workflow-editor-capture-kind')?.value || 'scalar';
+  const limitField = row.querySelector('.workflow-editor-capture-limit-field');
+  if (limitField) limitField.hidden = kind !== 'collection';
+  row.classList.toggle('is-collection', kind === 'collection');
+  refreshCollectionOptions();
+}
+
 function captureOption(source) {
   if (source === 'first_line_containing') {
     return { field: 'contains', label: 'Contains', placeholder: 'Literal text' };
@@ -258,6 +305,24 @@ function createCaptureRow(capture = {}, stepIndex = 0, captureIndex = 0, onRemov
 
   const nameInput = textInput('workflow-editor-capture-name', capture.name, 'resolved_ip', 64);
   const sourceSelect = createCaptureSourceSelect(capture.source);
+  const kindSelect = optionSelect(
+    'workflow-editor-capture-kind',
+    'Capture value shape',
+    WORKFLOW_CAPTURE_KINDS,
+    capture.kind === 'collection' || capture.mode === 'collection' ? 'collection' : 'scalar',
+  );
+  const limitInput = numberInput(
+    'workflow-editor-capture-item-limit',
+    capture.item_limit || WORKFLOW_COLLECTION_ITEM_LIMIT,
+    1,
+    WORKFLOW_COLLECTION_ITEM_LIMIT,
+  );
+  const limitField = field(
+    'Item limit',
+    limitInput,
+    `steps.${stepIndex}.captures.${captureIndex}.item_limit`,
+  );
+  limitField.classList.add('workflow-editor-capture-limit-field');
   const optionHost = document.createElement('div');
   optionHost.className = 'workflow-editor-capture-option-host';
   const destination = document.createElement('div');
@@ -269,6 +334,7 @@ function createCaptureRow(capture = {}, stepIndex = 0, captureIndex = 0, onRemov
     destinationValue.textContent = `{{${String(nameInput.value || 'capture').trim() || 'capture'}}}`;
   };
   nameInput.addEventListener('input', updateDestination);
+  nameInput.addEventListener('input', refreshCollectionOptions);
   updateDestination();
   destination.append(destinationLabel, destinationValue);
 
@@ -279,12 +345,16 @@ function createCaptureRow(capture = {}, stepIndex = 0, captureIndex = 0, onRemov
     header,
     field('Name', nameInput, `steps.${stepIndex}.captures.${captureIndex}.name`),
     field('Selector', sourceSelect, `steps.${stepIndex}.captures.${captureIndex}.source`),
+    field('Value', kindSelect, `steps.${stepIndex}.captures.${captureIndex}.kind`),
+    limitField,
     optionHost,
     required,
     destination,
   );
   sourceSelect.addEventListener('change', () => updateCaptureOption(row, stepIndex, captureIndex));
+  kindSelect.addEventListener('change', () => updateCaptureKind(row));
   updateCaptureOption(row, stepIndex, captureIndex);
+  updateCaptureKind(row);
   return row;
 }
 
@@ -324,9 +394,11 @@ function createCaptureSection(step, stepIndex) {
     const row = createCaptureRow(capture, stepIndex, captureRows(section).length, (target) => {
       target.remove();
       refreshCaptures();
+      refreshCollectionOptions();
     });
     list.appendChild(row);
     refreshCaptures();
+    refreshCollectionOptions();
   };
   bindPressable(addButton, { onActivate: () => addCapture(), refocusComposer: false });
   (Array.isArray(step.captures) ? step.captures : []).forEach(addCapture);
@@ -428,6 +500,151 @@ function createExitCodeSection(step, stepIndex) {
   return section;
 }
 
+function priorCollectionNames(stepRow) {
+  const names = [];
+  for (const row of stepRows()) {
+    if (row === stepRow) break;
+    captureRows(row).forEach((captureRow) => {
+      if (captureRow.querySelector('.workflow-editor-capture-kind')?.value !== 'collection') return;
+      const name = String(
+        captureRow.querySelector('.workflow-editor-capture-name')?.value || '',
+      ).trim();
+      if (name && !names.includes(name)) names.push(name);
+    });
+  }
+  return names;
+}
+
+function refreshFanoutCollectionSelect(stepRow) {
+  const select = stepRow.querySelector('.workflow-editor-fanout-collection');
+  if (!select) return;
+  const previous = select.dataset.initialValue || select.value || '';
+  const names = priorCollectionNames(stepRow);
+  select.innerHTML = '';
+  addTransitionOption(
+    select,
+    '',
+    names.length ? 'Choose a prior collection' : 'Add a collection capture to an earlier step',
+  );
+  names.forEach(name => addTransitionOption(select, name, name));
+  if (previous && !names.includes(previous)) {
+    addTransitionOption(select, previous, `Missing collection (${previous})`);
+    select.options[select.options.length - 1].dataset.workflowMissingCollection = '1';
+  }
+  select.value = previous || '';
+  select.classList.toggle('has-missing-collection', !!previous && !names.includes(previous));
+  delete select.dataset.initialValue;
+  if (typeof importedSyncAppSelect === 'function') importedSyncAppSelect(select);
+}
+
+function refreshCollectionOptions() {
+  stepRows().forEach(refreshFanoutCollectionSelect);
+}
+
+function updateFanoutSection(section) {
+  const enabled = !!section.querySelector('.workflow-editor-fanout-enabled')?.checked;
+  const controls = section.querySelector('.workflow-editor-fanout-controls');
+  if (controls) controls.hidden = !enabled;
+  section.classList.toggle('is-enabled', enabled);
+  if (!enabled) return;
+  const failureMode = section.querySelector('.workflow-editor-fanout-failure-mode');
+  const maxFailures = section.querySelector('.workflow-editor-fanout-max-failures');
+  if (failureMode && maxFailures) {
+    const failFast = failureMode.value === 'fail_fast';
+    if (failFast) maxFailures.value = '1';
+    else if (maxFailures.value === '1' && maxFailures.dataset.continueDefault !== '0') {
+      maxFailures.value = String(WORKFLOW_FANOUT_LIMITS.maxFailures[1]);
+    }
+    maxFailures.disabled = failFast;
+  }
+  const collection = String(
+    section.querySelector('.workflow-editor-fanout-collection')?.value || '',
+  ).trim();
+  const hint = section.querySelector('.workflow-editor-fanout-hint');
+  if (hint) {
+    hint.textContent = collection
+      ? `Command placeholder: {{${collection}}}. One normal scoped run starts for each item.`
+      : 'Choose a prior collection, then use its placeholder in this step\'s command.';
+  }
+  refreshCollectionOptions();
+}
+
+function createFanoutSection(step, stepIndex) {
+  const raw = step.for_each && typeof step.for_each === 'object' ? step.for_each : null;
+  const section = document.createElement('section');
+  section.className = 'workflow-editor-fanout';
+  section.dataset.workflowField = `steps.${stepIndex}.for_each`;
+
+  const header = document.createElement('div');
+  header.className = 'workflow-editor-section-header';
+  const title = document.createElement('span');
+  title.className = 'workflow-editor-subsection-title';
+  title.textContent = 'Collection fan-out';
+  const toggleLabel = document.createElement('label');
+  toggleLabel.className = 'form-check workflow-editor-fanout-toggle';
+  const toggle = document.createElement('input');
+  toggle.className = 'workflow-editor-fanout-enabled';
+  toggle.type = 'checkbox';
+  toggle.checked = !!raw;
+  const toggleText = document.createElement('span');
+  toggleText.textContent = 'Run once per item';
+  toggleLabel.append(toggle, toggleText);
+  header.append(title, toggleLabel);
+
+  const collection = optionSelect(
+    'workflow-editor-fanout-collection',
+    'Fan-out collection',
+    [['', 'Choose a prior collection']],
+    '',
+  );
+  collection.dataset.initialValue = String(raw?.collection || '');
+  const failureMode = optionSelect(
+    'workflow-editor-fanout-failure-mode',
+    'Fan-out failure policy',
+    WORKFLOW_FANOUT_FAILURE_MODES,
+    raw?.failure_mode || raw?.mode || 'fail_fast',
+  );
+  const retries = numberInput(
+    'workflow-editor-fanout-retries',
+    raw?.retries ?? 0,
+    ...WORKFLOW_FANOUT_LIMITS.retries,
+  );
+  const maxParallel = numberInput(
+    'workflow-editor-fanout-max-parallel',
+    raw?.max_parallel ?? 1,
+    ...WORKFLOW_FANOUT_LIMITS.maxParallel,
+  );
+  const maxFailures = numberInput(
+    'workflow-editor-fanout-max-failures',
+    raw?.max_failures ?? (failureMode.value === 'fail_fast' ? 1 : 32),
+    ...WORKFLOW_FANOUT_LIMITS.maxFailures,
+  );
+  maxFailures.dataset.continueDefault = raw?.failure_mode === 'continue' ? '0' : '1';
+
+  const controls = document.createElement('div');
+  controls.className = 'workflow-editor-fanout-controls';
+  controls.append(
+    field('Collection', collection, `steps.${stepIndex}.for_each.collection`, { wide: true }),
+    field('Failure policy', failureMode, `steps.${stepIndex}.for_each.failure_mode`, { wide: true }),
+    field('Retries (0–3)', retries, `steps.${stepIndex}.for_each.retries`),
+    field('Parallel runs (1–8)', maxParallel, `steps.${stepIndex}.for_each.max_parallel`),
+    field('Failure limit (0–32)', maxFailures, `steps.${stepIndex}.for_each.max_failures`),
+  );
+  const hint = document.createElement('span');
+  hint.className = 'workflow-editor-route-hint workflow-editor-fanout-hint';
+  controls.appendChild(hint);
+
+  const sectionError = document.createElement('span');
+  sectionError.className = 'form-error u-hidden';
+  sectionError.setAttribute('aria-live', 'polite');
+  section.append(header, controls, sectionError);
+  toggle.addEventListener('change', () => updateFanoutSection(section));
+  collection.addEventListener('change', () => updateFanoutSection(section));
+  failureMode.addEventListener('change', () => updateFanoutSection(section));
+  updateFanoutSection(section);
+  return section;
+}
+
 function createStepRow(step = {}, index = 0, callbacks = {}) {
   const row = document.createElement('div');
   row.className = 'workflow-editor-step panel-row';
@@ -469,6 +686,7 @@ function createStepRow(step = {}, index = 0, callbacks = {}) {
     field('Step ID', idInput, `steps.${index}.id`),
     field('Command', cmdInput, `steps.${index}.cmd`),
     field('Note', noteInput, `steps.${index}.note`),
+    createFanoutSection(step, index),
     transitions,
     createExitCodeSection(step, index),
     createCaptureSection(step, index),
@@ -509,6 +727,7 @@ function refreshFieldPaths() {
     row.querySelector('.workflow-editor-move-down').disabled = index === rows.length - 1;
     row.querySelector('.workflow-editor-remove-step').disabled = rows.length <= 1;
   });
+  refreshCollectionOptions();
 }
 
 function refreshTransitionSelect(select, {
@@ -651,6 +870,66 @@ function validateExitCodeRoutes() {
   return errors;
 }
 
+function boundedIntegerError(input, minimum, maximum, label) {
+  const raw = String(input?.value || '').trim();
+  if (!/^[+-]?\d+$/.test(raw)) return `${label} must be a whole number.`;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    return `${label} must be between ${minimum} and ${maximum}.`;
+  }
+  return '';
+}
+
+function validateCollectionFeatures() {
+  const errors = [];
+  stepRows().forEach((row, stepIndex) => {
+    captureRows(row).forEach((captureRow, captureIndex) => {
+      if (captureRow.querySelector('.workflow-editor-capture-kind')?.value !== 'collection') return;
+      const itemLimit = captureRow.querySelector('.workflow-editor-capture-item-limit');
+      const message = boundedIntegerError(
+        itemLimit,
+        1,
+        WORKFLOW_COLLECTION_ITEM_LIMIT,
+        'Item limit',
+      );
+      if (message) {
+        errors.push({
+          field: `steps.${stepIndex}.captures.${captureIndex}.item_limit`,
+          message,
+        });
+      }
+    });
+
+    if (!row.querySelector('.workflow-editor-fanout-enabled')?.checked) return;
+    const collectionSelect = row.querySelector('.workflow-editor-fanout-collection');
+    const collection = String(collectionSelect?.value || '').trim();
+    if (!collection || collectionSelect?.selectedOptions?.[0]?.dataset.workflowMissingCollection === '1') {
+      errors.push({
+        field: `steps.${stepIndex}.for_each.collection`,
+        message: 'Choose a collection captured by an earlier step.',
+      });
+    } else {
+      const command = String(row.querySelector('.workflow-editor-step-command')?.value || '');
+      const token = new RegExp(`\\{\\{\\s*${collection.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}`);
+      if (!token.test(command)) {
+        errors.push({
+          field: `steps.${stepIndex}.cmd`,
+          message: `Use {{${collection}}} in this fan-out command.`,
+        });
+      }
+    }
+    [
+      ['retries', '.workflow-editor-fanout-retries', ...WORKFLOW_FANOUT_LIMITS.retries, 'Retries'],
+      ['max_parallel', '.workflow-editor-fanout-max-parallel', ...WORKFLOW_FANOUT_LIMITS.maxParallel, 'Parallel runs'],
+      ['max_failures', '.workflow-editor-fanout-max-failures', ...WORKFLOW_FANOUT_LIMITS.maxFailures, 'Failure limit'],
+    ].forEach(([fieldName, selector, minimum, maximum, label]) => {
+      const message = boundedIntegerError(row.querySelector(selector), minimum, maximum, label);
+      if (message) errors.push({ field: `steps.${stepIndex}.for_each.${fieldName}`, message });
+    });
+  });
+  return errors;
+}
+
 function serializeParameter(row) {
   const input = {
     id: String(row.querySelector('.workflow-editor-parameter-id')?.value || '').trim(),
@@ -698,6 +977,13 @@ function payloadFromEditor(workflow = null) {
       if (optionInput?.dataset.captureOptionField) {
         capture[optionInput.dataset.captureOptionField] = String(optionInput.value || '').trim();
       }
+      if (captureRow.querySelector('.workflow-editor-capture-kind')?.value === 'collection') {
+        capture.kind = 'collection';
+        capture.item_limit = Number.parseInt(
+          captureRow.querySelector('.workflow-editor-capture-item-limit')?.value || '',
+          10,
+        );
+      }
       return capture;
     });
     const serialized = {
@@ -709,10 +995,32 @@ function payloadFromEditor(workflow = null) {
     };
     if (captures.length) serialized.captures = captures;
     else delete serialized.captures;
+    if (row.querySelector('.workflow-editor-fanout-enabled')?.checked) {
+      serialized.for_each = {
+        collection: String(row.querySelector('.workflow-editor-fanout-collection')?.value || '').trim(),
+        failure_mode: String(
+          row.querySelector('.workflow-editor-fanout-failure-mode')?.value || 'fail_fast',
+        ),
+        retries: Number.parseInt(row.querySelector('.workflow-editor-fanout-retries')?.value || '', 10),
+        max_parallel: Number.parseInt(
+          row.querySelector('.workflow-editor-fanout-max-parallel')?.value || '',
+          10,
+        ),
+        max_failures: Number.parseInt(
+          row.querySelector('.workflow-editor-fanout-max-failures')?.value || '',
+          10,
+        ),
+      };
+    } else {
+      delete serialized.for_each;
+    }
     return serialized;
   });
+  const requiresVersionThree = Number(workflow?.version) === 3 || steps.some(step => (
+    !!step.for_each || step.captures?.some(capture => capture.kind === 'collection')
+  ));
   return {
-    version: 2,
+    version: requiresVersionThree ? 3 : 2,
     title: String(refs.titleInput?.value || '').trim(),
     description: String(refs.descriptionInput?.value || '').trim(),
     inputs,
@@ -834,6 +1142,7 @@ function createWorkflowEditorController({ apiFetch, onSaved, reloadCatalog, show
     if (!payload.title) clientErrors.push({ field: 'title', message: 'Workflow name is required.' });
     if (!payload.steps.length) clientErrors.push({ field: 'steps', message: 'Add at least one command step.' });
     clientErrors.push(...validateExitCodeRoutes());
+    clientErrors.push(...validateCollectionFeatures());
     if (clientErrors.length) {
       showErrors(clientErrors);
       setMessage(clientErrors[0].message, true);

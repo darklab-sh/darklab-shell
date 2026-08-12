@@ -194,6 +194,88 @@ _PACKAGE_INDEX_TEMPLATE = _PACKAGE_JINJA.from_string("""
 {% endif -%}
 </tbody></table>
 </section>
+{% if assessment_context -%}
+<h2>Assessment Coverage</h2>
+<section class="card">
+<p><strong>{{ assessment_context.assessment.title }}</strong> · {{ assessment_context.assessment.status }} ·
+{{ assessment_context.rollup.covered_checks }} of \
+{{ assessment_context.methodology.applicable_denominator }} applicable checks covered</p>
+<p>{{ assessment_context.methodology.summary }}</p>
+<div class="chips">
+<span class="chip">Awaiting review: {{ assessment_context.rollup.checks_awaiting_review }}</span>
+<span class="chip">Untested: {{ assessment_context.rollup.untested_checks }}</span>
+<span class="chip">Excluded: {{ assessment_context.rollup.excluded_checks }}</span>
+<span class="chip">Unavailable evidence: {{ assessment_context.rollup.unavailable_evidence_checks }}</span>
+</div>
+{% if assessment_context.manual_exclusions -%}
+<h3>Manual exclusions</h3>
+<table><thead><tr><th>Check</th><th>Target</th><th>State</th><th>Reason</th></tr></thead><tbody>
+{% for item in assessment_context.manual_exclusions -%}
+<tr><td><span class="mono">{{ item.check_id }}</span></td>
+<td>{{ item.target_value }}</td><td>{{ item.state }}</td><td>{{ item.reason }}</td></tr>
+{% endfor -%}
+</tbody></table>
+{% endif -%}
+{% if assessment_context.unavailable_evidence_warnings or assessment_context.screenshot_warnings -%}
+<h3>Coverage warnings</h3><ul>
+{% for item in assessment_context.unavailable_evidence_warnings -%}
+<li><span class="mono">{{ item.check_id }}</span>: {{ item.reason }}</li>{% endfor -%}
+{% for item in assessment_context.screenshot_warnings -%}
+<li><span class="mono">{{ item.artifact_id }}</span>: {{ item.reason }}</li>{% endfor -%}
+</ul>
+{% endif -%}
+{% if assessment_context.fix_first["items"] -%}
+<h3>Fix first</h3>
+<table><thead><tr><th>Remediation</th><th>Signals</th><th>Observations</th></tr></thead><tbody>
+{% for item in assessment_context.fix_first["items"] -%}
+<tr><td>{{ item.title }}<br><span class="mono">{{ item.remediation_id }}</span></td>
+<td>{% for reason in item.risk.priority_reasons %}{{ reason }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+<td>{{ item.observation_count }} observations · {{ item.evidence_count }} evidence sources</td></tr>
+{% endfor -%}
+</tbody></table>
+{% endif -%}
+</section>
+{% endif -%}
+{% if finding_changes -%}
+<h2>Assessment Finding Changes</h2>
+<section class="card">
+<p><strong>{{ finding_changes.assessment_title }}</strong> · {{ finding_changes.comparison }}</p>
+<div class="chips">
+{% for metric in finding_changes.rollup -%}
+<span class="chip">{{ metric.label }}: {{ metric.count }}</span>
+{% endfor -%}
+</div>
+<p class="muted">Counts are distinct remediation groups, not evidence observations.</p>
+<table><thead><tr><th>State</th><th>Remediation</th><th>Current</th><th>Earlier</th><th>Comparison reason</th></tr></thead>
+<tbody>
+{% for item in finding_changes["items"] -%}
+<tr>
+<td>{{ item.state }}</td>
+<td><strong>{{ item.label }}</strong><br><span class="mono">{{ item.remediation_id }}</span></td>
+<td>
+{% for finding in item.current_findings -%}
+{% if finding.href -%}<a href="{{ finding.href }}">{{ finding.label }}</a>{% else -%}{{ finding.label }}{% endif -%}<br>
+{% endfor -%}
+{% for evidence_id in item.current_evidence_ids -%}<span class="mono">{{ evidence_id }}</span><br>{% endfor -%}
+{% if not item.current_findings and not item.current_evidence_ids -%}<span class="muted">None</span>{% endif -%}
+</td>
+<td>
+{% for finding in item.previous_findings -%}
+{% if finding.href -%}<a href="{{ finding.href }}">{{ finding.label }}</a>{% else -%}{{ finding.label }}{% endif -%}<br>
+{% endfor -%}
+{% for evidence_id in item.previous_evidence_ids -%}<span class="mono">{{ evidence_id }}</span><br>{% endfor -%}
+{% if not item.previous_findings and not item.previous_evidence_ids -%}<span class="muted">None</span>{% endif -%}
+</td>
+<td>
+{% if item.reasons -%}{{ item.reasons | join('; ') }}
+{% else -%}<span class="muted">No exception recorded</span>
+{% endif -%}
+</td>
+</tr>
+{% endfor -%}
+</tbody></table>
+</section>
+{% endif -%}
 <h2>Artifacts</h2>
 <section class="card">
 <table><thead><tr><th>Artifact</th><th>Workspace path</th><th>Bytes</th><th>Run</th></tr></thead>
@@ -694,6 +776,189 @@ def _package_index_sort_script():
 """.strip()
 
 
+def _package_finding_change_link(finding, manifest_findings, run_pages):
+    finding_id = str(finding.get("id") or "") if isinstance(finding, dict) else ""
+    source = manifest_findings.get(finding_id, {})
+    run_id = str(source.get("run_id") or "") if isinstance(source, dict) else ""
+    return {
+        "label": str(finding.get("title") or finding_id or "Finding source unavailable"),
+        "href": _finding_run_anchor(source) if run_id in run_pages else "",
+    }
+
+
+def _package_finding_changes(manifest, run_pages):
+    source = manifest.get("assessment_finding_changes")
+    if not isinstance(source, dict):
+        return None
+    raw_assessment = source.get("assessment")
+    raw_comparison = source.get("comparison")
+    raw_rollup = source.get("rollup")
+    assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    comparison = raw_comparison if isinstance(raw_comparison, dict) else {}
+    rollup = raw_rollup if isinstance(raw_rollup, dict) else {}
+    findings = manifest.get("findings") if isinstance(manifest.get("findings"), list) else []
+    manifest_findings = {
+        str(finding.get("id") or ""): finding
+        for finding in findings
+        if isinstance(finding, dict) and finding.get("id")
+    }
+    items = []
+    for item in source.get("items", []):
+        if not isinstance(item, dict):
+            continue
+        items.append({
+            "remediation_id": str(item.get("remediation_id") or ""),
+            "state": str(item.get("state") or "incomparable").replace("_", " "),
+            "label": str(item.get("vulnerability_id") or item.get("rule_identity") or "Saved remediation"),
+            "reasons": [str(value) for value in item.get("reasons", []) if str(value or "")],
+            "current_findings": [
+                _package_finding_change_link(finding, manifest_findings, run_pages)
+                for finding in item.get("current_findings", [])
+                if isinstance(finding, dict)
+            ],
+            "previous_findings": [
+                _package_finding_change_link(finding, manifest_findings, run_pages)
+                for finding in item.get("previous_findings", [])
+                if isinstance(finding, dict)
+            ],
+            "current_evidence_ids": [str(value) for value in item.get("current_evidence_ids", [])],
+            "previous_evidence_ids": [str(value) for value in item.get("previous_evidence_ids", [])],
+        })
+    return {
+        "assessment_title": str(assessment.get("title") or assessment.get("id") or "Assessment cycle"),
+        "comparison": (
+            f"{_package_int(comparison.get('comparable_checks'))} of "
+            f"{_package_int(comparison.get('total_checks'))} checks comparable"
+        ),
+        "rollup": [
+            {"label": label, "count": _package_int(rollup.get(key))}
+            for key, label in (
+                ("regressed", "Regressed"),
+                ("new", "New"),
+                ("persistent", "Persistent"),
+                ("not_observed", "Not observed"),
+                ("incomparable", "Incomparable"),
+            )
+        ],
+        "items": items,
+    }
+
+
+def _append_package_finding_changes_markdown(lines, manifest, run_pages):
+    changes = _package_finding_changes(manifest, run_pages)
+    if not changes:
+        return
+    lines.extend([
+        "",
+        "## Assessment Finding Changes",
+        "",
+        f"- Cycle: {_package_markdown_text(changes['assessment_title'])}",
+        f"- Comparison: {_package_markdown_text(changes['comparison'])}",
+        "- Counts are distinct remediation groups, not evidence observations.",
+        "",
+        "| State | Count |",
+        "| --- | ---: |",
+    ])
+    for metric in changes["rollup"]:
+        lines.append(f"| {metric['label']} | {metric['count']} |")
+    for item in changes["items"]:
+        lines.extend([
+            "",
+            f"### {_package_markdown_text(item['label'])}",
+            "",
+            f"- State: {_package_markdown_text(item['state'])}",
+            f"- Remediation: {_package_markdown_code(item['remediation_id'])}",
+        ])
+        for side, label in (("current", "Current"), ("previous", "Earlier")):
+            references = [
+                _package_markdown_link(finding["label"], finding["href"])
+                for finding in item[f"{side}_findings"]
+            ]
+            references.extend(
+                _package_markdown_code(value)
+                for value in item[f"{side}_evidence_ids"]
+            )
+            lines.append(f"- {label}: {', '.join(references) if references else 'None'}")
+        reasons = "; ".join(item["reasons"]) or "No exception recorded"
+        lines.append(f"- Comparison reason: {_package_markdown_text(reasons)}")
+
+
+def _append_package_assessment_context_markdown(lines, manifest):
+    context = manifest.get("assessment_context")
+    if not isinstance(context, dict):
+        return
+    raw_assessment = context.get("assessment")
+    assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    raw_rollup = context.get("rollup")
+    rollup = raw_rollup if isinstance(raw_rollup, dict) else {}
+    raw_methodology = context.get("methodology")
+    methodology = raw_methodology if isinstance(raw_methodology, dict) else {}
+    lines.extend([
+        "",
+        "## Assessment Coverage",
+        "",
+        f"- Cycle: {_package_markdown_text(assessment.get('title') or assessment.get('id'))}",
+        f"- Cycle ID: {_package_markdown_code(assessment.get('id'))}",
+        f"- Status: {_package_markdown_text(assessment.get('status'))}",
+        f"- Profile: {_package_markdown_code(assessment.get('profile_key'))} "
+        f"{_package_markdown_text(assessment.get('profile_version'))}",
+        f"- Applicable denominator: {_package_int(methodology.get('applicable_denominator'))}",
+        f"- Covered: {_package_int(rollup.get('covered_checks'))}",
+        f"- Awaiting review: {_package_int(rollup.get('checks_awaiting_review'))}",
+        f"- Untested: {_package_int(rollup.get('untested_checks'))}",
+        f"- Excluded: {_package_int(rollup.get('excluded_checks'))}",
+        f"- Unavailable evidence: {_package_int(rollup.get('unavailable_evidence_checks'))}",
+        "",
+        _package_markdown_text(methodology.get("summary")),
+    ])
+    exclusions = context.get("manual_exclusions")
+    if isinstance(exclusions, list) and exclusions:
+        lines.extend(("", "### Manual exclusions", "", "| Check | Target | State | Reason |", "| --- | --- | --- | --- |"))
+        for item in exclusions:
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"| {_package_markdown_code(item.get('check_id'))} "
+                f"| {_package_markdown_text(item.get('target_value'))} "
+                f"| {_package_markdown_text(item.get('state'))} "
+                f"| {_package_markdown_text(item.get('reason'))} |"
+            )
+    warnings = [
+        *[item for item in context.get("unavailable_evidence_warnings", []) if isinstance(item, dict)],
+        *[item for item in context.get("screenshot_warnings", []) if isinstance(item, dict)],
+    ]
+    if warnings:
+        lines.extend(("", "### Coverage warnings", ""))
+        for item in warnings:
+            lines.append(
+                f"- {_package_markdown_code(item.get('check_id') or item.get('artifact_id'))}: "
+                f"{_package_markdown_text(item.get('reason'))}"
+            )
+    raw_fix_first = context.get("fix_first")
+    fix_first = raw_fix_first if isinstance(raw_fix_first, dict) else {}
+    raw_items = fix_first.get("items")
+    items = raw_items if isinstance(raw_items, list) else []
+    if items:
+        lines.extend(("", "### Fix first", ""))
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_risk = item.get("risk")
+            risk = raw_risk if isinstance(raw_risk, dict) else {}
+            raw_reasons = risk.get("priority_reasons")
+            reasons = raw_reasons if isinstance(raw_reasons, list) else []
+            signal_text = "; ".join(str(reason) for reason in reasons) or "No stored CVE-risk signals"
+            lines.extend([
+                f"#### {_package_markdown_text(item.get('title') or item.get('remediation_id'))}",
+                "",
+                f"- Remediation: {_package_markdown_code(item.get('remediation_id'))}",
+                f"- Signals: {_package_markdown_text(signal_text)}",
+                f"- Evidence: {_package_int(item.get('observation_count'))} observations, "
+                f"{_package_int(item.get('evidence_count'))} evidence sources",
+                "",
+            ])
+
+
 def _render_package_index_html(
     package,
     manifest,
@@ -765,6 +1030,11 @@ def _render_package_index_html(
             "note": note.get("body") if note and note.get("body") else "",
         })
 
+    finding_changes = _package_finding_changes(manifest, run_pages)
+    assessment_context = manifest.get("assessment_context")
+    if not isinstance(assessment_context, dict):
+        assessment_context = None
+
     artifact_items = []
     for artifact in artifacts:
         if not isinstance(artifact, dict):
@@ -814,6 +1084,8 @@ def _render_package_index_html(
         targets=target_items,
         runs=run_items,
         findings=finding_items,
+        assessment_context=assessment_context,
+        finding_changes=finding_changes,
         artifacts=artifact_items,
         export_links=export_links,
         skipped_items=skipped_item_rows,
@@ -919,6 +1191,8 @@ def _render_package_readme(
             )
     else:
         lines.append("- No selected findings.")
+    _append_package_assessment_context_markdown(lines, manifest)
+    _append_package_finding_changes_markdown(lines, manifest, run_pages)
     lines.extend(["", "## Artifacts", ""])
     if artifacts:
         lines.extend(["| Artifact | Workspace Path | Bytes | Run |", "| --- | --- | ---: | --- |"])
@@ -1008,7 +1282,15 @@ def _package_findings_json_bytes(manifest, generated_at, run_pages):
         if run_id in run_pages:
             item["run_page"] = _finding_run_anchor(item)
         exported.append(item)
-    return _package_collection_json_bytes("findings", exported, generated_at)
+    return _package_collection_json_bytes(
+        "findings",
+        exported,
+        generated_at,
+        extra={
+            "assessment_context": manifest.get("assessment_context"),
+            "assessment_finding_changes": manifest.get("assessment_finding_changes"),
+        },
+    )
 
 
 def _package_findings_markdown_bytes(manifest, run_pages):

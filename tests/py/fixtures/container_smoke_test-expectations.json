@@ -133,6 +133,14 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "gau --version",
+      "expected_text": [
+        "gau version: 2.2.4"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "trufflehog --help",
       "expected_text": [
         "TruffleHog is a tool for finding credentials",
@@ -387,6 +395,14 @@
       "command": "wpscan --url https://ip.darklab.sh --detection-mode aggressive",
       "expected_text": [
         "_______________________________________________________________"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dalfox --help",
+      "expected_text": [
+        "Usage: dalfox"
       ]
     },
     {
@@ -1398,6 +1414,71 @@
       "command": "gobuster fuzz -u https://ip.darklab.sh?FUZZ=test -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
       "expected_text": [
         "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "gau -h",
+      "expected_text": [
+        "Usage of gau:",
+        "--version"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "gau --subs --threads 2 --timeout 10 darklab.sh",
+      "any_of": [
+        {
+          "expected_patterns": [
+            "https?://\\S*darklab\\.sh"
+          ]
+        },
+        {
+          "no_output": true
+        }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "schemathesis --help",
+      "expected_text": [
+        "Usage: schemathesis [OPTIONS] COMMAND [ARGS]...",
+        "Property-based API testing for OpenAPI and GraphQL."
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "schemathesis --version",
+      "expected_text": [
+        "schemathesis, version 4.24.3"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "sqlmap --help",
+      "expected_text": [
+        "Usage: python sqlmap [options]"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "nmap -sT -sV -Pn -p 443 --max-retries 2 --host-timeout 2m ip.darklab.sh",
+      "expected_text": [
+        "Starting Nmap"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "nmap -sT -sV -Pn -p 443 --script default --script-timeout 30s --max-retries 1 --host-timeout 3m ip.darklab.sh",
+      "expected_text": [
+        "Starting Nmap"
       ]
     }
   ]

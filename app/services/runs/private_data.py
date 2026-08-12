@@ -15,6 +15,9 @@ from services.commands.registry import (
     required_secrets_for_command,
 )
 from services.runs.contracts import RunPreparationError
+from services.runs.execution_override import apply_reviewed_execution
+from services.runs.signal_context import RunOutputSignalContext
+from services.runs.start_context import append_trusted_execution_args
 from services.secrets.storage import InvalidSecretName, get_secret_value_for_env
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
@@ -80,13 +83,16 @@ def prepare_real_command(
     *,
     team_id: str,
     owner_context: object,
+    trusted_execution_args: tuple[str, ...] = (),
+    reviewed_execution: object | None = None,
+    output_signal_context: RunOutputSignalContext | None = None,
 ) -> Any:
     kwargs: dict[str, object] = {"display_command": display_command}
     if private_values:
         kwargs["private_values"] = private_values
     if team_id:
         kwargs.update({"team_id": team_id, "owner_context": owner_context})
-    return handlers.prepare_real_command(
+    prepared = handlers.prepare_real_command(
         original_command,
         execution_command,
         session_id,
@@ -94,33 +100,12 @@ def prepare_real_command(
         workspace_cwd,
         **kwargs,
     )
-
-
-def display_missing_runtime(prepared_real: Any) -> str:
-    return str(
-        getattr(prepared_real, "display_missing_runtime", "")
-        or prepared_real.missing_runtime
+    prepared = apply_reviewed_execution(
+        prepared,
+        reviewed_execution,
+        output_signal_context=output_signal_context,
     )
-
-
-def real_start_kwargs(
-    *,
-    owner_client_id: str,
-    owner_tab_id: str,
-    team_id: str,
-    owner_context: object,
-    private_values: tuple[str, ...],
-) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {}
-    if owner_client_id:
-        kwargs["owner_client_id"] = owner_client_id
-    if owner_tab_id:
-        kwargs["owner_tab_id"] = owner_tab_id
-    if team_id:
-        kwargs.update({"team_id": team_id, "owner_context": owner_context})
-    if private_values:
-        kwargs["private_values"] = private_values
-    return kwargs
+    return append_trusted_execution_args(prepared, trusted_execution_args)
 
 
 def public_workspace_metadata(

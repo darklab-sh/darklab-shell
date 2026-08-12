@@ -139,6 +139,15 @@ def _report_manifest_provenance(
             "private_notes_included": bool(export_prefs.get("include_private_notes")),
         },
     }
+    risk_snapshot = (context or {}).get("cve_risk_snapshot")
+    if isinstance(risk_snapshot, dict) and risk_snapshot:
+        provenance["sources"]["cve_risk"] = risk_snapshot
+    finding_changes = (context or {}).get("assessment_finding_changes")
+    if isinstance(finding_changes, dict) and finding_changes:
+        provenance["sources"]["assessment_finding_changes"] = finding_changes
+    assessment_context = (context or {}).get("assessment_context")
+    if isinstance(assessment_context, dict) and assessment_context:
+        provenance["sources"]["assessment_context"] = assessment_context
     if audit_handoff:
         provenance["audit"] = {
             key: str(value)

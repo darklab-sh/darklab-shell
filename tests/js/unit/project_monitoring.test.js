@@ -74,6 +74,7 @@ const monitoringPayload = {
     cadence_preset: 'daily',
     channel_ids: ['ntc_ops'],
     quiet_no_change: false,
+    risk_escalations_enabled: true,
     last_evaluated_at: '2026-06-15T11:30:00+00:00',
     last_sent_at: '2026-06-15T11:35:00+00:00',
     next_due_at: '2026-06-16T11:35:00+00:00',
@@ -191,6 +192,20 @@ const monitoringPayload = {
     schedule: { cadence_preset: 'daily', enabled: true },
     latest_fire: null,
   }],
+  risk_events: [{
+    id: 'rsk_1',
+    cve_id: 'CVE-2026-10001',
+    source: 'kev',
+    transition_kind: 'kev_added',
+    feed_version: '2026.06.15',
+    old_value: 'false',
+    new_value: 'true',
+    model_changed: false,
+    observation_count: 2,
+    ack_state: 'new',
+    ack_note: '',
+    created: '2026-06-15T12:05:00+00:00',
+  }],
   timeline: [{
     id: 'wtf_1',
     watcher_id: 'wtr_1',
@@ -306,6 +321,9 @@ describe('project monitoring controller', () => {
     expect(projectWorkspaceRequest).toHaveBeenCalledWith('/projects/prj_1/monitoring?fire_limit=8', { cache: 'no-store' })
     expect(container.textContent).toContain('Changed')
     expect(container.textContent).toContain('Digest Notifications')
+    expect(container.textContent).toContain('CVE Risk Changes')
+    expect(container.textContent).toContain('CVE-2026-10001')
+    expect(container.textContent).toContain('Added to CISA KEV')
     expect(container.textContent).toContain('Ops Slack · slack')
     expect(container.textContent).toContain('Security Email · email')
     expect(container.textContent).toContain('last sent: 2026-06-15 11:35:00+00:00')
@@ -314,7 +332,8 @@ describe('project monitoring controller', () => {
     const rootChildren = [...container.querySelector('[data-project-monitoring-root]').children]
     expect(rootChildren[0].classList.contains('project-monitoring-counts')).toBe(true)
     expect(rootChildren[1].classList.contains('project-monitoring-filters')).toBe(true)
-    expect(rootChildren[2].classList.contains('project-monitoring-digest')).toBe(true)
+    expect(rootChildren[2].classList.contains('project-monitoring-risk')).toBe(true)
+    expect(rootChildren[3].classList.contains('project-monitoring-digest')).toBe(true)
     expect(container.textContent).toContain('Ports')
     expect(container.textContent).toContain('TLS')
     expect(container.textContent).toContain('Missing baseline')
@@ -344,6 +363,66 @@ describe('project monitoring controller', () => {
     controller.renderMonitoring(container, 'prj_1')
     expect(container.textContent).toContain('Ports')
     expect(container.textContent).not.toContain('TLS')
+
+    const mobile = controller.renderMobileMonitoringTab('prj_1')
+    expect(mobile.classList.contains('is-mobile')).toBe(true)
+    expect(mobile.textContent).toContain('CVE Risk Changes')
+    expect(mobile.textContent).toContain('CVE-2026-10001')
+    expect(mobile.querySelector('[data-project-monitoring-risk-id="rsk_1"]'))
+      .not.toBeNull()
+    expect([...mobile.querySelectorAll('[data-project-monitoring-action="ack-risk"]')]
+      .every(button => button.type === 'button' && !button.disabled)).toBe(true)
+
+    const emptyController = monitoringApi.createProjectMonitoringController(makeContext(
+      vi.fn(async () => apiResponse({
+        ...monitoringPayload,
+        counts: { active: 0, changed: 0, failed: 0, quiet: 0, paused: 0 },
+        monitors: [],
+        risk_events: [],
+        timeline: [],
+      })),
+      { mobileView: vi.fn(() => 'detail') },
+    ))
+    await emptyController.load('prj_empty', { render: false })
+    const emptyMobile = emptyController.renderMobileMonitoringTab('prj_empty')
+    expect(emptyMobile.textContent).toContain('No monitors are linked to this project.')
+    expect(emptyMobile.textContent).toContain('No feed-driven CVE risk changes yet.')
+    expect(emptyMobile.textContent).toContain('No monitoring events yet.')
+  })
+
+  it('labels NVD advisory and CVSS transitions without presenting them as scanner findings', async () => {
+    const monitoringApi = loadMonitoringModule()
+    const payload = {
+      ...monitoringPayload,
+      risk_events: [{
+        ...monitoringPayload.risk_events[0],
+        id: 'rsk_nvd_cvss',
+        source: 'nvd',
+        transition_kind: 'nvd_cvss_downgraded',
+        old_value: '9.8',
+        new_value: '8.7',
+      }, {
+        ...monitoringPayload.risk_events[0],
+        id: 'rsk_nvd_status',
+        source: 'nvd',
+        transition_kind: 'nvd_reinstated',
+        old_value: 'disputed',
+        new_value: 'active',
+      }],
+    }
+    const controller = monitoringApi.createProjectMonitoringController(makeContext(
+      vi.fn(async () => apiResponse(payload)),
+    ))
+
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderMonitoring(container, 'prj_1')
+
+    expect(container.textContent).toContain('NVD CVSS downgraded')
+    expect(container.textContent).toContain('CVSS 9.8 → 8.7')
+    expect(container.textContent).toContain('NVD advisory reinstated')
+    expect(container.textContent).toContain('Disputed → Active')
+    expect(container.textContent).not.toContain('Added to CISA KEV')
   })
 
   it('saves digest settings from the monitoring tab', async () => {
@@ -356,6 +435,7 @@ describe('project monitoring controller', () => {
           cadence_preset: 'weekly',
           channel_ids: ['ntc_ops', 'ntc_email'],
           quiet_no_change: true,
+          risk_escalations_enabled: true,
         })
         return apiResponse({
           can_manage_digest_settings: true,
@@ -364,6 +444,7 @@ describe('project monitoring controller', () => {
             cadence_preset: 'weekly',
             channel_ids: ['ntc_ops', 'ntc_email'],
             quiet_no_change: true,
+            risk_escalations_enabled: true,
             last_evaluated_at: '',
             last_sent_at: '',
           },
@@ -383,6 +464,7 @@ describe('project monitoring controller', () => {
     expect(container.querySelector('.project-monitoring-digest-channels').classList.contains('nice-scroll')).toBe(true)
     container.querySelector('[data-project-digest-field="cadence_preset"]').value = 'weekly'
     container.querySelector('[data-project-digest-field="quiet_no_change"]').checked = true
+    container.querySelector('[data-project-digest-field="risk_escalations_enabled"]').checked = true
     container.querySelector('[data-project-digest-field="channel"][value="ntc_email"]').checked = true
     const save = container.querySelector('[data-project-monitoring-action="save-digest"]')
 
@@ -391,6 +473,41 @@ describe('project monitoring controller', () => {
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Digest settings saved.')
     expect(ctx.renderProjectExplorer).toHaveBeenCalled()
     expect(controller.stateFor('prj_1').digestSettings.cadence_preset).toBe('weekly')
+  })
+
+  it('updates a CVE risk acknowledgement from the shared monitoring triage controls', async () => {
+    const monitoringApi = loadMonitoringModule()
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (String(url).includes('/monitoring/risk-events/')) {
+        expect(options.method).toBe('PATCH')
+        expect(JSON.parse(options.body)).toEqual({
+          ack_state: 'needs_action',
+          ack_note: 'Patch during the next maintenance window.',
+        })
+        return apiResponse({ ok: true })
+      }
+      return apiResponse(monitoringPayload)
+    })
+    const ctx = makeContext(projectWorkspaceRequest, {
+      mobileView: vi.fn(() => 'detail'),
+    })
+    const controller = monitoringApi.createProjectMonitoringController(ctx)
+
+    await controller.load('prj_1', { render: false })
+    const mobile = controller.renderMobileMonitoringTab('prj_1')
+    mobile.querySelector('[data-project-monitoring-risk-note="rsk_1"]').value = 'Patch during the next maintenance window.'
+    const action = mobile.querySelector('[data-project-monitoring-action="ack-risk"][data-ack-state="needs_action"]')
+
+    await controller.handleClick({ target: action, preventDefault: vi.fn(), stopPropagation: vi.fn() })
+
+    expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      '/projects/prj_1/monitoring/risk-events/rsk_1',
+      expect.objectContaining({ method: 'PATCH' }),
+    )
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('CVE risk change updated.')
+    expect(projectWorkspaceRequest.mock.calls.some(([url]) => String(url).includes('/monitoring/fires/')))
+      .toBe(false)
+    expect(ctx.renderProjectMobileDetail).toHaveBeenCalled()
   })
 
   it('renders digest settings as read-only for team viewers', async () => {
@@ -403,10 +520,10 @@ describe('project monitoring controller', () => {
     const controller = monitoringApi.createProjectMonitoringController(makeContext(projectWorkspaceRequest))
 
     await controller.load('prj_1', { render: false })
-    const container = document.createElement('div')
-    controller.renderMonitoring(container, 'prj_1')
+    const container = controller.renderMobileMonitoringTab('prj_1')
 
     expect(container.textContent).toContain('read-only')
+    expect(container.classList.contains('is-mobile')).toBe(true)
     expect(container.querySelector('[data-project-monitoring-action="save-digest"]').disabled).toBe(true)
     expect([...container.querySelectorAll('[data-project-digest-field]')]
       .every(control => control.disabled)).toBe(true)
@@ -745,8 +862,7 @@ describe('project monitoring controller', () => {
     const retryContext = makeContext(retryRequest)
     const retryController = monitoringApi.createProjectMonitoringController(retryContext)
     await retryController.load('prj_retry', { render: false })
-    const retryContainer = document.createElement('div')
-    retryController.renderMonitoring(retryContainer, 'prj_retry')
+    const retryContainer = retryController.renderMobileMonitoringTab('prj_retry')
     const retry = retryContainer.querySelector('[data-project-monitoring-action="retry"]')
     expect(retry).not.toBeNull()
 

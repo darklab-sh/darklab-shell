@@ -152,7 +152,9 @@ function _setOptionsCommandRegistryData(data) {
 
 function _optionsCatalogHasRequiredData(data, requirements = {}) {
   if (!data) return false;
-  if (requirements.intelProviders) return Array.isArray(data.intel_providers);
+  if (requirements.intelProviders) {
+    return Array.isArray(data.intel_providers) && Array.isArray(data.cve_risk_feeds);
+  }
   return (
     Array.isArray(data.secret_consumers)
     || (Array.isArray(data.commands) && data.commands.length > 0)
@@ -383,6 +385,56 @@ function _optionsProviderRow(provider, secretNames, secrets = []) {
   return row;
 }
 
+function _optionsCveRiskFeedAge(value) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours < 0) return '';
+  if (hours < 48) return `${Math.max(0, Math.round(hours))}h`;
+  return `${Math.max(1, Math.round(hours / 24))}d`;
+}
+
+function _optionsCveRiskFeedRow(feed) {
+  const source = String(feed?.source || '').toLowerCase();
+  const status = String(feed?.status || 'unavailable').toLowerCase();
+  const origin = String(feed?.origin || 'unavailable').toLowerCase();
+  const row = document.createElement('div');
+  row.className = 'options-provider-row';
+
+  const header = document.createElement('div');
+  header.className = 'options-provider-row-header';
+  const title = document.createElement('div');
+  title.className = 'options-provider-name';
+  title.textContent = source === 'epss' ? 'FIRST EPSS' : source === 'kev' ? 'CISA KEV' : source.toUpperCase();
+  header.appendChild(title);
+
+  const badge = document.createElement('span');
+  const tone = status === 'current'
+    ? 'badge-tone-green'
+    : status === 'stale'
+      ? 'badge-tone-amber'
+      : status === 'failed'
+        ? 'badge-tone-red'
+        : 'badge-tone-muted';
+  badge.className = `badge options-provider-status ${tone}`;
+  badge.textContent = status;
+  header.appendChild(badge);
+  row.appendChild(header);
+
+  const meta = document.createElement('div');
+  meta.className = 'options-provider-meta';
+  const details = [`${origin.charAt(0).toUpperCase()}${origin.slice(1)} source`];
+  const published = String(feed?.published_at || '').trim();
+  const age = _optionsCveRiskFeedAge(feed?.age_hours);
+  const version = String(feed?.source_version || '').trim();
+  const model = String(feed?.model_version || '').trim();
+  if (published) details.push(`Published ${published}`);
+  if (age) details.push(`Snapshot age ${age}`);
+  if (version) details.push(`Version ${version}`);
+  if (model) details.push(`Model ${model}`);
+  meta.textContent = details.join(' · ');
+  row.appendChild(meta);
+  return row;
+}
+
 async function _loadOptionsSecretsForProviderStatus() {
   const resp = await _optionsSecretsApiFetch('/session/secrets', { cache: 'no-store' });
   const data = await resp.json().catch(() => ({}));
@@ -423,6 +475,7 @@ async function openProviderStatusModal() {
       _loadOptionsSecretsForProviderStatus(),
     ]);
     const providers = Array.isArray(catalog?.intel_providers) ? catalog.intel_providers : [];
+    const feeds = Array.isArray(catalog?.cve_risk_feeds) ? catalog.cve_risk_feeds : [];
     const secretNames = _optionsProviderSecretNames(secrets);
     const usableCount = providers.filter((provider) => _optionsProviderStatus(provider, secretNames).configured).length;
     const needsCount = Math.max(0, providers.length - usableCount);
@@ -452,6 +505,30 @@ async function openProviderStatusModal() {
     body.appendChild(intro);
     body.appendChild(summary);
     body.appendChild(list);
+
+    const riskTitle = document.createElement('div');
+    riskTitle.className = 'options-provider-name';
+    riskTitle.textContent = 'Public CVE risk data';
+    body.appendChild(riskTitle);
+    if (feeds.length) {
+      const riskList = document.createElement('div');
+      riskList.className = 'options-provider-list';
+      feeds.forEach((feed) => riskList.appendChild(_optionsCveRiskFeedRow(feed)));
+      body.appendChild(riskList);
+    } else {
+      const unavailable = document.createElement('div');
+      unavailable.className = 'options-provider-summary';
+      unavailable.textContent = 'EPSS and CISA KEV data is unavailable.';
+      body.appendChild(unavailable);
+    }
+    const refreshEnabled = feeds.some((feed) => feed?.live_refresh_enabled === true);
+    const hasBundled = feeds.some((feed) => String(feed?.origin || '').toLowerCase() === 'bundled');
+    const guidance = document.createElement('div');
+    guidance.className = 'options-provider-summary';
+    guidance.textContent = refreshEnabled
+      ? `${hasBundled ? 'Bundled snapshots may be stale until the next refresh. ' : ''}Live EPSS/KEV refresh is enabled.`
+      : `${hasBundled ? 'Bundled snapshots may be stale. ' : ''}Live EPSS/KEV refresh is off. Set cve_risk.refresh_enabled: true in config.local.yaml to update the public feeds.`;
+    body.appendChild(guidance);
 
     _providerStatusFocusReturn = document.activeElement instanceof HTMLElement
       ? document.activeElement

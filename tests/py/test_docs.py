@@ -35,7 +35,41 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "95875f8394c1b7c0d835cccb0eaad327a039a44cd0f7f58cb3362f4369ee77c0"
+_LOG_EVENT_INVENTORY_HASH = "7cf65cd8bf170c6504691d8bae775dce135397cc64fc1e430d589e2bf5625566"
+_ASSESSMENT_LOG_SOURCE_GLOBS = (
+    "app/blueprints/projects_assessment*.py",
+    "app/blueprints/api_v1_assessment*.py",
+    "app/blueprints/projects_http_profiles.py",
+    "app/blueprints/api_v1_http_profiles.py",
+    "app/blueprints/projects_manual_findings.py",
+    "app/blueprints/api_v1_manual_findings.py",
+    "app/blueprints/projects_finding_evidence.py",
+    "app/blueprints/api_v1_finding_evidence.py",
+    "app/services/assessments/*.py",
+    "app/services/connectors/oast*.py",
+    "app/services/connectors/zap*.py",
+    "app/services/runs/broker_observability.py",
+    "app/services/runs/finalization*.py",
+    "app/services/runs/schemathesis_completion.py",
+)
+_ASSESSMENT_LOG_EVENT_PREFIXES = (
+    "ASSESSMENT_",
+    "PROJECT_ASSESSMENT_",
+    "API_PROJECT_ASSESSMENT_",
+    "PROJECT_HTTP_PROFILE_",
+    "API_PROJECT_HTTP_PROFILE_",
+    "PROJECT_MANUAL_FINDING_",
+    "API_PROJECT_MANUAL_FINDING_",
+    "PROJECT_FINDING_EVIDENCE_",
+    "API_PROJECT_FINDING_EVIDENCE_",
+    "OAST_",
+    "ZAP_",
+    "DALFOX_",
+    "SCHEMATHESIS_",
+    "TAKEOVER_",
+    "NMAP_",
+    "HTTPX_",
+)
 _CHANGELOG_ARCHIVES = (
     _REPO_ROOT / "docs" / "changelog" / "2.x.md",
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",
@@ -56,6 +90,7 @@ _ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
     "interactive_pty_enabled",
     "prometheus_multiproc_dir",
     "raw_packet_scanning_enabled",
+    "assessment_intrusive_actions_enabled",
     "restricted_command_input_cidrs",
     "workspace_backend",
     "workspace_enabled",
@@ -346,6 +381,45 @@ def _log_event_inventory_body() -> str:
     return match.group("body")
 
 
+def _assessment_log_event_literals() -> set[str]:
+    paths: set[Path] = set()
+    for pattern in _ASSESSMENT_LOG_SOURCE_GLOBS:
+        paths.update(_REPO_ROOT.glob(pattern))
+    events: set[str] = set()
+    logging_methods = {
+        "critical",
+        "debug",
+        "error",
+        "exception",
+        "info",
+        "warn",
+        "warning",
+    }
+    for path in sorted(paths):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Attribute):
+                callable_name = node.func.attr
+            elif isinstance(node.func, ast.Name):
+                callable_name = node.func.id
+            else:
+                continue
+            if callable_name not in logging_methods and "log" not in callable_name.lower():
+                continue
+            values = [*node.args, *(keyword.value for keyword in node.keywords)]
+            for value in values:
+                if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+                    continue
+                event = value.value
+                if re.fullmatch(r"[A-Z][A-Z0-9_]+", event) and event.startswith(
+                    _ASSESSMENT_LOG_EVENT_PREFIXES
+                ):
+                    events.add(event)
+    return events
+
+
 # ── Stable asset and repository-layout contracts ─────────────────────────────
 
 _TEMPLATE_STATIC_URL_RE = re.compile(r"['\"](/(?:static|vendor)/[^'\"]+)['\"]")
@@ -481,6 +555,13 @@ class TestProjectStructureCoverage:
     """Protect stable asset contracts and the compact repository layout."""
 
     def test_asset_manifest_source_hashes_match_current_sources(self):
+        gitignore = (_REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+        parent_rule = gitignore.index("!app/static/build/")
+        child_rule = gitignore.index("app/static/build/*")
+        assert parent_rule < child_rule, (
+            "The build directory must be re-included before its child rules so "
+            "a user-level `build/` ignore cannot hide new content-hashed assets"
+        )
         manifest = json.loads(_ASSET_MANIFEST.read_text(encoding="utf-8"))
         stale = []
         for bundle_name, bundle in sorted((manifest.get("bundles") or {}).items()):
@@ -765,8 +846,11 @@ class TestChangelogArchives:
 class TestLoggingReference:
     def test_event_inventory_was_moved_without_dropping_contracts(self):
         body = _log_event_inventory_body()
+        documented = set(re.findall(r"`([A-Z][A-Z0-9_]+)`", body))
+        missing = sorted(_assessment_log_event_literals() - documented)
+        assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
-        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 247
+        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 342
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()

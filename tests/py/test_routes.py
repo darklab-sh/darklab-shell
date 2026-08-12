@@ -13,6 +13,7 @@ import csv
 import gzip
 import hashlib
 import io
+import inspect
 import json
 import logging
 import os
@@ -46,6 +47,8 @@ import core.database as database
 import core.process as process
 import services.runs.comparison as run_comparison
 import services.assets.diagnostics as assets_diagnostics
+import services.assessments.http_profile_scope as http_profile_scope_service
+from project_assessment_route_contracts import registered_assessment_mutations
 import services.secrets.vault as secrets_vault
 import services.projects.package_presets as package_presets
 import services.atlas.import_workflow as atlas_import_workflow
@@ -270,6 +273,8 @@ class TestIndexRoute:
             "findings_board_bridge": "/static/js/features/findings/findings_board_bridge.js",
             "findings_board": "/static/js/features/findings/findings_board_modal.js",
             "project_activity": "/static/js/features/projects/project_activity.js",
+            "project_assessment": "/static/js/features/projects/project_assessment.js",
+            "project_assessment_renderer": "/static/js/features/projects/project_assessment_renderer.js",
             "project_artifacts": "/static/js/features/projects/project_artifacts.js",
             "project_workspace_shell": "/static/js/features/projects/project_workspace_shell.js",
             "project_workspace_events": "/static/js/features/projects/project_workspace_events.js",
@@ -301,6 +306,7 @@ class TestIndexRoute:
         }
         expected_styles = {
             "projects_css": "/static/css/features/projects.css",
+            "project_assessment_css": "/static/css/features/project-assessment.css",
             "atlas_css": "/static/css/features/atlas.css",
             "atlas_mobile_css": "/static/css/features/atlas-mobile.css",
             "command_registry_css": "/static/css/features/command-registry.css",
@@ -811,6 +817,91 @@ class TestAtlasImportRoutes:
             )
             conn.commit()
 
+    def test_prepared_import_draft_read_is_bounded_owner_scoped_and_expires(
+        self, tmp_path
+    ):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_draft_owner"
+            other_session_id = "tok_atlas_import_draft_other"
+            self._register_session_token(session_id)
+            self._register_session_token(other_session_id)
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "OWASP ZAP",
+                    "import_name": "Prepared ZAP report",
+                    "file": (
+                        io.BytesIO(
+                            b"row_type,entity_kind,entity_value,title,severity,evidence\n"
+                            b"finding,url,https://example.test,Missing header,medium,header absent\n"
+                        ),
+                        "zap-report.csv",
+                    ),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+            assert preview.status_code == 200
+            created = preview.get_json()
+
+            reviewed = client.get(
+                f"/atlas/imports/drafts/{created['draft_id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert reviewed.status_code == 200
+            payload = reviewed.get_json()
+            assert payload["draft_id"] == created["draft_id"]
+            assert payload["row_set_digest"] == created["row_set_digest"]
+            assert payload["source_tool"] == "OWASP ZAP"
+            assert payload["import_name"] == "Prepared ZAP report"
+            assert payload["filename"] == "zap-report.csv"
+            assert payload["counts"] == created["counts"]
+            assert payload["samples"] == created["samples"]
+            assert payload["warnings"] == created["warnings"]
+            assert payload["apply_options"] == created["apply_options"]
+            assert "normalized_rows" not in payload
+
+            cross_owner = client.get(
+                f"/atlas/imports/drafts/{created['draft_id']}",
+                headers={"X-Session-ID": other_session_id},
+            )
+            assert cross_owner.status_code == 404
+            assert cross_owner.get_json()["error"] == "draft_not_found"
+
+            with db_connect() as conn:
+                conn.execute(
+                    "UPDATE atlas_import_drafts SET normalized_rows_sha256 = 'tampered' "
+                    "WHERE id = ?",
+                    (created["draft_id"],),
+                )
+                conn.commit()
+            changed = client.get(
+                f"/atlas/imports/drafts/{created['draft_id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert changed.status_code == 409
+            assert changed.get_json()["error"] == "digest_mismatch"
+
+            with db_connect() as conn:
+                conn.execute(
+                    "UPDATE atlas_import_drafts "
+                    "SET normalized_rows_sha256 = ?, expires_at = '2000-01-01 00:00:00' "
+                    "WHERE id = ?",
+                    (created["row_set_digest"], created["draft_id"]),
+                )
+                conn.commit()
+            expired = client.get(
+                f"/atlas/imports/drafts/{created['draft_id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert expired.status_code == 410
+            assert expired.get_json()["error"] == "draft_expired"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
     def test_preview_and_apply_import_without_creating_history_run(self, tmp_path):
         from services.intel.canonical import entity_signature
         from services.projects.findings import _finding_signature, _normalize_finding_signal_key
@@ -1015,7 +1106,7 @@ class TestAtlasImportRoutes:
                     "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences"
                 ).fetchone()["count"]
                 finding_identity = conn.execute(
-                    "SELECT subject_key, signature_hash FROM findings"
+                    "SELECT subject_key, signature_hash, origin, validation_method FROM findings"
                 ).fetchone()
                 project_target_count = conn.execute(
                     "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
@@ -1043,6 +1134,8 @@ class TestAtlasImportRoutes:
             )
             assert finding_identity["subject_key"] == expected_finding_subject
             assert finding_identity["signature_hash"] == expected_finding_signature
+            assert finding_identity["origin"] == "import"
+            assert finding_identity["validation_method"] == "imported_assertion"
             assert project_target_count == 1
             assert quota_project_link_count == 0
             apply_success_extra = next(
@@ -1100,6 +1193,7 @@ class TestAtlasImportRoutes:
             assert audit_rows[0]["details"]["options"] == {
                 "import_entities": False,
                 "import_findings": True,
+                "import_evidence": False,
                 "link_to_project": True,
                 "create_project_targets": True,
             }
@@ -1108,6 +1202,329 @@ class TestAtlasImportRoutes:
             assert audit_rows[0]["details"]["counts"]["project_links_added"] == 1
             assert audit_rows[0]["details"]["counts"]["project_targets_created"] == 1
             assert csv_payload.decode() not in json.dumps(audit_rows)
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_cyclonedx_import_applies_typed_batch_evidence_without_trusting_vex_triage(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_cyclonedx_import"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_cyclonedx_import"
+            now = datetime.now(timezone.utc).isoformat()
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'CycloneDX Import', 'cyclonedx-import', ?, ?)",
+                    (project_id, session_id, now, now),
+                )
+                conn.commit()
+            payload = json.dumps({
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.5",
+                "metadata": {"timestamp": "2026-08-07T12:00:00Z"},
+                "components": [{
+                    "bom-ref": "pkg:pypi/requests@2.31.0",
+                    "type": "library",
+                    "name": "requests",
+                    "version": "2.31.0",
+                    "purl": "pkg:pypi/requests@2.31.0",
+                }, {
+                    "bom-ref": "pkg:pypi/urllib3@2.0.7",
+                    "type": "library",
+                    "name": "urllib3",
+                    "version": "2.0.7",
+                    "purl": "pkg:pypi/urllib3@2.0.7",
+                }],
+                "dependencies": [{
+                    "ref": "pkg:pypi/requests@2.31.0",
+                    "dependsOn": ["pkg:pypi/urllib3@2.0.7"],
+                }],
+                "vulnerabilities": [{
+                    "id": "CVE-2026-4242",
+                    "source": {"name": "Upstream advisory"},
+                    "ratings": [{"severity": "high"}],
+                    "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+                }, {
+                    "id": "CVE-2026-4242",
+                    "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+                    "analysis": {
+                        "state": "not_affected",
+                        "justification": "code_not_reachable",
+                    },
+                }],
+            }).encode()
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "cyclonedx_json",
+                    "source_tool": "CycloneDX",
+                    "import_name": "Application SBOM",
+                    "file": (io.BytesIO(payload), "application.cdx.json"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["rows"] == 5
+            assert preview_payload["counts"]["finding_valid"] == 1
+            assert preview_payload["counts"]["evidence_valid"] == 5
+            assert preview_payload["counts"]["evidence_new"] == 5
+            assert preview_payload["apply_options"]["import_evidence"] == {
+                "available": True,
+                "requires": ["mutate_projects"],
+            }
+            assert [item["evidence_type"] for item in preview_payload["samples"]["evidence"]] == [
+                "cyclonedx_component",
+                "cyclonedx_component",
+                "cyclonedx_dependency",
+                "cyclonedx_vulnerability",
+                "cyclonedx_vulnerability",
+            ]
+
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "project_id": project_id,
+                    "options": {"import_findings": True, "import_evidence": True},
+                },
+            )
+
+            assert applied.status_code == 200
+            applied_payload = applied.get_json()
+            assert applied_payload["counts"]["findings_created"] == 1
+            assert applied_payload["counts"]["evidence_imported"] == 5
+            with db_connect() as conn:
+                rows = conn.execute(
+                    "SELECT project_id, evidence_type, subject_key, source_detail_json "
+                    "FROM atlas_import_evidence ORDER BY row_number, id"
+                ).fetchall()
+                finding = conn.execute(
+                    "SELECT f.status, f.origin, f.validation_method, o.external_id "
+                    "FROM findings f JOIN atlas_finding_import_occurrences o ON o.finding_id = f.id"
+                ).fetchone()
+            assert len(rows) == 5
+            assert {row["project_id"] for row in rows} == {project_id}
+            assert json.loads(rows[2]["source_detail_json"])["depends_on"] == [
+                "pkg:pypi/urllib3@2.0.7"
+            ]
+            not_affected = json.loads(rows[-1]["source_detail_json"])
+            assert not_affected["analysis"]["category"] == "not_affected"
+            assert dict(finding) == {
+                "status": "new",
+                "origin": "import",
+                "validation_method": "imported_assertion",
+                "external_id": "CVE-2026-4242",
+            }
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_nessus_import_applies_exact_service_version_evidence(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_nessus_versions"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_nessus_versions"
+            now = datetime.now(timezone.utc).isoformat()
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Nessus Versions', 'nessus-versions', ?, ?)",
+                    (project_id, session_id, now, now),
+                )
+                conn.commit()
+            payload = b"""
+            <NessusClientData_v2><Report name="example"><ReportHost name="api.example.test">
+              <HostProperties>
+                <tag name="HOST_END">2026-08-07T10:30:00-05:00</tag>
+                <tag name="Nessus Server version">10.9.1</tag>
+              </HostProperties>
+              <ReportItem port="443" protocol="tcp" svc_name="https" pluginID="1234"
+                          pluginName="Example service" severity="0">
+                <description>Service inventory.</description>
+                <cpe>cpe:/a:example:server:2.5.1</cpe>
+              </ReportItem>
+            </ReportHost></Report></NessusClientData_v2>
+            """
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "nessus_xml",
+                    "source_tool": "Nessus",
+                    "import_name": "Versioned services",
+                    "file": (io.BytesIO(payload), "services.nessus"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["evidence_valid"] == 1
+            assert preview_payload["samples"]["evidence"][0]["evidence_type"] == (
+                "nessus_service_version"
+            )
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "project_id": project_id,
+                    "options": {"import_entities": True, "import_evidence": True},
+                },
+            )
+
+            assert applied.status_code == 200
+            assert applied.get_json()["counts"]["evidence_imported"] == 1
+            with db_connect() as conn:
+                row = conn.execute(
+                    "SELECT e.evidence_type, e.project_id, e.observed_at, e.source_detail_json, "
+                    "b.format_id, b.status FROM atlas_import_evidence e "
+                    "JOIN atlas_import_batches b ON b.id = e.batch_id"
+                ).fetchone()
+            assert row["evidence_type"] == "nessus_service_version"
+            assert row["project_id"] == project_id
+            assert row["observed_at"] == "2026-08-07T15:30:00Z"
+            assert row["format_id"] == "nessus_xml"
+            assert row["status"] == "applied"
+            source_detail = json.loads(row["source_detail_json"])
+            assert source_detail["cpe"] == (
+                "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*"
+            )
+            assert source_detail["source_observed_at"] == "2026-08-07T10:30:00-05:00"
+            assert source_detail["source_observed_at_timezone"] == "source"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_greenbone_import_reuses_atlas_dedupe_and_project_mapping(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_greenbone_import"
+            self._register_session_token(session_id)
+            project_id = "proj_atlas_greenbone_import"
+            now = datetime.now(timezone.utc).isoformat()
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Greenbone Import', 'greenbone-import', ?, ?)",
+                    (project_id, session_id, now, now),
+                )
+                conn.commit()
+            payload = b"""
+            <get_reports_response status="200" status_text="OK">
+              <report id="report-1"><report id="report-1"><results>
+                <result id="result-1">
+                  <name>First exported title</name>
+                  <modification_time>2026-08-08T10:30:00Z</modification_time>
+                  <host>greenbone.example.test</host><port>443/tcp</port>
+                  <nvt oid="1.3.6.1.4.1.25623.1.0.12345">
+                    <family>Web application abuses</family>
+                    <solution type="VendorFix">Upgrade the affected service.</solution>
+                  </nvt>
+                  <severity>7.5</severity><qod><value>95</value><type>remote_vul</type></qod>
+                  <description>First result for CVE-2026-12345.</description>
+                </result>
+                <result id="result-2">
+                  <name>Updated exported title</name>
+                  <modification_time>2026-08-08T11:00:00Z</modification_time>
+                  <host>GREENBONE.example.test</host><port>443/tcp</port>
+                  <nvt oid="1.3.6.1.4.1.25623.1.0.12345">
+                    <family>Web application abuses</family>
+                    <solution type="VendorFix">Upgrade the affected service.</solution>
+                  </nvt>
+                  <severity>7.5</severity><qod><value>90</value><type>remote_banner</type></qod>
+                  <description>Updated result for CVE-2026-12345.</description>
+                </result>
+              </results></report></report>
+            </get_reports_response>
+            """
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "greenbone_xml",
+                    "source_tool": "Greenbone",
+                    "import_name": "Quarterly Greenbone report",
+                    "file": (io.BytesIO(payload), "greenbone-report.xml"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            preview_payload = preview.get_json()
+            assert preview_payload["counts"]["rows"] == 2
+            assert preview_payload["counts"]["finding_valid"] == 2
+            assert preview_payload["samples"]["findings"][0]["source_detail"]["nvt_oid"] == (
+                "1.3.6.1.4.1.25623.1.0.12345"
+            )
+            applied = client.post(
+                "/atlas/imports/apply",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "draft_id": preview_payload["draft_id"],
+                    "row_set_digest": preview_payload["row_set_digest"],
+                    "project_id": project_id,
+                    "options": {
+                        "import_findings": True,
+                        "link_to_project": True,
+                        "create_project_targets": True,
+                    },
+                },
+            )
+
+            assert applied.status_code == 200
+            counts = applied.get_json()["counts"]
+            assert counts["entities_created"] == 1
+            assert counts["findings_created"] == 1
+            assert counts["findings_updated"] == 1
+            assert counts["finding_occurrences"] == 2
+            assert counts["project_links_added"] == 1
+            assert counts["project_targets_created"] == 1
+            with db_connect() as conn:
+                finding_rows = conn.execute(
+                    "SELECT id, tool_root, origin, validation_method, severity, title, raw_line "
+                    "FROM findings"
+                ).fetchall()
+                occurrences = conn.execute(
+                    "SELECT external_id, source_detail_json FROM atlas_finding_import_occurrences "
+                    "ORDER BY row_number"
+                ).fetchall()
+                project_links = conn.execute(
+                    "SELECT entity_type FROM project_links WHERE project_id = ?",
+                    (project_id,),
+                ).fetchall()
+            assert len(finding_rows) == 1
+            assert dict(finding_rows[0]) == {
+                "id": finding_rows[0]["id"],
+                "tool_root": "greenbone",
+                "origin": "import",
+                "validation_method": "imported_assertion",
+                "severity": "high",
+                "title": "Updated exported title",
+                "raw_line": (
+                    "Updated result for CVE-2026-12345. "
+                    "CVE references: CVE-2026-12345 Location: 443/tcp "
+                    "QoD: 90% (remote_banner)"
+                ),
+            }
+            assert [row["external_id"] for row in occurrences] == [
+                "1.3.6.1.4.1.25623.1.0.12345",
+                "1.3.6.1.4.1.25623.1.0.12345",
+            ]
+            assert {
+                json.loads(row["source_detail_json"])["result_id"]
+                for row in occurrences
+            } == {"result-1", "result-2"}
+            assert [row["entity_type"] for row in project_links] == ["atlas_entity"]
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -2068,6 +2485,60 @@ SQL syntax error near q</response>
             for patcher in reversed(patchers):
                 patcher.stop()
 
+    def test_preview_accepts_bounded_compressed_report_and_hashes_the_upload(self, tmp_path):
+        client, patchers = self._client(tmp_path)
+        try:
+            session_id = "tok_atlas_import_compressed"
+            self._register_session_token(session_id)
+            report = (
+                b"row_type,entity_kind,entity_value\n"
+                b"entity,domain,compressed-preview.darklab.sh\n"
+            )
+            uploaded = gzip.compress(report)
+
+            preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "generic_csv",
+                    "source_tool": "Compressed CSV",
+                    "import_name": "Compressed preview",
+                    "file": (io.BytesIO(uploaded), "report.csv.gz"),
+                },
+                headers={"X-Session-ID": session_id},
+                content_type="multipart/form-data",
+            )
+
+            assert preview.status_code == 200
+            payload = preview.get_json()
+            assert payload["counts"]["entity_new"] == 1
+            with db_connect() as conn:
+                draft = conn.execute(
+                    "SELECT original_file_sha256 FROM atlas_import_drafts WHERE id = ?",
+                    (payload["draft_id"],),
+                ).fetchone()
+            assert draft["original_file_sha256"] == hashlib.sha256(uploaded).hexdigest()
+
+            with mock.patch.dict(config.CFG, {"atlas_import_max_expanded_mb": 1}, clear=False):
+                oversized = client.post(
+                    "/atlas/imports/preview",
+                    data={
+                        "format_id": "generic_csv",
+                        "source_tool": "Compressed CSV",
+                        "import_name": "Oversized expansion",
+                        "file": (io.BytesIO(gzip.compress(report + b"#" * (1024 * 1024))), "large.csv.gz"),
+                    },
+                    headers={"X-Session-ID": session_id},
+                    content_type="multipart/form-data",
+                )
+            assert oversized.status_code == 400
+            assert "Expanded import" in oversized.get_json()["message"]
+            with db_connect() as conn:
+                draft_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_drafts").fetchone()["count"]
+            assert draft_count == 1
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
 
 class TestTeamRoutes:
     def _team_client(self, tmp_path):
@@ -2227,6 +2698,49 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
                 assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 0
+
+            cyclonedx_payload = json.dumps({
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.5",
+                "metadata": {"timestamp": "2026-08-07T12:00:00Z"},
+                "components": [{
+                    "bom-ref": "pkg:pypi/example@1.0.0",
+                    "type": "library",
+                    "name": "example",
+                    "version": "1.0.0",
+                    "purl": "pkg:pypi/example@1.0.0",
+                }],
+            }).encode()
+            evidence_preview = client.post(
+                "/atlas/imports/preview",
+                data={
+                    "format_id": "cyclonedx_json",
+                    "source_tool": "CycloneDX",
+                    "import_name": "Team SBOM import",
+                    "file": (io.BytesIO(cyclonedx_payload), "team.cdx.json"),
+                },
+                headers=operator_headers,
+                content_type="multipart/form-data",
+            )
+            assert evidence_preview.status_code == 200
+            evidence_payload = evidence_preview.get_json()
+            assert evidence_payload["apply_options"]["import_evidence"] == {
+                "available": False,
+                "requires": ["mutate_projects"],
+            }
+            evidence_rejected = client.post(
+                "/atlas/imports/apply",
+                headers=operator_headers,
+                json={
+                    "draft_id": evidence_payload["draft_id"],
+                    "row_set_digest": evidence_payload["row_set_digest"],
+                    "options": {"import_evidence": True},
+                },
+            )
+            assert evidence_rejected.status_code == 403
+            assert evidence_rejected.get_json()["error"] == "team_forbidden"
+            with db_connect() as conn:
+                assert conn.execute("SELECT COUNT(*) AS count FROM atlas_import_evidence").fetchone()["count"] == 0
 
             subject_only_payload = (
                 b"row_type,subject,title,severity,evidence\n"
@@ -3479,6 +3993,8 @@ class TestTeamRoutes:
             run_id = "run-team-capability"
             entity_id = "ent_team_capability"
             finding_id = "fnd_team_capability"
+            merge_entity_id = "ent_team_capability_merge"
+            merge_finding_id = "fnd_team_capability_merge"
             seen_at = "2026-05-28T15:00:00+00:00"
             with db_connect() as conn:
                 conn.execute(
@@ -3525,6 +4041,41 @@ class TestTeamRoutes:
                     "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
                     "VALUES (?, ?, 1, 'capability finding', ?)",
                     (finding_id, run_id, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                    "last_seen_at, created) VALUES (?, ?, 'domain', 'capability-merge.example', "
+                    "?, ?, ?, ?)",
+                    (
+                        merge_entity_id,
+                        owner_token,
+                        "sig_" + merge_entity_id,
+                        seen_at,
+                        seen_at,
+                        seen_at,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, "
+                    "kind, tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, "
+                    "occurrence_count, status, title, raw_line, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, "
+                    "'new', 'alternate capability finding', 'alternate capability finding', ?)",
+                    (
+                        merge_finding_id,
+                        owner_token,
+                        run_id,
+                        merge_entity_id,
+                        merge_entity_id,
+                        "sig_" + merge_finding_id,
+                        run_id,
+                        run_id,
+                        seen_at,
+                        seen_at,
+                        seen_at,
+                    ),
                 )
                 conn.commit()
 
@@ -3605,12 +4156,42 @@ class TestTeamRoutes:
             operator_finding_triage_update = client.put(
                 f"/findings/{finding_id}/triage",
                 headers=operator_headers,
-                json={"verification_status": "ready_to_verify", "remediation": "Patch capability finding."},
+                json={"verification_status": "verified", "remediation": "Patch capability finding."},
+            )
+            viewer_finding_triage_after_update = client.get(
+                f"/findings/{finding_id}/triage",
+                headers=viewer_headers,
             )
             viewer_finding_triage_update = client.put(
                 f"/findings/{finding_id}/triage",
                 headers=viewer_headers,
                 json={"verification_status": "verified"},
+            )
+            viewer_merge_candidates = client.post(
+                f"/findings/{finding_id}/remediation-merge/candidates",
+                headers=viewer_headers,
+                json={"query": "alternate capability"},
+            )
+            viewer_merge_preview = client.post(
+                f"/findings/{finding_id}/remediation-merge/preview",
+                headers=viewer_headers,
+                json={"target_finding_id": merge_finding_id},
+            )
+            viewer_merge_apply = client.post(
+                f"/findings/{finding_id}/remediation-merge",
+                headers=viewer_headers,
+                json={
+                    "target_finding_id": merge_finding_id,
+                    "preview_token": viewer_merge_preview.get_json()["preview"]["preview_token"],
+                },
+            )
+            operator_merge_apply = client.post(
+                f"/findings/{finding_id}/remediation-merge",
+                headers=operator_headers,
+                json={
+                    "target_finding_id": merge_finding_id,
+                    "preview_token": viewer_merge_preview.get_json()["preview"]["preview_token"],
+                },
             )
             viewer_atlas_review = client.post(
                 "/atlas/findings/review",
@@ -3654,7 +4235,27 @@ class TestTeamRoutes:
             assert viewer_finding_review.status_code == 403
             assert viewer_finding_triage_read.status_code == 200
             assert operator_finding_triage_update.status_code == 200
+            assert viewer_finding_triage_after_update.status_code == 200
+            assert viewer_finding_triage_after_update.get_json()["triage"]["remediation"] == (
+                "Patch capability finding."
+            )
+            verification_disposition = viewer_finding_triage_after_update.get_json()["triage"][
+                "verification_disposition"
+            ]
+            assert verification_disposition["status"] == "verified"
+            assert verification_disposition["actor"]["kind"] == "team_member"
+            assert verification_disposition["actor"]["display_name"] == "Operator"
+            assert operator_token not in json.dumps(verification_disposition)
             assert viewer_finding_triage_update.status_code == 403
+            assert viewer_merge_candidates.status_code == 200
+            assert [
+                item["finding_id"]
+                for item in viewer_merge_candidates.get_json()["candidates"]
+            ] == [merge_finding_id]
+            assert viewer_merge_preview.status_code == 200
+            assert viewer_merge_apply.status_code == 403
+            assert operator_merge_apply.status_code == 200
+            assert operator_merge_apply.get_json()["merge"]["member_count"] == 2
             assert viewer_atlas_review.status_code == 403
             assert viewer_intel_refresh.status_code == 403
             assert viewer_brokered_run.get_json()["error"] == "team_forbidden"
@@ -4050,6 +4651,33 @@ class TestTeamRoutes:
             assert explicit_personal_link is None
             assert unassigned_team_link is None
             assert dict(active_team_link) == {"project_id": project_id, "source": "active_project"}
+
+            archived = client.patch(
+                f"/session/teams/{team_id}",
+                headers={"X-Session-ID": owner_token},
+                json={"status": "archived"},
+            )
+            archived_list = client.get(
+                "/projects?include_archived=1",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            archived_detail = client.get(
+                f"/projects/{project_id}",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+            )
+            archived_create = client.post(
+                "/projects",
+                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                json={"name": "Blocked while archived"},
+            )
+
+            assert archived.status_code == 200
+            assert archived_list.status_code == 200
+            assert project_id in {item["id"] for item in archived_list.get_json()["projects"]}
+            assert archived_detail.status_code == 200
+            assert archived_detail.get_json()["project"]["id"] == project_id
+            assert archived_create.status_code == 409
+            assert archived_create.get_json()["error"] == "team_archived"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -6014,6 +6642,99 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         return resp.get_json()["target"]
 
+    def test_project_http_profiles_support_reference_only_browser_crud(self):
+        client = get_client()
+        session_id = self._session_id("project-http-profile")
+        other_session = self._session_id("project-http-profile-other")
+        project = self._create_project(client, session_id, name="HTTP Profiles")
+        target = "browser-http-profile.example.com"
+        self._create_target(client, session_id, project["id"], value=target)
+        route = f"/projects/{project['id']}/http-profiles"
+
+        created_response = client.post(
+            route,
+            headers={"X-Session-ID": session_id},
+            json={
+                "name": "Anonymous baseline",
+                "role": "anonymous",
+                "base_url": f"https://{target}",
+                "include_paths": ["/public"],
+                "rate_limit_per_second": 3,
+                "concurrency": 1,
+            },
+        )
+        assert created_response.status_code == 201
+        created = created_response.get_json()["profile"]
+        assert created["protected_references_visible"] is True
+        assert created["reference_counts"]["secret_refs"] == 0
+
+        detail_route = f"{route}/{created['id']}"
+        listed = client.get(route, headers={"X-Session-ID": session_id})
+        detail = client.get(detail_route, headers={"X-Session-ID": session_id})
+        foreign = client.get(detail_route, headers={"X-Session-ID": other_session})
+        updated = client.patch(
+            detail_route,
+            headers={"X-Session-ID": session_id},
+            json={"revision": created["revision"], "enabled": False},
+        )
+        assert listed.get_json()["profiles"][0]["id"] == created["id"]
+        assert detail.get_json()["profile"]["id"] == created["id"]
+        assert foreign.status_code == 404
+        assert updated.status_code == 200
+        assert updated.get_json()["profile"]["revision"] == 2
+        assert updated.get_json()["profile"]["enabled"] is False
+
+        removed = client.delete(
+            detail_route,
+            headers={"X-Session-ID": session_id},
+        )
+        assert removed.get_json() == {"ok": True, "removed": True}
+        assert client.get(detail_route, headers={"X-Session-ID": session_id}).status_code == 404
+
+    def test_project_http_profiles_skip_invalid_confirmed_targets(self):
+        client = get_client()
+        session_id = self._session_id("project-http-profile-invalid-target")
+        project = self._create_project(client, session_id, name="HTTP Profile Target Recovery")
+        valid_target = "valid-http-profile.example.com"
+        self._create_target(client, session_id, project["id"], value=valid_target)
+        invalid_target = self._create_target(
+            client,
+            session_id,
+            project["id"],
+            value="www.namecheap.com)",
+        )
+        assert invalid_target["review_state"] == "confirmed"
+        route = f"/projects/{project['id']}/http-profiles"
+
+        with mock.patch.object(http_profile_scope_service.log, "warning") as warning_log:
+            listed = client.get(route, headers={"X-Session-ID": session_id})
+            created = client.post(
+                route,
+                headers={"X-Session-ID": session_id},
+                json={
+                    "name": "Valid target scope",
+                    "role": "anonymous",
+                    "base_url": f"https://{valid_target}",
+                    "allowed_hosts": [valid_target],
+                },
+            )
+
+        assert listed.status_code == 200
+        assert listed.get_json() == {"profiles": [], "total": 0}
+        assert created.status_code == 201
+        assert created.get_json()["profile"]["allowed_hosts"] == [valid_target]
+        assert warning_log.call_count == 2
+        event, = warning_log.call_args.args
+        fields = warning_log.call_args.kwargs["extra"]
+        assert event == "PROJECT_HTTP_PROFILE_INVALID_TARGETS_SKIPPED"
+        assert fields == {
+            "project_id": project["id"],
+            "team_scope": False,
+            "invalid_target_count": 1,
+            "invalid_target_types": ["domain"],
+        }
+        assert invalid_target["value"] not in json.dumps(fields)
+
     def test_project_overview_route_returns_empty_contract_and_404_for_foreign_project(self):
         client = get_client()
         session_id = self._session_id("project-overview-empty")
@@ -6037,6 +6758,7 @@ class TestProjectRoutes:
         assert payload["project"]["id"] == project["id"]
         assert payload["payload_version"] == 1
         assert payload["targets"] == []
+        assert payload["active_assessment"] is None
         assert payload["rollups"]["target_count"] == 0
         assert payload["rollups"]["certificate_statuses"]["unknown"] == 0
         assert payload["rollups"]["recent_change_state"] == "not-monitored"
@@ -6103,6 +6825,13 @@ class TestProjectRoutes:
         session_id = self._session_id("project-overview")
         project = self._create_project(client, session_id, name="Overview Populated")
         target = self._create_target(client, session_id, project["id"])
+        assessment_resp = client.post(
+            f"/projects/{project['id']}/assessments",
+            json={"profile_key": "network", "title": "Overview assessment"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert assessment_resp.status_code == 201
+        assessment_id = assessment_resp.get_json()["assessment"]["id"]
         snapshot_id = f"snap-route-overview-{target['id']}"
         finding_id = f"finding-route-overview-{target['id']}"
         now = datetime.now(timezone.utc).isoformat()
@@ -6160,6 +6889,29 @@ class TestProjectRoutes:
         assert payload["rollups"]["target_count"] == 1
         assert payload["rollups"]["certificate_statuses"]["expiring_30d"] == 1
         assert payload["rollups"]["finding_severities"]["high"] == 1
+        assert payload["active_assessment"]["id"] == assessment_id
+        assert payload["active_assessment"]["title"] == "Overview assessment"
+        assert payload["active_assessment"]["profile_key"] == "network"
+        assert payload["active_assessment"]["status"] == "active"
+        assert payload["active_assessment"]["rollup"]["applicable_checks"] > 0
+        assert payload["active_assessment"]["fix_first"] == {
+            "items": [],
+            "total": 0,
+            "limit": 3,
+            "offset": 0,
+            "has_more": False,
+            "priority": "",
+            "rollup": {
+                "total": 0,
+                "kev_listed": 0,
+                "epss_scored": 0,
+                "cvss_scored": 0,
+                "unscored": 0,
+            },
+            "source_finding_count": 0,
+        }
+        assert "profile_snapshot" not in payload["active_assessment"]
+        assert "team_id" not in payload["active_assessment"]
         target_row = payload["targets"][0]
         assert target_row["entity_id"] == target["id"]
         assert target_row["open_ports"] == [443]
@@ -6721,6 +7473,97 @@ class TestProjectRoutes:
         assert debug_log.call_args.args == ("PROJECT_MONITORING_FIRE_ACK_MISS",)
         assert debug_log.call_args.kwargs["extra"]["fire_id"] == "missing-fire"
 
+    def test_project_monitoring_risk_ack_route_updates_event_and_audits_metadata(self):
+        from core.helpers import get_log_session_id
+
+        client = get_client()
+        session_id = "tok_project_risk_ack_" + uuid.uuid4().hex[:8]
+        self._register_session_token(session_id)
+        project = self._create_project(client, session_id, name="Risk Triage")
+        other_project = self._create_project(client, session_id, name="Other Risk Triage")
+        escalation_id = "rsk_route_" + uuid.uuid4().hex[:8]
+        now = "2026-08-04T12:00:00+00:00"
+
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO risk_escalations ("
+                "id, owner_session_id, remediation_id, cve_id, source, transition_kind, "
+                "feed_version, observation_count, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, 'kev', 'kev_added', '2026.08.04', 2, ?, ?)",
+                (
+                    escalation_id,
+                    session_id,
+                    "CVE-2026-12345:target-one",
+                    "CVE-2026-12345",
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO risk_escalation_projects (escalation_id, project_id) VALUES (?, ?)",
+                (escalation_id, project["id"]),
+            )
+            conn.commit()
+
+        note = "Prioritize during the maintenance window"
+        with mock.patch.object(project_routes.log, "info") as info_log:
+            resp = client.patch(
+                f"/projects/{project['id']}/monitoring/risk-events/{escalation_id}",
+                headers={"X-Session-ID": session_id},
+                json={"ack_state": "needs_action", "ack_note": note},
+            )
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["risk_event"]["ack_state"] == "needs_action"
+        assert payload["risk_event"]["ack_note"] == note
+        assert payload["risk_event"]["ack_by"] == session_id
+        assert payload["risk_event"]["ack_at"]
+        audit_rows = _audit_event_rows(
+            target_id=escalation_id,
+            event_type="risk_escalation.ack",
+        )
+        assert len(audit_rows) == 1
+        assert audit_rows[0]["project_id"] == project["id"]
+        assert audit_rows[0]["details"] == {
+            "from_state": "new",
+            "note_chars": len(note),
+            "observation_count": 2,
+            "source": "kev",
+            "to_state": "needs_action",
+            "transition_kind": "kev_added",
+        }
+        assert note not in json.dumps(audit_rows[0]["details"])
+        updated_log = next(
+            call
+            for call in info_log.call_args_list
+            if call.args == ("PROJECT_RISK_ESCALATION_ACK_UPDATED",)
+        )
+        assert updated_log.kwargs["extra"] == {
+            "ip": mock.ANY,
+            "session": get_log_session_id(session_id),
+            "team_id": "",
+            "project_id": project["id"],
+            "escalation_id": escalation_id,
+            "ack_state": "needs_action",
+            "note_chars": len(note),
+        }
+
+        rejected = client.patch(
+            f"/projects/{project['id']}/monitoring/risk-events/{escalation_id}",
+            headers={"X-Session-ID": session_id},
+            json={"ack_state": "invalid"},
+        )
+        assert rejected.status_code == 400
+        assert rejected.get_json()["error"] == "invalid_risk_escalation_update"
+
+        wrong_project = client.patch(
+            f"/projects/{other_project['id']}/monitoring/risk-events/{escalation_id}",
+            headers={"X-Session-ID": session_id},
+            json={"ack_state": "resolved"},
+        )
+        assert wrong_project.status_code == 404
+
     def test_project_monitoring_team_routes_enforce_view_and_triage_capabilities(self):
         from services.watchers import service as watcher_service
 
@@ -7277,28 +8120,36 @@ class TestProjectRoutes:
         assert finding_count == 0
 
     def test_project_write_routes_are_rate_limited(self):
-        for view in (
-            project_routes.projects_create,
-            project_routes.projects_active_set,
-            project_routes.projects_active_clear,
-            project_routes.projects_update,
-            project_routes.projects_delete,
-            project_routes.projects_links_create,
-            project_routes.projects_links_delete,
-            project_routes.projects_targets_create,
-            project_routes.projects_targets_update,
-            project_routes.projects_targets_delete,
-            project_routes.projects_packages_create,
-            project_routes.projects_packages_delete,
-            project_routes.findings_review_update,
-            project_routes.entity_labels_create,
-            project_routes.entity_labels_delete,
-            project_routes.entity_note_update,
-            project_routes.entity_note_delete,
-        ):
-            assert "__wrapper-limiter-instance" in view.__dict__
-        assert "__wrapper-limiter-instance" in project_routes.projects_packages_download.__dict__
-        assert "__wrapper-limiter-instance" in project_routes.projects_auto_promote_rules_preview.__dict__
+        app = reusable_test_app(__name__)
+        read_only_post_endpoints = {
+            "projects.projects_artifacts_download_ticket",
+            "projects.projects_run_entity_link_preview",
+            "projects.projects_run_entity_unlink_preview",
+        }
+        registered_writes = []
+        for rule in app.url_map.iter_rules():
+            methods = {"POST", "PUT", "PATCH", "DELETE"}.intersection(
+                rule.methods or set()
+            )
+            if not rule.rule.startswith("/projects") or not methods:
+                continue
+            if rule.endpoint in read_only_post_endpoints:
+                assert methods == {"POST"}
+                continue
+            registered_writes.append((rule, app.view_functions[rule.endpoint]))
+
+        assert registered_writes
+        for rule, view in registered_writes:
+            assert "__wrapper-limiter-instance" in view.__dict__, rule.endpoint
+
+        assessment_contracts = registered_assessment_mutations(
+            app,
+            route_prefix="/projects",
+        )
+        assert assessment_contracts
+        for rule, _method, view, capability in assessment_contracts:
+            source = inspect.getsource(view)
+            assert f"Capability.{capability}" in source, rule.endpoint
 
     def test_dynamic_unknown_routes_use_baseline_http_rate_limit(self, monkeypatch):
         client = get_client()
@@ -8755,7 +9606,10 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert bulk_review_resp.status_code == 200
-        assert json.loads(bulk_review_resp.data)["counts"] == {"updated": 1, "not_found": 2}
+        bulk_review_data = json.loads(bulk_review_resp.data)
+        assert bulk_review_data["counts"] == {"updated": 1, "not_found": 2}
+        assert bulk_review_data["remediation_groups_updated"] == 1
+        assert bulk_review_data["affected_observations"] == 1
         audit_rows = _audit_event_rows(target_id=f"fnd_{run_id}", event_type="finding.review_change")
         assert len(audit_rows) == 1
         assert audit_rows[0]["project_id"] == project["id"]
@@ -8862,6 +9716,13 @@ class TestProjectRoutes:
         assert triage_resp.status_code == 200
         triage_payload = triage_resp.get_json()
         assert isinstance(triage_payload, dict)
+        assessment_resp = client.post(
+            f"/projects/{project['id']}/assessments",
+            json={"profile_key": "network", "title": "Package assessment context"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert assessment_resp.status_code == 201
+        assessment_id = assessment_resp.get_json()["assessment"]["id"]
 
         package_resp = client.post(
             f"/projects/{project['id']}/packages",
@@ -8871,6 +9732,7 @@ class TestProjectRoutes:
                 "redaction_mode": "raw",
                 "include_artifacts": True,
                 "preset": "custom",
+                "assessment_id": assessment_id,
                 "include_private_notes": True,
                 "labels": ["handoff"],
                 "notes": "Package review note",
@@ -8906,6 +9768,12 @@ class TestProjectRoutes:
         assert package["manifest"]["selected_entity_ids"]["target_ids"] == [evidence_target["id"]]
         assert package["manifest"]["include_private_notes"] is True
         assert package["manifest"]["redaction_mode"] == "raw"
+        assessment_context = package["manifest"]["assessment_context"]
+        assert assessment_context["selection"]["mode"] == "selected"
+        assert assessment_context["assessment"]["id"] == assessment_id
+        assert assessment_context["assessment"]["profile_snapshot"]["key"] == "network"
+        assert assessment_context["scope"]["check_count"] > 0
+        assert assessment_context["methodology"]["applicable_denominator"] > 0
         assert package["manifest"]["options"]["index_html"] is True
         assert package["manifest"]["options"]["transcripts_html"] is True
         assert package["manifest"]["selected_entity_ids"]["transcript_run_ids"] == [run_id]
@@ -9106,6 +9974,13 @@ class TestProjectRoutes:
             "verification_notes": "Internal ticket APP-123.",
             "created": triage_payload["triage"]["created"],
             "updated": triage_payload["triage"]["updated"],
+            "remediation_id": triage_payload["triage"]["remediation_id"],
+            "remediation_group_id": triage_payload["triage"]["remediation_group_id"],
+            "remediation_group_merged": False,
+            "remediation_group_member_count": 1,
+            "remediation_source": "remediation_group",
+            "remediation_updated_at": triage_payload["triage"]["remediation_updated_at"],
+            "verification_disposition": None,
         }
         assert downloaded_manifest["manifest"]["findings"][0]["triage"]["remediation"] == (
             "Patch TLS config for darklab.sh."
@@ -11240,6 +12115,19 @@ class TestProjectRoutes:
         client = get_client()
         session_id = self._session_id("project-report")
         project = self._create_project(client, session_id, name="Report Scope")
+        report_target = self._create_target(
+            client,
+            session_id,
+            project["id"],
+            value="report-scope.example.com",
+        )
+        assessment_resp = client.post(
+            f"/projects/{project['id']}/assessments",
+            json={"profile_key": "network", "title": "Report assessment context"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert assessment_resp.status_code == 201
+        assessment_id = assessment_resp.get_json()["assessment"]["id"]
 
         default_resp = client.get(
             f"/projects/{project['id']}/report",
@@ -11251,6 +12139,9 @@ class TestProjectRoutes:
         assert default_payload["templates"]
 
         draft = default_payload["report"]["draft"]
+        draft["assessment_id"] = assessment_id
+        draft["selection_modes"]["target_ids"] = "manual"
+        draft["selection"]["target_ids"] = [report_target["id"]]
         draft["metadata"]["engagement_name"] = "Report Scope Readout"
         draft["metadata"]["executive_summary"] = "Clear findings and next steps."
         save_resp = client.post(
@@ -11332,6 +12223,8 @@ class TestProjectRoutes:
         assert "Generated by darklab_shell" in preview["html"]
         assert "Redacted" in preview["html"]
         assert "Report Scope Readout" in preview["html"]
+        assert "Report assessment context" in preview["markdown"]
+        assert "Assessment coverage" in preview["html"]
 
         bad_date_draft = deepcopy(draft)
         bad_date_draft["metadata"]["date_range"] = "June 1 - June 5"
@@ -11420,7 +12313,7 @@ class TestProjectRoutes:
         assert job["status"] == "complete"
         assert job["archive_bytes"] > 0
         assert job["metrics"]["run_count"] == 0
-        assert job["metrics"]["target_count"] == 0
+        assert job["metrics"]["target_count"] == 1
         assert job["metrics"]["finding_count"] == 0
         assert job["metrics"]["artifact_count"] == 0
         assert job["metrics"]["run_total"] == 0
@@ -11446,7 +12339,7 @@ class TestProjectRoutes:
         assert started_extra["project_id"] == project["id"]
         complete_extra = complete_call.kwargs["extra"]
         assert complete_extra["run_count"] == 0
-        assert complete_extra["target_count"] == 0
+        assert complete_extra["target_count"] == 1
         assert complete_extra["finding_count"] == 0
         assert complete_extra["artifact_count"] == 0
         assert complete_extra["run_total"] == 0
@@ -11461,7 +12354,7 @@ class TestProjectRoutes:
         assert {row["correlation_id"] for row in report_audit_rows} == {job["id"]}
         assert report_audit_rows[-1]["details"]["archive_bytes"] > 0
         assert report_audit_rows[-1]["details"]["run_count"] == 0
-        assert report_audit_rows[-1]["details"]["target_count"] == 0
+        assert report_audit_rows[-1]["details"]["target_count"] == 1
         assert report_audit_rows[-1]["details"]["finding_count"] == 0
         assert report_audit_rows[-1]["details"]["artifact_count"] == 0
         assert report_audit_rows[-1]["details"]["run_total"] == 0
@@ -11490,6 +12383,7 @@ class TestProjectRoutes:
             assert manifest["provenance"]["build"]["selection_modes"]["run_ids"] == "all"
             assert manifest["provenance"]["build"]["selected_entity_ids"]["run_ids"] == []
             assert manifest["provenance"]["privacy"]["private_notes_included"] is False
+            assert manifest["provenance"]["sources"]["assessment_context"]["assessment"]["id"] == assessment_id
             assert manifest["provenance"]["audit"] == {
                 "event_type": "report.build",
                 "correlation_id": job["id"],
@@ -11502,6 +12396,8 @@ class TestProjectRoutes:
             assert "# Report Scope Readout" in report_md
             assert "Generated by darklab_shell v" in report_md
             assert "Generated by darklab_shell" in report_html
+            assert "Report assessment context" in report_md
+            assert "Assessment coverage" in report_html
             _assert_no_audit_private_export_strings(
                 "\n".join([
                     json.dumps(manifest),
@@ -12291,6 +13187,278 @@ class TestProjectRoutes:
         assert package["manifest"]["options"]["raw_artifacts"] is False
         assert package["manifest"]["artifacts"][0]["file_status"] == "disabled"
 
+    def test_project_web_surface_pages_verified_images_with_exact_run_entities(self, tmp_path):
+        client = get_client()
+        session_id = self._session_id("project-web-surface")
+        other_session = self._session_id("project-web-surface-other")
+        project = self._create_project(client, session_id, name="Web Surface")
+        run_id = self._seed_run(
+            session_id,
+            "httpx -ss -srd captures -u https://app.example.test/login",
+        )
+        previous_run_id = self._seed_run(
+            session_id,
+            "httpx -ss -srd previous-captures -u https://app.example.test/login",
+            started="'2026-08-06T00:00:00+00:00'",
+        )
+        self._link_run(client, session_id, project["id"], run_id)
+        self._link_run(client, session_id, project["id"], previous_run_id)
+        host_entity_id = "ent_" + uuid.uuid4().hex[:16]
+        url_entity_id = "ent_" + uuid.uuid4().hex[:16]
+        good_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+        conflict_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+        previous_artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+        good_path = "captures/app.png"
+        conflict_path = "captures/conflict.png"
+        previous_path = "previous-captures/app.png"
+        preview = [{
+            "text": "https://app.example.test/login [200]",
+            "source_detail": {
+                "screenshots": [
+                    {
+                        "url": "https://app.example.test/login",
+                        "artifact_path": good_path,
+                        "status_code": 200,
+                        "title": "Sign in",
+                        "technologies": ["nginx"],
+                        "captured_at": "2026-08-07T00:00:02Z",
+                        "visual_hash": "visual-good",
+                        "source_run_id": run_id,
+                        "profile_role": "authenticated",
+                        "captured_html": "<script>must not leave the run</script>",
+                    },
+                    {
+                        "url": "https://app.example.test/one",
+                        "artifact_path": conflict_path,
+                        "source_run_id": run_id,
+                    },
+                    {
+                        "url": "https://app.example.test/two",
+                        "artifact_path": conflict_path,
+                        "source_run_id": run_id,
+                    },
+                ],
+            },
+        }]
+        previous_preview = [{
+            "source_detail": {
+                "screenshots": [{
+                    "url": "https://app.example.test/login",
+                    "artifact_path": previous_path,
+                    "status_code": 200,
+                    "title": "Sign in",
+                    "technologies": ["nginx"],
+                    "captured_at": "2026-08-06T00:00:02Z",
+                    "visual_hash": "visual-previous",
+                    "source_run_id": previous_run_id,
+                    "profile_role": "authenticated",
+                }],
+            },
+        }]
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_root": str(tmp_path / "workspaces"),
+        }
+        image = b"\x89PNG\r\n\x1a\nverified-image"
+        with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
+            for path in (good_path, conflict_path, previous_path):
+                resolved = resolve_workspace_path(
+                    session_id,
+                    path,
+                    shell_app_module.CFG,
+                    ensure_parent=True,
+                )
+                resolved.write_bytes(image)
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "UPDATE runs SET output_preview = ?, finished = ? WHERE id = ?",
+                    (json.dumps(preview), "2026-08-07T00:00:03+00:00", run_id),
+                )
+                conn.execute(
+                    "UPDATE runs SET output_preview = ?, finished = ? WHERE id = ?",
+                    (json.dumps(previous_preview), "2026-08-06T00:00:03+00:00", previous_run_id),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                    "last_seen_at, occurrence_count, created) "
+                    "VALUES (?, ?, 'domain', 'app.example.test', ?, ?, ?, 1, ?)",
+                    (
+                        host_entity_id,
+                        session_id,
+                        "sig_" + uuid.uuid4().hex,
+                        "2026-08-07T00:00:02+00:00",
+                        "2026-08-07T00:00:02+00:00",
+                        "2026-08-07T00:00:02+00:00",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO entities "
+                    "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                    "first_seen_at, last_seen_at, occurrence_count, created) "
+                    "VALUES (?, ?, 'url', 'https://app.example.test/login', ?, ?, ?, ?, 1, ?)",
+                    (
+                        url_entity_id,
+                        session_id,
+                        "sig_" + uuid.uuid4().hex,
+                        host_entity_id,
+                        "2026-08-07T00:00:02+00:00",
+                        "2026-08-07T00:00:02+00:00",
+                        "2026-08-07T00:00:02+00:00",
+                    ),
+                )
+                conn.executemany(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    [
+                        (host_entity_id, run_id, "2026-08-07T00:00:02+00:00", "2026-08-07T00:00:02+00:00"),
+                        (url_entity_id, run_id, "2026-08-07T00:00:02+00:00", "2026-08-07T00:00:02+00:00"),
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO run_file_artifacts "
+                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                    "detected_by, content_type, preview_type, content_sha256, created) "
+                    "VALUES (?, ?, ?, ?, ?, 'screenshot', ?, 'httpx_screenshot', "
+                    "'image/png', 'image', ?, ?)",
+                    [
+                        (
+                            conflict_artifact_id,
+                            session_id,
+                            run_id,
+                            conflict_path,
+                            "conflict.png",
+                            len(image),
+                            hashlib.sha256(image).hexdigest(),
+                            "2026-08-07T00:00:01+00:00",
+                        ),
+                        (
+                            good_artifact_id,
+                            session_id,
+                            run_id,
+                            good_path,
+                            "app.png",
+                            len(image),
+                            hashlib.sha256(image).hexdigest(),
+                            "2026-08-07T00:00:02+00:00",
+                        ),
+                        (
+                            previous_artifact_id,
+                            session_id,
+                            previous_run_id,
+                            previous_path,
+                            "previous-app.png",
+                            len(image),
+                            hashlib.sha256(image).hexdigest(),
+                            "2026-08-06T00:00:02+00:00",
+                        ),
+                    ],
+                )
+                conn.execute(
+                    "INSERT INTO run_file_artifacts "
+                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                    "detected_by, content_type, preview_type, created) "
+                    "VALUES (?, ?, ?, 'captures/readme.txt', 'readme.txt', 'output', 1, "
+                    "'workspace_flag', 'text/plain', 'text', ?)",
+                    (
+                        "rfa_" + uuid.uuid4().hex[:16],
+                        session_id,
+                        run_id,
+                        "2026-08-07T00:00:03+00:00",
+                    ),
+                )
+                conn.commit()
+
+            first = client.get(
+                f"/projects/{project['id']}/web-surface?limit=1&offset=0",
+                headers={"X-Session-ID": session_id},
+            )
+            second = client.get(
+                f"/projects/{project['id']}/web-surface?limit=1&offset=1",
+                headers={"X-Session-ID": session_id},
+            )
+            filtered = client.get(
+                f"/projects/{project['id']}/web-surface?" + urlencode({
+                    "target": "APP.EXAMPLE",
+                    "status_code": "200",
+                    "technology": "NGINX",
+                    "profile_role": "AUTHENTICATED",
+                    "visual_hash": "VISUAL-GOOD",
+                    "change_state": "CHANGED",
+                    "limit": "1",
+                }),
+                headers={"X-Session-ID": session_id},
+            )
+            with mock.patch("services.projects.web_surface.MAX_GALLERY_ROWS", 1):
+                capped_filtered = client.get(
+                    f"/projects/{project['id']}/web-surface?target=app.example",
+                    headers={"X-Session-ID": session_id},
+                )
+            foreign = client.get(
+                f"/projects/{project['id']}/web-surface",
+                headers={"X-Session-ID": other_session},
+            )
+
+        assert first.status_code == 200
+        first_payload = first.get_json()
+        assert {key: first_payload[key] for key in ("total", "limit", "offset", "has_more")} == {
+            "total": 3,
+            "limit": 1,
+            "offset": 0,
+            "has_more": True,
+        }
+        capture = first_payload["captures"][0]
+        assert capture["url"] == "https://app.example.test/login"
+        assert capture["title"] == "Sign in"
+        assert capture["technologies"] == ["nginx"]
+        assert capture["metadata_state"] == "available"
+        assert capture["capture_state"] == "current"
+        assert capture["url_entity_id"] == url_entity_id
+        assert capture["host_entity_id"] == host_entity_id
+        assert capture["source_run"]["id"] == run_id
+        assert capture["artifact"]["id"] == good_artifact_id
+        assert capture["artifact"]["file_available"] is True
+        assert capture["comparison"] == {
+            "state": "changed",
+            "basis": "exact_url_and_profile_role",
+            "previous_capture": {
+                "artifact_id": previous_artifact_id,
+                "source_run_id": previous_run_id,
+                "captured_at": "2026-08-06T00:00:02Z",
+                "visual_hash": "visual-previous",
+            },
+        }
+        assert "captured_html" not in json.dumps(first_payload)
+        assert second.status_code == 200
+        conflicting = second.get_json()["captures"][0]
+        assert conflicting["artifact"]["id"] == conflict_artifact_id
+        assert conflicting["metadata_state"] == "conflict"
+        assert conflicting["capture_state"] == "metadata_conflict"
+        assert "url" not in conflicting
+        assert filtered.status_code == 200
+        filtered_payload = filtered.get_json()
+        assert filtered_payload["total"] == 1
+        assert filtered_payload["candidate_total"] == 3
+        assert filtered_payload["candidate_limit"] == 200
+        assert filtered_payload["candidate_truncated"] is False
+        assert filtered_payload["filters"] == {
+            "target": "APP.EXAMPLE",
+            "status_code": 200,
+            "technology": "NGINX",
+            "profile_role": "AUTHENTICATED",
+            "visual_hash": "VISUAL-GOOD",
+            "change_state": "changed",
+        }
+        assert filtered_payload["captures"][0]["artifact"]["id"] == good_artifact_id
+        assert capped_filtered.status_code == 200
+        capped_payload = capped_filtered.get_json()
+        assert capped_payload["total"] == 1
+        assert capped_payload["candidate_total"] == 3
+        assert capped_payload["candidate_limit"] == 1
+        assert capped_payload["candidate_truncated"] is True
+        assert foreign.status_code == 404
+
     def test_rejects_cross_session_or_unsupported_project_links(self):
         client = get_client()
         session_id = self._session_id("project-link")
@@ -12345,6 +13513,146 @@ class TestProjectRoutes:
 
 # ── /log ──────────────────────────────────────────────────────────────────────
 
+    def test_manual_findings_keep_stable_identity_and_bounded_line_evidence(self):
+        client = get_client()
+        session_id = self._session_id("manual-findings")
+        project = self._create_project(client, session_id)
+        target = self._create_target(
+            client,
+            session_id,
+            project["id"],
+            value="manual.example.test",
+        )
+        run_id = self._seed_run(session_id, "nmap manual.example.test")
+        self._link_run(client, session_id, project["id"], run_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "UPDATE runs SET output_line_count = 3 WHERE id = ?",
+                (run_id,),
+            )
+            conn.commit()
+
+        create_payload = {
+            "target_id": target["id"],
+            "title": "Unauthenticated admin console",
+            "severity": "high",
+            "summary": "The administrative console is reachable without authentication.",
+            "confidence": "high",
+            "cve_ids": ["CVE-2026-12345"],
+            "cwe_ids": ["CWE-306"],
+            "references": ["https://example.test/advisories/CVE-2026-12345"],
+            "evidence": [{
+                "evidence_type": "run_line",
+                "evidence_id": run_id,
+                "line_number": 1,
+                "snippet": "443/tcp open https - admin console",
+            }],
+        }
+        created_resp = client.post(
+            f"/projects/{project['id']}/findings",
+            json=create_payload,
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert created_resp.status_code == 201
+        created = created_resp.get_json()["finding"]
+        assert created["origin"] == "manual"
+        assert created["validation_method"] == "manual_assessment"
+        assert created["manual_revision"] == 1
+        assert created["run_id"] == run_id
+        assert created["line_number"] == 1
+        assert created["raw_line"] == "443/tcp open https - admin console"
+        assert created["cve_ids"] == ["CVE-2026-12345"]
+        assert created["risk"]["cve_id"] == "CVE-2026-12345"
+        assert created["evidence_links"][0]["snippet"] == created["raw_line"]
+        assert "manual_created_by_session_id" not in created
+        observation_id = created["observation_id"]
+        remediation_id = created["remediation_id"]
+
+        duplicate_resp = client.post(
+            f"/projects/{project['id']}/findings",
+            json=create_payload,
+            headers={"X-Session-ID": session_id},
+        )
+        assert duplicate_resp.status_code == 409
+        duplicate = duplicate_resp.get_json()
+        assert duplicate["conflict"] == "possible_duplicate"
+        assert duplicate["duplicates"][0]["id"] == created["id"]
+
+        updated_resp = client.patch(
+            f"/projects/{project['id']}/findings/{created['id']}",
+            json={
+                "expected_revision": 1,
+                "title": "Admin console allows anonymous access",
+                "severity": "critical",
+                "cve_ids": ["CVE-2026-12345"],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert updated_resp.status_code == 200
+        updated = updated_resp.get_json()["finding"]
+        assert updated["manual_revision"] == 2
+        assert updated["severity"] == "critical"
+        assert updated["observation_id"] == observation_id
+        assert updated["remediation_id"] == remediation_id
+
+        stale_resp = client.patch(
+            f"/projects/{project['id']}/findings/{created['id']}",
+            json={"expected_revision": 1, "severity": "low"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert stale_resp.status_code == 409
+        assert stale_resp.get_json() == {
+            "ok": False,
+            "updated": False,
+            "conflict": "stale_revision",
+            "current_revision": 2,
+        }
+
+        findings_resp = client.get(
+            f"/projects/{project['id']}/findings",
+            headers={"X-Session-ID": session_id},
+        )
+        listed = next(
+            item for item in findings_resp.get_json()["findings"]
+            if item["id"] == created["id"]
+        )
+        assert listed["manual_revision"] == 2
+        assert listed["orphan_source"] is False
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            occurrence = conn.execute(
+                "SELECT line_number, snippet, observed_severity FROM findings_occurrences "
+                "WHERE finding_id = ?",
+                (created["id"],),
+            ).fetchone()
+            cve_link = conn.execute(
+                "SELECT cve_id, link_source FROM finding_cve_links WHERE finding_id = ?",
+                (created["id"],),
+            ).fetchone()
+        assert dict(occurrence) == {
+            "line_number": 1,
+            "snippet": "443/tcp open https - admin console",
+            "observed_severity": "critical",
+        }
+        assert dict(cve_link) == {
+            "cve_id": "CVE-2026-12345",
+            "link_source": "manual",
+        }
+
+        override_payload = dict(create_payload)
+        override_payload["allow_duplicate"] = True
+        override_resp = client.post(
+            f"/projects/{project['id']}/findings",
+            json=override_payload,
+            headers={"X-Session-ID": session_id},
+        )
+        assert override_resp.status_code == 201
+        override = override_resp.get_json()
+        assert override["duplicate_override"] is True
+        assert override["finding"]["id"] != created["id"]
+
+
 class TestClientLogRoute:
     def test_accepts_client_error_payload(self):
         client = get_client()
@@ -12388,6 +13696,57 @@ class TestClientLogRoute:
         debug_extra = mock_debug.call_args.kwargs["extra"]
         assert debug_extra["context"] == "TEAM_SCOPE_CHANGED"
         assert debug_extra["client_message"] == '{"scope":"team"}'
+
+        with mock.patch.object(shell_assets.log, "error") as mock_error:
+            assessment_resp = client.post("/log", json={
+                "event": "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
+                "level": "error",
+                "context": "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
+                "message": "Internal server error",
+                "details": {
+                    "page": "project_assessment",
+                    "phase": "zap_job_refresh",
+                    "project_id": "prj_1",
+                    "assessment_id": "asm_1",
+                    "check_id": "ach_1",
+                    "correlation_id": "ocr_1",
+                    "job_id": "zaj_1",
+                    "profile_key": "web",
+                    "status": 500,
+                    "assessment_check_id": "legacy-check-id",
+                    "zap_job_id": "legacy-job-id",
+                    "target_value": "https://private.example.test",
+                    "callback_url": "https://callback.example.test",
+                    "command": "secret command",
+                    "response_body": "private response",
+                    "finding_text": "private finding",
+                },
+            })
+        assert assessment_resp.status_code == 200
+        mock_error.assert_called_once()
+        assert mock_error.call_args.args == (
+            "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
+        )
+        assessment_extra = mock_error.call_args.kwargs["extra"]
+        assert assessment_extra["client_details"] == {
+            "assessment_id": "asm_1",
+            "check_id": "ach_1",
+            "correlation_id": "ocr_1",
+            "job_id": "zaj_1",
+            "page": "project_assessment",
+            "phase": "zap_job_refresh",
+            "profile_key": "web",
+            "project_id": "prj_1",
+            "status": 500,
+        }
+        serialized = json.dumps(assessment_extra)
+        assert "private.example.test" not in serialized
+        assert "callback.example.test" not in serialized
+        assert "secret command" not in serialized
+        assert "private response" not in serialized
+        assert "private finding" not in serialized
+        assert "legacy-check-id" not in serialized
+        assert "legacy-job-id" not in serialized
 
     def test_routes_supported_levels_and_counts_only_warning_and_error_metrics(self):
         client = get_client()
@@ -12599,12 +13958,14 @@ class TestConfigRoute:
             "high_volume_output_status_interval_lines", "evidence_package_max_mb",
             "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
             "workspace_enabled", "interactive_pty_commands",
+            "assessment_intrusive_actions_enabled",
             "scheduler_default_timezone",
             "tour_chapters",
         ):
             assert key in data
         assert "share_redaction_enabled" in data
         assert "share_redaction_rules" in data
+        assert data["assessment_intrusive_actions_enabled"] is False
 
     def test_interactive_pty_commands_reflect_registry(self):
         client = get_client()
@@ -12915,6 +14276,9 @@ class TestVendorAssets:
             if fragment_path.endswith("atlas_overlay.html"):
                 assert 'id="atlas-overlay"' in fragment_body
                 assert 'id="atlas-surface"' in fragment_body
+                assert '<option value="sarif_json">SARIF 2.1 JSON</option>' in fragment_body
+                assert '<option value="cyclonedx_json">CycloneDX JSON</option>' in fragment_body
+                assert '<option value="greenbone_xml">Greenbone XML</option>' in fragment_body
             else:
                 assert 'id="project-workspace-overlay"' in fragment_body
                 assert 'id="project-workspace-body"' in fragment_body
@@ -13357,6 +14721,7 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         emitted = set(data["config"].keys())
+        assert data["config"]["assessment_intrusive_actions_enabled"] is False
         assert data["raw_packets"]["configured"] is False
         assert data["raw_packets"]["active"] is False
         assert data["raw_packets"]["reason"] == "disabled"
@@ -14659,7 +16024,18 @@ class TestCommandCatalogRoute:
             ],
             "pipe_helpers": [],
         }
+        feed_status = [{
+            "source": "epss",
+            "status": "stale",
+            "origin": "bundled",
+            "source_version": "2026-08-01",
+            "model_version": "v2025.03.14",
+            "published_at": "2026-08-01",
+            "age_hours": 72.0,
+            "live_refresh_enabled": False,
+        }]
         with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.content.get_configured_feed_status", return_value=feed_status), \
              mock.patch.dict("config.CFG", {"workspace_enabled": False}):
             index_resp = client.get("/commands/catalog")
             resp = client.get("/commands/catalog/sentinel")
@@ -14679,6 +16055,7 @@ class TestCommandCatalogRoute:
         assert "workspace-tool" not in {item["root"] for item in index_data["commands"]}
         assert index_data["groups"][0]["name"] == "Registry Group"
         assert index_data["groups"][0]["commands"] == index_data["commands"]
+        assert index_data["cve_risk_feeds"] == feed_status
         assert {
             (item["id"], tuple(item["entity_types"]), tuple(item["secret_env_names"]))
             for item in index_data["intel_providers"]
@@ -14857,10 +16234,28 @@ class TestWorkflowsRoute:
         enabled_by_title = {item["title"]: item for item in enabled["items"]}
 
         assert "Subdomain HTTP Triage" not in disabled_titles
+        assert "Historical Web Surface Triage" not in disabled_titles
         assert "Crawl And Scan" not in disabled_titles
+        assert "Bounded Subdomain Assessment" in disabled_titles
         assert enabled_by_title["Subdomain HTTP Triage"]["steps"][0]["cmd"] == (
             "subfinder -d {{domain}} -silent -o subdomains.txt"
         )
+        historical = enabled_by_title["Historical Web Surface Triage"]
+        assert historical["version"] == 2
+        assert historical["steps"][0]["cmd"] == (
+            "gau --subs --threads 2 --timeout 10 {{domain}} | head -n 1024 > historical-urls.txt"
+        )
+        assert historical["steps"][1]["cmd"] == (
+            "urlscope {{domain}} historical-urls.txt historical-scoped-urls.txt"
+        )
+        assert historical["steps"][4]["cmd"].startswith(
+            "katana -list live-scoped-urls.txt"
+        )
+        bounded = enabled_by_title["Bounded Subdomain Assessment"]
+        assert bounded["version"] == 3
+        assert bounded["steps"][0]["captures"][0]["item_limit"] == 16
+        assert bounded["steps"][1]["for_each"]["collection"] == "subdomains"
+        assert bounded["steps"][1]["for_each"]["max_parallel"] == 4
         assert enabled_by_title["Crawl And Scan"]["steps"][2]["cmd"] == (
             "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt"
         )
@@ -15275,7 +16670,7 @@ class TestAtlasRoutes:
         )
         with db_connect() as conn:
             before_private_lookup = {
-                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec
                 for table in protected_tables
             }
         with (
@@ -15306,7 +16701,7 @@ class TestAtlasRoutes:
             )
         with db_connect() as conn:
             after_private_lookup = {
-                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec
                 for table in protected_tables
             }
         with mock.patch.object(atlas_blueprint.log, "debug") as lookup_debug:
@@ -15646,6 +17041,7 @@ class TestAtlasRoutes:
             "occurrence_count": 1,
             "last_seen_at": "2026-05-14T00:03:00+00:00",
             "source_run_count": 1,
+            "service_evidence_state": "needs_review",
         }
         assert detail["overview"]["observed"]["app_services"] == []
         assert detail["overview"]["finding_summary"] == detail["finding_summary"]
@@ -17192,6 +18588,79 @@ class TestAtlasRoutes:
             ("Names", "darklab.sh, www.darklab.sh", "crtsh"),
         }
 
+    def test_cve_refresh_persists_shared_nvd_advisory_only_when_enabled(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        cve_entity_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        nvd_payload = {
+            "status": "active",
+            "published": "2026-08-01T00:00:00Z",
+            "last_modified": "2026-08-04T00:00:00Z",
+            "severity": "HIGH",
+            "score": 8.8,
+            "cvss_version": "3.1",
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "cwes": ["CWE-79"],
+        }
+        provider_result = mock.Mock(
+            provider="nvd",
+            status="ok",
+            message="",
+            result=mock.Mock(
+                provider="nvd",
+                payload={
+                    "providers": {"nvd": nvd_payload},
+                    "summary": {"has_intel": True, "providers_with_data": ["nvd"]},
+                },
+            ),
+        )
+        lookup_result = mock.Mock(
+            entity_type="cve",
+            canonical_value="CVE-2025-49113",
+            providers=[provider_result],
+            success_count=1,
+            configured_count=1,
+        )
+
+        with mock.patch.dict(
+            "config.CFG",
+            {"cve_risk": {"advisory_mode": "external"}},
+        ), mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result):
+            response = client.post(
+                f"/atlas/entities/{cve_entity_id}/refresh_intel",
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert response.status_code == 200
+        refresh_data = json.loads(response.data)["refresh"]
+        assert refresh_data["shared_advisory"] == {
+            "source": "nvd",
+            "outcome": "stored",
+            "record_count": 1,
+        }
+        with db_connect() as conn:
+            risk = conn.execute(
+                "SELECT advisory_status, cvss_score, cvss_vector, cwe_ids_json, nvd_origin "
+                "FROM cve_risk_records WHERE cve_id = 'CVE-2025-49113'"
+            ).fetchone()
+        assert dict(risk) == {
+            "advisory_status": "active",
+            "cvss_score": 8.8,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "cwe_ids_json": '["CWE-79"]',
+            "nvd_origin": "external",
+        }
+        audit = _audit_event_rows(event_type="cve_advisory.refresh")[-1]
+        assert audit["target_id"] == "nvd"
+        assert audit["details"] == {
+            "origin": "external",
+            "outcome": "stored",
+            "record_count": 1,
+            "source": "nvd",
+        }
+        assert "CVE-2025-49113" not in json.dumps(audit)
+
     def test_refresh_intel_can_offload_provider_payload_and_restore_detail(self):
         from services.storage import body_store
 
@@ -17255,12 +18724,64 @@ class TestAtlasRoutes:
         list_resp = client.get("/atlas/findings?review_state=new", headers={"X-Session-ID": session_id})
         data = json.loads(list_resp.data)
         finding_id = data["findings"][0]["id"]
+        entity_id = data["findings"][0]["entity_id"]
+        run_id = data["findings"][0]["run_id"]
+        related_finding_id = "fnd_group_related_" + uuid.uuid4().hex
+        unrelated_finding_id = "fnd_group_unrelated_" + uuid.uuid4().hex
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE findings SET title = 'CVE-2026-12345', "
+                "cve_ids_json = '[\"CVE-2026-12345\"]' WHERE id = ?",
+                (finding_id,),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, title, "
+                "origin, validation_method, cve_ids_json, created) "
+                "VALUES (?, ?, ?, ?, 'related-proof', ?, 'CVE-2026-12345 inferred', "
+                "'run', 'version_inference', '[\"CVE-2026-12345\"]', datetime('now'))",
+                (related_finding_id, session_id, run_id, entity_id, uuid.uuid4().hex),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, title, "
+                "origin, validation_method, cve_ids_json, created) "
+                "VALUES (?, ?, ?, 'ent_unrelated_review_group', 'unrelated-proof', ?, "
+                "'CVE-2026-12345 elsewhere', 'manual', 'manual_assessment', "
+                "'[\"CVE-2026-12345\"]', datetime('now'))",
+                (unrelated_finding_id, session_id, run_id, uuid.uuid4().hex),
+            )
+            conn.execute(
+                "INSERT INTO findings_occurrences "
+                "(finding_id, run_id, line_number, snippet, seen_at) "
+                "VALUES (?, ?, 2, 'CVE-2026-12345 inferred', datetime('now'))",
+                (related_finding_id, run_id),
+            )
+            conn.commit()
         wrong_session_id = self._session_id()
         bulk_resp = client.post(
             "/atlas/findings/review",
             json={"finding_ids": [finding_id, "missing-finding"], "review_state": "important"},
             headers={"X-Session-ID": session_id},
         )
+        grouped_findings = client.get(
+            "/atlas/findings",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["findings"]
+        run_findings = client.get(
+            f"/entities/run/{run_id}/findings",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["findings"]
+        with db_connect() as conn:
+            conn.execute(
+                "DELETE FROM findings_occurrences WHERE finding_id = ?",
+                (related_finding_id,),
+            )
+            conn.executemany(
+                "DELETE FROM findings WHERE id = ?",
+                ((related_finding_id,), (unrelated_finding_id,)),
+            )
+            conn.commit()
         missing_triage_get_resp = client.get(
             "/findings/missing-finding/triage",
             headers={"X-Session-ID": session_id},
@@ -17377,6 +18898,18 @@ class TestAtlasRoutes:
         assert bulk_resp.status_code == 200
         bulk_data = json.loads(bulk_resp.data)
         assert bulk_data["counts"] == {"updated": 1, "not_found": 1}
+        assert bulk_data["remediation_groups_updated"] == 1
+        assert bulk_data["affected_observations"] == 2
+        grouped_by_id = {item["id"]: item for item in grouped_findings}
+        assert grouped_by_id[finding_id]["review_state"] == "important"
+        assert grouped_by_id[related_finding_id]["review_state"] == "important"
+        assert grouped_by_id[unrelated_finding_id]["review_state"] == "new"
+        assert grouped_by_id[related_finding_id]["observation_references"][0][
+            "review_state_source"
+        ] == "remediation_group"
+        assert {
+            item["id"]: item["review_state"] for item in run_findings
+        }[related_finding_id] == "important"
         assert missing_triage_get_resp.status_code == 404
         assert json.loads(missing_triage_get_resp.data) == {"error": "finding not found"}
         assert missing_triage_put_resp.status_code == 404
@@ -17449,7 +18982,256 @@ class TestAtlasRoutes:
                 "SELECT status FROM findings WHERE session_id = ? AND id = ?",
                 (session_id, finding_id),
             ).fetchone()
+            verification_audit = conn.execute(
+                "SELECT details FROM audit_events WHERE event_type = ? AND target_id = ?",
+                ("finding.verification_edit", finding_id),
+            ).fetchone()
         assert row["status"] == "important"
+        assert verification_audit is not None
+        assert json.loads(verification_audit["details"])["to_state"] == "ready_to_verify"
+
+    def test_explicit_remediation_merge_previews_and_shares_only_disposition(self):
+        client = get_client()
+        session_id = self._session_id()
+        other_session_id = self._session_id()
+        self._register_session_token(session_id)
+        self._register_session_token(other_session_id)
+        run_id, _recorded = self._seed_entity_run(session_id)
+        source_finding = client.get(
+            "/atlas/findings",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["findings"][0]
+        source_finding_id = source_finding["id"]
+        target_finding_id = "fnd_merge_target_" + uuid.uuid4().hex
+        target_entity_id = "ent_merge_target_" + uuid.uuid4().hex
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                "last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'domain', 'merged-target.darklab.test', ?, datetime('now'), "
+                "datetime('now'), 1, datetime('now'))",
+                (target_entity_id, session_id, uuid.uuid4().hex),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, entity_id, subject_key, signature_hash, origin, "
+                "validation_method, status, severity, title, raw_line, cve_ids_json, created) "
+                "VALUES (?, ?, ?, ?, 'merged-target.darklab.test', ?, 'manual', "
+                "'manual_assessment', 'important', 'high', 'Alternate evidence for one fix', "
+                "'CVE-2026-99999 on merged-target.darklab.test', "
+                "'[\"CVE-2026-99999\"]', datetime('now'))",
+                (
+                    target_finding_id,
+                    session_id,
+                    run_id,
+                    target_entity_id,
+                    uuid.uuid4().hex,
+                ),
+            )
+            before_occurrences = conn.execute(
+                "SELECT COUNT(*) AS count FROM findings_occurrences "
+                "WHERE finding_id IN (?, ?)",
+                (source_finding_id, target_finding_id),
+            ).fetchone()["count"]
+            conn.commit()
+
+        source_triage = client.put(
+            f"/findings/{source_finding_id}/triage",
+            json={
+                "verification_status": "ready_to_verify",
+                "verification_steps": "Repeat the source check.",
+                "verification_notes": "Keep source evidence separate.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        target_review = client.put(
+            f"/findings/{target_finding_id}/review",
+            json={"review_state": "important"},
+            headers={"X-Session-ID": session_id},
+        )
+        target_triage = client.put(
+            f"/findings/{target_finding_id}/triage",
+            json={
+                "remediation": "Apply the target-side patch guidance.",
+                "verification_status": "verified",
+                "verification_steps": "Repeat the target check.",
+                "verification_notes": "Target verification stays independent.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        candidates_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/candidates",
+            json={"query": "CVE-2026-99999"},
+            headers={"X-Session-ID": session_id},
+        )
+        preview_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/preview",
+            json={"target_finding_id": target_finding_id},
+            headers={"X-Session-ID": session_id},
+        )
+        preview = preview_resp.get_json()["preview"]
+        stale_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge",
+            json={
+                "target_finding_id": target_finding_id,
+                "preview_token": "stale-preview-token",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        target_changed = client.put(
+            f"/findings/{target_finding_id}/review",
+            json={"review_state": "reviewed"},
+            headers={"X-Session-ID": session_id},
+        )
+        changed_disposition_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge",
+            json={
+                "target_finding_id": target_finding_id,
+                "preview_token": preview["preview_token"],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        target_restored = client.put(
+            f"/findings/{target_finding_id}/review",
+            json={"review_state": "important"},
+            headers={"X-Session-ID": session_id},
+        )
+        refreshed_preview_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/preview",
+            json={"target_finding_id": target_finding_id},
+            headers={"X-Session-ID": session_id},
+        )
+        refreshed_preview = refreshed_preview_resp.get_json()["preview"]
+        apply_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge",
+            json={
+                "target_finding_id": target_finding_id,
+                "preview_token": refreshed_preview["preview_token"],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        merged_again_resp = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/preview",
+            json={"target_finding_id": target_finding_id},
+            headers={"X-Session-ID": session_id},
+        )
+        cross_scope_candidates = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/candidates",
+            json={"query": "CVE-2026-99999"},
+            headers={"X-Session-ID": other_session_id},
+        )
+        cross_scope_preview = client.post(
+            f"/findings/{source_finding_id}/remediation-merge/preview",
+            json={"target_finding_id": target_finding_id},
+            headers={"X-Session-ID": other_session_id},
+        )
+        merged_findings = {
+            item["id"]: item
+            for item in client.get(
+                "/atlas/findings",
+                headers={"X-Session-ID": session_id},
+            ).get_json()["findings"]
+        }
+        source_after_merge = client.get(
+            f"/findings/{source_finding_id}/triage",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["triage"]
+        target_after_merge = client.get(
+            f"/findings/{target_finding_id}/triage",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["triage"]
+        review_resp = client.put(
+            f"/findings/{source_finding_id}/review",
+            json={"review_state": "reviewed"},
+            headers={"X-Session-ID": session_id},
+        )
+        guidance_resp = client.put(
+            f"/findings/{source_finding_id}/triage",
+            json={
+                "remediation": "Use the final shared patch guidance.",
+                "verification_status": "ready_to_verify",
+                "verification_steps": "Repeat the source check.",
+                "verification_notes": "Keep source evidence separate.",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        target_after_guidance = client.get(
+            f"/findings/{target_finding_id}/triage",
+            headers={"X-Session-ID": session_id},
+        ).get_json()["triage"]
+        review_states = {
+            item["id"]: item["review_state"]
+            for item in client.get(
+                "/atlas/findings",
+                headers={"X-Session-ID": session_id},
+            ).get_json()["findings"]
+        }
+        with db_connect() as conn:
+            after_occurrences = conn.execute(
+                "SELECT COUNT(*) AS count FROM findings_occurrences "
+                "WHERE finding_id IN (?, ?)",
+                (source_finding_id, target_finding_id),
+            ).fetchone()["count"]
+
+        assert source_triage.status_code == 200
+        assert target_review.status_code == 200
+        assert target_triage.status_code == 200
+        assert candidates_resp.status_code == 200
+        assert [item["finding_id"] for item in candidates_resp.get_json()["candidates"]] == [
+            target_finding_id
+        ]
+        assert preview_resp.status_code == 200
+        assert preview["member_count"] == 2
+        assert preview["observation_count"] == 2
+        assert preview["target"]["review_state"] == "important"
+        assert preview["target"]["remediation_preview"] == "Apply the target-side patch guidance."
+        assert {item["finding_id"] for item in preview["observations"]} == {
+            source_finding_id,
+            target_finding_id,
+        }
+        assert stale_resp.status_code == 400
+        assert "stale" in stale_resp.get_json()["error"]
+        assert target_changed.status_code == 200
+        assert changed_disposition_resp.status_code == 400
+        assert "stale" in changed_disposition_resp.get_json()["error"]
+        assert target_restored.status_code == 200
+        assert refreshed_preview_resp.status_code == 200
+        assert apply_resp.status_code == 200
+        merge = apply_resp.get_json()["merge"]
+        assert merge["merge_id"].startswith("rmg_")
+        assert merge["member_count"] == 2
+        assert merged_again_resp.status_code == 400
+        assert "already share" in merged_again_resp.get_json()["error"]
+        assert cross_scope_candidates.status_code == 404
+        assert cross_scope_preview.status_code == 404
+        source_group = merged_findings[source_finding_id]
+        target_group = merged_findings[target_finding_id]
+        assert source_group["remediation_id"] != target_group["remediation_id"]
+        assert source_group["remediation_group_id"] == merge["merge_id"]
+        assert target_group["remediation_group_id"] == merge["merge_id"]
+        assert source_group["remediation_group_merged"] is True
+        assert source_group["remediation_group_member_count"] == 2
+        assert source_after_merge["remediation"] == "Apply the target-side patch guidance."
+        assert source_after_merge["verification_status"] == "ready_to_verify"
+        assert source_after_merge["verification_steps"] == "Repeat the source check."
+        assert target_after_merge["verification_status"] == "verified"
+        assert target_after_merge["verification_steps"] == "Repeat the target check."
+        assert review_resp.status_code == 200
+        assert guidance_resp.status_code == 200
+        assert review_states[source_finding_id] == "reviewed"
+        assert review_states[target_finding_id] == "reviewed"
+        assert target_after_guidance["remediation"] == "Use the final shared patch guidance."
+        assert target_after_guidance["verification_status"] == "verified"
+        assert target_after_guidance["verification_steps"] == "Repeat the target check."
+        assert before_occurrences == after_occurrences
+        merge_events = _audit_event_rows(
+            target_id=source_finding_id,
+            event_type="finding.remediation_merge",
+        )
+        assert len(merge_events) == 1
+        assert merge_events[0]["details"]["remediation_group_id"] == merge["merge_id"]
+        assert merge_events[0]["details"]["member_count"] == 2
 
     def test_atlas_suppression_hides_rows_until_requested_and_preserves_project_links(self):
         client = get_client()
@@ -19176,6 +20958,10 @@ class TestRunRoute:
         assert filtered == "wrote /reports/nmap.xml and /"
 
     def test_brokered_run_requires_available_broker(self):
+        from services.runs.broker_observability import (
+            log_assessment_broker_unavailable,
+        )
+
         client = get_client()
         with mock.patch.object(shell_app_module.log, "warning") as warning, \
              mock.patch("blueprints.run.broker_available", return_value=False), \
@@ -19188,6 +20974,52 @@ class TestRunRoute:
         assert extra["reason"] == "broker unavailable"
         assert extra["command_root"] == "echo"
         assert extra["broker_mode"] in {"in_process", "redis"}
+
+        assessment_log = mock.Mock()
+        common = {
+            "request_id": "request-1",
+            "session_id": "tok_private-session-token",
+            "team_id": "",
+            "project_id": "prj_1",
+            "assessment_id": "asm_1",
+            "check_id": "ach_1",
+            "finding_id": "fnd_1",
+            "action_kind": "finding_verification",
+            "source": "browser",
+            "broker_mode": "redis",
+        }
+        log_assessment_broker_unavailable(
+            assessment_log,
+            reason="Run broker is disabled by configuration.",
+            **common,
+        )
+        log_assessment_broker_unavailable(
+            assessment_log,
+            reason="Run broker requires Redis, but Redis is not available.",
+            **common,
+        )
+        assessment_log.info.assert_called_once()
+        assessment_log.warning.assert_called_once()
+        info_fields = assessment_log.info.call_args.kwargs["extra"]
+        warning_fields = assessment_log.warning.call_args.kwargs["extra"]
+        assert info_fields["reason"] == "configuration_disabled"
+        assert warning_fields["reason"] == "redis_unavailable"
+        assert warning_fields["owner_kind"] == "personal"
+        assert warning_fields["session"] != common["session_id"]
+        assert set(warning_fields) == {
+            "action_kind",
+            "assessment_id",
+            "broker_mode",
+            "check_id",
+            "finding_id",
+            "owner_kind",
+            "project_id",
+            "reason",
+            "request_id",
+            "session",
+            "source",
+            "team_id",
+        }
 
     def test_brokered_run_missing_runtime_returns_synthetic_stream_reference(self):
         client = get_client()
@@ -19217,11 +21049,23 @@ class TestRunRoute:
 
     def test_brokered_run_rejects_invalid_command_payloads(self):
         client = get_client()
-        with mock.patch("blueprints.run.broker_available", return_value=True):
+        public_started = mock.Mock(run_id="run-public-context", status="running")
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch(
+                 "blueprints.run._start_brokered_run_service",
+                 return_value=public_started,
+             ) as public_start:
             non_object = client.post("/runs", json=["hostname"])
             missing = client.post("/runs", json={})
             non_string = client.post("/runs", json={"command": 42})
             blank = client.post("/runs", json={"command": "   "})
+            caller_context = client.post(
+                "/runs",
+                json={
+                    "command": "echo public",
+                    "output_signal_context": {"nuclei_takeover_template": "caller-made"},
+                },
+            )
 
         assert non_object.status_code == 400
         assert json.loads(non_object.data) == {"error": "Request body must be a JSON object"}
@@ -19231,6 +21075,8 @@ class TestRunRoute:
         assert json.loads(non_string.data) == {"error": "Command must be a string"}
         assert blank.status_code == 400
         assert json.loads(blank.data) == {"error": "No command provided"}
+        assert caller_context.status_code == 202
+        assert "output_signal_context" not in public_start.call_args.kwargs
 
     def test_brokered_run_disallowed_command_returns_403_before_spawning(self):
         client = get_client()
@@ -19242,6 +21088,24 @@ class TestRunRoute:
         assert resp.status_code == 403
         assert json.loads(resp.data) == {"error": "blocked"}
         popen.assert_not_called()
+
+        dangerous_sqlmap_commands = (
+            "sqlmap -u https://darklab.sh/item?id=1 --config-file attacker.ini",
+            "sqlmap -u https://darklab.sh/item?id=1 --os-pwn",
+            "sqlmap -u https://darklab.sh/item?id=1 --preprocess attacker.py",
+        )
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("blueprints.run.subprocess.Popen") as sqlmap_popen, \
+             mock.patch("blueprints.run._brokered_synthetic_run") as synthetic:
+            responses = [
+                client.post("/runs", json={"command": command})
+                for command in dangerous_sqlmap_commands
+            ]
+
+        assert [response.status_code for response in responses] == [403, 403, 403]
+        assert all(json.loads(response.data).get("error") for response in responses)
+        sqlmap_popen.assert_not_called()
+        synthetic.assert_not_called()
 
     def test_brokered_run_starts_real_process_and_registers_active_run(self, caplog):
         from blueprints import run as run_routes

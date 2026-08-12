@@ -88,6 +88,9 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
             ),
             "database_backend": str(active_cfg.get("database_backend") or ""),
             "workspace_enabled": bool(active_cfg.get("workspace_enabled")),
+            "assessment_intrusive_actions_enabled": bool(
+                active_cfg.get("assessment_intrusive_actions_enabled")
+            ),
             "raw_packet_scanning_configured": raw_packet_configured,
             "raw_packet_scanning_state": raw_packet_state,
             "raw_packet_scanning_active_tools": ",".join(active_tools),
@@ -239,6 +242,23 @@ def recover_workflow_executions_on_startup() -> None:
         })
 
 
+def cleanup_http_profile_runtime_on_startup() -> None:
+    from services.assessments.http_profile_runtime import (  # noqa: PLC0415
+        cleanup_stale_http_profile_runtime,
+    )
+
+    try:
+        removed = cleanup_stale_http_profile_runtime()
+    except Exception:
+        log.error("HTTP_PROFILE_RUNTIME_RECOVERY_ERROR", exc_info=True)
+        return
+    if removed:
+        log.info(
+            "HTTP_PROFILE_RUNTIME_RECOVERY_CLEANUP",
+            extra={"removed_count": removed, "pid": os.getpid()},
+        )
+
+
 def _bootstrap_step_flags(
     *,
     init_metrics: bool,
@@ -299,6 +319,7 @@ def bootstrap_runtime(
         ("process", init_process, lambda: init_process_runtime(active_cfg)),
         ("database", init_db, init_database),
         ("active_run_cleanup", cleanup_active_runs, cleanup_active_run_metadata_on_startup),
+        ("http_profile_runtime_cleanup", cleanup_active_runs, cleanup_http_profile_runtime_on_startup),
         ("workflow_recovery", cleanup_active_runs, recover_workflow_executions_on_startup),
     )
     for step, enabled, func in steps:

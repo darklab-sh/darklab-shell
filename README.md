@@ -65,7 +65,7 @@ Fresh installations keep a few capabilities disabled until you choose to enable 
 | [Interactive PTY](CONFIGURATION.md#enable-interactive-pty) | Real terminal sessions for approved interactive tools | `INTERACTIVE_PTY_ENABLED=true` |
 | [Raw-packet scanning](CONFIGURATION.md#raw-packet-scanning) | Capability-backed SYN and other approved raw scanner modes | `RAW_PACKET_SCANNING_ENABLED=true` |
 
-After changing one of these settings, run `docker compose up -d --force-recreate shell`. Interactive PTY uses Redis in normal multi-worker deployments, while raw-packet modes still activate only when their runtime readiness checks pass. Postgres and AI assists are separate optional deployment services covered in [Configuration](CONFIGURATION.md#environment-variables-and-env).
+After changing one of these settings, run `docker compose up -d --force-recreate shell`. Interactive PTY uses Redis in normal multi-worker deployments, while raw-packet modes still activate only when their runtime readiness checks pass. Postgres, AI assists, and the private ZAP/OAST connector workers are optional deployment services covered in [Configuration](CONFIGURATION.md#environment-variables-and-env).
 
 ---
 
@@ -75,10 +75,10 @@ After changing one of these settings, run `docker compose up -d --force-recreate
 | --- | --- |
 | [Browser shell](FEATURES.md#output-streaming-and-display) | Live, searchable output across desktop and mobile tabs. |
 | [History and sharing](FEATURES.md#tabs--run-history) | Saved runs, comparisons, exports, permalinks, and redaction. |
-| [Projects](FEATURES.md#project-workspaces) | Case workspaces that connect targets, evidence, findings, monitoring, and handoff packages. |
+| [Projects](FEATURES.md#project-workspaces) | Case workspaces that connect targets, assessment coverage, evidence, findings, monitoring, and handoff packages. |
 | [Atlas and Quick Lookup](FEATURES.md#session-entity-atlas) | Browse captured entities and open everything saved for one hostname, IP address, or URL without paging through results. |
 | [Workflows and automation](FEATURES.md#guided-workflows) | Guided playbooks, schedules, watchers, and outbound notifications. |
-| [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context from supported providers. |
+| [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context, including dated offline EPSS and CISA KEV signals. |
 | [Files, variables, and secrets](FEATURES.md#session-files) | A searchable personal or team file browser, terminal capture/copy helpers, reusable values, and encrypted tool credentials. |
 | [Teams](FEATURES.md#team-mode) | Shared runs, projects, files, automation, and secrets with role controls. |
 | [Interactive tools](FEATURES.md#interactive-pty-mode) | Guarded PTY sessions for approved tools that need a real terminal. |
@@ -92,6 +92,33 @@ See [FEATURES.md](FEATURES.md) for the full feature reference.
 Open **Quick Lookup** beside Atlas on the desktop rail or mobile menu, or press `Alt+Q` / `Option+Q`. Enter one hostname, IP address, or absolute `http://` or `https://` URL and darklab_shell opens the matching saved Atlas profile in your current personal or team scope. **Auto** detects the input type, while the other choices let you require a hostname, IP address, or URL.
 
 Quick Lookup reads evidence and Intel snapshots the app has already saved. It doesn't run a command, create an Atlas record, or contact an Intel provider. If there isn't an exact record, the result explains what was missing and can take you to normal Atlas search; an unmatched URL can also offer its known parent host. Use **Refresh intel** from a saved profile only when you want a live provider refresh.
+
+Atlas can preview external scanner reports before saving any rows. Alongside Nuclei, Nessus, Greenbone, ZAP, Burp Suite, CSV, and JSONL, the import picker accepts SARIF 2.1 JSON and CycloneDX JSON. Any supported report can also arrive as gzip or as a ZIP containing one report; upload and expanded-size limits keep compressed files from consuming unbounded space. Greenbone's native XML reports map hosts, CVEs, and findings into the same Atlas and Project review flow, and repeated exports of the same NVT against the same target don't create duplicate findings. Importing a report doesn't connect to or manage a Greenbone service. SARIF keeps stable fingerprints, automation context, and safe web or repository-relative locations for review, while local file URIs, traversal paths, credential-bearing URLs, and other unsafe locations are left out and never fetched. CycloneDX previews show components, dependency links, vulnerability assertions, and VEX dispositions separately. Nessus previews can also keep exact service versions with the host, port, service, scan time, and parser details that produced them. You can keep that evidence with the import batch; inventory alone doesn't become a finding, and an imported `not affected` or `resolved` claim never closes existing work. When the app checks a Nessus version against stored NVD rules, it has to re-read that exact applied evidence row before it can save an inferred finding.
+
+### Run a Project assessment
+
+1. Add the approved domains, IPs, ports, or URLs to a Project.
+2. Open **Assessment**, start a Network, Web, API, TLS, or Combined cycle, and review the checks created for those targets.
+3. Run a recommended action or link compatible evidence the Project already has. Mark a check blocked, skipped, or not applicable only when you have a reason to keep with the cycle.
+4. Review findings and retests, complete the cycle, then choose that cycle when you build an evidence package or engagement report.
+
+Coverage stays factual: a saved run counts only when its target, tool, outcome, version, and evidence match the frozen check. Each target keeps its full-cycle totals even when the worklist spans several pages. **Fix first** ranks current issues without making untested checks look complete, and the **Retest queue** groups two to ten findings only when they share the same safe, credential-free plan. Completed and archived cycles are read-only, and team viewers can inspect the work without changing it.
+
+### Use reviewed actions and integrations
+
+Every available action shows its exact target, policy, scope, limits, and credential use before it starts. Reusable HTTP profiles keep role and scope settings while referring to darklab_shell Secrets and Files instead of copying credential values. Saved service evidence can suggest a fixed Nmap profile, but uncertain or conflicting fingerprints don't produce an action. The full list of maintained actions and their safety boundaries is in [Project Workspaces](FEATURES.md#project-workspaces).
+
+Operators can optionally connect ZAP for reviewed external web scans or a private Interactsh-compatible service for blind-XSS callbacks. Both integrations are off by default, use separate workers, and keep scanner credentials and callback details out of visible commands and browser storage. See [ZAP and OAST worker setup](CONFIGURATION.md#running-zap-and-oast-workers).
+
+Projects also include a **Web Surface** gallery for saved HTTPx screenshots. It shows current response context and visual changes, keeps unavailable captures visible, and can hand an available image to an evidence package or report without opening captured HTML in the app.
+
+### Review findings and hand off the cycle
+
+Create a finding from an Assessment check, Atlas profile, or selected Run Details lines, then attach typed references to the runs, artifacts, screenshots, targets, and checks that support it. Compatible retest results can suggest a status, but the final verification remains a human decision. Completing a cycle compares it with the newest compatible earlier cycle and keeps new, persistent, no-longer-observed, regressed, and incomparable work separate.
+
+Reports and evidence packages can use any saved cycle, including archived history. They keep its frozen scope, coverage, exclusions, evidence references, fix-first priorities, comparison basis, and warnings when a source or screenshot is unavailable.
+
+Release-pinned EPSS and CISA KEV data help explain which saved CVEs deserve attention first without making an outbound request. Optional NVD and OSV data can add advisory or exact package-version context, while Project Monitoring records later risk changes without rewriting the original finding. Inventory and inferred version matches stay separate from findings that an active check confirmed.
 
 ---
 
@@ -154,10 +181,14 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `nikto` | Web server vulnerability scanning |
 | `wpscan` | WordPress vulnerability scanning |
 | `nuclei` | Template-based exposure, misconfiguration, and vulnerability checks |
+| `dalfox` | Bounded parameter discovery plus separately enabled and confirmed validation for one reviewed query parameter |
+| `schemathesis` | OpenAPI and GraphQL contract tester; direct terminal use is limited to local help and version output |
+| `sqlmap` | Detection-only SQL injection checks for one approved URL; extraction and takeover actions are blocked |
+| `gau` | Passive historical URL discovery from public archives and indexes; the built-in Historical Web Surface Triage workflow can scope and verify those results before crawling |
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
 | `amass` | OWASP subdomain enumeration and attack-surface asset discovery |
 | `httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery) |
-| `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
+| `dnsx` | Fast DNS resolution and record querying, with structured CNAME evidence for dangling-record review (ProjectDiscovery) |
 | `tlsx` | TLS certificate, protocol, cipher, and DNS metadata collection (ProjectDiscovery) |
 | `cdncheck` | CDN, cloud, and WAF provider classification for hosts and IPs (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost discovery |
@@ -248,6 +279,8 @@ The installed `release-manifest.json` records both registry index references, th
 
 Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, and `remove` for production lifecycle work. When the installation includes `compose.operator.yaml`, Compose-backed lifecycle steps automatically use it alongside the release-owned `compose.yaml`. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
 
+Assessments can hand reviewed work to operator-managed ZAP and private OAST services. The production stack includes one isolated worker profile for each connector, so enabling either service doesn't require a custom process supervisor. Keep the provider and policy credentials in the installation's private `.env`, then follow [Running ZAP and OAST workers](CONFIGURATION.md#running-zap-and-oast-workers) to connect, start, and monitor them.
+
 ---
 
 ## Running in a Development Environment
@@ -328,6 +361,7 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
 - [TODO.md](TODO.md) - Backlog items, research notes, and known issues
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [app/resources/cve_risk/NOTICE.md](app/resources/cve_risk/NOTICE.md) - Attribution and interpretation notes for the bundled EPSS and CISA KEV data
 - [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
 - [docs/changelog/1.x.md](docs/changelog/1.x.md) - Published 1.x release history

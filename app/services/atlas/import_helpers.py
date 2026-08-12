@@ -48,45 +48,6 @@ def row_set_digest(normalized_rows: dict[str, Any]) -> str:
     return sha256_text(stable_json(normalized_rows))
 
 
-def safe_count_fields(counts: dict[str, Any]) -> dict[str, int]:
-    fields: dict[str, int] = {}
-    for key in (
-        "rows",
-        "valid",
-        "skipped",
-        "warnings",
-        "duplicate",
-        "new",
-        "updated",
-        "entity_valid",
-        "entity_new",
-        "entity_duplicate",
-        "finding_valid",
-        "finding_new",
-        "finding_duplicate",
-        "finding_subject_entities_to_create",
-        "project_target_candidates",
-        "entities_created",
-        "entities_updated",
-        "findings_created",
-        "findings_updated",
-        "finding_remediations_imported",
-        "entity_links",
-        "finding_occurrences",
-        "project_links_added",
-        "project_links_existing",
-        "project_targets_created",
-        "project_targets_existing",
-    ):
-        if key not in counts:
-            continue
-        try:
-            fields[key] = int(counts.get(key) or 0)
-        except (TypeError, ValueError):
-            fields[key] = 0
-    return fields
-
-
 def required_capability_values(required: set[Capability] | list[Capability] | tuple[Capability, ...]) -> list[str]:
     return sorted(capability.value for capability in required)
 

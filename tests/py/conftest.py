@@ -43,6 +43,9 @@ TEST_RATE_LIMIT_OVERRIDES = {
     "rate_limit_per_second": 1000,
     "evidence_package_download_rate_limit_per_minute": 100000,
     "evidence_package_download_rate_limit_per_second": 1000,
+    "cve_risk": {
+        "bootstrap_enabled": False,
+    },
 }
 
 def build_test_config(overrides=None):

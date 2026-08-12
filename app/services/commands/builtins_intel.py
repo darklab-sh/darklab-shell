@@ -20,6 +20,7 @@ from core.helpers import get_log_session_id
 from services.intel.canonical import CanonicalizationError
 from services.intel.lookup import IntelLookupResult, ProviderLookup, lookup_entity
 from services.intel.registry import provider_label
+from services.cve_risk.store import get_cve_risk
 
 
 log = logging.getLogger("shell")
@@ -52,8 +53,9 @@ def run_builtin_intel(command: str, session_id: str, *, team_id: str = "") -> tu
         return [output_line(f"intel: {message}")], 1
 
     _persist_lookup_snapshot(result, session_id, team_id=team_id)
-    lines = _format_lookup_result(result)
-    exit_code = 0 if result.success_count or result.configured_count else 1
+    cve_risk = _stored_cve_risk(result.canonical_value) if entity_type == "cve" else None
+    lines = _format_lookup_result(result, cve_risk=cve_risk)
+    exit_code = 0 if result.success_count or result.configured_count or cve_risk else 1
     return lines, exit_code
 
 
@@ -100,13 +102,27 @@ def _private_ip_error(value: str, *, include_private: bool) -> str:
     )
 
 
-def _format_lookup_result(result: IntelLookupResult) -> list[dict[str, object]]:
+def _stored_cve_risk(cve_id: str) -> dict[str, Any] | None:
+    try:
+        return get_cve_risk(cve_id)
+    except Exception:
+        log.exception("CVE_RISK_LOOKUP_FAILED", extra={"surface": "intel_builtin"})
+        return None
+
+
+def _format_lookup_result(
+    result: IntelLookupResult,
+    *,
+    cve_risk: dict[str, Any] | None = None,
+) -> list[dict[str, object]]:
     lines = [
         output_line(
             f"Intel lookup: {result.entity_type} {result.canonical_value}",
             "builtin-section",
         ),
     ]
+    if result.entity_type == "cve":
+        lines.extend(_format_cve_risk(cve_risk))
     for index, provider in enumerate(result.providers):
         if index > 0:
             lines.append(output_line("", "builtin-spacer"))
@@ -114,6 +130,61 @@ def _format_lookup_result(result: IntelLookupResult) -> list[dict[str, object]]:
     if result.providers and result.configured_count == 0:
         lines.append(output_line("No providers are configured for this lookup.", "builtin-note"))
         lines.append(output_line("Use `providers` to see provider setup status and accepted secret names.", "builtin-note"))
+    return lines
+
+
+def _format_cve_risk(risk: dict[str, Any] | None) -> list[dict[str, object]]:
+    lines = [output_line("", "builtin-spacer"), output_line("Stored public risk signals:", "builtin-section")]
+    if not risk:
+        lines.append(output_line("No stored EPSS or KEV data is available for this CVE.", "builtin-note"))
+        return lines
+    probability = risk.get("epss_probability")
+    percentile = risk.get("epss_percentile")
+    if probability is None:
+        probability_label = "unavailable"
+    else:
+        probability_label = f"{float(probability) * 100:.2f}%"
+    if percentile is None:
+        percentile_label = "unavailable"
+    else:
+        percentile_label = f"{float(percentile) * 100:.2f}th"
+    lines.extend([
+        output_line(format_native_record("CISA KEV", "listed" if risk.get("kev_listed") else "not listed", 14), "builtin-kv"),
+        output_line(format_native_record("EPSS", probability_label, 14), "builtin-kv"),
+        output_line(format_native_record("percentile", percentile_label, 14), "builtin-kv"),
+    ])
+    if risk.get("epss_published_at"):
+        lines.append(output_line(format_native_record("EPSS date", str(risk["epss_published_at"]), 14), "builtin-kv"))
+    if risk.get("epss_model_version"):
+        lines.append(output_line(format_native_record("EPSS model", str(risk["epss_model_version"]), 14), "builtin-kv"))
+    if risk.get("kev_date_added"):
+        lines.append(output_line(format_native_record("KEV added", str(risk["kev_date_added"]), 14), "builtin-kv"))
+    if risk.get("kev_due_date"):
+        lines.append(output_line(format_native_record("BOD 22-01 date", str(risk["kev_due_date"]), 14), "builtin-kv"))
+        lines.append(output_line("The BOD date is federal directive context, not your remediation SLA.", "builtin-note"))
+    if risk.get("cvss_score") is not None:
+        cvss_label = f"{float(risk['cvss_score']):.1f}"
+        if risk.get("cvss_severity"):
+            cvss_label += f" · {risk['cvss_severity']}"
+        lines.append(output_line(format_native_record("NVD CVSS", cvss_label, 14), "builtin-kv"))
+    if risk.get("cvss_vector"):
+        lines.append(output_line(format_native_record("CVSS vector", str(risk["cvss_vector"]), 14), "builtin-kv"))
+    if str(risk.get("advisory_status") or "unknown") != "unknown":
+        lines.append(output_line(format_native_record("NVD status", str(risk["advisory_status"]), 14), "builtin-kv"))
+    for source in risk.get("sources") or []:
+        label = {
+            "epss": "FIRST EPSS",
+            "kev": "CISA KEV",
+            "nvd": "NIST NVD",
+        }.get(str(source.get("source") or ""), str(source.get("source") or "").upper())
+        detail = " · ".join(filter(None, (
+            str(source.get("status") or "unavailable"),
+            str(source.get("origin") or ""),
+            f"published {source.get('published_at')}" if source.get("published_at") else "",
+            f"fetched {source.get('retrieved_at')}" if source.get("retrieved_at") else "",
+        )))
+        lines.append(output_line(format_native_record(label, detail, 14), "builtin-kv"))
+    lines.append(output_line("EPSS estimates exploitation probability; it isn't a complete risk score.", "builtin-note"))
     return lines
 
 
@@ -460,11 +531,17 @@ def _format_hibp(payload: dict[str, Any]) -> list[dict[str, object]]:
 
 def _format_nvd(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
+        output_line(format_native_record("status", str(payload.get("status") or "unknown"), 14), "builtin-kv"),
         output_line(format_native_record("severity", str(payload.get("severity") or "unknown"), 14), "builtin-kv"),
         output_line(format_native_record("score", str(payload.get("score") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("published", str(payload.get("published") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("modified", str(payload.get("last_modified") or "-"), 14), "builtin-kv"),
     ]
+    if payload.get("cvss_vector"):
+        lines.append(output_line(format_native_record("CVSS vector", str(payload["cvss_vector"]), 14), "builtin-kv"))
+    cwes = payload.get("cwes")
+    if isinstance(cwes, list) and cwes:
+        lines.append(output_line(format_native_record("CWEs", _join_values(cwes), 14), "builtin-kv"))
     description = str(payload.get("description") or "").strip().replace("\n", " ")
     if description:
         lines.append(output_line(format_native_record("summary", _truncate(description, 110), 14), "builtin-kv"))

@@ -17,7 +17,13 @@ from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
-from services.atlas.import_workflow import AtlasImportError, apply_atlas_import, preview_atlas_import
+from services.atlas.import_logging import route_count_log_fields as _atlas_import_count_log_fields
+from services.atlas.import_draft_read import get_atlas_import_preview
+from services.atlas.import_workflow import (
+    AtlasImportError,
+    apply_atlas_import,
+    preview_atlas_import,
+)
 from services.atlas.lookup import (
     atlas_summary,
     run_atlas_read,
@@ -123,6 +129,7 @@ def _atlas_import_option_flags(options):
     return {
         "import_entities": bool(raw.get("import_entities")),
         "import_findings": bool(raw.get("import_findings")),
+        "import_evidence": bool(raw.get("import_evidence")),
         "link_to_project": bool(raw.get("link_to_project")),
         "create_project_targets": bool(raw.get("create_project_targets")),
     }
@@ -161,43 +168,6 @@ def _atlas_import_preview_log_fields(session_id, scope, member):
         "filename_present": bool(upload and upload.filename),
         "content_length": int(request.content_length or 0),
     }
-
-
-def _atlas_import_count_log_fields(counts):
-    raw = counts if isinstance(counts, dict) else {}
-    fields = {}
-    for key in (
-        "rows",
-        "valid",
-        "skipped",
-        "warnings",
-        "new",
-        "updated",
-        "entity_valid",
-        "entity_new",
-        "entity_duplicate",
-        "finding_valid",
-        "finding_new",
-        "finding_duplicate",
-        "finding_subject_entities_to_create",
-        "project_target_candidates",
-        "entities_created",
-        "entities_updated",
-        "findings_created",
-        "findings_updated",
-        "entity_links",
-        "finding_occurrences",
-        "project_links_added",
-        "project_links_existing",
-        "project_targets_created",
-        "project_targets_existing",
-    ):
-        if key in raw:
-            try:
-                fields[key] = int(raw.get(key) or 0)
-            except (TypeError, ValueError):
-                fields[key] = 0
-    return fields
 
 
 def _log_atlas_import_preview_rejected(exc, *, session_id, scope, member):
@@ -660,6 +630,28 @@ def atlas_import_apply():
     )
     return jsonify(result)
 
+
+@atlas_bp.route("/atlas/imports/drafts/<draft_id>", methods=["GET"])
+@limiter.limit(_atlas_write_limit)
+def atlas_import_draft(draft_id):
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    scope, error_response = _atlas_request_scope_response(session_id)
+    if error_response:
+        return error_response
+    member = (scope.member or {}) if scope else {}
+    try:
+        result = get_atlas_import_preview(
+            session_id=session_id,
+            team_id=scope.team_id if scope else "",
+            role=str(member.get("role") or ""),
+            draft_id=draft_id,
+        )
+    except AtlasImportError as exc:
+        return _atlas_import_error_response(exc)
+    return jsonify(result)
+
 from blueprints.atlas_read import (  # noqa: E402,F401
     atlas_entities_export_download,
     atlas_entities_list,
@@ -668,12 +660,12 @@ from blueprints.atlas_read import (  # noqa: E402,F401
 )
 from blueprints.atlas_profile_read import atlas_entity_detail  # noqa: E402,F401
 from blueprints.atlas_lookup_read import atlas_entity_lookup  # noqa: E402,F401
+from blueprints.atlas_intel_refresh import atlas_entity_intel_refresh  # noqa: E402,F401
 from blueprints.atlas_mutations import (  # noqa: E402,F401
     atlas_entities_bulk_delete,
     atlas_entities_bulk_suppression_update,
     atlas_entity_delete,
     atlas_entity_delete_preview_route,
-    atlas_entity_intel_refresh,
     atlas_entity_project_link_create,
     atlas_entity_project_link_delete,
     atlas_entity_suppression_update,

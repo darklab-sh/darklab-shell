@@ -3,6 +3,8 @@
 
 // Project Overview tab controller.
 // Loaded lazily; shell chrome supplies request, filter, and render callbacks.
+import { renderProjectFindingChangesSummary } from './project_finding_changes.js';
+import { NO_STORED_CVE_RISK_LABEL, findingRiskSummary } from '../findings/finding_risk.js';
 
 let exportedDarklabProjectOverview = null;
 
@@ -177,6 +179,13 @@ let exportedDarklabProjectOverview = null;
       return payload.deliverables_status && typeof payload.deliverables_status === 'object'
         ? payload.deliverables_status
         : {};
+    }
+
+    function activeAssessment(st) {
+      const payload = st && st.payload && typeof st.payload === 'object' ? st.payload : {};
+      return payload.active_assessment && typeof payload.active_assessment === 'object'
+        ? payload.active_assessment
+        : null;
     }
 
     function formatCount(value) {
@@ -424,6 +433,135 @@ let exportedDarklabProjectOverview = null;
         ]),
       );
       return wrap;
+    }
+
+    function renderActiveAssessment(projectId, st) {
+      const assessment = activeAssessment(st);
+      if (!assessment) return null;
+      const source = assessment.rollup && typeof assessment.rollup === 'object'
+        ? assessment.rollup
+        : {};
+      const section = document.createElement('section');
+      section.className = 'project-overview-assessment';
+      const heading = document.createElement('div');
+      heading.className = 'project-overview-assessment-heading';
+      const copy = document.createElement('div');
+      copy.className = 'project-overview-assessment-title';
+      const title = document.createElement('h3');
+      title.textContent = String(assessment.title || 'Active assessment');
+      const meta = document.createElement('p');
+      meta.textContent = [
+        'Active assessment',
+        readableToken(assessment.profile_key),
+        assessment.profile_version ? `profile ${assessment.profile_version}` : '',
+        assessment.started_at ? `started ${formatDate(assessment.started_at)}` : '',
+      ].filter(Boolean).join(' · ');
+      copy.append(title, meta);
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn btn-secondary btn-compact';
+      open.textContent = 'Open Assessment';
+      open.dataset.projectOverviewAssessment = String(assessment.id || '');
+      open.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (typeof ctx.openProjectAssessment === 'function') {
+          ctx.openProjectAssessment(projectId, { assessmentId: String(assessment.id || '') });
+          return;
+        }
+        gotoTab(projectId, 'assessment', {});
+      });
+      ctx.bindProjectRuntimePressable?.(open);
+      heading.append(copy, open);
+      const grid = document.createElement('div');
+      grid.className = 'project-overview-assessment-grid';
+      grid.append(
+        summaryCard(
+          'Covered',
+          `${formatCount(source.covered_checks)} of ${formatCount(source.applicable_checks)}`,
+          'applicable checks',
+          Number(source.covered_checks || 0) === Number(source.applicable_checks || 0) ? 'success' : '',
+          'compact',
+        ),
+        summaryCard(
+          'Awaiting review',
+          formatCount(source.checks_awaiting_review),
+          'checks with finding evidence',
+          Number(source.checks_awaiting_review || 0) ? 'attention' : '',
+          'compact',
+        ),
+        summaryCard('Untested', formatCount(source.untested_checks), 'checks outstanding', '', 'compact'),
+        summaryCard('Excluded', formatCount(source.excluded_checks), 'blocked, skipped, or not applicable', '', 'compact'),
+      );
+      section.append(heading, grid);
+      const fixFirst = assessment.fix_first && typeof assessment.fix_first === 'object'
+        ? assessment.fix_first
+        : {};
+      const fixRollup = fixFirst.rollup && typeof fixFirst.rollup === 'object'
+        ? fixFirst.rollup
+        : {};
+      const fixFirstPanel = document.createElement('div');
+      fixFirstPanel.className = 'project-overview-assessment-fix-first';
+      const fixFirstHeading = document.createElement('div');
+      fixFirstHeading.className = 'project-overview-assessment-fix-first-heading';
+      const fixFirstCopy = document.createElement('div');
+      const fixFirstTitle = document.createElement('strong');
+      fixFirstTitle.textContent = 'Fix first';
+      const fixFirstMeta = document.createElement('span');
+      fixFirstMeta.textContent = `${formatCount(fixRollup.total)} remediation groups · ${formatCount(fixRollup.kev_listed)} CISA KEV`;
+      fixFirstCopy.append(fixFirstTitle, fixFirstMeta);
+      const fixFirstActions = document.createElement('div');
+      fixFirstActions.className = 'project-overview-assessment-fix-first-actions';
+      const openFixFirst = (label, priority = '') => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-secondary btn-compact';
+        button.textContent = label;
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (typeof ctx.openProjectAssessment === 'function') {
+            ctx.openProjectAssessment(projectId, {
+              assessmentId: String(assessment.id || ''),
+              priority,
+            });
+            return;
+          }
+          gotoTab(projectId, 'assessment', {});
+        });
+        ctx.bindProjectRuntimePressable?.(button);
+        fixFirstActions.appendChild(button);
+      };
+      openFixFirst('Open fix-first');
+      if (Number(fixRollup.kev_listed || 0) > 0) openFixFirst('Show CISA KEV', 'kev');
+      fixFirstHeading.append(fixFirstCopy, fixFirstActions);
+      fixFirstPanel.appendChild(fixFirstHeading);
+      const priorityItems = Array.isArray(fixFirst.items) ? fixFirst.items : [];
+      if (priorityItems.length) {
+        const list = document.createElement('div');
+        list.className = 'project-overview-assessment-fix-first-list';
+        priorityItems.forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'project-overview-assessment-fix-first-row';
+          const identity = document.createElement('strong');
+          identity.textContent = String(item?.vulnerability_id || item?.rule_identity || item?.title || 'Saved finding');
+          const signals = document.createElement('span');
+          signals.textContent = findingRiskSummary(item) || NO_STORED_CVE_RISK_LABEL;
+          row.append(identity, signals);
+          list.appendChild(row);
+        });
+        fixFirstPanel.appendChild(list);
+      }
+      section.appendChild(fixFirstPanel);
+      if (Number(source.unavailable_evidence_checks || 0) > 0) {
+        const unavailable = Number(source.unavailable_evidence_checks || 0);
+        const warning = document.createElement('div');
+        warning.className = 'project-overview-assessment-warning';
+        warning.append(
+          badge('Evidence unavailable', 'badge-tone-amber'),
+          document.createTextNode(`${formatCount(unavailable)} check${unavailable === 1 ? '' : 's'} reference${unavailable === 1 ? 's' : ''} saved evidence that can no longer be opened.`),
+        );
+        section.appendChild(warning);
+      }
+      return section;
     }
 
     function gapGroups(st) {
@@ -1204,6 +1342,16 @@ let exportedDarklabProjectOverview = null;
       root.appendChild(renderRollups(st));
       root.appendChild(renderProviderIntelCaveat());
       root.appendChild(renderFindingProgress(st));
+      const assessment = renderActiveAssessment(normalized, st);
+      if (assessment) root.appendChild(assessment);
+      const findingChanges = renderProjectFindingChangesSummary({
+        changes: st?.payload?.assessment_finding_changes,
+        projectId: normalized,
+        onOpenAssessment: ctx.openProjectAssessment,
+        bindPressable: ctx.bindProjectRuntimePressable,
+        mobile,
+      });
+      if (findingChanges) root.appendChild(findingChanges);
       root.appendChild(renderOperationalTempo(normalized, st));
       root.appendChild(renderCoverageGaps(normalized, st));
       root.appendChild(renderDeliverablesStatus(st));

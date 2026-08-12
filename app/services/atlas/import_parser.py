@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from io import BytesIO, StringIO
 import json
 import logging
@@ -15,30 +15,35 @@ from typing import Any, BinaryIO, IO, cast
 from urllib.parse import urlsplit
 
 from services.nuclei.provenance import nuclei_source_detail
+from services.atlas.sarif_parser import parse_sarif_json
 
 from defusedxml import ElementTree as SafeElementTree
 from defusedxml.common import DefusedXmlException
 
 from services.atlas.materializer import canonicalize_entity_record
+from services.atlas.import_formats import SUPPORTED_FORMATS
 from services.atlas.schema import ATLAS_ENTITY_TYPES
+from services.atlas.import_archive import (
+    ImportSourceError,
+    PreparedImportSource,
+    prepare_import_source,
+)
+from services.atlas.import_types import (
+    ImportEntity,
+    ImportEvidence,
+    ImportFinding,
+    ImportParseResult,
+    ImportWarning,
+)
 from services.intel.canonical import entity_signature
 from services.projects.findings import _finding_signature, _normalize_finding_signal_key
 
 log = logging.getLogger("shell")
 
-SUPPORTED_FORMATS = frozenset({
-    "generic_csv",
-    "generic_jsonl",
-    "nessus_xml",
-    "zap_json",
-    "zap_xml",
-    "burp_xml",
-    "nuclei_jsonl",
-})
-
 ENTITY_KINDS = ATLAS_ENTITY_TYPES
 SEVERITIES = frozenset({"info", "low", "medium", "high", "critical"})
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_EXPANDED_BYTES = 50 * 1024 * 1024
 DEFAULT_MAX_ROWS = 5000
 DEFAULT_MAX_WARNINGS = 100
 DEFAULT_MAX_XML_ELEMENTS = 100000
@@ -52,66 +57,10 @@ class ImportParseError(ValueError):
 @dataclass(frozen=True)
 class ImportParserLimits:
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    max_expanded_bytes: int = DEFAULT_MAX_EXPANDED_BYTES
     max_rows: int = DEFAULT_MAX_ROWS
     max_warnings: int = DEFAULT_MAX_WARNINGS
     max_xml_elements: int = DEFAULT_MAX_XML_ELEMENTS
-
-
-@dataclass(frozen=True)
-class ImportWarning:
-    row_number: int
-    code: str
-    message: str
-
-
-@dataclass(frozen=True)
-class ImportEntity:
-    row_number: int
-    kind: str
-    value: str
-    canonical_value: str
-    observed_at: str = ""
-    external_id: str = ""
-    source_detail: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class ImportFinding:
-    row_number: int
-    title: str
-    severity: str
-    subject_key: str
-    signature_hash: str
-    description: str = ""
-    remediation: str = ""
-    evidence: str = ""
-    affected_entity: ImportEntity | None = None
-    external_id: str = ""
-    references: list[str] = field(default_factory=list)
-    observed_at: str = ""
-    source_detail: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class ImportParseResult:
-    format_id: str
-    row_count: int
-    skipped_count: int
-    entities: list[ImportEntity]
-    findings: list[ImportFinding]
-    warnings: list[ImportWarning]
-    suppressed_warning_count: int = 0
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "format_id": self.format_id,
-            "row_count": self.row_count,
-            "skipped_count": self.skipped_count,
-            "entities": [asdict(entity) for entity in self.entities],
-            "findings": [asdict(finding) for finding in self.findings],
-            "warnings": [asdict(warning) for warning in self.warnings],
-            "suppressed_warning_count": self.suppressed_warning_count,
-        }
 
 
 class _ParseState:
@@ -128,8 +77,8 @@ class _ParseState:
             raise ImportParseError(f"Import row limit exceeded ({self.limits.max_rows}).")
         return self.row_count
 
-    def warn(self, row_number: int, code: str, message: str) -> None:
-        self.skipped_count += 1
+    def warn(self, row_number: int, code: str, message: str, *, skipped: bool = True) -> None:
+        self.skipped_count += int(bool(skipped))
         if len(self.warnings) >= self.limits.max_warnings:
             self.suppressed_warning_count += 1
             return
@@ -154,17 +103,33 @@ def parse_import_file(
     if normalized_format not in SUPPORTED_FORMATS:
         raise ImportParseError(f"Unsupported import format: {format_id!r}.")
     active_limits = limits or ImportParserLimits()
-    payload = read_import_source_bytes(source, active_limits)
+    prepared = read_import_source(source, active_limits)
+    return parse_prepared_import(prepared, format_id=normalized_format, limits=active_limits)
+
+
+def parse_prepared_import(
+    prepared: PreparedImportSource,
+    *,
+    format_id: str,
+    limits: ImportParserLimits,
+) -> ImportParseResult:
+    normalized_format = str(format_id or "").strip().lower()
+    if normalized_format not in SUPPORTED_FORMATS:
+        raise ImportParseError(f"Unsupported import format: {format_id!r}.")
+    payload = prepared.payload
     log.debug("ATLAS_IMPORT_PARSE_STARTED", extra={
         "format_id": normalized_format,
-        "upload_bytes": len(payload),
-        "max_rows": active_limits.max_rows,
-        "max_warnings": active_limits.max_warnings,
-        "max_xml_elements": active_limits.max_xml_elements,
+        "upload_bytes": prepared.upload_bytes,
+        "expanded_bytes": prepared.expanded_bytes,
+        "compression": prepared.compression,
+        "max_rows": limits.max_rows,
+        "max_warnings": limits.max_warnings,
+        "max_xml_elements": limits.max_xml_elements,
     })
-    state = _ParseState(active_limits)
+    state = _ParseState(limits)
     entities: list[ImportEntity] = []
     findings: list[ImportFinding] = []
+    evidence: list[ImportEvidence] = []
 
     if normalized_format == "generic_csv":
         _parse_generic_csv(payload, state, entities, findings)
@@ -172,8 +137,16 @@ def parse_import_file(
         _parse_generic_jsonl(payload, state, entities, findings)
     elif normalized_format == "nuclei_jsonl":
         _parse_nuclei_jsonl(payload, state, entities, findings)
+    elif normalized_format == "sarif_json":
+        parse_sarif_json(payload, state, entities, findings)
+    elif normalized_format == "cyclonedx_json":
+        from services.atlas.cyclonedx_parser import parse_cyclonedx_json
+        parse_cyclonedx_json(payload, state, entities, findings, evidence)
+    elif normalized_format == "greenbone_xml":
+        from services.atlas.greenbone_parser import parse_greenbone_xml
+        parse_greenbone_xml(payload, state, entities, findings)
     elif normalized_format == "nessus_xml":
-        _parse_nessus_xml(payload, state, entities, findings)
+        _parse_nessus_xml(payload, state, entities, findings, evidence)
     elif normalized_format == "zap_json":
         _parse_zap_json(payload, state, entities, findings)
     elif normalized_format == "zap_xml":
@@ -190,7 +163,7 @@ def parse_import_file(
             "skipped": state.skipped_count,
             "warning_count": len(state.warnings),
             "suppressed_warning_count": state.suppressed_warning_count,
-            "max_warnings": active_limits.max_warnings,
+            "max_warnings": limits.max_warnings,
             "warning_codes": warning_codes,
         })
     log.debug("ATLAS_IMPORT_PARSE_COMPLETED", extra={
@@ -198,6 +171,7 @@ def parse_import_file(
         "rows": state.row_count,
         "entities": len(entities),
         "findings": len(findings),
+        "evidence": len(evidence),
         "skipped": state.skipped_count,
         "warning_count": len(state.warnings),
         "suppressed_warning_count": state.suppressed_warning_count,
@@ -209,21 +183,24 @@ def parse_import_file(
         skipped_count=state.skipped_count,
         entities=entities,
         findings=findings,
+        evidence=evidence,
         warnings=state.warnings,
         suppressed_warning_count=state.suppressed_warning_count,
     )
 
 
-def read_import_source_bytes(source: bytes | str | BinaryIO | IO[bytes], limits: ImportParserLimits) -> bytes:
-    if isinstance(source, bytes):
-        payload = source
-    elif isinstance(source, str):
-        payload = source.encode("utf-8")
-    else:
-        payload = source.read(limits.max_upload_bytes + 1)
-    if len(payload) > limits.max_upload_bytes:
-        raise ImportParseError(f"Import file exceeds the configured {limits.max_upload_bytes} byte limit.")
-    return payload
+def read_import_source(
+    source: bytes | str | BinaryIO | IO[bytes],
+    limits: ImportParserLimits,
+) -> PreparedImportSource:
+    try:
+        return prepare_import_source(
+            source,
+            max_upload_bytes=limits.max_upload_bytes,
+            max_expanded_bytes=limits.max_expanded_bytes,
+        )
+    except ImportSourceError as exc:
+        raise ImportParseError(str(exc)) from exc
 
 
 def _safe_text(value: Any, *, limit: int = MAX_TEXT_CHARS) -> str:
@@ -623,8 +600,11 @@ def _parse_nessus_xml(
     state: _ParseState,
     entities: list[ImportEntity],
     findings: list[ImportFinding],
+    evidence: list[ImportEvidence],
 ) -> None:
-    host_stack: list[str] = []
+    from services.atlas.nessus_versions import nessus_host_property
+
+    host_stack: list[dict[str, Any]] = []
     active_report_item_depth = 0
     try:
         iterator = SafeElementTree.iterparse(
@@ -639,7 +619,7 @@ def _parse_nessus_xml(
             element_name = _local_name(elem.tag)
             if event == "start":
                 if element_name == "reporthost":
-                    host_stack.append(_safe_text(elem.attrib.get("name")))
+                    host_stack.append({"host": _safe_text(elem.attrib.get("name")), "properties": {}})
                 if active_report_item_depth or element_name == "reportitem":
                     active_report_item_depth += 1
                 continue
@@ -648,11 +628,19 @@ def _parse_nessus_xml(
                 raise ImportParseError(f"XML element limit exceeded ({state.limits.max_xml_elements}).")
             if active_report_item_depth:
                 if element_name == "reportitem" and active_report_item_depth == 1:
-                    _append_nessus_report_item(elem, host_stack[-1] if host_stack else "", state, entities, findings)
+                    context = host_stack[-1] if host_stack else {}
+                    _append_nessus_report_item(
+                        elem, str(context.get("host") or ""), state, entities, findings, evidence,
+                        (properties if isinstance((properties := context.get("properties")), dict) else {}),
+                    )
                     elem.clear()
                     active_report_item_depth = 0
                     continue
                 active_report_item_depth -= 1
+                continue
+            if element_name == "tag" and host_stack:
+                nessus_host_property(host_stack[-1]["properties"], elem.attrib.get("name"), elem.text)
+                elem.clear()
                 continue
             if element_name != "reporthost":
                 elem.clear()
@@ -672,12 +660,30 @@ def _append_nessus_report_item(
     state: _ParseState,
     entities: list[ImportEntity],
     findings: list[ImportFinding],
+    evidence: list[ImportEvidence],
+    host_properties: dict[str, str],
 ) -> None:
+    from services.atlas.nessus_versions import append_nessus_version_evidence
+
     row_number = state.next_row()
     host = elem.attrib.get("host") or elem.attrib.get("hostname") or parent_host
     entity = _entity_from_target(host, row_number, state, {"adapter": "nessus"}) if host else None
     if entity:
         entities.append(entity)
+    if append_nessus_version_evidence(
+        elem,
+        entity,
+        row_number=row_number,
+        properties=host_properties,
+        evidence=evidence,
+        evidence_limit=state.limits.max_rows,
+    ):
+        state.warn(
+            row_number,
+            "nessus_service_version_limit_reached",
+            "Nessus service-version evidence was truncated at the configured limit.",
+            skipped=False,
+        )
     severity = _nessus_severity(elem.attrib.get("severity"))
     plugin_id = elem.attrib.get("pluginID") or elem.attrib.get("plugin_id")
     plugin_name = elem.attrib.get("pluginName") or elem.attrib.get("plugin_name")

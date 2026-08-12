@@ -41,6 +41,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mkdir -p "$ROOT_DIR/test-results"
+cd "$ROOT_DIR"
 
 SELECTED_COMMANDS=""
 PYTEST_ARGS=""
@@ -99,7 +100,7 @@ if [ -n "$SELECTED_COMMANDS" ]; then
         RUN_CONTAINER_SMOKE_TEST=1 \
         RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD="$FORCE_BUILD" \
         RUN_CONTAINER_SMOKE_TEST_COMMANDS="$SELECTED_COMMANDS" \
-        python3 -m pytest \
+        sh "$ROOT_DIR/scripts/run_pytest.sh" \
         "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
         --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
         --durations=50 \
@@ -110,7 +111,7 @@ fi
 exec env \
     RUN_CONTAINER_SMOKE_TEST=1 \
     RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD="$FORCE_BUILD" \
-    python3 -m pytest \
+    sh "$ROOT_DIR/scripts/run_pytest.sh" \
     "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
     --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
     --durations=50 \

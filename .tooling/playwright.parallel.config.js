@@ -23,6 +23,7 @@ const allSpecFiles = readdirSync(resolve(__dirname, 'tests/js/e2e'))
 // not by file count. Split welcome flows are weighted separately so the old
 // 70s+ long pole can be distributed across multiple workers.
 const specWeights = {
+  'assessment.spec.js': 10,
   'mobile.spec.js': 21,
   'ui.spec.js': 21,
   'shortcuts.spec.js': 19,

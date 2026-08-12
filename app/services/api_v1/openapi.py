@@ -8,7 +8,18 @@ from __future__ import annotations
 from copy import deepcopy
 
 from config import APP_VERSION
+from services.api_v1 import openapi_assessments as assessments, openapi_manual_findings as manual
+from services.api_v1 import openapi_run_evidence as run_evidence
+from services.api_v1.openapi_assessment_actions import assessment_action_paths, assessment_action_schemas
+from services.api_v1.openapi_assessment_oast import assessment_oast_paths, assessment_oast_schemas
+from services.api_v1.openapi_assessment_zap import assessment_zap_paths, assessment_zap_schemas
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
+from services.api_v1.openapi_cve_risk import cve_risk_schemas
+from services.api_v1.openapi_findings import finding_schemas
+from services.api_v1.openapi_finding_evidence import finding_evidence_paths, finding_evidence_schemas
+from services.api_v1.openapi_http_profiles import http_profile_paths, http_profile_schemas
+from services.api_v1.openapi_osv_lookup import osv_lookup_paths, osv_lookup_schemas
+from services.api_v1.openapi_verification_actions import verification_action_paths as action_paths, verification_action_schemas
 from services.scheduler.models import CADENCE_PRESETS
 from services.watchers.models import (
     DIFF_KINDS,
@@ -39,10 +50,8 @@ def _json_response(description: str, schema: dict) -> dict:
 
 
 def _text_response(description: str) -> dict:
-    return {
-        "description": description,
-        "content": {"text/plain": {"schema": {"type": "string"}}},
-    }
+    schema = {"type": "string"}
+    return {"description": description, "content": {"text/plain": {"schema": schema}}}
 
 
 def _error_response(description: str = "Error") -> dict:
@@ -562,36 +571,9 @@ OPENAPI_SPEC: dict = {
                     "total_exact": {"type": "boolean"},
                 },
             },
-            "AtlasFinding": {
-                "type": "object",
-                "required": ["id", "entity_id", "status", "title", "raw_line", "occurrence_count"],
-                "properties": {
-                    "id": {"type": "string"},
-                    "entity_id": {"type": "string"},
-                    "entity_type": {"type": "string"},
-                    "entity_value": {"type": "string"},
-                    "subject_key": {"type": "string"},
-                    "severity": {"type": "string"},
-                    "kind": {"type": "string"},
-                    "tool_root": {"type": "string"},
-                    "first_run_id": {"type": "string"},
-                    "last_run_id": {"type": "string"},
-                    "run_id": {"type": "string"},
-                    "run_command": {"type": "string"},
-                    "first_seen_at": {"type": "string", "nullable": True},
-                    "last_seen_at": {"type": "string", "nullable": True},
-                    "occurrence_count": {"type": "integer"},
-                    "status": {"type": "string"},
-                    "review_state": {"type": "string"},
-                    "suppressed": {"type": "boolean"},
-                    "suppressed_reason": {"type": "string"},
-                    "suppressed_at": {"type": "string"},
-                    "title": {"type": "string"},
-                    "raw_line": {"type": "string"},
-                    "line_number": {"type": "integer", "nullable": True},
-                    "created": {"type": "string", "nullable": True},
-                },
-            },
+            **cve_risk_schemas(),
+            **osv_lookup_schemas(),
+            **finding_schemas(),
             "AtlasFindingPage": {
                 "type": "object",
                 "required": [
@@ -616,6 +598,17 @@ OPENAPI_SPEC: dict = {
                 },
             },
             **atlas_profile_schemas(),
+            **assessments.assessment_schemas(),
+            **run_evidence.run_evidence_schemas(),
+            **(
+                finding_evidence_schemas()
+                | assessment_action_schemas()
+                | assessment_oast_schemas()
+                | assessment_zap_schemas()
+                | http_profile_schemas()
+                | manual.manual_finding_schemas()
+                | verification_action_schemas()
+            ),
             "AtlasFindingDetail": {
                 "type": "object",
                 "required": ["finding", "occurrences", "detail_limits"],
@@ -725,59 +718,6 @@ OPENAPI_SPEC: dict = {
                 "type": "object",
                 "required": ["project"],
                 "properties": {"project": _ref("Project")},
-            },
-            "ProjectFindingPage": {
-                "type": "object",
-                "required": [
-                    "findings",
-                    "total",
-                    "limit",
-                    "offset",
-                    "has_more",
-                    "group_counts",
-                    "collapsed_group_counts",
-                    "group_order",
-                ],
-                "properties": {
-                    "findings": {"type": "array", "items": _ref("ProjectFinding")},
-                    "total": {"type": "integer"},
-                    "limit": {"type": "integer"},
-                    "offset": {"type": "integer"},
-                    "has_more": {"type": "boolean"},
-                    "group_counts": {"type": "object", "additionalProperties": {"type": "integer"}},
-                    "collapsed_group_counts": {"type": "object", "additionalProperties": {"type": "integer"}},
-                    "group_order": {"type": "array", "items": {"type": "string"}},
-                },
-            },
-            "ProjectFinding": {
-                "type": "object",
-                "required": ["id", "run_id", "status", "review_state", "title", "raw_line", "target_ids", "run_command"],
-                "properties": {
-                    "id": {"type": "string"},
-                    "session_id": {"type": "string"},
-                    "run_id": {"type": "string"},
-                    "target_id": {"type": "string"},
-                    "entity_id": {"type": "string"},
-                    "target_ids": {"type": "array", "items": {"type": "string"}},
-                    "subject_key": {"type": "string"},
-                    "scope": {"type": "string"},
-                    "kind": {"type": "string"},
-                    "title": {"type": "string"},
-                    "raw_line": {"type": "string"},
-                    "line_number": {"type": "integer", "nullable": True},
-                    "severity": {"type": "string"},
-                    "fingerprint": {"type": "string"},
-                    "review_state": {"type": "string"},
-                    "status": {"type": "string"},
-                    "first_seen_at": {"type": "string", "nullable": True},
-                    "last_seen_at": {"type": "string", "nullable": True},
-                    "occurrence_count": {"type": "integer"},
-                    "created": {"type": "string", "nullable": True},
-                    "run_command": {"type": "string"},
-                    "command_root": {"type": "string"},
-                    "source_run_exists": {"type": "boolean"},
-                    "orphan_source": {"type": "boolean"},
-                },
             },
             "ProjectRun": {
                 "type": "object",
@@ -1603,7 +1543,18 @@ OPENAPI_SPEC: dict = {
         },
     },
     "security": [{"bearerToken": []}],
-    "paths": {
+    "paths": (
+        assessments.assessment_paths()
+        | assessment_action_paths()
+        | assessment_oast_paths()
+        | assessment_zap_paths()
+        | finding_evidence_paths()
+        | http_profile_paths()
+        | manual.manual_finding_paths()
+        | osv_lookup_paths()
+        | run_evidence.run_evidence_paths()
+        | action_paths()
+        | {
         "/health": {
             "get": {
                 "security": [],
@@ -2135,6 +2086,7 @@ OPENAPI_SPEC: dict = {
                     **_common_errors(not_found="Project not found"),
                 },
             },
+            "post": manual.manual_finding_create_operation(),
         },
         "/projects/{project_id}/runs": {
             "get": {
@@ -2603,7 +2555,8 @@ OPENAPI_SPEC: dict = {
                 },
             },
         },
-    },
+        }
+    ),
 }
 
 

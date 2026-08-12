@@ -49,8 +49,10 @@ def recalculate_atlas_findings(conn, finding_ids: Iterable[str] | None) -> None:
             "  SELECT seen_at FROM findings_occurrences WHERE finding_id = ? "
             "  UNION ALL "
             "  SELECT observed_at AS seen_at FROM atlas_finding_import_occurrences WHERE finding_id = ?"
+            "  UNION ALL "
+            "  SELECT observed_at AS seen_at FROM finding_version_inference_sources WHERE finding_id = ?"
             ") finding_sources",
-            (finding_id, finding_id),
+            (finding_id, finding_id, finding_id),
         ).fetchone()
         occurrence_count = int(row["occurrence_count"] or 0) if row else 0
         if occurrence_count <= 0:
@@ -66,8 +68,12 @@ def recalculate_atlas_findings(conn, finding_ids: Iterable[str] | None) -> None:
             "  UNION ALL "
             "  SELECT '' AS run_id, row_number AS line_number, observed_at AS seen_at "
             "  FROM atlas_finding_import_occurrences WHERE finding_id = ?"
+            "  UNION ALL "
+            "  SELECT CASE WHEN source_kind = 'run' THEN source_id ELSE '' END AS run_id, "
+            "  -1 AS line_number, observed_at AS seen_at "
+            "  FROM finding_version_inference_sources WHERE finding_id = ?"
             ") finding_sources ORDER BY seen_at ASC, run_id ASC LIMIT 1",
-            (finding_id, finding_id),
+            (finding_id, finding_id, finding_id),
         ).fetchone()
         last_run = conn.execute(
             "SELECT run_id FROM ("
@@ -75,8 +81,11 @@ def recalculate_atlas_findings(conn, finding_ids: Iterable[str] | None) -> None:
             "  UNION ALL "
             "  SELECT '' AS run_id, observed_at AS seen_at "
             "  FROM atlas_finding_import_occurrences WHERE finding_id = ?"
+            "  UNION ALL "
+            "  SELECT CASE WHEN source_kind = 'run' THEN source_id ELSE '' END AS run_id, "
+            "  observed_at AS seen_at FROM finding_version_inference_sources WHERE finding_id = ?"
             ") finding_sources ORDER BY seen_at DESC, run_id DESC LIMIT 1",
-            (finding_id, finding_id),
+            (finding_id, finding_id, finding_id),
         ).fetchone()
         first_run_id = str(first_run["run_id"] or "") if first_run else ""
         last_run_id = str(last_run["run_id"] or "") if last_run else ""

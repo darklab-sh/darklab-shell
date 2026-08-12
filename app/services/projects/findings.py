@@ -16,6 +16,7 @@ from typing import Any
 
 from core.database_access import get_db_connect
 from core.output_signals import strip_ansi_codes
+from services.assessments.handoff import project_assessment_finding_changes_on_conn
 from services.atlas.scope import finding_exists_in_scope
 from services.atlas.recalculation import recalculate_atlas_findings
 from services.atlas.materializer import (
@@ -32,6 +33,13 @@ from services.projects.contracts import (
     MAX_LABEL_LEN,
     ProjectWorkspaceError,
 )
+from services.projects.finding_provenance import (
+    normalize_finding_origin,
+    normalize_finding_validation_method,
+)
+from services.projects.finding_details import finding_detail_fields, manual_finding_fields
+from services.projects.finding_dispositions import set_remediation_group_review_state
+from services.projects.finding_identity import stable_rule_identity
 from services.projects.metadata import (
     _entity_labels_by_id,
     _entity_notes_by_id,
@@ -49,6 +57,7 @@ from services.projects.utils import (
 )
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
 from services.runs.comparison_findings import severity_neutral_signal_key
+from services.cve_risk.ranking import attach_risk_to_findings, cve_risk_order_sql
 
 
 def row_to_finding(row):
@@ -67,6 +76,17 @@ def row_to_finding(row):
     kind = value("kind") or value("scope") or "finding"
     status = value("status") or value("review_state") or "new"
     raw_line = value("snippet") or value("raw_line")
+    origin = normalize_finding_origin(value("origin"))
+    validation_method = normalize_finding_validation_method(
+        value("validation_method"),
+        origin=origin,
+    )
+    rule_identity = stable_rule_identity({
+        "id": value("id"),
+        "signature_hash": value("signature_hash"),
+        "tool_root": value("tool_root"),
+        "kind": kind,
+    })
     return {
         "id": value("id"),
         "session_id": value("session_id"),
@@ -75,8 +95,12 @@ def row_to_finding(row):
         "target_id": target_id,
         "entity_id": target_id,
         "subject_key": value("subject_key"),
+        "origin": origin,
+        "validation_method": validation_method,
+        "rule_identity": rule_identity,
         "scope": value("scope") or kind,
         "kind": kind,
+        "tool_root": value("tool_root"),
         "title": value("title"),
         "raw_line": raw_line,
         "line_number": value("line_number", None),
@@ -88,6 +112,8 @@ def row_to_finding(row):
         "last_seen_at": value("last_seen_at"),
         "occurrence_count": int(value("occurrence_count", 0) or 0),
         "created": value("created"),
+        **finding_detail_fields(row),
+        **manual_finding_fields(row),
     }
 
 
@@ -168,6 +194,7 @@ def _project_finding_page_payload(
     collapsed_group_counts=None,
     group_order=None,
     has_more=None,
+    assessment_finding_changes=None,
 ):
     return _page_payload(
         "findings",
@@ -180,6 +207,9 @@ def _project_finding_page_payload(
             "group_counts": group_counts if isinstance(group_counts, dict) else {},
             "collapsed_group_counts": collapsed_group_counts if isinstance(collapsed_group_counts, dict) else {},
             "group_order": group_order if isinstance(group_order, list) else [],
+            "assessment_finding_changes": (
+                assessment_finding_changes if isinstance(assessment_finding_changes, dict) else None
+            ),
         },
 )
 
@@ -211,6 +241,7 @@ def _project_finding_source_exists_sql():
         "    OR source_direct.id = f.last_run_id"
         "  )"
         ")"
+        " OR f.origin = 'manual'"
         ")"
     )
 
@@ -281,9 +312,14 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             query_params.extend([safe_limit, safe_offset])
         rows = conn.execute(
             base_sql
-            + "SELECT f.id, f.session_id, f.entity_id, f.subject_key, f.signature_hash, f.severity, "  # nosec
+            + "SELECT f.id, f.session_id, f.team_id, f.entity_id, "  # nosec
+            "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
+            "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
+            "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
+            "f.manual_revision, f.manual_created_by_member_id, "
+            "f.manual_updated_by_member_id, f.manual_updated_at, "
             "d.run_id, d.line_number, d.snippet, d.run_occurrence_count "
             "FROM deduped d JOIN findings f ON f.id = d.finding_id "
             "ORDER BY d.line_number ASC, d.seen_at ASC, f.id ASC"
@@ -297,6 +333,20 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             finding["target_ids"] = [row["entity_id"]] if row["entity_id"] else []
             finding["run_occurrence_count"] = int(row["run_occurrence_count"] or 0)
             findings.append(finding)
+    attach_risk_to_findings(
+        findings,
+        owner_by_finding_id={
+            str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+            for row in rows
+        },
+    )
+    with get_db_connect()() as triage_conn:
+        attach_finding_triage_details(
+            triage_conn,
+            session_id,
+            findings,
+            team_id=team_id,
+        )
     if paginated:
         return _run_finding_page_payload(findings, total, safe_limit, safe_offset, occurrence_total)
     return findings
@@ -310,20 +360,37 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
     with get_db_connect()() as conn:
         if not finding_exists_in_scope(conn, session_id, finding_id, team_id=team_id):
             return None
-        result = conn.execute(
-            "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
-            (review_state, _now(), finding_id),
+        disposition_update = set_remediation_group_review_state(
+            conn,
+            {finding_id},
+            review_state=review_state,
+            updated_at=_now(),
+            owner_scope=("" if team_id else session_id, team_id),
         )
-        if result.rowcount <= 0:
+        if finding_id not in disposition_update["affected_finding_ids"]:
             return None
         row = conn.execute(
-            "SELECT id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+            "SELECT id, session_id, team_id, entity_id, subject_key, signature_hash, origin, validation_method, "
+            "severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
-            "fingerprint, title, raw_line, created FROM findings WHERE id = ?",
+            "fingerprint, title, raw_line, created, summary, impact, reproduction_steps, confidence, "
+            "cve_ids_json, cwe_ids_json, cvss_vector, cvss_score, references_json, "
+            "manual_revision, manual_created_by_member_id, manual_updated_by_member_id, "
+            "manual_updated_at "
+            "FROM findings WHERE id = ?",
             [finding_id],
         ).fetchone()
+        finding = row_to_finding(row)
+        if finding:
+            attach_risk_to_findings(
+                [finding],
+                conn=conn,
+                owner_by_finding_id={
+                    str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or "")),
+                },
+            )
         conn.commit()
-    return row_to_finding(row)
+    return finding
 
 
 def bulk_update_project_finding_review_states(session_id, project_id, data, *, team_id=""):
@@ -382,11 +449,19 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
         found_ids = {str(row["id"] or "") for row in found_rows if row["id"]}
         if found_ids:
             updated_at = _now()
-            conn.executemany(
-                "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
-                [(review_state, updated_at, finding_id) for finding_id in sorted(found_ids)],
+            disposition_update = set_remediation_group_review_state(
+                conn,
+                found_ids,
+                review_state=review_state,
+                updated_at=updated_at,
+                owner_scope=("" if team_id else session_id, team_id),
             )
             conn.commit()
+        else:
+            disposition_update = {
+                "remediation_group_count": 0,
+                "affected_finding_ids": set(),
+            }
     results = [
         {"finding_id": finding_id, "status": "updated" if finding_id in found_ids else "not_found"}
         for finding_id in finding_ids
@@ -398,6 +473,8 @@ def bulk_update_project_finding_review_states(session_id, project_id, data, *, t
             "updated": len(found_ids),
             "not_found": len(finding_ids) - len(found_ids),
         },
+        "remediation_groups_updated": disposition_update["remediation_group_count"],
+        "affected_observations": len(disposition_update["affected_finding_ids"]),
         "results": results,
     }
 
@@ -556,6 +633,10 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
                 "f.status",
                 "f.kind",
                 "f.tool_root",
+                "f.summary",
+                "f.impact",
+                "f.reproduction_steps",
+                "f.cvss_vector",
             )
             where_clauses.append(
                 "(" + " OR ".join(f"LOWER(COALESCE({field}, '')) LIKE ?" for field in finding_query_fields) + ")"
@@ -668,10 +749,16 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             query_params.extend([fetch_limit, safe_offset])
         rows = conn.execute(  # nosec
             base_sql  # nosec
-            + "SELECT f.id, f.session_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
-            "f.subject_key, f.signature_hash, f.severity, f.kind, f.tool_root, "
+            + "SELECT f.id, f.session_id, f.team_id, "
+            "COALESCE(f.entity_id, f.target_id) AS entity_id, "
+            "f.subject_key, f.signature_hash, f.origin, f.validation_method, "
+            "f.severity, f.kind, f.tool_root, "
             "f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
+            "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
+            "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
+            "f.manual_revision, f.manual_created_by_member_id, "
+            "f.manual_updated_by_member_id, f.manual_updated_at, "
             + page_source_run_expr
             + " AS run_id, COALESCE("
             + latest_occurrence_line_expr
@@ -687,7 +774,10 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             "LEFT JOIN runs r ON r.id = "
             + page_source_run_expr
             + " AND r.session_id = f.session_id "
-            "ORDER BY pf.sort_seen DESC, f.id DESC"
+            "ORDER BY "
+            + cve_risk_order_sql(
+                "f", age_expression="COALESCE(NULLIF(f.first_seen_at, ''), f.created)"
+            )
             + page_sql,
             query_params,
         ).fetchall()
@@ -771,7 +861,22 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             finding_id = str(item["id"] or "")
             item["labels"] = finding_labels.get(finding_id, [])
             item["note"] = finding_notes.get(finding_id)
+        attach_risk_to_findings(
+            findings,
+            conn=conn,
+            owner_by_finding_id={
+                str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+                for row in rows
+            },
+        )
         attach_finding_triage_details(conn, session_id, findings, team_id=team_id)
+        assessment_finding_changes = None
+        if paginated:
+            assessment_finding_changes = project_assessment_finding_changes_on_conn(
+                conn,
+                project_id,
+                item_limit=5,
+            )
 
     if paginated:
         return _project_finding_page_payload(
@@ -783,6 +888,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             collapsed_group_counts,
             group_order,
             has_more,
+            assessment_finding_changes,
         )
     return findings
 
@@ -1188,6 +1294,12 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
     for fallback_index, entry in enumerate(entry_items):
         if not isinstance(entry, dict):
             continue
+        source_detail = entry.get("source_detail")
+        if (
+            isinstance(source_detail, dict)
+            and isinstance(source_detail.get("dalfox_xss_observations"), list)
+        ):
+            continue
         role = str(entry.get("role") or "")
         if role in {"section-header", "kv", "help-row", "progress", "status-line", "pty-marker"}:
             continue
@@ -1246,8 +1358,9 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
                 "(id, session_id, team_id, run_id, target_id, scope, line_number, review_state, "
                 "entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                 "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
-                "status_updated_at, fingerprint, title, raw_line, created) "
-                "VALUES (?, ?, ?, ?, ?, 'finding', ?, 'new', ?, ?, ?, ?, 'finding', ?, ?, ?, ?, ?, 0, 'new', '', ?, ?, ?, ?)",
+                "status_updated_at, fingerprint, title, raw_line, created, origin, validation_method) "
+                "VALUES (?, ?, ?, ?, ?, 'finding', ?, 'new', ?, ?, ?, ?, 'finding', ?, ?, ?, ?, ?, "
+                "0, 'new', '', ?, ?, ?, ?, 'run', 'captured_observation')",
                 (
                     finding_id,
                     session_id,
@@ -1283,9 +1396,13 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
         recalculate_atlas_findings(conn, [finding_id])
         full_row = conn.execute(
             "SELECT f.id, f.session_id, f.team_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
-            "f.subject_key, f.signature_hash, f.severity, "
+            "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
+            "f.summary, f.impact, f.reproduction_steps, f.confidence, f.cve_ids_json, "
+            "f.cwe_ids_json, f.cvss_vector, f.cvss_score, f.references_json, "
+            "f.manual_revision, f.manual_created_by_member_id, "
+            "f.manual_updated_by_member_id, f.manual_updated_at, "
             "fo.run_id AS occurrence_run_id, fo.line_number, fo.snippet "
             "FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id "
             "WHERE f.id = ? AND fo.run_id = ? AND fo.line_number = ?",

@@ -18,10 +18,14 @@ from core.helpers import get_log_session_id
 from core.output_signals import OutputSignalClassifier
 from core.redaction import REDACTED_ENTITY_SENTINEL, line_entries_from_events, redact_line_entries
 from services.atlas.materializer import materialize_run_entities
+from services.assessments.coverage import reconcile_run_evidence_on_conn
+from services.assessments.nmap_inference_materialization import materialize_nmap_xml_version_inferences
+from services.assessments.nmap_service_evidence_persistence import (
+    persist_nmap_xml_service_observations,
+)
 from services.commands.registry import command_project_target_inputs
 from services.metrics_lazy import app_metrics
 from services.notifications.hooks import enqueue_run_complete
-from services.projects.artifacts import record_run_file_artifacts
 from services.projects.auto_promote import apply_run_rules_on_conn as apply_auto_promote_rules_for_run
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.findings import record_run_findings
@@ -33,6 +37,22 @@ from services.projects.links import (
 from services.projects.targets import record_project_target_discoveries
 from services.pty.transcript import shape_completed_pty_entries
 from services.runs.kinds import RUN_KIND_EXTERNAL, run_kind_for_cmd_type
+from services.runs.completion_policy_contracts import RunCompletionPolicy
+from services.runs.finalization_artifacts import save_run_file_artifacts_for_finalize
+from services.runs.finalization_assessments import reconcile_assessment_evidence_for_finalize
+from services.runs.finalization_dalfox_xss import materialize_dalfox_xss_findings_for_finalize
+from services.runs.finalization_nmap_evidence import materialize_nmap_evidence_for_finalize
+from services.runs.finalization_schemathesis import persist_schemathesis_evidence_for_finalize
+from services.runs.finalization_version_inference import (
+    materialize_run_entities_for_finalize,
+)
+from services.runs.finalization_takeover import materialize_takeover_confirmation_for_finalize
+from services.runs.finalization_summaries import (
+    AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT,
+    auto_promote_summary_ids,
+    auto_promote_summary_log_results,
+    auto_promote_summary_results,
+)
 from services.runs.output_model import (
     LineEvent,
     LineRole,
@@ -55,9 +75,9 @@ from services.runs.structured_summary import replace_run_output_summary
 from services.runs.workspace_artifacts import workspace_artifacts_with_sizes
 from services.storage.body_store import inline_threshold_bytes, maybe_store_text_body
 from services.teams.scope import owner_context_for_scope
+from services.workspace.files import read_owner_workspace_text_file
 
 log = logging.getLogger("shell")
-AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT = 10
 SEARCH_ENTITY_MAX_BYTES = 4096
 
 
@@ -76,7 +96,10 @@ class RunFinalizeRecords:
     recorded_findings: list = field(default_factory=list)
     recorded_targets: list = field(default_factory=list)
     scan_observation_count: int = 0
+    nmap_service_summary: dict | None = None
+    version_inference_summary: dict | None = None
     auto_promote_summary: dict | None = None
+    schemathesis_summary: dict | None = None
 
 
 def run_output_capture(run_id: str, cfg: Mapping[str, Any] | None = None) -> RunOutputCapture:
@@ -155,6 +178,15 @@ def capture_event_with_signals(
         signals=metadata.get("signals") if isinstance(metadata.get("signals"), list) else None,
         entities=metadata.get("entities") if isinstance(metadata.get("entities"), list) else None,
     )
+    raw_source_detail = metadata.get("source_detail")
+    source_detail: dict[str, object] = (
+        raw_source_detail.copy()
+        if isinstance(raw_source_detail, dict)
+        else {}
+    )
+    for key in ("screenshots", "historical_urls", "version_observations", "takeover_observations"):
+        if isinstance(metadata.get(key), list):
+            source_detail[key] = metadata[key]
     captured_event = replace(
         base_event,
         signals=metadata_event.signals,
@@ -163,7 +195,7 @@ def capture_event_with_signals(
         command_root=str(metadata.get("command_root", "")),
         target=str(metadata.get("target", "")),
         entities=metadata_event.entities,
-        source_detail=metadata.get("source_detail") if isinstance(metadata.get("source_detail"), dict) else {},
+        source_detail=source_detail,
     )
     capture.add_event(captured_event)
     return metadata, captured_event
@@ -401,48 +433,6 @@ def _save_run_project_link_for_finalize(
     return None
 
 
-def _save_run_file_artifacts_for_finalize(
-    conn,
-    session_id,
-    team_id,
-    run_id,
-    command,
-    workspace_artifacts,
-    workspace_owner,
-    *,
-    workspace_artifacts_with_sizes_fn: Callable = workspace_artifacts_with_sizes,
-) -> list:
-    if not workspace_artifacts:
-        return []
-    try:
-        if team_id:
-            sized_workspace_artifacts = workspace_artifacts_with_sizes_fn(
-                session_id,
-                workspace_artifacts,
-                owner_context=workspace_owner,
-            )
-        else:
-            sized_workspace_artifacts = workspace_artifacts_with_sizes_fn(session_id, workspace_artifacts)
-        return run_finalize_savepoint(
-            conn,
-            "run_file_artifacts",
-            lambda: record_run_file_artifacts(
-                conn,
-                session_id,
-                run_id,
-                sized_workspace_artifacts,
-                **({"owner_context": workspace_owner} if team_id else {}),
-            ),
-        )
-    except Exception:
-        log.error("PROJECT_RUN_ARTIFACT_CAPTURE_ERROR", exc_info=True, extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "cmd": command,
-        })
-    return []
-
-
 def _discover_project_targets_for_finalize(
     conn,
     session_id,
@@ -515,41 +505,6 @@ def _record_run_findings_for_finalize(
     return []
 
 
-def _materialize_run_entities_for_finalize(
-    conn,
-    session_id,
-    team_id,
-    run_id,
-    command,
-    persisted_entries,
-    finished_iso,
-    *,
-    materialize_run_entities_fn: Callable = materialize_run_entities,
-) -> list:
-    try:
-        return run_finalize_savepoint(
-            conn,
-            "atlas_entities",
-            lambda: materialize_run_entities_fn(
-                conn,
-                session_id,
-                run_id,
-                persisted_entries,
-                team_id=team_id,
-                seen_at=finished_iso,
-                command=command,
-            ),
-        )
-    except Exception:
-        app_metrics.record_run_finalize_error("entity_materialize")
-        log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "cmd": command,
-        })
-    return []
-
-
 def _apply_auto_promote_for_finalize(
     conn,
     session_id,
@@ -613,38 +568,6 @@ def _link_active_project_entities_for_finalize(
             "entity_count": len(recorded_entities),
             "cmd": command,
         })
-
-
-def auto_promote_summary_results(summary) -> list[dict]:
-    if not isinstance(summary, dict):
-        return []
-    results = summary.get("results")
-    if not isinstance(results, list):
-        return []
-    return [result for result in results if isinstance(result, dict)]
-
-
-def auto_promote_summary_ids(results: list[dict], key: str) -> list[str]:
-    return sorted({
-        str(result.get(key) or "")
-        for result in results
-        if str(result.get(key) or "")
-    })
-
-
-def auto_promote_summary_log_results(results: list[dict]) -> list[dict[str, object]]:
-    safe_results = []
-    for result in results[:AUTO_PROMOTE_RUN_LOG_RESULT_LIMIT]:
-        safe_results.append({
-            "project_id": str(result.get("project_id") or ""),
-            "rule_id": str(result.get("rule_id") or ""),
-            "matched_count": int(result.get("matched_count") or 0),
-            "linked_count": int(result.get("linked_count") or 0),
-            "promoted_count": int(result.get("promoted_count") or 0),
-            "quota_limited_count": int(result.get("quota_limited_count") or 0),
-            "match_cap_limited_count": int(result.get("match_cap_limited_count") or 0),
-        })
-    return safe_results
 
 
 def log_run_finalize_records(run_id, session_id, team_id, run_kind, records: RunFinalizeRecords) -> tuple[list[dict], list[str]]:
@@ -714,12 +637,24 @@ def update_run_finalize_summary(
         "artifact_count": len(records.recorded_artifacts),
         "finding_count": len(records.recorded_findings),
         "atlas_entity_count": len(records.recorded_entities),
+        "version_inference_count": int(
+            (records.version_inference_summary or {}).get("materialized_count") or 0
+        ),
+        "nmap_service_observation_count": int(
+            (records.nmap_service_summary or {}).get("observation_count") or 0
+        ),
         "project_target_count": len(records.recorded_targets),
         "project_auto_promote_count": int(records.auto_promote_summary.get("linked_count") or 0)
         if isinstance(records.auto_promote_summary, dict) else 0,
         "project_auto_promote_promoted_count": int(records.auto_promote_summary.get("promoted_count") or 0)
         if isinstance(records.auto_promote_summary, dict) else 0,
         "project_auto_promote_project_ids": auto_promote_project_ids,
+        "schemathesis_operation_count": int(
+            (records.schemathesis_summary or {}).get("operation_count") or 0
+        ),
+        "schemathesis_failure_count": int(
+            (records.schemathesis_summary or {}).get("failure_count") or 0
+        ),
         **structured_output_summary_fields(persisted_entries),
     })
 
@@ -740,16 +675,21 @@ def save_completed_run(
     run_kind=RUN_KIND_EXTERNAL,
     owner_tab_id="",
     finalize_summary=None,
+    completion_policy: RunCompletionPolicy | None = None,
     cfg: Mapping[str, Any] | None = None,
     load_full_output_entries_fn: Callable = load_full_output_entries,
     workspace_artifacts_with_sizes_fn: Callable = workspace_artifacts_with_sizes,
     record_run_findings_fn: Callable = record_run_findings,
     materialize_run_entities_fn: Callable = materialize_run_entities,
+    read_owner_workspace_text_file_fn: Callable = read_owner_workspace_text_file,
+    persist_nmap_xml_service_observations_fn: Callable = persist_nmap_xml_service_observations,
+    materialize_nmap_xml_version_inferences_fn: Callable = materialize_nmap_xml_version_inferences,
     run_persistence_transaction_fn: Callable = run_persistence_transaction,
     apply_auto_promote_rules_for_run_fn: Callable = apply_auto_promote_rules_for_run,
     command_project_target_inputs_fn: Callable = command_project_target_inputs,
     record_project_target_discoveries_fn: Callable = record_project_target_discoveries,
     link_active_project_run_entities_fn: Callable = link_active_project_run_entities,
+    reconcile_assessment_evidence_fn: Callable = reconcile_run_evidence_on_conn,
 ):
     capture.finalize()
     try:
@@ -803,7 +743,7 @@ def save_completed_run(
                 link_project_id=link_project_id,
                 link_active_project=link_active_project,
             )
-            records.recorded_artifacts = _save_run_file_artifacts_for_finalize(
+            records.recorded_artifacts = save_run_file_artifacts_for_finalize(
                 conn,
                 session_id,
                 team_id,
@@ -811,6 +751,9 @@ def save_completed_run(
                 command,
                 workspace_artifacts,
                 workspace_owner,
+                persisted_entries=output_state.persisted_entries,
+                exit_code=exit_code,
+                cfg=cfg,
                 workspace_artifacts_with_sizes_fn=workspace_artifacts_with_sizes_fn,
             )
             records.recorded_findings = _record_run_findings_for_finalize(
@@ -822,7 +765,7 @@ def save_completed_run(
                 output_state.persisted_entries,
                 record_run_findings_fn=record_run_findings_fn,
             )
-            records.recorded_entities = _materialize_run_entities_for_finalize(
+            records.recorded_entities = materialize_run_entities_for_finalize(
                 conn,
                 session_id,
                 team_id,
@@ -831,6 +774,23 @@ def save_completed_run(
                 output_state.persisted_entries,
                 finished_iso,
                 materialize_run_entities_fn=materialize_run_entities_fn,
+            )
+            (
+                records.nmap_service_summary,
+                records.version_inference_summary,
+            ) = materialize_nmap_evidence_for_finalize(
+                conn,
+                session_id,
+                team_id,
+                run_id,
+                exit_code,
+                finished_iso,
+                workspace_artifacts,
+                workspace_owner,
+                cfg=cfg,
+                read_owner_workspace_text_file_fn=read_owner_workspace_text_file_fn,
+                persist_nmap_xml_service_observations_fn=persist_nmap_xml_service_observations_fn,
+                materialize_nmap_xml_version_inferences_fn=materialize_nmap_xml_version_inferences_fn,
             )
             records.recorded_targets = _discover_project_targets_for_finalize(
                 conn,
@@ -862,6 +822,28 @@ def save_completed_run(
                 records.recorded_entities,
                 link_active_project_run_entities_fn=link_active_project_run_entities_fn,
             )
+            records.schemathesis_summary = persist_schemathesis_evidence_for_finalize(
+                conn, session_id, team_id, run_id, finished_iso,
+                records.active_project_link, records.recorded_findings, completion_policy,
+            )
+            materialize_dalfox_xss_findings_for_finalize(
+                conn, session_id, team_id, run_id, command, exit_code,
+                output_state.persisted_entries, records.active_project_link,
+                records.recorded_findings,
+            )
+            materialize_takeover_confirmation_for_finalize(
+                conn, session_id, team_id, run_id, command, exit_code,
+                output_state.persisted_entries, records.active_project_link,
+                records.recorded_findings,
+            )
+            reconcile_assessment_evidence_for_finalize(
+                conn,
+                run_id,
+                session_id,
+                team_id,
+                records.active_project_link, records.auto_promote_summary,
+                reconcile_run_evidence_fn=reconcile_assessment_evidence_fn,
+            )
 
         run_persistence_transaction_fn(_persist_completed)
         _auto_promote_results, auto_promote_project_ids = log_run_finalize_records(run_id, session_id, team_id, run_kind, records)
@@ -889,6 +871,7 @@ def finalize_completed_run(
     workspace_artifacts=None,
     owner_tab_id="",
     link_project_id: str | None = "",
+    completion_policy: RunCompletionPolicy | None = None,
     cfg: Mapping[str, Any] | None = None,
     save_completed_run_fn: Callable = save_completed_run,
 ):
@@ -896,16 +879,20 @@ def finalize_completed_run(
     finished = datetime.now(timezone.utc)
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
     finalize_summary = {}
+    save_kwargs = {
+        "workspace_artifacts": workspace_artifacts,
+        "link_active_project": cmd_type == "real" and link_project_id is not None,
+        "link_project_id": link_project_id or "",
+        "run_kind": run_kind_for_cmd_type(cmd_type),
+        "owner_tab_id": owner_tab_id,
+        "finalize_summary": finalize_summary,
+        "cfg": active_cfg,
+    }
+    if completion_policy is not None:
+        save_kwargs["completion_policy"] = completion_policy
     active_project_link = save_completed_run_fn(
         run_id, session_id, team_id, original_command, run_started,
-        finished.isoformat(), exit_code, capture,
-        workspace_artifacts=workspace_artifacts,
-        link_active_project=cmd_type == "real" and link_project_id is not None,
-        link_project_id=link_project_id or "",
-        run_kind=run_kind_for_cmd_type(cmd_type),
-        owner_tab_id=owner_tab_id,
-        finalize_summary=finalize_summary,
-        cfg=active_cfg,
+        finished.isoformat(), exit_code, capture, **save_kwargs,
     )
     persisted = bool(finalize_summary.get("persisted"))
     finalize_status = "ok" if persisted else "degraded"
@@ -930,6 +917,10 @@ def finalize_completed_run(
         "artifact_count": int(finalize_summary.get("artifact_count") or len(workspace_artifacts or [])),
         "finding_count": int(finalize_summary.get("finding_count") or 0),
         "atlas_entity_count": int(finalize_summary.get("atlas_entity_count") or 0),
+        "version_inference_count": int(finalize_summary.get("version_inference_count") or 0),
+        "nmap_service_observation_count": int(
+            finalize_summary.get("nmap_service_observation_count") or 0
+        ),
         "project_target_count": int(finalize_summary.get("project_target_count") or 0),
     })
     app_metrics.record_completed_run(original_command, run_kind_for_cmd_type(cmd_type), exit_code, elapsed, capture)
@@ -976,6 +967,7 @@ def persist_completed_pty_run(
         execution_command,
         cmd_type="real",
         extra_domain_suffixes=active_cfg.get("output_entity_extra_domain_suffixes", []),
+        source_run_id=str(run.run_id),
     )
     for item in shape_completed_pty_entries(synthesized_lines, transcript_mode):
         text = str(item.get("text", ""))

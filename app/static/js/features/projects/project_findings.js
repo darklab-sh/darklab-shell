@@ -7,11 +7,17 @@ import {
   activeTeamScopeCan as importedActiveTeamScopeCan,
   teamScopeDeniedMessage as importedTeamScopeDeniedMessage,
 } from '../team_scope.js';
+import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
+import { renderProjectFindingChangesSummary } from './project_finding_changes.js';
 
 let exportedDarklabProjectFindings = null;
 
 (function projectFindingsModule(global) {
   'use strict';
+
+  const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
+    ? importedFindingRiskSummary
+    : () => '';
 
   function createProjectFindingsController(context) {
     const ctx = context || {};
@@ -88,9 +94,14 @@ let exportedDarklabProjectFindings = null;
         buttonGroup.className = 'project-finding-row-button-group';
         const triage = ctx.makeProjectButton('Triage', 'edit-finding-triage', projectId);
         triage.dataset.findingId = String(finding.id || '');
-        const edit = ctx.makeProjectButton('Edit', 'edit-finding-metadata', projectId);
-        edit.dataset.findingId = String(finding.id || '');
-        buttonGroup.append(triage, edit);
+        const metadata = ctx.makeProjectButton('Metadata', 'edit-finding-metadata', projectId);
+        metadata.dataset.findingId = String(finding.id || '');
+        buttonGroup.append(triage, metadata);
+        if (String(finding.origin || '') === 'manual') {
+          const edit = ctx.makeProjectButton('Edit finding', 'edit-manual-finding', projectId);
+          edit.dataset.findingId = String(finding.id || '');
+          buttonGroup.appendChild(edit);
+        }
         if (finding.run_id) {
           const seeRun = ctx.makeProjectButton('See in run', 'open-finding-run-details', projectId);
           seeRun.dataset.findingId = String(finding.id || '');
@@ -181,6 +192,12 @@ let exportedDarklabProjectFindings = null;
         wrap.appendChild(btn);
       });
       tools.appendChild(wrap);
+      const create = ctx.makeProjectButton('Create finding', 'create-manual-finding', projectId, 'primary');
+      if (!activeTeamScopeCan('triage_findings')) {
+        create.disabled = true;
+        create.title = teamScopeDeniedMessage('create team findings');
+      }
+      tools.appendChild(create);
       if (boardAllowed) {
         const open = ctx.makeProjectButton('Open board', 'open-findings-board', projectId);
         open.classList.add('project-finding-board-open');
@@ -230,6 +247,7 @@ let exportedDarklabProjectFindings = null;
         finding.run_command || finding.run_id,
         finding.scope || 'finding',
         ctx.projectFindingTargetText(summary, finding) || ctx.projectTargetLabel(summary, finding.target_id),
+        summarizeFindingRisk(finding),
         `line ${finding.line_number || 0}`,
       ].filter(Boolean);
       const row = ctx.projectItemRow({
@@ -274,6 +292,13 @@ let exportedDarklabProjectFindings = null;
       const total = Math.max(0, Number(pagination.total || allFindings.length || 0));
       const viewMode = findingsBoardAvailable() ? ctx.findingViewMode() : 'list';
       pruneSelection(findings);
+      const findingChanges = renderProjectFindingChangesSummary({
+        changes: ctx.projectFindingChanges?.(projectId),
+        projectId,
+        onOpenAssessment: ctx.openProjectAssessment,
+        bindPressable: ctx.bindProjectRuntimePressable,
+      });
+      if (findingChanges) container.appendChild(findingChanges);
       container.appendChild(renderViewToggle(projectId));
       if (viewMode === 'board' && ctx.findingSelectMode()) {
         ctx.selectedFindingIds().clear();

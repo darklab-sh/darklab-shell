@@ -40,6 +40,11 @@ class AuditTargetType(str, Enum):
     IMPORT = "import"
     WORKFLOW = "workflow"
     WORKFLOW_EXECUTION = "workflow_execution"
+    CVE_RISK_SOURCE = "cve_risk_source"
+    RISK_ESCALATION = "risk_escalation"
+    ASSESSMENT = "assessment"
+    ASSESSMENT_CHECK = "assessment_check"
+    HTTP_PROFILE = "http_profile"
 
 
 class AuditEventType(str, Enum):
@@ -82,6 +87,11 @@ class AuditEventType(str, Enum):
     FINDING_REVIEW_CHANGE = "finding.review_change"
     PROJECT_LINK = "project.link"
     REMEDIATION_EDIT = "finding.remediation_edit"
+    REMEDIATION_MERGE = "finding.remediation_merge"
+    FINDING_EVIDENCE_LINK = "finding.evidence_link"
+    FINDING_EVIDENCE_UNLINK = "finding.evidence_unlink"
+    FINDING_MANUAL_CREATE = "finding.manual_create"
+    FINDING_MANUAL_UPDATE = "finding.manual_update"
     VERIFICATION_EDIT = "finding.verification_edit"
     LABEL_CHANGE = "label.change"
     NOTE_CHANGE = "note.change"
@@ -107,6 +117,24 @@ class AuditEventType(str, Enum):
     WORKFLOW_DELETE = "workflow.delete"
     WORKFLOW_EXECUTION_START = "workflow_execution.start"
     WORKFLOW_EXECUTION_CANCEL = "workflow_execution.cancel"
+    CVE_RISK_REFRESH = "cve_risk.refresh"
+    CVE_ADVISORY_REFRESH = "cve_advisory.refresh"
+    RISK_ESCALATION_ACK = "risk_escalation.ack"
+    ASSESSMENT_CREATE = "assessment.create"
+    ASSESSMENT_UPDATE = "assessment.update"
+    ASSESSMENT_COMPLETE = "assessment.complete"
+    ASSESSMENT_ARCHIVE = "assessment.archive"
+    ASSESSMENT_DELETE = "assessment.delete"
+    ASSESSMENT_CHECK_STATE_CHANGE = "assessment.check_state_change"
+    ASSESSMENT_EVIDENCE_LINK = "assessment.evidence_link"
+    ASSESSMENT_EVIDENCE_UNLINK = "assessment.evidence_unlink"
+    ASSESSMENT_ACTION_LAUNCH = "assessment.action_launch"
+    ASSESSMENT_OAST_RESERVE = "assessment.oast_reserve"
+    ASSESSMENT_ZAP_JOB_SUBMIT = "assessment.zap_job_submit"
+    ASSESSMENT_ZAP_JOB_CANCEL = "assessment.zap_job_cancel"
+    HTTP_PROFILE_CREATE = "http_profile.create"
+    HTTP_PROFILE_UPDATE = "http_profile.update"
+    HTTP_PROFILE_DELETE = "http_profile.delete"
 
 
 COMMON_DETAIL_KEYS = frozenset({
@@ -208,9 +236,28 @@ COMMON_DETAIL_KEYS = frozenset({
     "source_session_hash",
     "source_session_label",
     "triggers",
+    "origin",
+    "outcome",
+    "record_count",
+    "source_version",
+    "transition_kind",
+    "observation_count",
+    "member_count",
+    "remediation_group_id",
+    "assessment_id",
+    "check_id",
+    "check_key",
+    "evidence_id",
+    "evidence_link_id",
+    "evidence_type",
+    "policy_level",
+    "profile_key",
+    "profile_version",
+    "profile_id",
 })
 
 HISTORY_DELETE_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "assessment_evidence_unavailable_count",
     "prune_atlas_requested",
     "prune_curated_atlas_requested",
     "atlas_removed_entity_count",
@@ -230,6 +277,20 @@ PROJECT_UNLINK_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
     "unlinked_curated_finding_count",
     "kept_entity_count",
     "kept_finding_count",
+})
+
+MANUAL_FINDING_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "manual_revision",
+    "severity",
+    "evidence_count",
+    "duplicate_override",
+})
+
+ASSESSMENT_ACTION_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "parameter_observation_id",
+    "parameter_source_run_id",
+    "schema_artifact_id",
+    "schema_operation_count",
 })
 
 
@@ -252,6 +313,109 @@ def _spec(
 
 
 EVENT_SPECS: dict[str, EventSpec] = {
+    AuditEventType.FINDING_MANUAL_CREATE.value: _spec(
+        AuditEventType.FINDING_MANUAL_CREATE,
+        AuditTargetType.FINDING,
+        RecordingMode.FAIL_CLOSED,
+        detail_keys=MANUAL_FINDING_DETAIL_KEYS,
+    ),
+    AuditEventType.FINDING_MANUAL_UPDATE.value: _spec(
+        AuditEventType.FINDING_MANUAL_UPDATE,
+        AuditTargetType.FINDING,
+        RecordingMode.FAIL_CLOSED,
+        detail_keys=MANUAL_FINDING_DETAIL_KEYS,
+    ),
+    AuditEventType.ASSESSMENT_CREATE.value: _spec(
+        AuditEventType.ASSESSMENT_CREATE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_UPDATE.value: _spec(
+        AuditEventType.ASSESSMENT_UPDATE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_COMPLETE.value: _spec(
+        AuditEventType.ASSESSMENT_COMPLETE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_ARCHIVE.value: _spec(
+        AuditEventType.ASSESSMENT_ARCHIVE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_DELETE.value: _spec(
+        AuditEventType.ASSESSMENT_DELETE,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.ASSESSMENT_CHECK_STATE_CHANGE.value: _spec(
+        AuditEventType.ASSESSMENT_CHECK_STATE_CHANGE,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.ASSESSMENT_EVIDENCE_LINK.value: _spec(
+        AuditEventType.ASSESSMENT_EVIDENCE_LINK,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.ASSESSMENT_EVIDENCE_UNLINK.value: _spec(
+        AuditEventType.ASSESSMENT_EVIDENCE_UNLINK,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.ASSESSMENT_ACTION_LAUNCH.value: _spec(
+        AuditEventType.ASSESSMENT_ACTION_LAUNCH,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.BEST_EFFORT,
+        detail_keys=ASSESSMENT_ACTION_DETAIL_KEYS,
+    ),
+    AuditEventType.ASSESSMENT_OAST_RESERVE.value: _spec(
+        AuditEventType.ASSESSMENT_OAST_RESERVE,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_ZAP_JOB_SUBMIT.value: _spec(
+        AuditEventType.ASSESSMENT_ZAP_JOB_SUBMIT,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_ZAP_JOB_CANCEL.value: _spec(
+        AuditEventType.ASSESSMENT_ZAP_JOB_CANCEL,
+        AuditTargetType.ASSESSMENT_CHECK,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.HTTP_PROFILE_CREATE.value: _spec(
+        AuditEventType.HTTP_PROFILE_CREATE,
+        AuditTargetType.HTTP_PROFILE,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.HTTP_PROFILE_UPDATE.value: _spec(
+        AuditEventType.HTTP_PROFILE_UPDATE,
+        AuditTargetType.HTTP_PROFILE,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.HTTP_PROFILE_DELETE.value: _spec(
+        AuditEventType.HTTP_PROFILE_DELETE,
+        AuditTargetType.HTTP_PROFILE,
+        RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.CVE_ADVISORY_REFRESH.value: _spec(
+        AuditEventType.CVE_ADVISORY_REFRESH,
+        AuditTargetType.CVE_RISK_SOURCE,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.CVE_RISK_REFRESH.value: _spec(
+        AuditEventType.CVE_RISK_REFRESH,
+        AuditTargetType.CVE_RISK_SOURCE,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.RISK_ESCALATION_ACK.value: _spec(
+        AuditEventType.RISK_ESCALATION_ACK,
+        AuditTargetType.RISK_ESCALATION,
+        RecordingMode.BEST_EFFORT,
+    ),
     AuditEventType.HISTORY_DELETE.value: _spec(
         AuditEventType.HISTORY_DELETE,
         AuditTargetType.RUN,
@@ -374,6 +538,15 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     AuditEventType.REMEDIATION_EDIT.value: _spec(
         AuditEventType.REMEDIATION_EDIT, AuditTargetType.FINDING, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.REMEDIATION_MERGE.value: _spec(
+        AuditEventType.REMEDIATION_MERGE, AuditTargetType.FINDING, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.FINDING_EVIDENCE_LINK.value: _spec(
+        AuditEventType.FINDING_EVIDENCE_LINK, AuditTargetType.FINDING, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.FINDING_EVIDENCE_UNLINK.value: _spec(
+        AuditEventType.FINDING_EVIDENCE_UNLINK, AuditTargetType.FINDING, RecordingMode.FAIL_CLOSED
     ),
     AuditEventType.VERIFICATION_EDIT.value: _spec(
         AuditEventType.VERIFICATION_EDIT, AuditTargetType.FINDING, RecordingMode.BEST_EFFORT

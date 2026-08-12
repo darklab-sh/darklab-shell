@@ -87,8 +87,13 @@ EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
         "nvd": {
             "published": "",
             "last_modified": "",
+            "status": "unknown",
             "severity": "",
             "score": None,
+            "cvss_version": "",
+            "cvss_vector": "",
+            "cwes": [],
+            "cpe_matches": [],
             "description": "",
             "references": [],
         },

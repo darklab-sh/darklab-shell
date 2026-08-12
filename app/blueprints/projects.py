@@ -64,7 +64,6 @@ from services.teams.request_scope import (
 )
 
 log = logging.getLogger("shell")
-
 projects_bp = Blueprint("projects", __name__)
 
 
@@ -231,7 +230,7 @@ def _project_owner(required_capability=None):
     if not requested_team_id(request):
         return session_id, "", None
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError as exc:
         payload, status = scope_error_payload(exc)
         return session_id, "", (jsonify(payload), status)
@@ -248,7 +247,7 @@ def _project_owner_any_capability(capabilities):
     if not requested_team_id(request):
         return session_id, "", None
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError as exc:
         payload, status = scope_error_payload(exc)
         return session_id, "", (jsonify(payload), status)
@@ -268,7 +267,7 @@ def _can_manage_project_digest_settings(session_id, team_id):
     if not team_id:
         return True
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError:
         return False
     role = str((scope.member or {}).get("role") or "")
@@ -301,7 +300,7 @@ def _project_actor_member_id(session_id, team_id):
     if not team_id:
         return ""
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError:
         return ""
     return str((scope.member or {}).get("id") or "")
@@ -311,7 +310,7 @@ def _project_audit_fields(session_id, team_id):
     scope = None
     if team_id:
         try:
-            scope = current_request_scope(session_id, request)
+            scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
         except RequestScopeError:
             scope = None
     return route_audit_fields(session_id, request, scope)
@@ -394,7 +393,7 @@ def _project_team_log_context(session_id, team_id):
         return {}
     context = {"team_id": team_id}
     try:
-        scope = current_request_scope(session_id, request)
+        scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
     except RequestScopeError:
         return context
     member = scope.member or {}
@@ -512,6 +511,7 @@ from blueprints.projects_targets import (  # noqa: E402,F401
     projects_targets_list,
     projects_targets_update,
 )
+from blueprints import projects_assessment_action_launch, projects_assessment_actions, projects_assessment_checks, projects_assessment_oast, projects_assessment_oast_launch, projects_assessment_zap, projects_assessments, projects_finding_evidence, projects_finding_merges, projects_finding_triage, projects_http_profiles, projects_retest_queue, projects_verification_actions  # noqa: E402,F401,E501
 from blueprints.projects_auto_promote import (  # noqa: E402,F401
     projects_auto_promote_rules_apply,
     projects_auto_promote_rules_create,
@@ -534,6 +534,7 @@ from blueprints.projects_monitoring import (  # noqa: E402,F401
     projects_monitoring_fire_update,
     projects_monitoring_summary,
 )
+from blueprints.projects_monitoring_risk import projects_monitoring_risk_event_update  # noqa: E402,F401
 from blueprints.projects_report import (  # noqa: E402,F401
     projects_report_export_job_create,
     projects_report_export_job_file,
@@ -560,14 +561,15 @@ from blueprints.projects_artifacts import (  # noqa: E402,F401
     projects_artifacts_list,
     projects_artifacts_preview,
 )
+from blueprints.projects_web_surface import projects_web_surface_list  # noqa: E402,F401
 from blueprints.projects_findings import (  # noqa: E402,F401
-    finding_triage_detail,
-    finding_triage_update,
     findings_review_update,
     projects_findings_bulk_review_update,
     projects_findings_list,
     run_findings_list,
 )
+from blueprints.projects_finding_triage import finding_triage_detail, finding_triage_update  # noqa: E402,F401,E501
+from blueprints import projects_manual_findings as _projects_manual_findings  # noqa: E402,F401
 from blueprints.projects_metadata import (  # noqa: E402,F401
     entity_labels_create,
     entity_labels_delete,

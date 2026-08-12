@@ -18,6 +18,7 @@ MAX_ENTITY_NOTE_BODY_LEN = 20000
 MAX_FINDING_REMEDIATION_LEN = 20000
 MAX_FINDING_VERIFICATION_STEPS_LEN = 20000
 MAX_FINDING_VERIFICATION_NOTES_LEN = 20000
+MAX_FINDING_EVIDENCE_SNIPPET_LEN = 1000
 MAX_TARGET_VALUE_LEN = 512
 MAX_FINDING_TITLE_LEN = 240
 MAX_PACKAGE_NAME_LEN = 120
@@ -58,6 +59,17 @@ FINDING_VERIFICATION_STATES = frozenset({
     "verified",
     "needs_retest",
     "not_applicable",
+})
+FINDING_EVIDENCE_TYPES = frozenset({
+    "run",
+    "run_line",
+    "run_artifact",
+    "workspace_file",
+    "screenshot",
+    "atlas_entity",
+    "project_target",
+    "assessment_check",
+    "retest_run",
 })
 EVIDENCE_PACKAGE_STATUSES = frozenset({"draft"})
 PROJECT_TARGET_SELECT_COLUMNS = (

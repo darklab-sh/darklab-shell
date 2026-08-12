@@ -22,6 +22,10 @@ from services.teams.scope import personal_owner_context, shared_owner_predicate
 from services.workflows.captures import MAX_CAPTURE_TOTAL_BYTES
 from services.workflows.compiler import workflow_private_values
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
+from services.workflows.fanout_checkpoint import checkpoint_from_payload
+from services.workflows.fanout_child_cancellation import cancel_fanout_children_on_conn
+from services.workflows.fanout_summary import summarize_fanout_results
+from services.workflows.transitions import transition_for_step
 
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running", "canceling")
@@ -77,7 +81,10 @@ def _elapsed_ms(started: object, finished: object) -> int:
 
 def _capture_failure_metadata(error: str) -> tuple[str, str]:
     normalized = str(error or "").lower()
-    if "required captures were not found" in normalized:
+    if (
+        "required captures were not found" in normalized
+        or "required collection captures were not found" in normalized
+    ):
         return "required_capture_missing", "required_missing"
     if "execution limit" in normalized:
         return "capture_total_limit", "total_limit"
@@ -118,6 +125,7 @@ def _step_from_row(row: Any) -> dict[str, Any]:
     keys = _row_keys(row)
     result = {key: row[key] for key in keys}
     result["capture_names"] = _dialect().decode_json_list(result.get("capture_names"))
+    result["fanout_checkpoint"] = _dialect().decode_json_dict(result.get("fanout_checkpoint"))
     if result.get("run_id"):
         result["stream"] = f"/runs/{result['run_id']}/stream"
     return result
@@ -154,6 +162,19 @@ def public_execution(execution: Mapping[str, Any] | None) -> dict[str, Any]:
             for field in PUBLIC_EXECUTION_STEP_FIELDS
             if field in step
         }
+        checkpoint = step.get("fanout_checkpoint")
+        if isinstance(checkpoint, Mapping):
+            rows = [
+                *({"status": "pending"} for _ in checkpoint.get("pending", [])),
+                *({"status": "running"} for _ in checkpoint.get("running", [])),
+                *({"status": "succeeded"} for _ in checkpoint.get("completed", [])),
+                *({"status": "failed", "error_code": "child_failed"} for _ in checkpoint.get("failed", [])),
+                *({"status": "skipped"} for _ in checkpoint.get("skipped", [])),
+            ]
+            public_step["fanout_summary"] = summarize_fanout_results(
+                rows,
+                cancelled=bool(checkpoint.get("cancelled")),
+            )
         if "error_detail" in public_step:
             public_step["error_detail"] = redact_private_values(
                 public_step["error_detail"],
@@ -354,6 +375,23 @@ def get_execution_by_id(execution_id: str) -> dict[str, Any] | None:
     return result
 
 
+def set_fanout_checkpoint(
+    execution_id: str,
+    step_id: str,
+    checkpoint: Mapping[str, object],
+) -> bool:
+    """Persist one validated private fan-out checkpoint for a workflow step."""
+    normalized = checkpoint_from_payload(dict(checkpoint)).to_payload()
+    dialect = _dialect()
+    with get_db_connect()() as conn:
+        result = conn.execute(
+            "UPDATE workflow_execution_steps SET fanout_checkpoint = ? "
+            "WHERE execution_id = ? AND step_id = ?",
+            (dialect.json_param(normalized), execution_id, step_id),
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+
 def active_execution_page_for_recovery(
     *,
     limit: int = 100,
@@ -430,6 +468,10 @@ def fail_execution(execution_id: str, code: str, detail: str, *, step_id: str = 
                 "WHERE execution_id = ? AND step_id = ? AND status IN ('pending', 'launching', 'running')",
                 (bounded_code, bounded_detail, now, execution_id, step_id),
             )
+        if get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
+            conn, "workflow_execution_children"
+        ):
+            cancel_fanout_children_on_conn(conn, execution_id, finished=now)
         conn.execute(
             "UPDATE workflow_execution_steps SET status = 'skipped', finished = ? "
             "WHERE execution_id = ? AND status = 'pending'",
@@ -441,10 +483,17 @@ def fail_execution(execution_id: str, code: str, detail: str, *, step_id: str = 
 
 def fail_execution_for_run(run_id: str, code: str, detail: str) -> bool:
     with get_db_connect()() as conn:
-        row = conn.execute(
-            "SELECT execution_id, step_id FROM workflow_execution_steps WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
+        query = "SELECT execution_id, step_id FROM workflow_execution_steps WHERE run_id = ?"
+        params = (run_id,)
+        if get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
+            conn, "workflow_execution_children"
+        ):
+            query += (
+                " UNION ALL SELECT execution_id, step_id "
+                "FROM workflow_execution_children WHERE run_id = ?"
+            )
+            params = (run_id, run_id)
+        row = conn.execute(query + " LIMIT 1", params).fetchone()  # nosec
     if not row:
         return False
     return fail_execution(str(row["execution_id"]), code, detail, step_id=str(row["step_id"]))
@@ -452,10 +501,21 @@ def fail_execution_for_run(run_id: str, code: str, detail: str) -> bool:
 
 def execution_for_run(run_id: str) -> dict[str, Any] | None:
     with get_db_connect()() as conn:
+        child_clause = ""
+        params = (run_id,)
+        if get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
+            conn, "workflow_execution_children"
+        ):
+            child_clause = (
+                " OR EXISTS (SELECT 1 FROM workflow_execution_children c "
+                "WHERE c.execution_id = e.id AND c.run_id = ?)"
+            )
+            params = (run_id, run_id)
         row = conn.execute(
-            "SELECT e.* FROM workflow_executions e "
-            "JOIN workflow_execution_steps s ON s.execution_id = e.id WHERE s.run_id = ?",
-            (run_id,),
+            "SELECT e.* FROM workflow_executions e WHERE "  # nosec
+            "EXISTS (SELECT 1 FROM workflow_execution_steps s "
+            "WHERE s.execution_id = e.id AND s.run_id = ?)" + child_clause,
+            params,
         ).fetchone()
     return _execution_from_row(row)
 
@@ -488,15 +548,33 @@ def workflow_provenance_by_run(
     elif session_id or team_id:
         owner_clause, owner_params = _owner_where(session_id, team_id=team_id, table_alias="e")
         owner_sql = " AND " + owner_clause
-    rows = conn.execute(
+    scalar_query = (
         "SELECT s.run_id, s.execution_id, s.step_id, s.step_index, s.status AS step_status, "  # nosec
         "s.exit_code, s.selected_transition, s.transition_reason, "
         "e.workflow_id, e.workflow_source, e.title, e.status AS execution_status, e.current_step_id "
         "FROM workflow_execution_steps s "
         "JOIN workflow_executions e ON e.id = s.execution_id "
-        f"WHERE s.run_id IN ({placeholders})" + owner_sql,
-        (*normalized_ids, *owner_params),
-    ).fetchall()
+        f"WHERE s.run_id IN ({placeholders})" + owner_sql
+    )
+    query_params: tuple[Any, ...] = (*normalized_ids, *owner_params)
+    child_table_exists = get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
+        conn, "workflow_execution_children"
+    )
+    if child_table_exists:
+        child_query = (
+            "SELECT c.run_id, c.execution_id, c.step_id, s.step_index, "  # nosec
+            "c.status AS step_status, "
+            "c.exit_code, s.selected_transition, s.transition_reason, "
+            "e.workflow_id, e.workflow_source, e.title, e.status AS execution_status, e.current_step_id "
+            "FROM workflow_execution_children c "
+            "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
+            "AND s.step_id = c.step_id "
+            "JOIN workflow_executions e ON e.id = c.execution_id "
+            f"WHERE c.run_id IN ({placeholders})" + owner_sql
+        )
+        scalar_query += " UNION ALL " + child_query
+        query_params += (*normalized_ids, *owner_params)
+    rows = conn.execute(scalar_query, query_params).fetchall()
     result: dict[str, dict[str, Any]] = {}
     execution_ids: set[str] = set()
     for row in rows:
@@ -608,43 +686,12 @@ def bind_step_run(execution_id: str, step_id: str, run_id: str) -> bool:
     return result.rowcount == 1
 
 
-def _transition_for_step(
-    definition: Mapping[str, object],
-    step_id: str,
-    *,
-    exit_code: int,
-    capture_failed: bool,
-) -> tuple[str, str]:
-    raw_steps = definition.get("steps")
-    steps = [step for step in raw_steps if isinstance(step, Mapping)] if isinstance(raw_steps, list) else []
-    index = next((position for position, step in enumerate(steps) if step.get("id") == step_id), -1)
-    if index < 0:
-        return "stop", "definition_error"
-    step = steps[index]
-    raw_next = step.get("next")
-    next_value: Mapping[str, object] = raw_next if isinstance(raw_next, Mapping) else {}
-    raw_codes = next_value.get("codes")
-    codes: Mapping[str, object] = raw_codes if isinstance(raw_codes, Mapping) else {}
-    code_destination = None if capture_failed else codes.get(str(exit_code))
-    if code_destination:
-        return str(code_destination), f"exit_code:{exit_code}"
-    success = exit_code == 0 and not capture_failed
-    outcome = "success" if success else "failure"
-    destination = next_value.get(outcome)
-    if destination:
-        return str(destination), outcome
-    if success:
-        if index + 1 < len(steps):
-            return str(steps[index + 1].get("id") or "stop"), "implicit_success"
-        return "complete", "implicit_success"
-    return "stop", "capture_failure" if capture_failed else "implicit_failure"
-
-
 def finalize_run_step(
     run_id: str,
     exit_code: int,
     *,
     captures: Mapping[str, str] | None = None,
+    collection_captures: Mapping[str, list[str]] | None = None,
     capture_error: str = "",
 ) -> dict[str, Any] | None:
     """Finalize a linked step and select its next destination exactly once."""
@@ -662,7 +709,13 @@ def finalize_run_step(
             return None
         definition = dialect.decode_json_dict(row["definition_snapshot"])
         variables = dialect.decode_json_dict(row["variables"])
-        pending_captures = {str(key): str(value) for key, value in (captures or {}).items()}
+        pending_captures: dict[str, object] = {
+            str(key): str(value) for key, value in (captures or {}).items()
+        }
+        pending_captures.update({
+            str(key): [str(item) for item in value]
+            for key, value in (collection_captures or {}).items()
+        })
         current_step = next(
             (
                 step
@@ -686,17 +739,22 @@ def finalize_run_step(
             for item in definition.get("inputs") or []
             if isinstance(item, Mapping)
         }
-        capture_values = {
-            key: str(value)
+        capture_values: dict[str, object] = {
+            key: value
             for key, value in variables.items()
             if key not in input_ids
         }
         capture_values.update(pending_captures)
-        if sum(len(value.encode("utf-8")) for value in capture_values.values()) > MAX_CAPTURE_TOTAL_BYTES:
+        capture_bytes = sum(
+            len(str(item).encode("utf-8"))
+            for value in capture_values.values()
+            for item in (value if isinstance(value, list) else [value])
+        )
+        if capture_bytes > MAX_CAPTURE_TOTAL_BYTES:
             capture_error = capture_error or "workflow captures exceed the execution limit"
             pending_captures = {}
         variables.update(pending_captures)
-        destination, reason = _transition_for_step(
+        destination, reason = transition_for_step(
             definition,
             str(row["step_id"]),
             exit_code=int(exit_code),
@@ -798,8 +856,10 @@ def cancel_execution(session_id: str, execution_id: str, *, team_id: str = "") -
     owner_sql, owner_params = _owner_where(session_id, team_id=team_id)
     now = _now()
     with get_db_connect()() as conn:
+        conn.execute(_dialect().begin_immediate_sql())
+        lock_sql = " FOR UPDATE" if get_db_backend() == DatabaseBackend.POSTGRES else ""
         row = conn.execute(
-            "SELECT * FROM workflow_executions WHERE " + owner_sql + " AND id = ?",  # nosec
+            "SELECT * FROM workflow_executions WHERE " + owner_sql + " AND id = ?" + lock_sql,  # nosec
             (*owner_params, execution_id),
         ).fetchone()
         execution = _execution_from_row(row)
@@ -822,6 +882,11 @@ def cancel_execution(session_id: str, execution_id: str, *, team_id: str = "") -
         if changed.rowcount != 1:
             conn.rollback()
             return get_execution(session_id, execution_id, team_id=team_id)
+        child_run_ids = cancel_fanout_children_on_conn(
+            conn,
+            execution_id,
+            finished=now,
+        )
         if get_db_backend() != DatabaseBackend.POSTGRES:
             active_rows = conn.execute(
                 "SELECT run_id FROM workflow_execution_steps WHERE execution_id = ? "
@@ -840,5 +905,5 @@ def cancel_execution(session_id: str, execution_id: str, *, team_id: str = "") -
             str(row["run_id"])
             for row in active_rows
             if str(row["run_id"] or "")
-        })
+        } | set(child_run_ids))
     return result

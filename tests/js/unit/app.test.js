@@ -2892,6 +2892,64 @@ describe('app helpers', () => {
       codes: { 2: 'scan' },
     })
     expect(payload.steps[1].next).toEqual({ success: 'complete', failure: 'stop' })
+
+    openWorkflowEditor({
+      id: 'usr_collection_probe',
+      source: 'user',
+      version: 3,
+      title: 'Collect and probe',
+      description: 'Probe each captured host.',
+      inputs: [],
+      steps: [
+        {
+          id: 'collect',
+          cmd: 'discover --json',
+          captures: [{
+            name: 'hosts',
+            kind: 'collection',
+            source: 'json_pointer',
+            pointer: '/hosts',
+            item_limit: 12,
+          }],
+          next: { success: 'probe', failure: 'stop' },
+        },
+        {
+          id: 'probe',
+          cmd: 'httpx -u {{hosts}} -silent',
+          for_each: {
+            collection: 'hosts',
+            failure_mode: 'continue',
+            retries: 2,
+            max_parallel: 4,
+            max_failures: 5,
+          },
+          next: { success: 'complete', failure: 'stop' },
+        },
+      ],
+    })
+
+    const collectionSteps = document.querySelectorAll('[data-workflow-editor-step]')
+    const collectionCapture = collectionSteps[0].querySelector('[data-workflow-editor-capture]')
+    expect(collectionCapture.querySelector('.workflow-editor-capture-kind').value).toBe('collection')
+    expect(collectionCapture.querySelector('.workflow-editor-capture-item-limit').value).toBe('12')
+    expect(collectionCapture.querySelector('.workflow-editor-capture-limit-field').hidden).toBe(false)
+    expect(collectionSteps[1].querySelector('.workflow-editor-fanout-enabled').checked).toBe(true)
+    expect(collectionSteps[1].querySelector('.workflow-editor-fanout-collection').value).toBe('hosts')
+    expect(payloadFromEditor()).toMatchObject({
+      version: 3,
+      steps: [
+        { captures: [{ name: 'hosts', kind: 'collection', item_limit: 12 }] },
+        {
+          for_each: {
+            collection: 'hosts',
+            failure_mode: 'continue',
+            retries: 2,
+            max_parallel: 4,
+            max_failures: 5,
+          },
+        },
+      ],
+    })
   })
 
   it('keeps exact exit-code routes visible through step edits and validates route fields', async () => {
@@ -2972,7 +3030,46 @@ describe('app helpers', () => {
       .toBe('Enter a whole-number exit code.')
     duplicate.querySelector('.workflow-editor-remove-exit-code').click()
     expect(payloadFromEditor().steps[0].next.codes).toEqual({ 7: 'stop' })
-  })
+
+    openWorkflowEditor({
+      id: 'usr_invalid_collection_limits',
+      source: 'user',
+      version: 3,
+      title: 'Invalid collection limits',
+      inputs: [],
+      steps: [
+        {
+          id: 'collect',
+          cmd: 'discover --json',
+          captures: [{
+            name: 'hosts', kind: 'collection', source: 'json_pointer',
+            pointer: '/hosts', item_limit: 12,
+          }],
+          next: { success: 'probe', failure: 'stop' },
+        },
+        {
+          id: 'probe',
+          cmd: 'httpx -u {{hosts}}',
+          for_each: { collection: 'hosts', max_parallel: 2 },
+          next: { success: 'complete', failure: 'stop' },
+        },
+      ],
+    })
+    const collectionSteps = document.querySelectorAll('[data-workflow-editor-step]')
+    collectionSteps[0].querySelector('.workflow-editor-capture-item-limit').value = '33'
+    collectionSteps[1].querySelector('.workflow-editor-fanout-max-parallel').value = '9'
+    document.getElementById('workflow-editor-form').dispatchEvent(new Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(apiFetch).toHaveBeenCalledTimes(initialApiCallCount)
+    expect(collectionSteps[0].querySelector(
+      '[data-workflow-field$="item_limit"] .form-error',
+    ).textContent).toBe('Item limit must be between 1 and 32.')
+    expect(collectionSteps[1].querySelector(
+      '[data-workflow-field$="max_parallel"] .form-error',
+    ).textContent).toBe('Parallel runs must be between 1 and 8.')
+  }, 10000)
 
   it('marks workflow capture-fed command previews as available only during the playbook', async () => {
     const { renderWorkflowItems } = await loadAppFns()
@@ -3067,6 +3164,10 @@ describe('app helpers', () => {
           selected_transition: 'scan',
           transition_reason: 'success',
           capture_names: ['resolved_ip'],
+          fanout_summary: {
+            total: 6, succeeded: 2, failed: 1, skipped: 1, pending: 1, running: 1,
+            failure_samples: ['scope_rejected'],
+          },
         }],
       }],
     }, { nowMs: finished })
@@ -3081,6 +3182,10 @@ describe('app helpers', () => {
     expect(body.textContent).toContain('Elapsed: 1m 05s')
     expect(body.textContent).toContain('to scan (success)')
     expect(body.textContent).toContain('Captured: resolved_ip')
+    expect(body.textContent).toContain(
+      'Fan-out: 4/6 finished · 1 pending · 1 active · 2 succeeded · 1 failed · 1 skipped',
+    )
+    expect(body.textContent).toContain('Failure codes: scope_rejected')
     expect(body.textContent).toContain('run-resolve-1')
   })
 
@@ -3340,13 +3445,29 @@ describe('app helpers', () => {
 
     const durableWorkflow = {
       ...workflow,
-      id: 'builtin:durable-dns',
-      version: 2,
-      title: 'Durable DNS',
+      id: 'bounded_subdomain_assessment',
+      version: 3,
+      title: 'Bounded Subdomain Assessment',
       inputs: [{ ...workflow.inputs[0], default: 'darklab.sh' }],
       steps: [
-        { id: 'resolve', cmd: 'dig {{domain}} A', next: { success: 'inspect', failure: 'stop' } },
-        { id: 'inspect', cmd: 'host {{domain}}', next: { success: 'complete', failure: 'stop' } },
+        {
+          id: 'discover',
+          cmd: 'subfinder -d {{domain}} -silent',
+          captures: [{
+            name: 'hosts', source: 'entity', entity_type: 'domain',
+            kind: 'collection', item_limit: 4, required: true,
+          }],
+          next: { success: 'probe', failure: 'stop' },
+        },
+        {
+          id: 'probe',
+          cmd: 'httpx -u {{hosts}} -silent',
+          for_each: {
+            collection: 'hosts', failure_mode: 'continue', retries: 0,
+            max_parallel: 2, max_failures: 4,
+          },
+          next: { success: 'complete', failure: 'stop' },
+        },
       ],
     }
     document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
@@ -3363,15 +3484,15 @@ describe('app helpers', () => {
     expect(document.body.textContent).not.toContain('wfx_terminal_test')
 
     const durableExecution = createBrowserCommandExecution(
-      'workflow run durable-dns --domain darklab.sh',
+      'workflow run bounded-subdomain-assessment --domain darklab.sh',
     )
     await handleWorkflowTerminalCommand(
-      'workflow run durable-dns --domain darklab.sh',
+      'workflow run bounded-subdomain-assessment --domain darklab.sh',
       'tab-1',
       durableExecution,
     )
     await vi.waitFor(() => expect(commandExecutionText(durableExecution)).toContain(
-      '[workflow] Durable DNS: execution wfx_terminal_test started with 1 input. '
+      '[workflow] Bounded Subdomain Assessment: execution wfx_terminal_test started with 1 input. '
         + 'Check progress with workflow status wfx_terminal_test.',
     ))
     expect(commandExecutionText(durableExecution)).not.toContain('step_1')
@@ -7436,6 +7557,28 @@ describe('app helpers', () => {
                 app_native: false,
               },
             ],
+            cve_risk_feeds: [
+              {
+                source: 'epss',
+                status: 'stale',
+                origin: 'bundled',
+                source_version: '2026-08-01',
+                model_version: 'v2025.03.14',
+                published_at: '2026-08-01',
+                age_hours: 72,
+                live_refresh_enabled: false,
+              },
+              {
+                source: 'kev',
+                status: 'current',
+                origin: 'live',
+                source_version: '2026.08.09',
+                model_version: '',
+                published_at: '2026-08-09',
+                age_hours: 12,
+                live_refresh_enabled: false,
+              },
+            ],
           }),
         })
       }
@@ -7483,6 +7626,18 @@ describe('app helpers', () => {
     expect(providerText).toContain('ProjectDiscovery Chaos')
     expect(providerText).toContain('PDCP_API_KEY')
     expect(providerText).not.toContain('VTCLI_APIKEY')
+    expect(providerText).toContain('Public CVE risk data')
+    expect(providerText).toContain('FIRST EPSS')
+    expect(providerText).toContain('stale')
+    expect(providerText).toContain('Bundled source')
+    expect(providerText).toContain('Published 2026-08-01')
+    expect(providerText).toContain('Snapshot age 3d')
+    expect(providerText).toContain('Version 2026-08-01')
+    expect(providerText).toContain('Model v2025.03.14')
+    expect(providerText).toContain('CISA KEV')
+    expect(providerText).toContain('Live source')
+    expect(providerText).toContain('Bundled snapshots may be stale.')
+    expect(providerText).toContain('Set cve_risk.refresh_enabled: true in config.local.yaml')
 
     document.querySelector('.provider-status-close').click()
     await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(true))

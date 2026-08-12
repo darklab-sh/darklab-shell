@@ -253,6 +253,7 @@ def normalize_report_export_prefs(value: Any) -> dict[str, Any]:
 
 def default_report_draft() -> dict[str, Any]:
     return {
+        "assessment_id": "",
         "metadata": _normalize_metadata({}),
         "sections": normalize_report_sections(None),
         "selection": normalize_report_selection({}),
@@ -266,6 +267,7 @@ def default_report_draft() -> dict[str, Any]:
 def normalize_report_draft(value: Any) -> dict[str, Any]:
     raw = deepcopy(value) if isinstance(value, dict) else {}
     return {
+        "assessment_id": _trim_text(raw.get("assessment_id"), MAX_ENTITY_ID_LEN),
         "metadata": _normalize_metadata(raw.get("metadata")),
         "sections": normalize_report_sections(raw.get("sections")),
         "selection": normalize_report_selection(raw.get("selection")),

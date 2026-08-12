@@ -17,7 +17,11 @@ function apiResponse(payload = {}, { ok = true, status = ok ? 200 : 500 } = {}) 
 
 function loadOverviewModule() {
   return fromDomScripts(
-    ['app/static/js/features/projects/project_overview.js'],
+    [
+      'app/static/js/features/findings/finding_risk.js',
+      'app/static/js/features/projects/project_finding_changes.js',
+      'app/static/js/features/projects/project_overview.js',
+    ],
     { document, window },
     'globalThis.DarklabProjectOverview',
   )
@@ -57,6 +61,7 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
     renderProjectExplorer: vi.fn(),
     renderProjectMobileDetail: vi.fn(),
     setProjectWorkspaceTab: vi.fn(),
+    openProjectAssessment: vi.fn(),
     setProjectEntityTab: vi.fn(),
     projectTargetFilterSet: vi.fn(projectId => setFor(targetFilters, projectId)),
     projectRunFilterSet: vi.fn(projectId => setFor(runFilters, projectId)),
@@ -76,6 +81,78 @@ function makeContext(projectWorkspaceRequest, overrides = {}) {
 const overviewPayload = {
   payload_version: 1,
   project: { id: 'prj_1', name: 'Client edge' },
+  active_assessment: {
+    id: 'asmt_1',
+    title: 'Network assessment',
+    profile_key: 'network',
+    profile_version: '1.0.0',
+    status: 'active',
+    started_at: '2026-06-24T12:00:00+00:00',
+    updated_at: '2026-06-24T15:00:00+00:00',
+    rollup: {
+      total_checks: 9,
+      applicable_checks: 8,
+      covered_checks: 4,
+      checks_awaiting_review: 2,
+      untested_checks: 2,
+      excluded_checks: 1,
+      unavailable_evidence_checks: 1,
+    },
+    fix_first: {
+      items: [{
+        remediation_id: 'rmd_1',
+        vulnerability_id: 'CVE-2026-10001',
+        title: 'Internet-facing vulnerable service',
+        risk: {
+          kev: { listed: true, freshness: 'current' },
+          epss: { probability: 0.42, percentile: 0.97, freshness: 'current' },
+          cvss: { score: 9.8, freshness: 'current' },
+        },
+      }, {
+        remediation_id: 'rmd_2',
+        rule_identity: 'rule-without-risk-data',
+        title: 'Finding without stored public risk data',
+      }],
+      total: 4,
+      limit: 3,
+      offset: 0,
+      has_more: true,
+      priority: '',
+      rollup: {
+        total: 4,
+        kev_listed: 1,
+        epss_scored: 3,
+        cvss_scored: 4,
+        unscored: 0,
+      },
+      source_finding_count: 5,
+    },
+  },
+  assessment_finding_changes: {
+    assessment: {
+      id: 'asmt_1',
+      title: 'Network assessment',
+      status: 'active',
+    },
+    comparison: {
+      status: 'partial',
+      total_checks: 4,
+      comparable_checks: 3,
+      no_baseline_checks: 1,
+      incomparable_checks: 0,
+    },
+    rollup: {
+      regressed: 1,
+      new: 2,
+      persistent: 3,
+      not_observed: 1,
+      incomparable: 1,
+      total: 8,
+    },
+    items: [],
+    item_limit: 5,
+    truncated: true,
+  },
   rollups: {
     target_count: 1,
     open_port_count: 2,
@@ -306,6 +383,43 @@ describe('project overview controller', () => {
     expect(progressText).toContain('Verified')
     expect(progressText).toContain('Needs retest')
     expect(progressText).toContain('Not applicable: 1')
+    const assessmentText = container.querySelector('.project-overview-assessment')?.textContent || ''
+    expect(assessmentText).toContain('Network assessment')
+    expect(assessmentText).toContain('Active assessment · network · profile 1.0.0')
+    expect(assessmentText).toContain('4 of 8')
+    expect(assessmentText).toContain('Awaiting review')
+    expect(assessmentText).toContain('Untested')
+    expect(assessmentText).toContain('Excluded')
+    expect(assessmentText).toContain('Fix first')
+    expect(assessmentText).toContain('4 remediation groups · 1 CISA KEV')
+    expect(assessmentText).toContain('CVE-2026-10001')
+    expect(assessmentText).toContain('EPSS 42.0%')
+    expect(assessmentText).toContain('EPSS 97.0th percentile')
+    expect(assessmentText).toContain('No stored KEV, EPSS, or NVD data')
+    expect(assessmentText).not.toContain('No stored public exploit signal')
+    expect(assessmentText).toContain('1 check references saved evidence that can no longer be opened')
+    container.querySelector('[data-project-overview-assessment="asmt_1"]').click()
+    expect(ctx.openProjectAssessment).toHaveBeenCalledWith('prj_1', { assessmentId: 'asmt_1' })
+    const findingChanges = container.querySelector('.project-finding-changes-summary')
+    expect(findingChanges?.textContent).toContain('Finding changes')
+    expect(findingChanges?.textContent).toContain('3 of 4 checks comparable')
+    expect(findingChanges?.textContent).toContain('Regressed: 1')
+    expect(findingChanges?.textContent).toContain('New: 2')
+    expect(findingChanges?.textContent).toContain('distinct remediation groups')
+    findingChanges?.querySelector('[data-project-finding-changes-assessment="asmt_1"]')?.click()
+    expect(ctx.openProjectAssessment).toHaveBeenLastCalledWith('prj_1', { assessmentId: 'asmt_1' })
+    const fixFirstButtons = [...container.querySelectorAll('.project-overview-assessment-fix-first-actions .btn')]
+    expect(fixFirstButtons.map(button => button.textContent)).toEqual(['Open fix-first', 'Show CISA KEV'])
+    fixFirstButtons[0].click()
+    expect(ctx.openProjectAssessment).toHaveBeenLastCalledWith('prj_1', {
+      assessmentId: 'asmt_1',
+      priority: '',
+    })
+    fixFirstButtons[1].click()
+    expect(ctx.openProjectAssessment).toHaveBeenLastCalledWith('prj_1', {
+      assessmentId: 'asmt_1',
+      priority: 'kev',
+    })
     const tempoText = container.querySelector('.project-overview-tempo')?.textContent || ''
     expect(tempoText).toContain('Last run')
     expect(tempoText).toContain('2026-06-24 13:00:00+00:00')
@@ -389,6 +503,21 @@ describe('project overview controller', () => {
     expect([...ctx._sets.targetFilters.get('prj_1')]).toEqual(['ent_1'])
     expect([...ctx._sets.severityFilters.get('prj_1')]).toEqual(['high'])
     expect(ctx.setProjectFindingOrphanFilter).toHaveBeenLastCalledWith('prj_1', 'all')
+  })
+
+  it('omits the assessment card when the Project has no active cycle', async () => {
+    const overviewApi = loadOverviewModule()
+    const payload = JSON.parse(JSON.stringify(overviewPayload))
+    payload.active_assessment = null
+    const controller = overviewApi.createProjectOverviewController(makeContext(
+      vi.fn(async () => apiResponse(payload)),
+    ))
+
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderOverview(container, 'prj_1', {})
+
+    expect(container.querySelector('.project-overview-assessment')).toBeNull()
   })
 
   it('previews long target lists so aggregate panels stay reachable', async () => {

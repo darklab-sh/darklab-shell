@@ -12,6 +12,7 @@ import sqlite3
 from typing import Any
 
 from core.database_backend import DatabaseBackend, SQLITE_DIALECT, SQLiteOperationalError
+from core.migrations.atlas_import_evidence_schema import INDEXES as IMPORT_EVIDENCE_INDEXES, SQLITE_TABLE
 
 log = logging.getLogger("shell")
 
@@ -703,6 +704,7 @@ def _create_project_workspace_schema(conn):
             status                 TEXT NOT NULL DEFAULT 'applied'
         )
     """)
+    conn.execute(SQLITE_TABLE)
     conn.execute(f"""
         CREATE TABLE IF NOT EXISTS atlas_entity_import_links (
             entity_id              TEXT NOT NULL,
@@ -1187,18 +1189,13 @@ def _create_indexes(conn):
         "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_finding_seen "
         "ON findings_occurrences (finding_id, seen_at DESC)"
     )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_atlas_import_drafts_scope_created "
-        "ON atlas_import_drafts (team_id, session_id, created DESC)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_atlas_import_drafts_expires "
-        "ON atlas_import_drafts (expires_at)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_atlas_import_batches_scope_applied "
-        "ON atlas_import_batches (team_id, session_id, applied_at DESC)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_atlas_import_drafts_scope_created "
+                 "ON atlas_import_drafts (team_id, session_id, created DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_atlas_import_drafts_expires ON atlas_import_drafts (expires_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_atlas_import_batches_scope_applied "
+                 "ON atlas_import_batches (team_id, session_id, applied_at DESC)")
+    for statement in IMPORT_EVIDENCE_INDEXES:
+        conn.execute(statement)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_atlas_entity_import_links_batch "
         "ON atlas_entity_import_links (batch_id)"
@@ -1398,6 +1395,8 @@ _POSTGRES_COLUMN_OVERRIDES: dict[tuple[str, str], str] = {
     ("atlas_entity_import_links", "source_detail_json"): "JSONB NOT NULL DEFAULT '{}'::jsonb",
     ("atlas_finding_import_occurrences", "row_number"): "BIGINT NOT NULL DEFAULT 0",
     ("atlas_finding_import_occurrences", "source_detail_json"): "JSONB NOT NULL DEFAULT '{}'::jsonb",
+    ("atlas_import_evidence", "row_number"): "BIGINT NOT NULL DEFAULT 0",
+    ("atlas_import_evidence", "source_detail_json"): "JSONB NOT NULL DEFAULT '{}'::jsonb",
     ("atlas_import_batches", "counts_json"): "JSONB NOT NULL DEFAULT '{}'::jsonb",
     ("atlas_import_batches", "warning_summary_json"): "JSONB NOT NULL DEFAULT '[]'::jsonb",
     ("atlas_import_drafts", "normalized_rows_json"): "JSONB NOT NULL DEFAULT '[]'::jsonb",

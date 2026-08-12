@@ -37,12 +37,13 @@ import textwrap
 import time
 import unittest.mock as mock
 import uuid
+import zipfile
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
-from typing import IO, cast
+from typing import Any, IO, cast
 
 import pytest
 import yaml
@@ -75,6 +76,7 @@ import services.secrets.vault as secrets_vault
 import services.workspace.file_mutations as workspace_file_mutations
 import services.workspace.files as workspace_module
 import services.commands.wordlists as wordlists
+from services.workflows.catalog import render_workflow_command
 from services.commands.registry import (
     split_chained_commands, load_all_faq, load_all_workflows, load_faq,
     load_welcome, load_tour, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
@@ -2459,6 +2461,7 @@ class TestLoadConfig:
             "INTERACTIVE_PTY_ENABLED": "true",
             "PROMETHEUS_MULTIPROC_DIR": "/env/prometheus",
             "RAW_PACKET_SCANNING_ENABLED": "true",
+            "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED": "true",
             "AI_BASE_URL_ALLOWED_CIDRS": "192.0.2.0/24,not-a-cidr",
         }):
             with open(os.path.join(tmp, "config.yaml"), "w") as f:
@@ -2483,6 +2486,7 @@ class TestLoadConfig:
         assert cfg["interactive_pty_enabled"] is True
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
         assert cfg["raw_packet_scanning_enabled"] is True
+        assert cfg["assessment_intrusive_actions_enabled"] is True
         assert cfg["ai_base_url_allowed_cidrs"] == ["192.0.2.0/24"]
         assert app_config.get_config_load_summary()["warning_count"] == 1
         warning.assert_has_calls([
@@ -2865,6 +2869,7 @@ class TestLoadConfig:
                     output_preview_max_mb: 2MB
                     ai_enabled: yes
                     raw_packet_scanning_enabled: invalid
+                    assessment_intrusive_actions_enabled: invalid
                     database_postgres_jit: "true"
                     ai_max_concurrent: "4"
                     audit_export_max_rows: 999999
@@ -2880,10 +2885,11 @@ class TestLoadConfig:
         assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
         assert cfg["ai_enabled"] is True
         assert cfg["raw_packet_scanning_enabled"] is False
+        assert cfg["assessment_intrusive_actions_enabled"] is False
         assert cfg["database_postgres_jit"] is True
         assert cfg["ai_max_concurrent"] == 4
         assert cfg["audit_export_max_rows"] == 200000
-        assert app_config.get_config_load_summary()["warning_count"] == 2
+        assert app_config.get_config_load_summary()["warning_count"] == 3
         warning.assert_has_calls([
             mock.call(
                 "CONFIG_VALUE_CLAMPED",
@@ -2898,6 +2904,15 @@ class TestLoadConfig:
                 "CONFIG_VALUE_DEFAULTED",
                 extra={
                     "key": "raw_packet_scanning_enabled",
+                    "source": os.path.join(tmp, "config.yaml"),
+                    "reason": "invalid_bool",
+                    "fallback": False,
+                },
+            ),
+            mock.call(
+                "CONFIG_VALUE_DEFAULTED",
+                extra={
+                    "key": "assessment_intrusive_actions_enabled",
                     "source": os.path.join(tmp, "config.yaml"),
                     "reason": "invalid_bool",
                     "fallback": False,
@@ -2953,6 +2968,23 @@ class TestLoadConfig:
                       max_per_session: 7
                     project_digests:
                       default_cadence_preset: weekly
+                    zap_connector:
+                      enabled: true
+                      base_url: https://zap.example.test/
+                      api_key_secret_id: DARKLAB_ZAP_API_KEY
+                      tls_verify: true
+                      allowed_target_cidrs:
+                        - 192.0.2.10/24
+                        - 2001:db8::10/64
+                        - 192.0.2.0/24
+                      scope_policy_url: https://zap-policy.example.test/v1/zap-scope/review
+                      scope_policy_token_secret_id: DARKLAB_ZAP_SCOPE_TOKEN
+                      scope_policy_id: assessment-egress-v1
+                      egress_proxy_host: zap-egress.example.test
+                      egress_proxy_port: 8080
+                      max_concurrent_jobs: 2
+                      job_timeout_seconds: 900
+                      max_report_bytes: 8388608
                     """
                 ))
 
@@ -2974,6 +3006,1193 @@ class TestLoadConfig:
         assert cfg.get("project_digests", {}).get("default_cadence_preset") == "weekly"
         assert cfg["project_digests"]["first_send_lookback_hours"] == 24
         assert cfg.project_digests.default_cadence_preset == "weekly"
+        assert cfg["zap_connector"] == {
+            "enabled": True,
+            "base_url": "https://zap.example.test",
+            "api_key_secret_id": "DARKLAB_ZAP_API_KEY",
+            "tls_verify": True,
+            "allowed_target_cidrs": ["192.0.2.0/24", "2001:db8::/64"],
+            "scope_policy_url": "https://zap-policy.example.test/v1/zap-scope/review",
+            "scope_policy_token_secret_id": "DARKLAB_ZAP_SCOPE_TOKEN",
+            "scope_policy_id": "assessment-egress-v1",
+            "egress_proxy_host": "zap-egress.example.test",
+            "egress_proxy_port": 8080,
+            "max_concurrent_jobs": 2,
+            "job_timeout_seconds": 900,
+            "max_report_bytes": 8388608,
+        }
+        from services.connectors.zap_config import (
+            ZapConnectorUnavailable,
+            resolve_zap_api_key,
+            resolve_zap_scope_policy_token,
+            zap_connector_settings,
+        )
+        from services.connectors.zap_scope import ZapTargetScopeError, review_zap_target
+
+        settings = zap_connector_settings(cfg)
+        assert settings.allowed_target_cidrs == ("192.0.2.0/24", "2001:db8::/64")
+        assert settings.base_url == "https://zap.example.test"
+        with pytest.raises(ZapConnectorUnavailable, match="HTTP or HTTPS") as exc_info:
+            zap_connector_settings({"zap_connector": {"base_url": "file:///tmp/zap"}})
+        assert exc_info.value.code == "zap_base_url_invalid"
+        assert resolve_zap_api_key(
+            settings,
+            environ={"DARKLAB_ZAP_API_KEY": "connector-secret"},
+        ) == "connector-secret"
+        assert resolve_zap_scope_policy_token(
+            settings,
+            environ={"DARKLAB_ZAP_SCOPE_TOKEN": "scope-secret"},
+        ) == "scope-secret"
+        reviewed_target = review_zap_target(
+            "https://app.example.test/login?next=%2F",
+            settings,
+            resolve_addresses=lambda _host: ["192.0.2.10", "2001:db8::10", "192.0.2.10"],
+        )
+        assert reviewed_target.url == "https://app.example.test/login?next=%2F"
+        assert reviewed_target.host == "app.example.test"
+        assert reviewed_target.resolved_addresses == ("192.0.2.10", "2001:db8::10")
+        from services.connectors import zap_scope_policy as zap_scope_policy_module
+        from services.connectors.zap_scope_policy import (
+            ZapScopePolicyError,
+            allowed_target_cidrs_sha256,
+            review_zap_scope_policy,
+            review_zap_scope_policy_response,
+        )
+
+        scope_response = {
+            "schema_version": 1,
+            "nonce": "fresh-nonce",
+            "policy_id": "assessment-egress-v1",
+            "allowed_target_cidrs_sha256": allowed_target_cidrs_sha256(settings),
+            "egress_proxy": {"host": "zap-egress.example.test", "port": 8080},
+            "enforcement": {"mode": "cidr_proxy", "dns_recheck": "per_connection"},
+            "targets": [{
+                "host": "app.example.test",
+                "resolved_addresses": ["192.0.2.10", "2001:db8::10"],
+            }],
+        }
+        scanner_review = review_zap_scope_policy_response(
+            settings,
+            [reviewed_target.host],
+            scope_response,
+            nonce="fresh-nonce",
+        )
+        assert scanner_review.scanner_addresses == ((
+            "app.example.test", ("192.0.2.10", "2001:db8::10"),
+        ),)
+
+        class FakeScopePolicyResponse:
+            status = 200
+
+            def __init__(self, payload: bytes):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def getcode(self):
+                return self.status
+
+            def geturl(self):
+                return settings.scope_policy_url
+
+            def read(self, amount: int):
+                return self.payload[:amount]
+
+        policy_requests = []
+
+        class FakeScopePolicyOpener:
+            def open(self, request, *, timeout):
+                policy_requests.append((request, timeout))
+                submitted = json.loads(request.data.decode("utf-8"))
+                return FakeScopePolicyResponse(json.dumps({
+                    **scope_response,
+                    "nonce": submitted["nonce"],
+                }).encode("utf-8"))
+
+        with mock.patch.object(
+            zap_scope_policy_module,
+            "build_opener",
+            return_value=FakeScopePolicyOpener(),
+        ):
+            transported_review = review_zap_scope_policy(
+                settings,
+                [reviewed_target.host],
+                token="scope-secret",
+            )
+        assert transported_review == scanner_review
+        policy_request, policy_timeout = policy_requests[0]
+        policy_headers = {
+            key.casefold(): value for key, value in policy_request.header_items()
+        }
+        assert policy_timeout == 15
+        assert policy_headers["authorization"] == "Bearer scope-secret"
+        assert "scope-secret" not in policy_request.full_url
+        assert b"scope-secret" not in policy_request.data
+        with pytest.raises(ZapScopePolicyError, match="outside") as exc_info:
+            review_zap_scope_policy_response(
+                settings,
+                [reviewed_target.host],
+                {
+                    **scope_response,
+                    "targets": [{
+                        "host": "app.example.test",
+                        "resolved_addresses": ["198.51.100.5"],
+                    }],
+                },
+                nonce="fresh-nonce",
+            )
+        assert exc_info.value.code == "zap_scanner_target_out_of_scope"
+        with pytest.raises(ZapTargetScopeError, match="outside") as exc_info:
+            review_zap_target(
+                "https://app.example.test",
+                settings,
+                resolve_addresses=lambda _host: ["192.0.2.10", "198.51.100.5"],
+            )
+        assert exc_info.value.code == "zap_target_out_of_scope"
+        with pytest.raises(ZapTargetScopeError, match="credential-free") as exc_info:
+            review_zap_target(
+                "https://user:password@app.example.test/#secret",
+                settings,
+                resolve_addresses=lambda _host: ["192.0.2.10"],
+            )
+        assert exc_info.value.code == "zap_target_invalid"
+        with pytest.raises(ZapTargetScopeError, match="too many") as exc_info:
+            review_zap_target(
+                "https://app.example.test",
+                settings,
+                resolve_addresses=lambda _host: [f"192.0.2.{index}" for index in range(1, 18)],
+            )
+        assert exc_info.value.code == "zap_target_resolution_limit"
+        with pytest.raises(ZapConnectorUnavailable, match="API key is unavailable") as exc_info:
+            resolve_zap_api_key(settings, environ={})
+        assert exc_info.value.code == "zap_api_key_unavailable"
+
+        disabled = zap_connector_settings(build_test_config())
+        with pytest.raises(ZapConnectorUnavailable, match="connector is disabled") as exc_info:
+            resolve_zap_api_key(disabled, environ={})
+        assert exc_info.value.code == "zap_connector_disabled"
+        with pytest.raises(ZapTargetScopeError, match="connector is disabled") as exc_info:
+            review_zap_target("https://192.0.2.10", disabled)
+        assert exc_info.value.code == "zap_connector_disabled"
+
+        from services.connectors.zap_plan import build_zap_automation_plan
+        from services.connectors.zap_plan_contracts import ZapPlanError
+
+        http_profile = {
+            "enabled": True,
+            "role": "anonymous",
+            "allowed_hosts": ["app.example.test"],
+            "scope_roots": ["https://app.example.test/"],
+            "include_paths": ["/login"],
+            "exclude_paths": ["/login/logout"],
+            "rate_limit_per_second": 4,
+            "reference_counts": {
+                "secret_refs": 0,
+                "file_refs": 0,
+                "headers": 0,
+                "capture_rules": 0,
+            },
+        }
+        safe_plan = build_zap_automation_plan(
+            settings,
+            [reviewed_target],
+            http_profile,
+            scope_exclusions=["/login/admin", "/login/admin"],
+        )
+        safe_document = yaml.safe_load(safe_plan.yaml_bytes)
+        safe_context = safe_document["env"]["contexts"][0]
+        assert safe_document["env"]["proxy"] == {
+            "hostname": "zap-egress.example.test",
+            "port": 8080,
+        }
+        assert safe_document["env"]["parameters"] == {
+            "failOnError": True,
+            "failOnWarning": False,
+            "continueOnFailure": False,
+            "progressToStdout": False,
+        }
+        assert safe_context == {
+            "name": "darklab-anonymous",
+            "urls": ["https://app.example.test/login"],
+            "includePaths": [
+                r"^https://app\.example\.test/login(?:/.*)?(?:\?.*)?$",
+            ],
+            "excludePaths": [
+                r"^https://app\.example\.test/login/logout(?:/.*)?(?:\?.*)?$",
+                r"^https://app\.example\.test/login/admin(?:/.*)?(?:\?.*)?$",
+            ],
+        }
+        assert [job["type"] for job in safe_document["jobs"]] == [
+            "passiveScan-config",
+            "spider",
+            "passiveScan-wait",
+            "report",
+        ]
+        assert safe_document["jobs"][0]["parameters"] == {
+            "maxAlertsPerRule": 20,
+            "scanOnlyInScope": True,
+            "maxBodySizeInBytesToScan": 1048576,
+            "enableTags": False,
+        }
+        assert safe_document["jobs"][1]["parameters"]["postForm"] is False
+        assert safe_document["jobs"][1]["parameters"]["threadCount"] == 1
+        assert safe_document["jobs"][-1]["parameters"]["template"] == "traditional-json"
+        assert safe_plan.summary.to_dict() == {
+            "policy_level": "safe",
+            "authentication_role": "anonymous",
+            "targets": ["https://app.example.test/login"],
+            "include_rule_count": 1,
+            "exclusion_rule_count": 2,
+            "job_types": ["passiveScan-config", "spider", "passiveScan-wait", "report"],
+            "job_timeout_seconds": 900,
+            "report_file": "darklab-zap-report.json",
+            "scope_policy_id": "assessment-egress-v1",
+            "allowed_target_cidrs_sha256": allowed_target_cidrs_sha256(settings),
+            "egress_proxy": "zap-egress.example.test:8080",
+        }
+        intrusive_plan = build_zap_automation_plan(
+            settings,
+            [reviewed_target],
+            http_profile,
+            policy_level="intrusive",
+            intrusive_enabled=True,
+        )
+        intrusive_document = yaml.safe_load(intrusive_plan.yaml_bytes)
+        active_job = next(
+            job for job in intrusive_document["jobs"] if job["type"] == "activeScan"
+        )
+        assert active_job["parameters"]["maxScanDurationInMins"] == 3
+        assert active_job["parameters"]["maxRuleDurationInMins"] == 3
+        assert active_job["parameters"]["threadPerHost"] == 1
+        assert active_job["parameters"]["delayInMs"] == 250
+        assert intrusive_plan.summary.policy_level == "intrusive"
+        outside_profile_target = review_zap_target(
+            "https://app.example.test/outside",
+            settings,
+            resolve_addresses=lambda _host: ["192.0.2.10"],
+        )
+        restricted_profile = {
+            **http_profile,
+            "scope_roots": ["https://app.example.test/allowed"],
+            "include_paths": ["/allowed"],
+            "exclude_paths": ["/secret"],
+        }
+        for path in ("../secret", "%2e%2e/secret", "%2e./secret"):
+            normalized_target = review_zap_target(
+                f"https://app.example.test/allowed/{path}",
+                settings,
+                resolve_addresses=lambda _host: ["192.0.2.10"],
+            )
+            assert normalized_target.url == "https://app.example.test/secret"
+            with pytest.raises(ZapPlanError) as exc_info:
+                build_zap_automation_plan(
+                    settings,
+                    [normalized_target],
+                    restricted_profile,
+                )
+            assert exc_info.value.code == "zap_http_profile_scope_mismatch"
+        for path in (
+            "allowed%2fsecret",
+            "allowed%5csecret",
+            "allowed/%252e%252e/secret",
+        ):
+            with pytest.raises(ZapTargetScopeError) as exc_info:
+                review_zap_target(
+                    f"https://app.example.test/{path}",
+                    settings,
+                    resolve_addresses=lambda _host: ["192.0.2.10"],
+                )
+            assert exc_info.value.code == "zap_target_invalid"
+
+        plan_errors = [
+            (
+                "zap_connector_disabled",
+                lambda: build_zap_automation_plan(
+                    disabled,
+                    [reviewed_target],
+                    http_profile,
+                ),
+            ),
+            (
+                "zap_policy_invalid",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    http_profile,
+                    policy_level="unbounded",
+                ),
+            ),
+            (
+                "zap_intrusive_disabled",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    http_profile,
+                    policy_level="intrusive",
+                ),
+            ),
+            (
+                "zap_http_profile_unsupported",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    {**http_profile, "credential_use": ["bearer_token"]},
+                ),
+            ),
+            (
+                "zap_http_profile_unsupported",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    {**http_profile, "role": "authenticated"},
+                ),
+            ),
+            (
+                "zap_scope_exclusion_invalid",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    http_profile,
+                    scope_exclusions=["https://outside.example.test"],
+                ),
+            ),
+            (
+                "zap_http_profile_scope_mismatch",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [outside_profile_target],
+                    http_profile,
+                ),
+            ),
+            (
+                "zap_http_profile_invalid",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    {**http_profile, "reference_counts": {"secret_refs": "many"}},
+                ),
+            ),
+            (
+                "zap_http_profile_invalid",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target],
+                    {**http_profile, "rate_limit_per_second": None},
+                    policy_level="intrusive",
+                    intrusive_enabled=True,
+                ),
+            ),
+            (
+                "zap_target_duplicate",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target, reviewed_target],
+                    http_profile,
+                ),
+            ),
+            (
+                "zap_target_limit",
+                lambda: build_zap_automation_plan(
+                    settings,
+                    [reviewed_target] * 9,
+                    http_profile,
+                ),
+            ),
+        ]
+        for expected_code, build_plan in plan_errors:
+            with pytest.raises(ZapPlanError) as exc_info:
+                build_plan()
+            assert exc_info.value.code == expected_code
+
+        from services.connectors.zap_remote_progress import (
+            ZapRemoteProgressError,
+            review_zap_remote_progress,
+        )
+
+        reviewed_progress = review_zap_remote_progress(
+            {
+                "planProgress": {
+                    "planId": 17,
+                    "started": "2026-08-09T15:00:00.123Z",
+                    "finished": "",
+                    "info": [f"  Job {index}\nprogress  " for index in range(10)],
+                    "warn": ["One bounded warning"],
+                    "error": [],
+                },
+            },
+            expected_plan_id="17",
+        )
+        assert reviewed_progress.to_dict() == {
+            "remote_plan_id": "17",
+            "started_at": "2026-08-09T15:00:00.123000Z",
+            "finished_at": "",
+            "complete": False,
+            "info_count": 10,
+            "warning_count": 1,
+            "error_count": 0,
+            "recent_messages": [
+                *[
+                    {"level": "info", "message": f"Job {index} progress"}
+                    for index in range(2, 10)
+                ],
+                {"level": "warn", "message": "One bounded warning"},
+            ],
+        }
+        finished_progress = review_zap_remote_progress(
+            {
+                "planId": "17",
+                "started": "2026-08-09T15:00:00Z",
+                "finished": "2026-08-09T15:05:00+00:00",
+                "info": [],
+                "warn": [],
+                "error": ["Plan failed safely"],
+            },
+            expected_plan_id="17",
+        )
+        assert finished_progress.complete is True
+        assert finished_progress.error_count == 1
+        progress_errors = [
+            (
+                "zap_progress_plan_mismatch",
+                {"planId": 18, "info": [], "warn": [], "error": []},
+            ),
+            (
+                "zap_progress_invalid",
+                {
+                    "planId": 17,
+                    "started": "not-a-time",
+                    "info": [],
+                    "warn": [],
+                    "error": [],
+                },
+            ),
+            (
+                "zap_progress_invalid",
+                {"planId": 17, "info": "unbounded", "warn": [], "error": []},
+            ),
+        ]
+        for expected_code, response in progress_errors:
+            with pytest.raises(ZapRemoteProgressError) as exc_info:
+                review_zap_remote_progress(response, expected_plan_id="17")
+            assert exc_info.value.code == expected_code
+
+        from urllib.parse import parse_qs, urlsplit
+
+        from services.connectors import zap_http as zap_http_module
+        from services.connectors.zap_http import ZapTransportError
+        from services.connectors.zap_transport import (
+            cancel_zap_automation_plan,
+            download_zap_report,
+            fetch_zap_plan_progress,
+            submit_zap_automation_plan,
+            zap_transfer_paths,
+        )
+
+        class FakeZapResponse:
+            def __init__(self, payload: bytes, url: str = ""):
+                self.payload = payload
+                self.url = url
+                self.status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def getcode(self):
+                return self.status
+
+            def geturl(self):
+                return self.url
+
+            def read(self, amount: int):
+                return self.payload[:amount]
+
+        requests = []
+        responses = [
+            b'{"Uploaded":"/zap/xfer/darklab/jobs/job/plan.yaml"}',
+            b'{"planId":"17"}',
+            json.dumps({
+                "planProgress": {
+                    "planId": 17,
+                    "started": "2026-08-09T15:00:00Z",
+                    "finished": "",
+                    "info": ["Spider started"],
+                    "warn": [],
+                    "error": [],
+                },
+            }).encode(),
+            b'{"Result":"OK"}',
+            b'{"site":[]}',
+        ]
+
+        def fake_zap_open(request, *, settings, timeout):
+            requests.append((request, settings, timeout))
+            return FakeZapResponse(responses.pop(0), request.full_url)
+
+        job_id = "zpj_" + "a" * 32
+        with mock.patch.object(
+            zap_http_module,
+            "_open_zap_request",
+            side_effect=fake_zap_open,
+        ):
+            assert submit_zap_automation_plan(
+                settings,
+                "connector-secret",
+                job_id,
+                safe_plan,
+            ) == "17"
+            remote_progress = fetch_zap_plan_progress(
+                settings,
+                "connector-secret",
+                "17",
+            )
+            cancel_zap_automation_plan(settings, "connector-secret", "17")
+            downloaded = download_zap_report(
+                settings,
+                "connector-secret",
+                job_id,
+                safe_plan.summary.report_file,
+            )
+
+        assert remote_progress.info_count == 1
+        assert downloaded.payload == b'{"site":[]}'
+        assert downloaded.byte_count == 11
+        assert downloaded.sha256 == hashlib.sha256(downloaded.payload).hexdigest()
+        assert len(requests) == 5
+        for request, request_settings, timeout in requests:
+            headers = {key.casefold(): value for key, value in request.header_items()}
+            assert headers["x-zap-api-key"] == "connector-secret"
+            assert "connector-secret" not in request.full_url
+            assert request_settings is settings
+            assert timeout == 30
+        upload_request = requests[0][0]
+        upload_form = parse_qs(upload_request.data.decode("utf-8"))
+        assert upload_request.get_method() == "POST"
+        assert upload_form == {
+            "fileName": [f"darklab/jobs/{job_id}/plan.yaml"],
+            "fileContents": [safe_plan.yaml_bytes.decode("utf-8")],
+        }
+        assert "connector-secret" not in upload_request.data.decode("utf-8")
+        assert parse_qs(urlsplit(requests[1][0].full_url).query) == {
+            "filePath": [f"${{XFER}}/darklab/jobs/{job_id}/plan.yaml"],
+        }
+        assert parse_qs(urlsplit(requests[2][0].full_url).query) == {"planId": ["17"]}
+        assert parse_qs(urlsplit(requests[3][0].full_url).query) == {"planId": ["17"]}
+        assert parse_qs(urlsplit(requests[4][0].full_url).query) == {
+            "fileName": [f"darklab/jobs/{job_id}/darklab-zap-report.json"],
+        }
+        paths = zap_transfer_paths(job_id, "darklab-zap-report.json")
+        assert paths.plan_api_path == f"${{XFER}}/darklab/jobs/{job_id}/plan.yaml"
+        assert paths.report_file == f"darklab/jobs/{job_id}/darklab-zap-report.json"
+
+        with pytest.raises(ZapTransportError) as exc_info:
+            zap_transfer_paths("../../other", "report.json")
+        assert exc_info.value.code == "zap_job_id_invalid"
+        redirected = FakeZapResponse(
+            b'{"planId":"17"}',
+            "https://other.example.test/JSON/automation/action/runPlan/",
+        )
+        with mock.patch.object(
+            zap_http_module,
+            "_open_zap_request",
+            return_value=redirected,
+        ):
+            with pytest.raises(ZapTransportError) as exc_info:
+                submit_zap_automation_plan(settings, "connector-secret", job_id, safe_plan)
+        assert exc_info.value.code == "zap_response_redirected"
+
+        from dataclasses import replace
+
+        tiny_report_settings = replace(settings, max_report_bytes=8)
+        oversized = FakeZapResponse(b"123456789", "")
+
+        def fake_oversized_open(request, **_kwargs):
+            oversized.url = request.full_url
+            return oversized
+
+        with mock.patch.object(
+            zap_http_module,
+            "_open_zap_request",
+            side_effect=fake_oversized_open,
+        ):
+            with pytest.raises(ZapTransportError) as exc_info:
+                download_zap_report(
+                    tiny_report_settings,
+                    "connector-secret",
+                    job_id,
+                    "report.json",
+                )
+        assert exc_info.value.code == "zap_response_too_large"
+
+        from services.connectors import zap_job_artifacts as zap_artifact_module
+        from services.connectors import zap_job_queue as zap_job_queue_module
+        from services.connectors import zap_observability
+        from services.connectors import zap_worker as zap_worker_module
+        from services.connectors import zap_worker_observability
+        from services.connectors import zap_worker_lock as zap_worker_lock_module
+        from services.connectors import zap_worker_support
+        from services.connectors import zap_worker_telemetry
+        from services.connectors.zap_job_artifacts import (
+            atlas_draft_id_for_zap_job,
+            discard_zap_job_plan,
+            load_zap_job_plan,
+            save_zap_job_report,
+            stale_zap_job_plan_ids,
+            store_zap_job_plan,
+            zap_report_workspace_path,
+        )
+        from services.connectors.zap_transport import DownloadedZapReport
+
+        artifact_job = {
+            "id": job_id,
+            "session_id": "session-a",
+            "team_id": "",
+            "actor_member_id": "",
+            "plan_summary": safe_plan.summary.to_dict(),
+            "report_filename": safe_plan.summary.report_file,
+            "status": "downloading",
+        }
+        with tempfile.TemporaryDirectory() as artifact_tmp:
+            artifact_cfg = build_test_config({"data_dir": artifact_tmp})
+            with mock.patch.object(
+                zap_artifact_module, "resolve_data_dir", return_value=artifact_tmp,
+            ):
+                store_zap_job_plan(job_id, safe_plan, artifact_cfg)
+                stored_plan_path = Path(artifact_tmp) / "zap-connector-jobs" / f"{job_id}.yaml"
+                assert stored_plan_path.read_bytes() == safe_plan.yaml_bytes
+                assert stored_plan_path.stat().st_mode & 0o777 == 0o600
+                assert load_zap_job_plan(artifact_job, artifact_cfg) == safe_plan
+                assert discard_zap_job_plan(job_id, artifact_cfg) is True
+                assert not stored_plan_path.exists()
+                store_zap_job_plan(job_id, safe_plan, artifact_cfg)
+                os.utime(stored_plan_path, (1, 1))
+                assert stale_zap_job_plan_ids(
+                    artifact_cfg,
+                    now=601,
+                    grace_seconds=300,
+                ) == (job_id,)
+                discard_zap_job_plan(job_id, artifact_cfg)
+            cleanup_error = OSError("/private/zap/plan.yaml target-secret")
+            private_path = mock.Mock()
+            private_path.unlink.side_effect = cleanup_error
+            with (
+                mock.patch.object(
+                    zap_artifact_module, "_plan_path", return_value=private_path
+                ),
+                mock.patch.object(zap_observability.log, "error") as error_log,
+            ):
+                assert discard_zap_job_plan(job_id, artifact_cfg) is False
+            assert error_log.call_args.args == ("ZAP_PLAN_SPOOL_CLEANUP_FAILED",)
+            assert error_log.call_args.kwargs["extra"] == {
+                "job_id": job_id,
+                "cleanup_stage": "reviewed_plan_spool",
+                "error_class": "OSError",
+            }
+            assert "target-secret" not in repr(error_log.call_args)
+            assert "/private/zap" not in repr(error_log.call_args)
+
+            unreadable_plan = mock.Mock()
+            unreadable_plan.lstat.side_effect = OSError("/private/zap/scan")
+            private_spool = mock.Mock()
+            private_spool.glob.return_value = [unreadable_plan]
+            with (
+                mock.patch.object(
+                    zap_artifact_module, "_spool_dir", return_value=private_spool
+                ),
+                mock.patch.object(
+                    zap_observability, "log_zap_plan_spool_scan_degraded"
+                ) as degraded_log,
+            ):
+                assert stale_zap_job_plan_ids(artifact_cfg, now=601) == ()
+            degraded_log.assert_called_once_with({"OSError": 1})
+
+            assert zap_observability.claim_zap_warning(
+                "ZAP_TEST_WARNING", now=100.0
+            ) == (True, 0)
+            assert zap_observability.claim_zap_warning(
+                "ZAP_TEST_WARNING", now=101.0
+            ) == (False, 1)
+            with (
+                mock.patch.object(
+                    zap_observability, "claim_zap_warning", return_value=(True, 2)
+                ),
+                mock.patch.object(zap_observability.log, "warning") as warning_log,
+            ):
+                zap_observability.log_zap_plan_spool_scan_degraded({"OSError": 3})
+            assert warning_log.call_args.args == ("ZAP_PLAN_SPOOL_SCAN_DEGRADED",)
+            assert warning_log.call_args.kwargs["extra"] == {
+                "failure_count": 3,
+                "error_classes": "OSError",
+                "suppressed_repeat_count": 2,
+            }
+            assert "/private/zap" not in repr(warning_log.call_args)
+
+            try:
+                raise ZapTransportError(
+                    "zap_report_invalid", "private target and report content"
+                )
+            except ZapTransportError as terminal_error:
+                with mock.patch.object(
+                    zap_worker_observability.log, "error"
+                ) as terminal_log:
+                    zap_worker_observability.log_zap_job_failed(
+                        job_id, "downloading", terminal_error
+                    )
+            assert terminal_log.call_args.args == ("ZAP_JOB_FAILED",)
+            assert terminal_log.call_args.kwargs["extra"] == {
+                "job_id": job_id,
+                "from_status": "downloading",
+                "to_status": "failed",
+                "phase": "downloading",
+                "error_code": "zap_report_invalid",
+                "error_class": "ZapTransportError",
+            }
+            assert "private target" not in repr(terminal_log.call_args)
+            assert "report content" not in repr(terminal_log.call_args)
+
+            private_response = mock.Mock(name="private-provider-response")
+            zap_worker_telemetry.clear_zap_job_telemetry(job_id)
+            with (
+                mock.patch.object(
+                    zap_worker_telemetry.time,
+                    "monotonic",
+                    side_effect=(10.0, 10.042),
+                ),
+                mock.patch.object(zap_worker_telemetry.log, "debug") as debug_log,
+            ):
+                assert zap_worker_telemetry.observed_zap_external_call(
+                    job_id, "submit", lambda: private_response
+                ) is private_response
+            assert debug_log.call_args.args == ("ZAP_EXTERNAL_CALL_COMPLETED",)
+            assert debug_log.call_args.kwargs["extra"] == {
+                "job_id": job_id,
+                "phase": "submit",
+                "attempt": 1,
+                "duration_ms": 41,
+                "outcome_class": "plan_id",
+            }
+            assert "private-provider-response" not in repr(debug_log.call_args)
+
+            with (
+                mock.patch.object(
+                    zap_worker_telemetry.time,
+                    "monotonic",
+                    side_effect=(20.0, 20.012),
+                ),
+                mock.patch.object(zap_worker_telemetry.log, "info") as info_log,
+            ):
+                assert zap_worker_telemetry.observed_zap_state_change(
+                    job_id,
+                    "downloading",
+                    "ready",
+                    "download",
+                    lambda: {"status": "ready"},
+                    report_bytes=17,
+                ) == {"status": "ready"}
+            assert info_log.call_args.args == ("ZAP_JOB_STATE_CHANGED",)
+            assert info_log.call_args.kwargs["extra"] == {
+                "job_id": job_id,
+                "from_status": "downloading",
+                "to_status": "ready",
+                "phase": "download",
+                "duration_ms": 12,
+                "report_bytes": 17,
+            }
+
+            retry_error = RuntimeError("private target and provider response")
+            with (
+                mock.patch.object(zap_worker_telemetry.log, "warning") as warning_log,
+                mock.patch.object(zap_worker_telemetry.log, "debug") as debug_log,
+            ):
+                zap_worker_telemetry.log_zap_retry(
+                    "ZAP_CANCEL_RETRY", job_id, "cancel", retry_error
+                )
+                zap_worker_telemetry.log_zap_retry(
+                    "ZAP_CANCEL_RETRY", job_id, "cancel", retry_error
+                )
+            assert warning_log.call_count == 1
+            assert warning_log.call_args.args == ("ZAP_CANCEL_RETRY",)
+            assert warning_log.call_args.kwargs["extra"]["attempt"] == 1
+            assert warning_log.call_args.kwargs["extra"]["next_attempt"] == 2
+            assert warning_log.call_args.kwargs["extra"]["next_retry_seconds"] == 5.0
+            assert debug_log.call_args.args == ("ZAP_RETRY_SUPPRESSED",)
+            assert debug_log.call_args.kwargs["extra"]["attempt"] == 2
+            assert debug_log.call_args.kwargs["extra"]["suppressed_repeat_count"] == 1
+            assert "private target" not in repr(warning_log.call_args)
+            assert "provider response" not in repr(debug_log.call_args)
+            zap_worker_telemetry.clear_zap_job_telemetry(job_id)
+
+            with (
+                mock.patch.object(
+                    zap_job_queue_module, "new_zap_job_id", return_value=job_id
+                ),
+                mock.patch.object(
+                    zap_job_queue_module, "store_zap_job_plan"
+                ) as store_plan,
+                mock.patch.object(
+                    zap_job_queue_module,
+                    "create_zap_job",
+                    return_value={**artifact_job, "status": "queued"},
+                ) as create_job,
+            ):
+                queued = zap_job_queue_module.queue_zap_job(
+                    "session-a",
+                    "prj_a",
+                    "asm_a",
+                    "chk_a",
+                    "php_a",
+                    3,
+                    safe_plan,
+                    cfg=artifact_cfg,
+                )
+            assert queued["status"] == "queued"
+            store_plan.assert_called_once_with(job_id, safe_plan, artifact_cfg)
+            assert create_job.call_args.kwargs["job_id"] == job_id
+            assert create_job.call_args.args[:7] == (
+                "session-a", "prj_a", "asm_a", "chk_a", "php_a", 3, safe_plan.summary,
+            )
+            with (
+                mock.patch.object(
+                    zap_worker_lock_module,
+                    "resolve_data_dir",
+                    return_value=artifact_tmp,
+                ),
+                mock.patch.object(
+                    zap_worker_lock_module.database,
+                    "DB_BACKEND",
+                    database_backend.DatabaseBackend.SQLITE,
+                ),
+            ):
+                with zap_worker_lock_module.acquire_zap_worker_lock(artifact_cfg) as acquired:
+                    assert acquired is True
+                    with zap_worker_lock_module.acquire_zap_worker_lock(artifact_cfg) as duplicate:
+                        assert duplicate is False
+
+        report = DownloadedZapReport(
+            payload=b'{"site":[]}',
+            sha256=hashlib.sha256(b'{"site":[]}').hexdigest(),
+        )
+        with mock.patch.object(
+            zap_artifact_module,
+            "write_owner_workspace_text_file",
+            return_value={"size": report.byte_count},
+        ) as write_report:
+            report_path = save_zap_job_report(artifact_job, report, cfg)
+        assert report_path == f"assessments/zap/{job_id}/darklab-zap-report.json"
+        assert zap_report_workspace_path(
+            job_id, "darklab-zap-report.json",
+        ) == report_path
+        assert write_report.call_args.args[0].scope == "personal"
+        assert write_report.call_args.args[1:3] == (report_path, '{"site":[]}')
+        draft_id = atlas_draft_id_for_zap_job(job_id)
+        assert re.fullmatch(r"impd_[0-9a-f]{32}", draft_id)
+        assert draft_id == atlas_draft_id_for_zap_job(job_id)
+        with mock.patch.object(
+            zap_worker_module,
+            "preview_atlas_import",
+            return_value={"draft_id": draft_id},
+        ) as preview_report:
+            assert zap_worker_module._preview_report(artifact_job, report.payload) == draft_id
+        assert preview_report.call_args.kwargs == {
+            "session_id": "session-a",
+            "team_id": "",
+            "actor_member_id": "",
+            "role": "",
+            "file_content": report.payload,
+            "filename": "darklab-zap-report.json",
+            "format_id": "zap_json",
+            "source_tool": "OWASP ZAP",
+            "import_name": "ZAP assessment report",
+            "draft_id": draft_id,
+        }
+        from services.atlas.import_limits import AtlasImportError
+        from services.atlas.import_workflow import preview_atlas_import
+
+        with pytest.raises(AtlasImportError) as exc_info:
+            preview_atlas_import(
+                session_id="session-a",
+                file_content=report.payload,
+                filename="report.json",
+                format_id="zap_json",
+                source_tool="OWASP ZAP",
+                import_name="ZAP assessment report",
+                draft_id="caller-selected",
+            )
+        assert exc_info.value.code == "invalid_draft_id"
+
+        with (
+            mock.patch.object(zap_worker_module, "download_zap_report", return_value=report),
+            mock.patch.object(zap_worker_module, "save_zap_job_report", return_value=report_path),
+            mock.patch.object(zap_worker_module, "_preview_report", return_value=draft_id),
+            mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+        ):
+            zap_worker_module.process_zap_job(
+                artifact_job,
+                settings,
+                "connector-secret",
+                "scope-secret",
+                cfg,
+            )
+        transition_job.assert_called_once_with(
+            job_id,
+            ("downloading",),
+            "ready",
+            report_bytes=report.byte_count,
+            report_sha256=report.sha256,
+            import_source_id=draft_id,
+        )
+
+        submitted_job = {**artifact_job, "status": "submitting"}
+        with (
+            mock.patch.object(
+                zap_worker_module,
+                "transition_zap_job",
+                return_value=submitted_job,
+            ) as transition_job,
+            mock.patch.object(
+                zap_worker_module,
+                "record_zap_job_submission",
+                return_value={**submitted_job, "status": "running", "remote_plan_id": "21"},
+            ) as record_submission,
+            mock.patch.object(zap_worker_module, "load_zap_job_plan", return_value=safe_plan),
+            mock.patch.object(zap_worker_support, "review_zap_scope_policy") as scope_review,
+            mock.patch.object(
+                zap_worker_module, "submit_zap_automation_plan", return_value="21",
+            ) as submit_plan,
+            mock.patch.object(zap_worker_module, "discard_zap_job_plan") as discard_plan,
+        ):
+            zap_worker_module.process_zap_job(
+                {**artifact_job, "status": "queued"},
+                settings,
+                "connector-secret",
+                "scope-secret",
+                cfg,
+            )
+        transition_job.assert_called_once_with(job_id, ("queued",), "submitting")
+        record_submission.assert_called_once_with(job_id, "21")
+        submit_plan.assert_called_once_with(settings, "connector-secret", job_id, safe_plan)
+        scope_review.assert_called_once_with(
+            settings,
+            ("app.example.test",),
+            token="scope-secret",
+        )
+        with pytest.raises(zap_worker_module.ZapJobError) as exc_info:
+            zap_worker_module._review_job_scope_policy(
+                {
+                    **artifact_job,
+                    "plan_summary": {
+                        **artifact_job["plan_summary"],
+                        "egress_proxy": "changed.example.test:8080",
+                    },
+                },
+                settings,
+                "scope-secret",
+            )
+        assert exc_info.value.code == "zap_scope_policy_changed"
+        discard_plan.assert_called_once_with(job_id, cfg)
+
+        with mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job:
+            zap_worker_module.process_zap_job(
+                {
+                    **artifact_job,
+                    "status": "submitting",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                settings,
+                "connector-secret",
+                "scope-secret",
+                cfg,
+            )
+        transition_job.assert_not_called()
+        with (
+            mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+            mock.patch.object(zap_worker_module, "discard_zap_job_plan"),
+            mock.patch.object(zap_worker_module, "log_zap_job_failed") as failure_log,
+        ):
+            zap_worker_module.process_zap_job(
+                {
+                    **artifact_job,
+                    "status": "submitting",
+                    "updated_at": "2020-01-01T00:00:00+00:00",
+                },
+                settings,
+                "connector-secret",
+                "scope-secret",
+                cfg,
+            )
+        assert transition_job.call_args.kwargs["error_code"] == "zap_submission_state_uncertain"
+        assert transition_job.call_args.args[:3] == (job_id, ("submitting",), "failed")
+        assert failure_log.call_args.args[:2] == (job_id, "submitting")
+        assert failure_log.call_args.args[2].code == "zap_submission_state_uncertain"
+
+        transition_conflict = zap_worker_module.ZapJobError(
+            "zap_job_transition_conflict", "changed"
+        )
+        with (
+            mock.patch.object(
+                zap_worker_module,
+                "transition_zap_job",
+                side_effect=transition_conflict,
+            ),
+            mock.patch.object(zap_worker_module, "discard_zap_job_plan") as discard_plan,
+            mock.patch.object(zap_worker_module, "log_zap_job_failed") as failure_log,
+        ):
+            zap_worker_module._fail_job(
+                job_id, "running", RuntimeError("private provider response"), cfg
+            )
+        discard_plan.assert_not_called()
+        failure_log.assert_not_called()
+
+        cancel_job = {**artifact_job, "status": "cancel_requested", "remote_plan_id": "21"}
+        with (
+            mock.patch.object(zap_worker_module, "cancel_zap_automation_plan") as cancel_plan,
+            mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+            mock.patch.object(zap_worker_module, "discard_zap_job_plan"),
+        ):
+            zap_worker_module.process_zap_job(
+                cancel_job, settings, "connector-secret", "scope-secret", cfg,
+            )
+        cancel_plan.assert_called_once_with(settings, "connector-secret", "21")
+        transition_job.assert_called_once_with(job_id, ("cancel_requested",), "canceled")
+        with (
+            mock.patch.object(
+                zap_worker_module,
+                "cancel_zap_automation_plan",
+                side_effect=RuntimeError("temporary failure"),
+            ),
+            mock.patch.object(zap_worker_module, "transition_zap_job") as transition_job,
+            mock.patch.object(zap_worker_module, "log_zap_retry") as retry_log,
+        ):
+            zap_worker_module.process_zap_job(
+                cancel_job, settings, "connector-secret", "scope-secret", cfg,
+            )
+        transition_job.assert_not_called()
+        assert retry_log.call_args.args[:3] == (
+            "ZAP_CANCEL_RETRY", job_id, "cancel"
+        )
+
+        queued_jobs = [
+            {**artifact_job, "id": "zpj_" + "b" * 32, "status": "queued"},
+            {**artifact_job, "id": "zpj_" + "c" * 32, "status": "queued"},
+        ]
+        orphan_plan_id = "zpj_" + "d" * 32
+        staged_plan_id = "zpj_" + "e" * 32
+        with (
+            mock.patch.object(zap_worker_module, "expire_zap_jobs"),
+            mock.patch.object(
+                zap_worker_module,
+                "stale_zap_job_plan_ids",
+                return_value=(orphan_plan_id, staged_plan_id),
+            ),
+            mock.patch.object(
+                zap_worker_module,
+                "staged_zap_job_ids",
+                return_value={staged_plan_id},
+            ),
+            mock.patch.object(
+                zap_worker_module,
+                "discard_zap_job_plan",
+            ) as discard_plan,
+            mock.patch.object(zap_worker_module, "zap_jobs_for_worker", return_value=queued_jobs),
+            mock.patch.object(zap_worker_module, "remote_zap_job_count", return_value=1),
+            mock.patch.object(zap_worker_module, "process_zap_job") as process_job,
+            mock.patch.object(
+                zap_worker_module, "log_zap_concurrency_deferred"
+            ) as deferred_log,
+        ):
+            assert zap_worker_module.run_once(
+                cfg=cfg,
+                environ={
+                    "DARKLAB_ZAP_API_KEY": "connector-secret",
+                    "DARKLAB_ZAP_SCOPE_TOKEN": "scope-secret",
+                },
+            ) == 1
+        process_job.assert_called_once_with(
+            queued_jobs[0], settings, "connector-secret", "scope-secret", cfg,
+        )
+        discard_plan.assert_called_once_with(orphan_plan_id, cfg)
+        deferred_log.assert_called_once_with(1, 1, settings.max_concurrent_jobs)
+
+        with (
+            mock.patch.object(zap_worker_module, "expire_zap_jobs"),
+            mock.patch.object(
+                zap_worker_module, "stale_zap_job_plan_ids", return_value=()
+            ),
+            mock.patch.object(
+                zap_worker_module, "zap_jobs_for_worker", return_value=[cancel_job]
+            ),
+            mock.patch.object(
+                zap_worker_module,
+                "resolve_zap_api_key",
+                side_effect=RuntimeError("private credential failure"),
+            ),
+            mock.patch.object(zap_worker_module, "log_zap_retry") as retry_log,
+            mock.patch.object(zap_worker_module, "_fail_job") as fail_job,
+        ):
+            assert zap_worker_module.run_once(cfg=cfg, environ={}) == 1
+        assert retry_log.call_args.args[:3] == (
+            "ZAP_CANCEL_CREDENTIAL_RETRY", job_id, "cancel"
+        )
+        assert "private credential failure" not in repr(retry_log.call_args.args[:3])
+        fail_job.assert_not_called()
+
+    def test_private_oast_config_is_explicit_non_secret_and_disabled_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    oast_connector:
+                      enabled: true
+                      base_url: https://interactsh.internal.example/
+                      token_secret_id: DARKLAB_OAST_TOKEN
+                      allowed_domain: callbacks.example.test.
+                      tls_verify: false
+                      callback_retention_seconds: 86400
+                      privacy_acknowledged: true
+                    """
+                ))
+
+            cfg = app_config.load_config(tmp)
+
+        assert cfg["oast_connector"] == {
+            "enabled": True,
+            "base_url": "https://interactsh.internal.example",
+            "token_secret_id": "DARKLAB_OAST_TOKEN",
+            "allowed_domain": "callbacks.example.test",
+            "tls_verify": False,
+            "callback_retention_seconds": 86400,
+            "privacy_acknowledged": True,
+        }
+        from services.connectors.oast_config import (
+            OastConnectorUnavailable,
+            oast_connector_settings,
+            resolve_oast_token,
+        )
+
+        settings = oast_connector_settings(cfg)
+        assert settings.base_url == "https://interactsh.internal.example"
+        assert settings.allowed_domain == "callbacks.example.test"
+        assert settings.callback_retention_seconds == 86400
+        assert resolve_oast_token(
+            settings,
+            environ={"DARKLAB_OAST_TOKEN": "private-connector-token"},
+        ) == "private-connector-token"
+        with pytest.raises(OastConnectorUnavailable, match="token is unavailable") as exc_info:
+            resolve_oast_token(settings, environ={})
+        assert exc_info.value.code == "oast_token_unavailable"
+
+        disabled = oast_connector_settings(build_test_config())
+        assert disabled.enabled is False
+        assert disabled.privacy_acknowledged is False
+        with pytest.raises(OastConnectorUnavailable, match="connector is disabled") as exc_info:
+            resolve_oast_token(disabled, environ={})
+        assert exc_info.value.code == "oast_connector_disabled"
 
     def test_validation_error_reports_source_and_redacts_secret_values(self):
         cases = [
@@ -3003,6 +4222,33 @@ class TestLoadConfig:
                       - smtp-password-secret-ref
                 """,
             ),
+            (
+                "oast_connector.token_secret_id",
+                "oast-token-secret-ref",
+                """
+                oast_connector:
+                  token_secret_id:
+                    - oast-token-secret-ref
+                """,
+            ),
+            (
+                "zap_connector.api_key_secret_id",
+                "zap-api-key-secret-ref",
+                """
+                zap_connector:
+                  api_key_secret_id:
+                    - zap-api-key-secret-ref
+                """,
+            ),
+            (
+                "zap_connector.scope_policy_token_secret_id",
+                "zap-scope-token-secret-ref",
+                """
+                zap_connector:
+                  scope_policy_token_secret_id:
+                    - zap-scope-token-secret-ref
+                """,
+            ),
         ]
         for key, raw_secret, yaml_text in cases:
             with tempfile.TemporaryDirectory() as tmp:
@@ -3027,6 +4273,112 @@ class TestLoadConfig:
             ("notifications", "notifications: []\n"),
             ("notifications.smtp.port", "notifications:\n  smtp:\n    port: '587'\n"),
             ("scheduler", "scheduler: false\n"),
+            (
+                "oast_connector.base_url",
+                "oast_connector:\n  base_url: http://interactsh.example.test\n",
+            ),
+            (
+                "oast_connector.allowed_domain",
+                "oast_connector:\n  allowed_domain: '*.example.test'\n",
+            ),
+            (
+                "oast_connector.allowed_domain",
+                "oast_connector:\n  allowed_domain: 192.0.2.10\n",
+            ),
+            (
+                "oast_connector.base_url",
+                "oast_connector:\n  enabled: true\n"
+                "  token_secret_id: DARKLAB_OAST_TOKEN\n"
+                "  allowed_domain: callbacks.example.test\n"
+                "  privacy_acknowledged: true\n",
+            ),
+            (
+                "oast_connector.token_secret_id",
+                "oast_connector:\n  enabled: true\n"
+                "  base_url: https://interactsh.example.test\n"
+                "  allowed_domain: callbacks.example.test\n"
+                "  privacy_acknowledged: true\n",
+            ),
+            (
+                "oast_connector.allowed_domain",
+                "oast_connector:\n  enabled: true\n"
+                "  base_url: https://interactsh.example.test\n"
+                "  token_secret_id: DARKLAB_OAST_TOKEN\n"
+                "  privacy_acknowledged: true\n",
+            ),
+            (
+                "oast_connector.privacy_acknowledged",
+                "oast_connector:\n  enabled: true\n"
+                "  base_url: https://interactsh.example.test\n"
+                "  token_secret_id: DARKLAB_OAST_TOKEN\n"
+                "  allowed_domain: callbacks.example.test\n",
+            ),
+            (
+                "oast_connector.callback_retention_seconds",
+                "oast_connector:\n  callback_retention_seconds: 299\n",
+            ),
+            (
+                "zap_connector.base_url",
+                "zap_connector:\n  base_url: https://user:password@zap.example.test/api\n",
+            ),
+            (
+                "zap_connector.allowed_target_cidrs",
+                "zap_connector:\n  allowed_target_cidrs: [not-a-network]\n",
+            ),
+            (
+                "zap_connector.base_url",
+                "zap_connector:\n  enabled: true\n  api_key_secret_id: DARKLAB_ZAP_API_KEY\n"
+                "  allowed_target_cidrs: [192.0.2.0/24]\n",
+            ),
+            (
+                "zap_connector.api_key_secret_id",
+                "zap_connector:\n  enabled: true\n  base_url: http://zap:8080\n"
+                "  allowed_target_cidrs: [192.0.2.0/24]\n",
+            ),
+            (
+                "zap_connector.allowed_target_cidrs",
+                "zap_connector:\n  enabled: true\n  base_url: http://zap:8080\n"
+                "  api_key_secret_id: DARKLAB_ZAP_API_KEY\n",
+            ),
+            (
+                "zap_connector.scope_policy_url",
+                "zap_connector:\n  enabled: true\n  base_url: http://zap:8080\n"
+                "  api_key_secret_id: DARKLAB_ZAP_API_KEY\n"
+                "  allowed_target_cidrs: [192.0.2.0/24]\n",
+            ),
+            (
+                "zap_connector.scope_policy_url",
+                "zap_connector:\n"
+                "  scope_policy_url: http://policy.example.test/v1/zap-scope/review\n",
+            ),
+            (
+                "zap_connector.scope_policy_token_secret_id",
+                "zap_connector:\n  scope_policy_token_secret_id: lowercase-token\n",
+            ),
+            (
+                "zap_connector.scope_policy_id",
+                "zap_connector:\n  scope_policy_id: 'unsafe policy'\n",
+            ),
+            (
+                "zap_connector.egress_proxy_host",
+                "zap_connector:\n  egress_proxy_host: 'https://proxy.example.test'\n",
+            ),
+            (
+                "zap_connector.egress_proxy_port",
+                "zap_connector:\n  egress_proxy_port: 65536\n",
+            ),
+            (
+                "zap_connector.max_concurrent_jobs",
+                "zap_connector:\n  max_concurrent_jobs: 9\n",
+            ),
+            (
+                "zap_connector.job_timeout_seconds",
+                "zap_connector:\n  job_timeout_seconds: 29\n",
+            ),
+            (
+                "zap_connector.max_report_bytes",
+                "zap_connector:\n  max_report_bytes: 1023\n",
+            ),
         ]
         for key, yaml_text in cases:
             with tempfile.TemporaryDirectory() as tmp:
@@ -3049,6 +4401,9 @@ class TestLoadConfig:
                     """
                     database_url:
                       - postgresql://darklab:secret@postgres:5432/darklab_shell
+                    oast_connector:
+                      base_url:
+                        - https://private-token@interactsh.example.test
                     intel_rate_limit_urlscan_bucket:
                       - not-a-secret
                     """
@@ -3059,9 +4414,11 @@ class TestLoadConfig:
 
         message = str(exc_info.value)
         assert f"database_url from {config_path}" in message
+        assert f"oast_connector.base_url from {config_path}" in message
         assert f"intel_rate_limit_urlscan_bucket from {config_path}" in message
         assert "database_url from " in message and "value=<redacted>" in message
         assert "postgresql://darklab:secret@postgres:5432/darklab_shell" not in message
+        assert "https://private-token@interactsh.example.test" not in message
         assert "intel_rate_limit_urlscan_bucket" in message
         assert "value=['not-a-secret']" in message
 
@@ -3265,6 +4622,7 @@ class TestLoadConfig:
         )
         assert "present_local_overlays" in inventory_call.kwargs["extra"]
         assert info.call_args.kwargs["extra"]["workspace_enabled"] is True
+        assert info.call_args.kwargs["extra"]["assessment_intrusive_actions_enabled"] is False
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_configured"] is False
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_state"] == "disabled"
         assert info.call_args.kwargs["extra"]["raw_packet_scanning_active_tools"] == ""
@@ -3616,6 +4974,8 @@ class TestProjectOverviewContract:
             "generated_at": "",
             "payload_version": project_workspace.OVERVIEW_PAYLOAD_VERSION,
             "targets": [],
+            "active_assessment": None,
+            "assessment_finding_changes": None,
             "rollups": {
                 "target_count": 0,
                 "certificate_statuses": {
@@ -4366,6 +5726,22 @@ class TestProjectOverviewContract:
                 "occurrence_count": 1,
                 "last_seen_at": now,
                 "source_run_count": 1,
+                "service_evidence_state": "identified",
+                "assessment_actions": [{
+                    "key": "https_profile",
+                    "label": "Review HTTPS surface",
+                    "rationale": "The service identified an HTTPS endpoint.",
+                    "command": "command:httpx",
+                    "policy_level": "standard",
+                    "target_types": ["domain", "ip", "url"],
+                    "required_features": ["confirmed_project_target", "httpx"],
+                    "expected_evidence": [
+                        "atlas_service_entity", "http_metadata", "tls_metadata",
+                    ],
+                    "unsupported_conditions": [
+                        "ambiguous_service", "conflicting_service_evidence", "port_only_inference",
+                    ],
+                }],
             },
             {
                 "port": 8443,
@@ -4377,6 +5753,7 @@ class TestProjectOverviewContract:
                 "last_seen_at": now,
                 "source_run_count": 1,
                 "banner": "x" * 157 + "...",
+                "service_evidence_state": "unsupported",
             },
         ]
         assert target_row["app_port_count"] == 2
@@ -5461,6 +6838,8 @@ class TestProjectOverviewContract:
             "recent_change_count": 0,
             "payload_target_count": overview_service.OVERVIEW_TARGET_LIMIT,
             "target_truncated": True,
+            "has_active_assessment": False,
+            "has_assessment_finding_changes": False,
         }
 
     def test_get_project_intel_overview_logs_degraded_source_data(self, monkeypatch, tmp_path):
@@ -6558,6 +7937,7 @@ class TestPostgresMigrations:
         "starred_commands",
         "session_variables",
         "user_workflows",
+        "workflow_execution_children",
         "workflow_execution_steps",
         "workflow_executions",
         "recent_values",
@@ -6582,13 +7962,41 @@ class TestPostgresMigrations:
         "findings_occurrences",
         "atlas_import_drafts",
         "atlas_import_batches",
+        "atlas_import_evidence",
         "atlas_entity_import_links",
         "atlas_finding_import_occurrences",
         "entity_labels",
         "entity_notes",
         "finding_triage_details",
+        "finding_remediation_dispositions",
+        "finding_remediation_merge_members",
         "evidence_packages",
         "project_reports",
+        "cve_risk_sources",
+        "cve_risk_records",
+        "cve_risk_refresh_leases",
+        "cve_risk_work_items",
+        "cve_advisory_sources",
+        "cve_advisory_lookup_cache",
+        "cve_advisory_cpe_matches",
+        "finding_version_inference_sources",
+        "package_advisories",
+        "package_advisory_ranges",
+        "finding_cve_links",
+        "risk_escalation_states",
+        "risk_escalations",
+        "risk_escalation_observations",
+        "risk_escalation_projects",
+        "project_assessments",
+        "project_assessment_checks",
+        "project_assessment_evidence",
+        "project_http_profiles",
+        "zap_connector_jobs",
+        "oast_correlations",
+        "oast_interactions",
+        "nmap_service_observations",
+        "schemathesis_operation_evidence",
+        "schemathesis_run_evidence",
     )
 
     @staticmethod
@@ -6606,12 +8014,25 @@ class TestPostgresMigrations:
                     line = raw_line.strip().rstrip(",")
                     if not line:
                         continue
-                    keyword = line.split()[0].upper()
+                    column_name = line.split()[0].strip('"')
+                    keyword = column_name.upper()
                     if keyword.startswith("'"):
                         continue
-                    if keyword in {"PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"}:
+                    if (
+                        not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", column_name)
+                        or keyword in {
+                            "PRIMARY",
+                            "UNIQUE",
+                            "FOREIGN",
+                            "CHECK",
+                            "CONSTRAINT",
+                            "REFERENCES",
+                            "OR",
+                            "AND",
+                        }
+                    ):
                         continue
-                    columns.add(line.split()[0].strip('"'))
+                    columns.add(column_name)
             alter_match = alter_re.search(statement)
             if alter_match:
                 columns.add(alter_match.group(1))
@@ -6689,6 +8110,34 @@ class TestPostgresMigrations:
             "0043",
             "0044",
             "0045",
+            "0046",
+            "0047",
+            "0048",
+            "0049",
+            "0050",
+            "0051",
+            "0052",
+            "0053",
+            "0054",
+            "0055",
+            "0056",
+            "0057",
+            "0058",
+            "0059",
+            "0060",
+            "0061",
+            "0062",
+            "0063",
+            "0064",
+            "0065",
+            "0066",
+            "0067",
+            "0068",
+            "0069",
+            "0070",
+            "0071",
+            "0072",
+            "0073",
         ]
         for table_name in (
             "runs",
@@ -6728,6 +8177,7 @@ class TestPostgresMigrations:
             "findings_occurrences",
             "atlas_import_drafts",
             "atlas_import_batches",
+            "atlas_import_evidence",
             "atlas_entity_import_links",
             "atlas_finding_import_occurrences",
             "entity_labels",
@@ -6845,6 +8295,392 @@ class TestPostgresMigrations:
         assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
         assert "DELETE FROM atlas_finding_import_occurrences WHERE finding_id = OLD.id" in postgres_sql
 
+    def test_project_assessment_schema_enforces_cycle_and_evidence_contracts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "assessment-contract.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            now = "2026-08-04T12:00:00+00:00"
+            conn.execute(
+                "INSERT INTO projects "
+                "(id, session_id, name, slug, created, updated) "
+                "VALUES ('prj_assessment', 'session-a', 'Assessment', 'assessment', ?, ?)",
+                (now, now),
+            )
+
+            assessment_sql = (
+                "INSERT INTO project_assessments "
+                "(id, session_id, project_id, title, profile_key, profile_version, "
+                "started_at, created_at, updated_at) VALUES (?, 'session-a', "
+                "'prj_assessment', ?, 'network', '1.0', ?, ?, ?)"
+            )
+            conn.execute(assessment_sql, ("asm_one", "First cycle", now, now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(assessment_sql, ("asm_duplicate", "Second active cycle", now, now, now))
+            conn.execute(
+                "UPDATE project_assessments SET status = 'completed', completed_at = ? WHERE id = 'asm_one'",
+                (now,),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    assessment_sql.replace(
+                        "VALUES (?, 'session-a'",
+                        "VALUES (?, ''",
+                    ),
+                    ("asm_ownerless", "Ownerless", now, now, now),
+                )
+            conn.execute(assessment_sql, ("asm_two", "Second cycle", now, now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE project_assessments SET status = 'invalid' WHERE id = 'asm_two'")
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE project_assessments SET status = 'completed' WHERE id = 'asm_two'")
+
+            conn.execute(
+                "INSERT INTO project_http_profiles "
+                "(id, session_id, project_id, name, name_key, base_url, created_at, updated_at) "
+                "VALUES ('php_zap', 'session-a', 'prj_assessment', 'ZAP', 'zap', "
+                "'https://app.example.test', ?, ?)",
+                (now, now),
+            )
+
+            check_sql = (
+                "INSERT INTO project_assessment_checks "
+                "(id, assessment_id, category, check_key, target_type, target_value, target_value_hash, "
+                "created_at, updated_at) VALUES (?, ?, 'discovery', 'open_ports', "
+                "'domain', 'darklab.sh', 'target-hash', ?, ?)"
+            )
+            conn.execute(check_sql, ("chk_one", "asm_one", now, now))
+            conn.execute(check_sql, ("chk_two", "asm_two", now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(check_sql, ("chk_duplicate", "asm_one", now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE project_assessment_checks SET state = 'unknown' WHERE id = 'chk_one'"
+                )
+
+            from services.connectors.zap_job_lifecycle import (
+                expire_zap_jobs,
+                mark_zap_job_imported_for_atlas_draft,
+                record_zap_job_progress,
+                record_zap_job_submission,
+                request_zap_job_cancel,
+                transition_zap_job,
+            )
+            from services.connectors.zap_jobs import (
+                ZapJobError,
+                create_zap_job,
+                zap_job_for_owner,
+            )
+            from services.connectors.zap_plan_contracts import ZapAutomationPlanSummary
+            from services.connectors.zap_remote_progress import review_zap_remote_progress
+
+            job_now = datetime(2026, 8, 9, 16, 0, tzinfo=timezone.utc)
+            job_summary = ZapAutomationPlanSummary(
+                policy_level="safe",
+                authentication_role="anonymous",
+                targets=("https://app.example.test/",),
+                include_rule_count=1,
+                exclusion_rule_count=1,
+                job_types=("passiveScan-config", "spider", "passiveScan-wait", "report"),
+                job_timeout_seconds=900,
+                report_file="darklab-zap-report.json",
+                scope_policy_id="assessment-egress-v1",
+                allowed_target_cidrs_sha256="a" * 64,
+                egress_proxy="zap-egress.example.test:8080",
+            )
+            zap_job = create_zap_job(
+                "session-a",
+                "prj_assessment",
+                "asm_two",
+                "chk_two",
+                "php_zap",
+                1,
+                job_summary,
+                now=job_now,
+                conn=conn,
+            )
+            assert zap_job["id"].startswith("zpj_")
+            assert zap_job["status"] == "queued"
+            assert zap_job["plan_summary"] == job_summary.to_dict()
+            assert zap_job["progress"] == {}
+            assert zap_job["expires_at"] == "2026-08-09T16:15:00+00:00"
+            assert zap_job_for_owner(
+                "other-session", zap_job["id"], conn=conn,
+            ) is None
+
+            submitting = transition_zap_job(
+                zap_job["id"], ("queued",), "submitting", now=job_now, conn=conn,
+            )
+            running = record_zap_job_submission(
+                zap_job["id"], "17", now=job_now, conn=conn,
+            )
+            assert submitting["status"] == "submitting"
+            assert running["remote_plan_id"] == "17"
+            with pytest.raises(ZapJobError) as exc_info:
+                transition_zap_job(
+                    zap_job["id"], ("running",), "downloading", remote_plan_id="18", conn=conn,
+                )
+            assert exc_info.value.code == "zap_job_remote_id_invalid"
+            progress = review_zap_remote_progress(
+                {
+                    "planId": 17,
+                    "started": "2026-08-09T16:00:00Z",
+                    "finished": "",
+                    "info": ["Spider started"],
+                    "warn": [],
+                    "error": [],
+                },
+                expected_plan_id="17",
+            )
+            progressed = record_zap_job_progress(
+                zap_job["id"], progress, now=job_now, conn=conn,
+            )
+            assert progressed["progress"]["info_count"] == 1
+            cancel_requested = request_zap_job_cancel(
+                "session-a", zap_job["id"], now=job_now, conn=conn,
+            )
+            assert cancel_requested["status"] == "cancel_requested"
+            canceled = transition_zap_job(
+                zap_job["id"],
+                ("cancel_requested",),
+                "canceled",
+                now=job_now,
+                conn=conn,
+            )
+            assert canceled["finished_at"] == "2026-08-09T16:00:00+00:00"
+            with pytest.raises(ZapJobError) as exc_info:
+                transition_zap_job(
+                    zap_job["id"], ("running",), "downloading", now=job_now, conn=conn,
+                )
+            assert exc_info.value.code == "zap_job_transition_conflict"
+
+            cancel_race_job = create_zap_job(
+                "session-a",
+                "prj_assessment",
+                "asm_two",
+                "chk_two",
+                "php_zap",
+                1,
+                job_summary,
+                now=job_now,
+                conn=conn,
+            )
+            transition_zap_job(
+                cancel_race_job["id"], ("queued",), "submitting", now=job_now, conn=conn,
+            )
+            request_zap_job_cancel(
+                "session-a", cancel_race_job["id"], now=job_now, conn=conn,
+            )
+            canceled_submission = record_zap_job_submission(
+                cancel_race_job["id"], "18", now=job_now, conn=conn,
+            )
+            assert canceled_submission["status"] == "cancel_requested"
+            assert canceled_submission["remote_plan_id"] == "18"
+            transition_zap_job(
+                cancel_race_job["id"],
+                ("cancel_requested",),
+                "canceled",
+                now=job_now,
+                conn=conn,
+            )
+
+            ready_job = create_zap_job(
+                "session-a",
+                "prj_assessment",
+                "asm_two",
+                "chk_two",
+                "php_zap",
+                1,
+                job_summary,
+                now=job_now,
+                conn=conn,
+            )
+            transition_zap_job(
+                ready_job["id"], ("queued",), "submitting", now=job_now, conn=conn,
+            )
+            record_zap_job_submission(
+                ready_job["id"], "19", now=job_now, conn=conn,
+            )
+            transition_zap_job(
+                ready_job["id"], ("running",), "downloading", now=job_now, conn=conn,
+            )
+            with pytest.raises(ZapJobError) as exc_info:
+                transition_zap_job(
+                    ready_job["id"],
+                    ("downloading",),
+                    "ready",
+                    report_bytes=11,
+                    report_sha256="a" * 64,
+                    now=job_now,
+                    conn=conn,
+                )
+            assert exc_info.value.code == "zap_job_import_invalid"
+            ready = transition_zap_job(
+                ready_job["id"],
+                ("downloading",),
+                "ready",
+                report_bytes=11,
+                report_sha256="a" * 64,
+                import_source_id="impd_" + "b" * 32,
+                now=job_now,
+                conn=conn,
+            )
+            assert ready["import_source_id"] == "impd_" + "b" * 32
+            assert mark_zap_job_imported_for_atlas_draft(
+                "other-session",
+                ready["import_source_id"],
+                "impb_" + "c" * 32,
+                now=job_now,
+                conn=conn,
+            ) is False
+            assert mark_zap_job_imported_for_atlas_draft(
+                "session-a",
+                ready["import_source_id"],
+                "impb_" + "c" * 32,
+                now=job_now,
+                conn=conn,
+            ) is True
+            imported = zap_job_for_owner("session-a", ready_job["id"], conn=conn)
+            assert imported is not None
+            assert imported["status"] == "imported"
+            assert imported["import_source_id"] == "impb_" + "c" * 32
+
+            expiring_job = create_zap_job(
+                "session-a",
+                "prj_assessment",
+                "asm_two",
+                "chk_two",
+                "php_zap",
+                1,
+                job_summary,
+                now=job_now,
+                conn=conn,
+            )
+            assert expire_zap_jobs(
+                now=job_now + timedelta(seconds=901), conn=conn,
+            ) == 1
+            expired = zap_job_for_owner("session-a", expiring_job["id"], conn=conn)
+            assert expired is not None
+            assert expired["status"] == "expired"
+            assert expired["error_code"] == "zap_job_expired"
+
+            with pytest.raises(ZapJobError) as exc_info:
+                create_zap_job(
+                    "session-a",
+                    "prj_assessment",
+                    "asm_two",
+                    "chk_two",
+                    "php_zap",
+                    2,
+                    job_summary,
+                    now=job_now,
+                    conn=conn,
+                )
+            assert exc_info.value.code == "zap_job_scope_changed"
+
+            evidence_sql = (
+                "INSERT INTO project_assessment_evidence "
+                "(id, assessment_id, check_id, evidence_type, evidence_id, observed_at, "
+                "match_rule_key, match_rule_version, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'completed-run', '1', ?, ?)"
+            )
+            conn.execute(
+                evidence_sql,
+                ("evi_one", "asm_one", "chk_one", "run", "run_deleted", now, now, now),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    evidence_sql,
+                    ("evi_duplicate", "asm_one", "chk_one", "run", "run_deleted", now, now, now),
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    evidence_sql,
+                    ("evi_unknown", "asm_one", "chk_one", "unknown", "source", now, now, now),
+                )
+            conn.execute(
+                "UPDATE project_assessment_evidence SET source_state = 'unavailable', "
+                "unavailable_at = ?, unavailable_reason = 'source_deleted' WHERE id = 'evi_one'",
+                (now,),
+            )
+            conn.execute(
+                "INSERT INTO finding_evidence_links "
+                "(id, session_id, project_id, finding_id, evidence_type, evidence_id, "
+                "created_by_session_id, created_at) VALUES "
+                "('fel_project_delete', 'session-a', 'prj_assessment', 'fnd_deleted', "
+                "'run', 'run_deleted', 'session-a', ?)",
+                (now,),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE project_assessment_evidence SET unavailable_at = NULL WHERE id = 'evi_one'"
+                )
+            tombstone = conn.execute(
+                "SELECT evidence_type, evidence_id, observed_at, unavailable_reason "
+                "FROM project_assessment_evidence WHERE id = 'evi_one'"
+            ).fetchone()
+            assert tuple(tombstone) == ("run", "run_deleted", now, "source_deleted")
+
+            report_sql = (
+                "INSERT INTO schemathesis_run_evidence "
+                "(id, session_id, project_id, assessment_id, check_id, run_id, "
+                "schema_artifact_id, schema_sha256, schema_version, profile_key, "
+                "profile_version, tool_version, seed, stop_reason, running_time_seconds, "
+                "expected_operation_count, observed_operation_count, case_count, failure_count, "
+                "observed_at, created_at) VALUES (?, 'session-a', 'prj_assessment', "
+                "'asm_one', 'chk_one', 'run_deleted', 'rfa_0123456789abcdef', ?, '3.1.0', "
+                "'api', '1.0', '4.24.3', 1, 'completed', 2.5, 1, 1, 2, 1, ?, ?)"
+            )
+            conn.execute(report_sql, ("str_one", "a" * 64, now, now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(report_sql, ("str_duplicate", "a" * 64, now, now))
+            operation_sql = (
+                "INSERT INTO schemathesis_operation_evidence "
+                "(id, report_id, operation_key, method, path, status, case_count, "
+                "failure_count, created_at) VALUES (?, 'str_one', 'GET /items', ?, '/items', "
+                "'failure', 2, 1, ?)"
+            )
+            conn.execute(operation_sql, ("sop_one", "GET", now))
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(operation_sql, ("sop_invalid", "POST", now))
+            conn.execute(
+                "INSERT INTO oast_correlations "
+                "(id, session_id, project_id, assessment_id, check_id, "
+                "target_entity_id, action_key, callback_label, allowed_domain, "
+                "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
+                "VALUES ('ocr_0123456789abcdef0123456789abcdef', 'session-a', "
+                "'prj_assessment', 'asm_two', 'chk_two', 'ent_oast_delete', "
+                "'oast_dns_callback', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "
+                "'oast.darklab.test', ?, ?, ?, ?, ?)",
+                ("a" * 64, now, now, now, now),
+            )
+            conn.execute(
+                "INSERT INTO oast_interactions "
+                "(id, correlation_id, protocol, event_fingerprint, observed_at, "
+                "received_at, summary_json) VALUES "
+                "('oin_0123456789abcdef0123456789abcdef', "
+                "'ocr_0123456789abcdef0123456789abcdef', 'dns', ?, ?, ?, '{}')",
+                ("b" * 64, now, now),
+            )
+
+            from services.projects.crud import delete_project
+
+            assert delete_project("session-a", "prj_assessment", conn=conn) is True
+            assert conn.execute("SELECT COUNT(*) FROM project_assessments").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM project_assessment_checks").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM project_assessment_evidence").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM zap_connector_jobs").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM oast_correlations").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM oast_interactions").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM schemathesis_run_evidence").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM schemathesis_operation_evidence").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM finding_evidence_links").fetchone()[0] == 0
+            conn.close()
+
     def test_schema_inventory_captures_sqlite_head_objects(self):
         from core.schema_manifest import SQLITE_BACKEND_ARTIFACTS, SHARED_APP_TABLES, sqlite_head_schema_inventory
 
@@ -6866,8 +8702,79 @@ class TestPostgresMigrations:
             inventory.tables["runs"].columns
         )
         assert {"host_entity_id", "attributes_json"}.issubset(inventory.tables["entities"].columns)
+        assert {"profile_key", "profile_version", "profile_snapshot", "status"}.issubset(
+            inventory.tables["project_assessments"].columns
+        )
+        assert {"check_key", "target_value", "target_value_hash", "applicability", "state_source"}.issubset(
+            inventory.tables["project_assessment_checks"].columns
+        )
+        assert {"evidence_type", "evidence_id", "source_state", "match_rule_version"}.issubset(
+            inventory.tables["project_assessment_evidence"].columns
+        )
+        assert {
+            "project_id",
+            "role_key",
+            "allowed_hosts_json",
+            "secret_refs_json",
+            "file_refs_json",
+            "enabled",
+            "revision",
+        }.issubset(inventory.tables["project_http_profiles"].columns)
+        assert {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "http_profile_id",
+            "plan_summary_json",
+            "progress_json",
+            "status",
+            "expires_at",
+        }.issubset(inventory.tables["zap_connector_jobs"].columns)
+        assert {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "callback_label",
+            "service_origin_sha256",
+            "status",
+            "active_until",
+            "purge_at",
+        }.issubset(inventory.tables["oast_correlations"].columns)
+        assert {
+            "correlation_id",
+            "finding_id",
+            "protocol",
+            "event_fingerprint",
+            "provider_event_sha256",
+            "summary_json",
+        }.issubset(inventory.tables["oast_interactions"].columns)
+        assert {
+            "assessment_id",
+            "check_id",
+            "run_id",
+            "schema_sha256",
+            "missing_operations_json",
+        }.issubset(inventory.tables["schemathesis_run_evidence"].columns)
+        assert {
+            "report_id",
+            "operation_key",
+            "response_statuses_json",
+            "failure_examples_json",
+        }.issubset(inventory.tables["schemathesis_operation_evidence"].columns)
         assert "idx_runs_session_started" in inventory.indexes
         assert "idx_entities_host_entity" in inventory.indexes
+        assert "idx_project_assessments_active_project" in inventory.indexes
+        assert "idx_project_assessment_evidence_source" in inventory.indexes
+        assert "idx_project_http_profiles_project_name" in inventory.indexes
+        assert "idx_project_http_profiles_project_enabled" in inventory.indexes
+        assert "idx_zap_connector_jobs_active_expiry" in inventory.indexes
+        assert "idx_oast_correlations_active_expiry" in inventory.indexes
+        assert "idx_oast_correlations_terminal_purge" in inventory.indexes
+        assert "idx_oast_correlations_run_check" in inventory.indexes
+        assert "idx_oast_interactions_correlation_observed" in inventory.indexes
+        assert "idx_oast_interactions_finding_observed" in inventory.indexes
+        assert "idx_schemathesis_run_evidence_run" in inventory.indexes
+        assert "idx_schemathesis_operation_evidence_report" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad", "runs_ai", "runs_ad"}.issubset(inventory.triggers)
         assert set(SQLITE_BACKEND_ARTIFACTS).issubset(set(inventory.fts_artifacts))
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in inventory.tables["run_output_summary_status"].constraints
@@ -6882,8 +8789,79 @@ class TestPostgresMigrations:
             inventory.tables["runs"].columns
         )
         assert {"host_entity_id", "attributes_json"}.issubset(inventory.tables["entities"].columns)
+        assert {"profile_key", "profile_version", "profile_snapshot", "status"}.issubset(
+            inventory.tables["project_assessments"].columns
+        )
+        assert {"check_key", "target_value", "target_value_hash", "applicability", "state_source"}.issubset(
+            inventory.tables["project_assessment_checks"].columns
+        )
+        assert {"evidence_type", "evidence_id", "source_state", "match_rule_version"}.issubset(
+            inventory.tables["project_assessment_evidence"].columns
+        )
+        assert {
+            "project_id",
+            "role_key",
+            "allowed_hosts_json",
+            "secret_refs_json",
+            "file_refs_json",
+            "enabled",
+            "revision",
+        }.issubset(inventory.tables["project_http_profiles"].columns)
+        assert {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "http_profile_id",
+            "plan_summary_json",
+            "progress_json",
+            "status",
+            "expires_at",
+        }.issubset(inventory.tables["zap_connector_jobs"].columns)
+        assert {
+            "project_id",
+            "assessment_id",
+            "check_id",
+            "callback_label",
+            "service_origin_sha256",
+            "status",
+            "active_until",
+            "purge_at",
+        }.issubset(inventory.tables["oast_correlations"].columns)
+        assert {
+            "correlation_id",
+            "finding_id",
+            "protocol",
+            "event_fingerprint",
+            "provider_event_sha256",
+            "summary_json",
+        }.issubset(inventory.tables["oast_interactions"].columns)
+        assert {
+            "assessment_id",
+            "check_id",
+            "run_id",
+            "schema_sha256",
+            "missing_operations_json",
+        }.issubset(inventory.tables["schemathesis_run_evidence"].columns)
+        assert {
+            "report_id",
+            "operation_key",
+            "response_statuses_json",
+            "failure_examples_json",
+        }.issubset(inventory.tables["schemathesis_operation_evidence"].columns)
         assert "idx_runs_session_started" in inventory.indexes
         assert "idx_entities_host_entity" in inventory.indexes
+        assert "idx_project_assessments_active_project" in inventory.indexes
+        assert "idx_project_assessment_evidence_source" in inventory.indexes
+        assert "idx_project_http_profiles_project_name" in inventory.indexes
+        assert "idx_project_http_profiles_project_enabled" in inventory.indexes
+        assert "idx_zap_connector_jobs_active_expiry" in inventory.indexes
+        assert "idx_oast_correlations_active_expiry" in inventory.indexes
+        assert "idx_oast_correlations_terminal_purge" in inventory.indexes
+        assert "idx_oast_correlations_run_check" in inventory.indexes
+        assert "idx_oast_interactions_correlation_observed" in inventory.indexes
+        assert "idx_oast_interactions_finding_observed" in inventory.indexes
+        assert "idx_schemathesis_run_evidence_run" in inventory.indexes
+        assert "idx_schemathesis_operation_evidence_report" in inventory.indexes
         assert "idx_runs_command_trgm" in inventory.indexes
         assert "idx_entities_canonical_value_trgm" in inventory.indexes
         assert {"findings_legacy_ai", "findings_ad"}.issubset(inventory.triggers)
@@ -6906,6 +8884,18 @@ class TestPostgresMigrations:
 
         assert set(SHARED_APP_TABLES).issubset(manifest.tables)
         assert "idx_runs_session_started" in manifest.indexes
+        assert "idx_project_assessments_active_project" in manifest.indexes
+        assert "idx_project_assessment_evidence_source" in manifest.indexes
+        assert "idx_project_http_profiles_project_name" in manifest.indexes
+        assert "idx_project_http_profiles_project_enabled" in manifest.indexes
+        assert "idx_zap_connector_jobs_active_expiry" in manifest.indexes
+        assert "idx_oast_correlations_active_expiry" in manifest.indexes
+        assert "idx_oast_correlations_terminal_purge" in manifest.indexes
+        assert "idx_oast_correlations_run_check" in manifest.indexes
+        assert "idx_oast_interactions_correlation_observed" in manifest.indexes
+        assert "idx_oast_interactions_finding_observed" in manifest.indexes
+        assert "idx_schemathesis_run_evidence_run" in manifest.indexes
+        assert "idx_schemathesis_operation_evidence_report" in manifest.indexes
         assert "idx_runs_command_trgm" not in manifest.indexes
         assert "findings_ad" in manifest.triggers
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in manifest.constraints["run_output_summary_status"]
@@ -7478,7 +9468,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0046",
+            "0074",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -7530,7 +9520,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0045"
+        assert rows[-1]["version"] == "0073"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -7540,16 +9530,81 @@ class TestPostgresMigrations:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         try:
-            applied = run_migrations(conn, MIGRATIONS, backend=database_backend.DatabaseBackend.SQLITE)
+            pre_provenance_migrations = tuple(
+                migration for migration in MIGRATIONS if migration.version < "0051"
+            )
+            applied = run_migrations(
+                conn,
+                pre_provenance_migrations,
+                backend=database_backend.DatabaseBackend.SQLITE,
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, subject_key, raw_line, created) "
+                "VALUES ('finding-import-before-0051', 'migration-session', "
+                "'domain:imported.darklab.sh', '[medium] imported service finding', "
+                "'2026-07-13T09:30:00Z')"
+            )
+            conn.execute(
+                "INSERT INTO atlas_finding_import_occurrences "
+                "(finding_id, batch_id, row_number, snippet, observed_at, created, updated) "
+                "VALUES ('finding-import-before-0051', 'batch-before-0051', 7, "
+                "'[medium] imported service finding', '2026-07-13T09:30:00Z', "
+                "'2026-07-13T09:30:00Z', '2026-07-13T09:30:00Z')"
+            )
+            applied.extend(run_migrations(
+                conn,
+                MIGRATIONS,
+                backend=database_backend.DatabaseBackend.SQLITE,
+            ))
             tables = {
                 str(row["name"])
                 for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
             }
+            imported_provenance = conn.execute(
+                "SELECT origin, validation_method, summary, impact, reproduction_steps, confidence, "
+                "cve_ids_json, cwe_ids_json, cvss_vector, cvss_score, references_json "
+                "FROM findings WHERE id = ?",
+                ("finding-import-before-0051",),
+            ).fetchone()
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO findings (id, session_id, origin, created) "
+                    "VALUES ('finding-invalid-origin', 'migration-session', 'scanner', '2026-07-13')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO findings (id, session_id, validation_method, created) "
+                    "VALUES ('finding-invalid-method', 'migration-session', 'unbounded', '2026-07-13')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO findings (id, session_id, confidence, created) "
+                    "VALUES ('finding-invalid-confidence', 'migration-session', 'certain', '2026-07-13')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO findings (id, session_id, cvss_score, created) "
+                    "VALUES ('finding-invalid-score', 'migration-session', 10.1, '2026-07-13')"
+                )
         finally:
             conn.close()
 
         assert applied == [migration.version for migration in MIGRATIONS]
         assert {"runs", "runs_fts", "schema_migrations"}.issubset(tables)
+        assert dict(imported_provenance) == {
+            "origin": "import",
+            "validation_method": "imported_assertion",
+            "summary": "",
+            "impact": "",
+            "reproduction_steps": "",
+            "confidence": "unknown",
+            "cve_ids_json": "[]",
+            "cwe_ids_json": "[]",
+            "cvss_vector": "",
+            "cvss_score": None,
+            "references_json": "[]",
+        }
         assert not hasattr(database, "_migrate_schema")
 
     def test_sqlite_fresh_unified_baseline_does_not_call_database_schema_wrappers(self, monkeypatch):
@@ -7919,7 +9974,17 @@ class TestPostgresMigrations:
         applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
         applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
-        assert applied == ["0039", "0040", "0041", "0042", "0043", "0044", "0045"]
+        assert applied == [
+            "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046", "0047", "0048",
+            "0049", "0050", "0051", "0052", "0053", "0054", "0055", "0056", "0057", "0058",
+            "0059", "0060", "0061", "0062", "0063", "0064", "0065", "0066", "0067",
+            "0068",
+            "0069",
+            "0070",
+            "0071",
+            "0072",
+            "0073",
+        ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
         assert "0040" in conn.applied_versions
@@ -7928,7 +9993,35 @@ class TestPostgresMigrations:
         assert "0043" in conn.applied_versions
         assert "0044" in conn.applied_versions
         assert "0045" in conn.applied_versions
-        assert conn.commit_count == 7
+        assert "0046" in conn.applied_versions
+        assert "0047" in conn.applied_versions
+        assert "0048" in conn.applied_versions
+        assert "0049" in conn.applied_versions
+        assert "0050" in conn.applied_versions
+        assert "0051" in conn.applied_versions
+        assert "0052" in conn.applied_versions
+        assert "0053" in conn.applied_versions
+        assert "0054" in conn.applied_versions
+        assert "0055" in conn.applied_versions
+        assert "0056" in conn.applied_versions
+        assert "0057" in conn.applied_versions
+        assert "0058" in conn.applied_versions
+        assert "0059" in conn.applied_versions
+        assert "0060" in conn.applied_versions
+        assert "0061" in conn.applied_versions
+        assert "0062" in conn.applied_versions
+        assert "0063" in conn.applied_versions
+        assert "0064" in conn.applied_versions
+        assert "0065" in conn.applied_versions
+        assert "0066" in conn.applied_versions
+        assert "0067" in conn.applied_versions
+        assert "0068" in conn.applied_versions
+        assert "0069" in conn.applied_versions
+        assert "0070" in conn.applied_versions
+        assert "0071" in conn.applied_versions
+        assert "0072" in conn.applied_versions
+        assert "0073" in conn.applied_versions
+        assert conn.commit_count == 35
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -8081,7 +10174,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0045",
+            "0074",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -8106,9 +10199,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0045"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "0074"]
         assert table_exists is not None
-        assert "0045" in versions
+        assert "0074" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -8231,6 +10324,7 @@ class TestPostgresMigrations:
 
     def test_post_schema_maintenance_logs_lifecycle_and_steps(self, monkeypatch):
         import services.audit.retention as audit_retention
+        import services.cve_risk.maintenance as cve_risk_maintenance
 
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         monkeypatch.setattr(database, "_populate_output_search_text", mock.Mock(return_value=0))
@@ -8242,6 +10336,7 @@ class TestPostgresMigrations:
         monkeypatch.setattr(audit_retention, "prune_events", mock.Mock())
         monkeypatch.setattr(database, "_audit_project_target_host_type_collapse", mock.Mock())
         monkeypatch.setattr(database, "_backfill_url_host_entity_links", mock.Mock())
+        monkeypatch.setattr(cve_risk_maintenance, "sync_finding_cve_links", mock.Mock())
 
         with mock.patch.object(database.log, "info") as log_info, \
              mock.patch.object(database.log, "debug") as log_debug:
@@ -8263,6 +10358,7 @@ class TestPostgresMigrations:
             "audit_retention_prune",
             "project_target_audit",
             "url_host_entity_link_backfill",
+            "finding_cve_link_backfill",
         ]
         assert log_info.call_args_list[-1].kwargs["extra"]["steps"] == ",".join(step_events)
 
@@ -9534,6 +11630,7 @@ class TestWatchersFoundation:
             "cadence_preset": "daily",
             "channel_ids": [],
             "quiet_no_change": False,
+            "risk_escalations_enabled": False,
             "last_evaluated_at": "",
             "last_sent_at": "",
             "next_due_at": "",
@@ -10422,6 +12519,8 @@ class TestWatchersFoundation:
             "failed": 0,
             "quiet": 1,
             "paused": 0,
+            "risk_escalations": 0,
+            "unacknowledged_risk_escalations": 0,
         }
         assert [monitor["dashboard_state"] for monitor in payload["monitors"]] == ["quiet", "changed"]
         changed_monitor = next(item for item in payload["monitors"] if item["id"] == changed.id)
@@ -13175,6 +15274,10 @@ class TestIntelServices:
         assert canonical.canonical_entity("url", "HTTP://[2001:0DB8::0001]:8080/path/") == (
             "http://[2001:db8::1]:8080/path"
         )
+        for path in ("../secret", "%2e%2e/secret", "%2e./secret"):
+            assert canonical.canonical_entity(
+                "url", f"https://example.test/allowed/{path}"
+            ) == "https://example.test/secret"
         assert canonical.canonical_entity("port", "Example.com:443") == "example.com:443/tcp"
         assert canonical.canonical_entity("port", "192.0.2.10:53/UDP") == "192.0.2.10:53/udp"
         assert canonical.canonical_entity("port", "[2001:db8::1]:8443/tcp") == "[2001:db8::1]:8443/tcp"
@@ -13188,6 +15291,9 @@ class TestIntelServices:
             ("hash", "not-hex"),
             ("cve", "2024-1234"),
             ("url", "ftp://example.test/file"),
+            ("url", "https://example.test/allowed%2fsecret"),
+            ("url", "https://example.test/allowed%5csecret"),
+            ("url", "https://example.test/allowed/%252e%252e/secret"),
             ("url", "https://example.test/" + ("a" * 2050)),
             ("port", "example.test:0/tcp"),
             ("port", "example.test:65536/tcp"),
@@ -13647,15 +15753,23 @@ class TestIntelServices:
                 return {
                     "vulnerabilities": [{
                         "cve": {
+                            "vulnStatus": "Analyzed",
                             "published": "2026-01-01T00:00:00.000",
                             "lastModified": "2026-01-02T00:00:00.000",
                             "descriptions": [{"lang": "en", "value": "Example vulnerability."}],
                             "metrics": {
                                 "cvssMetricV31": [{
                                     "baseSeverity": "HIGH",
-                                    "cvssData": {"baseScore": 8.8},
+                                    "cvssData": {
+                                        "version": "3.1",
+                                        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+                                        "baseScore": 8.8,
+                                    },
                                 }],
                             },
+                            "weaknesses": [{
+                                "description": [{"lang": "en", "value": "CWE-79"}],
+                            }],
                             "references": [{"url": "https://example.test/advisory"}],
                         },
                     }],
@@ -13888,6 +16002,9 @@ class TestIntelServices:
         assert hibp_result.payload["providers"]["hibp"]["pwned"] is True
         assert hibp_result.payload["providers"]["hibp"]["count"] == 7
         assert nvd_result.payload["providers"]["nvd"]["severity"] == "HIGH"
+        assert nvd_result.payload["providers"]["nvd"]["status"] == "active"
+        assert nvd_result.payload["providers"]["nvd"]["cvss_version"] == "3.1"
+        assert nvd_result.payload["providers"]["nvd"]["cwes"] == ["CWE-79"]
         assert greynoise_result.payload["providers"]["greynoise"]["classification"] == "benign"
         assert greynoise_empty.payload["providers"]["greynoise"]["message"] == (
             "IP not observed scanning the internet or contained in RIOT data set."
@@ -15064,10 +17181,124 @@ class TestDataAccessLayerServiceCoverage:
                 ("prj_session_service", source_session, now, now),
             )
             conn.execute(
+                "INSERT INTO project_http_profiles "
+                "(id, session_id, project_id, name, name_key, role_key, base_url, "
+                "created_by_session_id, updated_by_session_id, created_at, updated_at) "
+                "VALUES ('htp_session_service', ?, 'prj_session_service', "
+                "'Anonymous', 'anonymous', 'anonymous', 'https://darklab.sh', ?, ?, ?, ?)",
+                (source_session, source_session, source_session, now, now),
+            )
+            conn.execute(
+                "INSERT INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, created) "
+                "VALUES ('pln_session_service', 'prj_session_service', 'run', "
+                "'run-session-service', 'manual', ?)",
+                (now,),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, first_run_id, last_run_id, signature_hash, title, "
+                "manual_created_by_session_id, manual_updated_by_session_id, created) "
+                "VALUES ('fnd_session_service', ?, 'run-session-service', 'run-session-service', "
+                "'run-session-service', 'sig-session-service', 'Migrated evidence finding', ?, ?, ?)",
+                (source_session, source_session, source_session, now),
+            )
+            conn.execute(
+                "INSERT INTO finding_evidence_links "
+                "(id, session_id, project_id, finding_id, evidence_type, evidence_id, run_id, "
+                "created_by_session_id, created_at) VALUES "
+                "('fel_session_service', ?, 'prj_session_service', 'fnd_session_service', "
+                "'run', 'run-session-service', 'run-session-service', ?, ?)",
+                (source_session, source_session, now),
+            )
+            conn.execute(
+                "INSERT INTO finding_triage_details "
+                "(id, session_id, finding_id, verification_status, "
+                "verification_updated_by_session_id, verification_updated_at, created, updated) "
+                "VALUES ('ftri_session_service', ?, 'fnd_session_service', 'verified', ?, ?, ?, ?)",
+                (source_session, source_session, now, now, now),
+            )
+            conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
                 "VALUES (?, ?, 'webhook', 'Webhook', '{}', '{}', '[]', 0, ?, ?)",
                 ("ntc_session_service", source_session, now, now),
+            )
+            disposition_sql = (
+                "INSERT INTO finding_remediation_dispositions "
+                "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+                "rule_identity, review_state, remediation, created_at, updated_at, "
+                "remediation_updated_at) "
+                "VALUES (?, '', 'subject:session-migration', 'rule', "
+                "'RULE:session-migration', 'session-migration', ?, ?, ?, ?, ?)"
+            )
+            conn.execute(
+                disposition_sql,
+                (
+                    source_session,
+                    "reviewed",
+                    "Use migrated guidance.",
+                    "2026-06-01T00:00:00+00:00",
+                    "2026-06-02T00:00:00+00:00",
+                    "2026-06-04T00:00:00+00:00",
+                ),
+            )
+            conn.execute(
+                disposition_sql,
+                (
+                    destination_session,
+                    "important",
+                    "Older destination guidance.",
+                    "2026-05-31T00:00:00+00:00",
+                    "2026-06-03T00:00:00+00:00",
+                    "2026-06-01T00:00:00+00:00",
+                ),
+            )
+            conn.executemany(
+                "INSERT INTO finding_remediation_merge_members "
+                "(session_id, team_id, merge_id, affected_subject, identity_kind, "
+                "identity_value, vulnerability_id, rule_identity, created_by_session_id, "
+                "created_at) VALUES (?, '', 'rmg_session_migration', ?, 'vulnerability', "
+                "'CVE-2026-12345', 'CVE-2026-12345', ?, ?, ?)",
+                (
+                    (
+                        source_session,
+                        "entity:session-migration-one",
+                        "observation:session-migration-one",
+                        source_session,
+                        now,
+                    ),
+                    (
+                        source_session,
+                        "entity:session-migration-two",
+                        "observation:session-migration-two",
+                        source_session,
+                        now,
+                    ),
+                ),
+            )
+            conn.executemany(
+                "INSERT INTO finding_remediation_merge_members "
+                "(session_id, team_id, merge_id, affected_subject, identity_kind, "
+                "identity_value, vulnerability_id, rule_identity, created_by_session_id, "
+                "created_at) VALUES (?, '', 'rmg_destination_existing', ?, "
+                "'vulnerability', 'CVE-2026-12345', 'CVE-2026-12345', ?, ?, ?)",
+                (
+                    (
+                        destination_session,
+                        "entity:session-migration-one",
+                        "observation:session-migration-one",
+                        destination_session,
+                        now,
+                    ),
+                    (
+                        destination_session,
+                        "entity:destination-existing",
+                        "observation:destination-existing",
+                        destination_session,
+                        now,
+                    ),
+                ),
             )
             conn.commit()
 
@@ -15086,10 +17317,24 @@ class TestDataAccessLayerServiceCoverage:
         assert counts["migrated_variables"] == 1
         assert counts["migrated_workflows"] == 1
         assert counts["migrated_projects"] == 1
+        assert counts["migrated_finding_remediation_dispositions"] == 1
+        assert counts["migrated_finding_remediation_guidance"] == 1
+        assert counts["migrated_finding_remediation_merge_members"] == 2
+        assert counts["migrated_finding_evidence_links"] == 1
+        assert counts["migrated_finding_triage_details"] == 1
+        assert counts["migrated_project_http_profiles"] == 1
+        assert counts["migrated_zap_connector_jobs"] == 0
+        assert counts["migrated_oast_correlations"] == 0
+        assert counts["migrated_schemathesis_run_evidence"] == 0
         assert counts["migrated_notification_channels"] == 1
         assert counts["migrated_recent_values"] == 1
         assert counts["migrated_secrets"] == 1
         with database.db_connect() as conn:
+            migrated_disposition = conn.execute(
+                "SELECT session_id, review_state, remediation, remediation_updated_at "
+                "FROM finding_remediation_dispositions "
+                "WHERE affected_subject = 'subject:session-migration'",
+            ).fetchone()
             source_counts = {
                 "runs": conn.execute(
                     "SELECT COUNT(*) AS count FROM runs WHERE session_id = ?", (source_session,)
@@ -15118,9 +17363,48 @@ class TestDataAccessLayerServiceCoverage:
                     "SELECT COUNT(*) AS count FROM recent_values WHERE session_id = ?",
                     (source_session,),
                 ).fetchone()["count"],
+                "remediation_merge_members": conn.execute(
+                    "SELECT COUNT(*) AS count FROM finding_remediation_merge_members "
+                    "WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "finding_evidence_links": conn.execute(
+                    "SELECT COUNT(*) AS count FROM finding_evidence_links WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "finding_triage_details": conn.execute(
+                    "SELECT COUNT(*) AS count FROM finding_triage_details WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
+                "project_http_profiles": conn.execute(
+                    "SELECT COUNT(*) AS count FROM project_http_profiles WHERE session_id = ?",
+                    (source_session,),
+                ).fetchone()["count"],
             }
+            migrated_merge_rows = conn.execute(
+                "SELECT session_id, merge_id, created_by_session_id "
+                "FROM finding_remediation_merge_members WHERE session_id = ? "
+                "ORDER BY affected_subject",
+                (destination_session,),
+            ).fetchall()
             destination_project = conn.execute(
                 "SELECT session_id FROM projects WHERE id = 'prj_session_service'",
+            ).fetchone()
+            migrated_evidence = conn.execute(
+                "SELECT session_id, created_by_session_id FROM finding_evidence_links "
+                "WHERE id = 'fel_session_service'",
+            ).fetchone()
+            migrated_finding = conn.execute(
+                "SELECT session_id, manual_created_by_session_id, manual_updated_by_session_id "
+                "FROM findings WHERE id = 'fnd_session_service'",
+            ).fetchone()
+            migrated_triage = conn.execute(
+                "SELECT session_id, verification_updated_by_session_id "
+                "FROM finding_triage_details WHERE id = 'ftri_session_service'",
+            ).fetchone()
+            migrated_http_profile = conn.execute(
+                "SELECT session_id, created_by_session_id, updated_by_session_id "
+                "FROM project_http_profiles WHERE id = 'htp_session_service'",
             ).fetchone()
             audit_row = conn.execute(
                 "SELECT details FROM audit_events WHERE target_id = ?",
@@ -15129,9 +17413,89 @@ class TestDataAccessLayerServiceCoverage:
 
         assert set(source_counts.values()) == {0}
         assert destination_project["session_id"] == destination_session
+        assert migrated_evidence["session_id"] == destination_session
+        assert migrated_evidence["created_by_session_id"] == destination_session
+        assert migrated_finding["session_id"] == destination_session
+        assert migrated_finding["manual_created_by_session_id"] == destination_session
+        assert migrated_finding["manual_updated_by_session_id"] == destination_session
+        assert tuple(migrated_triage) == (destination_session, destination_session)
+        assert tuple(migrated_http_profile) == (
+            destination_session,
+            destination_session,
+            destination_session,
+        )
+        assert migrated_disposition["session_id"] == destination_session
+        assert migrated_disposition["review_state"] == "important"
+        assert migrated_disposition["remediation"] == "Use migrated guidance."
+        assert migrated_disposition["remediation_updated_at"] == "2026-06-04T00:00:00+00:00"
+        assert len(migrated_merge_rows) == 3
+        assert {row["merge_id"] for row in migrated_merge_rows} == {
+            "rmg_destination_existing"
+        }
+        assert {row["created_by_session_id"] for row in migrated_merge_rows} == {
+            destination_session
+        }
         assert secrets_storage.get_secret_value_for_env(destination_session, "VT_API_KEY") == "secret-value"
         assert audit_row is not None
         assert json.loads(audit_row["details"])["migration_counts"]["migrated_recent_values"] == 1
+
+    def test_manual_finding_update_reports_an_atomic_revision_race(self, monkeypatch):
+        from services.projects import manual_findings
+
+        existing = {
+            "target_id": "ent_manual",
+            "manual_revision": 1,
+            "title": "Original title",
+            "severity": "medium",
+            "subject_key": "domain\x1fmanual.example.test",
+            "fingerprint": "stable-fingerprint",
+        }
+        payload = {
+            **existing,
+            "expected_revision": 1,
+            "title": "Updated title",
+            "summary": "",
+            "impact": "",
+            "reproduction_steps": "",
+            "confidence": "unknown",
+            "cve_ids": [],
+            "cwe_ids": [],
+            "cvss_vector": "",
+            "cvss_score": None,
+            "references": [],
+            "allow_duplicate": False,
+        }
+        rows = iter([{"manual_revision": 1}, {"manual_revision": 2}])
+        monkeypatch.setattr(manual_findings, "_manual_row", lambda *_args: next(rows))
+        monkeypatch.setattr(manual_findings, "row_to_finding", lambda _row: existing)
+        monkeypatch.setattr(manual_findings, "_project_target", mock.Mock())
+        monkeypatch.setattr(
+            manual_findings,
+            "normalize_manual_finding_update",
+            lambda _data, *, existing: payload,
+        )
+        monkeypatch.setattr(
+            manual_findings,
+            "_duplicate_candidates",
+            lambda *_args, **_kwargs: [],
+        )
+        conn = mock.Mock()
+        conn.execute.return_value = mock.Mock(rowcount=0)
+
+        result = manual_findings.update_manual_finding_on_conn(
+            conn,
+            "tok_manual",
+            "prj_manual",
+            "fnd_manual",
+            {"expected_revision": 1, "title": "Updated title"},
+        )
+
+        assert result == {
+            "updated": False,
+            "conflict": "stale_revision",
+            "current_revision": 2,
+        }
+        assert conn.execute.call_count == 1
 
 
 class TestSessionWorkspace:
@@ -16779,7 +19143,7 @@ class TestDerivedCommandRegistry:
         assert grep["autocomplete"]["pipe_command"] is True
         assert grep["autocomplete"]["flags"][0]["value"] == "-i"
 
-    def test_commands_registry_rejects_interactive_pty_with_required_secrets(self):
+    def test_commands_registry_rejects_invalid_semantic_contracts(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "commands.yaml"
             path.write_text(textwrap.dedent("""
@@ -16801,6 +19165,48 @@ class TestDerivedCommandRegistry:
             with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
                 with pytest.raises(ValueError, match="cannot combine interactive PTY mode with requires_secrets"):
                     load_commands_registry()
+
+            invalid_registries = (
+                (
+                    "duplicate command registry root in commands: probe",
+                    """
+                    commands:
+                      - root: probe
+                      - root: probe
+                    """,
+                ),
+                (
+                    "command registry roots cannot appear in commands and pipe_helpers: probe",
+                    """
+                    commands:
+                      - root: probe
+                    pipe_helpers:
+                      - root: probe
+                        autocomplete:
+                          pipe:
+                            enabled: true
+                    """,
+                ),
+                (
+                    "pipe helper must declare autocomplete.pipe.enabled: grep",
+                    """
+                    pipe_helpers:
+                      - root: grep
+                        autocomplete:
+                          flags:
+                            - value: -i
+                    """,
+                ),
+            )
+            for index, (message, body) in enumerate(invalid_registries):
+                invalid_path = Path(tmp) / f"invalid-{index}.yaml"
+                invalid_path.write_text(textwrap.dedent(body))
+                with mock.patch(
+                    "services.commands.registry.COMMANDS_REGISTRY_FILE",
+                    str(invalid_path),
+                ):
+                    with pytest.raises(ValueError, match=re.escape(message)):
+                        load_commands_registry()
 
     def test_secret_show_consumers_marks_required_and_optional(self):
         providers = [
@@ -16893,6 +19299,10 @@ class TestDerivedCommandRegistry:
                 },
             ]),
             mock.patch("services.commands.builtins_secrets.list_secret_metadata", return_value=stored_secrets),
+            mock.patch(
+                "services.commands.builtins_secrets.get_osv_source_status",
+                return_value={"status": "unavailable"},
+            ),
         ):
             lines, exit_code = builtin_commands.execute_builtin_command("secret show-consumers", "secret-session")
             alias_lines, alias_exit_code = builtin_commands.execute_builtin_command("providers", "secret-session")
@@ -16924,6 +19334,8 @@ class TestDerivedCommandRegistry:
         assert "configured · GITHUB_TOKEN" in text
         assert "trufflehog gitlab" in text
         assert "not configured · GITLAB_TOKEN" in text
+        assert "OSV package data" in text
+        assert "disabled · unavailable" in text
         assert [line.get("text") for line in alias_lines] == [line.get("text") for line in lines]
 
     def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
@@ -17314,9 +19726,9 @@ class TestDerivedCommandRegistry:
         disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})
         enabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
-        assert {"file", "cat", "cp", "ls", "rm", "touch"}.isdisjoint(disabled)
+        assert {"file", "cat", "cp", "ls", "rm", "touch", "urlscope"}.isdisjoint(disabled)
         assert "diff" in disabled
-        assert {"file", "cat", "cp", "diff", "ls", "rm", "touch"}.issubset(enabled)
+        assert {"file", "cat", "cp", "diff", "ls", "rm", "touch", "urlscope"}.issubset(enabled)
         assert [item["value"] for item in enabled["file"]["arg_hints"]["__positional__"]] == [
             "list <folder>",
             "ls <folder>",
@@ -17336,10 +19748,22 @@ class TestDerivedCommandRegistry:
         assert enabled["touch"]["arg_hints"]["__positional__"][0]["value_type"] == "workspace_path"
         assert "rm" in enabled["file"]["expects_value"]
         assert "rm" in enabled["file"]["arg_hints"]
+        assert [
+            item["value_type"]
+            for item in enabled["urlscope"]["arg_hints"]["__positional__"]
+        ] == ["domain", "workspace_path", "workspace_path"]
 
     def test_real_registry_commands_have_root_descriptions(self):
         registry = load_commands_registry()
         by_root = {str(item.get("root") or ""): item for item in registry.get("commands", [])}
+        command_roots = [str(item.get("root") or "") for item in registry.get("commands", [])]
+        pipe_roots = [str(item.get("root") or "") for item in registry.get("pipe_helpers", [])]
+        sqlmap_sections = [
+            section
+            for section in ("commands", "pipe_helpers")
+            for item in registry.get(section, [])
+            if str(item.get("root") or "").strip() == "sqlmap"
+        ]
 
         missing = [
             str(item.get("root") or "<unknown>").strip()
@@ -17348,6 +19772,127 @@ class TestDerivedCommandRegistry:
         ]
 
         assert missing == []
+        assert len(command_roots) == len(set(command_roots))
+        assert len(pipe_roots) == len(set(pipe_roots))
+        assert set(command_roots).isdisjoint(pipe_roots)
+        assert all(
+            bool((item.get("autocomplete") or {}).get("pipe_command"))
+            for item in registry.get("pipe_helpers", [])
+        )
+        assert sqlmap_sections == ["commands"]
+        dalfox = by_root["dalfox"]
+        assert dalfox["policy"]["allow"] == ["dalfox"]
+        assert {
+            "dalfox server",
+            "dalfox payload",
+            "dalfox file",
+            "dalfox pipe",
+            "dalfox --config",
+            "dalfox --follow-redirects",
+            "dalfox --remote-wordlists",
+            "dalfox --blind-oob",
+        }.issubset(set(dalfox["policy"]["deny"]))
+        assert is_command_allowed("dalfox https://darklab.sh/?view=summary")[0]
+        assert not is_command_allowed("dalfox server")[0]
+        assert not is_command_allowed("dalfox https://darklab.sh/ --follow-redirects")[0]
+        rewritten, _notice = commands.rewrite_command("dalfox https://darklab.sh/")
+        assert rewritten.endswith("--only-discovery --skip-mining-dict")
+        help_command, _notice = commands.rewrite_command("dalfox --help")
+        assert help_command == "dalfox --help"
+        schemathesis = by_root["schemathesis"]
+        assert schemathesis["policy"]["allow"] == [
+            "schemathesis --help",
+            "schemathesis --version",
+        ]
+        assert is_command_allowed("schemathesis --help")[0]
+        assert is_command_allowed("schemathesis --version")[0]
+        assert not is_command_allowed(
+            "schemathesis run https://api.darklab.sh/openapi.json"
+        )[0]
+        sqlmap = by_root["sqlmap"]
+        assert sqlmap["policy"]["allow"] == ["sqlmap"]
+        denied_sqlmap_flags = {
+            "sqlmap --config-file",
+            "sqlmap --dump",
+            "sqlmap --os-shell",
+            "sqlmap --file-read",
+            "sqlmap --technique",
+            "sqlmap --sql-shell",
+            "sqlmap --sql-query",
+            "sqlmap --sql-file",
+            "sqlmap --os-pwn",
+            "sqlmap --os-smbrelay",
+            "sqlmap --os-bof",
+            "sqlmap --priv-esc",
+            "sqlmap --udf-inject",
+            "sqlmap --shared-lib",
+            "sqlmap --reg-read",
+            "sqlmap --reg-add",
+            "sqlmap --reg-del",
+            "sqlmap --reg-key",
+            "sqlmap --reg-value",
+            "sqlmap --reg-data",
+            "sqlmap --eval",
+            "sqlmap --all",
+            "sqlmap --passwords",
+            "sqlmap --users",
+            "sqlmap --privileges",
+            "sqlmap --roles",
+            "sqlmap --columns",
+            "sqlmap --count",
+            "sqlmap --search",
+            "sqlmap --common-tables",
+            "sqlmap --common-columns",
+            "sqlmap --file-dest",
+            "sqlmap --preprocess",
+            "sqlmap --postprocess",
+            "sqlmap --second-url",
+            "sqlmap --second-req",
+            "sqlmap --csrf-url",
+            "sqlmap --safe-url",
+            "sqlmap --safe-req",
+            "sqlmap --dns-domain",
+            "sqlmap --shell",
+            "sqlmap --wizard",
+            "sqlmap --purge",
+            "sqlmap -d",
+            "sqlmap -g",
+            "sqlmap -D",
+            "sqlmap -T",
+            "sqlmap -C",
+            "sqlmap -X",
+        }
+        assert denied_sqlmap_flags.issubset(set(sqlmap["policy"]["deny"]))
+        assert is_command_allowed("sqlmap https://darklab.sh/item?id=1")[0]
+        assert commands.validate_command(
+            "sqlmap -u https://darklab.sh/item?id=1 -p id --smart --fresh-queries"
+        ).allowed
+        for denied_command in sorted(denied_sqlmap_flags):
+            assert not is_command_allowed(
+                f"{denied_command} value https://darklab.sh/item?id=1"
+            )[0]
+        blocked_sqlmap_commands = (
+            "sqlmap -u https://darklab.sh/item?id=1 --config-file=attacker.ini",
+            "sqlmap -u https://darklab.sh/item?id=1 --os-pwn",
+            "sqlmap -u https://darklab.sh/item?id=1 --reg-read",
+            "sqlmap -u https://darklab.sh/item?id=1 --sql-shell",
+            "sqlmap -u https://darklab.sh/item?id=1 --technique=ST",
+            "sqlmap -u https://darklab.sh/item?id=1 --preprocess attacker.py",
+            "sqlmap -u https://darklab.sh/item?id=1 --udf-inject",
+            "sqlmap -u https://darklab.sh/item?id=1 --file-write payload",
+            "sqlmap -u https://darklab.sh/item?id=1 --sql-file queries.sql",
+            "sqlmap -m targets.txt",
+            "sqlmap -g inurl:item.php?id=",
+            "sqlmap -d sqlite:///tmp/owned.db",
+            "sqlmap -u https://darklab.sh/item?id=1 --random-agent",
+            "sqlmap https://darklab.sh/one?id=1 https://darklab.sh/two?id=2",
+            "sqlmap -u https://user:secret@darklab.sh/item?id=1",
+        )
+        for raw_command in blocked_sqlmap_commands:
+            validation = commands.validate_command(raw_command)
+            assert not validation.allowed, raw_command
+            assert validation.exec_command == raw_command
+        assert not is_command_allowed("sqlmap https://darklab.sh/item?id=1 --dump")[0]
         ipinfo = by_root["ipinfo"]
         assert ipinfo["requires_secrets"] == [{"env": "IPINFO_TOKEN", "optional": True}]
         assert "ipinfo --token" in ipinfo["policy"]["deny"]
@@ -17414,6 +19959,10 @@ class TestDerivedCommandRegistry:
         assert "cdncheck -update" in cdncheck["policy"]["deny"]
         assert is_command_allowed("cdncheck -i ip.darklab.sh -jsonl -silent")[0]
         assert not is_command_allowed("cdncheck -i ip.darklab.sh -update")[0]
+        gau = by_root["gau"]
+        assert {"gau --o", "gau --config", "gau --proxy"}.issubset(set(gau["policy"]["deny"]))
+        assert is_command_allowed("gau --subs --threads 2 --timeout 10 darklab.sh")[0]
+        assert not is_command_allowed("gau --proxy http://proxy.darklab.sh darklab.sh")[0]
         trufflehog = by_root["trufflehog"]
         assert "trufflehog filesystem --directory" in trufflehog["policy"]["allow"]
         assert "trufflehog git" in trufflehog["policy"]["allow"]
@@ -17524,6 +20073,7 @@ class TestDerivedCommandRegistry:
                 "request.txt": "GET / HTTP/1.1\nHost: ip.darklab.sh\n\n",
                 "subfinder-config.yaml": "recursive: false\n",
                 "subfinder-provider-config.yaml": "github: []\n",
+                "gau-config.toml": "threads = 2\n",
                 "ca.pem": "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
                 "nmap-script-args.txt": "http.useragent=darklab\n",
                 "trufflehog-include.txt": ".*\n",
@@ -17569,6 +20119,9 @@ class TestDerivedCommandRegistry:
                 ),
                 "cdncheck -i ip.darklab.sh -jsonl -silent -r resolvers.txt -o cdncheck-results.jsonl": (
                     ["resolvers.txt"], ["cdncheck-results.jsonl"],
+                ),
+                "gau --config gau-config.toml --o historical-urls.txt darklab.sh": (
+                    ["gau-config.toml"], ["historical-urls.txt"],
                 ),
                 "httpx -rr request.txt -status-code -o httpx-raw.txt": (
                     ["request.txt"], ["httpx-raw.txt"],
@@ -17705,6 +20258,17 @@ class TestDerivedCommandRegistry:
                         )
                     if command == "wget --directory-prefix=downloads https://ip.darklab.sh":
                         assert f"--directory-prefix={resolve_workspace_path(session_id, 'downloads', cfg)}" in exec_tokens
+                    if command == "nikto -h ip.darklab.sh -o nikto.txt":
+                        rewritten, notice = commands.rewrite_command(
+                            result.exec_command,
+                            session_id=session_id,
+                            cfg=cfg,
+                        )
+                        rewritten_tokens = commands.split_command_argv(rewritten)
+                        assert rewritten_tokens[:4] == [
+                            "python3", "-m", "services.commands.nikto_workspace", "nikto",
+                        ]
+                        assert "output is staged" in str(notice)
                     for original in reads + writes:
                         if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
                             continue
@@ -17736,6 +20300,23 @@ class TestDerivedCommandRegistry:
                 )
                 assert not result.allowed
                 assert "Command not allowed" in result.reason
+
+            from services.commands.nikto_workspace import run_nikto_workspace
+
+            nikto_destination = resolve_workspace_path(session_id, "nikto.txt", cfg)
+
+            def fake_nikto(arguments, *, check):
+                assert check is False
+                output_index = arguments.index("-o") + 1
+                report_format = arguments[arguments.index("-Format") + 1]
+                Path(f"{arguments[output_index]}.{report_format}").write_text("Nikto report\n")
+                return subprocess.CompletedProcess(arguments, 0)
+
+            assert run_nikto_workspace(
+                ["nikto", "-h", "ip.darklab.sh", "-o", str(nikto_destination)],
+                run_command=fake_nikto,
+            ) == 0
+            assert nikto_destination.read_text() == "Nikto report\n"
 
     def test_workspace_rewrites_quote_shell_sensitive_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -21553,6 +24134,9 @@ class TestOutputSignals:
         assert extract_target("tlsx -u ip.darklab.sh -json -silent") == "ip.darklab.sh"
         assert extract_target("cdncheck -i ip.darklab.sh -jsonl -silent") == "ip.darklab.sh"
         assert extract_target(
+            "gau --providers wayback,commoncrawl --threads 2 --timeout 10 darklab.sh"
+        ) == "darklab.sh"
+        assert extract_target(
             "puredns bruteforce /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt "
             "darklab.sh --resolvers resolvers.txt"
         ) == "darklab.sh"
@@ -23627,6 +26211,7 @@ class TestAutocompleteContextLoading:
         for arg_name, version, smoke_command in (
             ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
             ("CDNCHECK_VERSION", "v1.2.45", "cdncheck -h"),
+            ("GAU_VERSION", "v2.2.4", "gau --version"),
             ("TRUFFLEHOG_VERSION", "v3.95.9", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
@@ -24007,7 +26592,7 @@ class TestWorkflowInputLoading:
             }
         ]
 
-    def test_load_workflows_rejects_an_invalid_v2_entry_as_one_playbook(self):
+    def test_load_workflows_validates_each_durable_entry_as_one_playbook(self):
         payload = textwrap.dedent(
             """
             - version: 2
@@ -24041,16 +26626,58 @@ class TestWorkflowInputLoading:
         assert warning.call_args.args[0] == "WORKFLOW_DEFINITION_REJECTED"
         assert warning.call_args.kwargs["extra"]["entry_index"] == 0
 
-        unsupported = textwrap.dedent(
+        collection = textwrap.dedent(
             """
             - version: 3
-              id: future_playbook
-              title: Future playbook
+              id: collection_playbook
+              title: Collection playbook
               steps:
-                - id: skipped
-                  cmd: "echo should-not-run"
+                - id: discover
+                  cmd: "subfinder -d example.test -silent"
+                  captures:
+                    - name: hosts
+                      source: first_nonempty_line
+                      kind: collection
+                      item_limit: 4
+                  next:
+                    success: probe
+                    failure: stop
+                - id: probe
+                  cmd: "httpx -u {{hosts}} -silent"
+                  for_each:
+                    collection: hosts
+                    failure_mode: continue
+                    max_parallel: 2
+                    max_failures: 4
+                  next:
+                    success: complete
+                    failure: stop
             """
         )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(collection, encoding="utf-8")
+            with (
+                mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)),
+                mock.patch("services.workflows.catalog.log.warning") as warning,
+            ):
+                result = load_workflows()
+
+        assert result[0]["version"] == 3
+        assert result[0]["id"] == "collection_playbook"
+        compiled_steps = cast(list[dict[str, object]], result[0]["steps"])
+        compiled_captures = cast(list[dict[str, object]], compiled_steps[0]["captures"])
+        assert compiled_captures[0]["kind"] == "collection"
+        assert compiled_steps[1]["for_each"] == {
+            "collection": "hosts",
+            "failure_mode": "continue",
+            "retries": 0,
+            "max_parallel": 2,
+            "max_failures": 4,
+        }
+        warning.assert_not_called()
+
+        unsupported = collection.replace("version: 3", "version: 4")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflows.yaml"
             path.write_text(unsupported, encoding="utf-8")
@@ -24089,9 +26716,15 @@ class TestWorkflowInputLoading:
         enabled_titles = {item["title"] for item in enabled}
 
         assert "Subdomain HTTP Triage" not in disabled_titles
+        assert "Historical Web Surface Triage" not in disabled_titles
         assert "Crawl And Scan" not in disabled_titles
+        assert "Bounded Subdomain Assessment" in disabled_titles
+        assert "Live Web Review" not in disabled_titles
+        assert "Port Service Review" in disabled_titles
         assert "Subdomain HTTP Triage" in enabled_titles
+        assert "Historical Web Surface Triage" in enabled_titles
         assert "Crawl And Scan" in enabled_titles
+        assert "Live Web Review" in enabled_titles
 
         subdomain = next(item for item in enabled if item["title"] == "Subdomain HTTP Triage")
         assert subdomain["feature_required"] == "workspace"
@@ -24100,6 +26733,136 @@ class TestWorkflowInputLoading:
             "subfinder -d {{domain}} -silent -o subdomains.txt",
             "httpx -l subdomains.txt -silent -o live-urls.txt",
             "httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
+        ]
+        historical = next(item for item in enabled if item["title"] == "Historical Web Surface Triage")
+        assert historical["id"] == "historical_web_surface_triage"
+        assert historical["version"] == 2
+        historical_steps = cast(list[dict[str, object]], historical["steps"])
+        assert [step["id"] for step in historical_steps] == [
+            "collect_archives",
+            "scope_archives",
+            "confirm_live",
+            "scope_live",
+            "crawl_live",
+            "scope_crawl",
+            "summarize_surface",
+        ]
+        assert [step["cmd"] for step in historical_steps] == [
+            "gau --subs --threads 2 --timeout 10 {{domain}} | head -n 1024 > historical-urls.txt",
+            "urlscope {{domain}} historical-urls.txt historical-scoped-urls.txt",
+            (
+                "httpx -l historical-scoped-urls.txt -silent -threads 10 -timeout 10 -retries 1 "
+                "| head -n 256 > live-urls.txt"
+            ),
+            "urlscope {{domain}} live-urls.txt live-scoped-urls.txt",
+            (
+                "katana -list live-scoped-urls.txt -d 1 -ct 5 -timeout 10 -silent "
+                "| head -n 1024 > crawled-urls.txt"
+            ),
+            "urlscope {{domain}} crawled-urls.txt crawled-scoped-urls.txt",
+            (
+                "httpx -l crawled-scoped-urls.txt -status-code -title -tech-detect "
+                "-threads 10 -timeout 10 -retries 1 | head -n 256 > http-summary.txt"
+            ),
+        ]
+        assert historical_steps[-1]["next"] == {"success": "complete", "failure": "stop"}
+        bounded = next(item for item in enabled if item["title"] == "Bounded Subdomain Assessment")
+        assert bounded["id"] == "bounded_subdomain_assessment"
+        assert bounded["version"] == 3
+        bounded_steps = cast(list[dict[str, object]], bounded["steps"])
+        assert [step["id"] for step in bounded_steps] == [
+            "discover_subdomains",
+            "resolve_subdomains",
+            "probe_subdomains",
+            "crawl_subdomains",
+            "scan_subdomains",
+        ]
+        captures = cast(list[dict[str, object]], bounded_steps[0]["captures"])
+        assert captures == [{
+            "name": "subdomains",
+            "source": "entity",
+            "required": True,
+            "kind": "collection",
+            "item_limit": 16,
+            "entity_type": "domain",
+        }]
+        assert bounded_steps[1]["for_each"] == {
+            "collection": "subdomains",
+            "failure_mode": "continue",
+            "retries": 1,
+            "max_parallel": 4,
+            "max_failures": 16,
+        }
+        assert "-no-interactsh -disable-redirects -disable-update-check" in str(
+            bounded_steps[-1]["cmd"]
+        )
+        rendered_commands = [
+            render_workflow_command(
+                str(step["cmd"]),
+                {"domain": "example.com", "subdomains": "api.example.com"},
+            )
+            for step in bounded_steps
+        ]
+        assert [is_command_allowed(command) for command in rendered_commands] == [
+            (True, ""),
+            (True, ""),
+            (True, ""),
+            (True, ""),
+            (True, ""),
+        ]
+        live_web = next(item for item in enabled if item["title"] == "Live Web Review")
+        assert live_web["id"] == "live_web_review"
+        assert live_web["version"] == 2
+        assert live_web["feature_required"] == "workspace"
+        live_web_steps = cast(list[dict[str, object]], live_web["steps"])
+        assert [step["id"] for step in live_web_steps] == [
+            "capture_screenshot",
+            "inventory_parameters",
+        ]
+        assert live_web_steps[0]["next"] == {
+            "success": "inventory_parameters",
+            "failure": "stop",
+        }
+        assert "-screenshot -srd live-web-screenshots" in str(live_web_steps[0]["cmd"])
+        assert "--only-discovery --skip-mining-dict --format jsonl" in str(
+            live_web_steps[1]["cmd"]
+        )
+        live_web_commands = [
+            render_workflow_command(str(step["cmd"]), {"url": "https://example.com/search?q=one"})
+            for step in live_web_steps
+        ]
+        live_web_validations = [
+            commands.validate_command(command, cfg={"workspace_enabled": True})
+            for command in live_web_commands
+        ]
+        assert [
+            (validation.allowed, validation.reason)
+            for validation in live_web_validations
+        ] == [
+            (True, ""),
+            (True, ""),
+        ]
+        port_review = next(item for item in enabled if item["title"] == "Port Service Review")
+        assert port_review["id"] == "port_service_review"
+        assert port_review["version"] == 2
+        port_steps = cast(list[dict[str, object]], port_review["steps"])
+        assert [step["id"] for step in port_steps] == [
+            "fingerprint_service",
+            "enumerate_service",
+        ]
+        assert port_steps[0]["next"] == {"success": "enumerate_service", "failure": "stop"}
+        assert "-sT -sV -Pn -p {{port}}" in str(port_steps[0]["cmd"])
+        assert "--script default --script-timeout 30s" in str(port_steps[1]["cmd"])
+        port_commands = [
+            render_workflow_command(
+                str(step["cmd"]),
+                {"host": "example.com", "port": "443"},
+            )
+            for step in port_steps
+        ]
+        assert [is_command_allowed(command) for command in port_commands] == [
+            (True, ""),
+            (True, ""),
         ]
 
 
@@ -25258,7 +28021,7 @@ class TestDatabaseInit:
                 "HTTP://Example.COM:80/a/../report?next=%2Fadmin#private",
                 "url",
                 "url",
-                "http://example.com/a/../report?next=/admin",
+                "http://example.com/report?next=/admin",
             ),
         ],
     )
@@ -25352,7 +28115,7 @@ class TestDatabaseInit:
                     "audit_events",
                 )
                 before_counts = {
-                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec
                     for table in protected_tables
                 }
 
@@ -25393,7 +28156,7 @@ class TestDatabaseInit:
                             unreadable_url,
                         )
                 after_counts = {
-                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec B608
+                    table: int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])  # nosec
                     for table in protected_tables
                 }
                 raw_url_audit_rows = int(conn.execute(
@@ -25539,7 +28302,7 @@ class TestDatabaseInit:
         assert direct["detail"]["entity"]["id"] == direct_id
         assert direct["candidates"] == []
 
-    def test_personal_scope_predicates_use_sqlite_partial_indexes(self):
+    def test_personal_scope_and_assessment_queries_use_sqlite_indexes(self):
         from services.atlas.lookup_resolve import exact_lookup_candidate_query
         from services.atlas.scope import (
             entity_scope_params,
@@ -25552,6 +28315,15 @@ class TestDatabaseInit:
             project_finding_owner_clause,
         )
         from services.projects.scope import shared_owner_where
+        from services.assessments.read_model import (
+            assessment_check_page_query,
+            assessment_cycle_page_query,
+        )
+        from services.cve_risk.escalation import (
+            project_risk_escalation_page_query,
+            risk_work_page_query,
+        )
+        from services.cve_risk.links import changed_cve_observation_query
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -25559,6 +28331,173 @@ class TestDatabaseInit:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             try:
+                timestamp = "2026-08-10T12:00:00+00:00"
+                conn.execute(
+                    "INSERT INTO projects "
+                    "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+                    "VALUES ('project-plan', 'scope-session', '', 'Plan', 'plan', '', 'active', '', ?, ?)",
+                    (timestamp, timestamp),
+                )
+                conn.executemany(
+                    "INSERT INTO projects "
+                    "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+                    "VALUES (?, 'scope-session', '', ?, ?, '', 'active', '', ?, ?)",
+                    [
+                        (
+                            f"project-plan-extra-{index:03}",
+                            f"Plan Extra {index:03}",
+                            f"plan-extra-{index:03}",
+                            timestamp,
+                            timestamp,
+                        )
+                        for index in range(160)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO project_assessments "
+                    "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+                    "status, started_at, completed_at, archived_at, created_at, updated_at) "
+                    "VALUES (?, 'scope-session', '', 'project-plan', ?, 'network', '1.0', "
+                    "?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            f"assessment-plan-{index:03}",
+                            f"Plan {index:03}",
+                            "completed" if index < 80 else "archived",
+                            timestamp,
+                            timestamp,
+                            None if index < 80 else timestamp,
+                            timestamp,
+                            f"2026-08-10T12:{index % 60:02}:00+00:00",
+                        )
+                        for index in range(160)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO project_assessments "
+                    "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+                    "status, started_at, completed_at, created_at, updated_at) "
+                    "VALUES (?, 'scope-session', '', ?, ?, 'network', '1.0', "
+                    "'completed', ?, ?, ?, ?)",
+                    [
+                        (
+                            f"assessment-plan-extra-{index:03}",
+                            f"project-plan-extra-{index:03}",
+                            f"Extra Plan {index:03}",
+                            timestamp,
+                            timestamp,
+                            timestamp,
+                            timestamp,
+                        )
+                        for index in range(160)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO project_assessment_checks "
+                    "(id, assessment_id, category, check_key, target_type, target_value, "
+                    "target_value_hash, state, created_at, updated_at) "
+                    "VALUES (?, 'assessment-plan-000', ?, ?, 'domain', ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            f"check-plan-{index:03}",
+                            "discovery" if index % 2 == 0 else "validation",
+                            f"check-{index:03}",
+                            f"host-{index:03}.example",
+                            f"hash-{index:03}",
+                            "covered" if index % 3 == 0 else "not_started",
+                            timestamp,
+                            timestamp,
+                        )
+                        for index in range(240)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO risk_escalations "
+                    "(id, owner_session_id, owner_team_id, remediation_id, cve_id, source, "
+                    "transition_kind, feed_version, created_at, updated_at) "
+                    "VALUES (?, 'scope-session', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
+                    [
+                        (
+                            f"risk-plan-{index:03}",
+                            f"remediation-plan-{index:03}",
+                            f"CVE-2026-{index:04}",
+                            f"feed-{index:03}",
+                            f"2026-08-10T11:{index % 60:02}:00+00:00",
+                            timestamp,
+                        )
+                        for index in range(180)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO risk_escalation_projects (escalation_id, project_id) VALUES (?, 'project-plan')",
+                    [(f"risk-plan-{index:03}",) for index in range(180)],
+                )
+                conn.executemany(
+                    "INSERT INTO risk_escalation_projects (escalation_id, project_id) VALUES (?, ?)",
+                    [
+                        (
+                            f"risk-plan-{risk_index:03}",
+                            f"project-plan-extra-{project_index:03}",
+                        )
+                        for risk_index in range(180)
+                        for project_index in range(10)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, target_id, status, title, created, last_seen_at) "
+                    "VALUES (?, 'scope-session', ?, ?, ?, 'Plan finding', ?, ?)",
+                    [
+                        (
+                            f"finding-plan-{index:03}",
+                            "run-1" if index < 40 else f"run-plan-{index:03}",
+                            f"target-plan-{index:03}",
+                            (
+                                "new",
+                                "needs_followup",
+                                "important",
+                                "reviewed",
+                                "false_positive",
+                            )[index % 5],
+                            timestamp,
+                            timestamp,
+                        )
+                        for index in range(220)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO finding_cve_links (finding_id, cve_id, created_at) VALUES (?, ?, ?)",
+                    [
+                        (
+                            f"finding-plan-{index:03}",
+                            "CVE-2026-9999" if index < 40 else f"CVE-2026-{index:04}",
+                            timestamp,
+                        )
+                        for index in range(220)
+                    ],
+                )
+                # Keep due work selective enough for SQLite to exercise the
+                # production status/next-attempt index after ANALYZE.
+                conn.executemany(
+                    "INSERT INTO cve_risk_work_items "
+                    "(id, source, feed_version, cve_id, transition_kind, status, "
+                    "next_attempt_at, created_at, updated_at) "
+                    "VALUES (?, 'epss', ?, ?, 'changed', ?, ?, ?, ?)",
+                    [
+                        (
+                            f"work-plan-{index:03}",
+                            f"feed-{index:03}",
+                            f"CVE-2026-{index:04}",
+                            "pending" if index < 90 else "complete",
+                            "",
+                            f"2026-08-10T10:{index % 60:02}:00+00:00",
+                            timestamp,
+                        )
+                        for index in range(1800)
+                    ],
+                )
+                conn.execute("ANALYZE")
+
                 atlas_entity_sql = (
                     "SELECT e.id FROM entities e WHERE "
                     + entity_scope_sql("e")
@@ -25714,6 +28653,57 @@ class TestDatabaseInit:
                     "SELECT rel_path FROM run_output_artifacts WHERE run_id = ?",
                     ("run-artifact-1",),
                 )
+                assessment_cycle_sql, assessment_cycle_params = assessment_cycle_page_query(
+                    "project-plan",
+                    status="completed",
+                    include_archived=True,
+                    limit=25,
+                    offset=25,
+                )
+                assessment_cycle_plan = self._sqlite_query_plan(
+                    conn,
+                    assessment_cycle_sql,
+                    assessment_cycle_params,
+                )
+                assessment_check_sql, assessment_check_params = assessment_check_page_query(
+                    "assessment-plan-000",
+                    {"state": "covered"},
+                    limit=25,
+                    offset=25,
+                )
+                assessment_check_plan = self._sqlite_query_plan(
+                    conn,
+                    assessment_check_sql,
+                    assessment_check_params,
+                )
+                project_risk_sql, project_risk_params = project_risk_escalation_page_query(
+                    "project-plan",
+                    start="2026-08-10T00:00:00+00:00",
+                    limit=25,
+                )
+                project_risk_plan = self._sqlite_query_plan(
+                    conn,
+                    project_risk_sql,
+                    project_risk_params,
+                )
+                changed_cve_sql, changed_cve_params = changed_cve_observation_query(
+                    "CVE-2026-9999"
+                )
+                changed_cve_plan = self._sqlite_query_plan(
+                    conn,
+                    changed_cve_sql,
+                    changed_cve_params,
+                )
+                risk_work_sql, risk_work_params = risk_work_page_query(
+                    max_attempts=5,
+                    due_at=timestamp,
+                    limit=25,
+                )
+                risk_work_plan = self._sqlite_query_plan(
+                    conn,
+                    risk_work_sql,
+                    risk_work_params,
+                )
             finally:
                 conn.close()
 
@@ -25737,7 +28727,11 @@ class TestDatabaseInit:
             or "idx_entities_session_type_last_seen" in profile_related_entities_plan
         )
         assert "idx_entities_host_entity" in profile_related_findings_plan
-        assert "idx_findings_session_entity_seen" in profile_related_findings_plan
+        assert (
+            "idx_findings_session_entity_seen" in profile_related_findings_plan
+            or "idx_findings_session_suppressed" in profile_related_findings_plan
+            or "idx_findings_session_last_run_seen" in profile_related_findings_plan
+        )
         assert "idx_projects_personal_slug_unique" in project_slug_plan
         assert (
             "idx_entities_session_type_last_seen" in project_entity_plan
@@ -25747,12 +28741,26 @@ class TestDatabaseInit:
         assert "idx_entities_session_last_seen_value" in atlas_entity_sort_plan
         assert "idx_projects_personal_visible_name_sort" in project_visible_sort_plan
         assert "idx_projects_personal_archive_name_sort" in project_archive_sort_plan
-        assert "idx_findings_session_status_sort_seen" in atlas_finding_status_sort_plan
+        # SQLite can prefer the owner/recency index for the same bounded status
+        # page on a compact fixture. Both plans keep the scan owner-scoped.
+        assert (
+            "idx_findings_session_status_sort_seen" in atlas_finding_status_sort_plan
+            or "idx_findings_session_last_run_seen" in atlas_finding_status_sort_plan
+        )
         assert "idx_findings_team_first_run_seen" in team_first_run_finding_plan
         assert "idx_findings_team_last_run_seen" in team_last_run_finding_plan
         assert "idx_run_file_artifacts_run_created_path" in artifact_created_path_plan
         assert "idx_run_file_artifacts_run_created_id" in artifact_created_id_plan
         assert "sqlite_autoindex_run_output_artifacts_1" in output_artifact_plan
+        assert "idx_project_assessments_project_updated" in assessment_cycle_plan
+        assert (
+            "idx_project_assessment_checks_assessment_state" in assessment_check_plan
+            or "idx_project_assessment_checks_assessment_category" in assessment_check_plan
+        )
+        assert "idx_project_assessment_evidence_check_observed" in assessment_check_plan
+        assert "idx_risk_escalation_projects_project" in project_risk_plan
+        assert "idx_finding_cve_links_cve" in changed_cve_plan
+        assert "idx_cve_risk_work_items_due" in risk_work_plan
 
     def test_personal_scope_team_id_normalization_guards_strict_predicates(self):
         from core.migrations import v0040_personal_scope_team_id_normalization as migration
@@ -26036,6 +29044,9 @@ class TestDatabaseInit:
             import_batch_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('atlas_import_batches')").fetchall()
             }
+            import_evidence_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('atlas_import_evidence')").fetchall()
+            }
             entity_import_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('atlas_entity_import_links')").fetchall()
             }
@@ -26050,6 +29061,18 @@ class TestDatabaseInit:
             }
             finding_triage_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('finding_triage_details')").fetchall()
+            }
+            finding_disposition_columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info('finding_remediation_dispositions')"
+                ).fetchall()
+            }
+            finding_merge_columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info('finding_remediation_merge_members')"
+                ).fetchall()
             }
             conn.close()
 
@@ -26066,11 +29089,14 @@ class TestDatabaseInit:
             "findings_occurrences",
             "atlas_import_drafts",
             "atlas_import_batches",
+            "atlas_import_evidence",
             "atlas_entity_import_links",
             "atlas_finding_import_occurrences",
             "entity_labels",
             "entity_notes",
             "finding_triage_details",
+            "finding_remediation_dispositions",
+            "finding_remediation_merge_members",
             "evidence_packages",
             "project_reports",
             "audit_events",
@@ -26078,6 +29104,16 @@ class TestDatabaseInit:
         assert "project_targets" not in tables
         assert "finding_targets" not in tables
         assert "notes" not in project_columns
+        assert {
+            "session_id",
+            "team_id",
+            "merge_id",
+            "affected_subject",
+            "identity_kind",
+            "identity_value",
+            "created_by_session_id",
+            "created_at",
+        }.issubset(finding_merge_columns)
         assert {"target_entity_kind", "match_mode", "filters_json", "apply_on_run"}.issubset(auto_promote_columns)
         assert "content_sha256" in artifact_columns
         assert {
@@ -26088,10 +29124,31 @@ class TestDatabaseInit:
             "last_run_id",
             "occurrence_count",
             "status",
+            "origin",
+            "validation_method",
+            "summary",
+            "impact",
+            "reproduction_steps",
+            "confidence",
+            "cve_ids_json",
+            "cwe_ids_json",
+            "cvss_vector",
+            "cvss_score",
+            "references_json",
         }.issubset(finding_columns)
         assert {"finding_id", "run_id", "line_number", "snippet", "seen_at"}.issubset(occurrence_columns)
         assert {"id", "normalized_rows_json", "preview_counts_json", "warning_summary_json"}.issubset(import_draft_columns)
         assert {"id", "counts_json", "warning_summary_json", "applied_at"}.issubset(import_batch_columns)
+        assert {
+            "id",
+            "batch_id",
+            "project_id",
+            "evidence_type",
+            "subject_key",
+            "row_number",
+            "source_detail_json",
+            "observed_at",
+        }.issubset(import_evidence_columns)
         assert {"entity_id", "batch_id", "source_detail_json", "created_entity"}.issubset(entity_import_columns)
         assert {"finding_id", "batch_id", "row_number", "source_detail_json"}.issubset(finding_import_columns)
         assert "team_id" in label_columns
@@ -26103,16 +29160,58 @@ class TestDatabaseInit:
             "verification_steps",
             "verification_status",
             "verification_notes",
+            "verification_updated_by_session_id",
+            "verification_updated_by_member_id",
+            "verification_updated_at",
         }.issubset(finding_triage_columns)
+        assert {
+            "session_id",
+            "team_id",
+            "affected_subject",
+            "identity_kind",
+            "identity_value",
+            "vulnerability_id",
+            "rule_identity",
+            "review_state",
+            "remediation",
+            "created_at",
+            "updated_at",
+            "remediation_updated_at",
+        } == finding_disposition_columns
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
-                "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
+                "INSERT INTO findings "
+                "(id, session_id, subject_key, signature_hash, cve_ids_json, title, created) "
                 "VALUES ('finding-triage-1', 'session-triage', 'host:example', 'sig-triage', "
-                "'Finding', '2026-01-01')"
+                "'[\"CVE-2026-12345\"]', 'Finding', '2026-01-01')"
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, subject_key, signature_hash, cve_ids_json, origin, "
+                "validation_method, title, created) "
+                "VALUES ('finding-triage-related', 'session-triage', 'host:example', "
+                "'sig-triage-related', '[\"CVE-2026-12345\"]', 'manual', "
+                "'manual_assessment', 'Related finding', '2026-01-02')"
+            )
+            conn.execute(
+                "UPDATE findings SET status = 'reviewed' "
+                "WHERE id = 'finding-triage-related'"
+            )
+            conn.execute(
+                "INSERT INTO finding_evidence_links "
+                "(id, session_id, project_id, finding_id, evidence_type, evidence_id, "
+                "created_by_session_id, created_at) VALUES "
+                "('fel-triage-cleanup', 'session-triage', 'prj-deleted', "
+                "'finding-triage-1', 'run', 'run-deleted', 'session-triage', "
+                "'2026-01-01')"
+            )
+            conn.execute(
+                "INSERT INTO finding_cve_links (finding_id, cve_id, link_source, created_at) "
+                "VALUES ('finding-triage-1', 'CVE-2026-12345', 'manual', '2026-01-01')"
             )
             conn.commit()
             conn.close()
@@ -26142,6 +29241,28 @@ class TestDatabaseInit:
                 )
                 assert loaded is not None
                 assert loaded["verification_steps"] == "Re-run the SMB checks."
+                related = project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-related",
+                )
+                assert related is not None
+                assert related["remediation"] == "Patch Samba."
+                assert related["remediation_source"] == "remediation_group"
+                assert related["remediation_id"] == saved["remediation_id"]
+                assert related["verification_status"] == "not_started"
+                assert related["verification_steps"] == ""
+                with database.db_connect() as review_conn:
+                    review_states = {
+                        row["id"]: row["status"]
+                        for row in review_conn.execute(
+                            "SELECT id, status FROM findings WHERE id IN (?, ?)",
+                            ("finding-triage-1", "finding-triage-related"),
+                        ).fetchall()
+                    }
+                assert review_states == {
+                    "finding-triage-1": "new",
+                    "finding-triage-related": "new",
+                }
                 with database.db_connect() as quota_conn:
                     quota_conn.execute(
                         "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
@@ -26149,6 +29270,10 @@ class TestDatabaseInit:
                         "'Finding 2', '2026-01-01')"
                     )
                     quota_conn.commit()
+                assert project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-2",
+                ) is None
                 with mock.patch.dict("config.CFG", {"max_finding_triage_details_per_owner": 1}, clear=False):
                     with pytest.raises(ProjectWorkspaceQuotaExceeded, match="finding triage quota exceeded"):
                         project_metadata.upsert_finding_triage_details(
@@ -26169,6 +29294,29 @@ class TestDatabaseInit:
                 assert updated is not None
                 assert updated["id"] == saved["id"]
                 assert updated["verification_status"] == "verified"
+                assert updated["verification_disposition"] == {
+                    "status": "verified",
+                    "actor": {"kind": "session"},
+                    "updated_at": updated["verification_disposition"]["updated_at"],
+                }
+                disposition_at = updated["verification_disposition"]["updated_at"]
+                assert disposition_at
+                assert "verification_updated_by_session_id" not in updated
+                with database.db_connect() as disposition_conn:
+                    preserved = project_metadata.upsert_finding_triage_details_on_conn(
+                        disposition_conn,
+                        "session-triage",
+                        "finding-triage-1",
+                        {
+                            "remediation": "Patch Samba and restart smbd.",
+                            "verification_steps": "Re-run nmap smb-vuln scripts.",
+                            "verification_status": "verified",
+                            "verification_notes": "Added after the final decision.",
+                        },
+                        now="2099-01-01 00:00:00",
+                    )
+                    disposition_conn.commit()
+                assert preserved["verification_disposition"]["updated_at"] == disposition_at
 
                 class _MissingFirstTriageSelect:
                     def __init__(self):
@@ -26239,6 +29387,10 @@ class TestDatabaseInit:
                     {"verification_status": "not_started"},
                 ) is None
                 assert project_metadata.get_finding_triage_details("session-triage", "finding-triage-1") is None
+                assert project_metadata.get_finding_triage_details(
+                    "session-triage",
+                    "finding-triage-related",
+                ) is None
                 project_metadata.upsert_finding_triage_details(
                     "session-triage",
                     "finding-triage-1",
@@ -26252,7 +29404,17 @@ class TestDatabaseInit:
                         "SELECT COUNT(*) AS count FROM finding_triage_details WHERE finding_id = ?",
                         ["finding-triage-1"],
                     ).fetchone()
+                    evidence_row = cleanup_conn.execute(
+                        "SELECT COUNT(*) AS count FROM finding_evidence_links WHERE finding_id = ?",
+                        ["finding-triage-1"],
+                    ).fetchone()
+                    cve_link_row = cleanup_conn.execute(
+                        "SELECT COUNT(*) AS count FROM finding_cve_links WHERE finding_id = ?",
+                        ["finding-triage-1"],
+                    ).fetchone()
                 assert int(row["count"] or 0) == 0
+                assert int(evidence_row["count"] or 0) == 0
+                assert int(cve_link_row["count"] or 0) == 0
 
     def test_json_bearing_schema_columns_use_sqlite_json_type(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -26272,6 +29434,7 @@ class TestDatabaseInit:
                     "entity_intel_snapshots",
                     "atlas_import_drafts",
                     "atlas_import_batches",
+                    "atlas_import_evidence",
                     "atlas_entity_import_links",
                     "atlas_finding_import_occurrences",
                     "evidence_packages",
@@ -26292,6 +29455,7 @@ class TestDatabaseInit:
         assert column_types["atlas_import_drafts"]["warning_summary_json"] == "TEXT"
         assert column_types["atlas_import_batches"]["counts_json"] == "TEXT"
         assert column_types["atlas_import_batches"]["warning_summary_json"] == "TEXT"
+        assert column_types["atlas_import_evidence"]["source_detail_json"] == "TEXT"
         assert column_types["atlas_entity_import_links"]["source_detail_json"] == "TEXT"
         assert column_types["atlas_finding_import_occurrences"]["source_detail_json"] == "TEXT"
         assert column_types["evidence_packages"]["manifest"] == "TEXT"
@@ -26793,16 +29957,24 @@ class TestDatabaseInit:
         assert result.warnings == []
 
     def test_atlas_import_parser_streams_nessus_xml_and_extracts_cves(self):
+        from services.intel.canonical import entity_signature
+
         payload = """
         <NessusClientData_v2>
           <Report name="example">
             <ReportHost name="graph.darklab.sh">
+              <HostProperties>
+                <tag name="HOST_START">Fri Aug 07 10:00:00 2026</tag>
+                <tag name="HOST_END">Fri Aug 07 10:30:00 2026</tag>
+                <tag name="Nessus Server version">10.9.1</tag>
+              </HostProperties>
               <ReportItem port="443" protocol="tcp" svc_name="https" pluginID="1234"
                           pluginName="Example vulnerable service" severity="3">
                 <description>Service is vulnerable.</description>
                 <solution>Upgrade the affected HTTPS service.</solution>
                 <plugin_output>Banner evidence</plugin_output>
                 <cve>CVE-2026-12345</cve>
+                <cpe>cpe:/a:example:server:2.5.1</cpe>
                 <see_also>https://example.com/advisory</see_also>
               </ReportItem>
             </ReportHost>
@@ -26810,6 +29982,7 @@ class TestDatabaseInit:
               <ReportItem port="22" protocol="tcp" svc_name="ssh" pluginID="5678"
                           pluginName="SSH service detected" severity="0">
                 <description>SSH is reachable.</description>
+                <cpe>cpe:/a:example:ssh:*</cpe>
               </ReportItem>
             </ReportHost>
           </Report>
@@ -26829,6 +30002,150 @@ class TestDatabaseInit:
         assert result.findings[0].affected_entity.canonical_value == "graph.darklab.sh"
         assert result.findings[0].remediation == "Upgrade the affected HTTPS service."
         assert result.findings[0].source_detail["plugin_id"] == "1234"
+        assert [item.evidence_type for item in result.evidence] == ["nessus_service_version"]
+        target_key = entity_signature("domain", "graph.darklab.sh")
+        assert result.evidence[0].subject_key == (
+            f"{target_key}\x1fcpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*"
+        )
+        assert result.evidence[0].observed_at == ""
+        assert result.evidence[0].source_detail == {
+            "adapter": "nessus",
+            "target_kind": "domain",
+            "target_value": "graph.darklab.sh",
+            "target_key": target_key,
+            "cpe": "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*",
+            "version": "2.5.1",
+            "port": "443",
+            "protocol": "tcp",
+            "service": "https",
+            "tool_version": "Nessus 10.9.1",
+            "parser_version": "nessus-xml-cpe-v1",
+            "source_observed_at": "Fri Aug 07 10:30:00 2026",
+            "source_observed_at_timezone": "unspecified",
+        }
+
+    def test_atlas_import_parser_bounds_nessus_service_version_evidence(self):
+        cpes = "".join(
+            f"<cpe>cpe:/a:example:service{index}:1.0</cpe>"
+            for index in range(17)
+        )
+        result = parse_import_file(
+            (
+                "<NessusClientData_v2><Report><ReportHost name='bounded.example.test'>"
+                "<ReportItem port='443' protocol='tcp' svc_name='https' pluginID='1' "
+                f"pluginName='Inventory' severity='0'>{cpes}</ReportItem>"
+                "</ReportHost></Report></NessusClientData_v2>"
+            ),
+            format_id="nessus_xml",
+            limits=ImportParserLimits(max_rows=20),
+        )
+
+        assert len(result.evidence) == 16
+        assert [warning.code for warning in result.warnings] == [
+            "nessus_service_version_limit_reached"
+        ]
+        assert result.skipped_count == 0
+
+    def test_atlas_import_parser_streams_greenbone_xml_with_stable_nvt_identity(self):
+        payload = """
+        <get_reports_response status="200" status_text="OK">
+          <report id="report-1" extension="xml" content_type="text/xml">
+            <report id="report-1">
+              <results>
+                <result id="result-first">
+                  <name>Example service vulnerability</name>
+                  <creation_time>2026-08-08T10:00:00Z</creation_time>
+                  <modification_time>2026-08-08T10:30:00Z</modification_time>
+                  <host>192.0.2.44<hostname>api.example.test</hostname></host>
+                  <port>443/tcp</port>
+                  <nvt oid="1.3.6.1.4.1.25623.1.0.12345">
+                    <name>Example service vulnerability</name>
+                    <family>Web application abuses</family>
+                    <cvss_base>8.7</cvss_base>
+                    <refs>
+                      <ref type="cve" id="CVE-2026-12345"/>
+                      <ref type="url" id="https://example.test/advisories/12345"/>
+                      <ref type="url" id="https://user:secret@example.test/private"/>
+                    </refs>
+                    <solution type="VendorFix">Upgrade the affected service.</solution>
+                  </nvt>
+                  <scan_nvt_version>2026-08-08T09:00:00Z</scan_nvt_version>
+                  <threat>High</threat>
+                  <severity>8.7</severity>
+                  <qod><value>95</value><type>remote_vul</type></qod>
+                  <description>The service is affected by CVE-2026-12345.</description>
+                </result>
+                <result id="result-second">
+                  <name>Renamed result title</name>
+                  <host>192.0.2.44<hostname>api.example.test</hostname></host>
+                  <port>443/tcp</port>
+                  <nvt oid="1.3.6.1.4.1.25623.1.0.12345">
+                    <name>Example service vulnerability</name>
+                    <family>Web application abuses</family>
+                    <refs><ref type="cve" id="CVE-2026-12345"/></refs>
+                  </nvt>
+                  <threat>High</threat>
+                  <severity>8.7</severity>
+                  <qod><value>80</value><type>remote_banner</type></qod>
+                  <description>A later result body with the same stable NVT.</description>
+                </result>
+              </results>
+            </report>
+          </report>
+        </get_reports_response>
+        """
+
+        result = parse_import_file(payload, format_id="greenbone_xml")
+
+        assert result.row_count == 2
+        assert {(entity.kind, entity.canonical_value) for entity in result.entities} == {
+            ("ip", "192.0.2.44"),
+            ("cve", "CVE-2026-12345"),
+        }
+        assert [finding.severity for finding in result.findings] == ["high", "high"]
+        assert result.findings[0].external_id == "1.3.6.1.4.1.25623.1.0.12345"
+        assert result.findings[0].remediation == "Upgrade the affected service."
+        assert result.findings[0].references == ["https://example.test/advisories/12345"]
+        assert "CVE references: CVE-2026-12345" in result.findings[0].evidence
+        assert result.findings[0].observed_at == "2026-08-08T10:30:00Z"
+        assert result.findings[0].source_detail == {
+            "adapter": "greenbone",
+            "rule_identity": "nvt:1.3.6.1.4.1.25623.1.0.12345",
+            "nvt_oid": "1.3.6.1.4.1.25623.1.0.12345",
+            "result_id": "result-first",
+            "family": "Web application abuses",
+            "location": "443/tcp",
+            "port": "443",
+            "protocol": "tcp",
+            "hostname": "api.example.test",
+            "severity_score": "8.7",
+            "threat": "High",
+            "qod_value": "95",
+            "qod_type": "remote_vul",
+            "scan_nvt_version": "2026-08-08T09:00:00Z",
+            "cve_ids": ["CVE-2026-12345"],
+        }
+        assert result.findings[0].signature_hash == result.findings[1].signature_hash
+        assert result.warnings == []
+
+    def test_atlas_import_parser_rejects_incomplete_greenbone_results(self):
+        payload = """
+        <report><results>
+          <result id="missing-nvt"><host>192.0.2.10</host><severity>5.0</severity></result>
+          <result id="missing-host"><nvt oid="1.3.6.1.4.1.25623.1.0.7"/></result>
+        </results></report>
+        """
+
+        result = parse_import_file(payload, format_id="greenbone_xml")
+
+        assert result.row_count == 2
+        assert result.entities == []
+        assert result.findings == []
+        assert result.skipped_count == 2
+        assert [warning.code for warning in result.warnings] == [
+            "missing_greenbone_nvt_oid",
+            "missing_greenbone_host",
+        ]
 
     def test_atlas_import_parser_normalizes_zap_json_and_xml_reports(self):
         json_payload = json.dumps({
@@ -26965,6 +30282,13 @@ SQL syntax error near q</response>
         with pytest.raises(ImportParseError, match="unsafe"):
             parse_import_file(payload, format_id="burp_xml")
 
+        greenbone_payload = payload.replace(
+            "<issues><issue><name>",
+            "<report><results><result><host>192.0.2.1</host><nvt oid='1.2.3'/><name>",
+        ).replace("</name></issue></issues>", "</name></result></results></report>")
+        with pytest.raises(ImportParseError, match="unsafe"):
+            parse_import_file(greenbone_payload, format_id="greenbone_xml")
+
     def test_atlas_import_parser_enforces_row_and_element_limits(self):
         csv_payload = "\n".join((
             "row_type,entity_kind,entity_value",
@@ -27002,6 +30326,8 @@ SQL syntax error near q</response>
         completed_extra = mock_debug.call_args_list[1].kwargs["extra"]
         assert started_extra["format_id"] == "generic_jsonl"
         assert started_extra["upload_bytes"] == len(warning_payload.encode("utf-8"))
+        assert started_extra["expanded_bytes"] == len(warning_payload.encode("utf-8"))
+        assert started_extra["compression"] == "none"
         assert started_extra["max_warnings"] == 1
         assert completed_extra["rows"] == 2
         assert completed_extra["warning_count"] == 1
@@ -27035,6 +30361,91 @@ SQL syntax error near q</response>
             parse_import_file(cast(IO[bytes], source), format_id="generic_csv", limits=ImportParserLimits(max_upload_bytes=4))
         assert source.read_sizes == [5]
 
+    def test_atlas_import_parser_accepts_bounded_gzip_and_single_report_zip(self):
+        payload = (
+            b"row_type,entity_kind,entity_value\n"
+            b"entity,domain,compressed.darklab.sh\n"
+        )
+        gzip_payload = gzip.compress(payload)
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("reports/atlas.csv", payload)
+
+        with mock.patch("services.atlas.import_parser.log.debug") as mock_debug:
+            gzip_result = parse_import_file(gzip_payload, format_id="generic_csv")
+        zip_result = parse_import_file(zip_buffer.getvalue(), format_id="generic_csv")
+
+        assert [entity.canonical_value for entity in gzip_result.entities] == ["compressed.darklab.sh"]
+        assert [entity.canonical_value for entity in zip_result.entities] == ["compressed.darklab.sh"]
+        started_extra = mock_debug.call_args_list[0].kwargs["extra"]
+        assert started_extra["upload_bytes"] == len(gzip_payload)
+        assert started_extra["expanded_bytes"] == len(payload)
+        assert started_extra["compression"] == "gzip"
+
+    def test_atlas_import_parser_rejects_unsafe_or_ambiguous_archives(self):
+        payload = b"row_type,entity_kind,entity_value\nentity,domain,archive.darklab.sh\n"
+
+        def zipped(*members):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for name, content in members:
+                    archive.writestr(name, content)
+            return buffer.getvalue()
+
+        with pytest.raises(ImportParseError, match="exactly one"):
+            parse_import_file(
+                zipped(("first.csv", payload), ("second.csv", payload)),
+                format_id="generic_csv",
+            )
+        many_entries = [(f"directory-{index}/", b"") for index in range(16)]
+        with pytest.raises(ImportParseError, match="entry limit"):
+            parse_import_file(zipped(*many_entries, ("report.csv", payload)), format_id="generic_csv")
+        with pytest.raises(ImportParseError, match="unsafe report path"):
+            parse_import_file(zipped(("../report.csv", payload)), format_id="generic_csv")
+        symlink_buffer = io.BytesIO()
+        symlink_info = zipfile.ZipInfo("report.csv")
+        symlink_info.create_system = 3
+        symlink_info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(symlink_buffer, mode="w") as archive:
+            archive.writestr(symlink_info, "target.csv")
+        with pytest.raises(ImportParseError, match="regular file"):
+            parse_import_file(symlink_buffer.getvalue(), format_id="generic_csv")
+        encrypted = bytearray(zipped(("report.csv", payload)))
+        for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+            header_offset = encrypted.find(signature)
+            flags = int.from_bytes(encrypted[header_offset + flag_offset:header_offset + flag_offset + 2], "little")
+            encrypted[header_offset + flag_offset:header_offset + flag_offset + 2] = (flags | 1).to_bytes(2, "little")
+        with pytest.raises(ImportParseError, match="Encrypted ZIP"):
+            parse_import_file(bytes(encrypted), format_id="generic_csv")
+        with pytest.raises(ImportParseError, match="Nested compressed"):
+            parse_import_file(gzip.compress(gzip.compress(payload)), format_id="generic_csv")
+        with pytest.raises(ImportParseError, match="malformed or incomplete"):
+            parse_import_file(b"\x1f\x8btruncated", format_id="generic_csv")
+
+    def test_atlas_import_parser_rejects_expansion_over_configured_limit(self):
+        payload = (
+            b"row_type,entity_kind,entity_value\n"
+            b"entity,domain,expanded.darklab.sh\n"
+        )
+        limit = len(payload) - 1
+
+        with pytest.raises(ImportParseError, match="Expanded import"):
+            parse_import_file(
+                gzip.compress(payload),
+                format_id="generic_csv",
+                limits=ImportParserLimits(max_expanded_bytes=limit),
+            )
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("report.csv", payload)
+        with pytest.raises(ImportParseError, match="Expanded import"):
+            parse_import_file(
+                zip_buffer.getvalue(),
+                format_id="generic_csv",
+                limits=ImportParserLimits(max_expanded_bytes=limit),
+            )
+
     def test_materializes_run_entities_from_output_entries(self):
         from core.helpers import get_log_session_id
 
@@ -27047,6 +30458,12 @@ SQL syntax error near q</response>
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
                 ("run-atlas", "atlas-session", "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
             )
+            gau_metadata = OutputSignalClassifier(
+                "gau example.com",
+                source_run_id="run-atlas",
+            ).classify_line("https://example.com/path")
+            gau_entities = gau_metadata["entities"]
+            assert isinstance(gau_entities, list)
             recorded = materialize_run_entities(
                 conn,
                 "atlas-session",
@@ -27061,11 +30478,7 @@ SQL syntax error near q</response>
                             {"type": "ip", "value": "2001:0db8::0001", "canonical_value": "2001:db8::1"},
                             {"type": "hash", "value": "A" * 40, "canonical_value": f"sha1:{'a' * 40}"},
                             {"type": "cve", "value": "cve-2025-49113", "canonical_value": "CVE-2025-49113"},
-                            {
-                                "type": "url",
-                                "value": "HTTPS://Example.com:443/path/#frag",
-                                "canonical_value": "https://example.com/path",
-                            },
+                            *gau_entities,
                             {"type": "domain", "value": "<redacted>", "canonical_value": REDACTED_ENTITY_SENTINEL},
                         ],
                     }
@@ -27074,7 +30487,7 @@ SQL syntax error near q</response>
             )
             conn.commit()
             entity_rows = conn.execute(
-                "SELECT id, type, canonical_value, occurrence_count, host_entity_id "
+                "SELECT id, type, canonical_value, occurrence_count, host_entity_id, attributes_json "
                 "FROM entities ORDER BY type, canonical_value"
             ).fetchall()
             link_rows = conn.execute(
@@ -27104,6 +30517,11 @@ SQL syntax error near q</response>
         example_host_id = next(row["id"] for row in entity_rows if row["canonical_value"] == "example.com")
         url_row = next(row for row in entity_rows if row["canonical_value"] == "https://example.com/path")
         assert url_row["host_entity_id"] == example_host_id
+        assert json.loads(url_row["attributes_json"]) == {
+            "discovery_mode": "passive",
+            "provider": "gau",
+            "source_run_id": "run-atlas",
+        }
         assert len(recorded) == 7
         assert [row["run_id"] for row in link_rows] == ["run-atlas"] * 7
         warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
@@ -28049,7 +31467,8 @@ SQL syntax error near q</response>
                 record_run_findings(conn, session_id, run_id, entries, team_id="team_findings")
             conn.commit()
             finding_rows = conn.execute(
-                "SELECT session_id, team_id, entity_id, signature_hash, occurrence_count FROM findings"
+                "SELECT session_id, team_id, entity_id, signature_hash, occurrence_count, "
+                "origin, validation_method FROM findings"
             ).fetchall()
             occurrence_rows = conn.execute(
                 "SELECT finding_id, run_id FROM findings_occurrences ORDER BY run_id"
@@ -28065,6 +31484,8 @@ SQL syntax error near q</response>
         assert finding_rows[0]["team_id"] == "team_findings"
         assert finding_rows[0]["entity_id"] == entity_rows[0]["id"]
         assert finding_rows[0]["occurrence_count"] == 2
+        assert finding_rows[0]["origin"] == "run"
+        assert finding_rows[0]["validation_method"] == "captured_observation"
         assert len({row["finding_id"] for row in occurrence_rows}) == 1
         assert [row["run_id"] for row in occurrence_rows] == [
             "run-finding-team-operator",
@@ -29351,6 +32772,9 @@ SQL syntax error near q</response>
             import_batch_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('atlas_import_batches')").fetchall()
             }
+            import_evidence_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('atlas_import_evidence')").fetchall()
+            }
             entity_import_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('atlas_entity_import_links')").fetchall()
             }
@@ -29399,6 +32823,8 @@ SQL syntax error near q</response>
         assert "idx_atlas_import_drafts_scope_created" in import_draft_indexes
         assert "idx_atlas_import_drafts_expires" in import_draft_indexes
         assert "idx_atlas_import_batches_scope_applied" in import_batch_indexes
+        assert "idx_atlas_import_evidence_batch" in import_evidence_indexes
+        assert "idx_atlas_import_evidence_project_type" in import_evidence_indexes
         assert "idx_atlas_entity_import_links_batch" in entity_import_indexes
         assert "idx_atlas_entity_import_links_entity_seen" in entity_import_indexes
         assert "idx_atlas_finding_import_occurrences_batch" in finding_import_indexes
@@ -29742,7 +33168,16 @@ class TestSessionVariables:
 
 class TestBuiltinConfigAccess:
     def test_split_builtin_modules_read_shared_config_without_cfg_sync(self, monkeypatch):
-        from services.commands import builtins_discovery, builtins_misc, builtins_runtime, builtins_system, builtins_workspace
+        from services.commands import (
+            builtins_assessment,
+            builtins_discovery,
+            builtins_misc,
+            builtins_runtime,
+            builtins_system,
+            builtins_workspace,
+        )
+        from services.commands.builtin_registry import BuiltinExecutionContext
+        from services.teams.scope import personal_owner_context
 
         active_cfg = build_test_config({
             "app_name": "Phase Three Shell",
@@ -29795,6 +33230,41 @@ class TestBuiltinConfigAccess:
         workspace_lines = builtins_workspace.run_builtin_workspace("file list", "sess-phase3")
         assert any(str(line["text"]).startswith("Session files:") for line in workspace_lines)
         assert seen_workspace_cfg == [active_cfg]
+
+        writes = []
+
+        def fake_read(_owner, path, cfg):
+            assert path == "historical-urls.txt"
+            seen_workspace_cfg.append(cfg)
+            return "\n".join([
+                "HTTPS://Example.COM/admin",
+                "https://api.example.com/live",
+                "https://example.com.evil.test/lookalike",
+            ])
+
+        def fake_write(_owner, path, payload, cfg):
+            seen_workspace_cfg.append(cfg)
+            writes.append((path, payload))
+            return {"path": path}
+
+        monkeypatch.setattr(builtins_assessment, "read_owner_workspace_text_file", fake_read)
+        monkeypatch.setattr(builtins_assessment, "write_owner_workspace_text_file", fake_write)
+        context = BuiltinExecutionContext(
+            "sess-phase3",
+            supplied_owner_context=personal_owner_context("sess-phase3"),
+            config_resolver=lambda: active_cfg,
+        )
+        scoped_lines, exit_code = builtins_assessment.run_builtin_urlscope(
+            "urlscope example.com historical-urls.txt scoped-urls.txt",
+            context,
+        )
+        assert exit_code == 0
+        assert writes == [(
+            "scoped-urls.txt",
+            "https://example.com/admin\nhttps://api.example.com/live\n",
+        )]
+        assert scoped_lines[0]["text"] == "urlscope: wrote 2 scoped URLs to scoped-urls.txt"
+        assert seen_workspace_cfg == [active_cfg, active_cfg, active_cfg]
 
 
 class TestBuiltinStatus:
@@ -30188,3 +33658,604 @@ class TestSecretsVault:
 
         assert exc_info.value.env_name == "SHODAN_API_KEY"
         assert exc_info.value.existing_name == "SHODAN_PRIMARY"
+
+
+class TestAssessmentHttpProfileExecution:
+    def test_private_runtime_material_is_mode_limited_and_stale_safe(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from services.assessments import http_profile_runtime as runtime
+        from services.assessments.http_profile_material import materialize_tool_profile
+
+        monkeypatch.setattr(runtime, "_scanner_user_exists", lambda: False)
+        monkeypatch.setattr(runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
+        cfg = build_test_config({"command_timeout_seconds": 10})
+        old_material = runtime.PrivateHttpRunMaterial(cfg=cfg)
+        old_file = old_material.write_bytes("headers.txt", b"X-Test: protected\n")
+        recent_material = runtime.PrivateHttpRunMaterial(cfg=cfg)
+        recent_file = recent_material.write_bytes("secrets.yaml", b"static: []\n")
+        now = time.time()
+        os.utime(old_material.path, (now - 4000, now - 4000))
+
+        assert stat.S_IMODE(old_material.root.stat().st_mode) == 0o730
+        assert stat.S_IMODE(old_material.path.stat().st_mode) == 0o700
+        assert stat.S_IMODE(old_file.stat().st_mode) == 0o600
+        assert stat.S_IMODE(recent_file.stat().st_mode) == 0o600
+        assert recent_material.read_bytes("secrets.yaml", max_bytes=64) == b"static: []\n"
+        with pytest.raises(runtime.PrivateHttpMaterialError, match="exceeds its limit"):
+            recent_material.read_bytes("secrets.yaml", max_bytes=4)
+        outside = tmp_path / "outside-report"
+        outside.write_bytes(b"outside")
+        (recent_material.path / "linked-report").symlink_to(outside)
+        with pytest.raises(runtime.PrivateHttpMaterialError, match="could not be read"):
+            recent_material.read_bytes("linked-report", max_bytes=64)
+        assert runtime.cleanup_stale_http_profile_runtime(
+            cfg=cfg,
+            now_timestamp=now,
+        ) == 1
+        assert not old_material.path.exists()
+        assert recent_material.path.exists()
+        recent_material.cleanup()
+        assert not recent_material.path.exists()
+        curl_material = materialize_tool_profile(
+            "curl",
+            {"allowed_hosts": ["app.example"], "file_refs": {}},
+            [("Authorization", 'Bearer protected"token')],
+            session_id="tok-http-profile",
+            team_id="",
+            actor_member_id="",
+        )
+        assert curl_material.trusted_args[:1] == ("--config",)
+        curl_config = Path(curl_material.trusted_args[1])
+        assert stat.S_IMODE(curl_config.stat().st_mode) == 0o600
+        assert curl_config.read_text(encoding="utf-8") == (
+            'header = "Authorization: Bearer protected\\"token"\n'
+        )
+        assert str(curl_config) in curl_material.private_values
+        assert curl_material.cleanup is not None
+        curl_material.cleanup()
+        assert not curl_config.parent.exists()
+
+    def test_http_profile_adapters_keep_scope_and_policy_in_explicit_argv(self):
+        from services.assessments.command_plans import command_plan
+        from services.assessments.http_profile_execution import (
+            HttpProfileExecutionError,
+            _SUPPORTED_TOOLS,
+            _execution_target,
+            _scope_arguments,
+            _unsupported_reason,
+            materialize_http_profile_launch,
+        )
+        from services.assessments.http_profile_material import (
+            private_file_values,
+        )
+        from services.assessments.http_profile_material_formats import (
+            curl_config,
+            dalfox_config,
+            sqlmap_config,
+        )
+        from services.commands.registry import is_command_allowed
+
+        summary = {
+            "credential_use": ["headers"],
+            "rate_limit_per_second": 4,
+            "concurrency": 2,
+        }
+        katana = command_plan(
+            "katana",
+            "url",
+            "https://app.example/admin",
+            http_profile=summary,
+        )
+        assert katana is not None
+        assert katana.command.endswith("-H [protected]")
+        assert "-d 1 -dr -c 2 -rl 4 -timeout 10" in katana.command
+        curl = command_plan(
+            "curl",
+            "ip",
+            "192.0.2.10",
+            http_profile=summary,
+        )
+        assert curl is not None
+        assert curl.command.startswith("curl -q --silent --show-error --head --no-location")
+        assert "--noproxy '*' --proto '=http,https'" in curl.command
+        assert "--connect-timeout 10 --max-time 30 https://192.0.2.10" in curl.command
+        assert curl.command.endswith("--config [protected]")
+        assert curl.request_limit == 1
+        assert curl.time_limit_seconds == 30
+        allowed, reason = is_command_allowed(curl.command.removesuffix(" --config [protected]"))
+        assert allowed, reason
+        dalfox = command_plan(
+            "dalfox",
+            "url",
+            "https://app.example/admin?view=summary",
+            http_profile=summary,
+        )
+        assert dalfox is not None
+        assert dalfox.command.endswith("--max-targets-per-host 1 --config [protected]")
+        assert "--only-discovery --skip-mining-dict --format jsonl --no-color" in dalfox.command
+        assert "--scan-timeout 60 --rate-limit 4 --workers 2" in dalfox.command
+        assert dalfox.time_limit_seconds == 60
+        allowed, reason = is_command_allowed(dalfox.command.removesuffix(" --config [protected]"))
+        assert allowed, reason
+        sqlmap = command_plan(
+            "sqlmap",
+            "url",
+            "https://app.example/item?id=1",
+            http_profile=summary,
+        )
+        assert sqlmap is not None
+        assert sqlmap.command.endswith("--no-logging -c [protected]")
+        assert "--batch --level 1 --risk 1 --technique BEU" in sqlmap.command
+        assert "--threads 2" in sqlmap.command
+        assert sqlmap.time_limit_seconds == 120
+        assert not is_command_allowed(
+            sqlmap.command.removesuffix(" -c [protected]")
+        )[0]
+        sqlmap_launch = materialize_http_profile_launch(
+            "tok-sqlmap",
+            "prj-sqlmap",
+            {
+                "action": {"id": "sqlmap"},
+                "target": {
+                    "type": "url",
+                    "value": "https://app.example/item?id=1",
+                },
+                "http_profile": {"concurrency": 2},
+                "display_command": sqlmap.command.removesuffix(" -c [protected]"),
+            },
+        )
+        carrier_validation = commands.validate_command(sqlmap_launch.execution_command)
+        assert carrier_validation.allowed
+        rewritten_sqlmap, _notice = commands.rewrite_command(
+            carrier_validation.exec_command
+        )
+        rewritten_tokens = shlex.split(rewritten_sqlmap)
+        assert rewritten_tokens[0:3] == [
+            "sqlmap",
+            "-u",
+            "https://app.example/item?id=1",
+        ]
+        assert rewritten_tokens[rewritten_tokens.index("--threads") + 1] == "2"
+        assert rewritten_tokens[rewritten_tokens.index("--level") + 1] == "1"
+        assert rewritten_tokens[rewritten_tokens.index("--risk") + 1] == "1"
+        assert rewritten_tokens[rewritten_tokens.index("--technique") + 1] == "BEU"
+        assert rewritten_tokens[rewritten_tokens.index("--time-limit") + 1] == "120"
+        certificate = command_plan("sslyze", "domain", "tls.example")
+        tls_configuration = command_plan("testssl", "domain", "tls.example")
+        assert certificate is not None
+        assert tls_configuration is not None
+        allowed, reason = is_command_allowed(certificate.command)
+        assert allowed, reason
+        allowed, reason = is_command_allowed(tls_configuration.command)
+        assert allowed, reason
+        profile = {
+            "include_paths": ["/admin"],
+            "exclude_paths": ["/admin/logout"],
+        }
+        scoped_profile = {
+            "base_url": "https://app.example/allowed",
+            "scope_roots": ["https://app.example/allowed"],
+            "allowed_hosts": ["app.example"],
+            "include_paths": ["/allowed"],
+            "exclude_paths": ["/secret"],
+        }
+        assert _SUPPORTED_TOOLS == {
+            "curl", "httpx", "katana", "nuclei", "dalfox", "sqlmap",
+        }
+        assert _execution_target(
+            scoped_profile,
+            {"type": "url", "value": "https://app.example/allowed/./page"},
+        ) == "https://app.example/allowed/page"
+        for path in (
+            "../secret",
+            "%2e%2e/secret",
+            "%2e./secret",
+            "page%2f..%2fsecret",
+            "page%5c..%5csecret",
+        ):
+            with pytest.raises(HttpProfileExecutionError) as exc_info:
+                _execution_target(
+                    scoped_profile,
+                    {"type": "url", "value": f"https://app.example/allowed/{path}"},
+                )
+            assert exc_info.value.code == "http_profile_scope_mismatch"
+        katana_scope = _scope_arguments(profile, "katana", "https://app.example/admin")
+        assert katana_scope[:2] == ["-fs", "fqdn"]
+        assert katana_scope[2::2] == ["-cs", "-cos"]
+        assert r"\[2001:db8::1\]" in _scope_arguments(
+            profile, "katana", "https://[2001:db8::1]/admin"
+        )[3]
+        assert _scope_arguments(profile, "curl", "https://app.example/admin") == []
+        assert _scope_arguments(profile, "dalfox", "https://app.example/admin") == []
+        assert _scope_arguments(profile, "nuclei", "https://app.example") == ["-dr", "-ni"]
+        assert "proxy allowlist" in _unsupported_reason({"proxy_url": "https://proxy.example"}, "httpx")
+        assert "client certificate" in _unsupported_reason(
+            {"file_refs": {"client_certificate": "cert.pem"}},
+            "katana",
+        )
+        assert private_file_values(
+            "client_key",
+            b"-----BEGIN PRIVATE KEY-----\nunique-private-key-material\n-----END PRIVATE KEY-----\n",
+        ) == ["unique-private-key-material"]
+        assert curl_config(
+            [("X-Token", 'quote" slash\\ tab\tvalue')],
+            {
+                "client_certificate": "/private/client cert.pem",
+                "client_key": "/private/client key.pem",
+            },
+        ).decode("utf-8") == (
+            'header = "X-Token: quote\\" slash\\\\ tab\\tvalue"\n'
+            'cert = "/private/client cert.pem"\n'
+            'key = "/private/client key.pem"\n'
+        )
+        assert json.loads(dalfox_config([
+            ("Authorization", "Bearer protected"),
+        ])) == {
+            "scan": {
+                "follow_redirects": False,
+                "headers": ["Authorization: Bearer protected"],
+            },
+        }
+        assert sqlmap_config([("Authorization", "Bearer protected")]).decode("utf-8") == (
+            "[Target]\n\n[Request]\nheaders = Authorization: Bearer protected\n"
+            "ignoreRedirects = True\n"
+        )
+
+    def test_private_runtime_uses_scanner_owned_handoff_in_container_mode(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from services.assessments import http_profile_runtime as runtime
+        from services.assessments import http_profile_runtime_read as runtime_read
+
+        calls = []
+        reads = []
+
+        def scanner_run(arguments, *, input_bytes=None):
+            calls.append((list(arguments), input_bytes))
+            path = Path(arguments[-1])
+            if arguments[0] == "mkdir":
+                path.mkdir(mode=0o700)
+            elif arguments[0] == "tee":
+                path.write_bytes(input_bytes or b"")
+            elif arguments[0] == "chmod":
+                os.chmod(path, int(arguments[1], 8))
+            elif arguments[0] == "rm":
+                for child in path.iterdir():
+                    child.unlink()
+                path.rmdir()
+
+        monkeypatch.setattr(runtime, "_scanner_user_exists", lambda: True)
+        monkeypatch.setattr(runtime, "_scanner_run", scanner_run)
+        monkeypatch.setattr(
+            runtime_read,
+            "read_private_material_file",
+            lambda path, *, max_bytes, scanner_owned: (
+                reads.append((path, max_bytes, scanner_owned)) or path.read_bytes()
+            ),
+        )
+        monkeypatch.setattr(runtime, "_SCANNER_RUNTIME_PARENT", tmp_path)
+        material = runtime.PrivateHttpRunMaterial(cfg=build_test_config())
+        protected_file = material.write_bytes("secrets.yaml", b"static: []\n")
+
+        assert material.root.parent == tmp_path
+        assert calls[0][0][:3] == ["mkdir", "-m", "700"]
+        assert calls[1] == (["tee", str(protected_file)], b"static: []\n")
+        assert calls[2][0][:2] == ["chmod", "600"]
+        assert material.read_bytes("secrets.yaml", max_bytes=64) == b"static: []\n"
+        assert reads == [(protected_file, 64, True)]
+        material.cleanup()
+        assert calls[-1][0][:3] == ["rm", "-rf", "--"]
+        assert not material.path.exists()
+
+    def test_scanner_owned_private_read_uses_fixed_bounded_no_follow_helper(
+        self,
+        monkeypatch,
+    ):
+        from services.assessments import http_profile_runtime_read as runtime_read
+
+        captured = {}
+
+        def run(arguments, **kwargs):
+            captured["arguments"] = arguments
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(stdout=b"bounded-report")
+
+        monkeypatch.setattr(runtime_read.shutil, "which", lambda _name: "/usr/bin/sudo")
+        monkeypatch.setattr(runtime_read.subprocess, "run", run)
+
+        content = runtime_read.read_private_material_file(
+            Path("/tmp/private-http-runs/run-0123456789abcdef/events.ndjson"),
+            max_bytes=1024,
+            scanner_owned=True,
+        )
+
+        assert content == b"bounded-report"
+        assert captured["arguments"][:6] == [
+            "/usr/bin/sudo", "-u", "scanner", "-g", "appuser", runtime_read.sys.executable,
+        ]
+        assert captured["arguments"][6] == "-c"
+        assert "O_NOFOLLOW" in captured["arguments"][7]
+        assert captured["arguments"][-2:] == [
+            "/tmp/private-http-runs/run-0123456789abcdef/events.ndjson",
+            "1024",
+        ]
+        assert captured["kwargs"] == {
+            "check": True,
+            "stdout": runtime_read.subprocess.PIPE,
+            "stderr": runtime_read.subprocess.DEVNULL,
+            "timeout": 10,
+        }
+
+    def test_trusted_execution_arguments_are_appended_after_validation_only(self):
+        from services.runs.contracts import RunPreparationError
+        from services.runs.lifecycle import PreparedRealCommand
+        from services.runs.start_context import append_trusted_execution_args
+
+        prepared = PreparedRealCommand(
+            registry_command="httpx -u https://app.example",
+            execution_command="httpx -u https://app.example",
+            command="httpx -u https://app.example",
+            rewrite_notice=None,
+            validation=cast(Any, None),
+            missing_runtime=None,
+            display_missing_runtime=None,
+            env_overrides={},
+            secret_env_names=[],
+        )
+        protected_path = "/private/run-a/secrets profile.yaml"
+        appended = append_trusted_execution_args(prepared, ("-sf", protected_path))
+
+        assert appended.registry_command == prepared.registry_command
+        assert appended.execution_command == (
+            "httpx -u https://app.example -sf '/private/run-a/secrets profile.yaml'"
+        )
+        assert appended.command == appended.execution_command
+        with pytest.raises(RunPreparationError, match="arguments are invalid"):
+            append_trusted_execution_args(prepared, ("-H", "unsafe\nheader"))
+
+
+def test_atlas_import_parser_normalizes_bounded_sarif_and_rejects_file_uris():
+    payload = json.dumps({
+        "version": "2.1.0",
+        "runs": [{
+            "automationDetails": {
+                "id": "nightly/security",
+                "guid": "11111111-1111-1111-1111-111111111111",
+                "correlationGuid": "22222222-2222-2222-2222-222222222222",
+            },
+            "tool": {"driver": {
+                "name": "Semgrep",
+                "version": "1.2",
+                "semanticVersion": "1.2.0",
+                "informationUri": "https://example.test/semgrep",
+                "rules": [{
+                    "id": "py/path-traversal",
+                    "name": "Path traversal",
+                    "helpUri": "https://example.test/rule",
+                }],
+            }},
+            "artifacts": [{"location": {"uri": "src/app.py"}}],
+            "results": [{
+                "ruleId": "py/path-traversal", "level": "error",
+                "message": {"text": "User input reaches a file path."},
+                "guid": "33333333-3333-3333-3333-333333333333",
+                "correlationGuid": "44444444-4444-4444-4444-444444444444",
+                "fingerprints": {"matchBasedId/v1": "stable-match"},
+                "partialFingerprints": {"primaryLocationLineHash": "stable-line"},
+                "locations": [{"physicalLocation": {
+                    "artifactLocation": {"uri": "https://app.example.test/api"},
+                    "region": {"startLine": 12, "startColumn": 4, "endLine": 12, "endColumn": 18},
+                }}, {"physicalLocation": {"artifactLocation": {"index": 0}}}],
+            }, {
+                "ruleId": "py/path-traversal", "level": "warning",
+                "message": {"text": "Local source path only."},
+                "locations": [{"physicalLocation": {"artifactLocation": {"uri": "file:///src/app.py"}}}],
+            }],
+        }],
+    }).encode()
+    result = parse_import_file(payload, format_id="sarif_json")
+    assert result.row_count == 2
+    assert len(result.findings) == 2
+    assert result.findings[0].source_detail["tool"] == "Semgrep"
+    assert result.findings[0].source_detail["tool_semantic_version"] == "1.2.0"
+    assert result.findings[0].source_detail["tool_information_uri"] == "https://example.test/semgrep"
+    assert result.findings[0].source_detail["rule_id"] == "py/path-traversal"
+    assert result.findings[0].source_detail["automation_details"] == {
+        "id": "nightly/security",
+        "guid": "11111111-1111-1111-1111-111111111111",
+        "correlation_guid": "22222222-2222-2222-2222-222222222222",
+    }
+    assert result.findings[0].source_detail["fingerprints"] == {
+        "matchBasedId/v1": "stable-match",
+    }
+    assert result.findings[0].source_detail["partial_fingerprints"] == {
+        "primaryLocationLineHash": "stable-line",
+    }
+    assert result.findings[0].source_detail["locations"] == [{
+        "uri": "https://app.example.test/api",
+        "kind": "web",
+        "region": {"start_line": 12, "start_column": 4, "end_line": 12, "end_column": 18},
+    }, {
+        "uri": "src/app.py",
+        "kind": "relative",
+        "artifact_index": 0,
+        "resolved_from_index": True,
+    }]
+    assert result.findings[0].evidence == "https://app.example.test/api:12:4; src/app.py"
+    assert result.entities[0].canonical_value == "https://app.example.test/api"
+    assert all(entity.canonical_value != "file:///src/app.py" for entity in result.entities)
+    assert result.findings[1].evidence == ""
+    assert result.findings[1].source_detail["rejected_location_count"] == 1
+    assert result.warnings[-1].code == "unsafe_sarif_location"
+    assert result.skipped_count == 0
+
+
+def test_atlas_sarif_import_rejects_traversal_credentials_and_backslash_locations():
+    payload = json.dumps({
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "Scanner"}},
+            "results": [{
+                "ruleId": "unsafe/location",
+                "message": {"text": "Unsafe source locations."},
+                "locations": [
+                    {"physicalLocation": {"artifactLocation": {"uri": "../../private.txt"}}},
+                    {"physicalLocation": {"artifactLocation": {
+                        "uri": "https://user:secret@example.test/private"
+                    }}},
+                    {"physicalLocation": {"artifactLocation": {"uri": "src\\private.py"}}},
+                    {"physicalLocation": {"artifactLocation": {"uri": "src%5Cprivate.py"}}},
+                    {"physicalLocation": {"artifactLocation": {"uri": "https://example.test/%0Aprivate"}}},
+                    {"physicalLocation": {"artifactLocation": {"uri": "https://["}}},
+                    {"physicalLocation": {"artifactLocation": {"index": 99}}},
+                ],
+            }],
+        }],
+    }).encode()
+
+    result = parse_import_file(payload, format_id="sarif_json")
+
+    assert result.row_count == 1
+    assert len(result.findings) == 1
+    assert result.entities == []
+    assert result.findings[0].evidence == ""
+    assert result.findings[0].source_detail["locations"] == []
+    assert result.findings[0].source_detail["rejected_location_count"] == 7
+    assert [warning.code for warning in result.warnings] == ["unsafe_sarif_location"] * 7
+    assert result.skipped_count == 0
+
+
+def test_atlas_sarif_import_bounds_locations_fingerprints_and_rule_metadata():
+    payload = json.dumps({
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "Scanner",
+                "rules": [
+                    {"id": f"rule-{index}", "name": f"Rule {index}"}
+                    for index in range(4)
+                ],
+            }},
+            "results": [{
+                "ruleId": "rule-0",
+                "message": {"text": "Bounded result."},
+                "fingerprints": {
+                    f"fingerprint-{index}": f"value-{index}"
+                    for index in range(20)
+                },
+                "partialFingerprints": {
+                    f"partial-{index}": f"value-{index}"
+                    for index in range(20)
+                },
+                "locations": [
+                    {"physicalLocation": {"artifactLocation": {
+                        "uri": f"src/module-{index}.py",
+                    }}}
+                    for index in range(10)
+                ],
+            }],
+        }],
+    }).encode()
+
+    result = parse_import_file(
+        payload,
+        format_id="sarif_json",
+        limits=ImportParserLimits(max_rows=2),
+    )
+
+    detail = result.findings[0].source_detail
+    assert detail["rule_name"] == "Rule 0"
+    assert detail["location_count"] == 8
+    assert detail["locations_truncated"] is True
+    assert len(detail["fingerprints"]) == 16
+    assert len(detail["partial_fingerprints"]) == 16
+
+
+def test_atlas_import_parser_retains_cyclonedx_inventory_dependencies_and_vex_without_inventing_findings():
+    payload = json.dumps({
+        "bomFormat": "CycloneDX", "specVersion": "1.5",
+        "serialNumber": "urn:uuid:11111111-2222-3333-4444-555555555555",
+        "metadata": {
+            "timestamp": "2026-08-07T12:00:00Z",
+            "tools": [{"vendor": "Acme", "name": "SBOM Builder", "version": "2.1"}],
+        },
+        "components": [{
+            "bom-ref": "pkg:pypi/requests@2.31.0",
+            "type": "library",
+            "name": "requests",
+            "version": "2.31.0",
+            "purl": "pkg:pypi/requests@2.31.0",
+            "components": [{
+                "bom-ref": "pkg:pypi/urllib3@2.0.7",
+                "type": "library",
+                "name": "urllib3",
+                "version": "2.0.7",
+                "purl": "pkg:pypi/urllib3@2.0.7",
+                "cpe": "cpe:2.3:a:urllib3:urllib3:2.0.7:*:*:*:*:*:*:*",
+            }],
+        }],
+        "dependencies": [{
+            "ref": "pkg:pypi/requests@2.31.0",
+            "dependsOn": ["pkg:pypi/urllib3@2.0.7", "missing-component"],
+        }],
+        "vulnerabilities": [{
+            "id": "CVE-2024-9999", "source": {"name": "Vendor advisory"},
+            "description": "A package issue.", "recommendation": "Upgrade the package.",
+            "ratings": [{"severity": "high", "score": 8.1, "method": "CVSSv31"}],
+            "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+            "references": [{"url": "https://nvd.nist.gov/vuln/detail/CVE-2024-9999"}, {"url": "file:///tmp/private"}],
+        }, {
+            "id": "CVE-2024-0000",
+            "affects": [{"ref": "pkg:pypi/urllib3@2.0.7"}],
+            "analysis": {
+                "state": "not_affected",
+                "justification": "code_not_reachable",
+                "response": ["will_not_fix"],
+                "detail": "The vulnerable path isn't reachable.",
+            },
+        }, {
+            "id": "CVE-2024-0001",
+            "analysis": {"state": "resolved", "response": ["update"]},
+        }, {
+            "id": "CVE-2024-0002",
+            "affects": [{"ref": "missing-component"}],
+        }],
+    }).encode()
+    result = parse_import_file(payload, format_id="cyclonedx_json")
+    assert result.row_count == 7
+    assert result.skipped_count == 1
+    assert [item.evidence_type for item in result.evidence] == [
+        "cyclonedx_component",
+        "cyclonedx_component",
+        "cyclonedx_dependency",
+        "cyclonedx_vulnerability",
+        "cyclonedx_vulnerability",
+        "cyclonedx_vulnerability",
+        "cyclonedx_vulnerability",
+    ]
+    assert result.evidence[1].source_detail["parent_ref"] == "pkg:pypi/requests@2.31.0"
+    assert result.evidence[2].source_detail["depends_on"] == ["pkg:pypi/urllib3@2.0.7"]
+    assert result.evidence[2].source_detail["unknown_dependency_count"] == 1
+    assert result.evidence[4].source_detail["analysis"] == {
+        "state": "not_affected",
+        "category": "not_affected",
+        "justification": "code_not_reachable",
+        "responses": ["will_not_fix"],
+        "detail": "The vulnerable path isn't reachable.",
+    }
+    assert len(result.findings) == 1
+    assert result.findings[0].external_id == "CVE-2024-9999"
+    assert result.findings[0].title == "Vendor advisory"
+    assert result.findings[0].source_detail["component"]["purl"] == "pkg:pypi/requests@2.31.0"
+    assert result.findings[0].references == ["https://nvd.nist.gov/vuln/detail/CVE-2024-9999"]
+    assert [warning.code for warning in result.warnings] == [
+        "unknown_cyclonedx_dependency_target",
+        "cyclonedx_vex_disposition_recorded",
+        "cyclonedx_vex_disposition_recorded",
+        "invalid_cyclonedx_subject",
+    ]

@@ -91,13 +91,13 @@ def _clean_payload(data):
         )
 
     raw_version = str(data.get("version") or "").strip()
-    if "version" in data and raw_version not in {"1", "2"}:
+    if "version" in data and raw_version not in {"1", "2", "3"}:
         raise UserWorkflowError("unsupported workflow version", field="version")
 
     steps = []
     step_ids = set()
     capture_names: dict[str, str] = {}
-    version = 2 if raw_version == "2" else 1
+    version = int(raw_version) if raw_version in {"1", "2", "3"} else 1
     for index, item in enumerate(raw_steps):
         if not isinstance(item, dict):
             raise UserWorkflowError("workflow step must be an object", field=f"steps.{index}")
@@ -105,7 +105,7 @@ def _clean_payload(data):
         note = _trim_text(item.get("note"), MAX_WORKFLOW_STEP_NOTE_LEN)
         if not cmd:
             raise UserWorkflowError("workflow step command is required", field=f"steps.{index}.cmd")
-        if version == 2:
+        if version >= 2:
             step_id = str(item.get("id") or "").strip().lower()
             if not WORKFLOW_INPUT_ID_RE.fullmatch(step_id):
                 raise UserWorkflowError(
@@ -164,6 +164,22 @@ def _clean_payload(data):
                     "workflow capture JSON Pointer must start with /",
                     field=f"{capture_path}.pointer",
                 )
+            capture_kind = str(capture.get("kind") or capture.get("mode") or "").strip().lower()
+            if capture_kind == "collection" and version < 3:
+                raise UserWorkflowError(
+                    "collection captures require workflow version 3",
+                    field=f"{capture_path}.kind",
+                )
+            if capture_kind == "collection":
+                try:
+                    item_limit = int(capture.get("item_limit") or 32)
+                except (TypeError, ValueError) as exc:
+                    raise UserWorkflowError(
+                        "collection item limit must be an integer",
+                        field=f"{capture_path}.item_limit",
+                    ) from exc
+                if not 1 <= item_limit <= 32:
+                    raise UserWorkflowError("collection item limit must be between 1 and 32", field=f"{capture_path}.item_limit")
         step = dict(item)
         step["cmd"] = cmd
         step["note"] = note
@@ -261,7 +277,8 @@ def _new_workflow_id():
 
 
 def _definition_version(workflow) -> int:
-    return 2 if workflow.get("version") == 2 else 1
+    version = workflow.get("version")
+    return version if isinstance(version, int) and version in {1, 2, 3} else 1
 
 
 def create_user_workflow(session_id, data, *, team_id=""):

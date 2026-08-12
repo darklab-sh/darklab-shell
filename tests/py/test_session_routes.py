@@ -255,6 +255,14 @@ class TestSessionMigrate:
                 ("fnd_migrate_test", session_id, "run_migrate_test", "ent_migrate_test", "ent_migrate_test"),
             )
             conn.execute(
+                "INSERT OR REPLACE INTO finding_remediation_dispositions "
+                "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+                "rule_identity, review_state, created_at, updated_at) "
+                "VALUES (?, '', 'entity:ent_migrate_test', 'rule', 'RULE:observation:fnd_migrate_test', "
+                "'observation:fnd_migrate_test', 'reviewed', datetime('now'), datetime('now'))",
+                (session_id,),
+            )
+            conn.execute(
                 "INSERT OR REPLACE INTO entity_labels "
                 "(id, session_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'run', 'run_migrate_test', 'baseline', datetime('now'))",
@@ -271,6 +279,56 @@ class TestSessionMigrate:
                 "(id, session_id, project_id, name, manifest, created, updated) "
                 "VALUES (?, ?, ?, 'Package', '{}', datetime('now'), datetime('now'))",
                 ("pkg_migrate_test", session_id, project_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO project_assessments "
+                "(id, session_id, project_id, title, profile_key, profile_version, "
+                "profile_snapshot, status, started_at, created_by_session_id, "
+                "updated_by_session_id, created_at, updated_at) VALUES "
+                "('asm_migrate_test', ?, ?, 'Assessment', 'network', '1.0', '{}', "
+                "'active', datetime('now'), ?, ?, datetime('now'), datetime('now'))",
+                (session_id, project_id, session_id, session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO project_assessment_checks "
+                "(id, assessment_id, category, check_key, target_type, target_value, "
+                "target_value_hash, state, state_source, state_reason, "
+                "state_changed_by_session_id, state_changed_at, created_at, updated_at) "
+                "VALUES ('chk_migrate_test', 'asm_migrate_test', 'discovery', "
+                "'service_discovery', 'domain', 'darklab.sh', 'target-hash', 'blocked', "
+                "'manual', 'Waiting for access', ?, datetime('now'), datetime('now'), "
+                "datetime('now'))",
+                (session_id,),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO project_http_profiles "
+                "(id, session_id, project_id, name, name_key, role_key, base_url, "
+                "created_by_session_id, updated_by_session_id, created_at, updated_at) "
+                "VALUES ('htp_migrate_test', ?, ?, 'Anonymous', 'anonymous', "
+                "'anonymous', 'https://darklab.sh', ?, ?, datetime('now'), datetime('now'))",
+                (session_id, project_id, session_id, session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO zap_connector_jobs "
+                "(id, session_id, project_id, assessment_id, check_id, "
+                "http_profile_id, http_profile_revision, policy_level, "
+                "target_count, created_at, updated_at, expires_at) VALUES "
+                "('zap_migrate_test', ?, ?, 'asm_migrate_test', "
+                "'chk_migrate_test', 'htp_migrate_test', 1, 'safe', 1, "
+                "datetime('now'), datetime('now'), datetime('now', '+1 hour'))",
+                (session_id, project_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO oast_correlations "
+                "(id, session_id, project_id, assessment_id, check_id, "
+                "target_entity_id, action_key, callback_label, allowed_domain, "
+                "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
+                "VALUES ('ocr_0123456789abcdef0123456789abcdef', ?, ?, "
+                "'asm_migrate_test', 'chk_migrate_test', 'ent_migrate_test', "
+                "'oast_dns_callback', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "
+                "'oast.darklab.test', ?, datetime('now'), datetime('now'), "
+                "datetime('now', '+5 minutes'), datetime('now', '+1 hour'))",
+                (session_id, project_id, "a" * 64),
             )
             conn.commit()
 
@@ -603,6 +661,15 @@ class TestSessionMigrate:
                 "datetime('now'), datetime('now'))",
                 (to_id,),
             )
+            conn.execute(
+                "INSERT INTO finding_remediation_dispositions "
+                "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+                "rule_identity, review_state, created_at, updated_at) "
+                "VALUES (?, '', 'entity:ent_migrate_test', 'rule', "
+                "'RULE:observation:fnd_migrate_test', 'observation:fnd_migrate_test', "
+                "'important', '2026-08-01T00:00:00+00:00', '2099-08-01T00:00:00+00:00')",
+                (to_id,),
+            )
             conn.commit()
 
         resp = client.post(
@@ -631,18 +698,50 @@ class TestSessionMigrate:
                 "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
                 "WHERE fo.finding_id = 'fnd_migrate_test'",
             ).fetchone()
+            finding_disposition = conn.execute(
+                "SELECT session_id, review_state FROM finding_remediation_dispositions "
+                "WHERE affected_subject = 'entity:ent_migrate_test'",
+            ).fetchone()
             evidence_package = conn.execute(
                 "SELECT session_id, project_id FROM evidence_packages "
                 "WHERE id = 'pkg_migrate_test'",
+            ).fetchone()
+            assessment = conn.execute(
+                "SELECT session_id, created_by_session_id, updated_by_session_id "
+                "FROM project_assessments WHERE id = 'asm_migrate_test'",
+            ).fetchone()
+            assessment_check = conn.execute(
+                "SELECT state_changed_by_session_id FROM project_assessment_checks "
+                "WHERE id = 'chk_migrate_test'",
+            ).fetchone()
+            http_profile = conn.execute(
+                "SELECT session_id, created_by_session_id, updated_by_session_id "
+                "FROM project_http_profiles WHERE id = 'htp_migrate_test'",
+            ).fetchone()
+            zap_job = conn.execute(
+                "SELECT session_id FROM zap_connector_jobs "
+                "WHERE id = 'zap_migrate_test'",
+            ).fetchone()
+            oast_correlation = conn.execute(
+                "SELECT session_id FROM oast_correlations "
+                "WHERE id = 'ocr_0123456789abcdef0123456789abcdef'",
             ).fetchone()
         assert resp.status_code == 200
         assert data["migrated_projects"] == 1
         assert data["migrated_run_file_artifacts"] == 1
         assert data["migrated_findings"] == 1
+        assert data["migrated_finding_remediation_dispositions"] == 1
         assert data["migrated_finding_targets"] == 0
         assert data["migrated_entity_labels"] == 1
         assert data["migrated_entity_notes"] == 1
         assert data["migrated_evidence_packages"] == 1
+        assert data["migrated_project_assessments"] == 1
+        assert data["migrated_schemathesis_run_evidence"] == 0
+        assert data["migrated_project_assessment_actors"] == 1
+        assert data["migrated_project_assessment_check_actors"] == 1
+        assert data["migrated_project_http_profiles"] == 1
+        assert data["migrated_zap_connector_jobs"] == 1
+        assert data["migrated_oast_correlations"] == 1
         assert self._count_rows("projects", from_id) == 0
         assert self._count_rows("projects", to_id) == 2
         assert self._count_rows("run_file_artifacts", from_id) == 0
@@ -653,7 +752,13 @@ class TestSessionMigrate:
         assert tuple(project_target) == (to_id, "darklab.sh")
         assert tuple(run_artifact) == (to_id, "findings.txt")
         assert tuple(finding_occurrence) == (to_id, "fnd_migrate_test", "ent_migrate_test")
+        assert tuple(finding_disposition) == (to_id, "important")
         assert tuple(evidence_package) == (to_id, "prj_migrate_test")
+        assert tuple(assessment) == (to_id, to_id, to_id)
+        assert tuple(assessment_check) == (to_id,)
+        assert tuple(http_profile) == (to_id, to_id, to_id)
+        assert tuple(zap_job) == (to_id,)
+        assert tuple(oast_correlation) == (to_id,)
 
     def test_migrates_recent_values_and_merges_destination(self):
         client = get_client()
@@ -919,9 +1024,15 @@ class TestSessionWorkflows:
             "steps": [{"cmd": "dig {{domain}} A", "note": "resolve apex"}],
         }
 
-    def test_create_lists_and_returns_normalized_workflow(self):
+    def test_create_lists_and_returns_normalized_workflow(self, monkeypatch):
         client = get_client()
         session_id = "workflow-create-" + __import__("uuid").uuid4().hex[:8]
+        launched: list[str] = []
+        monkeypatch.setattr(
+            "blueprints.workflows.launch_execution_step",
+            lambda execution_id: launched.append(execution_id)
+            or {"execution_id": execution_id},
+        )
 
         create_resp = client.post(
             "/session/workflows",
@@ -937,6 +1048,54 @@ class TestSessionWorkflows:
         assert created["inputs"][0]["id"] == "domain"
         assert created["inputs"][0]["sensitive"] is True
         assert listed[0]["id"] == created["id"]
+
+        collection_resp = client.post(
+            "/session/workflows",
+            json={
+                "version": 3,
+                "title": "Saved bounded fan-out",
+                "description": "collect and probe",
+                "inputs": [],
+                "steps": [
+                    {
+                        "id": "collect",
+                        "cmd": "echo hosts",
+                        "captures": [{
+                            "name": "hosts",
+                            "kind": "collection",
+                            "source": "json_pointer",
+                            "pointer": "/hosts",
+                            "item_limit": 4,
+                        }],
+                    },
+                    {
+                        "id": "probe",
+                        "cmd": "httpx -u {{hosts}} -silent",
+                        "for_each": {"collection": "hosts", "max_parallel": 2},
+                    },
+                ],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        collection = collection_resp.get_json()["workflow"]
+        assert collection_resp.status_code == 201
+        assert collection["version"] == 3
+        assert collection["steps"][1]["for_each"] == {
+            "collection": "hosts",
+            "failure_mode": "fail_fast",
+            "retries": 0,
+            "max_parallel": 2,
+            "max_failures": 1,
+        }
+        launch_resp = client.post(
+            "/workflow-executions",
+            json={"workflow_id": collection["id"], "inputs": {}},
+            headers={"X-Session-ID": session_id},
+        )
+        assert launch_resp.status_code == 202
+        launched_execution = launch_resp.get_json()["execution"]
+        assert launched == [launched_execution["id"]]
+        assert launched_execution["workflow_id"] == collection["id"]
 
     def test_rejects_undeclared_workflow_variables(self):
         client = get_client()
@@ -1040,7 +1199,7 @@ class TestSessionWorkflows:
         }]
 
         unsupported_version = self._payload("Unsupported version")
-        unsupported_version["version"] = 3
+        unsupported_version["version"] = 4
         version_error = client.put(
             f"/session/workflows/{created['id']}",
             json=unsupported_version,

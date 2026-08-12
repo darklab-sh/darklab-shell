@@ -430,6 +430,20 @@ describe('bindDismissible', () => {
       expect(firstClose).not.toHaveBeenCalled()
     })
 
+    it('rendered z-index wins within the same level regardless of registration order', () => {
+      const elevated = makeOverlay()
+      const later = makeOverlay()
+      elevated.style.zIndex = '380'
+      later.style.zIndex = '365'
+      const elevatedClose = vi.fn()
+      const laterClose = vi.fn()
+      g.bindDismissible(elevated, { level: 'modal', isOpen: () => true, onClose: elevatedClose })
+      g.bindDismissible(later, { level: 'modal', isOpen: () => true, onClose: laterClose })
+      g.closeTopmostDismissible()
+      expect(elevatedClose).toHaveBeenCalledTimes(1)
+      expect(laterClose).not.toHaveBeenCalled()
+    })
+
     it('skips entries that report closed', () => {
       const closedPanel = vi.fn()
       const openPanel = vi.fn()

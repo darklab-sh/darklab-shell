@@ -996,6 +996,19 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["RAW_PACKET_SCANNING_ENABLED"] == (
         "${RAW_PACKET_SCANNING_ENABLED:-false}"
     )
+    assert shell["environment"]["ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED"] == (
+        "${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}"
+    )
+    assert shell["environment"]["SECRETS_MASTER_KEY"] == "${SECRETS_MASTER_KEY:-}"
+    assert shell["environment"]["DARKLAB_ZAP_API_KEY"] == (
+        "${DARKLAB_ZAP_API_KEY:-}"
+    )
+    assert shell["environment"]["DARKLAB_ZAP_SCOPE_POLICY_TOKEN"] == (
+        "${DARKLAB_ZAP_SCOPE_POLICY_TOKEN:-}"
+    )
+    assert shell["environment"]["DARKLAB_OAST_TOKEN"] == (
+        "${DARKLAB_OAST_TOKEN:-}"
+    )
     assert shell["environment"]["WORKSPACE_ENABLED"] == "${WORKSPACE_ENABLED:-false}"
     assert shell["environment"]["WORKSPACE_BACKEND"] == "${WORKSPACE_BACKEND:-tmpfs}"
     assert shell["environment"]["WORKSPACE_ROOT"] == (
@@ -1022,8 +1035,67 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "# WORKSPACE_ROOT=/workspaces" in env_example
     assert "# INTERACTIVE_PTY_ENABLED=true" in env_example
     assert "# RAW_PACKET_SCANNING_ENABLED=true" in env_example
+    assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in env_example
+    assert "# DARKLAB_ZAP_API_KEY=" in env_example
+    assert "# DARKLAB_ZAP_SCOPE_POLICY_TOKEN=" in env_example
+    assert "# DARKLAB_OAST_TOKEN=" in env_example
     assert services["postgres"]["profiles"] == ["postgres"]
     assert services["llama"]["profiles"] == ["llama"]
+    worker_contracts = {
+        "zap-worker": {
+            "profile": "zap",
+            "role": "zap-worker",
+            "credentials": {
+                "DARKLAB_ZAP_API_KEY": "${DARKLAB_ZAP_API_KEY:-}",
+                "DARKLAB_ZAP_SCOPE_POLICY_TOKEN": (
+                    "${DARKLAB_ZAP_SCOPE_POLICY_TOKEN:-}"
+                ),
+            },
+        },
+        "oast-worker": {
+            "profile": "oast",
+            "role": "oast-worker",
+            "credentials": {
+                "SECRETS_MASTER_KEY": "${SECRETS_MASTER_KEY:-}",
+                "DARKLAB_OAST_TOKEN": "${DARKLAB_OAST_TOKEN:-}",
+            },
+        },
+    }
+    for service_name, contract in worker_contracts.items():
+        worker = services[service_name]
+        assert worker["image"] == shell["image"]
+        assert worker["profiles"] == [contract["profile"]]
+        assert worker["init"] is True
+        assert worker["read_only"] is True
+        assert worker["restart"] == "unless-stopped"
+        assert worker["tmpfs"] == ["/tmp"]
+        assert worker["volumes"] == [
+            "./conf:/config:ro",
+            "./data:/data",
+            "./workspaces:/workspaces",
+        ]
+        assert "ports" not in worker
+        assert "cap_add" not in worker
+        assert "command" not in worker
+        environment = worker["environment"]
+        assert environment["DARKLAB_PROCESS_ROLE"] == contract["role"]
+        assert environment["REDIS_URL"] == "redis://redis:6379/0"
+        assert environment["APP_LOCAL_CONF_DIR"] == "/config"
+        assert environment["DATABASE_BACKEND"] == "${DATABASE_BACKEND:-sqlite}"
+        assert environment["DATABASE_URL"] == "${DATABASE_URL:-}"
+        assert environment["WORKSPACE_ROOT"] == (
+            "${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}"
+        )
+        for name, value in contract["credentials"].items():
+            assert environment[name] == value
+        assert worker["depends_on"]["redis"] == {"condition": "service_healthy"}
+        assert worker["depends_on"]["postgres"] == {
+            "condition": "service_healthy",
+            "required": False,
+        }
+        health_command = " ".join(worker["healthcheck"]["test"])
+        assert contract["role"] in health_command
+        assert "/tmp/darklab-process-role.ready" in health_command
     assert all("container_name" not in service for service in services.values())
     development_services = development_compose["services"]
     development_shell = development_compose["services"]["shell"]
@@ -1042,12 +1114,17 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "WORKSPACE_ENABLED=${WORKSPACE_ENABLED:-false}" in development_environment
     assert "WORKSPACE_BACKEND=${WORKSPACE_BACKEND:-tmpfs}" in development_environment
     assert "INTERACTIVE_PTY_ENABLED=${INTERACTIVE_PTY_ENABLED:-false}" in development_environment
+    assert (
+        "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}"
+        in development_environment
+    )
     assert "DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-}" in development_environment
     assert "DATABASE_POSTGRES_JIT=${DATABASE_POSTGRES_JIT:-}" in development_environment
     assert "AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-}" in development_environment
     development_env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "DEV_HOST_BIND_ADDRESS=127.0.0.1" in development_env_example
     assert "DARKLAB_IMAGE=" not in development_env_example
+    assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in development_env_example
     assert not (ROOT / "examples" / "docker-compose.prod.yml").exists()
 
 
@@ -1108,6 +1185,9 @@ def test_development_source_staging_normalizes_private_files_and_fails_closed(
 def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    schemathesis_constraints = (
+        ROOT / "deploy" / "schemathesis-constraints.txt"
+    ).read_text(encoding="utf-8")
     entrypoint = (ROOT / "entrypoint.sh").read_text(encoding="utf-8")
     go_installer = (ROOT / "scripts" / "container" / "install_go_tool.sh").read_text(
         encoding="utf-8"
@@ -1175,6 +1255,14 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert entrypoint.index("/usr/local/libexec/darklab-stage-runtime-source") < (
         entrypoint.index("stage_local_config_overlays")
     )
+    process_dispatch = entrypoint.index("run_process_role")
+    assert process_dispatch < entrypoint.index("RAW_PACKET_FIREWALL_READY_FILE")
+    assert 'process_role="${DARKLAB_PROCESS_ROLE:-web}"' in entrypoint
+    assert 'process_module="services.connectors.zap_worker"' in entrypoint
+    assert 'process_module="services.connectors.oast_worker"' in entrypoint
+    assert 'echo "PROCESS_ROLE_INVALID role=$process_role"' in entrypoint
+    assert 'exec gosu appuser python -m "$process_module"' in entrypoint
+    assert "/tmp/darklab-process-role.ready" in entrypoint
     assert 'cp -R "${source_dir%/}/."' in source_stager
     assert 'chmod -R u+rX,a-w "$runtime_dir"' in source_stager
     assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=$stage" in source_stager
@@ -1216,6 +1304,24 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG KIN_OPENAPI_VERSION=v0.144.0" in dockerfile
     assert "ARG GOSU_VERSION=1.19" in dockerfile
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
+    assert "ARG SCHEMATHESIS_VERSION=4.24.3" in dockerfile
+    dependency_pins = [
+        line
+        for line in schemathesis_constraints.splitlines()
+        if line and not line.startswith("#")
+    ]
+    assert "schemathesis==4.24.3" in dependency_pins
+    assert len({pin.partition("==")[0].lower() for pin in dependency_pins}) == len(
+        dependency_pins
+    )
+    assert all(re.fullmatch(r"[A-Za-z0-9_.-]+==[^=\s]+", pin) for pin in dependency_pins)
+    assert "FROM ${PYTHON_BASE_IMAGE} AS schemathesis-asset" in dockerfile
+    assert "COPY deploy/schemathesis-constraints.txt" in dockerfile
+    assert "schemathesis==${SCHEMATHESIS_VERSION}" in dockerfile
+    assert 'test "$(/opt/schemathesis/bin/schemathesis --version)"' in dockerfile
+    assert "/opt/schemathesis/bin/pip uninstall --yes pip" in dockerfile
+    assert "mv /opt/schemathesis /out/opt/schemathesis" in dockerfile
+    assert "COPY --from=schemathesis-asset /out/ /" in dockerfile
     assert 'install-go-tool "github.com/projectdiscovery/chaos-client' in dockerfile
     crypto_floor = 'go get "golang.org/x/crypto@${GO_X_CRYPTO_VERSION}"'
     tool_selection = 'go get "$tool_spec"'
@@ -1288,6 +1394,13 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     )
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
     assert "RUSTSCAN_LINUX_ARM64_SHA256=" in dockerfile
+    assert 'install-go-tool "github.com/lc/gau/v2/cmd/gau@${GAU_VERSION}"' in dockerfile
+    assert "ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=" in dockerfile
+    assert 'test "$gau_module_sum" = "$GAU_MODULE_SUM"' in dockerfile
+    assert "/usr/share/doc/darklab-shell/licenses/go-modules/gau.txt" in dockerfile
+    assert "AS gau-asset" not in dockerfile
+    assert "GAU_LINUX_AMD64_SHA256" not in dockerfile
+    assert "GAU_LINUX_ARM64_SHA256" not in dockerfile
     assert 'case "${TARGETARCH}" in' in dockerfile
     assert "curl --fail --location" in dockerfile
     assert "--connect-timeout 15" in dockerfile
@@ -1336,7 +1449,15 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "probe openssl-legacy-provider openssl list -providers -provider legacy" in (
         bundled_tool_smoke
     )
-    for tool in ("rustscan", "nuclei", "massdns", "pg_restore", "openssl"):
+    for tool in (
+        "rustscan",
+        "dalfox",
+        "schemathesis",
+        "nuclei",
+        "massdns",
+        "pg_restore",
+        "openssl",
+    ):
         assert f"probe {tool} " in bundled_tool_smoke
 
     bin_dir, runtime_log = _fake_image_runtime(tmp_path)
@@ -1706,6 +1827,27 @@ def test_container_license_inventory_matches_dockerfile_and_release():
         assert f"/usr/share/doc/darklab-shell/licenses/{notice_name}" in (
             ROOT / "Dockerfile"
         ).read_text(encoding="utf-8")
+    dalfox_component = next(
+        item for item in inventory["components"] if item["name"] == "Dalfox"
+    )
+    assert dalfox_component["license"] == "MIT"
+    assert dalfox_component["notice_location"].endswith("/licenses/Dalfox.txt")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "FROM ${PYTHON_BASE_IMAGE} AS dalfox-asset" in dockerfile
+    assert "COPY --from=dalfox-asset /out/ /" in dockerfile
+    assert "sha256sum -c dalfox.tar.gz.sha256" in dockerfile
+    assert "sha256sum -c LICENSE.txt.sha256" in dockerfile
+    schemathesis_component = next(
+        item
+        for item in inventory["components"]
+        if item["name"] == "Schemathesis and isolated Python dependencies"
+    )
+    assert schemathesis_component["version_arg"] == "SCHEMATHESIS_VERSION"
+    assert schemathesis_component["license"] == "mixed-open-source"
+    assert schemathesis_component["notice_location"].endswith("/*-info/licenses")
+    assert inventory["dockerfile_install_coverage"]["pip:schemathesis"] == (
+        "Schemathesis and isolated Python dependencies"
+    )
     publisher = (ROOT / "scripts" / "release" / "publish_release_artifacts.sh").read_text(
         encoding="utf-8"
     )
@@ -2033,6 +2175,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
             "CONFIGURATION.md",
             "# workspace_max_file_mb: 10",
         ),
+        "starters/conf/assessment_profiles.local.yaml": (
+            "app/conf/assessment_profiles.yaml",
+            "CONFIGURATION.md#assessment-profile-catalog",
+            "checks do not merge",
+        ),
         "starters/conf/commands.local.yaml": (
             "app/conf/commands.yaml",
             "CONFIGURATION.md#command-registry-autocomplete",
@@ -2245,6 +2392,16 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "container-smoke-durations.txt" in "\n".join(
         container_smoke_job["artifacts"]["paths"]
     )
+    container_smoke_setup = "\n".join(container_smoke_job["before_script"])
+    assert "py3-pip" in container_smoke_setup
+    assert "-r app/requirements.txt" in container_smoke_setup
+    container_smoke_script = "\n".join(container_smoke_job["script"])
+    assert (
+        "sh -o pipefail -c './scripts/container_smoke_test.sh "
+        "| tee test-results/container-smoke-durations.txt'"
+        in container_smoke_script
+    )
+    assert "bash -o pipefail" not in container_smoke_script
     lint_py_setup = "\n".join(parsed_ci["lint-py"]["before_script"])
     assert re.search(r"\bapt-get install\b[^\n]*\bgit\b", lint_py_setup)
     assert "pip install -q -r app/requirements.txt -r requirements-dev.txt" in lint_py_setup
@@ -3526,6 +3683,7 @@ def test_installer_creates_private_operator_files_without_starting(tmp_path: Pat
     assert stat.S_IMODE((target / ".env").stat().st_mode) == 0o600
     assert stat.S_IMODE((target / "conf" / "config.local.yaml").stat().st_mode) == 0o600
     expected_overlays = {
+        "assessment_profiles.local.yaml",
         "commands.local.yaml",
         "faq.local.yaml",
         "welcome.local.yaml",

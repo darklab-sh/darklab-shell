@@ -36,6 +36,7 @@ const PROJECT_TARGETS_SRC = readScriptSource('app/static/js/features/projects/pr
 const PROJECT_RUNS_SRC = readScriptSource('app/static/js/features/projects/project_runs.js')
 const PROJECT_MOBILE_COMPARE_SRC = readScriptSource('app/static/js/features/projects/project_mobile_compare.js')
 const PROJECT_MOBILE_SHELL_SRC = readScriptSource('app/static/js/features/projects/project_mobile_shell.js')
+const PROJECT_FINDING_CHANGES_SRC = readScriptSource('app/static/js/features/projects/project_finding_changes.js')
 const PROJECT_MOBILE_DETAIL_SRC = readScriptSource('app/static/js/features/projects/project_mobile_detail.js')
 const PROJECT_FINDINGS_DATA_SRC = readScriptSource('app/static/js/features/projects/project_findings_data.js')
 const PROJECT_FILTERS_SRC = readScriptSource('app/static/js/features/projects/project_filters.js')
@@ -45,6 +46,7 @@ const PROJECT_FINDINGS_BOARD_SRC = readScriptSource('app/static/js/features/proj
 const FINDING_TRIAGE_EDITOR_SRC = readScriptSource('app/static/js/features/findings/finding_triage_editor.js')
 const FINDINGS_BOARD_MODAL_SRC = readScriptSource('app/static/js/features/findings/findings_board_modal.js')
 const PROJECT_ARTIFACTS_SRC = readScriptSource('app/static/js/features/projects/project_artifacts.js')
+const PROJECT_WEB_SURFACE_SRC = readScriptSource('app/static/js/features/projects/project_web_surface.js')
 const PROJECT_PACKAGES_SRC = readScriptSource('app/static/js/features/projects/project_packages.js')
 const PROJECT_REPORT_SRC = readScriptSource('app/static/js/features/projects/project_report.js')
 const PROJECT_ACTIVITY_SRC = readScriptSource('app/static/js/features/projects/project_activity.js')
@@ -133,6 +135,7 @@ function loadShellChrome({
   activeTeamScopeCan = () => true,
   teamScopeDeniedMessage = action => `View-only team members can't ${action}. Switch to Personal or ask for operator access.`,
   downloadUrlAsAttachmentImpl = null,
+  projectAssessmentModule = null,
 } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
@@ -396,6 +399,7 @@ function loadShellChrome({
     'applyProjectAutoLinkRunEntitiesPreference',
     'downloadBlobAsAttachment',
     'downloadUrlAsAttachment',
+    'projectAssessmentModule',
     `
       const globalThis = global;
       const APP_CONFIG = global.APP_CONFIG || {};
@@ -485,6 +489,7 @@ function loadShellChrome({
       ${PROJECT_MOBILE_SHELL_SRC}
       global.DarklabProjectMobileShell = exportedDarklabProjectMobileShell;
       window.DarklabProjectMobileShell = exportedDarklabProjectMobileShell;
+      ${PROJECT_FINDING_CHANGES_SRC}
       ${PROJECT_MOBILE_DETAIL_SRC}
       global.DarklabProjectMobileDetail = exportedDarklabProjectMobileDetail;
       window.DarklabProjectMobileDetail = exportedDarklabProjectMobileDetail;
@@ -507,6 +512,9 @@ function loadShellChrome({
       ${PROJECT_ARTIFACTS_SRC}
       global.DarklabProjectArtifacts = exportedDarklabProjectArtifacts;
       window.DarklabProjectArtifacts = exportedDarklabProjectArtifacts;
+      ${PROJECT_WEB_SURFACE_SRC}
+      global.DarklabProjectWebSurface = exportedDarklabProjectWebSurface;
+      window.DarklabProjectWebSurface = exportedDarklabProjectWebSurface;
       ${PROJECT_PACKAGES_SRC}
       global.DarklabProjectPackages = exportedDarklabProjectPackages;
       window.DarklabProjectPackages = exportedDarklabProjectPackages;
@@ -523,6 +531,12 @@ function loadShellChrome({
       window.loadProjectOverview = global.loadProjectOverview;
       ${PROJECT_CONTEXT_BRIDGE_SRC}
       var openFindingsBoard = exportedOpenFindingsBoard;
+      if (projectAssessmentModule) {
+        global.DarklabProjectAssessment = projectAssessmentModule;
+        window.DarklabProjectAssessment = projectAssessmentModule;
+        global.loadProjectAssessment = () => Promise.resolve(projectAssessmentModule);
+        window.loadProjectAssessment = global.loadProjectAssessment;
+      }
       ${SHELL_CHROME_SRC}
       global.openProjectWorkspace = global.__darklabShellChromeExports.openProjectWorkspace;
       global.openProjectWorkspaceById = global.__darklabShellChromeExports.openProjectWorkspaceById;
@@ -600,6 +614,7 @@ function loadShellChrome({
     applyProjectAutoLinkRunEntitiesPreference,
     downloadBlobAsAttachment,
     downloadUrlAsAttachment,
+    projectAssessmentModule,
   )
 
   return {
@@ -1095,6 +1110,12 @@ describe('shell chrome project workspace', () => {
     expect(rowText('project-4')).not.toContain('99 entities')
     const desktopTabsWrap = document.querySelector('.project-explorer-tabs-wrap')
     const desktopTabs = document.querySelector('.project-explorer-tabs')
+    const desktopTabIds = [...desktopTabs.querySelectorAll('[data-project-tab]')]
+      .map(tab => tab.dataset.projectTab)
+    expect(desktopTabIds.indexOf('assessment')).toBe(desktopTabIds.indexOf('overview') + 1)
+    expect(desktopTabs.querySelector('[data-project-tab="assessment"]')?.textContent).toBe('Assessment')
+    expect(desktopTabIds.indexOf('web-surface')).toBe(desktopTabIds.indexOf('assessment') + 1)
+    expect(desktopTabs.querySelector('[data-project-tab="web-surface"]')?.textContent).toBe('Web Surface')
     expect(desktopTabsWrap?.classList.contains('tab-strip-wrap')).toBe(true)
     expect(desktopTabsWrap?.contains(desktopTabs)).toBe(true)
     const projectTabsScrollLeft = desktopTabsWrap.querySelector('[data-project-tabs-scroll="left"]')
@@ -1158,6 +1179,92 @@ describe('shell chrome project workspace', () => {
     shell.closeProjectWorkspace()
     await tick()
     expect(shell.openAtlas).toHaveBeenCalledWith(returnToAtlas)
+  })
+
+  it('opens the exact active assessment cycle from Project Overview', async () => {
+    const project = { id: 'project-1', name: 'Assessment Project', status: 'active' }
+    const focusCycle = vi.fn(() => Promise.resolve(true))
+    const assessmentController = {
+      focusCycle,
+      invalidate: vi.fn(),
+      renderAssessment: vi.fn((container) => {
+        container.replaceChildren(document.createTextNode('Focused assessment'))
+      }),
+      renderMobileAssessmentTab: vi.fn(() => document.createElement('div')),
+    }
+    const assessmentModule = {
+      createProjectAssessmentController: vi.fn(() => assessmentController),
+    }
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
+      }
+      if (String(url).startsWith('/projects?include_archived=1')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [project] }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project,
+            counts: { runs: 0, findings: 0, entities: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/overview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            active_assessment: {
+              id: 'asmt-active',
+              title: 'Active network review',
+              profile_key: 'network',
+              profile_version: '1.0.0',
+              status: 'active',
+              rollup: { applicable_checks: 2, covered_checks: 1 },
+            },
+            rollups: { finding_severities: {}, certificate_statuses: {} },
+            targets: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ targets: [], total: 0 }) })
+    })
+    try {
+      const logClientError = vi.fn()
+      const shell = loadShellChrome({ apiFetch, logClientError, projectAssessmentModule: assessmentModule })
+      await shell.openProjectWorkspaceById('project-1')
+      document.querySelector('[data-project-tab="overview"]').click()
+      await tick()
+      await tick()
+      document.querySelector('[data-project-overview-assessment="asmt-active"]').click()
+      await tick()
+      await tick()
+
+      expect(document.querySelector('[data-project-tab="assessment"]')?.classList.contains('is-active')).toBe(true)
+      expect(logClientError.mock.calls).toEqual([])
+      await vi.waitFor(() => {
+        expect(focusCycle).toHaveBeenCalledWith('project-1', 'asmt-active', {
+          category: '',
+          state: '',
+          priority: '',
+        })
+      })
+      shell.closeProjectWorkspace({ refocus: false })
+      await shell.openProjectWorkspace()
+      await tick()
+      expect(document.querySelector('[data-project-tab="assessment"]')?.classList.contains('is-active')).toBe(true)
+      expect(document.getElementById('project-explorer-body')?.textContent).toContain('Focused assessment')
+    } finally {
+      delete global.loadProjectAssessment
+      delete window.loadProjectAssessment
+      delete global.DarklabProjectAssessment
+      delete window.DarklabProjectAssessment
+    }
   })
 
   it('pages and filters the project Details targets browser', async () => {
@@ -1997,6 +2104,9 @@ describe('shell chrome project workspace', () => {
       expect(document.querySelector('.project-mobile-summary-menu-btn')?.dataset.projectId).toBe('project-1')
       expect(document.getElementById('project-mobile-tabs').textContent).toContain('999+')
       expect(document.getElementById('project-mobile-tabs').textContent).not.toContain('Artifacts')
+      const mobileTabIds = [...document.querySelectorAll('[data-project-mobile-detail-tab]')]
+        .map(tab => tab.dataset.projectMobileDetailTab)
+      expect(mobileTabIds.indexOf('assessment')).toBe(mobileTabIds.indexOf('overview') + 1)
 
       document.querySelector('[data-project-mobile-detail-tab="overview"]').click()
       await tick()
@@ -2377,6 +2487,87 @@ describe('shell chrome project workspace', () => {
       expect.stringContaining('Finding is missing'),
       expect.anything(),
     )
+  })
+
+  it('opens the shared manual finding editor for Project create and edit actions', async () => {
+    const finding = {
+      id: 'finding-manual',
+      origin: 'manual',
+      title: 'Manual finding',
+      target_id: 'target-1',
+      manual_revision: 2,
+    }
+    const editor = {
+      openRecord: vi.fn(() => Promise.resolve()),
+    }
+    const sandbox = {
+      activeTeamScopeCan: () => true,
+      DarklabFindingTriageEditor: editor,
+      teamScopeDeniedMessage: action => `Denied: ${action}`,
+    }
+    const projectEvents = new Function(
+      'globalThis',
+      'window',
+      `${PROJECT_WORKSPACE_EVENTS_SRC}\nreturn exportedDarklabProjectWorkspaceEvents;`,
+    )(sandbox, sandbox)
+    const invalidateProjectFindings = vi.fn()
+    const invalidateProjectOverview = vi.fn()
+    const loadProjectFindings = vi.fn(() => Promise.resolve())
+    const renderProjectExplorer = vi.fn()
+    const setProjectWorkspaceMessage = vi.fn()
+    const summary = {
+      project: { id: 'project-1', name: 'Project' },
+      targets: [{ id: 'target-1', type: 'domain', value: 'app.example.test', review_state: 'confirmed' }],
+    }
+    const controller = projectEvents.createProjectWorkspaceEventsController({
+      findingTriageEditor: editor,
+      filteredProjectFindings: () => [finding],
+      invalidateProjectFindings,
+      invalidateProjectOverview,
+      loadProjectFindings,
+      mobileView: () => 'list',
+      projectFindingItems: () => [finding],
+      projectSummary: () => summary,
+      projectTargetItems: value => value.targets,
+      renderProjectExplorer,
+      selectedProjectId: () => 'project-1',
+      setProjectWorkspaceMessage,
+      workspaceTab: () => 'findings',
+    })
+    const createButton = document.createElement('button')
+    createButton.dataset.projectAction = 'create-manual-finding'
+    createButton.dataset.projectId = 'project-1'
+
+    await controller.handleActionButton(createButton)
+
+    expect(editor.openRecord).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      finding: null,
+      targets: summary.targets,
+      canEdit: true,
+      onSaved: expect.any(Function),
+      onConflict: expect.any(Function),
+    }))
+    const createOptions = editor.openRecord.mock.calls.at(-1)[0]
+    await createOptions.onSaved()
+    expect(invalidateProjectFindings).toHaveBeenCalledWith('project-1')
+    expect(invalidateProjectOverview).toHaveBeenCalledWith('project-1')
+    expect(loadProjectFindings).toHaveBeenCalledWith('project-1')
+    expect(renderProjectExplorer).toHaveBeenCalled()
+    expect(setProjectWorkspaceMessage).toHaveBeenCalledWith('Finding created.')
+
+    const editButton = document.createElement('button')
+    editButton.dataset.projectAction = 'edit-manual-finding'
+    editButton.dataset.projectId = 'project-1'
+    editButton.dataset.findingId = finding.id
+    await controller.handleActionButton(editButton)
+
+    expect(editor.openRecord).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-1',
+      finding,
+      targets: summary.targets,
+      canEdit: true,
+    }))
   })
 
   it('opens the mobile project compare stepper and runs a baseline label comparison', async () => {
@@ -3605,6 +3796,13 @@ describe('shell chrome project workspace', () => {
             artifact_ids: ['artifact-1'],
             target_ids: ['target-1'],
           },
+          assessment_context: {
+            assessment: {
+              id: 'asm-archived',
+              title: 'Archived network cycle',
+              status: 'archived',
+            },
+          },
           provenance: {
             schema_version: 1,
             kind: 'evidence_package',
@@ -3777,6 +3975,18 @@ describe('shell chrome project workspace', () => {
                 },
               },
             ],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/assessments?include_archived=1&limit=100') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            assessments: [{
+              id: 'asm-archived',
+              title: 'Archived network cycle',
+              status: 'archived',
+            }],
           }),
         })
       }
@@ -4040,6 +4250,8 @@ describe('shell chrome project workspace', () => {
                 target_id: 'target-1',
                 severity: 'high',
                 review_state: 'new',
+                origin: 'manual',
+                manual_revision: 1,
               },
               {
                 id: 'finding-2',
@@ -4545,7 +4757,9 @@ describe('shell chrome project workspace', () => {
     const findingActionGroup = findingTriageButton?.closest('.project-finding-row-button-group')
     expect(window.DarklabFindingTriageEditor?.open).toEqual(expect.any(Function))
     expect(findingTriageButton).not.toBeNull()
-    expect(findingActionGroup?.querySelector('[data-project-action="edit-finding-metadata"]')).not.toBeNull()
+    expect(findingActionGroup?.querySelector('[data-project-action="edit-finding-metadata"]')?.textContent).toBe('Metadata')
+    expect(findingActionGroup?.querySelector('[data-project-action="edit-manual-finding"]')?.textContent).toBe('Edit finding')
+    expect(document.querySelector('[data-project-action="create-manual-finding"]')?.textContent).toBe('Create finding')
     expect(findingTriageButton.disabled).toBe(false)
     expect(findingTriageButton.dataset.projectId).toBe('project-1')
     const triageOpenSpy = vi.spyOn(window.DarklabFindingTriageEditor, 'open')
@@ -4989,6 +5203,7 @@ describe('shell chrome project workspace', () => {
     await tick()
     expect(document.querySelector('[data-project-package-field="name"]').value).toBe('Darklab evidence')
     expect(document.querySelector('[data-project-package-field="redaction_mode"]').value).toBe('raw')
+    expect(document.querySelector('[data-project-package-field="assessment_id"]').value).toBe('asm-archived')
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preview')
@@ -5158,6 +5373,10 @@ describe('shell chrome project workspace', () => {
     const packageName = document.querySelector('[data-project-package-field="name"]')
     packageName.value = 'Scoped evidence'
     packageName.dispatchEvent(new Event('input', { bubbles: true }))
+    const packageAssessment = document.querySelector('[data-project-package-field="assessment_id"]')
+    expect(packageAssessment.textContent).toContain('Archived network cycle · archived')
+    packageAssessment.value = 'asm-archived'
+    packageAssessment.dispatchEvent(new Event('change', { bubbles: true }))
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preview')
@@ -5181,6 +5400,7 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.preset).toBe('evidence')
     expect(packagePayload.redaction_mode).toBe('raw')
     expect(packagePayload.include_artifacts).toBe(true)
+    expect(packagePayload.assessment_id).toBe('asm-archived')
     expect(packagePayload.labels).toEqual(['handoff', 'retest'])
     expect(packagePayload.notes).toBe('Package notes for handoff')
     expect(packagePayload.options.index_html).toBe(true)

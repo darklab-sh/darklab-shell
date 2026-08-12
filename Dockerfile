@@ -36,6 +36,18 @@ ARG RUSTSCAN_LINUX_AMD64_ASSET=x86_64-linux-rustscan.tar.gz.zip
 ARG RUSTSCAN_LINUX_AMD64_SHA256=f3a4365d939e3b81f25ba8c37852ce9ac9e938c3cc882c5b3e6fff6152c740be
 ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
 ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
+ARG DALFOX_VERSION=v3.1.2
+ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.1.2-linux-x86_64-musl.tar.gz
+ARG DALFOX_LINUX_AMD64_SHA256=0818b75082bf8527c5c4b6f4ed0f745f393290637328335788c9eadfea6cf0b2
+ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.1.2-linux-aarch64-musl.tar.gz
+ARG DALFOX_LINUX_ARM64_SHA256=d21f541038a40d8dd5c4b655fb88159a4b9a75c63f61c3e244647326a5199bc2
+ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
+ARG SCHEMATHESIS_VERSION=4.24.3
+ARG GAU_VERSION=v2.2.4
+ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=
+ARG SQLMAP_VERSION=1.10.8
+ARG SQLMAP_COMMIT=cb8298d55ae9b8eb4f05b6153c158d23479958a8
+ARG SQLMAP_LICENSE_SHA256=b1bbb62f5b272a6247d442d5e4f644a5bca7138e70776539ec84a5a90433fd13
 ARG TCPING_VERSION=v2.8.0
 ARG WPSCAN_VERSION=4.0.1
 ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
@@ -142,6 +154,8 @@ ARG PUREDNS_VERSION
 ARG VT_CLI_VERSION
 ARG IPINFO_CLI_VERSION
 ARG URLSCAN_CLI_VERSION
+ARG GAU_VERSION
+ARG GAU_MODULE_SUM
 RUN CGO_ENABLED=0 install-go-tool "github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}"
 RUN install-go-tool "github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}"
 RUN install-go-tool "github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}"
@@ -151,6 +165,13 @@ RUN install-go-tool "github.com/d3mondev/puredns/v2@${PUREDNS_VERSION}"
 RUN install-go-tool "github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION}"
 RUN install-go-tool "github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION}"
 RUN install-go-tool "github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION}"
+RUN install-go-tool "github.com/lc/gau/v2/cmd/gau@${GAU_VERSION}" && \
+    go version -m /out/usr/local/bin/gau > /tmp/gau-build-info && \
+    gau_module_sum=$(awk \
+        '$1 == "mod" && $2 == "github.com/lc/gau/v2" {print $4; exit}' \
+        /tmp/gau-build-info) && \
+    test "$gau_module_sum" = "$GAU_MODULE_SUM" && \
+    rm /tmp/gau-build-info
 RUN git clone --depth 1 --branch "${GOSU_VERSION}" \
         https://github.com/tianon/gosu.git /tmp/gosu && \
     go -C /tmp/gosu build -trimpath -o /out/usr/sbin/gosu . && \
@@ -183,11 +204,13 @@ RUN amass_license=$(find "$(go env GOMODCACHE)/github.com/owasp-amass" \
         -iname 'LICENSE*' -type f -print -quit) && \
     urlscan_license=$(find "$(go env GOMODCACHE)/github.com/urlscan" \
         -iname 'LICENSE*' -type f -print -quit) && \
+    gau_license=$(find "$(go env GOMODCACHE)/github.com/lc/gau" \
+        -iname 'LICENSE*' -type f -print -quit) && \
     test -n "$amass_license" && test -n "$assetfinder_license" && \
     test -n "$gobuster_license" && test -n "$ffuf_license" && \
     test -n "$tcping_license" && test -n "$puredns_license" && \
     test -n "$vt_license" && test -n "$ipinfo_license" && \
-    test -n "$urlscan_license" && \
+    test -n "$urlscan_license" && test -n "$gau_license" && \
     install -m 0644 "$amass_license" \
         /out/usr/share/doc/darklab-shell/licenses/go-modules/OWASP-Amass.txt && \
     install -m 0644 "$assetfinder_license" \
@@ -205,7 +228,9 @@ RUN amass_license=$(find "$(go env GOMODCACHE)/github.com/owasp-amass" \
     install -m 0644 "$ipinfo_license" \
         /out/usr/share/doc/darklab-shell/licenses/IPinfo-cli.txt && \
     install -m 0644 "$urlscan_license" \
-        /out/usr/share/doc/darklab-shell/licenses/urlscan-cli.txt
+        /out/usr/share/doc/darklab-shell/licenses/urlscan-cli.txt && \
+    install -m 0644 "$gau_license" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/gau.txt
 
 FROM ${PYTHON_BASE_IMAGE} AS native-tools
 ARG OPENSSL_VERSION
@@ -330,6 +355,41 @@ RUN case "${TARGETARCH}" in \
     mkdir -p /out/usr/local/bin && \
     install -m 0755 rustscan /out/usr/local/bin/rustscan
 
+FROM ${PYTHON_BASE_IMAGE} AS dalfox-asset
+ARG TARGETARCH
+ARG DALFOX_VERSION
+ARG DALFOX_LINUX_AMD64_ASSET
+ARG DALFOX_LINUX_AMD64_SHA256
+ARG DALFOX_LINUX_ARM64_ASSET
+ARG DALFOX_LINUX_ARM64_SHA256
+ARG DALFOX_LICENSE_SHA256
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /tmp
+RUN case "${TARGETARCH}" in \
+        amd64) dalfox_asset="${DALFOX_LINUX_AMD64_ASSET}"; dalfox_sha256="${DALFOX_LINUX_AMD64_SHA256}" ;; \
+        arm64) dalfox_asset="${DALFOX_LINUX_ARM64_ASSET}"; dalfox_sha256="${DALFOX_LINUX_ARM64_SHA256}" ;; \
+        *) echo "unsupported Dalfox target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    curl --fail --location --connect-timeout 15 --max-time 90 \
+        --retry 4 --retry-delay 3 --retry-all-errors \
+        --output dalfox.tar.gz \
+        "https://github.com/hahwul/dalfox/releases/download/${DALFOX_VERSION}/${dalfox_asset}" && \
+    printf "%s  dalfox.tar.gz\n" "${dalfox_sha256}" > dalfox.tar.gz.sha256 && \
+    sha256sum -c dalfox.tar.gz.sha256 && \
+    mkdir dalfox && \
+    tar xzf dalfox.tar.gz --strip-components=1 -C dalfox && \
+    mkdir -p /out/usr/local/bin /out/usr/share/doc/darklab-shell/licenses && \
+    install -m 0755 dalfox/dalfox /out/usr/local/bin/dalfox && \
+    curl --fail --location --connect-timeout 15 --max-time 30 \
+        --retry 4 --retry-delay 3 --retry-all-errors \
+        --output LICENSE.txt \
+        "https://raw.githubusercontent.com/hahwul/dalfox/${DALFOX_VERSION}/LICENSE.txt" && \
+    printf "%s  LICENSE.txt\n" "${DALFOX_LICENSE_SHA256}" > LICENSE.txt.sha256 && \
+    sha256sum -c LICENSE.txt.sha256 && \
+    install -m 0644 LICENSE.txt /out/usr/share/doc/darklab-shell/licenses/Dalfox.txt
+
 FROM ${PYTHON_BASE_IMAGE} AS ruby-tools
 ARG WPSCAN_VERSION
 RUN apt-get update && \
@@ -340,6 +400,37 @@ RUN gem install wpscan -v "${WPSCAN_VERSION}" && \
     mkdir -p /out/var/lib /out/usr/local/bin && \
     cp -a /var/lib/gems /out/var/lib/ && \
     cp -a /usr/local/bin/wpscan /out/usr/local/bin/
+
+FROM ${PYTHON_BASE_IMAGE} AS sqlmap-asset
+ARG SQLMAP_VERSION
+ARG SQLMAP_COMMIT
+ARG SQLMAP_LICENSE_SHA256
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "${SQLMAP_VERSION}" https://github.com/sqlmapproject/sqlmap.git /tmp/sqlmap && \
+    test "$(git -C /tmp/sqlmap rev-parse HEAD)" = "${SQLMAP_COMMIT}" && \
+    mkdir -p /out/opt/sqlmap /out/usr/local/bin /out/usr/share/doc/darklab-shell/licenses && \
+    cp -a /tmp/sqlmap/. /out/opt/sqlmap/ && chmod 0755 /out/opt/sqlmap/sqlmap.py && \
+    ln -s /opt/sqlmap/sqlmap.py /out/usr/local/bin/sqlmap && \
+    printf "%s  /tmp/sqlmap/LICENSE\n" "${SQLMAP_LICENSE_SHA256}" > /tmp/sqlmap-license.sha256 && \
+    sha256sum -c /tmp/sqlmap-license.sha256 && \
+    install -m 0644 /tmp/sqlmap/LICENSE /out/usr/share/doc/darklab-shell/licenses/Sqlmap.txt
+
+FROM ${PYTHON_BASE_IMAGE} AS schemathesis-asset
+ARG SCHEMATHESIS_VERSION
+COPY deploy/schemathesis-constraints.txt /tmp/schemathesis-constraints.txt
+RUN grep -qx "schemathesis==${SCHEMATHESIS_VERSION}" /tmp/schemathesis-constraints.txt && \
+    python -m venv /opt/schemathesis && \
+    /opt/schemathesis/bin/pip install --no-cache-dir \
+        schemathesis==${SCHEMATHESIS_VERSION} \
+        --constraint=/tmp/schemathesis-constraints.txt && \
+    /opt/schemathesis/bin/pip check && \
+    test "$(/opt/schemathesis/bin/schemathesis --version)" = \
+        "schemathesis, version ${SCHEMATHESIS_VERSION}" && \
+    /opt/schemathesis/bin/pip uninstall --yes pip && \
+    find /opt/schemathesis -type d -name __pycache__ -prune -exec rm -rf '{}' + && \
+    mkdir -p /out/opt /out/usr/local/bin && \
+    mv /opt/schemathesis /out/opt/schemathesis && \
+    ln -s /opt/schemathesis/bin/schemathesis /out/usr/local/bin/schemathesis
 
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 ARG TARGETARCH
@@ -391,6 +482,9 @@ COPY --from=native-tools /out/ /
 COPY --from=wordlist-assets /usr/share/wordlists/seclists/ /usr/share/wordlists/seclists/
 COPY --from=script-assets /out/ /
 COPY --from=rustscan-asset /out/ /
+COPY --from=dalfox-asset /out/ /
+COPY --from=sqlmap-asset /out/ /
+COPY --from=schemathesis-asset /out/ /
 COPY --from=ruby-tools /out/ /
 
 RUN ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \

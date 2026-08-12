@@ -1,18 +1,46 @@
 # Workflow Playbooks
 
-Workflows turn repeat command sequences into reusable playbooks. Legacy workflows are simple browser-run lists. Explicit `version: 2` playbooks add typed parameters, branching, bounded output captures, durable progress, cancellation, and links back to every normal run they start.
+Workflows turn repeat command sequences into reusable playbooks. Legacy workflows are simple browser-run lists. Explicit `version: 2` playbooks add typed parameters, branching, bounded scalar captures, durable progress, cancellation, and links back to every normal run they start. `version: 3` adds bounded collection capture and one controlled fan-out step that runs a normal scoped command for each item.
 
 ## Using Workflows
 
 Open **Browse all workflows** from the desktop rail, press `Alt+G`, or choose **Workflows** from the mobile menu. Every entry point opens the same workspace. The **Workflows** tab combines built-in, deployment-defined, personal, and active-team definitions in a searchable catalog; use the source menu to narrow it, then choose a row to see its parameters and steps. A workflow row in the desktop rail opens the same catalog with that definition selected. On mobile, choosing a row opens its detail and **Workflows** returns to the catalog.
 
 - Choose parameter values before starting a playbook. Target fields can use active Project targets and recent values. Files and wordlist fields can use active Files entries, while wordlist fields can also use packaged wordlists.
-- **Run all** starts a durable execution for a v2 playbook and switches to the **Executions** tab so its live status is immediately visible. You can close the panel or browser without stopping it.
-- The **Executions** tab shows the latest runs for the active personal/team scope, including the current step, elapsed time, branch outcomes, capture names, and linked runs. Attach opens an active run in the terminal; Open shows a finished run in Run Details.
+- **Run all** starts a durable execution for a v2 or v3 playbook and switches to the **Executions** tab so its live status is immediately visible. You can close the panel or browser without stopping it.
+- The **Executions** tab shows the latest runs for the active personal/team scope, including the current step, elapsed time, branch outcomes, capture names, and linked runs. Collection steps show finished, pending, active, succeeded, failed, and skipped counts plus at most three failure codes; they never show collection items. Attach opens an active run in the terminal; Open shows a finished run in Run Details.
 - Cancel stops pending work and signals the active run after confirmation.
 - Run Details and History show the playbook and step that produced a run, with shortcuts to sibling step runs and the execution in the Workflows panel.
 
-The in-app editor saves personal workflows in personal scope and shared workflows in active team scope. Team owners and admins can create, edit, and delete shared definitions. Team members with command-run permission can run them.
+The in-app editor saves scalar and collection workflows in personal scope or the active team scope. Choose **Collection** on a capture to set its item limit, then enable **Collection fan-out** on a later step to select that capture and configure the failure policy, retries, parallel runs, and failure limit. The editor keeps ordinary definitions at version 2 and saves definitions that use collection behavior as version 3. Team owners and admins can create, edit, and delete shared definitions. Team members with command-run permission can run them.
+
+### Bounded Subdomain Assessment
+
+The built-in **Bounded Subdomain Assessment** playbook discovers no more than 16 unique subdomains from one approved root domain. It uses that private collection to start normal scoped DNSx, HTTPx, Katana, and safe-profile Nuclei runs for each candidate. DNS resolution and HTTP probing use at most four children at once; crawling and scanning use at most two. Each command also carries its own time, rate, retry, or output bounds where the tool supports them.
+
+The playbook uses structured collection capture rather than a temporary Files list. Partial child failures remain visible in the execution counts and bounded failure sample while the remaining candidates continue. The safe Nuclei step excludes callbacks, redirects, automatic updates, intrusive and denial-of-service tags, headless checks, and local code or file protocols.
+
+### Live Web Review
+
+The built-in **Live Web Review** playbook starts from one approved HTTP or HTTPS URL. HTTPx records its response status, title, technology hints, and a verified screenshot in the fixed `live-web-screenshots` Files directory. The screenshot crosses the same file-size, count, total-storage, content-signature, and authenticated-download checks as any other Web Surface capture.
+
+After the screenshot succeeds, Dalfox builds a structured parameter inventory in discovery-only mode. It doesn't send XSS payloads, follow redirects, or use remote dictionary mining, and it keeps one target inside fixed request-rate, worker, and time limits. This step doesn't create an intermediate file; the saved run output and normalized parameter observations remain the durable evidence.
+
+### Port Service Review
+
+The built-in **Port Service Review** playbook takes one approved host and TCP port. Its first connect-mode Nmap run fingerprints that exact service. If the fingerprint succeeds, a second run uses Nmap's reviewed `default` selector so only default scripts that apply to the detected service run. One retry, a 30-second per-script timeout, and a three-minute host timeout bound the enumeration step.
+
+This playbook doesn't guess credentials or run broad intrusive script categories. When the saved service evidence supports a deeper TLS, SSH, SMB, mail, DNS, database, or other protocol check, Project Assessment offers that fixed profile separately so you can review its exact scripts before starting it.
+
+### API Schema Testing
+
+API schema testing stays in Project Assessment instead of the generic workflow runner. Choose one unchanged Project-linked OpenAPI JSON artifact on the API check, review the allowed GET/HEAD operation inventory and fixed request limits, then confirm the protected Schemathesis action. The app rechecks the artifact and keeps schema, configuration, and report paths private. Ordinary commands and workflows can't start a schema run, which prevents a saved playbook from adding write operations, remote references, redirects, or unreviewed targets.
+
+### Historical Web Surface Triage
+
+The built-in Historical Web Surface Triage playbook starts with passive `gau` archive discovery and saves a bounded candidate list in Files. It then normalizes and restricts the candidates to the domain you supplied (including its subdomains), checks only that scoped set for live HTTP services, and rechecks scope before Katana crawls confirmed live URLs. A final scope pass protects the HTTPx summary too.
+
+This playbook requires Files. Its intermediate candidate, scoped, live, crawl, and summary files are deliberately capped so archive volume can't turn into an unbounded scan. A scope or Files error stops the playbook instead of handing the previous step's unreviewed output to the next tool.
 
 ## Terminal Commands
 
@@ -33,9 +61,9 @@ Missing required inputs are prompted in the transcript. Autocomplete suggests wo
 
 ## Definition Files
 
-Add deployment workflows to `app/conf/workflows.local.yaml`. The app merges them after `app/conf/workflows.yaml` and reloads the files on each catalog request, so edits don't need a restart. A malformed v2 entry is skipped as a whole and logged with a bounded warning; other valid entries remain available.
+Add deployment workflows to `app/conf/workflows.local.yaml`. The app merges them after `app/conf/workflows.yaml` and reloads the files on each catalog request, so edits don't need a restart. A malformed durable entry is skipped as a whole and logged with a bounded warning; other valid entries remain available.
 
-New deployment playbooks use `version: 2` and a stable `id`:
+Scalar deployment playbooks use `version: 2` and a stable `id`:
 
 ```yaml
 - version: 2
@@ -76,12 +104,12 @@ Top-level fields:
 
 | Field | Required | Meaning |
 | ----- | -------- | ------- |
-| `version` | Yes for v2 | Use `2` for durable playbook behavior. An omitted version keeps legacy behavior; other explicit versions are rejected. |
-| `id` | Yes for deployment v2 entries | Stable identity that starts with a lowercase letter and then uses only lowercase letters, numbers, and underscores. Saved personal/team workflows receive an id from the app. |
+| `version` | Yes for durable playbooks | Use `2` for scalar captures or `3` for collection capture and fan-out. An omitted version keeps legacy behavior; other explicit versions are rejected. |
+| `id` | Yes for deployment v2/v3 entries | Stable identity that starts with a lowercase letter and then uses only lowercase letters, numbers, and underscores. Saved personal/team workflows receive an id from the app. |
 | `title` | Yes | Catalog and execution display name. |
 | `description` | No | Short catalog description. |
 | `inputs` | No | Typed values available as `{{input_id}}` in commands and notes. |
-| `steps` | Yes | Ordered command steps. V2 steps also have ids, captures, and transitions. |
+| `steps` | Yes | Ordered command steps. V2 and v3 steps also have ids, captures, and transitions; v3 steps may add `for_each`. |
 | `feature_required` | No | One feature name or a list, such as `workspace`; the catalog hides the workflow when the feature is unavailable. |
 
 ## Parameters
@@ -112,7 +140,7 @@ Browser previews substitute known inputs for readability. The server performs th
 
 ## Steps And Transitions
 
-Every v2 step needs a stable `id` and a `cmd`. Step IDs, like parameter and capture IDs, start with a lowercase letter and then use only lowercase letters, numbers, and underscores. `note` is optional and can use the same declared variables as the command.
+Every v2 or v3 step needs a stable `id` and a `cmd`. Step IDs, like parameter and capture IDs, start with a lowercase letter and then use only lowercase letters, numbers, and underscores. `note` is optional and can use the same declared variables as the command.
 
 `next` can define:
 
@@ -128,30 +156,62 @@ Definitions are rejected when they contain duplicate ids, undeclared variables, 
 
 ## Output Captures
 
-Captures read normalized step output after the app's output filters run. They store one small scalar for later `{{capture_name}}` use and never overwrite session variables. Capture names follow the same identifier rule: start with a lowercase letter, followed only by lowercase letters, numbers, and underscores.
+Captures read normalized step output after the app's output filters run and never overwrite session variables. A v2 scalar capture stores one small value for later `{{capture_name}}` use. A v3 collection capture adds `kind: collection` and stores a bounded, deduplicated list for one later `for_each` step. Capture names follow the same identifier rule: start with a lowercase letter, followed only by lowercase letters, numbers, and underscores.
 
 | Source | Extra field | Behavior |
 | ------ | ----------- | -------- |
-| `first_nonempty_line` | None | Saves the first eligible nonempty output line. |
-| `first_line_containing` | `contains` | Saves the first eligible line containing the literal text. |
-| `entity` | `entity_type` | Saves the first matching structured entity's canonical value. |
-| `json_pointer` | `pointer` | Reads one scalar from the first valid JSON or JSONL object using JSON Pointer. |
+| `first_nonempty_line` | None | Saves the first eligible nonempty line for a scalar, or each eligible line for a collection. |
+| `first_line_containing` | `contains` | Saves the first eligible matching line for a scalar, or each eligible matching line for a collection. |
+| `entity` | `entity_type` | Saves the first matching structured entity for a scalar, or each matching canonical value for a collection. |
+| `json_pointer` | `pointer` | Reads one scalar from the first valid JSON or JSONL object. A collection capture reads the bounded scalar items from one array at that pointer. |
 
 Set `required: true` when a missing capture should fail the step and follow its failure transition. App notices, progress rows, status rows, exit rows, and known output noise don't satisfy line captures. Control characters and oversized values are rejected.
 
-Each step accepts up to eight captures. One value is limited to 2 KiB, and capture values for one execution are limited to 8 KiB total. Capture names appear in execution summaries, but values stay inside the owner-scoped execution record and are omitted from workflow logs, audit details, metric labels, and notifications.
+Each step accepts up to eight captures. One scalar or collection item is limited to 2 KiB, scalar values for one execution are limited to 8 KiB total, and all collection captures share a separate 8 KiB ceiling. One collection keeps at most 32 unique items; `item_limit` can lower that bound. Capture names and collection counts appear in execution summaries, but values stay inside the owner-scoped execution record and are omitted from workflow routes, logs, audit details, metric labels, and notifications.
 
-Regular-expression captures, arbitrary expressions, executable transforms, loops, retries, and parallel branches aren't supported. Existing safe command pipe helpers can shape output before a bounded capture sees it.
+Regular-expression captures, arbitrary expressions, executable transforms, and general loops aren't supported. Existing safe command pipe helpers can shape output before a bounded capture sees it.
+
+## Collection Fan-Out
+
+A v3 `for_each` step names exactly one collection captured on every path leading to it. The command must reference that collection, and it can't also substitute another collection or a scalar value. The server substitutes one item at a time, so every child goes through the normal command policy, target scope, team permission, workspace, runtime readiness, History, and Project-link behavior.
+
+```yaml
+- version: 3
+  id: probe_discovered_hosts
+  title: Probe discovered hosts
+  inputs: []
+  steps:
+    - id: collect
+      cmd: "printf '%s\\n' one.example two.example"
+      captures:
+        - name: hosts
+          kind: collection
+          source: first_nonempty_line
+          item_limit: 16
+          required: true
+    - id: probe
+      cmd: "httpx -u {{hosts}} -silent"
+      for_each:
+        collection: hosts
+        failure_mode: continue
+        retries: 1
+        max_parallel: 4
+        max_failures: 8
+```
+
+`failure_mode: fail_fast` stops after the first terminal child failure and therefore always uses `max_failures: 1`. `failure_mode: continue` can keep launching until the saved `max_failures` threshold is reached. `retries` accepts 0 through 3, `max_parallel` accepts 1 through 8, and `max_failures` accepts 0 through 32 for continue mode. Scope, permission, and cancellation failures aren't retried. An optional empty collection completes the fan-out step without starting a child; an empty required collection follows the producer's failure transition.
+
+The private execution record holds the collection. Durable child rows hold only an ordinal, attempt number, linked run id, status, exit code, and bounded error code. Public execution and event responses show totals and outcomes but never include collection items or rendered child commands.
 
 ## Durable Execution
 
-Starting a v2 playbook saves an immutable normalized definition snapshot plus the resolved inputs and current execution variables. Editing or deleting the source workflow doesn't change an execution already in progress or its historical detail.
+Starting a v2 or v3 playbook saves an immutable normalized definition snapshot plus the resolved inputs and current execution variables. Editing or deleting the source workflow doesn't change an execution already in progress or its historical detail.
 
 Completed personal execution history moves with session-token migration and rotation. Migration is blocked while the current identity has an active workflow execution; wait for it to finish or cancel it before trying again. Team-owned execution history stays with the team.
 
-The server claims one step at a time and starts it through the normal run broker. Each step remains a standard History run with its own output, findings, Atlas entities, artifacts, Project links, and exit code. Finalization saves the run before it advances the playbook, and transaction guards prevent a duplicate callback from launching the next step twice. Cancellation also stops a run that becomes active during the transition between steps.
+The server claims one scalar step or one bounded collection batch at a time and starts each command through the normal run broker. Every launched command remains a standard History run with its own output, findings, Atlas entities, artifacts, Project links, and exit code. Finalization saves the run before it advances the playbook, and transaction guards prevent a duplicate callback from launching the next step or child twice. Cancellation also stops runs that become active during a transition.
 
-At startup, recovery reconciles all active executions in bounded pages. It retries a step interrupted before run binding, advances a completed linked run from saved output, leaves a live run alone, and fails an execution whose active run disappeared. The initiating team's state, member permission, and personal or team session token are checked again before each new step.
+At startup, recovery reconciles all active executions in bounded pages. It retries a scalar step interrupted before run binding, advances a completed linked run from saved output, leaves a live run alone, and fails an execution whose active run disappeared. For collection work, it initializes a claimed parent that stopped before child creation, returns only unbound launching children to pending, reconciles completed linked children, leaves active children alone, applies the saved policy to vanished runs, and fills only the available parallel slots. The initiating team's state, member permission, and personal or team session token are checked again before each new step or child.
 
 Interactive PTY modes aren't workflow steps. A command containing a registry-declared PTY trigger, such as an interactive monitor flag, is rejected before broker launch with a clear execution failure. Run interactive commands directly from the terminal instead.
 
@@ -165,7 +225,7 @@ The browser uses owner-scoped routes under `/workflow-executions`:
 
 | Method | Route | Purpose |
 | ------ | ----- | ------- |
-| `POST` | `/workflow-executions` | Validate inputs, snapshot context, and start a v2 execution. |
+| `POST` | `/workflow-executions` | Validate inputs, snapshot context, and start a v2 scalar or v3 collection execution. |
 | `GET` | `/workflow-executions` | List recent executions for the active personal/team scope, optionally filtered by `workflow_id`. |
 | `GET` | `/workflow-executions/<id>` | Read public execution and ordered step state. |
 | `GET` | `/workflow-executions/<id>/events` | Replay bounded value-free lifecycle events after an integer cursor. |
@@ -197,6 +257,11 @@ Saved personal and team definitions also have fixed validation bounds:
 | Step command | 1,200 characters |
 | Step note | 1,000 characters |
 | Supplied input value | 4,096 characters |
+| Collection items | 32 per collection, or a lower `item_limit` |
+| Collection bytes | 8 KiB across collection captures |
+| Fan-out retries | 3 after the first attempt |
+| Parallel children | 8 per fan-out step |
+| Terminal child failures | 32 per continue-mode fan-out step |
 
 These are application validation limits, not operator settings. Deployment-file playbooks use the same strict identifier, graph, input, transition, and capture validation, while the title, description, step-count, command, and note limits above apply when saving personal or team definitions through the app.
 

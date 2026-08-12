@@ -23,7 +23,7 @@ The loader validates the final config at startup. Malformed YAML, a non-mapping 
 
 Config events are captured while the files and environment are being resolved, then written once after the effective `log_level` and `log_format` are ready. `CONFIG_VALIDATED` and `CONFIG_LOADED` report a `warning_count` that includes ignored, dropped, defaulted, clamped, and truncated values. If loading can't finish, the app writes one safe `CONFIG_LOAD_FAILED` record using the most recent usable text or GELF format. It includes bounded phase, source, key, and error-type fields, but not raw parser output, file contents, configuration values, or a traceback.
 
-Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, and `project_digests` merge by field. A local file can override one nested value without restating the whole section.
+Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, `oast_connector`, and `zap_connector` merge by field. A local file can override one nested value without restating the whole section.
 
 The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow).
 
@@ -36,7 +36,7 @@ The schema contract is:
 | Field group | Validation posture |
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
-| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, and `project_digests` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
+| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, `oast_connector`, and `zap_connector` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
 | Forgiving booleans | Boolean environment settings plus YAML settings such as `database_postgres_jit`, `audit_log_enabled`, `ai_allow_full_output`, and `ai_require_private_base_url` accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
@@ -69,6 +69,9 @@ The installer keeps the host overlay tree at `0700` with files at `0600`. Contai
 | Shipped base | Production local overlay | Development overlay | Behavior |
 |--------------|-------------------------------|----------------------------|----------|
 | `app/conf/config.yaml` | `conf/config.local.yaml` | `app/conf/config.local.yaml` | Overrides application YAML fine-tuning settings |
+| `app/conf/assessment_profiles.yaml` | `conf/assessment_profiles.local.yaml` | `app/conf/assessment_profiles.local.yaml` | Adds complete profiles or replaces a complete profile with the same key |
+| `app/conf/package_presets.yaml` | `conf/package_presets.local.yaml` | `app/conf/package_presets.local.yaml` | Replaces the complete evidence-package preset catalog when selected by `package_presets_file` |
+| `app/conf/report_templates.yaml` | `conf/report_templates.local.yaml` | `app/conf/report_templates.local.yaml` | Replaces the complete engagement-report template catalog when selected by `report_templates_file` |
 | `app/conf/commands.yaml` | `conf/commands.local.yaml` | `app/conf/commands.local.yaml` | Adds new command roots and merges same-root entries into the base registry |
 | `app/conf/faq.yaml` | `conf/faq.local.yaml` | `app/conf/faq.local.yaml` | Appends local FAQ entries |
 | `app/conf/welcome.yaml` | `conf/welcome.local.yaml` | `app/conf/welcome.local.yaml` | Appends local welcome samples |
@@ -83,7 +86,7 @@ A theme overlay can change a shipped theme but doesn't create a new theme-select
 
 Malformed shipped or local theme YAML falls back to the valid values that remain. The container logs `THEME_OVERLAY_LOAD_FAILED` with only the bounded path, source type, and parser error type; it never includes theme contents or the raw parser message.
 
-Package presets and report templates are complete replacement catalogs rather than merge overlays. Select `package_presets.local.yaml` or `report_templates.local.yaml` in `config.local.yaml`; relative filenames containing `.local.` resolve from the operator root. `tour.yaml` and `wordlists.yaml` are image-owned catalogs and don't have local overlay filenames.
+Package presets and report templates are complete replacement catalogs rather than merge overlays. Select `package_presets.local.yaml` or `report_templates.local.yaml` in `config.local.yaml`; relative filenames containing `.local.` resolve from the operator root. `tour.yaml`, `wordlists.yaml`, and the reviewed takeover template under `app/conf/nuclei/` are image-owned catalogs and don't have local overlay filenames.
 
 ---
 
@@ -93,6 +96,10 @@ The table describes loader behavior after the app process can read the selected 
 
 | File | When changes take effect |
 |------|--------------------------|
+| `conf/assessment_profiles.yaml` | Immediately for the next assessment-profile read; invalid reloads keep the last valid catalog |
+| Selected `package_presets.yaml` or `package_presets.local.yaml` | Immediately after the readable file changes; invalid replacements fall back to the shipped catalog |
+| Selected `report_templates.yaml` or `report_templates.local.yaml` | Immediately after the readable file changes; invalid replacements fall back to the shipped catalog |
+| `conf/nuclei/takeovers/github-pages-dangling-domain.yaml` | With the release image that ships it; this reviewed template has no operator override |
 | `conf/faq.yaml` | Immediately; re-read on every request |
 | `conf/ascii.txt` | On next page load |
 | `conf/ascii_mobile.txt` | On next page load |
@@ -106,6 +113,18 @@ The table describes loader behavior after the app process can read the selected 
 | `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` |
 | `conf/config.local.yaml` | After `docker compose restart` |
+
+---
+
+## Assessment Profile Catalog
+
+`app/conf/assessment_profiles.yaml` contains the maintained Network, Web, API, TLS, and Combined assessment profiles. Each profile describes the targets it applies to, its versioned checks, the saved evidence that can satisfy those checks, the action the app should recommend, and the plain-language condition for calling the check complete. TLS uses fixed certificate-chain and fast high-severity configuration reviews for domains and IPs. Combined carries the other four profiles' checks and applies only the checks that fit each confirmed target.
+
+Use `assessment_profiles.local.yaml` to add a deployment-specific profile or replace a shipped profile with the same stable key. A local profile is always a complete definition: individual checks and fields don't merge with the shipped copy. This keeps saved cycle snapshots understandable even after the live catalog changes.
+
+The loader rejects duplicate profile, check, and evidence-rule keys; unsupported target or evidence types; unknown command/workflow references; unsupported policy levels; oversized definitions; and malformed YAML. A rejected local reload leaves the whole last valid catalog active and logs `ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED` without logging the file contents. Comment-only local files are inactive and don't produce a warning.
+
+The shipped file is the best starting point for the current schema. Every custom definition uses catalog `version: 1`; stable lowercase keys; dotted profile, check, and evidence-rule versions; one or more target types from `domain`, `ip`, `port`, or `url`; and a recommended action in `command:<root>` or `workflow:<id>` form. Evidence rules can refer only to saved runs, workflow executions, findings, Atlas entities, run artifacts, workspace artifacts, or screenshots. Their command and workflow references must already exist in the active command/workflow catalogs.
 
 ---
 
@@ -289,9 +308,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped database preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
 | `full_output_max_bytes` | derived from `full_output_max_mb` | Server-side only. Effective byte value used by artifact storage after startup. Operators should set `full_output_max_mb`; legacy byte-based config is still accepted only when the MB setting is left at its built-in default |
-| `workspace_quota_mb` | `50 MB` | Server-side only. Per-owner workspace quota for each personal or team workspace |
-| `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
-| `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
+| `workspace_quota_mb` | `50 MB` | Server-side only. Per-owner workspace quota for each personal or team workspace. HTTPx screenshot finalization also applies the remaining byte budget to new captures and removes excess event-named screenshot output instead of evicting earlier files |
+| `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed file size, including a saved HTTPx screenshot |
+| `workspace_max_files` | `100` | Server-side only. Maximum file count per owner workspace. HTTPx screenshot finalization retains only the new captures that fit after counting earlier files |
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
 | `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
 | `max_project_links_per_project` | `5000` | Server-side only. Maximum linked source records per project |
@@ -305,19 +324,31 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `project_auto_promote_preview_rate_limit_per_minute` | `30` | Server-side only. Per-session rate limit for auto-promote preview requests |
 | `project_auto_promote_preview_rate_limit_per_second` | `2` | Server-side only. Per-session burst limit for auto-promote preview requests |
 | `atlas_import_max_upload_mb` | `10 MB` | Server-side only. Maximum uploaded file size for one Atlas import preview |
+| `atlas_import_max_expanded_mb` | `50 MB` | Server-side only. Maximum report size after a gzip or ZIP import is expanded |
 | `atlas_import_max_rows` | `5000` | Server-side only. Maximum parsed rows accepted for one Atlas import preview or apply |
 | `atlas_import_max_findings` | `5000` | Server-side only. Maximum normalized findings accepted for one Atlas import |
 | `atlas_import_max_warnings` | `100` | Server-side only. Maximum row warnings retained while parsing one Atlas import |
 | `atlas_import_max_xml_elements` | `100000` | Server-side only. Maximum XML elements streamed by one XML Atlas import parser before rejection |
-| `atlas_import_preview_sample_limit` | `20` | Server-side only. Maximum entity and finding sample rows returned in one Atlas import preview response |
+| `atlas_import_preview_sample_limit` | `20` | Server-side only. Maximum entity, finding, and typed-evidence sample rows returned in one Atlas import preview response |
 | `atlas_import_warning_sample_limit` | `50` | Server-side only. Maximum warning samples returned in one Atlas import preview and stored on draft/batch metadata |
 | `atlas_import_draft_ttl_minutes` | `30` | Server-side only. Time window in minutes before an unapplied Atlas import draft is treated as abandoned and cleaned up |
 | `max_project_targets_per_project` | `200` | Server-side only. Maximum manual or discovered project targets per project, separate from bulk-linked Atlas entities |
+| `max_project_assessments_per_owner` | `100` | Server-side only. Maximum saved assessment cycles for one personal session or team owner. `0` means unlimited |
+| `max_project_assessments_per_project` | `25` | Server-side only. Maximum saved assessment cycles for one project. `0` means unlimited |
+| `max_project_http_profiles_per_project` | `50` | Server-side only. Maximum saved HTTP assessment profiles for one project. `0` means unlimited |
+| `max_project_assessment_checks_per_owner` | `250000` | Server-side only. Maximum target-specific assessment checks for one personal session or team owner. `0` means unlimited |
+| `max_project_assessment_checks_per_project` | `50000` | Server-side only. Maximum target-specific assessment checks for one project. `0` means unlimited |
+| `max_project_assessment_evidence_per_owner` | `1000000` | Server-side only. Maximum typed assessment evidence links for one personal session or team owner. `0` means unlimited |
+| `max_project_assessment_evidence_per_project` | `250000` | Server-side only. Maximum typed assessment evidence links retained by one project. `0` means unlimited |
+| `max_project_assessment_finding_deltas_per_assessment` | `100000` | Server-side only. Maximum stored remediation deltas rebuilt for one assessment cycle. `0` means unlimited; source findings and occurrence history are never evicted |
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
 | `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
 | `max_entity_notes_per_session` | `2000` | Server-side only. Maximum one-note-per-entity records one session can create |
-| `max_finding_triage_details_per_owner` | `5000` | Server-side only. Maximum finding remediation/verification detail records one personal session or team owner can create |
+| `max_finding_triage_details_per_owner` | `5000` | Server-side only. Maximum observation-specific finding verification records one personal session or team owner can create; shared remediation guidance doesn't consume this quota |
+| `max_manual_findings_per_owner` | `5000` | Server-side only. Maximum assessor-authored findings one personal session or team owner can save. `0` means unlimited; existing findings aren't evicted when the limit is reached |
+| `max_finding_evidence_links_per_owner` | `10000` | Server-side only. Maximum typed finding-evidence links one personal session or team owner can save. `0` means unlimited; existing links aren't evicted when the limit is reached |
+| `max_finding_evidence_links_per_finding` | `200` | Server-side only. Maximum typed evidence links saved for one finding inside one Project. `0` means unlimited |
 | `evidence_package_max_mb` | `25 MB` | Maximum final ZIP size for an evidence package download. The package wizard shows a best-guess ZIP estimate before the archive is built, and the server enforces the actual compressed size before returning the file |
 | `evidence_package_max_uncompressed_mb` | `500 MB` | Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well |
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
@@ -353,6 +384,52 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `project_digests` | see nested defaults | Server-side only. Defaults used when a project opts into attack-surface digest notifications |
 | `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
 | `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
+| `cve_risk` | see nested defaults | Server-side public CVE risk data. Release-pinned FIRST EPSS and CISA KEV snapshots work offline; live bulk-feed refresh remains an operator opt-in |
+| `cve_risk.bootstrap_enabled` | `true` | Loads the release-pinned EPSS and KEV snapshots when the database has no newer accepted data. Bootstrap import is a silent ranking baseline and does not create risk-escalation events |
+| `cve_risk.refresh_enabled` | `false` | Lets the scheduler refresh the public EPSS and KEV bulk feeds. Refreshes send no Project, target, finding, package, or CVE inventory values to either source |
+| `cve_risk.refresh_interval_seconds` | `86400` | Minimum interval between refresh attempts for each source, from 300 to 604800 seconds |
+| `cve_risk.stale_after_hours` | `48` | Age after which accepted feed data is labeled stale, from 1 to 8760 hours |
+| `cve_risk.http_timeout_seconds` | `30` | Per-request timeout for an enabled bulk-feed refresh, from 3 to 120 seconds |
+| `cve_risk.max_download_bytes` | `67108864` | Maximum compressed response accepted from one feed refresh, from 1024 to 268435456 bytes |
+| `cve_risk.max_attempts` | `3` | Maximum refresh attempts after network or validation failures, from 1 to 5 |
+| `cve_risk.lease_seconds` | `300` | Minimum database-backed single-flight lease for one source refresh, from 30 to 3600 seconds. The scheduler automatically extends the effective lease to cover the configured request attempts, backoff, download size, and parsing window |
+| `cve_risk.work_batch_size` | `100` | Maximum changed-feed work items claimed in one escalation pass, from 1 to 1000 |
+| `cve_risk.owner_batch_size` | `100` | Maximum owner groups processed for one changed CVE before its durable cursor yields, from 1 to 1000 |
+| `cve_risk.work_max_attempts` | `5` | Maximum isolated attempts for one failed escalation work item, from 1 to 20 |
+| `cve_risk.epss_activation_probability` | `0.10` | EPSS probability that activates one owner-scoped risk event after an upward crossing |
+| `cve_risk.epss_reset_probability` | `0.08` | Lower EPSS probability that rearms a later upward event. It must remain below the activation probability |
+| `cve_risk.advisory_mode` | `disabled` | Shared NVD advisory storage mode: `disabled`, `local`, or `external`. `external` only retains NVD results from an explicit Atlas CVE **Refresh intel** action; it doesn't start background CVE lookups |
+| `cve_risk.nvd_local_path` | empty | Path to an operator-managed NVD 2.0 JSON dataset when `advisory_mode` is `local`. The path is required in local mode |
+| `cve_risk.osv_advisory_mode` | `disabled` | Shared OSV package-applicability mode: `disabled`, `local`, or `external`. External mode permits only explicitly requested exact package lookups; it doesn't start background work |
+| `cve_risk.osv_local_path` | empty | Path to an operator-managed full-record OSV JSON array when `osv_advisory_mode` is `local`. The path is required in local mode |
+| `cve_risk.advisory_positive_ttl_seconds` | `604800` | Freshness and cache lifetime for accepted NVD and OSV records, from 3600 to 2592000 seconds |
+| `cve_risk.advisory_negative_ttl_seconds` | `86400` | Cache lifetime for an explicit NVD or OSV lookup with no advisory record, from 300 to 604800 seconds |
+| `cve_risk.advisory_cvss_downgrade_delta` | `1.0` | Minimum CVSS score decrease recorded as a material NVD change in Project Monitoring. Values must be greater than 0 and no more than 10 |
+| `cve_risk.advisory_max_local_bytes` | `268435456` | Largest single local NVD or OSV JSON file accepted, from 1024 to 1073741824 bytes |
+| `cve_risk.advisory_max_records` | `500000` | Largest number of records accepted from one local NVD or OSV dataset, from 1 to 1000000 |
+| `cve_risk.allowed_hosts` | `[epss.cyentia.com, www.cisa.gov, api.osv.dev]` | Exact HTTPS hostnames allowed for fixed CVE-risk acquisition URLs. OSV queries still require its exact endpoint and reject redirects. Entries must be hostnames, not URLs |
+| `oast_connector` | see nested defaults | Server-side only. Disabled-by-default safety boundary for an operator-managed private Interactsh-compatible service |
+| `oast_connector.enabled` | `false` | Makes the validated private OAST settings available. Enabling requires every identity, privacy, and retention field below; it doesn't allocate a callback or contact the service |
+| `oast_connector.base_url` | _(empty)_ | HTTPS origin for the private service, without credentials, a path, query, or fragment. The service must use Interactsh's default 20-character correlation id and 13-character nonce lengths |
+| `oast_connector.token_secret_id` | _(empty)_ | Environment variable name that holds the service token. Production Compose provides `DARKLAB_OAST_TOKEN`; the token value doesn't enter YAML, config diagnostics, or connector settings |
+| `oast_connector.allowed_domain` | _(empty)_ | Exact DNS suffix reserved for this private callback service, without a wildcard or IP address. The app prepends one random 33-character alphanumeric callback label using the service's default id and nonce lengths |
+| `oast_connector.tls_verify` | `true` | Verifies the private service's TLS certificate. Turning this off is an explicit operator choice |
+| `oast_connector.callback_retention_seconds` | `604800` | Required callback-data retention policy, from 300 to 2592000 seconds |
+| `oast_connector.privacy_acknowledged` | `false` | Must be `true` before the connector can be enabled, confirming the operator accepts the private service's callback-data handling and retention policy |
+| `zap_connector` | see nested defaults | Server-side only. Disabled-by-default connection and safety limits for an operator-managed OWASP ZAP service |
+| `zap_connector.enabled` | `false` | Makes the validated connector configuration available. Enabling it doesn't submit a scan by itself and requires the ZAP origin, both secret references, at least one target CIDR, and the scanner-side scope policy and proxy fields |
+| `zap_connector.base_url` | _(empty)_ | HTTP or HTTPS origin for the operator-managed ZAP API, without credentials, a path, query, or fragment |
+| `zap_connector.api_key_secret_id` | _(empty)_ | Environment variable name that holds the ZAP API key. Production Compose provides `DARKLAB_ZAP_API_KEY`; the key value doesn't enter YAML, config diagnostics, or connector settings |
+| `zap_connector.tls_verify` | `true` | Verifies the ZAP service's TLS certificate for HTTPS connections. Turning this off is an explicit operator choice |
+| `zap_connector.allowed_target_cidrs` | `[]` | IPv4 and IPv6 networks ZAP may receive as scan targets. The app and scanner-side policy must both resolve every hostname entirely inside this list |
+| `zap_connector.scope_policy_url` | _(empty)_ | Exact HTTPS endpoint for the scanner-side policy service, ending in `/v1/zap-scope/review`. It must share the enforcing proxy's network and DNS view |
+| `zap_connector.scope_policy_token_secret_id` | _(empty)_ | Environment variable name that holds the scope-policy bearer token. Production Compose provides `DARKLAB_ZAP_SCOPE_POLICY_TOKEN`; the token value doesn't enter YAML, plan summaries, logs, or stored jobs |
+| `zap_connector.scope_policy_id` | _(empty)_ | Stable identity for the deployed CIDR policy. The service must return this exact value with the configured CIDR digest and proxy binding |
+| `zap_connector.egress_proxy_host` | _(empty)_ | Hostname or IP address of the scanner-side CIDR-enforcing HTTP proxy added to every ZAP Automation Framework plan |
+| `zap_connector.egress_proxy_port` | `0` | Port for the enforcing proxy. Enabling the connector requires a value from 1 to 65535 |
+| `zap_connector.max_concurrent_jobs` | `1` | Deployment-wide remote-job ceiling, from 1 to 8 |
+| `zap_connector.job_timeout_seconds` | `1800` | Maximum remote-job lifetime, from 30 to 86400 seconds |
+| `zap_connector.max_report_bytes` | `10485760` | Maximum completed report accepted from ZAP, from 1024 to 52428800 bytes. Atlas import limits still apply afterward |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `workflow_active_execution_limit` | `3` | Maximum active workflow executions for one personal session or team owner |
 | `workflow_execution_max_runtime_seconds` | `14400` | Maximum total lifetime of one workflow execution. The engine checks this before launching or advancing each step |
@@ -391,6 +468,102 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG` |
 | `log_format` | `text` | Log output format. Options: `text` for human-readable logs or `gelf` for GELF 1.1 JSON |
 
+The connector uses ZAP's transfer directory to upload its reviewed Automation Framework plan and retrieve the generated JSON report. ZAP disables file transfer by default because API access with file transfer enabled is powerful enough to run uploaded scripts. Enable it only on the operator-managed ZAP service, require the API key, restrict which hosts can reach that API, and keep the transfer directory on an operator-managed retention policy. darklab_shell uses only per-job subdirectories, sends the key in `X-ZAP-API-Key`, and never follows redirects. ZAP doesn't provide this connector with a remote-delete endpoint, so downloading a report doesn't remove its plan or report from that directory.
+
+The scope-policy service and egress proxy are one deployment boundary. Put them on ZAP's network so they use the same DNS view as the scanner. The fixed policy endpoint accepts the current policy id, CIDR digest, proxy host and port, a fresh nonce, and one to eight target hostnames. It must return that nonce and identity, report every current address, and attest `mode: cidr_proxy` with `dns_recheck: per_connection`. The proxy must independently resolve and check every outbound connection against the same CIDRs; an attestation alone isn't a substitute for blocking disallowed traffic. Don't give the ZAP container another direct route to assessment targets. Preview, confirmation, and the worker's final pre-submit check all stop when the service is unavailable, reports a different policy or proxy, or sees any address outside the configured networks.
+
+The production `zap` Compose profile runs exactly one ZAP worker from the same release image and gives it the same configuration, app data, workspace, database, Redis service, and connector credentials as the web process. A deployment-wide database or file lock makes a duplicate worker exit cleanly. The worker keeps reviewed plans in a private app-data spool only until submission or cleanup, saves completed reports through the owner's normal Files quota, and creates an Atlas preview. It never applies that preview; the operator still reviews the import summary and warnings before choosing **Apply** in Atlas.
+
+The private OAST settings are a server-side safety boundary, not a background connection. darklab_shell accepts no public callback default, keeps the service token in the named environment variable, and requires an exact callback suffix plus an acknowledged retention policy before enabling the connector. Reading the settings doesn't register with the service, allocate a callback domain, or start polling for interactions. The maintained blind-XSS check can show its redacted command without contacting the service. Confirming that current plan reserves an app-owned callback identity for 15 minutes, or less when the configured retention is shorter; the list stays redacted, and one exact status read exposes the callback only after the private worker has staged it. The Assessment check recovers that state after a reload and shows only safe counts, worker state, and callback and cleanup deadlines; it never stores or renders the callback address. A separate fresh ready-only confirmation rebuilds the plan, rechecks the provider scope and staged session, starts the Project-linked run, and binds the callback to that run. The public command and response keep the redacted placeholder, while the callback reaches only the protected process-start boundary. A normalized interaction is accepted only while that exact identity is active. The app keeps a small DNS, HTTP, SMTP, or LDAP summary, hashes a provider event id, drops HTTP query strings and fragments, and doesn't retain raw headers, bodies, client addresses, credentials, or other provider fields. Duplicate interactions don't create new evidence, each identity is limited to 64 summaries, and terminal state becomes eligible for cleanup at its fixed retention deadline. Creating, expiring, recording, or deleting app-owned state still makes no provider request.
+
+The production `oast` Compose profile runs exactly one private OAST worker from the same release image and gives it the same configuration, app data, workspace, database, Redis service, vault key, and provider credential as the web process. A deployment-wide database or file lock makes a duplicate worker exit cleanly. The worker registers only callback reservations already approved and saved by the app, polls only correlations activated for a source run, and retries temporary provider or credential failures until the correlation's fixed deadline. Keep the app master key stable across restarts: without it, the worker can't recover the short-lived private provider session and fails that correlation closed. Terminal sessions are deregistered before their encrypted spool files are removed when the configured provider is reachable; the service's acknowledged retention policy is still the cleanup backstop during an outage.
+
+### Running ZAP and OAST workers
+
+The release Compose file contains both connector workers. They use a read-only root filesystem, a private `/tmp` tmpfs, and the same `./conf`, `./data`, and `./workspaces` mounts as the app. They don't publish ports or receive the scanner capabilities granted to the `shell` service.
+
+Put the connector settings in installed `conf/config.local.yaml`. The shipped Compose credential names are fixed so values can stay in the private `.env` file:
+
+```yaml
+zap_connector:
+  enabled: true
+  base_url: "https://zap-control.internal:8080"
+  api_key_secret_id: DARKLAB_ZAP_API_KEY
+  tls_verify: true
+  allowed_target_cidrs:
+    - 192.0.2.0/24
+  scope_policy_url: "https://zap-policy.internal/v1/zap-scope/review"
+  scope_policy_token_secret_id: DARKLAB_ZAP_SCOPE_POLICY_TOKEN
+  scope_policy_id: production-assessment-scope
+  egress_proxy_host: zap-egress.internal
+  egress_proxy_port: 3128
+
+oast_connector:
+  enabled: true
+  base_url: "https://interactsh.internal"
+  token_secret_id: DARKLAB_OAST_TOKEN
+  allowed_domain: callbacks.example.internal
+  tls_verify: true
+  callback_retention_seconds: 604800
+  privacy_acknowledged: true
+```
+
+Use values that match your own services and approved networks. Then set the private values and profiles in `.env`:
+
+```env
+DARKLAB_ZAP_API_KEY=replace-with-zap-key
+DARKLAB_ZAP_SCOPE_POLICY_TOKEN=replace-with-policy-token
+DARKLAB_OAST_TOKEN=replace-with-oast-token
+COMPOSE_PROFILES=zap,oast
+```
+
+If the deployment also uses bundled Postgres, include `postgres` in `COMPOSE_PROFILES`; both workers use the same `DATABASE_*` values and wait for that service's health check. The shell and workers use the same app-owned `/data/.secrets_master_key` by default. When `SECRETS_MASTER_KEY` is set instead, Compose passes the same value to the shell and OAST worker.
+
+The shell and ZAP worker must be able to reach the ZAP API and scope-policy service. The private OAST worker must be able to reach its provider. When those services live on operator-managed Docker networks, add the networks without editing the release-owned Compose file:
+
+```yaml
+# compose.operator.yaml
+services:
+  shell:
+    networks: [default, zap-control]
+  zap-worker:
+    networks: [default, zap-control]
+  oast-worker:
+    networks: [default, oast-control]
+
+networks:
+  zap-control:
+    external: true
+  oast-control:
+    external: true
+```
+
+Keep ZAP's target traffic behind the configured enforcing proxy and don't give the ZAP scanner another route to assessment targets. The `zap-control` network is for API and policy traffic; it doesn't replace the scanner-side CIDR enforcement described above.
+
+Validate and start the selected services:
+
+```bash
+docker compose --env-file .env -f compose.yaml -f compose.operator.yaml config --quiet
+docker compose --env-file .env -f compose.yaml -f compose.operator.yaml up -d \
+  --force-recreate shell zap-worker oast-worker
+docker compose --env-file .env -f compose.yaml -f compose.operator.yaml ps \
+  shell zap-worker oast-worker
+docker compose --env-file .env -f compose.yaml -f compose.operator.yaml logs \
+  --tail=100 zap-worker oast-worker
+```
+
+Omit `-f compose.operator.yaml` when the deployment doesn't need an override, and list only the worker profiles you enabled. Healthy containers report `ZAP_WORKER_STARTED` or `OAST_WORKER_STARTED`. A worker that loses its database, Redis service, provider, credential, or policy path keeps durable work queued or retryable and records a bounded error. Check its logs and network, correct `.env` or `config.local.yaml`, then run `docker compose restart zap-worker` or `docker compose restart oast-worker`. Run one replica of each worker; the deployment lock rejects duplicates.
+
+Release images include dated FIRST EPSS and CISA KEV snapshots, so saved CVE findings can be ranked without network access. Run `providers` or open **Options → Secrets → Provider Status** to see each snapshot's bundled, live, or local source, freshness, publication date, version, model, age, and whether live refresh is enabled. Finding labels repeat the source and age when those signals affect ranking. When `cve_risk.refresh_enabled` is `true`, the scheduler downloads only the fixed public bulk feeds over allowlisted HTTPS; Python's standard `HTTPS_PROXY` and `NO_PROXY` settings still apply. Each source lease is committed before a download begins, and acceptance or failure is published only if that same worker still owns the lease. A slow provider therefore doesn't hold SQLite's writer lock, and an expired worker can't replace data accepted by its successor. A rejected, oversized, malformed, or failed download leaves the last accepted snapshot in place.
+
+NVD advisory storage is separate from the EPSS/KEV bulk-feed switch. Use `advisory_mode: local` with `nvd_local_path` to load a bounded NVD 2.0 JSON dataset during startup, or use `advisory_mode: external` to retain the normalized result only when a user with finding-triage permission explicitly refreshes a saved CVE in Atlas. The external mode doesn't create a scheduler job or send scan-derived products, packages, targets, or findings to NVD. A failed local reload keeps the last accepted dataset and reports the failure through `providers`, logs, and metrics. Later accepted data records withdrawal, rejection, dispute, reinstatement, and CVSS decreases of at least `advisory_cvss_downgrade_delta` for linked findings; the first accepted record is a silent baseline. `disabled` keeps shared NVD CVSS storage off; the existing explicit `intel cve` provider lookup remains available under its own cache and rate limits.
+
+OSV package applicability has its own opt-in. Use `osv_advisory_mode: local` with `osv_local_path` to load a bounded full-record OSV JSON array during startup. The app accepts only exact package identities and supported version rules, skips a file whose checksum hasn't changed, and replaces the stored snapshot only after the whole dataset validates. A failed reload keeps the last accepted snapshot.
+
+`osv_advisory_mode: external` permits bounded lookups against `https://api.osv.dev/v1/query` only when an authenticated client calls `POST /api/v1/advisories/osv/lookup`. Each request sends the exact PURL and version supplied in that action; it never uploads an SBOM, discovered inventory, Project target list, or finding. Team calls require finding-triage permission. The request uses the configured timeout, attempt, and response-size limits, rejects redirects, and keeps positive and negative results under SHA-256 lookup keys until their configured expiry. A failed request keeps earlier accepted package rows. `providers` reports the mode and saved-data status, while logs, metrics, and audit data record only source, outcome, bounded counts, origin, and error class. They don't include the local path, package identifier, requested version, or advisory payload. Changing the mode alone doesn't make a request, and viewing a finding, Project, report, or Atlas profile never acquires OSV data.
+
+When stored NVD data includes complete CPE applicability, a successful validated Nmap `-oX` run can use those local rules to save an inferred finding. Finalization doesn't contact an advisory provider, and `advisory_mode: disabled` leaves the run with no stored advisory matches.
+
 See [Logging Reference](docs/logging.md) for level semantics, event names, fields, redaction rules, formats, and troubleshooting.
 
 ---
@@ -400,6 +573,9 @@ See [Logging Reference](docs/logging.md) for level semantics, event names, field
 | Path | Purpose |
 |------|---------|
 | `app/conf/config.yaml` | Main application settings |
+| `app/conf/assessment_profiles.yaml` | Maintained Network, Web, API, TLS, and Combined assessment profiles; complete local profiles can add to or replace this catalog by key |
+| `app/conf/package_presets.yaml` | Shipped evidence-package preset catalog; `package_presets_file` can select a complete operator-owned replacement |
+| `app/conf/report_templates.yaml` | Shipped engagement-report template catalog; `report_templates_file` can select a complete operator-owned replacement |
 | `app/conf/commands.yaml` | Command registry for catalog grouping, autocomplete, allow/deny policy, runtime adaptations, encrypted secret requirements, workspace flags, and smoke-test examples |
 | `app/conf/faq.yaml` | Operator FAQ entries appended to the built-in, section-grouped FAQ |
 | `app/conf/welcome.yaml` | Welcome command samples and featured sample metadata |
@@ -410,6 +586,7 @@ See [Logging Reference](docs/logging.md) for level semantics, event names, field
 | `app/conf/app_hints_mobile.txt` | Mobile rotating welcome hints |
 | `app/conf/wordlists.yaml` | Curated SecLists categories for the `wordlist` command and autocomplete |
 | `app/conf/workflows.yaml` | Operator-configured guided workflows shown in the Workflows panel after built-in workflow entries |
+| `app/conf/nuclei/takeovers/github-pages-dangling-domain.yaml` | Image-owned, digest-pinned GitHub Pages takeover confirmation template; it has no local override and changes only with a reviewed release image |
 | `app/conf/themes/` | Named theme variants used by the shell, permalink pages, diagnostics, and HTML export |
 | `app/conf/theme_dark.yaml.example` | Generated dark-theme reference template |
 | `app/conf/theme_light.yaml.example` | Generated light-theme reference template |
@@ -437,7 +614,7 @@ The `tour_enabled` setting in `config.yaml` is the kill-switch for tour entry po
 
 ## Command Registry Autocomplete
 
-`app/conf/commands.yaml` stores each external command under `commands`, with policy, help flags, runtime adaptations, encrypted secret requirements, workspace file flags, descriptive knowledge guidance, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale.
+`app/conf/commands.yaml` stores each external command under `commands`, with policy, help flags, runtime adaptations, encrypted secret requirements, workspace file flags, descriptive knowledge guidance, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale. Each section must keep roots unique, a root can't appear in both `commands` and `pipe_helpers`, and every final pipe helper must set `autocomplete.pipe.enabled: true`; the app rejects an ambiguous or incomplete registry during load.
 
 ```yaml
 commands:
@@ -772,6 +949,7 @@ cp .env.example .env
 # INTERACTIVE_PTY_ENABLED=false
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # RAW_PACKET_SCANNING_ENABLED=false
+# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=false
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -814,6 +992,9 @@ cp .env.example .env
 # POSTGRES_USER=darklab
 # POSTGRES_PASSWORD=
 # SECRETS_MASTER_KEY=
+# DARKLAB_ZAP_API_KEY=
+# DARKLAB_ZAP_SCOPE_POLICY_TOKEN=
+# DARKLAB_OAST_TOKEN=
 ```
 
 For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and diagnostics state, while `AI_WORKER_ENABLED=1` starts the worker process that drains queued provider calls. The summary and next-command feature flags control which Run Details cards appear. Without the worker, new assists can be queued but won't complete until a worker is running.
@@ -830,12 +1011,13 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `INTERACTIVE_PTY_ENABLED` | Docker Compose, Flask app | Enables guarded terminal sessions for approved interactive tools; detailed PTY limits remain in YAML |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. The same value drives app validation and scanner-user OUTPUT deny rules |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
+| `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions. It doesn't bypass the per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; destructive actions remain unavailable |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `SCHEDULER_ENABLED` | Docker entrypoint | Starts the scheduled-run worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Scratch directory created and exported for `prometheus_client` multiprocess metrics |
-| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `llama`, `postgres`, or a comma-separated combination such as `llama,postgres` when you want profile-gated services included without passing `--profile` |
+| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Available values are `llama`, `postgres`, `zap`, and `oast`; combine the ones the deployment uses, such as `postgres,zap,oast` |
 | `AI_WORKER_ENABLED` | Docker entrypoint | Starts the AI worker beside Gunicorn when set to `1`. Leave it `0` when AI is disabled or when another process is responsible for draining the AI queue |
 | `AI_ENABLED` / `AI_PROVIDER` / `AI_BASE_URL` / `AI_MODEL` | Docker Compose, Flask app | Core AI provider settings. `AI_ENABLED` permits AI routes and diagnostics; `AI_PROVIDER` is currently `openai_compatible`; `AI_BASE_URL` points at the provider; `AI_MODEL` is sent to chat completions and checked by `/diag` |
 | `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted personal or team vault for the queued request scope; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
@@ -854,11 +1036,30 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional environment overrides for YAML Postgres connection-pool bounds |
 | `DATABASE_POSTGRES_JIT` | Flask app | Optional environment override for the YAML Postgres JIT setting |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
-| `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
+| `SECRETS_MASTER_KEY` | Flask app and private OAST worker | Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault and short-lived private OAST provider sessions. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
+| `DARKLAB_ZAP_API_KEY` | ZAP worker | ZAP API key used by the shipped `zap` worker profile when `zap_connector.api_key_secret_id` names this variable |
+| `DARKLAB_ZAP_SCOPE_POLICY_TOKEN` | Flask app and ZAP worker | Bearer token used for scanner-side scope attestations when `zap_connector.scope_policy_token_secret_id` names this variable |
+| `DARKLAB_OAST_TOKEN` | Private OAST worker | Private Interactsh-compatible service token used by the shipped `oast` worker profile when `oast_connector.token_secret_id` names this variable |
 
 If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production stack keeps those defaults unless `.env` changes them. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
 
 The optional database and AI tuning variables are escape hatches for process-managed deployments. Leave them unset in the shipped Compose stacks to use `config.local.yaml`; their Compose entries intentionally pass empty values, which the app ignores.
+
+---
+
+## Intrusive Assessment Actions
+
+Intrusive Assessment actions are off by default because they send active validation payloads rather than only collecting or comparing evidence. Enable them only for Projects whose scope and authorization you've reviewed:
+
+```env
+ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true
+```
+
+```bash
+docker compose up -d --force-recreate shell
+```
+
+The setting only makes maintained intrusive actions available. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project context immediately before starting the command. That includes one saved Dalfox parameter for XSS validation or the exact reviewed headless and low-aggression DAST profile for Nuclei. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
 
 ---
 
@@ -945,7 +1146,7 @@ Postgres connection notes:
 - URL-encode special characters in the password before putting it in `DATABASE_URL`.
 - App Postgres connections disable JIT by default because the UI favors predictable low-latency page requests over long analytical queries. Set `database_postgres_jit: true` in `conf/config.local.yaml` only after measuring that your workload benefits from it.
 - If `POSTGRES_PASSWORD` changes after the `postgres-data` volume already exists, Postgres does not automatically change the existing role password. Managed SQLite migration and fresh-host backend adoption inspect the cluster over its local container socket before network authentication: they synchronize the configured password only when the destination has no user tables, and refuse to touch a non-empty retained volume. Other Postgres deployments need a deliberate role-password change or volume replacement.
-- Keep the same `SECRETS_MASTER_KEY` or copied app-owned key file when migrating encrypted secrets.
+- Keep the same `SECRETS_MASTER_KEY` or copied app-owned key file when migrating encrypted secrets or active private OAST sessions.
 
 For an existing production SQLite install, run `./darklab-deploy migrate-to-postgres` from the installation directory as the user who owns the deployment. Don't use `sudo`: the command uses Docker to read the app-owned SQLite file from the managed `/data` mount, while keeping `.env` and other operator files owned by the deployment user. It creates a verified backup, requires an empty bundled Postgres destination, synchronizes an empty retained cluster with the current installer-generated password, copies and validates the stopped SQLite database, updates the managed environment, and recreates the app on bundled Postgres. A named `postgres-data` volume survives `docker compose down` and deletion of the installation directory; if that retained volume contains user tables, migration refuses to overwrite it and tells you it isn't an empty target. Development checkouts and custom Postgres targets can use the direct helper described in [docs/postgres-migration.md](docs/postgres-migration.md).
 
@@ -999,7 +1200,7 @@ Every supported local overlay in `conf/` is active under the production `/config
 docker compose restart shell
 ```
 
-SQLite and Redis start by default. The installer generates a private Postgres password but doesn't enable Postgres; set `COMPOSE_PROFILES=postgres`, `DATABASE_BACKEND=postgres`, and keep the generated `DATABASE_URL` when you choose that backend. The `llama` profile is independent and can be combined as `COMPOSE_PROFILES=postgres,llama`.
+SQLite and Redis start by default. The installer generates a private Postgres password but doesn't enable Postgres; set `COMPOSE_PROFILES=postgres`, `DATABASE_BACKEND=postgres`, and keep the generated `DATABASE_URL` when you choose that backend. The `llama`, `zap`, and `oast` profiles are independent and can be combined with Postgres. The connector profiles start the release's dedicated workers only after their YAML settings and private `.env` credentials are configured; see [Running ZAP and OAST workers](#running-zap-and-oast-workers).
 
 `/data` is the durable app boundary. Redis has persistence disabled because it holds coordination and cache state. Files are disabled by default. Set `WORKSPACE_ENABLED=true`, `WORKSPACE_BACKEND=volume`, and `WORKSPACE_ROOT=/workspaces` in `.env` for persistent Files. The production Compose file already maps `./workspaces` to that path.
 
@@ -1335,6 +1536,7 @@ Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-session AI as
 ```yaml
 # conf/config.local.yaml
 atlas_import_max_upload_mb: 10
+atlas_import_max_expanded_mb: 50
 atlas_import_max_rows: 5000
 atlas_import_max_findings: 5000
 atlas_import_max_warnings: 100
@@ -1344,7 +1546,7 @@ atlas_import_warning_sample_limit: 50
 atlas_import_draft_ttl_minutes: 30
 ```
 
-These caps apply to Atlas imports before and during apply, so lowering them can make large Nessus, ZAP, Burp, Nuclei, CSV, or JSONL files fail preview with a clear limit error. Invalid values and `0` fall back to the server defaults above.
+These caps apply to Atlas imports before and during apply, so lowering them can make large Nessus, Greenbone, ZAP, Burp, Nuclei, CSV, or JSONL files fail preview with a clear limit error. Invalid values and `0` fall back to the server defaults above.
 
 ### Set The Default Theme
 
@@ -1435,7 +1637,8 @@ Normal relative paths resolve from the shipped config root. Relative filenames c
 - Add FAQ entries in `faq.local.yaml`.
 - Add welcome samples in `welcome.local.yaml`.
 - Add deployment-specific command registry entries in `commands.local.yaml`.
-- Add deployment-specific legacy or v2 workflows in `workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries or set it to `2`; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, execution, and compatibility reference.
+- Add complete deployment-specific assessment profiles in `assessment_profiles.local.yaml`. A profile with the same key replaces the shipped profile as one unit; its checks don't merge.
+- Add deployment-specific legacy, scalar v2, or collection-enabled v3 workflows in `workflows.local.yaml`, or save personal/team workflows through the in-app editor. Leave `version` out for legacy entries, use `2` for scalar captures, or use `3` for bounded collection capture and fan-out; unsupported explicit versions and malformed YAML are rejected. See [Workflow Playbooks](docs/workflows.md) for the full parameter, transition, capture, fan-out, execution, and compatibility reference.
 - Add desktop or mobile hints in `app_hints.local.txt` or `app_hints_mobile.local.txt`.
 - Replace banner art with `ascii.local.txt` or `ascii_mobile.local.txt`. These files replace the shipped text, so the installer provides non-active `.example` files instead of empty active placeholders.
 - Add deployment-specific evidence package presets in `package_presets.local.yaml` and point `package_presets_file` at that file.

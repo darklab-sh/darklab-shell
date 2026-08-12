@@ -427,7 +427,7 @@ let exportedRefreshOptionsTeams = null;
     const role = String(team.member?.role || team.role || '');
     const status = String(team.status || '');
     const active = _activeTeamId() === team.id;
-    if (role) chips.appendChild(_node('span', 'badge badge-tone-blue options-team-chip', _titleize(role)));
+    if (role) chips.appendChild(_node('span', 'badge badge-tone-cyan options-team-chip', _titleize(role)));
     if (status) chips.appendChild(_node('span', `badge ${status === 'active' ? 'badge-tone-green' : 'badge-tone-muted'} options-team-chip`, _titleize(status)));
     if (active) chips.appendChild(_node('span', 'badge badge-tone-green options-team-chip', 'Active scope'));
     const metaParts = [];

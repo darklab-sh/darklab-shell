@@ -85,6 +85,16 @@ def _write_operator_starters(starters_dir: Path, version: str) -> None:
     docs_root = f"https://gitlab.com/darklab.sh/darklab_shell/-/blob/v{version}"
     source_root = f"{docs_root}/app/conf"
     starters = {
+        "conf/assessment_profiles.local.yaml": (
+            "# Add a complete assessment profile or replace one shipped profile by stable key.\n"
+            "# A replacement must include the full profile and every check; checks do not merge.\n"
+            "# Built-in assessment profiles and examples (reference only):\n"
+            f"# {source_root}/assessment_profiles.yaml\n"
+            "# Operator guide:\n"
+            f"# {docs_root}/CONFIGURATION.md#assessment-profile-catalog\n"
+            "#\n"
+            "# Keep this file comment-only until you are ready to add a complete profile.\n"
+        ),
         "conf/commands.local.yaml": (
             "# Add new external commands or extend settings for an existing command root.\n"
             "# Built-in command registry and examples (reference only):\n"

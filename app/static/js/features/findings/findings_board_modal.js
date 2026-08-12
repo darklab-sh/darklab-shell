@@ -129,6 +129,12 @@ let exportedIsFindingsBoardOpen = null;
       : true;
   }
 
+  function canRunCommands() {
+    return teamScope && typeof teamScope.activeTeamScopeCan === 'function'
+      ? teamScope.activeTeamScopeCan('run_commands')
+      : true;
+  }
+
   function triageDeniedMessage() {
     return teamScope && typeof teamScope.deniedMessage === 'function'
       ? teamScope.deniedMessage('triage team findings')
@@ -633,7 +639,9 @@ let exportedIsFindingsBoardOpen = null;
     }
     showMessage('');
     await findingTriageEditor.open(finding, {
+      projectId: state.projectId,
       canEdit: canTriageFindings(),
+      canRun: canRunCommands(),
       onSaved: async (triage) => {
         const compact = typeof findingTriageEditor.compactTriage === 'function'
           ? findingTriageEditor.compactTriage(triage)

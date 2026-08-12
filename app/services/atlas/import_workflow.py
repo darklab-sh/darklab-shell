@@ -11,24 +11,31 @@ import logging
 import uuid
 from typing import Any, BinaryIO, IO
 
-from core.database_access import get_db_backend, get_db_connect
-from core.database_backend import dialect_for_backend, parse_database_backend
+from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from services.atlas.import_analysis import (
     analysis_counts as _analysis_counts,
     available_options as _available_options,
-    current_apply_counts as _current_apply_counts,
     entity_id_for as _entity_id_for,
     entity_key as _entity_key,
     entity_occurrence_stats as _entity_occurrence_stats,
     finding_id_for as _finding_id_for,
     normalize_options as _normalize_options,
-    preview_counts as _preview_counts,
     project_accessible as _project_accessible,
     project_target_exists as _project_target_exists,
     required_capabilities as _required_capabilities,
     required_capabilities_for_apply as _required_capabilities_for_apply,
     target_entity_candidates as _target_entity_candidates,
+)
+from services.atlas.import_counts import (
+    current_apply_counts as _current_apply_counts,
+    preview_counts as _preview_counts,
+)
+from services.atlas.import_draft_read import (
+    DRAFT_ID_RE as _DRAFT_ID_RE,
+    decode_json_dict as _decode_json_dict,
+    decode_json_list as _decode_json_list,
+    load_draft as _load_draft,
 )
 from services.atlas.import_helpers import (
     MAX_SOURCE_TOOL_LEN,
@@ -37,13 +44,14 @@ from services.atlas.import_helpers import (
     option_log_fields as _option_log_fields,
     required_capability_values as _required_capability_values,
     row_set_digest as _row_set_digest,
-    safe_count_fields as _safe_count_fields,
     safe_filename as _safe_filename,
     safe_label as _safe_label,
     safe_text as _safe_text,
     source_tool_key as _source_tool_key,
     update_apply_log_context as _update_apply_log_context,
 )
+from services.atlas.import_logging import safe_count_fields as _safe_count_fields
+from services.atlas.import_evidence import insert_evidence_rows, normalized_row_set, preview_samples
 from services.atlas.import_limits import (
     AtlasImportError,
     _INVALID_CFG_LIMIT_WARNED as _INVALID_CFG_LIMIT_WARNED,
@@ -55,8 +63,8 @@ from services.atlas.import_limits import (
 )
 from services.atlas.import_parser import (
     ImportParseError,
-    parse_import_file,
-    read_import_source_bytes,
+    parse_prepared_import,
+    read_import_source,
 )
 from services.atlas.import_sources import (
     insert_import_batch,
@@ -70,7 +78,7 @@ from services.intel.canonical import entity_signature
 from services.projects.findings import _finding_signature, _normalize_finding_signal_key
 from services.projects.contracts import MAX_FINDING_REMEDIATION_LEN, ProjectWorkspaceQuotaExceeded
 from services.projects.links import insert_project_link_with_quota
-from services.projects.metadata import _finding_triage_by_id, upsert_finding_triage_details_on_conn
+from services.projects.metadata import _finding_triage_details_on_conn, upsert_finding_triage_details_on_conn
 from services.projects.scope import normalize_team_id
 from services.projects.targets import ensure_project_target_on_conn
 from services.projects.utils import now as project_now
@@ -92,30 +100,8 @@ def _timestamp(value: datetime | None = None) -> str:
     return (value or _utc_now()).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _conn_dialect(conn):
-    backend = getattr(conn, "database_backend", get_db_backend())
-    return dialect_for_backend(parse_database_backend(backend))
-
-
-def _decode_json_dict(conn, value: Any) -> dict[str, Any]:
-    return _conn_dialect(conn).decode_json_dict(value)
-
-
-def _decode_json_list(conn, value: Any) -> list[Any]:
-    return _conn_dialect(conn).decode_json_list(value)
-
-
 def required_capabilities_for_apply(options: dict[str, Any], preview_counts: dict[str, Any]) -> set[Capability]:
     return _required_capabilities_for_apply(options, preview_counts)
-
-
-def _normalized_row_set(parse_payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "format_id": parse_payload.get("format_id") or "",
-        "entities": parse_payload.get("entities") if isinstance(parse_payload.get("entities"), list) else [],
-        "findings": parse_payload.get("findings") if isinstance(parse_payload.get("findings"), list) else [],
-        "warnings": parse_payload.get("warnings") if isinstance(parse_payload.get("warnings"), list) else [],
-    }
 
 
 def preview_atlas_import(
@@ -126,6 +112,7 @@ def preview_atlas_import(
     format_id: str,
     source_tool: str,
     import_name: str,
+    draft_id: str = "",
     team_id: str = "",
     actor_member_id: str = "",
     role: str = "",
@@ -133,21 +120,25 @@ def preview_atlas_import(
     source_tool = _safe_label(source_tool or format_id, MAX_SOURCE_TOOL_LEN)
     import_name = _safe_label(import_name or source_tool or "Atlas import", MAX_IMPORT_NAME_LEN)
     filename = _safe_filename(filename)
+    requested_draft_id = str(draft_id or "").strip()
     limits = _parser_limits()
-    source_bytes = b""
-    stage = "read_source"
+    prepared_source = None
+    stage = "validate_draft_id"
     try:
+        if requested_draft_id and not _DRAFT_ID_RE.fullmatch(requested_draft_id):
+            raise AtlasImportError("invalid_draft_id", "Import draft id is invalid.")
+        stage = "read_source"
         source_tool_key = _source_tool_key(source_tool)
-        source_bytes = read_import_source_bytes(file_content, limits)
+        prepared_source = read_import_source(file_content, limits)
         stage = "parse"
-        parsed = parse_import_file(source_bytes, format_id=format_id, limits=limits)
+        parsed = parse_prepared_import(prepared_source, format_id=format_id, limits=limits)
         parse_payload = parsed.to_dict()
-        normalized_rows = _normalized_row_set(parse_payload)
+        normalized_rows = normalized_row_set(parse_payload)
         row_digest = _row_set_digest(normalized_rows)
-        draft_id = "impd_" + uuid.uuid4().hex
+        draft_id = requested_draft_id or ("impd_" + uuid.uuid4().hex)
         created_dt = _utc_now()
         expires_dt = created_dt + timedelta(minutes=_draft_ttl_minutes())
-        original_digest = hashlib.sha256(source_bytes).hexdigest()
+        original_digest = prepared_source.upload_sha256
         with get_db_connect()() as conn:
             stage = "cleanup_expired_drafts"
             cleanup_expired_import_drafts(conn=conn, now=_timestamp(created_dt))
@@ -194,7 +185,7 @@ def preview_atlas_import(
                 "team_id": team_id,
                 "actor_member_id": actor_member_id,
                 "actor_role": role,
-                "upload_bytes": len(source_bytes),
+                "upload_bytes": prepared_source.upload_bytes,
                 "expires_at": _timestamp(expires_dt),
                 **_filename_log_fields(filename),
                 **_safe_count_fields(counts),
@@ -206,10 +197,7 @@ def preview_atlas_import(
             "row_set_digest": row_digest,
             "expires_at": _timestamp(expires_dt),
             "counts": counts,
-            "samples": {
-                "entities": normalized_rows["entities"][:_preview_sample_limit()],
-                "findings": normalized_rows["findings"][:_preview_sample_limit()],
-            },
+            "samples": preview_samples(normalized_rows, _preview_sample_limit()),
             "warnings": normalized_rows["warnings"][:_warning_sample_limit()],
             "apply_options": _available_options(
                 role=role,
@@ -226,7 +214,7 @@ def preview_atlas_import(
                 "source_tool_key": _source_tool_key(source_tool),
                 "team_id": team_id,
                 "stage": stage,
-                "upload_bytes": len(source_bytes),
+                "upload_bytes": prepared_source.upload_bytes if prepared_source else 0,
                 **_filename_log_fields(filename),
             },
         )
@@ -242,7 +230,7 @@ def preview_atlas_import(
             "format_id": str(format_id or ""),
             "source_tool_key": _source_tool_key(source_tool),
             "stage": stage,
-            "upload_bytes": len(source_bytes),
+            "upload_bytes": prepared_source.upload_bytes if prepared_source else 0,
             **_filename_log_fields(filename),
         })
         raise
@@ -282,19 +270,6 @@ def cleanup_expired_import_drafts(*, conn=None, now: str | None = None) -> int:
             "cutoff": timestamp,
         })
     return deleted
-
-
-def _load_draft(conn, session_id: str, draft_id: str, *, team_id: str = ""):
-    normalized_team_id = normalize_team_id(team_id)
-    if normalized_team_id:
-        return conn.execute(
-            "SELECT * FROM atlas_import_drafts WHERE team_id = ? AND id = ?",
-            (normalized_team_id, draft_id),
-        ).fetchone()
-    return conn.execute(
-        "SELECT * FROM atlas_import_drafts WHERE (team_id IS NULL OR team_id = '') AND session_id = ? AND id = ?",
-        (str(session_id or "").strip(), draft_id),
-    ).fetchone()
 
 
 def _load_batch_for_draft(conn, session_id: str, draft_id: str, *, team_id: str = ""):
@@ -411,8 +386,10 @@ def _import_finding_identity(finding: dict[str, Any]) -> tuple[str, str]:
     source_detail: dict[str, Any] = raw_source_detail if isinstance(raw_source_detail, dict) else {}
     tool_root = str(source_detail.get("adapter") or "")
     severity = _safe_label(finding.get("severity"), 32)
+    rule_identity = _safe_label(source_detail.get("rule_identity"), 512)
     signal_key = _normalize_finding_signal_key(
-        "\n".join(part for part in (
+        rule_identity
+        or "\n".join(part for part in (
             str(finding.get("title") or ""),
             str(finding.get("evidence") or ""),
         ) if part)
@@ -475,9 +452,9 @@ def _insert_or_update_finding(
         "(id, session_id, team_id, run_id, target_id, scope, line_number, review_state, "
         "entity_id, subject_key, signature_hash, severity, kind, tool_root, "
         "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
-        "status_updated_at, fingerprint, title, raw_line, created) "
+        "status_updated_at, fingerprint, title, raw_line, created, origin, validation_method) "
         "VALUES (?, ?, ?, '', ?, 'finding', ?, 'new', ?, ?, ?, ?, 'finding', ?, "
-        "'', '', ?, ?, 0, 'new', '', ?, ?, ?, ?)",
+        "'', '', ?, ?, 0, 'new', '', ?, ?, ?, ?, 'import', 'imported_assertion')",
         (
             finding_id,
             session_id,
@@ -592,9 +569,9 @@ def _apply_atlas_import_impl(
                         status_code=403,
                     )
         _update_apply_log_context(log_context, stage="check_project")
-        if (
-            clean_options["link_to_project"] or clean_options["create_project_targets"]
-        ) and not _project_accessible(conn, session_id, project_id, team_id=team_id):
+        project_must_exist = any((clean_options["link_to_project"], clean_options["create_project_targets"],
+                                  clean_options["import_evidence"] and bool(project_id)))
+        if project_must_exist and not _project_accessible(conn, session_id, project_id, team_id=team_id):
             raise AtlasImportError("project_not_found", "Project was not found.", status_code=404)
         _update_apply_log_context(log_context, stage="claim_draft")
         if not _claim_draft_for_apply(conn, draft_id):
@@ -645,6 +622,7 @@ def _apply_atlas_import_impl(
             "finding_remediations_imported": 0,
             "entity_links": 0,
             "finding_occurrences": 0,
+            "evidence_imported": 0,
             "project_links_added": 0,
             "project_links_existing": 0,
             "project_targets_created": 0,
@@ -742,12 +720,12 @@ def _apply_atlas_import_impl(
                 )
                 remediation = _safe_text(finding.get("remediation"), MAX_FINDING_REMEDIATION_LEN)
                 if remediation:
-                    existing_triage_row = _finding_triage_by_id(
+                    existing_triage_row = _finding_triage_details_on_conn(
                         conn,
                         session_id,
-                        [finding_id],
+                        finding_id,
                         team_id=team_id,
-                    ).get(finding_id)
+                    )
                     existing_triage = existing_triage_row if isinstance(existing_triage_row, dict) else {}
                     previous_remediation = _safe_text(
                         existing_triage.get("remediation"),
@@ -794,6 +772,12 @@ def _apply_atlas_import_impl(
                 counts["finding_occurrences"] += 1
                 counts["findings_created" if created else "findings_updated"] += 1
                 finding_ids.add(finding_id)
+        if clean_options["import_evidence"]:
+            _update_apply_log_context(log_context, stage="write_evidence")
+            counts["evidence_imported"] = insert_evidence_rows(
+                conn, normalized_rows.get("evidence"), batch_id=batch_id,
+                project_id=project_id, created=now,
+            )
         try:
             if clean_options["link_to_project"]:
                 _update_apply_log_context(log_context, stage="link_project")
@@ -860,6 +844,17 @@ def _apply_atlas_import_impl(
             status="applied",
         )
         conn.execute("UPDATE atlas_import_drafts SET status = 'applied' WHERE id = ?", (draft_id,))
+        from services.connectors.zap_job_lifecycle import (  # noqa: PLC0415
+            mark_zap_job_imported_for_atlas_draft,
+        )
+
+        mark_zap_job_imported_for_atlas_draft(
+            session_id,
+            draft_id,
+            batch_id,
+            team_id=team_id,
+            conn=conn,
+        )
         conn.commit()
     log.info(
         "ATLAS_IMPORT_APPLIED",

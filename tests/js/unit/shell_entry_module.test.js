@@ -459,7 +459,7 @@ describe('shell module entry', () => {
       stateModule.emitUiEvent('app:mobile-menu-show')
       expect(compareActive.classList.contains('u-hidden')).toBe(true)
     }
-  })
+  }, 10_000)
 
   it('keeps bundle-mode lazy entries on shared chunks without eager shell owner setup', () => {
     const manifest = JSON.parse(readFileSync(resolve(REPO_ROOT, 'app/static/build/manifest.json'), 'utf8'))

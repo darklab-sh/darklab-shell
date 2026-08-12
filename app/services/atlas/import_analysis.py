@@ -17,6 +17,7 @@ def normalize_options(raw_options: Any) -> dict[str, bool]:
     return {
         "import_entities": bool(options.get("import_entities")),
         "import_findings": bool(options.get("import_findings")),
+        "import_evidence": bool(options.get("import_evidence")),
         "link_to_project": bool(options.get("link_to_project")),
         "create_project_targets": bool(options.get("create_project_targets")),
     }
@@ -30,6 +31,8 @@ def required_capabilities(options: dict[str, bool], preview_counts: dict[str, An
         required.add(Capability.TRIAGE_FINDINGS)
         if int(preview_counts.get("finding_subject_entities_to_create") or 0) > 0:
             required.add(Capability.MUTATE_PROJECTS)
+    if options["import_evidence"]:
+        required.add(Capability.MUTATE_PROJECTS)
     if options["link_to_project"] or options["create_project_targets"]:
         required.add(Capability.MUTATE_PROJECTS)
     return required
@@ -58,6 +61,11 @@ def available_options(*, role: str = "", is_team: bool = False, preview_counts: 
                 Capability.TRIAGE_FINDINGS.value,
                 *([Capability.MUTATE_PROJECTS.value] if finding_requires_entities else []),
             ],
+        },
+        "import_evidence": {
+            "available": int(preview_counts.get("evidence_valid") or 0) > 0
+            and allowed(Capability.MUTATE_PROJECTS),
+            "requires": [Capability.MUTATE_PROJECTS.value],
         },
         "link_to_project": {
             "available": allowed(Capability.MUTATE_PROJECTS),
@@ -150,6 +158,7 @@ def project_accessible(conn, session_id: str, project_id: str, *, team_id: str =
 def analysis_counts(conn, session_id: str, team_id: str, normalized_rows: dict[str, Any]) -> dict[str, int]:
     entities = [item for item in normalized_rows.get("entities") or [] if isinstance(item, dict)]
     findings = [item for item in normalized_rows.get("findings") or [] if isinstance(item, dict)]
+    evidence = [item for item in normalized_rows.get("evidence") or [] if isinstance(item, dict)]
     entity_keys = {entity_key(entity) for entity in entities}
     finding_entity_keys = {
         entity_key(entity)
@@ -173,44 +182,11 @@ def analysis_counts(conn, session_id: str, team_id: str, normalized_rows: dict[s
         "finding_valid": len(findings),
         "finding_new": max(0, len(findings) - existing_findings),
         "finding_duplicate": existing_findings,
+        "evidence_valid": len(evidence),
+        "evidence_new": len(evidence),
         "finding_subject_entities_to_create": len(finding_entity_keys - existing_entity_keys),
         "project_target_candidates": len(target_candidates),
     }
-
-
-def preview_counts(parse_payload: dict[str, Any], analysis: dict[str, int]) -> dict[str, Any]:
-    raw_entities = parse_payload.get("entities")
-    raw_findings = parse_payload.get("findings")
-    raw_warnings = parse_payload.get("warnings")
-    entities: list[Any] = raw_entities if isinstance(raw_entities, list) else []
-    findings: list[Any] = raw_findings if isinstance(raw_findings, list) else []
-    warnings: list[Any] = raw_warnings if isinstance(raw_warnings, list) else []
-    return {
-        "rows": int(parse_payload.get("row_count") or 0),
-        "skipped": int(parse_payload.get("skipped_count") or 0),
-        "valid": len(entities) + len(findings),
-        "warnings": len(warnings),
-        "duplicate": int(analysis["entity_duplicate"]) + int(analysis["finding_duplicate"]),
-        "new": int(analysis["entity_new"]) + int(analysis["finding_new"]),
-        "updated": int(analysis["entity_duplicate"]) + int(analysis["finding_duplicate"]),
-        **analysis,
-    }
-
-
-def current_apply_counts(
-    conn,
-    session_id: str,
-    team_id: str,
-    normalized_rows: dict[str, Any],
-    preview_counts_payload: dict[str, Any],
-) -> dict[str, Any]:
-    counts = dict(preview_counts_payload)
-    analysis = analysis_counts(conn, session_id, team_id, normalized_rows)
-    counts.update(analysis)
-    counts["duplicate"] = int(analysis["entity_duplicate"]) + int(analysis["finding_duplicate"])
-    counts["new"] = int(analysis["entity_new"]) + int(analysis["finding_new"])
-    counts["updated"] = int(analysis["entity_duplicate"]) + int(analysis["finding_duplicate"])
-    return counts
 
 
 def entity_occurrence_stats(
