@@ -11,6 +11,10 @@ from typing import TypedDict
 import yaml
 
 import config as app_config
+from services.commands.registry_assessment_workflows import historical_web_surface_workflow
+from services.commands import registry_service_workflows
+from services.commands.registry_subdomain_workflows import bounded_subdomain_assessment_workflow
+from services.commands.registry_web_review_workflows import live_web_review_workflow
 from services.workflows import catalog as workflow_catalog
 
 log = logging.getLogger("shell")
@@ -51,15 +55,11 @@ def _load_yaml_list(path: str) -> list:
 
 
 def _load_yaml_list_with_local(path: str, *, local_path: str | None = None) -> list:
-    merged = []
-    merged.extend(_load_yaml_list(path))
-    merged.extend(_load_yaml_list(local_path or _local_overlay_path(path)))
-    return merged
+    return _load_yaml_list(path) + _load_yaml_list(local_path or _local_overlay_path(path))
 
 
 def builtin_workflows() -> list[dict[str, object]]:
-    return [
-        {
+    return [{
             "title": "DNS Troubleshooting",
             "description": "Diagnose why a domain isn't resolving or returns unexpected results.",
             "inputs": [
@@ -189,6 +189,8 @@ def builtin_workflows() -> list[dict[str, object]]:
                 },
             ],
         },
+        bounded_subdomain_assessment_workflow(),
+        live_web_review_workflow(),
         {
             "title": "Subdomain HTTP Triage",
             "description": (
@@ -218,6 +220,7 @@ def builtin_workflows() -> list[dict[str, object]]:
                 },
             ],
         },
+        historical_web_surface_workflow(),
         {
             "title": "Crawl And Scan",
             "description": (
@@ -358,22 +361,8 @@ def builtin_workflows() -> list[dict[str, object]]:
                 {"cmd": "tcptraceroute {{host}} 443", "note": "Trace the TCP path toward HTTPS specifically."},
             ],
         },
-        {
-            "title": "Fast Port Discovery to Service Fingerprint",
-            "description": "Sweep for exposed ports quickly, then fingerprint and validate important services.",
-            "inputs": [
-                {
-                    "id": "host", "label": "Host", "type": "host", "required": True,
-                    "placeholder": "example.com", "default": "ip.darklab.sh",
-                },
-            ],
-            "steps": [
-                {"cmd": "rustscan -a {{host}} --range 1-1000", "note": "Quickly sweep the first thousand ports."},
-                {"cmd": "naabu -host {{host}} -silent", "note": "Run a second fast TCP discovery pass."},
-                {"cmd": "nmap -sV {{host}}", "note": "Fingerprint services once you know exposure is present."},
-                {"cmd": "nc -zv {{host}} 80", "note": "Validate a specific expected port manually."},
-            ],
-        },
+        registry_service_workflows.fast_port_discovery_workflow(),
+        registry_service_workflows.port_service_review_workflow(),
     ]
 
 

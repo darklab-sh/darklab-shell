@@ -154,6 +154,11 @@ services:
       INTERACTIVE_PTY_ENABLED: ${INTERACTIVE_PTY_ENABLED:-false}
       RESTRICTED_COMMAND_INPUT_CIDRS: ${RESTRICTED_COMMAND_INPUT_CIDRS:-}
       RAW_PACKET_SCANNING_ENABLED: ${RAW_PACKET_SCANNING_ENABLED:-false}
+      ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED: ${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}
+      SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:-}
+      DARKLAB_ZAP_API_KEY: ${DARKLAB_ZAP_API_KEY:-}
+      DARKLAB_ZAP_SCOPE_POLICY_TOKEN: ${DARKLAB_ZAP_SCOPE_POLICY_TOKEN:-}
+      DARKLAB_OAST_TOKEN: ${DARKLAB_OAST_TOKEN:-}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
       WEB_THREADS: ${WEB_THREADS:-4}
       NOTIFICATION_WORKER_ENABLED: ${NOTIFICATION_WORKER_ENABLED:-1}
@@ -171,6 +176,92 @@ services:
         condition: service_healthy
         required: false
       llama:
+        condition: service_healthy
+        required: false
+
+  zap-worker:
+    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.8.3}
+    profiles:
+      - zap
+    init: true
+    volumes:
+      - ./conf:/config:ro
+      - ./data:/data
+      - ./workspaces:/workspaces
+    tmpfs:
+      - /tmp
+    read_only: true
+    restart: unless-stopped
+    environment:
+      DARKLAB_PROCESS_ROLE: zap-worker
+      REDIS_URL: redis://redis:6379/0
+      APP_LOCAL_CONF_DIR: /config
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_POOL_MIN: ${DATABASE_POOL_MIN:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-}
+      DATABASE_POSTGRES_JIT: ${DATABASE_POSTGRES_JIT:-}
+      WORKSPACE_ENABLED: ${WORKSPACE_ENABLED:-false}
+      WORKSPACE_BACKEND: ${WORKSPACE_BACKEND:-tmpfs}
+      WORKSPACE_ROOT: ${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}
+      DARKLAB_ZAP_API_KEY: ${DARKLAB_ZAP_API_KEY:-}
+      DARKLAB_ZAP_SCOPE_POLICY_TOKEN: ${DARKLAB_ZAP_SCOPE_POLICY_TOKEN:-}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          grep -qx 'zap-worker' /tmp/darklab-process-role.ready && kill -0 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+        required: false
+
+  oast-worker:
+    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:2.8.3}
+    profiles:
+      - oast
+    init: true
+    volumes:
+      - ./conf:/config:ro
+      - ./data:/data
+      - ./workspaces:/workspaces
+    tmpfs:
+      - /tmp
+    read_only: true
+    restart: unless-stopped
+    environment:
+      DARKLAB_PROCESS_ROLE: oast-worker
+      REDIS_URL: redis://redis:6379/0
+      APP_LOCAL_CONF_DIR: /config
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_POOL_MIN: ${DATABASE_POOL_MIN:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-}
+      DATABASE_POSTGRES_JIT: ${DATABASE_POSTGRES_JIT:-}
+      WORKSPACE_ENABLED: ${WORKSPACE_ENABLED:-false}
+      WORKSPACE_BACKEND: ${WORKSPACE_BACKEND:-tmpfs}
+      WORKSPACE_ROOT: ${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}
+      SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:-}
+      DARKLAB_OAST_TOKEN: ${DARKLAB_OAST_TOKEN:-}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          grep -qx 'oast-worker' /tmp/darklab-process-role.ready && kill -0 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
         required: false
 

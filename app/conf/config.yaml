@@ -8,7 +8,7 @@
 # Optional: add *.local.* files for untracked server-specific overrides.
 # Source-mounted development keeps them beside these files. Production installs
 # keep the same relative names under mounted ./conf (the /config container path).
-# Examples: config.local.yaml, commands.local.yaml, ascii.local.txt,
+# Examples: config.local.yaml, assessment_profiles.local.yaml, commands.local.yaml, ascii.local.txt,
 # app_hints.local.txt, faq.local.yaml, welcome.local.yaml,
 # themes/<name>.local.yaml.
 # If present, each local overlay is applied after its checked-in base file.
@@ -241,6 +241,10 @@
 # Server default if unset: 10
 # atlas_import_max_upload_mb: 10
 #
+# Maximum size of the report after gzip or ZIP expansion.
+# Server default if unset: 50
+# atlas_import_max_expanded_mb: 50
+#
 # Server default if unset: 5000
 # atlas_import_max_rows: 5000
 #
@@ -269,6 +273,37 @@
 # Server default if unset: 200
 # max_project_targets_per_project: 200
 #
+# Maximum saved assessment cycles and target-specific checks. The owner cap
+# applies to a personal session or team; the project cap keeps any one project
+# from consuming the owner's full allowance. Set to 0 for unlimited.
+# Server default if unset: 100
+# max_project_assessments_per_owner: 100
+#
+# Server default if unset: 25
+# max_project_assessments_per_project: 25
+#
+# Server default if unset: 50
+# max_project_http_profiles_per_project: 50
+#
+# Server default if unset: 250000
+# max_project_assessment_checks_per_owner: 250000
+#
+# Server default if unset: 50000
+# max_project_assessment_checks_per_project: 50000
+#
+# Maximum typed evidence links retained for assessment checks. Set to 0 for
+# unlimited. Evidence history is never evicted automatically at these limits.
+# Server default if unset: 1000000
+# max_project_assessment_evidence_per_owner: 1000000
+#
+# Server default if unset: 250000
+# max_project_assessment_evidence_per_project: 250000
+#
+# Maximum stored remediation deltas rebuilt for one assessment cycle. Set to 0
+# for unlimited. Existing findings and occurrence history are never evicted.
+# Server default if unset: 100000
+# max_project_assessment_finding_deltas_per_assessment: 100000
+#
 # Server default if unset: 25
 # max_evidence_packages_per_project: 25
 #
@@ -283,6 +318,19 @@
 #
 # Server default if unset: 5000
 # max_finding_triage_details_per_owner: 5000
+#
+# Maximum assessor-authored findings for a personal session or team. Set to 0
+# for unlimited. Existing findings aren't evicted when the limit is reached.
+# Server default if unset: 5000
+# max_manual_findings_per_owner: 5000
+#
+# Maximum typed evidence references saved for findings. Set either limit to 0
+# for unlimited. Existing evidence is never evicted when a limit is reached.
+# Server default if unset: 10000
+# max_finding_evidence_links_per_owner: 10000
+#
+# Server default if unset: 200
+# max_finding_evidence_links_per_finding: 200
 #
 # Evidence package final ZIP size cap in megabytes. Set to 0 for unlimited.
 # Server default if unset: 25
@@ -375,6 +423,95 @@
 # project_digests:
 #   default_cadence_preset: daily
 #   first_send_lookback_hours: 24
+
+# ── Public CVE Risk Data ────────────────────────────────────────────────────
+#
+# Release-pinned FIRST EPSS and CISA KEV snapshots give CVE findings a dated,
+# offline prioritization baseline. Live refresh is off until an operator opts
+# in. Refreshes download only the public bulk feeds; they don't send Project,
+# target, finding, or package values to either source.
+#
+# The `providers` built-in shows each feed's version, age, origin, and current
+# refresh setting. HTTPS_PROXY/NO_PROXY are honored by Python's standard HTTP
+# client when a live refresh is enabled.
+# A source lease is committed before network work starts. `lease_seconds` is a
+# minimum; the effective lease is extended to cover the configured attempts,
+# backoff, download size, and parse allowance. A worker must still own that
+# lease before it can publish an accepted feed or failure state.
+# NVD and OSV advisory storage are separate opt-ins. Their local modes load an
+# operator-managed dataset during startup and keep the last accepted snapshot
+# after a bad reload. OSV external mode sends one exact PURL and version only
+# when an explicit acquisition action asks for it. Read surfaces never acquire
+# advisory data.
+# Server default if unset:
+# cve_risk:
+#   bootstrap_enabled: true
+#   refresh_enabled: false
+#   refresh_interval_seconds: 86400
+#   stale_after_hours: 48
+#   http_timeout_seconds: 30
+#   max_download_bytes: 67108864
+#   max_attempts: 3
+#   lease_seconds: 300
+#   work_batch_size: 100
+#   owner_batch_size: 100
+#   work_max_attempts: 5
+#   epss_activation_probability: 0.10
+#   epss_reset_probability: 0.08
+#   advisory_mode: disabled
+#   nvd_local_path: ""
+#   osv_advisory_mode: disabled
+#   osv_local_path: ""
+#   advisory_positive_ttl_seconds: 604800
+#   advisory_negative_ttl_seconds: 86400
+#   advisory_cvss_downgrade_delta: 1.0
+#   advisory_max_local_bytes: 268435456
+#   advisory_max_records: 500000
+#   allowed_hosts:
+#     - epss.cyentia.com
+#     - www.cisa.gov
+#     - api.osv.dev
+
+# ── Optional OWASP ZAP Connector ─────────────────────────────────────────────
+#
+# ZAP runs outside the darklab_shell image. Enabling this section only makes a
+# validated operator-managed connector available; it doesn't submit a scan by
+# itself. Put the API key in the named environment variable, never in YAML.
+# Every target must resolve inside the explicit CIDRs from both the app and the
+# scanner-side scope policy. ZAP sends all target traffic through the policy's
+# enforcing proxy, which rechecks DNS and CIDRs for every connection.
+# Server default if unset:
+# zap_connector:
+#   enabled: false
+#   base_url: ""  # HTTP(S) origin only, such as http://zap:8080.
+#   api_key_secret_id: DARKLAB_ZAP_API_KEY  # Name only; value stays in .env.
+#   tls_verify: true
+#   allowed_target_cidrs: []
+#   scope_policy_url: ""  # Exact HTTPS .../v1/zap-scope/review endpoint.
+#   scope_policy_token_secret_id: DARKLAB_ZAP_SCOPE_POLICY_TOKEN
+#   scope_policy_id: ""  # Stable policy identity returned by the scope service.
+#   egress_proxy_host: ""  # Proxy configured in every generated ZAP plan.
+#   egress_proxy_port: 0
+#   max_concurrent_jobs: 1
+#   job_timeout_seconds: 1800
+#   max_report_bytes: 10485760
+
+# ── Optional Private OAST Connector ──────────────────────────────────────────
+#
+# OAST callbacks stay disabled until an operator points darklab_shell at a
+# private Interactsh-compatible HTTPS service and accepts the callback-data
+# privacy and retention policy. Put the service token in the named environment
+# variable, never in YAML. Loading this section doesn't allocate a callback
+# domain or contact the service.
+# Server default if unset:
+# oast_connector:
+#   enabled: false
+#   base_url: ""  # Credential-free HTTPS origin for the private service.
+#   token_secret_id: DARKLAB_OAST_TOKEN  # Name only; value stays in .env.
+#   allowed_domain: ""  # Exact callback DNS suffix, without a wildcard.
+#   tls_verify: true
+#   callback_retention_seconds: 604800
+#   privacy_acknowledged: false
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 

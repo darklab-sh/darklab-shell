@@ -186,6 +186,8 @@ let DarklabTeamScope = null;
     if (!activeTeamId) return true;
     const wanted = String(capability || '').trim();
     if (!wanted) return true;
+    const team = getActiveTeam();
+    if (team?.status === 'archived' && wanted !== 'view_team') return false;
     return getActiveTeamCapabilities().includes(wanted);
   }
 
@@ -571,6 +573,7 @@ let DarklabTeamScope = null;
       id: String(team.id || ''),
       name: String(team.name || team.slug || 'Team'),
       slug: String(team.slug || ''),
+      status: String(team.status || 'active'),
       role: String(team.member?.role || ''),
       capabilities: Array.isArray(team.member?.capabilities)
         ? team.member.capabilities.map(item => String(item || '')).filter(Boolean)

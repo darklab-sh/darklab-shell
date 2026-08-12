@@ -29,6 +29,12 @@ function compactTriage(triage) {
     has_verification_notes: !!String(item.verification_notes || '').trim() || !!item.has_verification_notes,
     remediation_preview: text(item.remediation_preview || item.remediation),
     verification_steps_preview: text(item.verification_steps_preview || item.verification_steps),
+    remediation_id: text(item.remediation_id),
+    remediation_group_id: text(item.remediation_group_id || item.remediation_id),
+    remediation_group_merged: !!item.remediation_group_merged,
+    remediation_group_member_count: Math.max(1, Number(item.remediation_group_member_count) || 1),
+    remediation_source: text(item.remediation_source, 'observation'),
+    remediation_updated_at: text(item.remediation_updated_at),
   };
 }
 
@@ -90,11 +96,20 @@ async function openFindingTriageEditor(finding, options = {}) {
   return editor.open(finding, options);
 }
 
+async function openFindingRecordEditor(options = {}) {
+  const editor = await loadEditor();
+  if (!editor || typeof editor.openRecord !== 'function') {
+    throw new Error('Finding editor is not available.');
+  }
+  return editor.openRecord(options);
+}
+
 const DarklabFindingTriageEditor = {
   compactTriage,
   close: closeFindingTriageEditor,
   isOpen: isFindingTriageEditorOpen,
   open: openFindingTriageEditor,
+  openRecord: openFindingRecordEditor,
   verificationStatusLabel,
   verificationStatusTone,
   verificationStates: VERIFICATION_STATES.slice(),
@@ -106,6 +121,7 @@ export {
   compactTriage,
   isFindingTriageEditorOpen,
   openFindingTriageEditor,
+  openFindingRecordEditor,
   verificationStatusLabel,
   verificationStatusTone,
   VERIFICATION_STATES as verificationStates,

@@ -42,6 +42,7 @@ Common examples include:
 - `wget -P downloads https://example.test/file.txt`
 - `trufflehog filesystem --directory source --json`
 - `puredns bruteforce domains.txt example.test --resolvers resolvers.txt --write results.txt`
+- `gau --subs --threads 2 --timeout 10 --o historical-urls.txt example.test`
 
 ProjectDiscovery tools such as `nuclei`, `subfinder`, `dnsx`, `httpx`, `tlsx`, `cdncheck`, `katana`, and `naabu` keep useful config, resume, and generated state under the active workspace's `/tools/` folder. Supported secondary response, screenshot, export, log, and auxiliary-file flags also save through Files. Use the Files panel or the built-in `ls`, `cat`, `mkdir`, `mv`, and confirmed `rm` commands to review and manage those results.
 
@@ -81,6 +82,8 @@ intel cve CVE-2025-0001
 
 Shodan InternetDB, Team Cymru, live TLS certificate checks, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without a saved key. Other providers use the encrypted secret named in Provider Status. IPinfo can return public basics without a token and adds account-backed data when `IPINFO_TOKEN` is saved.
 
+`intel cve` also shows the app's stored FIRST EPSS probability, CISA KEV context, and any accepted NVD status/CVSS/CWE data. Fresh installs have dated offline EPSS/KEV snapshots, so the first part of this prioritization works without a live request. `providers` shows each source mode, date, freshness, and enablement guidance. Operators may load NVD 2.0 JSON locally or retain the result of an explicit Atlas CVE **Refresh intel** action; simply viewing a CVE finding never refreshes a source. EPSS is an exploitation-probability estimate rather than a complete risk score, the CISA due date is federal BOD 22-01 context rather than your remediation deadline, and NVD CVSS does not prove that a scanned product is affected.
+
 FOFA needs `FOFA_EMAIL` plus a key saved as `FOFA_KEY`, `FOFA_API_KEY`, `FOFA_APIKEY`, or `FOFA_TOKEN`, and its search calls need an F-point balance. ZoomEye uses `ZOOMEYE_API_KEY` with the regional `api.zoomeye.ai` service and needs available resource credits. SecurityTrails currently requires a paid account. Provider terms, quotas, and account limits still apply.
 
 Use the external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan-cli`, and `chaos` commands when you need provider-native output. See [External Intel](../FEATURES.md#external-intel) for the provider coverage and result fields for each entity type.
@@ -103,17 +106,31 @@ Use `mtr --interactive <host>` for the continuously redrawn display when Interac
 
 `nmap` and `naabu` use connect scanning when raw readiness is inactive. An explicit `nmap -sT` always stays a connect scan, and spoofing or link-layer bypass flags remain blocked. Restricted-CIDR deployments keep Naabu in connect mode.
 
+Direct `nmap` commands still follow the normal command policy. Assessment service suggestions use a narrower set of app-owned NSE profiles with fixed category or script selectors. The suggestion names the profile, and those maintained profiles don't accept custom scripts, script arguments, or argument files.
+
 `masscan` has no connect fallback. If raw readiness is unavailable, use RustScan or `nmap -sT`.
 
 ### `wget`
 
 With Files enabled, downloads go to the active Files folder. Use `-P downloads` or `--directory-prefix=downloads` to choose a subfolder.
 
+### `gau`
+
+`gau` searches public archives and indexes for URLs that have been seen for a domain. Its results are passive leads, not proof that a URL is still live or vulnerable. Save them with `--o historical-urls.txt`, review the list in Files, and live-check approved URLs before using an active scanner. Custom proxy arguments stay blocked, while `--config` and `--o` can use owner-scoped Files paths.
+
 ### `nuclei` and ProjectDiscovery state
 
 The app runs `nuclei` with a writable temporary home and adds `-ud /tmp/nuclei-templates` when no update directory is present. The managed template cache lasts for the container session, so the first run after a restart may spend 30–60 seconds downloading templates.
 
 Saved output records whether a finding used the managed cache, a workspace template path, a pinned-looking template clone, or an operator-updated template set. Normal relative selectors such as `http/` count as managed-cache templates. ProjectDiscovery config, resume, and useful generated state is stored in Files under `/tools/` as described above.
+
+### `dalfox`
+
+darklab_shell uses Dalfox for bounded parameter discovery. Normal commands and the Project Assessment action add discovery-only mode and disable remote mining dictionaries, so Dalfox doesn't send XSS payloads. Server, callback, file/pipe input, proxy, redirect, custom payload, and remote-wordlist modes remain blocked. A protected Project HTTP profile can supply request headers through a short-lived private config without placing their values in the command or saved history.
+
+### `schemathesis`
+
+The image includes an exact-pinned Schemathesis runtime in a virtual environment separate from the app. The terminal allows `schemathesis --help` and `schemathesis --version`, but blocks direct schema runs because generated API traffic can call mutating operations. To run a test, start an API assessment for the approved URL, choose an unchanged Project-linked OpenAPI JSON artifact, and review the GET/HEAD operation count and request limits before confirming. The app rechecks the saved file, gives Schemathesis private schema, settings, and report paths for that run, disables its reusable crash and example caches, and rejects external references, out-of-scope servers, redirects, retries, and write operations.
 
 ### `wpscan`
 

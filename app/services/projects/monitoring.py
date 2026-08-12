@@ -57,6 +57,25 @@ HOST_COMMAND_ROOTS = frozenset({"amass", "assetfinder", "dnsx", "subfinder"})
 MISSING_REF_LOG_LIMIT = 10
 
 
+def _risk_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    actionable = [
+        event for event in events
+        if str(event.get("transition_kind") or "") in {
+            "epss_activated",
+            "kev_added",
+            "nvd_reinstated",
+        }
+    ]
+    return {
+        "event_count": len(events),
+        "actionable_count": len(actionable),
+        "unacknowledged_count": sum(
+            1 for event in events if str(event.get("ack_state") or "new") == "new"
+        ),
+        "top_changes": actionable[:5],
+    }
+
+
 def _value(row: Any, key: str, default: Any = "") -> Any:
     if row is None:
         return default
@@ -656,6 +675,17 @@ def get_project_monitoring(
         counts = _counts(monitors)
         visible_timeline = timeline[: max(25, safe_fire_limit)]
         summary = _project_summary(normalized_project_id, counts, monitors, summary_timeline)
+        from services.cve_risk.escalation import list_project_risk_escalations  # noqa: PLC0415
+
+        risk_events = list_project_risk_escalations(
+            conn,
+            normalized_project_id,
+            limit=max(25, safe_fire_limit),
+        )
+        risk_summary = _risk_summary(risk_events)
+        counts["risk_escalations"] = risk_summary["event_count"]
+        counts["unacknowledged_risk_escalations"] = risk_summary["unacknowledged_count"]
+        summary["risk"] = risk_summary
         window_summary = None
         if summary_window_start or summary_window_end:
             window_summary = _project_summary(
@@ -664,6 +694,15 @@ def get_project_monitoring(
                 [],
                 window_timeline,
             )
+            window_risk_events = list_project_risk_escalations(
+                conn,
+                normalized_project_id,
+                start=str(summary_window_start or ""),
+                end=str(summary_window_end or ""),
+                limit=100,
+            )
+            window_summary["risk"] = _risk_summary(window_risk_events)
+            window_summary["risk_escalation_count"] = len(window_risk_events)
         missing_run_ids = sorted(run_id for run_id in requested_run_ids if run_id not in run_refs)
         missing_baseline_run_ids = sorted(run_id for run_id in requested_baseline_ids if run_id not in run_refs)
         if missing_run_ids or missing_baseline_run_ids:
@@ -742,6 +781,7 @@ def get_project_monitoring(
             "quiet_no_change_threshold": QUIET_NO_CHANGE_THRESHOLD,
             "monitors": monitors,
             "timeline": visible_timeline,
+            "risk_events": risk_events,
             "filter_options": _filter_options(monitors, timeline, target_options),
         }
         if window_summary is not None:

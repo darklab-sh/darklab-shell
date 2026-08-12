@@ -445,7 +445,7 @@ function renderWorkflowInputCard(card, workflow) {
       const rendered = buildRenderedWorkflow(workflow, values);
       if (!rendered.ready) return;
       if (
-        Number(workflow.version || 1) === 2
+        Number(workflow.version || 1) >= 2
         || inputs.some(input => input?.sensitive)
       ) {
         runAllBtn.disabled = true;
@@ -735,7 +735,7 @@ function renderWorkflowDetail(workflow, container) {
     cardBody.appendChild(desc);
   }
 
-  if (Number(workflow.version || 1) === 2 && !(workflow.inputs || []).length) {
+  if (Number(workflow.version || 1) >= 2 && !(workflow.inputs || []).length) {
     const runActions = document.createElement('div');
     runActions.className = 'workflow-input-actions';
     const runPlaybookBtn = document.createElement('button');
@@ -793,7 +793,7 @@ function renderWorkflowDetail(workflow, container) {
       runBtn.disabled = !!inputPanel;
       runBtn.setAttribute('aria-disabled', runBtn.disabled ? 'true' : 'false');
       main.appendChild(runBtn);
-      if (Number(workflow.version || 1) === 2) {
+      if (Number(workflow.version || 1) >= 2) {
         const previewState = document.createElement('span');
         previewState.className = 'workflow-step-preview-state';
         main.appendChild(previewState);
@@ -814,7 +814,7 @@ function renderWorkflowDetail(workflow, container) {
 
   if (inputPanel && typeof inputPanel._workflowApplyRenderedState === 'function') {
     inputPanel._workflowApplyRenderedState();
-  } else if (Number(workflow.version || 1) === 2) {
+  } else if (Number(workflow.version || 1) >= 2) {
     applyWorkflowStepPreviews(card, workflow, {});
   }
   _workflowWireFaqCommandChips(card);
@@ -1100,7 +1100,7 @@ async function _workflowRunResolved(workflow, values, tabId, execution) {
     return;
   }
   persistWorkflowInputValues(workflow, values);
-  if (Number(workflow.version || 1) === 2) {
+  if (Number(workflow.version || 1) >= 2) {
     try {
       await startServerWorkflowExecution(workflow, values, tabId, {
         announceInTerminal: true,

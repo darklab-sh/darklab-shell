@@ -291,6 +291,7 @@ changed_watcher_id = "wtr_mon_changed_" + suffix
 deleted_watcher_id = "wtr_mon_deleted_" + suffix
 changed_fire_id = "wtf_mon_changed_" + suffix
 deleted_fire_id = "wtf_mon_deleted_" + suffix
+risk_event_id = "rsk_mon_" + suffix
 now = "2026-06-15T12:00:00+00:00"
 
 def output_preview(command, lines):
@@ -395,6 +396,18 @@ try:
     )
     insert_fire(conn, changed_fire_id, changed_watcher_id, current_run_id, baseline_run_id, changed_summary, now)
     insert_fire(conn, deleted_fire_id, deleted_watcher_id, deleted_run_id, baseline_run_id, deleted_summary, "2026-06-15T11:55:00+00:00")
+    conn.execute(
+        "INSERT INTO risk_escalations ("
+        "id, owner_session_id, remediation_id, cve_id, source, transition_kind, "
+        "feed_version, observation_count, created_at, updated_at"
+        ") VALUES (?, ?, ?, 'CVE-2026-10001', 'kev', 'kev_added', "
+        "'2026.06.15', 2, ?, ?)",
+        (risk_event_id, session_id, "CVE-2026-10001:browser-target", now, now),
+    )
+    conn.execute(
+        "INSERT INTO risk_escalation_projects (escalation_id, project_id) VALUES (?, ?)",
+        (risk_event_id, project_id),
+    )
     conn.commit()
 finally:
     conn.close()
@@ -406,6 +419,7 @@ print(json.dumps({
     "deletedWatcherId": deleted_watcher_id,
     "changedFireId": changed_fire_id,
     "deletedFireId": deleted_fire_id,
+    "riskEventId": risk_event_id,
 }))
 `
   const result = spawnSync(

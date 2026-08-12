@@ -413,3 +413,22 @@ def test_project_digest_payload_uses_relative_link_without_public_base_url(monke
     )
 
     assert payload["project_monitoring_url"] == "/projects/prj_digest/monitoring"
+
+    no_project_payload = build_project_digest_payload(
+        project={},
+        digest_identity={
+            "project_id": "",
+            "session_id": "tok_digest",
+            "team_id": "",
+            "window_start": "2026-05-20T10:00:00+00:00",
+            "window_end": "2026-05-20T11:00:00+00:00",
+        },
+        summary={
+            "risk": {
+                "actionable_count": 1,
+                "unacknowledged_count": 1,
+            },
+        },
+    )
+    assert no_project_payload["project_monitoring_path"] == "/projects"
+    assert no_project_payload["summary_fields"]["monitoring_link"] == "/projects"

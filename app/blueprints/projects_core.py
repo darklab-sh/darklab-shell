@@ -231,7 +231,7 @@ def projects_activity(project_id):
     if error_response:
         return error_response
     try:
-        owner_scope = current_request_scope(session_id, request)
+        owner_scope = current_request_scope(session_id, request, allow_archived=request.method == "GET")
         payload = list_scoped_events(
             session_id,
             owner_scope,

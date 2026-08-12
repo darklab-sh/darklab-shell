@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_for_release": "2.8.3",
-  "reviewed_on": "2026-07-29",
+  "reviewed_on": "2026-08-07",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -48,12 +48,14 @@
     "git:https://github.com/blechschmidt/massdns.git": "massdns",
     "git:https://github.com/danielmiessler/SecLists.git": "SecLists",
     "git:https://github.com/rbsec/sslscan.git": "sslscan",
+    "git:https://github.com/sqlmapproject/sqlmap.git": "SQLmap",
     "git:https://github.com/sullo/Nikto.git": "Nikto",
     "git:https://github.com/testssl/testssl.sh.git": "testssl.sh",
     "git:https://github.com/tianon/gosu.git": "gosu",
     "git:https://github.com/trufflesecurity/trufflehog.git": "TruffleHog",
     "pip:greynoise": "Python application and intelligence dependencies",
     "pip:pip": "Python application and intelligence dependencies",
+    "pip:schemathesis": "Schemathesis and isolated Python dependencies",
     "pip:setuptools": "Python application and intelligence dependencies",
     "pip:shodan": "Python application and intelligence dependencies",
     "pip:sslyze": "SSLyze",
@@ -245,6 +247,34 @@
       "source": "https://github.com/bee-san/RustScan",
       "license": "GPL-3.0",
       "notice_location": "/usr/share/common-licenses/GPL-3"
+    },
+    {
+      "name": "Dalfox",
+      "version_arg": "DALFOX_VERSION",
+      "source": "https://github.com/hahwul/dalfox",
+      "license": "MIT",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/Dalfox.txt"
+    },
+    {
+      "name": "gau",
+      "version_arg": "GAU_VERSION",
+      "source": "https://github.com/lc/gau",
+      "license": "MIT",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/gau.txt"
+    },
+    {
+      "name": "SQLmap",
+      "version_arg": "SQLMAP_VERSION",
+      "source": "https://github.com/sqlmapproject/sqlmap",
+      "license": "GPL-2.0-only",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/Sqlmap.txt"
+    },
+    {
+      "name": "Schemathesis and isolated Python dependencies",
+      "version_arg": "SCHEMATHESIS_VERSION",
+      "source": "https://github.com/schemathesis/schemathesis",
+      "license": "mixed-open-source",
+      "notice_location": "/opt/schemathesis/lib/python3.14/site-packages/*-info/licenses"
     },
     {
       "name": "WPScan",

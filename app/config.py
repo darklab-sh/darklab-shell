@@ -14,8 +14,22 @@ import re
 from copy import deepcopy
 from collections.abc import Iterator, Mapping, MutableMapping
 from typing import Any, cast
+from urllib.parse import urlsplit
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, ValidationError, create_model
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    ValidationInfo,
+    create_model,
+    field_validator,
+    model_validator,
+)
 import config_paths
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 from core.startup_logging import configure_config_log_fallback, install_config_log_buffer
@@ -42,9 +56,15 @@ _SECRET_CONFIG_KEYS = {
     "ai_api_key",
     "ai_api_key_secret_name",
     "notifications.smtp.password_secret_id",
+    "oast_connector.token_secret_id",
+    "zap_connector.api_key_secret_id",
+    "zap_connector.scope_policy_token_secret_id",
 }
 _SENSITIVE_URL_CONFIG_KEYS = {
     "database_url",
+    "oast_connector.base_url",
+    "zap_connector.base_url",
+    "zap_connector.scope_policy_url",
 }
 _MAX_CONFIG_ERROR_VALUE_CHARS = 120
 _MAX_CONFIG_LOG_PATH_CHARS = 240
@@ -463,9 +483,306 @@ class ProjectDigestsConfig(_ConfigModel):
     first_send_lookback_hours: StrictInt = 24
 
 
+class CveRiskConfig(_ConfigModel):
+    bootstrap_enabled: StrictBool = True
+    refresh_enabled: StrictBool = False
+    refresh_interval_seconds: StrictInt = Field(default=86400, ge=300, le=604800)
+    stale_after_hours: StrictInt = Field(default=48, ge=1, le=8760)
+    http_timeout_seconds: StrictInt = Field(default=30, ge=3, le=120)
+    max_download_bytes: StrictInt = Field(default=67108864, ge=1024, le=268435456)
+    max_attempts: StrictInt = Field(default=3, ge=1, le=5)
+    lease_seconds: StrictInt = Field(default=300, ge=30, le=3600)
+    work_batch_size: StrictInt = Field(default=100, ge=1, le=1000)
+    owner_batch_size: StrictInt = Field(default=100, ge=1, le=1000)
+    work_max_attempts: StrictInt = Field(default=5, ge=1, le=20)
+    epss_activation_probability: StrictFloat = Field(default=0.10, ge=0, le=1)
+    epss_reset_probability: StrictFloat = Field(default=0.08, ge=0, le=1)
+    advisory_mode: StrictStr = "disabled"
+    nvd_local_path: StrictStr = ""
+    osv_advisory_mode: StrictStr = "disabled"
+    osv_local_path: StrictStr = ""
+    advisory_positive_ttl_seconds: StrictInt = Field(default=604800, ge=3600, le=2592000)
+    advisory_negative_ttl_seconds: StrictInt = Field(default=86400, ge=300, le=604800)
+    advisory_cvss_downgrade_delta: StrictFloat = Field(default=1.0, gt=0, le=10)
+    advisory_max_local_bytes: StrictInt = Field(default=268435456, ge=1024, le=1073741824)
+    advisory_max_records: StrictInt = Field(default=500000, ge=1, le=1000000)
+    allowed_hosts: list[StrictStr] = Field(default_factory=lambda: [
+        "epss.cyentia.com",
+        "www.cisa.gov",
+        "api.osv.dev",
+    ])
+
+    @model_validator(mode="after")
+    def validate_contract(self):
+        if not 0 <= self.epss_reset_probability < self.epss_activation_probability <= 1:
+            raise ValueError(
+                "epss_reset_probability must be lower than epss_activation_probability"
+            )
+        self.advisory_mode = self.advisory_mode.strip().lower()
+        if self.advisory_mode not in {"disabled", "local", "external"}:
+            raise ValueError("cve_risk.advisory_mode must be disabled, local, or external")
+        self.nvd_local_path = self.nvd_local_path.strip()
+        if self.advisory_mode == "local" and not self.nvd_local_path:
+            raise ValueError("cve_risk.nvd_local_path is required when advisory_mode is local")
+        self.osv_advisory_mode = self.osv_advisory_mode.strip().lower()
+        if self.osv_advisory_mode not in {"disabled", "local", "external"}:
+            raise ValueError(
+                "cve_risk.osv_advisory_mode must be disabled, local, or external"
+            )
+        self.osv_local_path = self.osv_local_path.strip()
+        if self.osv_advisory_mode == "local" and not self.osv_local_path:
+            raise ValueError(
+                "cve_risk.osv_local_path is required when osv_advisory_mode is local"
+            )
+        normalized_hosts: list[str] = []
+        for value in self.allowed_hosts:
+            host = value.strip().lower()
+            if (
+                not host
+                or "://" in host
+                or "/" in host
+                or "@" in host
+                or host.startswith(".")
+                or host.endswith(".")
+            ):
+                raise ValueError("cve_risk.allowed_hosts entries must be hostnames")
+            normalized_hosts.append(host)
+        if not normalized_hosts:
+            raise ValueError("cve_risk.allowed_hosts must include at least one hostname")
+        self.allowed_hosts = list(dict.fromkeys(normalized_hosts))
+        return self
+
+
+class ZapConnectorConfig(_ConfigModel):
+    enabled: StrictBool = False
+    base_url: StrictStr = ""
+    api_key_secret_id: StrictStr = ""
+    tls_verify: StrictBool = True
+    allowed_target_cidrs: list[StrictStr] = Field(default_factory=list)
+    scope_policy_url: StrictStr = ""
+    scope_policy_token_secret_id: StrictStr = ""
+    scope_policy_id: StrictStr = ""
+    egress_proxy_host: StrictStr = ""
+    egress_proxy_port: StrictInt = Field(default=0, ge=0, le=65535)
+    max_concurrent_jobs: StrictInt = Field(default=1, ge=1, le=8)
+    job_timeout_seconds: StrictInt = Field(default=1800, ge=30, le=86400)
+    max_report_bytes: StrictInt = Field(default=10485760, ge=1024, le=52428800)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("must be a valid HTTP(S) origin") from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or (port is None and parsed.netloc.endswith(":"))
+        ):
+            raise ValueError("must be an HTTP(S) origin without credentials or a path")
+        return normalized
+
+    @field_validator("api_key_secret_id")
+    @classmethod
+    def validate_api_key_secret_id(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if not normalized and info.data.get("enabled"):
+            raise ValueError("is required when the connector is enabled")
+        if normalized and not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", normalized):
+            raise ValueError("must name an environment variable")
+        return normalized
+
+    @field_validator("allowed_target_cidrs")
+    @classmethod
+    def validate_allowed_target_cidrs(
+        cls,
+        values: list[str],
+        info: ValidationInfo,
+    ) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            try:
+                network = ipaddress.ip_network(value.strip(), strict=False)
+            except ValueError as exc:
+                raise ValueError("entries must be IP networks") from exc
+            normalized.append(str(network))
+        deduplicated = list(dict.fromkeys(normalized))
+        if not deduplicated and info.data.get("enabled"):
+            raise ValueError("must include at least one network when the connector is enabled")
+        return deduplicated
+
+    @field_validator("scope_policy_url")
+    @classmethod
+    def validate_scope_policy_url(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("must be the fixed HTTPS scope-policy endpoint") from exc
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path != "/v1/zap-scope/review"
+            or parsed.query
+            or parsed.fragment
+            or (port is None and parsed.netloc.endswith(":"))
+        ):
+            raise ValueError("must be an HTTPS URL ending in /v1/zap-scope/review")
+        return normalized
+
+    @field_validator("scope_policy_token_secret_id")
+    @classmethod
+    def validate_scope_policy_token_secret_id(
+        cls,
+        value: str,
+        info: ValidationInfo,
+    ) -> str:
+        normalized = value.strip()
+        if not normalized and info.data.get("enabled"):
+            raise ValueError("is required when the connector is enabled")
+        if normalized and not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", normalized):
+            raise ValueError("must name an environment variable")
+        return normalized
+
+    @field_validator("scope_policy_id")
+    @classmethod
+    def validate_scope_policy_id(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if not normalized and info.data.get("enabled"):
+            raise ValueError("is required when the connector is enabled")
+        if normalized and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", normalized):
+            raise ValueError("must contain only letters, numbers, dot, underscore, and dash")
+        return normalized
+
+    @field_validator("egress_proxy_host")
+    @classmethod
+    def validate_egress_proxy_host(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip().rstrip(".").lower()
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        try:
+            ipaddress.ip_address(normalized)
+        except ValueError:
+            if (
+                len(normalized) > 253
+                or not all(
+                    re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                    for label in normalized.split(".")
+                )
+            ):
+                raise ValueError("must be a hostname or IP address") from None
+        return normalized
+
+    @field_validator("egress_proxy_port")
+    @classmethod
+    def validate_egress_proxy_port(cls, value: int, info: ValidationInfo) -> int:
+        if info.data.get("enabled") and value == 0:
+            raise ValueError("must be between 1 and 65535 when the connector is enabled")
+        return value
+
+
+class OastConnectorConfig(_ConfigModel):
+    enabled: StrictBool = False
+    base_url: StrictStr = ""
+    token_secret_id: StrictStr = ""
+    allowed_domain: StrictStr = ""
+    tls_verify: StrictBool = True
+    callback_retention_seconds: StrictInt = Field(default=604800, ge=300, le=2592000)
+    privacy_acknowledged: StrictBool = False
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("must be a valid HTTPS origin") from exc
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or (port is None and parsed.netloc.endswith(":"))
+        ):
+            raise ValueError("must be an HTTPS origin without credentials or a path")
+        return normalized
+
+    @field_validator("token_secret_id")
+    @classmethod
+    def validate_token_secret_id(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if not normalized and info.data.get("enabled"):
+            raise ValueError("is required when the connector is enabled")
+        if normalized and not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", normalized):
+            raise ValueError("must name an environment variable")
+        return normalized
+
+    @field_validator("allowed_domain")
+    @classmethod
+    def validate_allowed_domain(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip().lower().rstrip(".")
+        if not normalized:
+            if info.data.get("enabled"):
+                raise ValueError("is required when the connector is enabled")
+            return ""
+        labels = normalized.split(".")
+        valid_label = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+        try:
+            ipaddress.ip_address(normalized)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("must be a DNS suffix rather than an IP address")
+        if (
+            len(normalized) > 253
+            or len(labels) < 2
+            or any(not valid_label.fullmatch(label) for label in labels)
+        ):
+            raise ValueError("must be an exact DNS suffix without a wildcard")
+        return normalized
+
+    @field_validator("privacy_acknowledged")
+    @classmethod
+    def validate_privacy_acknowledged(cls, value: bool, info: ValidationInfo) -> bool:
+        if info.data.get("enabled") and not value:
+            raise ValueError("must be true when the connector is enabled")
+        return value
+
+
 _FORGIVING_BOOL_KEYS = {
     "workspace_enabled",
     "interactive_pty_enabled",
+    "assessment_intrusive_actions_enabled",
     "raw_packet_scanning_enabled",
     "database_postgres_jit",
     "audit_log_enabled",
@@ -479,6 +796,7 @@ _FORGIVING_BOOL_KEYS = {
 _FORGIVING_BOOL_DEFAULTS = {
     "workspace_enabled": False,
     "interactive_pty_enabled": False,
+    "assessment_intrusive_actions_enabled": False,
     "raw_packet_scanning_enabled": False,
     "database_postgres_jit": False,
     "audit_log_enabled": True,
@@ -542,6 +860,9 @@ _NESTED_CONFIG_MODELS = {
     "scheduler": SchedulerConfig,
     "watchers": WatchersConfig,
     "project_digests": ProjectDigestsConfig,
+    "cve_risk": CveRiskConfig,
+    "oast_connector": OastConnectorConfig,
+    "zap_connector": ZapConnectorConfig,
 }
 
 
@@ -687,7 +1008,10 @@ def _redacted_config_value(path: str, value: Any) -> str:
         return "<redacted>"
     if "api_key" in path or "password" in path or "webhook" in path:
         return "<redacted>"
-    text = repr(value)
+    if isinstance(value, Mapping):
+        text = repr(_redact_config_mapping(value, path))
+    else:
+        text = repr(value)
     if len(text) > _MAX_CONFIG_ERROR_VALUE_CHARS:
         return text[: _MAX_CONFIG_ERROR_VALUE_CHARS - 3] + "..."
     return text
@@ -793,6 +1117,18 @@ def _format_validation_error(exc: ValidationError, provenance: dict[str, str], r
     for error in exc.errors():
         loc = ".".join(str(part) for part in error.get("loc", ())) or "<config>"
         source = provenance.get(loc, "effective config")
+        if source == "built-in defaults" and "." in loc:
+            parent = loc.rsplit(".", 1)[0] + "."
+            sibling_sources = {
+                candidate_source
+                for candidate_path, candidate_source in provenance.items()
+                if candidate_path.startswith(parent)
+                and candidate_source != "built-in defaults"
+            }
+            if len(sibling_sources) == 1:
+                source = sibling_sources.pop()
+            elif sibling_sources:
+                source = "effective config"
         raw_value: Any = raw_values
         for part in loc.split("."):
             if isinstance(raw_value, dict) and part in raw_value:
@@ -1012,6 +1348,7 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "ai_feature_next_commands":   False,
         "ai_feature_run_suggestions": False,
         "restricted_command_input_cidrs": [],
+        "assessment_intrusive_actions_enabled": False,
         "raw_packet_scanning_enabled": False,
         "workflow_active_execution_limit": 3,
         "workflow_execution_max_runtime_seconds": 14400,
@@ -1140,6 +1477,7 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "project_auto_promote_preview_rate_limit_per_minute": 30,
         "project_auto_promote_preview_rate_limit_per_second": 2,
         "atlas_import_max_upload_mb": 10,
+        "atlas_import_max_expanded_mb": 50,
         "atlas_import_max_rows": 5000,
         "atlas_import_max_findings": 5000,
         "atlas_import_max_warnings": 100,
@@ -1148,11 +1486,22 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "atlas_import_warning_sample_limit": 50,
         "atlas_import_draft_ttl_minutes": 30,
         "max_project_targets_per_project": 200,
+        "max_project_assessments_per_owner": 100,
+        "max_project_assessments_per_project": 25,
+        "max_project_http_profiles_per_project": 50,
+        "max_project_assessment_checks_per_owner": 250000,
+        "max_project_assessment_checks_per_project": 50000,
+        "max_project_assessment_evidence_per_owner": 1000000,
+        "max_project_assessment_evidence_per_project": 250000,
+        "max_project_assessment_finding_deltas_per_assessment": 100000,
         "max_evidence_packages_per_project": 25,
         "max_entity_labels_per_session": 5000,
         "max_entity_labels_per_entity": 20,
         "max_entity_notes_per_session": 2000,
         "max_finding_triage_details_per_owner": 5000,
+        "max_manual_findings_per_owner": 5000,
+        "max_finding_evidence_links_per_owner": 10000,
+        "max_finding_evidence_links_per_finding": 200,
         "evidence_package_max_mb":    25,
         "evidence_package_max_uncompressed_mb": 500,
         "evidence_package_max_artifacts": 100,
@@ -1197,6 +1546,47 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "project_digests": {
             "default_cadence_preset": "daily",
             "first_send_lookback_hours": 24,
+        },
+        "cve_risk": {
+            "bootstrap_enabled": True,
+            "refresh_enabled": False,
+            "refresh_interval_seconds": 86400,
+            "stale_after_hours": 48,
+            "http_timeout_seconds": 30,
+            "max_download_bytes": 67108864,
+            "max_attempts": 3,
+            "lease_seconds": 300,
+            "work_batch_size": 100,
+            "owner_batch_size": 100,
+            "work_max_attempts": 5,
+            "epss_activation_probability": 0.10,
+            "epss_reset_probability": 0.08,
+            "advisory_cvss_downgrade_delta": 1.0,
+            "allowed_hosts": ["epss.cyentia.com", "www.cisa.gov", "api.osv.dev"],
+        },
+        "zap_connector": {
+            "enabled": False,
+            "base_url": "",
+            "api_key_secret_id": "",
+            "tls_verify": True,
+            "allowed_target_cidrs": [],
+            "scope_policy_url": "",
+            "scope_policy_token_secret_id": "",
+            "scope_policy_id": "",
+            "egress_proxy_host": "",
+            "egress_proxy_port": 0,
+            "max_concurrent_jobs": 1,
+            "job_timeout_seconds": 1800,
+            "max_report_bytes": 10485760,
+        },
+        "oast_connector": {
+            "enabled": False,
+            "base_url": "",
+            "token_secret_id": "",
+            "allowed_domain": "",
+            "tls_verify": True,
+            "callback_retention_seconds": 604800,
+            "privacy_acknowledged": False,
         },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,
@@ -1429,6 +1819,18 @@ def load_config(conf_dir=None, local_conf_dir=None):
             "RAW_PACKET_SCANNING_ENABLED",
         )
         applied_env_names.append("RAW_PACKET_SCANNING_ENABLED")
+    env_assessment_intrusive_actions_enabled = str(
+        os.environ.get("ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED") or ""
+    ).strip()
+    if env_assessment_intrusive_actions_enabled:
+        _set_config_value(
+            defaults,
+            provenance,
+            "assessment_intrusive_actions_enabled",
+            env_assessment_intrusive_actions_enabled,
+            "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED",
+        )
+        applied_env_names.append("ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED")
     env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
     if env_database_backend:
         _set_config_value(defaults, provenance, "database_backend", env_database_backend, "DATABASE_BACKEND")

@@ -178,12 +178,24 @@ describe('frontend config bootstrap', () => {
                 url: '/static/js/features/projects/project_activity.js?v=activity-hash',
                 type: 'module',
               },
+              project_assessment_css: {
+                url: '/static/css/features/project-assessment.css?v=assessment-css-hash',
+                type: 'style',
+              },
+              project_assessment: {
+                url: '/static/js/features/projects/project_assessment.js?v=assessment-hash',
+                type: 'module',
+              },
               project_overview: {
                 url: '/static/js/features/projects/project_overview.js?v=overview-hash',
                 type: 'module',
               },
               project_artifacts: {
                 url: '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
+                type: 'module',
+              },
+              project_web_surface: {
+                url: '/static/js/features/projects/project_web_surface.js?v=web-surface-hash',
                 type: 'module',
               },
               project_details: '/static/js/features/projects/project_details.js?v=details-hash',
@@ -337,6 +349,11 @@ describe('frontend config bootstrap', () => {
           window.DarklabProjectActivity = DarklabProjectActivity
           return { DarklabProjectActivity }
         }
+        if (url.includes('/project_assessment.js')) {
+          const DarklabProjectAssessment = { createProjectAssessmentController: vi.fn() }
+          window.DarklabProjectAssessment = DarklabProjectAssessment
+          return { DarklabProjectAssessment }
+        }
         if (url.includes('/project_overview.js')) {
           const DarklabProjectOverview = { createProjectOverviewController: vi.fn() }
           window.DarklabProjectOverview = DarklabProjectOverview
@@ -346,6 +363,11 @@ describe('frontend config bootstrap', () => {
           const DarklabProjectArtifacts = { createProjectArtifactsController: vi.fn() }
           window.DarklabProjectArtifacts = DarklabProjectArtifacts
           return { DarklabProjectArtifacts }
+        }
+        if (url.includes('/project_web_surface.js')) {
+          const DarklabProjectWebSurface = { createProjectWebSurfaceController: vi.fn() }
+          window.DarklabProjectWebSurface = DarklabProjectWebSurface
+          return { DarklabProjectWebSurface }
         }
         if (url.includes('/project_packages.js')) {
           const DarklabProjectPackages = { createProjectPackagesController: vi.fn() }
@@ -413,6 +435,13 @@ describe('frontend config bootstrap', () => {
     expect(activityApi).toBe(window.DarklabProjectActivity)
     expect(window.__darklabImportModule).toHaveBeenCalledWith('/static/js/features/projects/project_activity.js?v=activity-hash')
 
+    const assessmentPromise = window.loadProjectAssessment()
+    const assessmentApi = await assessmentPromise
+    expect(assessmentApi).toBe(window.DarklabProjectAssessment)
+    expect(window.__darklabImportModule).toHaveBeenCalledWith(
+      '/static/js/features/projects/project_assessment.js?v=assessment-hash',
+    )
+
     const overviewPromise = window.loadProjectOverview()
     const overviewApi = await overviewPromise
     expect(overviewApi).toBe(window.DarklabProjectOverview)
@@ -469,6 +498,7 @@ describe('frontend config bootstrap', () => {
       '/static/js/features/atlas/atlas_overlay.js?v=atlas-overlay-hash',
       '/static/js/features/projects/project_report.js?v=report-hash',
       '/static/js/features/projects/project_activity.js?v=activity-hash',
+      '/static/js/features/projects/project_assessment.js?v=assessment-hash',
       '/static/js/features/projects/project_overview.js?v=overview-hash',
       '/static/js/features/projects/project_artifacts.js?v=artifacts-hash',
       '/static/js/features/projects/project_packages.js?v=packages-hash',
@@ -572,6 +602,7 @@ describe('frontend config bootstrap', () => {
       ['project_entities', 'DarklabProjectEntities', 'createProjectEntitiesController'],
       ['project_findings', 'DarklabProjectFindings', 'createProjectFindingsController'],
       ['project_findings_board', 'DarklabProjectFindingsBoard', 'createProjectFindingsBoardController'],
+      ['project_web_surface', 'DarklabProjectWebSurface', 'createProjectWebSurfaceController'],
     ]
     const projectWorkspaceCoreNames = [
       'project_details',
@@ -675,20 +706,25 @@ describe('frontend config bootstrap', () => {
     expect(workspaceApi).not.toHaveProperty('DarklabProjectRuns')
     expect(workspaceApi).not.toHaveProperty('DarklabProjectEntities')
 
-    const deferredPromise = window.loadProjectWorkspace({ modules: ['project_runs', 'project_entities'] })
+    const deferredPromise = window.loadProjectWorkspace({
+      modules: ['project_runs', 'project_entities', 'project_web_surface'],
+    })
     await vi.waitFor(() => {
       expect(imported).toEqual([
         ...projectWorkspaceCoreScripts.map(([name]) => `/static/js/features/projects/${name}.js?v=${name}-hash`),
         '/static/js/features/projects/project_runs.js?v=project_runs-hash',
         '/static/js/features/projects/project_entities.js?v=project_entities-hash',
+        '/static/js/features/projects/project_web_surface.js?v=project_web_surface-hash',
       ])
     })
     pendingProjectImports.get('project_runs')?.()
     pendingProjectImports.get('project_entities')?.()
+    pendingProjectImports.get('project_web_surface')?.()
     const deferredApi = await deferredPromise
     expect(deferredApi).toEqual(expect.objectContaining({
       DarklabProjectRuns: window.DarklabProjectRuns,
       DarklabProjectEntities: window.DarklabProjectEntities,
+      DarklabProjectWebSurface: window.DarklabProjectWebSurface,
     }))
     expect(appended).toEqual([])
 

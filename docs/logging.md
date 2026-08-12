@@ -10,7 +10,27 @@ Configuration loading starts before runtime bootstrap can build the final logger
 
 Structured events use the `session` field for request correlation. Anonymous session IDs are logged as-is, while `tok_` session-token values are masked before logging because they are bearer credentials.
 
-Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Atlas Quick Lookup reports accept only bounded modes, result states, scope kinds, request sequence numbers, counts, booleans, failure stages, and timings. Submitted drafts, normalized values, canonical values, URL paths or queries, and request bodies aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
+Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Assessment reports retain their stable event plus bounded Project, assessment, check, correlation, job, and profile keys; expected 4xx and degraded-network failures use WARNING, while unexpected 5xx and client-code failures use ERROR. Targets, HTTP-profile names or headers, callback URLs, commands, response bodies, and finding text aren't accepted. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Atlas Quick Lookup reports accept only bounded modes, result states, scope kinds, request sequence numbers, counts, booleans, failure stages, and timings. Submitted drafts, normalized values, canonical values, URL paths or queries, and request bodies aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
+
+Public CVE risk and advisory events log source names, feed versions, acquisition modes, outcomes, counts, timings, and error classes. Positive and negative NVD persistence events use counts only. They don't enumerate CVEs, package identities, targets, Projects, provider payloads, or finding evidence. Project acknowledgement logs keep only the escalation id, acknowledgement state, and bounded note length; the note itself stays in the database and out of logs.
+
+Assessment evidence matching logs bounded run, Project, team, and result counts after a completed run. Registry target-parser failures emit one WARNING with the safe run id, normalized command root, fixed parser, and error class before the generic extractor is used; DEBUG records carry only the parser outcome and parsed/fallback identity counts. Rejected Assessment launches use INFO when the broker is disabled by configuration and WARNING when its dependency is unavailable. Quota rejections emit one WARNING with a fixed quota kind, owner kind, safe workspace ids, and the limit, current, and requested counts. These events don't include commands, free-text errors, parser input, target or rejected values, finding text, output, profile snapshots, or evidence payloads. History deletion and automatic retention record only how many assessment evidence links became unavailable; the preserved evidence ids and reasons stay in the database and audit boundary rather than application logs.
+
+Assessment action, private-OAST reservation, and ZAP route records keep bounded workspace ids, policy and state fields, and counts. They don't include commands, targets, callback values, ZAP plans, HTTP-profile headers or names, credentials, provider responses, or finding text. HTTP-profile changes log only the profile id, role, enabled state, and reference counts; assessor-authored finding changes log ids, severity, revision, changed field names, and evidence counts without titles, descriptions, remediation text, notes, or evidence bodies. Finding-evidence records keep only the link id and evidence type. Profile-catalog rejection records bound the validation error and never include YAML or catalog definitions.
+
+Optional run-finalization stages keep the run, owner, Project when applicable, fixed stage, and bounded error class. Caught parser, query, artifact-read, and persistence failures include a sanitized traceback with a bounded source-file, function, and line summary while replacing the exception message and omitting the original source expression. Commands, workspace paths, targets, evidence bodies, reports, and parser payloads stay out of those records. A deterministic Schemathesis Project-link change is a WARNING skip without a traceback or error metric.
+
+Assessment matching and materialization outcomes keep owner-scoped ids plus bounded counts, rejection reasons, and created-state flags. They don't include target values, commands, report rows, payloads, finding prose, or evidence bodies. Their ERROR records include a traceback where the inventory says so; expected quota, stale-link, incomplete-report, and ambiguous-artifact paths use WARNING without a traceback.
+
+Private OAST provider, cleanup, and readiness records keep only a correlation id, fixed phase or state flags, timings, attempts, counts, and bounded error metadata. Successful external calls use DEBUG, while provider-ready, positive ingestion, and confirmed terminal cleanup use INFO. They never include the provider URL, callback domain or URL, service token, provider payload, session secret, private key, ciphertext, or spool path. Repeated readiness, stale-scan, and scope-mismatch warnings are suppressed for a bounded interval; the next emitted record reports how many repeats were skipped.
+
+Private ZAP plan-spool cleanup records keep only a validated job id, fixed cleanup stage, counts, and bounded error classes. They never include filesystem paths, Automation Framework YAML, selected targets, authentication roles, API keys, or report content. Repeated stale-scan warnings are suppressed for a bounded interval, and the next emitted warning reports how many repeats were skipped.
+
+ZAP worker lifecycle records use the same validated job id plus fixed state, phase, attempt, timing, concurrency, outcome-class, and bounded error fields. Successful external calls use DEBUG, durable state changes use INFO, and only the first identical retry uses WARNING until that operation recovers; repeated retries move to DEBUG with a suppression count. Ready-state changes can include the report size, but these records never include remote ids, exception text, target values, provider responses, plan content, credentials, or reports. Terminal failures add a sanitized traceback that preserves the originating stack without copying private values.
+
+Prometheus tracks active Assessment cycles by personal or team owner and a capped profile key, check transitions by bounded state and manual or derived source, derived evidence matches by type and outcome, action outcomes by fixed action and policy, parser outcomes, and ZAP/OAST operations and durations by fixed connector phase and outcome. The label contracts don't accept Project, assessment, check, run, job, correlation, workflow, target, command, CVE, callback, or provider values. Unknown values fold into fixed fallback labels, and scrape-time profile keys are normalized and capped rather than growing with stored data.
+
+HTTPx screenshot finalization logs only owner/run ids, counts, limits, and fixed failure classes. Storage-limit and cleanup events never include workspace paths, URLs, page titles, technologies, captured bytes, or target values.
 
 ## Level Semantics
 
@@ -134,13 +154,77 @@ The current event inventory is:
 | INFO | `REDIS_FALLBACK_IN_PROCESS` | process tracking startup | redis_configured, workers, fallback |
 | INFO | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP` | active-run startup cleanup | metadata_removed, session_members_removed, team_members_removed, pid, cleanup_owner, lock_type |
 | INFO | `MIGRATION_APPLIED` | Schema migration runner | migration_version, migration_name |
+| INFO | `CVE_RISK_BOOTSTRAP_LOADED` | bundled public-risk bootstrap | source, source_version, record_count, origin |
+| INFO | `CVE_RISK_REFRESH_COMPLETED` | public-risk feed refresh | source, source_version, record_count, outcome, attempt |
+| INFO | `CVE_ADVISORY_LOCAL_LOADED` | local NVD advisory loader | source, source_version, record_count, transition_count |
+| INFO | `CVE_ADVISORY_LOOKUP_STORED` | explicit Atlas CVE Intel refresh | source, outcome, record_count |
+| INFO | `RISK_ESCALATION_CREATED` | changed-CVE work processor | source, transition_kind, feed_version, owner_kind, observation_count, project_count, model_changed |
+| INFO | `PROJECT_RISK_ESCALATION_ACK_UPDATED` | Project Monitoring risk-event route | ip, session, team_id, project_id, escalation_id, ack_state, note_chars |
+| INFO | `PROJECT_ASSESSMENT_CREATED` | Project assessment create route | ip, session, team_id, project_id, assessment_id, profile_key, profile_version, check_count |
+| INFO | `PROJECT_ASSESSMENT_UPDATED` | Project assessment lifecycle route | ip, session, team_id, project_id, assessment_id, from_status, to_status, transition_kind, title_changed |
+| INFO | `PROJECT_ASSESSMENT_DELETED` | Project assessment deletion route | ip, session, team_id, project_id, assessment_id, check_count, evidence_count |
+| INFO | `PROJECT_ASSESSMENT_CHECK_STATE_CHANGED` | Project assessment check route | ip, session, team_id, project_id, assessment_id, check_id, check_key, policy_level, from_state, to_state, manual_override_cleared |
+| INFO | `PROJECT_ASSESSMENT_EVIDENCE_LINKED` | Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
+| INFO | `PROJECT_ASSESSMENT_EVIDENCE_UNLINKED` | Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
+| INFO / WARN | `PROJECT_ASSESSMENT_BROKER_UNAVAILABLE` | browser/API Assessment launch routes | request_id, session, owner_kind, team_id, project_id, assessment_id, check_id, finding_id, action_kind, source, reason, broker_mode |
+| DEBUG | `ASSESSMENT_PROFILE_CATALOG_CACHE_HIT` | assessment profile catalog | profile_count, check_count |
+| INFO | `ASSESSMENT_PROFILE_CATALOG_LOADED` | assessment profile catalog initial load and hot reload | load_kind, profile_count, check_count, local_overlay, duration_ms |
+| ERROR | `ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED` | required shipped assessment profile catalog | source_kind, error_code, error_class, traceback; catalog contents and paths are excluded |
+| WARNING | `ASSESSMENT_DALFOX_XSS_LAUNCH_CONTRACT_REJECTED` | reviewed Dalfox XSS launch guardrail | project_id, assessment_id, check_id, check_key, reason |
+| WARNING | `ASSESSMENT_DALFOX_OAST_LAUNCH_CONTRACT_REJECTED` | reviewed private-OAST launch guardrail | project_id, assessment_id, check_id, check_key, reason |
+| WARNING | `ASSESSMENT_TAKEOVER_LAUNCH_CONTRACT_REJECTED` | reviewed Nuclei takeover launch guardrail | project_id, assessment_id, check_id, profile_key, check_key, policy_level, action_id, reason |
+| ERROR | `ASSESSMENT_TAKEOVER_TEMPLATE_VALIDATION_FAILED` | app-owned Nuclei takeover template validation | project_id, assessment_id, check_id, profile_key, check_key, reason, traceback |
+| INFO | `API_PROJECT_ASSESSMENT_CREATED` | API v1 Project assessment create route | ip, session, team_id, project_id, assessment_id, source, profile_key, profile_version, check_count |
+| INFO | `API_PROJECT_ASSESSMENT_UPDATED` | API v1 Project assessment lifecycle route | ip, session, team_id, project_id, assessment_id, source, from_status, to_status, transition_kind, title_changed |
+| INFO | `API_PROJECT_ASSESSMENT_DELETED` | API v1 Project assessment deletion route | ip, session, team_id, project_id, assessment_id, source, check_count, evidence_count |
+| INFO | `API_PROJECT_ASSESSMENT_CHECK_STATE_CHANGED` | API v1 Project assessment check route | ip, session, team_id, project_id, assessment_id, check_id, source, check_key, policy_level, from_state, to_state, manual_override_cleared |
+| INFO | `API_PROJECT_ASSESSMENT_EVIDENCE_LINKED` | API v1 Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, source, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
+| INFO | `API_PROJECT_ASSESSMENT_EVIDENCE_UNLINKED` | API v1 Project assessment evidence route | ip, session, team_id, project_id, assessment_id, check_id, source, evidence_type, evidence_id, from_state, to_state, manual_state_preserved |
+| INFO | `PROJECT_ASSESSMENT_ACTION_LAUNCHED` / `API_PROJECT_ASSESSMENT_ACTION_LAUNCHED` | browser/API recommended-action launch | ip, session, team_id, source for API, project_id, assessment_id, check_id, check_key, profile_key, profile_version, policy_level, run_id, profile_id, profile_role, credential_use, action_kind, action_id |
+| INFO | `PROJECT_RETEST_BATCH_LAUNCHED` | browser Assessment retest-batch launch | ip, session, team_id, project_id, assessment_id, group_id, check_id, action_kind, action_id, finding_count, run_id |
+| INFO | `PROJECT_RETEST_BATCH_EVIDENCE_LINKED` | completed shared retest finalization | run_id, session, team_id, project_id, group_id, finding_count, linked_count, failed_count |
+| WARNING | `PROJECT_RETEST_BATCH_EVIDENCE_LINK_SKIPPED` | completed shared retest finalization | run_id, session, team_id, project_id, group_id, finding_count or finding_id/check_id, reason |
+| ERROR | `PROJECT_RETEST_BATCH_EVIDENCE_LINK_ERROR` | completed shared retest finalization | run_id, session, team_id, project_id, group_id, finding_id, check_id, traceback |
+| INFO | `PROJECT_ASSESSMENT_OAST_RESERVED` / `API_PROJECT_ASSESSMENT_OAST_RESERVED` | browser/API private-OAST reservation | ip, session, team_id, source for API, project_id, assessment_id, check_id, correlation_id, correlation_status |
+| INFO | `PROJECT_ASSESSMENT_OAST_LAUNCHED` / `API_PROJECT_ASSESSMENT_OAST_LAUNCHED` | browser/API private-OAST launch | ip, session, team_id, source for API, project_id, assessment_id, check_id, check_key, profile_key, profile_version, policy_level, run_id, profile_id, profile_role, credential_use, correlation_id, parameter_source_run_id, parameter_observation_id |
+| INFO | `PROJECT_ASSESSMENT_ZAP_JOB_SUBMITTED` / `API_PROJECT_ASSESSMENT_ZAP_JOB_SUBMITTED` | browser/API ZAP submit route | ip, session, team_id, source for API, project_id, assessment_id, check_id, job_id, policy_level, target_count |
+| INFO | `PROJECT_ASSESSMENT_ZAP_JOB_CANCEL_REQUESTED` / `API_PROJECT_ASSESSMENT_ZAP_JOB_CANCEL_REQUESTED` | browser/API ZAP cancel route | ip, session, team_id, source for API, project_id, assessment_id, check_id, job_id, job_status |
+| INFO | `PROJECT_HTTP_PROFILE_CREATED` / `API_PROJECT_HTTP_PROFILE_CREATED` | browser/API HTTP-profile create route | ip, session, team_id, source for API, project_id, profile_id, role, enabled, reference_counts |
+| INFO | `PROJECT_HTTP_PROFILE_UPDATED` / `API_PROJECT_HTTP_PROFILE_UPDATED` | browser/API HTTP-profile update route | ip, session, team_id, source for API, project_id, profile_id, role, enabled, reference_counts |
+| INFO | `PROJECT_HTTP_PROFILE_DELETED` / `API_PROJECT_HTTP_PROFILE_DELETED` | browser/API HTTP-profile delete route | ip, session, team_id, source for API, project_id, profile_id, role, enabled, reference_counts |
+| DEBUG | `PROJECT_MANUAL_FINDING_CONFLICT` / `API_PROJECT_MANUAL_FINDING_CONFLICT` | browser/API manual-finding create conflict | ip, session, team_id, source for API, project_id, conflict, duplicate_count |
+| DEBUG | `PROJECT_MANUAL_FINDING_UPDATE_CONFLICT` / `API_PROJECT_MANUAL_FINDING_UPDATE_CONFLICT` | browser/API manual-finding update conflict | ip, session, team_id, source for API, project_id, finding_id, conflict, current_revision, duplicate_count |
+| INFO | `PROJECT_MANUAL_FINDING_CREATED` / `API_PROJECT_MANUAL_FINDING_CREATED` | browser/API manual-finding create route | ip, session, team_id, source for API, project_id, finding_id, target_id, severity, manual_revision, evidence_count, duplicate_override |
+| INFO | `PROJECT_MANUAL_FINDING_UPDATED` / `API_PROJECT_MANUAL_FINDING_UPDATED` | browser/API manual-finding update route | ip, session, team_id, source for API, project_id, finding_id, target_id, severity, manual_revision, changed_fields, duplicate_override |
+| INFO | `PROJECT_FINDING_EVIDENCE_LINKED` / `API_PROJECT_FINDING_EVIDENCE_LINKED` | browser/API finding-evidence link route | ip, session, team_id, source for API, project_id, finding_id, evidence_link_id, evidence_type, link_created |
+| INFO | `PROJECT_FINDING_EVIDENCE_UNLINKED` / `API_PROJECT_FINDING_EVIDENCE_UNLINKED` | browser/API finding-evidence unlink route | ip, session, team_id, source for API, project_id, finding_id, evidence_link_id, evidence_type |
+| WARNING | `ASSESSMENT_PROFILE_CATALOG_RELOAD_REJECTED` | changed required shipped profile catalog rejected in favor of the last valid catalog | source, path, bounded validation error; no traceback |
+| WARNING | `ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED` | local profile overlay rejected in favor of shipped or last valid catalog | path, bounded validation error; no traceback |
+| WARNING | `ASSESSMENT_NUCLEI_PROFILE_CONTRACT_CHANGED` | saved generic Nuclei action no longer matches the deployment contract | project_id, assessment_id, check_id, profile_key, policy_level, deployment_gate_enabled; no traceback |
+| WARNING | `ASSESSMENT_NUCLEI_TEMPLATE_CACHE_CHANGED` | saved generic Nuclei action no longer matches the template cache | project_id, assessment_id, check_id, expected_state, current_state; no traceback |
+| INFO | `OAST_WORKER_STARTED` / `OAST_WORKER_STOPPED` | private OAST connector worker | pid |
+| INFO | `OAST_WORKER_LOCK_HELD` | private OAST connector worker | — |
+| ERROR | `OAST_WORKER_TICK_FAILED` | private OAST connector worker | traceback |
+| INFO | `PROJECT_ASSESSMENT_EVIDENCE_MATCHED` | completed-run assessment matching | run_id, session, team_id, project_ids, checks_considered, checks_matched, evidence_created, states_updated, manual_states_preserved |
+| WARNING | `PROJECT_ASSESSMENT_EVIDENCE_SKIPPED` | completed-run assessment matching quota rejection | run_id, session, team_id, project_ids, quota reason; no traceback |
+| ERROR | `PROJECT_ASSESSMENT_EVIDENCE_ERROR` | completed-run assessment matching failure | run_id, session, team_id, project_ids, traceback |
+| INFO | `PROJECT_ASSESSMENT_FINDINGS_RECONCILED` | completed-run assessment finding reconciliation | run_id, session, team_id, project_ids, assessment_count, finding_delta_count |
+| WARNING | `PROJECT_ASSESSMENT_FINDING_RECONCILIATION_SKIPPED` | completed-run finding reconciliation quota rejection | run_id, session, team_id, project_ids, quota reason; no traceback |
+| ERROR | `PROJECT_ASSESSMENT_FINDING_RECONCILIATION_ERROR` | completed-run finding reconciliation failure | run_id, session, team_id, project_ids, traceback |
+| INFO | `DALFOX_XSS_FINDINGS_MATERIALIZED` | reviewed Dalfox XSS run finalization | run_id, session, team_id, project_id, finding_count, finding_created_count, finding_ids |
+| INFO | `SCHEMATHESIS_EVIDENCE_MATERIALIZED` | reviewed Schemathesis run finalization | run_id, session, team_id, project_id, assessment_id, check_id, report_id, created_now, operation_count, case_count, failure_count, missing_operation_count, finding_count, finding_created_count, finding_ids |
+| WARNING | `SCHEMATHESIS_FINDINGS_EXIT_REJECTED` | reviewed Schemathesis completion policy | fixed reason; no traceback |
+| INFO | `TAKEOVER_CONFIRMATION_MATERIALIZED` | reviewed Nuclei takeover run finalization | run_id, session, team_id, project_id, finding_id, finding_created |
+| INFO | `NMAP_SERVICE_EVIDENCE_FINALIZED` | structured Nmap service-evidence finalization | run_id, session, team_id, observation_count, created_count, skipped_count, truncated |
+| WARNING | `NMAP_STRUCTURED_EVIDENCE_ARTIFACT_REJECTED` | structured Nmap artifact selection | run_id, session, team_id, marked_artifact_count; no traceback |
+| ERROR | `HTTPX_SCREENSHOT_ARTIFACT_CAPTURE_ERROR` | HTTPx screenshot artifact finalization | run_id, session, team_id, traceback |
 | INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
 | INFO | `GUNICORN_CHILD_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `GUNICORN_WORKER_EXIT` | Gunicorn worker hook | pid, hook |
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
 | INFO | `REQUEST_COMPLETED` | `after_request` | ip, session, request_id, method, path, endpoint, http_status, duration_ms |
 | INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type, scan_transport (raw/connect scanner runs only) |
-| INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
+| INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, version_inference_count, full_output_truncated |
 | INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
 | INFO | `RUN_OUTPUT_ARTIFACT_FINALIZED` | full-output artifact capture | run_id, rel_path, artifact_bytes, lines, truncated, available |
 | INFO | `WORKFLOW_EXECUTION_STARTED` | durable workflow route | execution_id, workflow_id, workflow_source, step_count, team_id, session, ip |
@@ -206,6 +290,7 @@ The current event inventory is:
 | DEBUG | `SCHEDULE_AFTER_FIRE_UPDATED` | scheduler storage | schedule_id, owner_kind, run_id, fired_at, next_run_at, consecutive_failures |
 | DEBUG | `SCHEDULE_PREVIEW_GENERATED` | browser schedule routes | ip, session, team_id, cron_expr, cadence_preset, timezone, next_fire_count |
 | DEBUG | `SCHEDULES_LISTED` | browser schedule routes | ip, session, team_id, count |
+| DEBUG | `PROJECT_ASSESSMENT_TARGET_PARSE_RESULT` | assessment evidence target parsing | run_id, command_root, parser, outcome, parsed_identity_count, fallback_identity_count |
 | DEBUG | `SCHEDULE_FIRES_LISTED` | browser schedule routes | ip, session, team_id, schedule_id, count, total, limit, offset |
 | DEBUG | `API_SCHEDULES_LISTED` | API schedule routes | ip, session, team_id, count, limit, offset |
 | DEBUG | `API_SCHEDULE_FIRES_LISTED` | API schedule routes | ip, session, team_id, schedule_id, count, total, limit, offset |
@@ -224,6 +309,12 @@ The current event inventory is:
 | DEBUG | `AI_CONTEXT_BUILT` | AI context assembly | run_id, session, variant, output_source, output_truncated, max_input_chars, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes, useful, omitted_sections, section_count, context_hash |
 | DEBUG | `AI_SUGGESTION_VALIDATION_COMPLETED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
 | DEBUG | `AI_WORKER_BUSY` | AI worker coordination | max_concurrent |
+| DEBUG | `HTTPX_SCREENSHOT_OUTPUT_CLEANED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
+| DEBUG | `OAST_PROVIDER_RETRY_SUPPRESSED` | private OAST retry suppression | retry_event, correlation_id when applicable, correlation_status, correlation_count when applicable, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| DEBUG | `OAST_PROVIDER_CALL_COMPLETED` | private OAST provider calls | correlation_id, phase, duration_ms, attempt, accepted_count, rejected_count, duplicate_count |
+| DEBUG | `ZAP_EXTERNAL_CALL_COMPLETED` | ZAP connector worker | job_id, phase, attempt, duration_ms, outcome_class |
+| DEBUG | `ZAP_CONCURRENCY_DEFERRED` | ZAP connector worker | deferred_count, active_count, configured_limit |
+| DEBUG | `ZAP_RETRY_SUPPRESSED` | ZAP connector retry suppression | retry_event, job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
 | INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
 | INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, team_id, source, schedule_id, removed |
@@ -232,6 +323,14 @@ The current event inventory is:
 | INFO | `PROJECT_AUTO_PROMOTE_RUN_APPLIED` | run finalization | run_id, session, team_id, project_ids, rule_ids, bounded rule_results, aggregate match/link/promote/quota/cap counts |
 | INFO | `PROJECT_UPDATED` | Project update route | ip, session, project_id, project_status |
 | INFO | `ATLAS_ENTITIES_CAPTURED` | run finalization | run_id, session, team_id, count, entity_type_counts, port_entity_count, scan_observation_count |
+| INFO | `NMAP_VERSION_INFERENCE_FINALIZED` | run finalization | run_id, session, team_id, observation_count, candidate_count, attempted_count, materialized_count, finding_created_count, source_created_count, rejected_count, skipped_count, truncated |
+| WARN | `NMAP_VERSION_INFERENCE_ARTIFACT_REJECTED` | run finalization | run_id, session, team_id, marked_artifact_count |
+| ERROR | `NMAP_VERSION_INFERENCE_FINALIZE_ERROR` | run finalization | run_id, session, team_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `NMAP_SERVICE_EVIDENCE_FINALIZE_ERROR` | run finalization | run_id, session, team_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `NMAP_STRUCTURED_EVIDENCE_READ_ERROR` | run finalization | run_id, session, team_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `DALFOX_XSS_FINDINGS_FINALIZE_ERROR` | run finalization | run_id, session, team_id, project_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `TAKEOVER_CONFIRMATION_FINALIZE_ERROR` | run finalization | run_id, session, team_id, project_id, finalize_stage, error_class (+ sanitized traceback) |
+| ERROR | `SCHEMATHESIS_EVIDENCE_FINALIZE_ERROR` | run finalization | run_id, session, team_id, project_id, finalize_stage, error_code, error_class (+ sanitized traceback) |
 | INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, team_id, source, schedule_id, fire_status, fired_at, run_id, last_error |
 | INFO | `API_SCHEDULE_CREATED` | API schedule routes | ip, session, team_id, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `API_SCHEDULE_UPDATED` | API schedule routes | ip, session, team_id, source, schedule_id, changed_fields, enabled, next_run_at |
@@ -272,6 +371,13 @@ The current event inventory is:
 | INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
+| INFO | `ZAP_WORKER_STARTED` | ZAP connector worker | pid |
+| INFO | `ZAP_WORKER_LOCK_HELD` | ZAP connector worker | — |
+| INFO | `ZAP_WORKER_STOPPED` | ZAP connector worker | pid |
+| INFO | `ZAP_JOB_STATE_CHANGED` | ZAP connector worker | job_id, from_status, to_status, phase, duration_ms, report_bytes when ready |
+| INFO | `OAST_PROVIDER_SESSION_READY` | private OAST provider registration | correlation_id, correlation_status |
+| INFO | `OAST_INTERACTIONS_INGESTED` | private OAST interaction ingestion | correlation_id, correlation_status, accepted_count, rejected_count, duplicate_count |
+| INFO | `OAST_PROVIDER_SESSION_CLEANED` | private OAST terminal cleanup | correlation_id, correlation_status |
 | INFO | `SCHEDULER_RECOVERY_APPLIED` | scheduler recovery | fired, skipped |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session, cleanup flags, removed/curated/kept counts |
@@ -284,6 +390,7 @@ The current event inventory is:
 | WARN | `RAW_PACKET_SCANNING_UNAVAILABLE` | app startup | tool, reason, availability_reason |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
 | WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, http_status |
+| WARN | `PROJECT_HTTP_PROFILE_INVALID_TARGETS_SKIPPED` | Project HTTP-profile scope discovery | project_id, team_scope, invalid_target_count, invalid_target_types |
 | WARN / ERROR | `TEAM_ACTION_REJECTED` / `TEAM_ROUTE_FAILED` / `TEAM_ACTION_FAILED` | browser/API team management routes | action, team_id, session, ip, result, source, reason, error_code, http_status, route, method |
 | WARN | `API_BROKER_UNAVAILABLE` | API run start routes | ip, reason |
 | WARN | `API_FULL_OUTPUT_LOAD_FAILED` | API output route | run_id, session, rel_path, error |
@@ -322,8 +429,25 @@ The current event inventory is:
 | WARN | `SCHEDULE_FIRE_CLAIM_TIME_INVALID` | scheduler dispatch | schedule_id, owner_kind, session, last_run_at, command_root |
 | WARN | `SCHEDULER_WORKER_DATABASE_INTERRUPTED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type, error_type, sqlstate |
 | WARN | `SCHEDULER_LOCK_RELEASE_SKIPPED` | scheduler worker | phase, error_type, sqlstate |
+| WARN | `SCHEMATHESIS_EVIDENCE_FINALIZE_SKIPPED` | run finalization | run_id, session, team_id, project_id, finalize_stage, reason |
+| WARN | `PROJECT_ASSESSMENT_TARGET_PARSE_FALLBACK` | assessment evidence target parsing | run_id, command_root, parser, error_class |
+| WARN / ERROR | `PROJECT_ASSESSMENT_CLIENT_*` | Assessment browser controllers through `/log` | ip, session, context, client_message, client_details with page, phase, status, project_id, assessment_id, check_id, correlation_id, job_id, profile_key |
+| WARN | `ZAP_CANCEL_RETRY` | ZAP connector worker | job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
+| WARN | `ZAP_CANCEL_CREDENTIAL_RETRY` | ZAP connector worker | job_id, phase, attempt, next_attempt, retryable, next_retry_seconds, suppressed_repeat_count, error_class, error_code |
+| WARN | `ZAP_PLAN_SPOOL_SCAN_DEGRADED` | private ZAP plan reconciliation | failure_count, error_classes, suppressed_repeat_count |
+| WARN | `OAST_SESSION_SPOOL_SCAN_DEGRADED` | private OAST session reconciliation | failure_count, error_classes, suppressed_repeat_count |
+| WARN | `OAST_SESSION_SPOOL_UNAVAILABLE` | private OAST readiness check | correlation_id, error_class, error_code, suppressed_repeat_count |
+| WARN | `OAST_PROVIDER_CLEANUP_SCOPE_MISMATCH` | private OAST terminal cleanup | correlation_id, correlation_status, connector_disabled, privacy_acknowledgement_missing, callback_scope_changed, service_origin_changed, suppressed_repeat_count |
+| WARN | `OAST_PROVIDER_SCOPE_RETRY` | private OAST scope recovery | correlation_id, correlation_status, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| WARN | `OAST_PROVIDER_RETRY` | private OAST provider recovery | correlation_id, correlation_status, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| WARN | `OAST_PROVIDER_CLEANUP_RETRY` | private OAST terminal cleanup | correlation_id, correlation_status, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| WARN | `OAST_INTERACTION_REJECTED` | private OAST interaction ingestion | correlation_id, correlation_status, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
+| WARN | `OAST_PROVIDER_CREDENTIAL_RETRY` | private OAST credential recovery | correlation_count, attempt, retryable, next_retry_seconds, occurrence_count, suppressed_repeat_count, error_class, error_code |
 | WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
-| WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
+| WARN | `PROJECT_QUOTA_HIT` | project quota helper | quota_kind, owner_kind, project_id, assessment_id, check_id, limit, current_count, requested_count |
+| WARN | `CVE_RISK_BOOTSTRAP_UNAVAILABLE` | bundled public-risk bootstrap | reason |
+| WARN | `CVE_RISK_REFRESH_RETRY` | public-risk feed refresh | source, attempt, max_attempts, error_type |
+| WARN | `PROJECT_RISK_ESCALATION_ACK_REJECTED` | Project Monitoring risk-event route | ip, session, team_id, project_id, escalation_id, http_status, reason |
 | WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
 | WARN | `PACKAGE_PRESETS_OVERRIDE_INVALID` | evidence package preset catalog loader | path, fallback_path, error |
 | WARN | `PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED` / `CREATE_REJECTED` / `UPDATE_REJECTED` / `APPLY_REJECTED` | Project auto-promote rule routes | ip, session, team_id, actor_member_id, actor_role, project_id, rule_id, target_entity_kind, match_mode, http_status, reason |
@@ -364,6 +488,10 @@ The current event inventory is:
 | WARN | `CLIENT_RUN_OUTPUT_TRUNCATED` | client-side run persistence | ip, session, cmd, raw_line_count, stored_line_count, limit |
 | WARN | `RUN_OUTPUT_ARTIFACT_TRUNCATED` | full-output artifact capture | run_id, rel_path, artifact_bytes, limit, reason |
 | WARN | `RUN_OUTPUT_ARTIFACT_PARSE_FALLBACK` | full-output artifact loading | rel_path, row_index, reason, error |
+| WARN | `HTTPX_SCREENSHOT_PROTECTED_PATH_LOOKUP_FAILED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
+| WARN | `HTTPX_SCREENSHOT_STORAGE_LIMIT_REACHED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated, quota_rejected_count, available_file_slots, available_bytes, usage_unavailable |
+| WARN | `HTTPX_SCREENSHOT_CLEANUP_INCOMPLETE` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
+| WARN | `HTTPX_SCREENSHOT_CLEANUP_SKIPPED_PROTECTED` | HTTPx screenshot finalization | run_id, session, team_id, candidate_count, invalid_count, retained_count, removed_count, cleanup_failed_count, protected_cleanup_skip_count, protected_lookup_failed, protected_lookup_error, candidate_truncated |
 | WARN | `COMMAND_REGISTRY_LOCAL_OVERLAY_INVALID` | command registry loading | path, error |
 | WARN | `THEME_OVERLAY_LOAD_FAILED` | theme loading | path, source, error_type |
 | WARN | `BODY_STORE_LOAD_FALLBACK` | large body storage | rel_path, kind, error |
@@ -426,6 +554,11 @@ The current event inventory is:
 | ERROR | `RUNTIME_BOOTSTRAP_FAILED` | runtime bootstrap | phase, runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs (+ traceback) |
 | ERROR | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR` | active-run startup cleanup | (+ traceback) |
 | ERROR | `DB_INIT_FAILED` | database startup | backend, phase, schema_action (+ traceback) |
+| ERROR | `CVE_RISK_BOOTSTRAP_MANIFEST_INVALID` | bundled public-risk bootstrap | reason when available (+ traceback for unreadable or invalid JSON) |
+| ERROR | `CVE_RISK_BOOTSTRAP_FAILED` | bundled public-risk bootstrap | source (+ traceback) |
+| ERROR | `CVE_RISK_REFRESH_FAILED` | public-risk feed refresh | source, attempts, error_type (+ traceback) |
+| ERROR | `CVE_ADVISORY_LOCAL_LOAD_FAILED` | local NVD advisory loader | source, error_type |
+| ERROR | `CVE_RISK_WORK_ITEM_FAILED` | changed-CVE work processor | source, attempt, max_attempts, error_type (+ traceback) |
 | ERROR | `METRICS_ENVIRONMENT_SETUP_FAILED` | metrics startup | prometheus_multiproc_dir, source (+ traceback) |
 | ERROR | `GUNICORN_WORKER_CLEANUP_FAILED` | Gunicorn worker hook | hook, pid (+ traceback) |
 | ERROR | `PROJECT_AUTO_PROMOTE_RUN_ERROR` | run finalization | run_id, session, team_id, cmd (+ traceback); per-rule context is logged by `PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR` |
@@ -450,6 +583,12 @@ The current event inventory is:
 | ERROR | `SCHEDULE_FAILURE_NOTIFICATION_ERROR` | scheduler dispatch | schedule_id (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_BOOTSTRAP_FAILED` | scheduler worker | phase, pid (+ traceback) |
+| ERROR | `ZAP_WORKER_TICK_FAILED` | ZAP connector worker | (+ traceback) |
+| ERROR | `ZAP_JOB_FAILED` | ZAP connector worker | job_id, from_status, to_status, phase, error_code, error_class (+ sanitized traceback) |
+| ERROR | `ZAP_PLAN_SPOOL_CLEANUP_FAILED` | private ZAP plan cleanup | job_id, cleanup_stage, error_class (+ sanitized traceback) |
+| ERROR | `OAST_SESSION_SPOOL_CLEANUP_FAILED` | private OAST terminal or orphan cleanup | correlation_id, cleanup_stage, error_class (+ sanitized traceback) |
+| ERROR | `OAST_PROVIDER_DEREGISTRATION_FAILED` | private OAST registration rollback | correlation_id, cleanup_stage, error_class, error_code (+ sanitized traceback) |
+| ERROR | `OAST_PROVIDER_SESSION_FAILED` | private OAST terminal session failure | correlation_id, from_status, to_status, error_class, error_code (+ sanitized traceback) |
 | ERROR | `AI_WORKER_BOOTSTRAP_FAILED` | AI worker startup | phase (+ traceback) |
 | ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Schema migration runner | migration_version, migration_name, error (+ traceback) |

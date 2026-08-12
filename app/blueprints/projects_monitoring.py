@@ -112,6 +112,7 @@ def projects_digest_settings_update(project_id):
         "cadence_preset": str(settings.get("cadence_preset") or ""),
         "channel_count": len(settings.get("channel_ids") or []),
         "quiet_no_change": bool(settings.get("quiet_no_change")),
+        "risk_escalations_enabled": bool(settings.get("risk_escalations_enabled")),
     })
     return jsonify({
         "digest_settings": settings,

@@ -14,6 +14,8 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.I)
 HEX_HASH_RE = re.compile(r"^[0-9a-f]+$", re.I)
 MAX_CANONICAL_VALUE_BYTES = 2048
+_AMBIGUOUS_PATH_ESCAPE_RE = re.compile(r"%(?:25)+(?:2e|2f|5c)|%(?:2f|5c)", re.I)
+_INVALID_PERCENT_ESCAPE_RE = re.compile(r"%(?![0-9a-f]{2})", re.I)
 PORT_RE = re.compile(r"^(?P<port>\d{1,5})(?:/(?P<proto>[a-z][a-z0-9-]*))?$", re.I)
 BRACKETED_HOST_PORT_RE = re.compile(
     r"^\[(?P<host>[^\]]+)]:(?P<port>\d{1,5})(?:/(?P<proto>[a-z][a-z0-9-]*))?$",
@@ -77,6 +79,57 @@ def canonical_cve(value: str) -> str:
     return token
 
 
+def _remove_dot_segments(path: str) -> str:
+    """Apply the RFC 3986 remove-dot-segments algorithm to one decoded path."""
+    pending = path
+    rendered = ""
+    while pending:
+        if pending.startswith("../"):
+            pending = pending[3:]
+        elif pending.startswith("./"):
+            pending = pending[2:]
+        elif pending.startswith("/./"):
+            pending = pending[2:]
+        elif pending == "/.":
+            pending = "/"
+        elif pending.startswith("/../"):
+            pending = pending[3:]
+            rendered = rendered.rsplit("/", 1)[0]
+        elif pending == "/..":
+            pending = "/"
+            rendered = rendered.rsplit("/", 1)[0]
+        elif pending in {".", ".."}:
+            pending = ""
+        else:
+            separator = pending.find("/", 1 if pending.startswith("/") else 0)
+            if separator < 0:
+                rendered += pending
+                pending = ""
+            else:
+                rendered += pending[:separator]
+                pending = pending[separator:]
+    return rendered
+
+
+def canonical_url_path(value: str, *, reject_dot_segments: bool = False) -> str:
+    """Return one unambiguous, RFC 3986-normalized URL path."""
+    raw = str(value or "")
+    if (
+        "\\" in raw
+        or _INVALID_PERCENT_ESCAPE_RE.search(raw)
+        or _AMBIGUOUS_PATH_ESCAPE_RE.search(raw)
+    ):
+        raise CanonicalizationError("URL path contains an ambiguous escape")
+    try:
+        decoded = unquote(raw, errors="strict")
+    except UnicodeDecodeError as exc:
+        raise CanonicalizationError("URL path contains invalid UTF-8") from exc
+    normalized = _remove_dot_segments(decoded)
+    if reject_dot_segments and normalized != decoded:
+        raise CanonicalizationError("URL path contains dot segments")
+    return quote(normalized, safe="/:@")
+
+
 def canonical_url(value: str) -> str:
     raw = str(value or "").strip()
     parts = urlsplit(raw)
@@ -98,7 +151,7 @@ def canonical_url(value: str) -> str:
     is_default_port = (scheme == "http" and parsed_port == 80) or (scheme == "https" and parsed_port == 443)
     port = f":{parsed_port}" if parsed_port and not is_default_port else ""
     netloc = host + port
-    path = quote(unquote(parts.path or ""), safe="/:@")
+    path = canonical_url_path(parts.path or "")
     if path == "/" and not parts.query:
         path = ""
     elif not parts.query and path.endswith("/"):

@@ -1,6 +1,6 @@
 # Headless API and CLI
 
-darklab_shell exposes a small `/api/v1` surface for scripts, CI jobs, and local terminals that need to start runs or read saved data without opening the browser UI. The API uses the same session token, command validation, brokered run lifecycle, artifact storage, project query services, and shared per-IP rate-limit policy as the browser run routes.
+darklab_shell exposes a versioned `/api/v1` headless API for scripts, CI jobs, and local terminals that need to start runs or read saved data without opening the browser UI. The API uses the same session token, command validation, brokered run lifecycle, artifact storage, Project query services, and shared per-IP rate-limit policy as the browser run routes.
 
 The bundled `darklab` CLI is a thin wrapper around this API. Install it from the repo root with:
 
@@ -21,6 +21,32 @@ installs completion for the detected shell, while `darklab completion bash`,
 `darklab completion zsh`, and `darklab completion fish` print the scripts without
 installing them. Completion covers CLI commands, nested command groups, option
 names, and fixed choices such as output formats and notification channel kinds.
+
+---
+
+## Contents
+
+- [Auth](#auth)
+- [Versioning](#versioning)
+- [Common Shapes](#common-shapes)
+- [Routes](#routes)
+  - [Exact OSV package lookup](#exact-osv-package-lookup)
+- [Project Assessments](#project-assessments)
+  - [HTTP profiles](#http-profiles)
+  - [Recommended actions](#recommended-actions)
+  - [External ZAP jobs](#external-zap-jobs)
+  - [Private OAST reservations](#private-oast-reservations)
+  - [Finding and run evidence](#finding-and-run-evidence)
+- [Teams](#teams)
+- [Running Commands](#running-commands)
+- [Atlas](#atlas)
+- [Schedules](#schedules)
+- [Watchers](#watchers)
+- [Notifications](#notifications)
+- [Streaming](#streaming)
+- [CLI Commands](#cli-commands)
+- [CLI Configuration](#cli-configuration)
+- [Related Docs](#related-docs)
 
 ---
 
@@ -91,6 +117,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/health` | Unauthenticated liveness check. |
 | `GET` | `/api/v1/openapi.json` | Unauthenticated OpenAPI document. |
 | `GET` | `/api/v1/whoami` | Token smoke test with creation metadata and the current successful-auth timestamp, without echoing the token. |
+| `POST` | `/api/v1/advisories/osv/lookup` | Explicitly look up one exact PURL and version when external OSV mode is enabled. |
 | `GET` | `/api/v1/teams` | List teams joined by the current token. |
 | `POST` | `/api/v1/teams` | Create a team and return the one-time recovery code. |
 | `GET` | `/api/v1/teams/<team_id>` | Team detail with members, invites, and recovery-code metadata. |
@@ -119,9 +146,41 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects` | Read-only project list. |
 | `GET` | `/api/v1/projects/<project_id>` | Read-only project detail. |
 | `GET` | `/api/v1/projects/<project_id>/findings` | Read-only project finding page. |
+| `POST` | `/api/v1/projects/<project_id>/findings` | Create an assessor-authored finding for a confirmed Project target. Likely duplicates return a conflict unless explicitly accepted. |
+| `PATCH` | `/api/v1/projects/<project_id>/findings/<finding_id>` | Edit an assessor-authored finding using its current `expected_revision`. |
+| `GET` | `/api/v1/projects/<project_id>/findings/<finding_id>/evidence` | List the finding's bounded typed evidence and current verification context. |
+| `POST` | `/api/v1/projects/<project_id>/findings/<finding_id>/evidence` | Link one same-owner, same-Project evidence source to a finding. |
+| `DELETE` | `/api/v1/projects/<project_id>/findings/<finding_id>/evidence/<evidence_link_id>` | Unlink one finding-evidence reference without deleting its source. |
 | `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
+| `GET` | `/api/v1/projects/<project_id>/assessments` | Assessment-cycle page with status, archived-visibility, limit, and offset controls plus the available profile keys and labels. |
+| `POST` | `/api/v1/projects/<project_id>/assessments` | Create an active assessment cycle from a saved profile definition. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | One assessment cycle with coverage, finding-change, and fix-first rollups plus independently paged check and remediation worklists. Check filters use `category`, `state`, `target_type`, `policy_level`, and `evidence_state`; fix-first filters use `finding_priority`, `finding_limit`, and `finding_offset`. |
+| `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Rename, complete, or archive an assessment cycle. |
+| `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Set or clear a reasoned manual check state. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Link one compatible saved evidence source to a check. |
+| `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence/<evidence_link_id>` | Unlink one manually added evidence source. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/recommended-action` | Preview the current redacted plan, with optional HTTP-profile, Dalfox-observation, or OpenAPI-artifact selection. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/recommended-action` | Confirm the current digest, start the bounded action, and link its run to the Project. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/oast-correlations` | Recover the ten newest redacted private-OAST reservations for one check. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/oast-correlations` | Confirm the provider-free blind-XSS plan and reserve a short-lived private callback. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/oast-correlations/<correlation_id>` | Poll one reservation and reveal its callback only after the worker marks it ready. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/oast-correlations/<correlation_id>/launch` | Reconfirm and start one ready private-OAST reservation. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/zap-plan` | Review selected Project URLs and return the exact non-secret ZAP plan. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/zap-jobs` | Recover the ten newest bounded ZAP jobs for one check. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/zap-jobs` | Reconfirm the plan and queue it for the external ZAP worker. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/zap-jobs/<job_id>` | Poll bounded ZAP progress and completed Files/Atlas handoff state. |
+| `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/zap-jobs/<job_id>` | Request cancellation of an active ZAP job. |
+| `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/delete-preview` | Preview the assessment-owned rows an archived-cycle deletion removes. |
+| `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Delete one archived cycle without deleting its source records. |
+| `GET` | `/api/v1/projects/<project_id>/http-profiles` | List the Project's saved HTTP profiles with capability-aware reference redaction. |
+| `POST` | `/api/v1/projects/<project_id>/http-profiles` | Create a reference-only HTTP profile. |
+| `GET` | `/api/v1/projects/<project_id>/http-profiles/<profile_id>` | Read one scoped HTTP profile. |
+| `PATCH` | `/api/v1/projects/<project_id>/http-profiles/<profile_id>` | Update one HTTP profile using its current revision. |
+| `DELETE` | `/api/v1/projects/<project_id>/http-profiles/<profile_id>` | Delete one HTTP profile without deleting its referenced resources. |
+| `GET` | `/api/v1/projects/<project_id>/findings/<finding_id>/verification-actions/<check_id>` | Preview the current bounded command plan for a finding's saved assessment check. |
+| `POST` | `/api/v1/projects/<project_id>/findings/<finding_id>/verification-actions/<check_id>` | Confirm the current plan digest, start the safe or standard command, and link its run to the Project. |
 | `GET` | `/api/v1/schedules` | Scheduled-command page for the token's active personal/team scope. |
 | `POST` | `/api/v1/schedules` | Create a scheduled command with `command`, `cron_expr` or `cadence_preset`, optional `timezone`, and optional `label`. |
 | `GET` | `/api/v1/schedules/<schedule_id>` | One scheduled command plus a next-fire preview. |
@@ -148,6 +207,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `POST` | `/api/v1/runs` | Start a non-interactive command run. |
 | `GET` | `/api/v1/runs/<run_id>` | Active or completed run status. |
 | `GET` | `/api/v1/runs/<run_id>/output` | Stored run output, with the same `format` and `range` options as the history output route. |
+| `GET` | `/api/v1/runs/<run_id>/service-evidence` | Page through bounded structured Nmap service observations with `limit` and `offset`. |
 | `POST` | `/api/v1/runs/<run_id>/wait` | Block until the run finishes or `?timeout=` expires. |
 | `GET` | `/api/v1/runs/<run_id>/ai-assists` | List cached and in-flight AI assists for one completed run in the active personal/team scope. |
 | `POST` | `/api/v1/runs/<run_id>/ai-summary` | Return a cached AI summary or queue one for the AI worker; team scope requires run-command permission. |
@@ -198,6 +258,198 @@ AI assist responses include a `progress` object while a queued request is active
 Summary payloads use `summary`, `key_findings`, `warnings`, and `next_steps_hint`. Next-command payloads use `suggestions`, where accepted and rejected drafts include command text, reason, risk label, validation result, and any rejection reason.
 
 Run, history, artifact, project, AI assist, schedule, and watcher routes are scoped to the token's active personal/team scope. Cross-scope IDs return `404` rather than confirming the object exists elsewhere.
+
+### Exact OSV package lookup
+
+External OSV package acquisition is disabled by default. When an operator enables it, an authenticated client can make one explicit request:
+
+```json
+{
+  "purl": "pkg:pypi/requests",
+  "version": "2.30.0"
+}
+```
+
+That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. Disabled mode returns `409`, and a provider failure returns `503` while keeping the last accepted data.
+
+---
+
+## Project Assessments
+
+Assessment routes reuse the browser's saved cycle, check, and evidence services. List and detail reads work in personal or team scope. Team writes require the same Project mutation permission as the browser, so a viewer can inspect a cycle but can't change it.
+
+The list response includes bounded summaries of the available profiles. Use a summary's `key` as `profile_key` when creating a cycle; the response doesn't expose the profiles' complete check definitions.
+
+Create a cycle with a profile key and optional title:
+
+```json
+{
+  "profile_key": "network.baseline",
+  "title": "August perimeter review"
+}
+```
+
+The cycle detail endpoint accepts `category`, `state`, `target_type`, `policy_level`, and `evidence_state` filters plus `limit` and `offset`. Its response keeps cycle and category rollups separate from the bounded `checks` page, including `total`, `limit`, `offset`, and `has_more`. Each check includes up to three newest evidence links, while `recent_evidence` returns up to 20 newest sources across the whole cycle with their check and target context. The read-only `retest_queue` considers up to 50 findings marked `ready_to_verify` or `needs_retest` and groups them only when Project target, Assessment check, action, and HTTP role/profile match exactly. Its batch metadata explains why a group remains individual or whether two to ten safe, credential-free plans share one exact command. A comparison can suggest a disposition, but it doesn't change the saved finding status.
+
+An active check accepts `blocked`, `skipped`, or `not_applicable` together with a reason. Send `not_started` without a reason to clear that decision and return to the state derived from saved evidence. Link evidence with its saved type and id:
+
+```json
+{
+  "evidence_type": "run",
+  "evidence_id": "run_..."
+}
+```
+
+The server verifies that the source belongs to the same owner and Project and satisfies the frozen evidence rule. It never trusts caller-supplied owner, target, rule, or source metadata. Complete or archive a cycle with `PATCH` and a `status` value; archived cycles can be previewed and deleted, while their original runs, findings, entities, and artifacts remain intact.
+
+### HTTP profiles
+
+HTTP profiles save names and references, never credential values. A create body requires `name` and `base_url`; it can also set `role`, `scope_roots`, `allowed_hosts`, header-to-Secret references, `secret_refs`, `file_refs`, `proxy_url`, `login_workflow_id`, token-capture rules, include/exclude path prefixes, `rate_limit_per_second` (1–1000), `concurrency` (1–100), and `enabled`. Lists hold at most 50 headers and general list items, 20 capture rules, and 50 profiles per Project by default. The complete field shapes are in `HttpProfileInput` in the OpenAPI document.
+
+Create and inspect a credential-free profile, replacing the example host with a confirmed host in the Project:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Anonymous web",
+    "role": "anonymous",
+    "base_url": "https://app.example.test/",
+    "scope_roots": ["https://app.example.test/"],
+    "allowed_hosts": ["app.example.test"],
+    "include_paths": ["/"],
+    "exclude_paths": ["/logout"],
+    "rate_limit_per_second": 5,
+    "concurrency": 2,
+    "enabled": true
+  }' \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/http-profiles"
+
+curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/http-profiles"
+```
+
+Create returns `201`. Update with `PATCH` and the profile's current `revision`; only supplied fields change. A stale revision or duplicate name returns `409`. Delete removes the profile but not its referenced Secrets, Files, workflow, or Project. Team reads are available to members, but reference names are replaced with counts unless the member can manage Secrets. Team create, update, and delete require `MANAGE_SECRETS`. Invalid scope or references return `400`, an out-of-scope Project/profile returns `404`, and the Project profile quota returns `409`.
+
+### Recommended actions
+
+Direct Assessment actions support protected Curl, HTTPx, Katana, Nuclei, Dalfox, and detection-only SQLmap runs. Preview accepts these optional query fields:
+
+- `http_profile_id` selects one enabled Project HTTP profile.
+- `source_run_id` and `parameter_observation_id` select one reviewed Dalfox parameter together.
+- `schema_artifact_id` selects one saved Project-linked OpenAPI JSON artifact for Schemathesis.
+
+The check decides which selection is valid. Supplying unrelated, incomplete, stale, or cross-scope ids makes the plan unavailable rather than broadening it. This example previews a protected action:
+
+```bash
+curl -sS -G \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  --data-urlencode "http_profile_id=$HTTP_PROFILE_ID" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/assessments/$ASSESSMENT_ID/checks/$CHECK_ID/recommended-action"
+```
+
+For Dalfox, add both `source_run_id` and `parameter_observation_id`; for Schemathesis, use `schema_artifact_id`. The `plan` reports the redacted command, target, policy, request/time bounds, selected input summary, availability, and `plan_digest`. It never returns Secret values, private Files paths, generated scanner material, or a private schema.
+
+Launch with the preview's digest and exactly the same selections:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"confirmed\":true,\"http_profile_id\":\"$HTTP_PROFILE_ID\",\"plan_digest\":\"$PLAN_DIGEST\"}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/assessments/$ASSESSMENT_ID/checks/$CHECK_ID/recommended-action"
+```
+
+Launch returns `202` with the Project-linked run and the current plan. It requires `RUN_COMMANDS`; selecting a team HTTP profile also requires `MANAGE_SECRETS`. The server rechecks Project scope, cycle state, target, policy, selected evidence, profile revision, Secret/File availability, and broker readiness before creating private material. A stale or unavailable plan returns `409`, a missing nested record returns `404`, unsupported input returns `400`, and an unavailable broker returns `503` with `Retry-After: 5`. ZAP and private OAST deliberately use the separate multi-step routes below.
+
+### External ZAP jobs
+
+ZAP uses a review-then-queue flow. The review body requires `http_profile_id` and one to eight unique confirmed Project URL `target_entity_ids`. `policy_level` defaults to `safe`; `intrusive` also requires the deployment opt-in. `scope_exclusions` accepts at most 50 URL path prefixes. The selected profile must be enabled, anonymous, and credential-free.
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"http_profile_id\":\"$HTTP_PROFILE_ID\",\"target_entity_ids\":[\"$URL_ENTITY_ID\"],\"policy_level\":\"safe\",\"scope_exclusions\":[\"/logout\"]}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/assessments/$ASSESSMENT_ID/checks/$CHECK_ID/zap-plan"
+```
+
+Review returns the exact non-secret Automation Framework YAML, selection summary, and `plan_digest` without contacting ZAP. Queue by sending the same fields plus `"confirmed": true` and that digest to `.../zap-jobs`; the response is `202` and contains the durable job.
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"confirmed\":true,\"plan_digest\":\"$PLAN_DIGEST\",\"http_profile_id\":\"$HTTP_PROFILE_ID\",\"target_entity_ids\":[\"$URL_ENTITY_ID\"],\"policy_level\":\"safe\",\"scope_exclusions\":[\"/logout\"]}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/assessments/$ASSESSMENT_ID/checks/$CHECK_ID/zap-jobs"
+```
+
+`GET .../zap-jobs` returns the ten newest jobs for reload recovery. Poll `GET .../zap-jobs/<job_id>` for bounded progress, `files_path`, and the ready `atlas_draft_id`; Atlas import remains a separate review/apply action. `DELETE` on that job requests cancellation and returns its current state. Reads stay owner- and nested-check scoped. Queue and cancel require `RUN_COMMANDS`; review and status reads do not start work. Disabled connectors, changed scope/profile, stale plans, invalid transitions, and unavailable intrusive policy return `409`; invalid selections return `400`; unknown nested jobs return `404`.
+
+### Private OAST reservations
+
+Private OAST begins with a normal recommended-action preview using both `source_run_id` and `parameter_observation_id`, plus `http_profile_id` when needed. The returned blind-XSS plan is provider-free and includes the digest used to reserve a callback.
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"confirmed\":true,\"plan_digest\":\"$PLAN_DIGEST\",\"source_run_id\":\"$SOURCE_RUN_ID\",\"parameter_observation_id\":\"$PARAMETER_OBSERVATION_ID\"}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/assessments/$ASSESSMENT_ID/checks/$CHECK_ID/oast-correlations"
+```
+
+Reservation returns `202`. `GET .../oast-correlations` recovers the ten newest redacted reservations. Poll `GET .../oast-correlations/<correlation_id>` until `provider_ready` is true; only that exact ready response can reveal the callback. Then POST the same confirmation fields to `.../oast-correlations/<correlation_id>/launch`; optional `workspace_cwd` is allowed there. Launch returns `202` with a Project-linked run and binds the callback without placing it in the public command or response.
+
+Reservation, exact status, and launch require `RUN_COMMANDS`; a selected team HTTP profile also requires `MANAGE_SECRETS`. A disabled or changed provider boundary, expired/reused reservation, worker preparation failure, stale plan, or not-yet-ready callback returns `409`. An unknown or mismatched nested correlation returns `404`, and broker unavailability returns `503` with `Retry-After: 5`. Because reservations and jobs are durable, clients should recover the bounded list after reconnecting instead of creating replacements blindly.
+
+### Finding and run evidence
+
+Finding evidence supports `run`, `run_line`, `run_artifact`, `workspace_file`, `screenshot`, `atlas_entity`, `project_target`, `assessment_check`, and `retest_run`. The source must belong to the same owner and Project. `run_line` also requires a zero-based `line_number` and can carry a saved snippet of at most 1,000 characters; other types reject those fields.
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"evidence_type\":\"run_line\",\"evidence_id\":\"$RUN_ID\",\"line_number\":12,\"snippet\":\"bounded saved context\"}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/findings/$FINDING_ID/evidence"
+
+curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/findings/$FINDING_ID/evidence"
+```
+
+Create returns `201`, or `200` with `created: false` when the exact link already exists. The list includes the bounded evidence set plus the finding's current verification context. The default limits are 200 links per finding and 10,000 per owner; reaching either returns `409`. Link and unlink require `TRIAGE_FINDINGS`; delete removes only the link. Invalid or cross-scope sources return `400` or `404` without copying source content.
+
+Structured Nmap service observations are read-only and paged separately:
+
+```bash
+curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/runs/$RUN_ID/service-evidence?limit=50&offset=0"
+```
+
+The response uses `observations`, `total`, `limit`, `offset`, and `has_more`. `limit` defaults to 50 and caps at 100; `offset` caps at 100,000. Free-form NSE output isn't returned. A run outside the active personal/team scope returns `404`.
+
+Across these routes, lifecycle conflicts and quota failures return `409`; invalid profiles, filters, states, transitions, or evidence return `400`; cross-scope records return `404`; team permission failures return `403`; and rate limits return `429`. Responses and the OpenAPI contract omit personal session ids, profile file paths, secrets, protected HTTP context, private workspace paths, and stored command variables.
+
+The bundled CLI exposes the same read and manual-state contract:
+
+```bash
+darklab assessment list prj_123 --status active
+darklab assessment show prj_123 asmt_123
+darklab assessment checks prj_123 asmt_123 --state not_started --policy-level safe
+darklab assessment set-state prj_123 asmt_123 asmc_123 blocked --reason "Waiting for authorization"
+darklab assessment clear-state prj_123 asmt_123 asmc_123
+darklab assessment start-action prj_123 asmt_123 asmc_123
+darklab assessment start-action prj_123 asmt_123 asmc_123 --confirm
+darklab assessment start-action prj_123 asmt_123 asmc_123 \
+  --http-profile-id htp_123 --confirm
+darklab assessment start-action prj_123 asmt_123 asmc_123 \
+  --source-run-id run_123 --parameter-observation-id dpx_123 --confirm
+darklab assessment start-action prj_123 asmt_123 asmc_123 \
+  --schema-artifact-id art_123 --confirm
+```
+
+List and check commands support `text`, `json`, and `ndjson`. Cycle detail, state mutations, and recommended actions support `text` and `json`. `start-action` is a read-only preview unless `--confirm` is present; even then, the server recomputes the plan and rejects a changed target, stale plan, unsupported command, or disallowed policy. The optional HTTP-profile, saved Dalfox observation, and Schemathesis schema flags select the same saved inputs as the browser. ZAP and private OAST use their dedicated review, queue or reservation, and launch routes because those connectors have extra lifecycle steps. Selecting `--status archived` includes archived cycles automatically; use `--include-archived` to include them without narrowing to that status. Use the global `--team` option or saved CLI team scope for team-owned Projects; the server still makes the permission decision.
 
 ---
 
@@ -526,6 +778,12 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. `--limit` defaults to 50 and caps at 100. |
+| `darklab assessment list <project_id> [--status active\|completed\|archived] [--include-archived] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Project assessment cycles. `--limit` defaults to 50 and caps at 200. |
+| `darklab assessment show <project_id> <assessment_id> [--format text\|json]` | Show one cycle with its coverage rollup. JSON output retains the full detail response, including the first bounded check page. |
+| `darklab assessment checks <project_id> <assessment_id> [--category NAME] [--state STATE] [--target-type TYPE] [--policy-level LEVEL] [--evidence-state available\|unavailable\|none] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page and filter checks for one cycle. `--limit` defaults to 50 and caps at 200. |
+| `darklab assessment set-state <project_id> <assessment_id> <check_id> blocked\|skipped\|not_applicable --reason TEXT [--format text\|json]` | Save a reasoned manual decision on an active check. |
+| `darklab assessment clear-state <project_id> <assessment_id> <check_id> [--format text\|json]` | Clear a manual decision and restore the check's evidence-derived state. |
+| `darklab assessment start-action <project_id> <assessment_id> <check_id> [--http-profile-id ID] [--source-run-id ID] [--parameter-observation-id ID] [--schema-artifact-id ID] [--confirm] [--workspace-cwd PATH] [--format text\|json]` | Preview the saved check's recommended action. Add `--confirm` to start the freshly revalidated bounded action and link its run to the Project. The optional ids select a protected HTTP profile, reviewed Dalfox observation, or saved Schemathesis schema when that check requires one. |
 | `darklab team list\|status [--format text\|json]` | List joined teams or show the active CLI scope. |
 | `darklab team create <name> [--slug SLUG] [--display-name NAME] [--format text\|json]` | Create a team and print the one-time recovery code. |
 | `darklab team switch <team-id\|slug\|name\|personal>` | Save the active CLI team scope, or clear it with `personal`. |

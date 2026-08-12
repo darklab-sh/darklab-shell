@@ -123,6 +123,9 @@ def build_project_digest_payload(
 ) -> dict[str, Any]:
     top_changes = summary.get("top_changes")
     safe_top_changes = _safe_digest_top_changes(top_changes)
+    raw_risk = summary.get("risk")
+    risk = raw_risk if isinstance(raw_risk, dict) else {}
+    safe_risk_changes = _safe_digest_risk_changes(risk.get("top_changes"))
     relative_link = _project_monitoring_path(project, summary, digest_identity)
     monitoring_url = _absolute_or_relative_url(relative_link)
     return {
@@ -135,6 +138,7 @@ def build_project_digest_payload(
         "project_monitoring_path": relative_link,
         "project_monitoring_url": monitoring_url,
         "top_changes": safe_top_changes,
+        "risk_changes": safe_risk_changes,
         "summary_fields": {
             "project": str(project.get("name") or "Project"),
             "window": (
@@ -145,6 +149,8 @@ def build_project_digest_payload(
             "failed": int(summary.get("failed_monitor_count") or 0),
             "highest_severity": str(summary.get("highest_severity") or "none"),
             "top_changes": len(safe_top_changes),
+            "cve_risk_changes": int(risk.get("actionable_count") or 0),
+            "unacknowledged_cve_risk_changes": int(risk.get("unacknowledged_count") or 0),
             "monitoring_link": monitoring_url,
             "quiet": "yes" if quiet else "no",
         },
@@ -179,6 +185,23 @@ def _safe_digest_top_changes(value: Any) -> list[dict[str, str]]:
             "fire_kind": str(item.get("fire_kind") or "")[:80],
             "watcher_label": str(item.get("watcher_label") or "")[:120],
             "label": str(item.get("label") or "")[:MAX_DIGEST_CHANGE_LABEL_LENGTH],
+            "created": str(item.get("created") or "")[:80],
+        })
+        if len(safe_changes) >= MAX_DIGEST_TOP_CHANGES:
+            break
+    return safe_changes
+
+
+def _safe_digest_risk_changes(value: Any) -> list[dict[str, str]]:
+    raw_changes = value if isinstance(value, list) else []
+    safe_changes: list[dict[str, str]] = []
+    for item in raw_changes:
+        if not isinstance(item, dict):
+            continue
+        safe_changes.append({
+            "cve_id": str(item.get("cve_id") or "")[:40],
+            "transition_kind": str(item.get("transition_kind") or "")[:80],
+            "source": str(item.get("source") or "")[:40],
             "created": str(item.get("created") or "")[:80],
         })
         if len(safe_changes) >= MAX_DIGEST_TOP_CHANGES:

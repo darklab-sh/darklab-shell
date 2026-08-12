@@ -150,6 +150,7 @@ services:
       # Opt-in only. Runtime readiness still requires the container capability
       # bounding set and scanner binary file capabilities to be intact.
       - RAW_PACKET_SCANNING_ENABLED=${RAW_PACKET_SCANNING_ENABLED:-false}
+      - ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s

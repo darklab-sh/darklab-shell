@@ -24,7 +24,6 @@ PATH_TMP_RE = re.compile(r'(?<![\w:/])/tmp\b')
 # strings as a substring.
 LOOPBACK_RE = re.compile(r'\blocalhost\b|127\.0\.0\.1|\b0\.0\.0\.0\b|\[::1\]', re.IGNORECASE)
 
-
 def split_command_argv(command: str) -> list[str]:
     """Split a shell-like command string into argv tokens for simple root-command inspection."""
     # Validation works on argv-style tokens only. The app never invokes a shell

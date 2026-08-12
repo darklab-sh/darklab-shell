@@ -15,15 +15,24 @@ from core.database_access import get_db_connect
 from services.metrics_lazy import app_metrics
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.runs.output_store import load_run_output_events_for_run
+from services.runs.output_model import LineEvent
 from services.teams.capabilities import Capability, role_can
 from services.teams.storage import get_member, get_team
 from services.workflows.captures import WorkflowCaptureAccumulator
+from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.compiler import (
     WorkflowDefinitionError,
     render_step_command,
     render_step_display_command,
     workflow_private_values,
 )
+from services.workflows.fanout_child_lifecycle import (
+    finalize_fanout_child_run,
+    reset_launching_fanout_child_for_recovery,
+)
+from services.workflows.fanout_child_queries import fanout_child_for_run
+from services.workflows.fanout_children import list_fanout_children
+from services.workflows.fanout_launch import launch_fanout_batch
 from services.workflows import storage
 
 
@@ -161,6 +170,25 @@ def _definition_step(definition: Mapping[str, object], step_id: str) -> dict[str
     return None
 
 
+def _capture_results(
+    capture: object | None,
+) -> tuple[dict[str, str], dict[str, list[str]], str]:
+    scalar = getattr(capture, "workflow_capture_accumulator", None)
+    collection = getattr(capture, "workflow_collection_accumulator", None)
+    captures: dict[str, str] = {}
+    collections: dict[str, list[str]] = {}
+    errors: list[str] = []
+    if isinstance(scalar, WorkflowCaptureAccumulator):
+        captures, error = scalar.result()
+        if error:
+            errors.append(error)
+    if isinstance(collection, WorkflowCollectionAccumulator):
+        collections, error = collection.result()
+        if error:
+            errors.append(error)
+    return captures, collections, "; ".join(errors)
+
+
 def _log_step_transition(state: Mapping[str, object]) -> None:
     duration_ms = int(str(state.get("duration_ms") or 0))
     log.info("WORKFLOW_STEP_COMPLETED", extra={
@@ -200,13 +228,108 @@ def _log_step_transition(state: Mapping[str, object]) -> None:
         _record_execution_finished(str(state.get("execution_id") or ""), status)
 
 
+def _launch_current_fanout_batch(execution_id: str) -> dict[str, object] | None:
+    execution = storage.get_execution_by_id(execution_id)
+    if not execution:
+        return None
+    step_id = str(execution.get("current_step_id") or "")
+    can_launch, current_role = _execution_can_launch(execution, step_id)
+    if not can_launch:
+        return None
+    definition = execution.get("definition_snapshot")
+    step = _definition_step(
+        definition if isinstance(definition, Mapping) else {},
+        step_id,
+    )
+    if not step or not isinstance(step.get("for_each"), Mapping):
+        changed = storage.fail_execution(
+            execution_id,
+            "fanout_definition_error",
+            "The current workflow fan-out step is invalid.",
+            step_id=step_id,
+        )
+        if changed:
+            _record_failed_step_and_execution(execution_id, step_id)
+        log.warning("WORKFLOW_FANOUT_DEFINITION_MISSING", extra={
+            "execution_id": execution_id,
+            "step_id": step_id,
+        })
+        return None
+    try:
+        result = launch_fanout_batch(execution, step, current_role)
+    except WorkflowDefinitionError as exc:
+        changed = storage.fail_execution(
+            execution_id,
+            "fanout_definition_error",
+            str(exc),
+            step_id=step_id,
+        )
+        if changed:
+            _record_failed_step_and_execution(execution_id, step_id)
+        log.warning("WORKFLOW_FANOUT_LAUNCH_FAILED", extra={
+            "execution_id": execution_id,
+            "step_id": step_id,
+            "error_type": type(exc).__name__,
+            "stage": "plan",
+        })
+        return None
+    except Exception as exc:
+        changed = storage.fail_execution(
+            execution_id,
+            "fanout_launch_failed",
+            "The workflow fan-out batch could not be launched.",
+            step_id=step_id,
+        )
+        if changed:
+            _record_failed_step_and_execution(execution_id, step_id)
+        log.error("WORKFLOW_FANOUT_LAUNCH_ERROR", exc_info=True, extra={
+            "execution_id": execution_id,
+            "step_id": step_id,
+            "error_type": type(exc).__name__,
+            "stage": "batch",
+        })
+        return None
+    raw_transition = result.pop("parent_transition", None)
+    if isinstance(raw_transition, Mapping) and raw_transition:
+        _log_step_transition(raw_transition)
+        if not raw_transition.get("terminal"):
+            launch_execution_step(str(raw_transition["execution_id"]))
+    return result
+
+
+def _continue_after_fanout_child(
+    child: Mapping[str, object],
+    finalized_child: Mapping[str, object],
+) -> dict[str, object] | None:
+    parent_transition = finalized_child.get("parent_transition")
+    if not isinstance(parent_transition, Mapping) or not parent_transition:
+        _launch_current_fanout_batch(str(child.get("execution_id") or ""))
+        return None
+    _log_step_transition(parent_transition)
+    if not parent_transition.get("terminal"):
+        launch_execution_step(str(parent_transition["execution_id"]))
+    return dict(parent_transition)
+
+
 def finalize_workflow_run(run_id: str, exit_code: int, capture: object | None) -> dict[str, object] | None:
+    child = fanout_child_for_run(run_id)
+    if child and str(child.get("status") or "") != "running":
+        return None
     linked_execution = storage.execution_for_run(run_id)
     if linked_execution and _execution_expired(linked_execution):
-        changed = storage.fail_execution_for_run(
-            run_id,
-            "execution_timeout",
-            "The workflow exceeded its maximum runtime.",
+        changed = (
+            storage.fail_execution(
+                str(linked_execution.get("id") or ""),
+                "execution_timeout",
+                "The workflow exceeded its maximum runtime.",
+                step_id=str(child.get("step_id") or ""),
+            )
+            if child
+            else storage.fail_execution_for_run(
+                run_id,
+                "execution_timeout",
+                "The workflow exceeded its maximum runtime.",
+            )
         )
         if changed:
             _record_failed_step_and_execution(
@@ -226,15 +349,17 @@ def finalize_workflow_run(run_id: str, exit_code: int, capture: object | None) -
             "transition_reason": "execution_timeout",
             "terminal": True,
         }
-    accumulator = getattr(capture, "workflow_capture_accumulator", None)
-    captures: dict[str, str] = {}
-    capture_error = ""
-    if isinstance(accumulator, WorkflowCaptureAccumulator):
-        captures, capture_error = accumulator.result()
+    if child:
+        finalized_child = finalize_fanout_child_run(run_id, int(exit_code))
+        if not finalized_child:
+            return None
+        return _continue_after_fanout_child(child, finalized_child)
+    captures, collection_captures, capture_error = _capture_results(capture)
     state = storage.finalize_run_step(
         run_id,
         int(exit_code),
         captures=captures,
+        collection_captures=collection_captures,
         capture_error=capture_error,
     )
     if not state:
@@ -281,6 +406,8 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
             "step_id": step_id,
         })
         return None
+    if isinstance(step.get("for_each"), Mapping):
+        return _launch_current_fanout_batch(execution_id)
     try:
         command = render_step_command(step, variables if isinstance(variables, Mapping) else {})
         display_command = render_step_display_command(
@@ -321,14 +448,20 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
         return None
 
     accumulator = WorkflowCaptureAccumulator(step.get("captures"))
+    collection_accumulator = WorkflowCollectionAccumulator(step.get("captures"))
     capture_holder: dict[str, object] = {}
 
     def attach_run(run_id: str, capture: object | None) -> None:
         if not storage.bind_step_run(execution_id, step_id, run_id):
             raise _WorkflowRunBindingError("workflow step run binding was already claimed")
         if capture is not None:
-            setattr(capture, "_event_observer", accumulator.observe)
+            def observe(event: LineEvent) -> None:
+                accumulator.observe(event)
+                collection_accumulator.observe(event)
+
+            setattr(capture, "_event_observer", observe)
             setattr(capture, "workflow_capture_accumulator", accumulator)
+            setattr(capture, "workflow_collection_accumulator", collection_accumulator)
             capture_holder["capture"] = capture
 
     try:
@@ -475,6 +608,7 @@ def _recover_completed_step(
         })
         return None
     accumulator = WorkflowCaptureAccumulator(step_definition.get("captures"))
+    collection_accumulator = WorkflowCollectionAccumulator(step_definition.get("captures"))
     output = load_run_output_events_for_run(
         run,
         log_event="WORKFLOW_RECOVERY_OUTPUT_LOAD_FAILED",
@@ -486,11 +620,15 @@ def _recover_completed_step(
     )
     for event in output.events:
         accumulator.observe(event)
+        collection_accumulator.observe(event)
     captures, capture_error = accumulator.result()
+    collection_captures, collection_error = collection_accumulator.result()
+    capture_error = "; ".join(error for error in (capture_error, collection_error) if error)
     state = storage.finalize_run_step(
         str(run.get("id") or ""),
         int(str(run.get("exit_code") or 0)),
         captures=captures,
+        collection_captures=collection_captures,
         capture_error=capture_error,
     )
     if state:
@@ -498,6 +636,100 @@ def _recover_completed_step(
         if not state.get("terminal"):
             launch_execution_step(str(state["execution_id"]))
     return state
+
+
+def _recover_fanout_step(
+    execution: Mapping[str, object],
+    step: Mapping[str, object],
+) -> str:
+    execution_id = str(execution.get("id") or "")
+    step_id = str(step.get("step_id") or "")
+    recovered = False
+    missing_child = False
+    children = list_fanout_children(execution_id, step_id)
+    if any(
+        (
+            str(child.get("status") or "") == "launching"
+            and bool(str(child.get("run_id") or ""))
+        )
+        or (
+            str(child.get("status") or "") == "running"
+            and not str(child.get("run_id") or "")
+        )
+        for child in children
+    ):
+        changed = storage.fail_execution(
+            execution_id,
+            "recovery_state_invalid",
+            "The workflow fan-out step has an invalid child recovery state.",
+            step_id=step_id,
+        )
+        if changed:
+            _record_failed_step_and_execution(execution_id, step_id)
+        log.warning("WORKFLOW_RECOVERY_FAILED", extra={
+            "execution_id": execution_id,
+            "step_id": step_id,
+            "reason": "fanout_child_state_invalid",
+        })
+        return "failed"
+    for child in children:
+        child_status = str(child.get("status") or "")
+        run_id = str(child.get("run_id") or "")
+        if child_status == "launching" and not run_id:
+            recovered = reset_launching_fanout_child_for_recovery(
+                str(child.get("id") or "")
+            ) or recovered
+            continue
+        if child_status != "running" or not run_id:
+            continue
+        completed_run = storage.completed_run_for_recovery(run_id)
+        if completed_run:
+            finalize_workflow_run(
+                run_id,
+                int(str(completed_run.get("exit_code") or 0)),
+                None,
+            )
+            recovered = True
+            continue
+        if _run_is_still_active(execution, run_id):
+            continue
+        finalized = finalize_fanout_child_run(
+            run_id,
+            1,
+            error_code="active_run_missing",
+        )
+        if finalized:
+            _continue_after_fanout_child(child, finalized)
+            recovered = True
+            missing_child = True
+            log.warning("WORKFLOW_FANOUT_RECOVERY_CHILD_MISSING", extra={
+                "execution_id": execution_id,
+                "step_id": step_id,
+                "ordinal": int(str(child.get("ordinal") or 0)),
+                "attempt": int(str(child.get("attempt") or 1)),
+                "run_id": run_id,
+            })
+
+    current = storage.get_execution_by_id(execution_id)
+    if not current or str(current.get("status") or "") not in storage.ACTIVE_EXECUTION_STATUSES:
+        if missing_child and str((current or {}).get("status") or "") == "failed":
+            return "failed"
+        return "recovered" if recovered else "ignored"
+    if str(current.get("current_step_id") or "") == step_id:
+        launched = _launch_current_fanout_batch(execution_id)
+        raw_launches = (launched or {}).get("launched")
+        recovered = (
+            bool(raw_launches)
+            or str((launched or {}).get("status") or "") == "completed"
+            or recovered
+        )
+        refreshed = storage.get_execution_by_id(execution_id)
+        refreshed_status = str((refreshed or {}).get("status") or "")
+        if refreshed_status == "failed" and (missing_child or not recovered):
+            return "failed"
+        if refreshed_status == "completed":
+            return "recovered"
+    return "recovered" if recovered else "left_running"
 
 
 def recover_workflow_execution(execution_id: str) -> str:
@@ -531,6 +763,31 @@ def recover_workflow_execution(execution_id: str) -> str:
         return "failed"
     step_status = str(step.get("status") or "")
     run_id = str(step.get("run_id") or "")
+    definition = execution.get("definition_snapshot")
+    step_definition = _definition_step(
+        definition if isinstance(definition, Mapping) else {},
+        step_id,
+    )
+    if step_definition and isinstance(step_definition.get("for_each"), Mapping):
+        if step_status == "pending" and not run_id:
+            launch_execution_step(execution_id)
+            return "recovered"
+        if step_status in {"launching", "running"} and not run_id:
+            return _recover_fanout_step(execution, step)
+        changed = storage.fail_execution(
+            execution_id,
+            "recovery_state_invalid",
+            "The workflow fan-out parent has an invalid recovery state.",
+            step_id=step_id,
+        )
+        if changed:
+            _record_failed_step_and_execution(execution_id, step_id)
+        log.warning("WORKFLOW_RECOVERY_FAILED", extra={
+            "execution_id": execution_id,
+            "step_id": step_id,
+            "reason": "fanout_parent_state_invalid",
+        })
+        return "failed"
     if step_status == "launching" and not run_id:
         storage.reset_launching_step_for_recovery(execution_id, step_id)
         step_status = "pending"

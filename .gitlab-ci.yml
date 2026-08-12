@@ -332,7 +332,8 @@ container-smoke-test:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apk add --no-cache python3 py3-pytest py3-yaml py3-pydantic py3-tldextract docker-cli-compose
+    - apk add --no-cache python3 py3-pip py3-pytest docker-cli-compose
+    - python3 -m pip install --break-system-packages --root-user-action=ignore --quiet -r app/requirements.txt
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
@@ -341,7 +342,7 @@ container-smoke-test:
       allow_failure: true
   script:
     - mkdir -p test-results
-    - bash -o pipefail -c './scripts/container_smoke_test.sh | tee test-results/container-smoke-durations.txt'
+    - sh -o pipefail -c './scripts/container_smoke_test.sh | tee test-results/container-smoke-durations.txt'
   after_script:
     - python3 scripts/test-support/summarize_pytest_junit.py test-results/container_smoke_test.xml test-results/container-smoke-files.txt --lane container_smoke
   artifacts:

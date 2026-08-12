@@ -7,14 +7,27 @@ Shared project workspace utility helpers.
 
 from __future__ import annotations
 
-import secrets
 import logging
+import secrets
 from datetime import datetime, timezone
+from typing import cast
 
 from config import resolve_effective_cfg
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 
 log = logging.getLogger("shell")
+
+_QUOTA_KINDS = frozenset({
+    "assessment_check_owner",
+    "assessment_check_project",
+    "assessment_cycle_owner",
+    "assessment_cycle_project",
+    "assessment_evidence_owner",
+    "assessment_evidence_project",
+    "assessment_finding_reconciliation",
+    "http_profile_project",
+    "project_workspace",
+})
 
 
 def cfg_int(key, default, *, cfg=None):
@@ -100,8 +113,46 @@ def metadata_filter_values(filters, key, max_len, *, lower=False):
     return values
 
 
-def raise_quota(message):
-    log.warning("PROJECT_QUOTA_HIT", extra={"reason": str(message or "")})
+def _quota_count(value: object, default: int = 0) -> int:
+    try:
+        numeric_value = cast(str | bytes | bytearray | int | float, value)
+        parsed = int(numeric_value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0, parsed)
+
+
+def raise_quota(
+    message,
+    *,
+    quota_kind="project_workspace",
+    owner_kind="unknown",
+    project_id="",
+    assessment_id="",
+    check_id="",
+    limit=0,
+    current_count=0,
+    requested_count=1,
+):
+    bounded_quota_kind = str(quota_kind or "").strip().lower()
+    if bounded_quota_kind not in _QUOTA_KINDS:
+        bounded_quota_kind = "project_workspace"
+    bounded_owner_kind = str(owner_kind or "").strip().lower()
+    if bounded_owner_kind not in {"personal", "team"}:
+        bounded_owner_kind = "unknown"
+    log.warning(
+        "PROJECT_QUOTA_HIT",
+        extra={
+            "quota_kind": bounded_quota_kind,
+            "owner_kind": bounded_owner_kind,
+            "project_id": str(project_id or "")[:64],
+            "assessment_id": str(assessment_id or "")[:64],
+            "check_id": str(check_id or "")[:64],
+            "limit": _quota_count(limit),
+            "current_count": _quota_count(current_count),
+            "requested_count": _quota_count(requested_count, 1),
+        },
+    )
     raise ProjectWorkspaceQuotaExceeded(message)
 
 
@@ -139,6 +190,10 @@ def new_finding_id() -> str:
 
 def new_finding_target_id() -> str:
     return "fnt_" + secrets.token_hex(8)
+
+
+def new_finding_evidence_link_id() -> str:
+    return "fev_" + secrets.token_hex(8)
 
 
 def new_evidence_package_id() -> str:

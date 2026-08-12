@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from services.commands import (
+    builtins_assessment,
     builtins_client,
     builtins_discovery,
     builtins_intel,
@@ -30,6 +31,7 @@ from services.commands.builtin_registry import (
 
 
 BUILTIN_COMMAND_PROVIDERS: tuple[BuiltinCommandProvider, ...] = (
+    builtins_assessment.builtin_command_specs,
     builtins_client.builtin_command_specs,
     builtins_discovery.builtin_command_specs,
     builtins_intel.builtin_command_specs,

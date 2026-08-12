@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.projects.finding_dispositions import (
+    set_remediation_group_review_state as update_finding_review_states,  # noqa: F401
+)
+
 
 def run_belongs_to_session(conn: Any, session_id: str, run_id: str) -> bool:
     row = conn.execute(
@@ -107,19 +111,4 @@ def update_findings_suppression(
             (suppressed, reason, suppressed_at, item_id)
             for item_id in sorted(finding_ids)
         ],
-    )
-
-
-def update_finding_review_states(
-    conn: Any,
-    finding_ids: set[str],
-    *,
-    review_state: str,
-    updated_at: str,
-) -> None:
-    if not finding_ids:
-        return
-    conn.executemany(
-        "UPDATE findings SET status = ?, status_updated_at = ? WHERE id = ?",
-        [(review_state, updated_at, finding_id) for finding_id in sorted(finding_ids)],
     )

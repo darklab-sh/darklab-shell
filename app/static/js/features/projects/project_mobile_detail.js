@@ -9,11 +9,17 @@ import {
   closeActionSheet as importedCloseActionSheet,
   openActionSheet as importedOpenActionSheet,
 } from '../../ui/ui_action_sheet.js';
+import { findingRiskSummary as importedFindingRiskSummary } from '../findings/finding_risk.js';
+import { renderProjectFindingChangesSummary } from './project_finding_changes.js';
 
 let exportedDarklabProjectMobileDetail = null;
 
 (function projectMobileDetailModule(global) {
   'use strict';
+
+  const summarizeFindingRisk = typeof importedFindingRiskSummary === 'function'
+    ? importedFindingRiskSummary
+    : () => '';
 
   function createProjectMobileDetailController(context) {
     const ctx = context || {};
@@ -450,6 +456,14 @@ let exportedDarklabProjectMobileDetail = null;
       const findings = ctx.filteredProjectFindings(projectId, summary);
       const total = Math.max(0, Number(pagination.total || allFindings.length || 0));
       const loading = !!pagination.loading;
+      const findingChanges = renderProjectFindingChangesSummary({
+        changes: ctx.projectFindingChanges?.(projectId),
+        projectId,
+        onOpenAssessment: ctx.openProjectAssessment,
+        bindPressable: ctx.bindProjectRuntimePressable,
+        mobile: true,
+      });
+      if (findingChanges) fragment.appendChild(findingChanges);
       const appendPager = (position = 'bottom') => {
         const limit = Math.max(1, Number(pagination.limit || 50));
         const offset = Math.max(0, Number(pagination.offset || 0));
@@ -486,6 +500,7 @@ let exportedDarklabProjectMobileDetail = null;
           finding.run_command || finding.run_id,
           finding.scope || 'finding',
           ctx.projectFindingTargetText(summary, finding) || ctx.projectTargetLabel(summary, finding.target_id),
+          summarizeFindingRisk(finding),
           `line ${finding.line_number || 0}`,
         ].filter(Boolean);
         fragment.appendChild(contentRow({
@@ -706,6 +721,13 @@ let exportedDarklabProjectMobileDetail = null;
       }
       const projectId = String(project.id || ctx.selectedProjectId() || '');
       if (ctx.projectWorkspaceTab() === 'overview') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileOverviewTab(projectId, summary));
+      else if (ctx.projectWorkspaceTab() === 'assessment') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileAssessmentTab(projectId, summary));
+      else if (ctx.projectWorkspaceTab() === 'web-surface') {
+        const webSurface = document.createElement('div');
+        webSurface.className = 'project-web-surface-root is-mobile';
+        ctx.projectMobileDetailBody.appendChild(webSurface);
+        ctx.renderProjectWebSurface(webSurface, projectId, summary);
+      }
       else if (ctx.projectWorkspaceTab() === 'runs') ctx.projectMobileDetailBody.appendChild(renderRunsTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'entities') ctx.projectMobileDetailBody.appendChild(ctx.renderProjectMobileEntitiesTab(projectId, summary));
       else if (ctx.projectWorkspaceTab() === 'findings') ctx.projectMobileDetailBody.appendChild(renderFindingsTab(projectId, summary));

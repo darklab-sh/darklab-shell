@@ -3,6 +3,7 @@
 
 """Current app schema baseline for Postgres."""
 
+from .atlas_import_evidence_schema import INDEXES as IMPORT_EVIDENCE_INDEXES, POSTGRES_TABLE
 from .runner import Migration
 
 MIGRATION = Migration(
@@ -636,6 +637,7 @@ MIGRATION = Migration(
             status TEXT NOT NULL DEFAULT 'applied'
         )
         """,
+        POSTGRES_TABLE,
         """
         CREATE TABLE IF NOT EXISTS atlas_entity_import_links (
             entity_id TEXT NOT NULL,
@@ -1056,6 +1058,7 @@ MIGRATION = Migration(
         CREATE INDEX IF NOT EXISTS idx_atlas_import_batches_scope_applied
         ON atlas_import_batches (team_id, session_id, applied_at DESC)
         """,
+        *IMPORT_EVIDENCE_INDEXES,
         "CREATE INDEX IF NOT EXISTS idx_atlas_entity_import_links_batch ON atlas_entity_import_links (batch_id)",
         """
         CREATE INDEX IF NOT EXISTS idx_atlas_entity_import_links_entity_seen

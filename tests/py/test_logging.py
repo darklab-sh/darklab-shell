@@ -82,6 +82,7 @@ def _run_config_startup(
             "PROMETHEUS_MULTIPROC_DIR",
             "INTERACTIVE_PTY_ENABLED",
             "RAW_PACKET_SCANNING_ENABLED",
+            "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED",
             "RESTRICTED_COMMAND_INPUT_CIDRS",
             "WORKSPACE_BACKEND",
             "WORKSPACE_ENABLED",

@@ -124,7 +124,13 @@ def refresh_entity_intel(session_id: str, entity_id: str, *, team_id: str = "") 
             "entity_id": entity_id,
             "entity_type": entity["type"],
         })
-    return _persist_lookup_snapshots(session_id, entity_id, lookup, team_id=team_id)
+    return _persist_lookup_snapshots(
+        session_id,
+        entity_id,
+        lookup,
+        team_id=team_id,
+        persist_shared_advisory=True,
+    )
 
 
 def _persist_lookup_snapshots(
@@ -133,11 +139,13 @@ def _persist_lookup_snapshots(
     lookup: IntelLookupResult,
     *,
     team_id: str = "",
+    persist_shared_advisory: bool = False,
 ) -> dict[str, Any]:
     metadata_session = metadata_owner_id(session_id, team_id)
     fetched_at = _now()
     snapshots: list[dict[str, Any]] = []
     replaced_payloads: list[Any] = []
+    shared_advisory: dict[str, Any] | None = None
     with get_db_connect()() as conn:
         for provider_lookup in lookup.providers:
             provider = provider_lookup.provider
@@ -155,6 +163,19 @@ def _persist_lookup_snapshots(
                     "provider": provider,
                     "provider_status": status,
                 })
+                if persist_shared_advisory and lookup.entity_type == "cve" and provider == "nvd":
+                    from services.cve_risk.nvd_advisory import (  # noqa: PLC0415
+                        persist_external_nvd_lookup,
+                    )
+
+                    providers = payload.get("providers") if isinstance(payload, dict) else None
+                    nvd_payload = providers.get("nvd") if isinstance(providers, dict) else None
+                    if isinstance(nvd_payload, dict):
+                        shared_advisory = persist_external_nvd_lookup(
+                            conn,
+                            lookup.canonical_value,
+                            nvd_payload,
+                        )
             else:
                 level = logging.WARNING if status in {"error", "rate_limited", "unreachable"} else logging.DEBUG
                 log.log(level, "INTEL_PROVIDER_LOOKUP_SKIPPED", extra={
@@ -206,7 +227,7 @@ def _persist_lookup_snapshots(
         conn.commit()
     for replaced_payload in replaced_payloads:
         delete_text_body(replaced_payload)
-    return {
+    response = {
         "entity_id": entity_id,
         "entity_type": lookup.entity_type,
         "canonical_value": lookup.canonical_value,
@@ -214,3 +235,6 @@ def _persist_lookup_snapshots(
         "configured_count": lookup.configured_count,
         "snapshots": snapshots,
     }
+    if shared_advisory is not None:
+        response["shared_advisory"] = shared_advisory
+    return response

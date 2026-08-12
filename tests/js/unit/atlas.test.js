@@ -270,14 +270,20 @@ function setupAtlasDom() {
         <div id="atlas-import-overlay" class="modal-overlay mobile-sheet-overlay atlas-import-overlay u-hidden" aria-hidden="true">
           <form id="atlas-import-modal" class="modal-card mobile-sheet-surface atlas-import-modal" tabindex="-1">
             <button id="atlas-import-close" type="button">close import</button>
+            <div id="atlas-import-subtitle"></div>
+            <section id="atlas-import-source">
             <select id="atlas-import-format">
               <option value="nuclei_jsonl">Nuclei JSONL</option>
               <option value="nessus_xml">Nessus XML</option>
+              <option value="greenbone_xml">Greenbone XML</option>
+              <option value="sarif_json">SARIF 2.1 JSON</option>
+              <option value="cyclonedx_json">CycloneDX JSON</option>
             </select>
             <input id="atlas-import-name" />
             <input id="atlas-import-file" type="file" />
             <button id="atlas-import-preview-btn" type="submit">preview</button>
             <span id="atlas-import-status"></span>
+            </section>
             <section id="atlas-import-preview" class="u-hidden"></section>
             <button id="atlas-import-cancel" type="button">cancel</button>
             <button id="atlas-import-apply" type="button">apply</button>
@@ -316,6 +322,7 @@ function loadAtlas({
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
   openProjectAutoPromoteRuleFromAtlasImpl = vi.fn(() => Promise.resolve(true)),
   openProjectWorkspaceByIdImpl = vi.fn(() => Promise.resolve(true)),
+  openContextualFindingRecordImpl = vi.fn(() => Promise.resolve(true)),
   closeMajorOverlaysImpl = vi.fn(),
   useRealSelectEnhancer = false,
   activeTeamScopeCanImpl = () => true,
@@ -440,6 +447,42 @@ function loadAtlas({
         blob: () => Promise.resolve(new Blob(['id,type\nent_ip,ip\n'], { type: 'text/csv' })),
       })
     }
+    if (target === '/atlas/imports/drafts/impd_zap') {
+      return Promise.resolve(jsonResponse({
+        ok: true,
+        draft_id: 'impd_zap',
+        row_set_digest: 'digest_zap',
+        status: 'previewed',
+        source_tool: 'OWASP ZAP',
+        import_name: 'ZAP assessment report',
+        filename: 'darklab-zap-report.json',
+        expires_at: '2026-08-09 15:00:00',
+        counts: {
+          rows: 2,
+          entity_valid: 1,
+          finding_valid: 1,
+          evidence_valid: 0,
+          new: 2,
+          updated: 0,
+          skipped: 0,
+          warnings: 1,
+          project_target_candidates: 1,
+        },
+        samples: {
+          entities: [{ kind: 'url', canonical_value: 'https://example.test' }],
+          findings: [{ severity: 'medium', title: 'Missing security header' }],
+          evidence: [],
+        },
+        warnings: [{ row_number: 2, code: 'missing_field', message: 'Skipped empty value' }],
+        apply_options: {
+          import_entities: { available: true, requires: ['mutate_projects'] },
+          import_findings: { available: true, requires: ['triage_findings'] },
+          import_evidence: { available: false, requires: ['mutate_projects'] },
+          link_to_project: { available: true, requires: ['mutate_projects'] },
+          create_project_targets: { available: true, requires: ['mutate_projects'] },
+        },
+      }))
+    }
     if (target === '/atlas/imports/preview' && options.method === 'POST') {
       return Promise.resolve(jsonResponse({
         ok: true,
@@ -449,19 +492,23 @@ function loadAtlas({
           rows: 2,
           entity_valid: 1,
           finding_valid: 1,
-          new: 2,
+          evidence_valid: 1,
+          new: 3,
           updated: 0,
+          skipped: 0,
           warnings: 1,
           project_target_candidates: 1,
         },
         samples: {
           entities: [{ kind: 'domain', canonical_value: 'example.com' }],
           findings: [{ severity: 'high', title: 'Missing security header' }],
+          evidence: [{ evidence_type: 'cyclonedx_component', label: 'pkg:npm/example@1.0.0' }],
         },
         warnings: [{ row_number: 2, code: 'missing_field', message: 'Skipped empty value' }],
         apply_options: {
           import_entities: { available: true, requires: ['mutate_projects'] },
           import_findings: { available: true, requires: ['triage_findings'] },
+          import_evidence: { available: true, requires: ['mutate_projects'] },
           link_to_project: { available: true, requires: ['mutate_projects'] },
           create_project_targets: { available: true, requires: ['mutate_projects'] },
         },
@@ -476,6 +523,7 @@ function loadAtlas({
           entities_updated: 0,
           findings_created: 1,
           findings_updated: 0,
+          evidence_imported: 1,
           project_links_added: 1,
           project_links_existing: 0,
           project_targets_created: 1,
@@ -894,6 +942,7 @@ function loadAtlas({
         copyTextToClipboard,
         openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
         openProjectWorkspaceById: openProjectWorkspaceByIdImpl,
+        openContextualFindingRecord: openContextualFindingRecordImpl,
         closeMajorOverlays: closeMajorOverlaysImpl,
         downloadBlobAsAttachment,
         activeTeamScopeCan: activeTeamScopeCanImpl,
@@ -929,6 +978,7 @@ function loadAtlas({
         window.copyTextToClipboard = copyTextToClipboard;
         window.openProjectAutoPromoteRuleFromAtlas = openProjectAutoPromoteRuleFromAtlas;
         window.openProjectWorkspaceById = openProjectWorkspaceById;
+        window.openContextualFindingRecord = openContextualFindingRecord;
         window.downloadBlobAsAttachment = downloadBlobAsAttachment;
         window.activeTeamScopeCan = activeTeamScopeCan;
         window.teamScopeDeniedMessage = teamScopeDeniedMessage;
@@ -951,6 +1001,7 @@ function loadAtlas({
     logClientError,
     openProjectAutoPromoteRuleFromAtlas: openProjectAutoPromoteRuleFromAtlasImpl,
     openProjectWorkspaceById: openProjectWorkspaceByIdImpl,
+    openContextualFindingRecord: openContextualFindingRecordImpl,
     closeMajorOverlays: closeMajorOverlaysImpl,
     syncAppSelect,
     enhanceAppSelects,
@@ -2209,7 +2260,7 @@ describe('Atlas overlay', () => {
       })
     }
     document.body.classList.remove('mobile-terminal-mode')
-  })
+  }, 10_000)
 
   it('opens an explicit ordinary Atlas search from a no-record state', async () => {
     const { openAtlasQuickLookup, apiFetch } = loadAtlas({
@@ -2739,9 +2790,20 @@ describe('Atlas overlay', () => {
     const fileInput = document.getElementById('atlas-import-file')
     const formatSelect = document.getElementById('atlas-import-format')
     expect(fileInput?.getAttribute('accept')).toContain('.jsonl')
+    expect(fileInput?.getAttribute('accept')).toContain('.gz')
+    expect(fileInput?.getAttribute('accept')).toContain('.zip')
     formatSelect.value = 'nessus_xml'
     formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
     expect(fileInput?.getAttribute('accept')).toContain('.nessus')
+    formatSelect.value = 'greenbone_xml'
+    formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(fileInput?.getAttribute('accept')).toContain('application/xml')
+    formatSelect.value = 'sarif_json'
+    formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(fileInput?.getAttribute('accept')).toContain('.sarif')
+    formatSelect.value = 'cyclonedx_json'
+    formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(fileInput?.getAttribute('accept')).toContain('application/vnd.cyclonedx+json')
     formatSelect.value = 'nuclei_jsonl'
     formatSelect.dispatchEvent(new Event('change', { bubbles: true }))
     expect(fileInput?.getAttribute('accept')).toContain('.jsonl')
@@ -2761,9 +2823,12 @@ describe('Atlas overlay', () => {
       expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
     })
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Skipped empty value')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('cyclonedx_component')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('pkg:npm/example@1.0.0')
     expect(document.querySelector('.atlas-import-warning-row')?.textContent).toContain('Row 2')
     expect(document.querySelector('[data-atlas-import-option="import_entities"]')?.disabled).toBe(false)
     expect(document.querySelector('[data-atlas-import-option="import_findings"]')?.disabled).toBe(false)
+    expect(document.querySelector('[data-atlas-import-option="import_evidence"]')?.disabled).toBe(false)
     expect(document.querySelector('[data-atlas-import-option="link_to_project"]')?.disabled).toBe(false)
     expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.disabled).toBe(false)
     expect(document.querySelector('[data-atlas-import-option="create_project_targets"]')?.checked).toBe(false)
@@ -2789,6 +2854,7 @@ describe('Atlas overlay', () => {
       options: {
         import_entities: true,
         import_findings: true,
+        import_evidence: true,
         link_to_project: true,
       },
     })
@@ -2796,9 +2862,53 @@ describe('Atlas overlay', () => {
       expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 entity created')
     })
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project link added')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 evidence record imported')
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project target created')
     expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success')
     expect(projectEvents.some(event => event.name === 'app:project-workspace-changed')).toBe(true)
+  })
+
+  it('opens a prepared ZAP draft in the existing explicit Atlas review and apply flow', async () => {
+    const { openAtlas, apiFetch, showToast } = loadAtlas()
+
+    await openAtlas({
+      source: 'project_assessment_zap',
+      tab: 'findings',
+      projectId: 'proj_1',
+      projectName: 'Evidence',
+      importDraftId: 'impd_zap',
+    })
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/imports/drafts/impd_zap',
+      { cache: 'no-store' },
+    )
+    expect(document.getElementById('atlas-import-overlay')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('atlas-import-source')?.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('atlas-import-subtitle')?.textContent)
+      .toBe('ZAP assessment report · OWASP ZAP')
+    expect(document.getElementById('atlas-import-status')?.textContent).toBe('Review ready')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Missing security header')
+    expect(document.getElementById('atlas-import-preview')?.textContent).toContain('Skipped empty value')
+    expect(document.getElementById('atlas-import-apply')?.disabled).toBe(false)
+    expect(apiFetch.mock.calls.some(([url]) => url === '/atlas/imports/preview')).toBe(false)
+
+    document.querySelector('[data-atlas-import-option="link_to_project"]').checked = true
+    document.getElementById('atlas-import-apply')?.click()
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success'))
+    const applyCall = apiFetch.mock.calls.find(([url]) => url === '/atlas/imports/apply')
+    expect(JSON.parse(applyCall?.[1].body)).toMatchObject({
+      draft_id: 'impd_zap',
+      row_set_digest: 'digest_zap',
+      project_id: 'proj_1',
+      options: {
+        import_entities: true,
+        import_findings: true,
+        import_evidence: false,
+        link_to_project: true,
+      },
+    })
   })
 
   it('requires a file before previewing an Atlas import', async () => {
@@ -2821,12 +2931,13 @@ describe('Atlas overlay', () => {
             ok: true,
             draft_id: 'impd_disabled',
             row_set_digest: 'digest_disabled',
-            counts: { rows: 1, entity_valid: 0, finding_valid: 0, new: 0, updated: 0, warnings: 0 },
-            samples: { entities: [], findings: [] },
+            counts: { rows: 1, entity_valid: 0, finding_valid: 0, evidence_valid: 0, new: 0, updated: 0, skipped: 1, warnings: 0 },
+            samples: { entities: [], findings: [], evidence: [] },
             warnings: [],
             apply_options: {
               import_entities: { available: false, requires: ['mutate_projects'] },
               import_findings: { available: false, requires: ['triage_findings'] },
+              import_evidence: { available: false, requires: ['mutate_projects'] },
               link_to_project: { available: false, requires: ['mutate_projects'] },
               create_project_targets: { available: false, requires: ['mutate_projects'] },
             },
@@ -2844,7 +2955,7 @@ describe('Atlas overlay', () => {
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-import-status')?.textContent).toContain('Preview ready')
     })
-    ;['import_entities', 'import_findings', 'link_to_project', 'create_project_targets'].forEach((key) => {
+    ;['import_entities', 'import_findings', 'import_evidence', 'link_to_project', 'create_project_targets'].forEach((key) => {
       const checkbox = document.querySelector(`[data-atlas-import-option="${key}"]`)
       expect(checkbox?.disabled).toBe(true)
       expect(checkbox?.checked).toBe(false)
@@ -3908,6 +4019,52 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-mobile-entity-view')?.classList.contains('u-hidden')).toBe(true)
     document.body.classList.remove('mobile-terminal-mode')
   }, 10_000)
+
+  it('creates a finding from a Project-scoped Atlas entity profile', async () => {
+    const openContextualFindingRecord = vi.fn(() => Promise.resolve(true))
+    FINDING.origin = 'manual'
+    try {
+      const { openAtlas } = loadAtlas({
+        openContextualFindingRecordImpl: openContextualFindingRecord,
+      })
+
+      await openAtlas({
+        source: 'project-workspace',
+        tab: 'ip',
+        projectId: 'prj_linked',
+        projectName: 'Linked Case',
+      })
+      const create = [...document.querySelectorAll('#atlas-detail .atlas-detail-actions button')]
+        .find(button => button.textContent === 'Create finding')
+      expect(create).toBeTruthy()
+      create.click()
+      await Promise.resolve()
+
+      expect(openContextualFindingRecord).toHaveBeenCalledWith(expect.objectContaining({
+        projectId: 'prj_linked',
+        targetId: ENTITY.id,
+        canEdit: true,
+        evidence: [{
+          evidence_type: 'atlas_entity',
+          evidence_id: ENTITY.id,
+          label: ENTITY.canonical_value,
+        }],
+      }))
+
+      document.querySelector('#atlas-detail button.atlas-finding-row')?.click()
+      const edit = [...document.querySelectorAll('#atlas-detail .atlas-detail-actions button')]
+        .find(button => button.textContent === 'Edit finding')
+      expect(edit).toBeTruthy()
+      edit.click()
+      expect(openContextualFindingRecord).toHaveBeenLastCalledWith(expect.objectContaining({
+        projectId: 'prj_linked',
+        targetId: ENTITY.id,
+        finding: expect.objectContaining({ id: FINDING.id, origin: 'manual' }),
+      }))
+    } finally {
+      delete FINDING.origin
+    }
+  })
 
   it('exports filtered entity rows without leaving the Atlas surface', async () => {
     const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()

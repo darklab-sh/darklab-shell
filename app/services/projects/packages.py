@@ -15,6 +15,7 @@ import config as _config
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from core.redaction import apply_redaction_rules
+from services.cve_risk.snapshot import build_cve_risk_snapshot
 from services.projects.package_presets import known_package_preset_ids
 from services.projects.provenance import attach_finding_target_references
 from services.projects.contracts import (
@@ -128,6 +129,7 @@ def normalize_evidence_package_payload(data):
         "preset": preset,
         "package_format_version": EVIDENCE_PACKAGE_FORMAT_VERSION,
         "include_private_notes": bool(data.get("include_private_notes")),
+        "assessment_id": _trim_text(data.get("assessment_id"), MAX_ENTITY_ID_LEN),
         "selection": selection if isinstance(selection, dict) else None,
         "options": options if isinstance(options, dict) else {},
         "labels": labels,
@@ -812,6 +814,7 @@ def evidence_manifest_from_summary(summary, payload, findings=None):
         "artifact_warnings": artifact_warnings,
         "redaction_mode": payload["redaction_mode"],
         "include_artifacts": payload["include_artifacts"],
+        "cve_risk_snapshot": build_cve_risk_snapshot(selected_findings),
         "provenance": _evidence_package_provenance(
             payload,
             project_payload,

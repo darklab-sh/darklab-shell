@@ -9,6 +9,7 @@ from typing import Any
 
 from services.intel.base import IntelResult, Provider, ProviderClientUnavailable
 from services.intel.canonical import canonical_cve
+from services.intel.nvd_applicability import normalize_nvd_cpe_matches
 from services.intel.registry import provider_definition
 from services.intel.schema import response_with_provider
 
@@ -17,12 +18,17 @@ def normalize_cve_payload(raw: dict[str, Any]) -> dict[str, Any]:
     cve = _first_cve(raw)
     raw_metrics = cve.get("metrics")
     metrics: dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
-    severity, score = _best_cvss(metrics)
+    cvss = _best_cvss(metrics)
     return {
         "published": str(cve.get("published") or ""),
         "last_modified": str(cve.get("lastModified") or ""),
-        "severity": severity,
-        "score": score,
+        "status": _advisory_status(cve),
+        "severity": cvss[0],
+        "score": cvss[1],
+        "cvss_version": cvss[2],
+        "cvss_vector": cvss[3],
+        "cwes": _cwe_ids(cve.get("weaknesses")),
+        "cpe_matches": normalize_nvd_cpe_matches(cve.get("configurations")),
         "description": _english_description(cve.get("descriptions")),
         "references": _reference_urls(cve.get("references")),
     }
@@ -59,8 +65,8 @@ def _first_cve(raw: dict[str, Any]) -> dict[str, Any]:
     return cve if isinstance(cve, dict) else {}
 
 
-def _best_cvss(metrics: dict[str, Any]) -> tuple[str, float | None]:
-    for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+def _best_cvss(metrics: dict[str, Any]) -> tuple[str, float | None, str, str]:
+    for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
         rows = metrics.get(key)
         if not isinstance(rows, list) or not rows:
             continue
@@ -75,8 +81,46 @@ def _best_cvss(metrics: dict[str, Any]) -> tuple[str, float | None]:
             score = float(raw_score) if raw_score is not None else None
         except (TypeError, ValueError):
             score = None
-        return severity, score
-    return "", None
+        return (
+            severity,
+            score,
+            str(cvss_data.get("version") or ""),
+            str(cvss_data.get("vectorString") or ""),
+        )
+    return "", None, "", ""
+
+
+def _advisory_status(cve: dict[str, Any]) -> str:
+    tags = cve.get("cveTags")
+    if isinstance(tags, list):
+        normalized_tags = {
+            str(tag).strip().lower()
+            for row in tags
+            for tag in (row.get("tags", []) if isinstance(row, dict) else [])
+        }
+        if "disputed" in normalized_tags:
+            return "disputed"
+    status = str(cve.get("vulnStatus") or "").strip().lower()
+    if status in {"rejected", "withdrawn"}:
+        return status
+    return "active" if cve else "unknown"
+
+
+def _cwe_ids(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    found: set[str] = set()
+    for row in value:
+        descriptions = row.get("description") if isinstance(row, dict) else None
+        if not isinstance(descriptions, list):
+            continue
+        for description in descriptions:
+            if not isinstance(description, dict):
+                continue
+            item = str(description.get("value") or "").strip().upper()
+            if item.startswith("CWE-") and item[4:].isdigit():
+                found.add(item)
+    return sorted(found)
 
 
 def _english_description(value: object) -> str:

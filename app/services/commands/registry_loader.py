@@ -19,6 +19,7 @@ from services.commands.registry_adaptations import (
     inject_merge_key,
 )
 from services.commands import registry_secret_specs
+from services.commands.registry_semantics import validate_commands_registry_semantics
 
 
 log = logging.getLogger("shell")
@@ -454,6 +455,9 @@ def normalize_commands_registry_entry(
         else:
             entry["feature_required"] = str(feature_required).strip().lower()
     if pipe_helper:
+        raw_autocomplete = raw_entry.get("autocomplete")
+        raw_pipe = raw_autocomplete.get("pipe") if isinstance(raw_autocomplete, dict) else None
+        entry["_pipe_contract_declared"] = isinstance(raw_pipe, dict) and "enabled" in raw_pipe
         return entry
 
     raw_policy_value = raw_entry.get("policy")
@@ -505,11 +509,13 @@ def normalize_commands_registry_data(
         entry = normalize_commands_registry_entry(raw_entry, normalize_autocomplete, pipe_helper=True)
         if entry:
             pipe_helpers.append(entry)
-    return {
+    registry = {
         "version": int(data.get("version") or 1),
         "commands": commands,
         "pipe_helpers": pipe_helpers,
     }
+    validate_commands_registry_semantics(registry, require_pipe_contracts=False)
+    return registry
 
 
 def merge_command_registry_entries(
@@ -704,6 +710,7 @@ def merge_commands_registry(
 
     merge_list("commands")
     merge_list("pipe_helpers", pipe_helper=True)
+    validate_commands_registry_semantics(merged, require_pipe_contracts=True)
     return merged
 
 

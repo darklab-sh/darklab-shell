@@ -52,11 +52,24 @@ JetBrains Mono and Syne are distributed under the SIL Open Font License 1.1.
 The license text is in
 /usr/share/doc/darklab-shell/licenses/OFL-1.1.txt in the image.
 
+Public risk data
+----------------
+
+The app includes dated bootstrap snapshots from the FIRST Exploit Prediction
+Scoring System and the CISA Known Exploited Vulnerabilities catalog. EPSS is
+an exploitation-probability estimate, not a complete risk score. CISA catalog
+inclusion and BOD 22-01 due dates don't create a private-sector remediation
+deadline. Attribution, source links, interpretation notes, and the
+non-endorsement statement are installed at
+/app/resources/cve_risk/NOTICE.md in the image.
+
 Other notice locations
 ----------------------
 
 Debian package notices are under /usr/share/doc/*/copyright. Python package
-notices are under their installed *-info metadata directories. Go source and
-license files are retained in /root/go/pkg/mod. Source trees retained for
+notices are under their installed *-info metadata directories, including the
+isolated Schemathesis environment under /opt/schemathesis. Durable notices for
+packaged binaries, including Dalfox, and source-built Go tools, including gau,
+are under /usr/share/doc/darklab-shell/licenses. Source trees retained for
 SecLists, testssl.sh, and Nikto include their upstream license files. Standard
 GNU license texts are under /usr/share/common-licenses.

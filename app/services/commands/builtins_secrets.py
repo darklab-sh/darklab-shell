@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from services.commands.builtin_registry import (
@@ -20,6 +21,12 @@ from services.secrets.storage import InvalidSecretName, delete_secret, list_secr
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
+from services.cve_risk.osv_acquisition import get_osv_source_status
+from services.cve_risk.store import get_feed_status
+from config import resolve_effective_cfg
+
+
+log = logging.getLogger("shell")
 
 
 def _secret_usage() -> list[dict[str, object]]:
@@ -217,6 +224,73 @@ def _run_secret_show_consumers(secret_scope_id: str) -> list[dict[str, object]]:
         )
         for row in sorted(command_rows, key=lambda item: str(item["label"]).lower()):
             lines.append(output_line(str(row["line"]), "builtin-kv"))
+
+    risk_cfg = resolve_effective_cfg().get("cve_risk")
+    risk_settings = risk_cfg if isinstance(risk_cfg, dict) else {}
+    try:
+        feeds = get_feed_status(
+            stale_after_hours=int(risk_settings.get("stale_after_hours") or 48),
+            live_refresh_enabled=bool(risk_settings.get("refresh_enabled", False)),
+        )
+    except Exception as exc:
+        log.warning(
+            "CVE_RISK_PROVIDER_STATUS_UNAVAILABLE",
+            extra={"error_type": type(exc).__name__},
+        )
+        feeds = []
+    lines.append(output_line(""))
+    lines.append(output_line("Public CVE risk data:", "builtin-section"))
+    if not feeds:
+        lines.append(output_line("EPSS and CISA KEV data is unavailable.", "builtin-note"))
+    for feed in feeds:
+        label = "FIRST EPSS" if feed["source"] == "epss" else "CISA KEV"
+        state = str(feed.get("status") or "unavailable")
+        origin = str(feed.get("origin") or "unavailable")
+        published = str(feed.get("published_at") or "unknown date")
+        lines.append(output_line(format_native_record(label, f"{state} · {origin} · {published}", 22), "builtin-kv"))
+    refresh_enabled = bool(risk_settings.get("refresh_enabled", False))
+    lines.append(output_line(
+        "Live EPSS/KEV refresh is enabled." if refresh_enabled
+        else (
+            "Live EPSS/KEV refresh is off. Set cve_risk.refresh_enabled: true in "
+            "config.local.yaml to update the inventory-neutral public feeds."
+        ),
+        "builtin-note",
+    ))
+    advisory_mode = str(risk_settings.get("advisory_mode") or "disabled")
+    lines.append(output_line(
+        format_native_record("NVD advisory data", advisory_mode, 22),
+        "builtin-kv",
+    ))
+    if advisory_mode == "disabled":
+        lines.append(output_line(
+            "Shared NVD CVSS storage is off. Choose local or external cve_risk.advisory_mode "
+            "before using explicit CVE enrichment.",
+            "builtin-note",
+        ))
+    try:
+        osv_status = get_osv_source_status()
+    except Exception as exc:
+        log.warning(
+            "OSV_ADVISORY_PROVIDER_STATUS_UNAVAILABLE",
+            extra={"error_type": type(exc).__name__},
+        )
+        osv_status = {"status": "unavailable"}
+    osv_mode = str(risk_settings.get("osv_advisory_mode") or "disabled")
+    lines.append(output_line(
+        format_native_record(
+            "OSV package data",
+            f"{osv_mode} · {str(osv_status.get('status') or 'unavailable')}",
+            22,
+        ),
+        "builtin-kv",
+    ))
+    if osv_mode == "disabled":
+        lines.append(output_line(
+            "Shared OSV package matching is off. Choose local or external "
+            "cve_risk.osv_advisory_mode before acquiring package applicability.",
+            "builtin-note",
+        ))
 
     return lines
 

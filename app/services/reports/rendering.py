@@ -101,7 +101,77 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 {% else %}
 <p class="muted">No methodology narrative has been written yet.</p>
 {% endif %}
+{% if assessment_context %}
+<h3>Assessment coverage</h3>
+<p><strong>{{ assessment_context.assessment.title }}</strong> · {{ assessment_context.assessment.status }} ·
+{{ assessment_context.rollup.covered_checks }} of \
+{{ assessment_context.methodology.applicable_denominator }} applicable checks covered</p>
+<p>{{ assessment_context.methodology.summary }}</p>
+<table><thead><tr><th>State</th><th>Count</th></tr></thead><tbody>
+<tr><td>Covered</td><td>{{ assessment_context.rollup.covered_checks }}</td></tr>
+<tr><td>Awaiting review</td><td>{{ assessment_context.rollup.checks_awaiting_review }}</td></tr>
+<tr><td>Untested</td><td>{{ assessment_context.rollup.untested_checks }}</td></tr>
+<tr><td>Excluded</td><td>{{ assessment_context.rollup.excluded_checks }}</td></tr>
+<tr><td>Unavailable evidence</td><td>{{ assessment_context.rollup.unavailable_evidence_checks }}</td></tr>
+</tbody></table>
+{% if assessment_context.manual_exclusions %}
+<h3>Manual exclusions</h3>
+<table><thead><tr><th>Check</th><th>Target</th><th>State</th><th>Reason</th></tr></thead><tbody>
+{% for item in assessment_context.manual_exclusions %}
+<tr><td><code>{{ item.check_id }}</code></td><td>{{ item.target_value }}</td>
+<td>{{ item.state|replace("_", " ") }}</td><td>{{ item.reason }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% if assessment_context.unavailable_evidence_warnings or assessment_context.screenshot_warnings %}
+<h3>Coverage warnings</h3><ul>
+{% for item in assessment_context.unavailable_evidence_warnings %}
+<li><code>{{ item.check_id }}</code>: {{ item.reason }}</li>{% endfor %}
+{% for item in assessment_context.screenshot_warnings %}
+<li><code>{{ item.artifact_id }}</code>: {{ item.reason }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endif %}
 {% elif section.type == "findings_by_severity" %}
+{% if assessment_context and assessment_context.fix_first["items"] %}
+<h3>Fix first</h3>
+<table><thead><tr><th>Remediation</th><th>Signals</th><th>Observations</th></tr></thead><tbody>
+{% for item in assessment_context.fix_first["items"] %}
+<tr><td>{{ item.title }}<br><code>{{ item.remediation_id }}</code></td>
+<td>{% for reason in item.risk.priority_reasons %}{{ reason }}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+<td>{{ item.observation_count }} observations · {{ item.evidence_count }} evidence sources</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% if assessment_finding_changes %}
+<h3>Assessment finding changes</h3>
+<p><strong>{{ assessment_finding_changes.assessment.title }}</strong> ·
+{{ assessment_finding_changes.comparison.comparable_checks }} of
+{{ assessment_finding_changes.comparison.total_checks }} checks comparable</p>
+<table><thead><tr>
+<th>State</th><th>Remediation</th><th>Current finding / evidence</th>
+<th>Earlier finding / evidence</th><th>Comparison reason</th>
+</tr></thead><tbody>
+{% for item in assessment_finding_changes["items"] %}
+<tr>
+<td>{{ item.state|replace("_", " ") }}</td>
+<td>{{ item.vulnerability_id or item.rule_identity }}<br><code>{{ item.remediation_id }}</code></td>
+<td>
+{% for finding in item.current_findings %}{{ finding.title }} (<code>{{ finding.id }}</code>)<br>{% endfor %}
+{% for evidence_id in item.current_evidence_ids %}<code>{{ evidence_id }}</code><br>{% endfor %}
+{% if not item.current_findings and not item.current_evidence_ids %}<span class="muted">None</span>{% endif %}
+</td>
+<td>
+{% for finding in item.previous_findings %}{{ finding.title }} (<code>{{ finding.id }}</code>)<br>{% endfor %}
+{% for evidence_id in item.previous_evidence_ids %}<code>{{ evidence_id }}</code><br>{% endfor %}
+{% if not item.previous_findings and not item.previous_evidence_ids %}<span class="muted">None</span>{% endif %}
+</td>
+<td>{% if item.reasons %}{{ item.reasons|join("; ") }}{% else %}<span class="muted">No exception recorded</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+<p class="muted">Counts and rows represent distinct remediation groups, not evidence observations.</p>
+{% endif %}
 {% if findings_by_severity %}
 {% for group in findings_by_severity %}
 <h3>{{ group.severity|title }} ({{ group.count }})</h3>
@@ -127,6 +197,9 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 </td>
 <td>{{ finding.review_state or finding.status }}</td>
 <td>
+{% if finding.risk and finding.risk.priority_reasons %}
+<p><strong>Priority:</strong> {{ finding.risk.priority_reasons|join("; ") }}</p>
+{% endif %}
 {% if finding.triage %}
 {% if finding.triage.remediation %}<p><strong>Remediation:</strong> {{ finding.triage.remediation }}</p>{% endif %}
 {% if finding.triage.verification_status and finding.triage.verification_status != "not_started" %}
@@ -186,6 +259,22 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 </section>
 {% endif %}
 {% endfor %}
+{% if cve_risk_snapshot %}
+<section data-report-section="cve-risk-sources">
+<h2>CVE risk data sources</h2>
+{% for source in cve_risk_snapshot.sources %}
+<p><strong>{{ source.source|upper }}</strong> — {{ source.attribution }}<br>
+<span class="muted">Origin {{ source.origin or "unavailable" }};
+version {{ source.source_version or "unavailable" }};
+model {{ source.model_version or "unavailable" }};
+published {{ source.published_at or "unknown" }};
+fetched {{ source.retrieved_at or "unknown" }};
+status {{ source.status or "unavailable" }};
+checksum {{ source.checksum_sha256 or "unavailable" }}.</span></p>
+{% endfor %}
+<p class="muted">{{ cve_risk_snapshot.non_endorsement }}</p>
+</section>
+{% endif %}
 </main>
 </body>
 </html>
@@ -282,6 +371,126 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
     return lines
 
 
+def _append_assessment_finding_changes_markdown(
+    lines: list[str],
+    context: dict[str, Any],
+) -> None:
+    changes = context.get("assessment_finding_changes")
+    if not isinstance(changes, dict):
+        return
+    raw_assessment = changes.get("assessment")
+    raw_comparison = changes.get("comparison")
+    assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    comparison = raw_comparison if isinstance(raw_comparison, dict) else {}
+    lines.extend([
+        "### Assessment finding changes",
+        "",
+        f"- Cycle: {_md(assessment.get('title') or assessment.get('id'))}",
+        "- Comparison: "
+        f"{int(comparison.get('comparable_checks') or 0)} of "
+        f"{int(comparison.get('total_checks') or 0)} checks comparable",
+        "- Counts and rows represent distinct remediation groups, not evidence observations.",
+    ])
+    for item in changes.get("items", []):
+        if not isinstance(item, dict):
+            continue
+        label = item.get("vulnerability_id") or item.get("rule_identity") or "Saved remediation"
+        lines.extend(("", f"#### {_md(label)}", ""))
+        lines.append(f"- State: {_md(str(item.get('state') or 'incomparable').replace('_', ' '))}")
+        lines.append(f"- Remediation: {_md_code(item.get('remediation_id'))}")
+        for side, side_label in (("current", "Current"), ("previous", "Earlier")):
+            references = [
+                f"{_md(finding.get('title') or finding.get('id'))} ({_md_code(finding.get('id'))})"
+                for finding in item.get(f"{side}_findings", [])
+                if isinstance(finding, dict)
+            ]
+            references.extend(
+                _md_code(value)
+                for value in item.get(f"{side}_evidence_ids", [])
+                if str(value or "")
+            )
+            lines.append(f"- {side_label}: {', '.join(references) if references else 'None'}")
+        reasons = "; ".join(str(value) for value in item.get("reasons", []) if str(value or ""))
+        lines.append(f"- Comparison reason: {_md(reasons or 'No exception recorded')}")
+    lines.append("")
+
+
+def _append_assessment_context_markdown(
+    lines: list[str],
+    context: dict[str, Any],
+) -> None:
+    raw = context.get("assessment_context")
+    if not isinstance(raw, dict):
+        return
+    raw_assessment = raw.get("assessment")
+    assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    raw_rollup = raw.get("rollup")
+    rollup = raw_rollup if isinstance(raw_rollup, dict) else {}
+    raw_methodology = raw.get("methodology")
+    methodology = raw_methodology if isinstance(raw_methodology, dict) else {}
+    lines.extend([
+        "",
+        "### Assessment coverage",
+        "",
+        f"- Cycle: {_md(assessment.get('title') or assessment.get('id'))}",
+        f"- Status: {_md(assessment.get('status'))}",
+        f"- Applicable denominator: {int(methodology.get('applicable_denominator') or 0)}",
+        f"- Covered: {int(rollup.get('covered_checks') or 0)}",
+        f"- Awaiting review: {int(rollup.get('checks_awaiting_review') or 0)}",
+        f"- Untested: {int(rollup.get('untested_checks') or 0)}",
+        f"- Excluded: {int(rollup.get('excluded_checks') or 0)}",
+        f"- Unavailable evidence: {int(rollup.get('unavailable_evidence_checks') or 0)}",
+        "",
+        _md(methodology.get("summary")),
+    ])
+    exclusions = raw.get("manual_exclusions") if isinstance(raw.get("manual_exclusions"), list) else []
+    if exclusions:
+        lines.extend(("", "#### Manual exclusions", ""))
+        lines.extend(_markdown_table(
+            ["Check", "Target", "State", "Reason"],
+            [[
+                item.get("check_id"), item.get("target_value"),
+                str(item.get("state") or "").replace("_", " "), item.get("reason"),
+            ] for item in exclusions if isinstance(item, dict)],
+        ))
+    warnings = [
+        *[item for item in raw.get("unavailable_evidence_warnings", []) if isinstance(item, dict)],
+        *[item for item in raw.get("screenshot_warnings", []) if isinstance(item, dict)],
+    ]
+    if warnings:
+        lines.extend(("", "#### Coverage warnings", ""))
+        lines.extend(
+            f"- {_md_code(item.get('check_id') or item.get('artifact_id'))}: {_md(item.get('reason'))}"
+            for item in warnings
+        )
+    lines.append("")
+
+
+def _append_fix_first_markdown(lines: list[str], context: dict[str, Any]) -> None:
+    raw = context.get("assessment_context")
+    fix_first = raw.get("fix_first") if isinstance(raw, dict) else None
+    items = fix_first.get("items") if isinstance(fix_first, dict) else None
+    if not isinstance(items, list) or not items:
+        return
+    lines.extend(("### Fix first", ""))
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw_risk = item.get("risk")
+        risk = raw_risk if isinstance(raw_risk, dict) else {}
+        raw_reasons = risk.get("priority_reasons")
+        reasons = raw_reasons if isinstance(raw_reasons, list) else []
+        lines.extend([
+            f"#### {_md(item.get('title') or item.get('remediation_id'))}",
+            "",
+            f"- Remediation: {_md_code(item.get('remediation_id'))}",
+            f"- Signals: {_md('; '.join(str(reason) for reason in reasons) or 'No stored CVE-risk signals')}",
+            f"- Evidence: {int(item.get('observation_count') or 0)} observations, "
+            f"{int(item.get('evidence_count') or 0)} evidence sources",
+            "",
+        ])
+
+
 def _target_reference_label(reference: Any) -> str:
     if not isinstance(reference, dict):
         return ""
@@ -342,7 +551,10 @@ def _render_markdown_section(section: dict[str, Any], context: dict[str, Any]) -
         lines.extend(target_table or ["_No targets are selected for this report._"])
     elif section_type == "methodology":
         lines.append(_md(metadata.get("methodology")) or "_No methodology narrative has been written yet._")
+        _append_assessment_context_markdown(lines, context)
     elif section_type == "findings_by_severity":
+        _append_fix_first_markdown(lines, context)
+        _append_assessment_finding_changes_markdown(lines, context)
         if not context.get("findings_by_severity"):
             lines.append("_No findings are selected for this report._")
         for group in context.get("findings_by_severity", []):
@@ -357,6 +569,10 @@ def _render_markdown_section(section: dict[str, Any], context: dict[str, Any]) -
                 for label, value in details:
                     if _md(value):
                         lines.append(f"  - {label}: {_md(value)}")
+                risk = finding.get("risk") if isinstance(finding.get("risk"), dict) else {}
+                reasons = risk.get("priority_reasons") if isinstance(risk.get("priority_reasons"), list) else []
+                if reasons:
+                    lines.append(f"  - Priority: {_md('; '.join(str(reason) for reason in reasons))}")
                 triage = finding.get("triage") if isinstance(finding.get("triage"), dict) else {}
                 for label, key in (
                     ("Remediation", "remediation"),
@@ -438,6 +654,21 @@ def render_report_markdown_from_context(
         if _section_enabled(section):
             lines.extend(_render_markdown_section(section, context))
             lines.append("")
+    snapshot = context.get("cve_risk_snapshot")
+    if isinstance(snapshot, dict) and snapshot:
+        lines.extend(("## CVE risk data sources", ""))
+        for source in snapshot.get("sources", []):
+            lines.append(
+                f"- **{_md(str(source.get('source') or '').upper())}:** "
+                f"{_md(source.get('attribution'))}; origin {_md(source.get('origin') or 'unavailable')}; "
+                f"version {_md(source.get('source_version') or 'unavailable')}; "
+                f"model {_md(source.get('model_version') or 'unavailable')}; "
+                f"published {_md(source.get('published_at') or 'unknown')}; "
+                f"fetched {_md(source.get('retrieved_at') or 'unknown')}; "
+                f"status {_md(source.get('status') or 'unavailable')}; "
+                f"checksum {_md(source.get('checksum_sha256') or 'unavailable')}"
+            )
+        lines.extend(("", _md(snapshot.get("non_endorsement")), ""))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -480,6 +711,9 @@ def render_report_html_from_context(
         runs=context.get("runs") or [],
         targets=context.get("targets") or [],
         findings_by_severity=context.get("findings_by_severity") or [],
+        assessment_context=context.get("assessment_context") or {},
+        assessment_finding_changes=context.get("assessment_finding_changes") or {},
         artifacts=context.get("artifacts") or [],
         artifact_warnings=context.get("artifact_warnings") or [],
+        cve_risk_snapshot=context.get("cve_risk_snapshot") or {},
     )

@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+id: darklab-github-pages-dangling-domain
+
+info:
+  name: Potential GitHub Pages dangling custom domain
+  author: darklab.sh
+  severity: info
+  description: >-
+    Detects the public GitHub Pages response associated with an unbound custom
+    domain. The app treats this provider fingerprint as confirmation only when
+    it matches separately reviewed DNS evidence for the same scoped hostname.
+  reference:
+    - https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/verifying-your-custom-domain-for-github-pages
+  metadata:
+    max-request: 1
+  tags: takeover,github,dns
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 404
+      - type: word
+        part: body
+        words:
+          - "There isn't a GitHub Pages site here."

@@ -20,6 +20,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules, line_entries_from_events, line_events_from_entries, redact_line_entries
+from services.assessments.export_context import get_project_assessment_context
 from services.runs.output_model import LineEvent, is_noise_event
 from services.projects.artifacts import (
     artifact_owner_context as _artifact_owner_context,
@@ -34,8 +35,9 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
 )
 from services.projects.findings import list_project_findings
+from services.projects.finding_evidence import attach_finding_evidence_links
 from services.projects.metadata import (
-    _finding_triage_by_id,
+    _full_finding_triage_by_id,
     _metadata_owner_where,
     _metadata_row_owner_values,
 )
@@ -149,7 +151,12 @@ def _attach_package_finding_triage(session_id, findings, *, team_id=""):
     if not finding_ids:
         return findings
     with get_db_connect()() as conn:
-        triage_by_id = _finding_triage_by_id(conn, session_id, finding_ids, team_id=team_id)
+        triage_by_id = _full_finding_triage_by_id(
+            conn,
+            session_id,
+            finding_ids,
+            team_id=team_id,
+        )
     for finding in items:
         triage = triage_by_id.get(str(finding.get("id") or ""))
         if triage:
@@ -874,6 +881,30 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
     findings = list_project_findings(session_id, project_id, team_id=team_id) or []
     _attach_package_finding_triage(session_id, findings, team_id=team_id)
     manifest = _evidence_manifest_from_summary(summary, payload, findings)
+    attach_finding_evidence_links(
+        session_id,
+        project_id,
+        manifest.get("findings", []),
+        team_id=team_id,
+    )
+    assessment_context = get_project_assessment_context(
+        session_id,
+        project_id,
+        assessment_id=payload["assessment_id"],
+        findings=manifest.get("findings", []),
+        selected_artifact_ids=(
+            str(artifact.get("id") or "")
+            for artifact in manifest.get("artifacts", [])
+            if isinstance(artifact, dict)
+        ),
+        team_id=team_id,
+    )
+    manifest["assessment_context"] = assessment_context
+    manifest["assessment_finding_changes"] = (
+        assessment_context.get("finding_changes")
+        if isinstance(assessment_context, dict)
+        else None
+    )
     redaction_rules = _package_redaction_rules(payload["redaction_mode"])
     if redaction_rules:
         manifest = _redact_package_manifest(manifest, redaction_rules)

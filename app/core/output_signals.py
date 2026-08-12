@@ -17,12 +17,12 @@ import re
 from urllib.parse import urlparse
 
 from core.output_targets import (
-    _find_flag_value,
-    _is_help_output_command,
+    _find_flag_value, _is_help_output_command,
     command_root,
     extract_target,
     tokenize_command,
 )
+from core.output_dnsx import dnsx_json_entities
 from core.output_entities import (
     _add_entity,
     _is_public_ip,
@@ -39,6 +39,7 @@ from core.output_port_entities import (
     _nmap_target_entities,
     _port_entities_for_host,
 )
+from core.output_nuclei import nuclei_output_metadata
 from core.output_shodan import (
     _SHODAN_DNS_FINDING_TYPES,
     _SHODAN_LABEL_RE,
@@ -48,6 +49,10 @@ from core.output_shodan import (
     _is_shodan_warning,
     _parse_shodan_dns_row,
 )
+from services.assessments.dalfox_parameter_observations import DalfoxParameterObservationState
+from services.assessments.dalfox_xss_observations import DalfoxXssObservationState, ReviewedDalfoxXssContext
+from services.assessments.dns_takeover_observations import dnsx_json_metadata
+from services.assessments.historical_urls import historical_url_entity_attributes, normalize_historical_url
 from core.output_structured_signals import (
     _cdncheck_json_entities,
     _is_cdncheck_json_summary,
@@ -63,13 +68,10 @@ from core.output_structured_signals import (
     _tlsx_json_entities,
 )
 from services.runs.output_model import LineNoiseKind, LineRole, noise_kind_for_role
-from services.nuclei.provenance import nuclei_source_detail, nuclei_template_provenance
-from services.intel.canonical import (
-    CanonicalizationError,
-    canonical_domain,
-    canonical_ip,
-    canonical_url,
-)
+from services.assessments.httpx_version_observations import httpx_json_metadata
+from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
+from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_ip, canonical_url
+from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 
 
 log = logging.getLogger("shell")
@@ -429,8 +431,6 @@ def _looks_like_clean_url(value: str) -> bool:
     return not _SHELL_TEMPLATE_URL_NOISE_RE.search(raw)
 
 
-
-
 def _nmap_report_entities(stripped: str, source_line: int | None) -> list[dict[str, object]]:
     match = _NMAP_REPORT_TARGET_RE.match(stripped)
     if not match:
@@ -584,6 +584,8 @@ def _is_nmap_vulners_finding(stripped: str) -> bool:
 
 
 def _is_command_scoped_finding(root: str, stripped: str) -> bool:
+    if root == "dnsx" and stripped.startswith("{"):
+        return bool(dnsx_json_metadata(_json_object_line(stripped), command="dnsx", source_run_id="classification"))
     if root in {"dnsx", "subfinder"}:
         return bool(_HOSTNAME_RE.search(stripped))
     if root == "tlsx":
@@ -868,15 +870,12 @@ def _extract_entities_for_command(
             )
         # Keep curl on the generic extraction path: verbose/header output often
         # contains useful domains or URLs even when it is not a connect line.
-    if root == "tlsx":
+    if root in {"dnsx", "tlsx", "cdncheck", "trufflehog"}:
         data = _json_object_line(stripped)
-        return _tlsx_json_entities(data, source_line) if data else []
-    if root == "cdncheck":
-        data = _json_object_line(stripped)
-        return _cdncheck_json_entities(data, source_line) if data else []
-    if root == "trufflehog":
-        data = _json_object_line(stripped)
-        return _trufflehog_json_entities(data, source_line) if data else []
+        extractors = {"dnsx": dnsx_json_entities, "tlsx": _tlsx_json_entities,
+            "cdncheck": _cdncheck_json_entities, "trufflehog": _trufflehog_json_entities,
+        }
+        return extractors[root](data, source_line) if data else []
     if root == "puredns":
         return _puredns_entities(stripped, source_line)
     if root == "openssl" and _is_openssl_noise(stripped):
@@ -947,19 +946,27 @@ class OutputSignalClassifier:
     command: str
     cmd_type: str = "real"
     extra_domain_suffixes: Sequence[str] = ()
-
+    source_run_id: str = ""
+    profile_role: str = ""
+    nuclei_takeover_template: ReviewedNucleiTakeoverTemplate | None = None
+    nuclei_template_snapshot: NucleiTemplateCacheSnapshot | None = None
+    dalfox_xss_context: ReviewedDalfoxXssContext | None = None
+    dalfox_oast_validation: bool = False
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
         self.url_template = ""
-        self.nuclei_template_provenance = {}
         if self.root == "ffuf":
             self.url_template = _find_flag_value(tokenize_command(self.command), {"-u", "--url"})
-        elif self.root == "nuclei":
-            self.nuclei_template_provenance = nuclei_template_provenance(self.command)
         self.is_help_output = _is_help_output_command(self.command, self.root)
         self.current_target: str | None = None
         self.current_nmap_service_target: str | None = None
+        dalfox_command = "" if self.dalfox_oast_validation else self.command
+        self.dalfox_discovery = DalfoxParameterObservationState(
+            dalfox_command,
+            self.source_run_id,
+        )
+        self.dalfox_xss = DalfoxXssObservationState(self.command, self.source_run_id, self.dalfox_xss_context)
         self.line_index = 0
         self.previous_text = ""
 
@@ -1003,13 +1010,29 @@ class OutputSignalClassifier:
         }
         if target:
             metadata["target"] = target
-        if self.root == "nuclei" and self.nuclei_template_provenance:
-            metadata["template_provenance"] = dict(self.nuclei_template_provenance)
-            source_detail = nuclei_source_detail(self.command, line_text=normalized_text)
-            if source_detail:
-                metadata["source_detail"] = source_detail
+        if self.root == "nuclei":
+            metadata.update(nuclei_output_metadata(
+                self.command, normalized_text, source_run_id=self.source_run_id,
+                takeover_template=self.nuclei_takeover_template, template_snapshot=self.nuclei_template_snapshot,
+            ))
         if scopes:
             metadata["signals"] = scopes
+        if self.root == "httpx" and normalized_text.startswith("{"):
+            metadata.update(httpx_json_metadata(
+                _json_object_line(normalized_text), source_run_id=self.source_run_id,
+                profile_role=self.profile_role, command=self.command,
+            ))
+        if self.root == "dnsx" and normalized_text.startswith("{"):
+            metadata.update(dnsx_json_metadata(_json_object_line(normalized_text), command=self.command,
+                                               source_run_id=self.source_run_id))
+        if self.root == "dalfox" and normalized_text.startswith("{"):
+            metadata.update(self.dalfox_discovery.metadata(normalized_text))
+            metadata.update(self.dalfox_xss.metadata(normalized_text))
+        historical = None
+        if self.root == "gau":
+            historical = normalize_historical_url(normalized_text, source="gau", run_id=self.source_run_id)
+            if historical:
+                metadata["historical_urls"] = [historical]
         role = classify_line_role(
             text,
             root=self.root,
@@ -1052,9 +1075,14 @@ class OutputSignalClassifier:
                 command_url_template=self.url_template,
             )
             if entities:
+                if historical:
+                    attributes = historical_url_entity_attributes(historical)
+                    for entity in entities:
+                        if entity.get("type") == "url":
+                            entity["attributes"] = attributes
                 metadata["entities"] = entities
         if (
-            self.root in {"tlsx", "cdncheck", "trufflehog"}
+            self.root in {"dalfox", "dnsx", "tlsx", "cdncheck", "trufflehog"}
             and normalized_text
             and normalized_text.lstrip().startswith("{")
             and _json_object_line(normalized_text) is None

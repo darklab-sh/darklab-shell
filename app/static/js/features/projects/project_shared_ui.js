@@ -360,6 +360,8 @@ let exportedDarklabProjectSharedUi = null;
     function actionCapability(action) {
       const triageActions = new Set([
         'bulk-delete-project-findings',
+        'create-manual-finding',
+        'edit-manual-finding',
         'edit-finding-metadata',
       ]);
       const mutateActions = new Set([

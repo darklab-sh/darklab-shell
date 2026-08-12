@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from time import monotonic
 
 import fcntl
@@ -35,6 +35,7 @@ from core.helpers import get_log_session_id
 from services.runs.output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
 from services.runs.structured_summary import replace_run_output_summary
 from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
+from services.history.retention import prune_retention_on_conn
 from services.storage.body_store import delete_text_body
 
 log = logging.getLogger("shell")
@@ -366,6 +367,8 @@ def _run_post_schema_maintenance(conn):
     run_step("audit_retention_prune", audit_retention)
     run_step("project_target_audit", lambda: _audit_project_target_host_type_collapse(conn))
     run_step("url_host_entity_link_backfill", lambda: _backfill_url_host_entity_links(conn))
+    from services.cve_risk.maintenance import run_cve_risk_maintenance  # noqa: PLC0415
+    run_cve_risk_maintenance(conn, run_step, CFG)
     log.info("POST_SCHEMA_MAINTENANCE_COMPLETED", extra={
         "backend": DB_BACKEND.value,
         "steps": ",".join(completed_steps),
@@ -646,68 +649,13 @@ def delete_snapshot_metadata(conn, snapshot_ids):
 
 def _prune_retention(conn, *, cfg=None) -> dict[str, int]:
     """Delete runs and snapshots older than permalink_retention_days."""
-    counts = {"runs": 0, "snapshots": 0}
-    active_cfg = CFG if cfg is None else cfg
-    days = active_cfg.get("permalink_retention_days", 0)
-    if days and days > 0:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
-        if DB_BACKEND == DatabaseBackend.POSTGRES:
-            run_older_sql = "r.started::timestamptz < ?::timestamptz"
-            started_older_sql = "started::timestamptz < ?::timestamptz"
-            created_older_sql = "created::timestamptz < ?::timestamptz"
-        else:
-            run_older_sql = "datetime(r.started) < ?"
-            started_older_sql = "datetime(started) < ?"
-            created_older_sql = "datetime(created) < ?"
-        linked_run_row = conn.execute(
-            "SELECT COUNT(DISTINCT r.id) AS linked_runs, COUNT(DISTINCT l.project_id) AS linked_projects "
-            "FROM runs r JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = r.id "
-            f"WHERE {run_older_sql}",  # nosec
-            (cutoff,),
-        ).fetchone()
-        linked_run_count = int(linked_run_row["linked_runs"] or 0) if linked_run_row else 0
-        linked_project_count = int(linked_run_row["linked_projects"] or 0) if linked_run_row else 0
-        if linked_run_count:
-            log.warning("PROJECT_RETENTION_WARNING", extra={
-                "linked_runs": linked_run_count,
-                "projects": linked_project_count,
-                "retention_days": days,
-            })
-        old_run_ids = [
-            row["id"]
-            for row in conn.execute(
-                f"SELECT id FROM runs WHERE {started_older_sql}",  # nosec
-                (cutoff,)
-            ).fetchall()
-        ]
-        old_snapshot_ids = [
-            row["id"]
-            for row in conn.execute(
-                f"SELECT id FROM snapshots WHERE {created_older_sql}",  # nosec
-                (cutoff,)
-            ).fetchall()
-        ]
-        delete_run_artifacts(conn, old_run_ids)
-        delete_snapshot_metadata(conn, old_snapshot_ids)
-        cur_runs  = conn.execute(
-            f"DELETE FROM runs WHERE {started_older_sql}",  # nosec
-            (cutoff,)
-        )
-        cur_snaps = conn.execute(
-            f"DELETE FROM snapshots WHERE {created_older_sql}",  # nosec
-            (cutoff,)
-        )
-        counts = {
-            "runs": int(cur_runs.rowcount or 0),
-            "snapshots": int(cur_snaps.rowcount or 0),
-        }
-        if cur_runs.rowcount or cur_snaps.rowcount:
-            log.info("DB_PRUNED", extra={
-                "runs": cur_runs.rowcount,
-                "snapshots": cur_snaps.rowcount,
-                "retention_days": days,
-            })
-    return counts
+    return prune_retention_on_conn(
+        conn,
+        cfg=CFG if cfg is None else cfg,
+        backend=DB_BACKEND,
+        delete_run_artifacts_fn=delete_run_artifacts,
+        delete_snapshot_metadata_fn=delete_snapshot_metadata,
+    )
 
 
 def prune_retention(conn, *, cfg=None) -> dict[str, int]:

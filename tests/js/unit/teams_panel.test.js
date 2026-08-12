@@ -208,7 +208,9 @@ async function loadTeamsPanel({
   await vi.waitFor(() => {
     expect(document.getElementById('options-teams-list').textContent).toContain('Permissions Team')
   })
-  document.querySelector('[data-team-action="select-team"]').click()
+  const manageTeam = document.querySelector('[data-team-action="select-team"]')
+  expect(manageTeam.closest('.options-team-row').querySelector('.options-team-chip')?.classList.contains('badge-tone-cyan')).toBe(true)
+  manageTeam.click()
   await vi.waitFor(() => {
     expect(document.getElementById('options-team-detail').textContent).toContain('Members')
   })

@@ -541,7 +541,7 @@
     },
     {
       "name": "nikto_writes_results",
-      "command": "nikto -h ip.darklab.sh -p 443 -ssl -o nikto-results.txt",
+      "command": "nikto -h ip.darklab.sh -p 443 -ssl -Tuning b -ask no -nocheck -o nikto-results.txt",
       "exit_code": null,
       "assert_files": {
         "nikto-results.txt": [

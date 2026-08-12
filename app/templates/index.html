@@ -28,6 +28,10 @@
     'url': static_asset('/static/css/features/projects.css'),
     'type': 'style'
   },
+  'project_assessment_css': {
+    'url': static_asset('/static/css/features/project-assessment.css'),
+    'type': 'style'
+  },
   'atlas_css': {
     'url': static_asset('/static/css/features/atlas.css'),
     'type': 'style'
@@ -92,12 +96,64 @@
     'url': static_asset('/static/js/features/findings/findings_board_modal.js'),
     'type': 'module'
   },
+  'finding_risk': {
+    'url': static_asset('/static/js/features/findings/finding_risk.js'),
+    'type': 'module'
+  },
   'finding_triage_editor': {
     'url': static_asset('/static/js/features/findings/finding_triage_editor.js'),
     'type': 'module'
   },
   'project_activity': {
     'url': static_asset('/static/js/features/projects/project_activity.js'),
+    'type': 'module'
+  },
+  'project_assessment': {
+    'url': static_asset('/static/js/features/projects/project_assessment.js'),
+    'type': 'module'
+  },
+  'project_assessment_actions': {
+    'url': static_asset('/static/js/features/projects/project_assessment_actions.js'),
+    'type': 'module'
+  },
+  'project_assessment_client_log': {
+    'url': static_asset('/static/js/features/projects/project_assessment_client_log.js'),
+    'type': 'module'
+  },
+  'project_assessment_check_state': {
+    'url': static_asset('/static/js/features/projects/project_assessment_check_state.js'),
+    'type': 'module'
+  },
+  'project_assessment_evidence': {
+    'url': static_asset('/static/js/features/projects/project_assessment_evidence.js'),
+    'type': 'module'
+  },
+  'project_assessment_oast': {
+    'url': static_asset('/static/js/features/projects/project_assessment_oast.js'),
+    'type': 'module'
+  },
+  'project_assessment_zap': {
+    'url': static_asset('/static/js/features/projects/project_assessment_zap.js'),
+    'type': 'module'
+  },
+  'project_assessment_renderer': {
+    'url': static_asset('/static/js/features/projects/project_assessment_renderer.js'),
+    'type': 'module'
+  },
+  'project_assessment_risk_renderer': {
+    'url': static_asset('/static/js/features/projects/project_assessment_risk_renderer.js'),
+    'type': 'module'
+  },
+  'project_http_profile_editor': {
+    'url': static_asset('/static/js/features/projects/project_http_profile_editor.js'),
+    'type': 'module'
+  },
+  'project_http_profiles': {
+    'url': static_asset('/static/js/features/projects/project_http_profiles.js'),
+    'type': 'module'
+  },
+  'project_finding_changes': {
+    'url': static_asset('/static/js/features/projects/project_finding_changes.js'),
     'type': 'module'
   },
   'project_overview': {
@@ -110,6 +166,10 @@
   },
   'project_artifacts': {
     'url': static_asset('/static/js/features/projects/project_artifacts.js'),
+    'type': 'module'
+  },
+  'project_web_surface': {
+    'url': static_asset('/static/js/features/projects/project_web_surface.js'),
     'type': 'module'
   },
   'project_details': {
@@ -230,6 +290,10 @@
   },
   'history_run_details': {
     'url': static_asset('/static/js/features/history/history_run_details.js'),
+    'type': 'module'
+  },
+  'nmap_service_evidence': {
+    'url': static_asset('/static/js/features/nmap_service_evidence.js'),
     'type': 'module'
   },
   'options_session_token_controls': {
@@ -1142,13 +1206,13 @@
 
 <div id="finding-triage-overlay" class="modal-overlay mobile-sheet-overlay finding-triage-overlay u-hidden" aria-hidden="true">
   <div id="finding-triage-modal" class="modal-card modal-card-compact mobile-sheet-surface finding-triage-modal" role="dialog" aria-modal="true" aria-labelledby="finding-triage-title">
-    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close finding triage editor"></div>
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close finding editor"></div>
     <div class="faq-header">
       <div>
         <span class="faq-title" id="finding-triage-title">FINDING TRIAGE</span>
         <div class="project-entity-editor-subtitle" id="finding-triage-subtitle"></div>
       </div>
-      <button type="button" id="finding-triage-close" class="close-btn finding-triage-close" aria-label="Close finding triage editor">✕</button>
+      <button type="button" id="finding-triage-close" class="close-btn finding-triage-close" aria-label="Close finding editor">✕</button>
     </div>
     <div id="finding-triage-message" class="project-workspace-message finding-triage-message u-hidden" role="status" aria-live="polite"></div>
     <form id="finding-triage-form" class="project-target-editor-form finding-triage-form">
@@ -1158,9 +1222,48 @@
           <span>What should be fixed</span>
           <textarea id="finding-triage-remediation" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="5" placeholder="Remediation guidance" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Finding remediation"></textarea>
         </label>
+        <p class="finding-triage-guidance-note">
+          This guidance is shared only with findings for the same target and vulnerability or rule.
+        </p>
+        <div id="finding-triage-merge-summary" class="finding-triage-merge-summary"></div>
+        <button type="button" id="finding-triage-merge-toggle" class="btn btn-secondary btn-compact finding-triage-merge-toggle" aria-expanded="false" aria-controls="finding-triage-merge-panel">
+          Merge with another finding
+        </button>
+        <div id="finding-triage-merge-panel" class="finding-triage-merge-panel u-hidden">
+          <label class="project-target-edit-field">
+            <span>Find another saved finding</span>
+            <input id="finding-triage-merge-search" class="form-control form-control-compact" type="search" placeholder="Search by title, CVE, target, or finding ID" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Find a remediation group to merge">
+          </label>
+          <p class="finding-triage-guidance-note">
+            Use this only when both findings describe one fix despite having different targets, CVEs, or scanner rules.
+          </p>
+          <div id="finding-triage-merge-results" class="finding-triage-merge-results" aria-live="polite"></div>
+          <div id="finding-triage-merge-preview" class="finding-triage-merge-preview u-hidden" aria-live="polite"></div>
+          <div id="finding-triage-merge-actions" class="finding-triage-merge-actions u-hidden">
+            <button type="button" id="finding-triage-merge-apply" class="btn btn-warning btn-compact">Merge remediation groups</button>
+          </div>
+        </div>
       </section>
       <section class="finding-triage-section" aria-labelledby="finding-triage-verification-label">
         <span class="project-workspace-section-label" id="finding-triage-verification-label">Verification</span>
+        <div id="finding-triage-disposition" class="finding-triage-disposition u-hidden"></div>
+        <div id="finding-triage-verification-context" class="finding-triage-verification-context u-hidden">
+          <div>
+            <span class="project-workspace-section-label">Origin and retest evidence</span>
+            <p class="finding-triage-guidance-note">Saved runs are compared with the finding's original tool, target, and frozen assessment check before they're presented as compatible.</p>
+          </div>
+          <div id="finding-triage-verification-suggestion" class="u-hidden" aria-live="polite"></div>
+          <div id="finding-triage-origin-checks" class="finding-triage-verification-list"></div>
+          <div id="finding-triage-retest-runs" class="finding-triage-verification-list"></div>
+          <div id="finding-triage-verification-candidates" class="finding-triage-verification-candidates u-hidden">
+            <label class="project-target-edit-field">
+              <span>Attach a completed Project run</span>
+              <select id="finding-triage-verification-run" class="form-select form-control-compact" aria-label="Verification run"></select>
+            </label>
+            <button type="button" id="finding-triage-verification-attach" class="btn btn-secondary btn-compact">Attach verification run</button>
+          </div>
+          <div id="finding-triage-verification-context-message" class="finding-triage-guidance-note" role="status" aria-live="polite"></div>
+        </div>
         <label class="project-target-edit-field">
           <span>Status</span>
           <select id="finding-triage-status" class="form-select form-control-compact" aria-label="Finding verification status">
@@ -1183,6 +1286,86 @@
       <div class="modal-actions">
         <button type="button" id="finding-triage-cancel" class="btn btn-secondary btn-compact finding-triage-cancel">Cancel</button>
         <button type="submit" id="finding-triage-save" class="btn btn-primary btn-compact">Save triage</button>
+      </div>
+    </form>
+    <form id="finding-record-form" class="project-target-editor-form finding-triage-form finding-record-form u-hidden">
+      <section class="finding-triage-section" aria-labelledby="finding-record-basics-label">
+        <span class="project-workspace-section-label" id="finding-record-basics-label">Finding</span>
+        <div class="finding-record-grid">
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Target</span>
+            <select id="finding-record-target" class="form-select form-control-compact" aria-label="Finding target"></select>
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Title</span>
+            <input id="finding-record-title" class="form-control form-control-compact" type="text" maxlength="240" placeholder="What did you find?" autocomplete="off" autocapitalize="sentences" spellcheck="true" required>
+          </label>
+          <label class="project-target-edit-field">
+            <span>Severity</span>
+            <select id="finding-record-severity" class="form-select form-control-compact" aria-label="Finding severity">
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Info</option>
+            </select>
+          </label>
+          <label class="project-target-edit-field">
+            <span>Confidence</span>
+            <select id="finding-record-confidence" class="form-select form-control-compact" aria-label="Finding confidence">
+              <option value="unknown">Unknown</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Summary</span>
+            <textarea id="finding-record-summary" class="form-control form-control-compact nice-scroll" maxlength="4000" rows="3" placeholder="A short explanation of the issue" autocomplete="off" autocapitalize="sentences" spellcheck="true"></textarea>
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Impact</span>
+            <textarea id="finding-record-impact" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="3" placeholder="What could happen if this is exploited?" autocomplete="off" autocapitalize="sentences" spellcheck="true"></textarea>
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>Reproduction steps</span>
+            <textarea id="finding-record-reproduction" class="form-control form-control-compact nice-scroll" maxlength="20000" rows="4" placeholder="How to reproduce or verify the issue" autocomplete="off" autocapitalize="sentences" spellcheck="true"></textarea>
+          </label>
+        </div>
+      </section>
+      <section id="finding-record-evidence-section" class="finding-triage-section u-hidden" aria-labelledby="finding-record-evidence-label">
+        <span class="project-workspace-section-label" id="finding-record-evidence-label">Evidence to attach</span>
+        <div id="finding-record-evidence" class="finding-record-evidence"></div>
+        <p class="finding-triage-guidance-note">Review this context before saving. The original source stays authoritative.</p>
+      </section>
+      <section class="finding-triage-section" aria-labelledby="finding-record-technical-label">
+        <span class="project-workspace-section-label" id="finding-record-technical-label">Technical details</span>
+        <div class="finding-record-grid">
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>CVE IDs</span>
+            <input id="finding-record-cves" class="form-control form-control-compact" type="text" placeholder="CVE-2026-12345, CVE-2026-23456" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>CWE IDs</span>
+            <input id="finding-record-cwes" class="form-control form-control-compact" type="text" placeholder="CWE-306, CWE-862" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          </label>
+          <label class="project-target-edit-field">
+            <span>CVSS vector</span>
+            <input id="finding-record-cvss-vector" class="form-control form-control-compact" type="text" maxlength="256" placeholder="CVSS:3.1/AV:N/..." autocomplete="off" autocapitalize="characters" spellcheck="false">
+          </label>
+          <label class="project-target-edit-field">
+            <span>CVSS score</span>
+            <input id="finding-record-cvss-score" class="form-control form-control-compact" type="number" min="0" max="10" step="0.1" placeholder="0.0" inputmode="decimal">
+          </label>
+          <label class="project-target-edit-field finding-record-field-wide">
+            <span>References</span>
+            <textarea id="finding-record-references" class="form-control form-control-compact nice-scroll" rows="3" placeholder="One HTTP(S) URL per line" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></textarea>
+          </label>
+        </div>
+      </section>
+      <div class="modal-actions">
+        <button type="button" id="finding-record-cancel" class="btn btn-secondary btn-compact finding-triage-cancel">Cancel</button>
+        <button type="submit" id="finding-record-save" class="btn btn-primary btn-compact">Create finding</button>
       </div>
     </form>
   </div>
@@ -1473,7 +1656,7 @@
     <div class="faq-header">
       <div>
         <span class="faq-title" id="provider-status-title">PROVIDER STATUS</span>
-        <div class="provider-status-subtitle">Intel providers available to this session.</div>
+        <div class="provider-status-subtitle">Intel providers and public CVE risk sources.</div>
       </div>
       <button type="button" class="close-btn provider-status-close" aria-label="Close provider status">✕</button>
     </div>

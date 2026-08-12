@@ -18,7 +18,6 @@ from services.atlas.cleanup import (
     detach_atlas_run_sources,
     public_cleanup_preview,
 )
-from services.atlas.intel_bridge import refresh_entity_intel
 from services.atlas.lookup import (
     entity_exists_in_scope,
     entity_ids_in_session,
@@ -107,15 +106,20 @@ def atlas_findings_bulk_review_update():
             if finding_exists_in_scope(conn, session_id, finding_id, team_id=owner_scope.team_id):
                 found_ids.add(finding_id)
         if found_ids:
-            update_finding_review_states(
+            disposition_update = update_finding_review_states(
                 conn,
                 found_ids,
                 review_state=review_state,
                 updated_at=atlas_routes._now_for_review(),
             )
-        return found_ids
+        else:
+            disposition_update = {
+                "remediation_group_count": 0,
+                "affected_finding_ids": set(),
+            }
+        return found_ids, disposition_update
 
-    found_ids = atlas_routes.run_atlas_transaction(_update_review)
+    found_ids, disposition_update = atlas_routes.run_atlas_transaction(_update_review)
     results = [
         {"finding_id": finding_id, "status": "updated" if finding_id in found_ids else "not_found"}
         for finding_id in finding_ids
@@ -126,6 +130,8 @@ def atlas_findings_bulk_review_update():
         "review_state": review_state,
         "updated": len(found_ids),
         "not_found": len(finding_ids) - len(found_ids),
+        "remediation_groups": disposition_update["remediation_group_count"],
+        "affected_observations": len(disposition_update["affected_finding_ids"]),
     })
     return jsonify({
         "ok": True,
@@ -134,6 +140,8 @@ def atlas_findings_bulk_review_update():
             "updated": len(found_ids),
             "not_found": len(finding_ids) - len(found_ids),
         },
+        "remediation_groups_updated": disposition_update["remediation_group_count"],
+        "affected_observations": len(disposition_update["affected_finding_ids"]),
         "results": results,
     })
 
@@ -594,29 +602,6 @@ def atlas_finding_delete(finding_id):
         "deleted": {"findings": deleted_findings},
         "sibling_cleanup": cleanup,
     })
-
-
-@atlas_routes.atlas_bp.route("/atlas/entities/<entity_id>/refresh_intel", methods=["POST"])
-@atlas_routes.limiter.limit(atlas_routes._atlas_write_limit)
-def atlas_entity_intel_refresh(entity_id):
-    session_id = atlas_routes.get_session_id()
-    owner_scope, scope_response = atlas_routes._atlas_request_scope_response(session_id, Capability.TRIAGE_FINDINGS)
-    if scope_response:
-        return scope_response
-    assert owner_scope is not None
-    try:
-        result = refresh_entity_intel(session_id, entity_id, team_id=owner_scope.team_id)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    if result is None:
-        return jsonify({"error": "entity not found"}), 404
-    atlas_routes.log.info("ATLAS_INTEL_REFRESH", extra={
-        "ip": atlas_routes.get_client_ip(),
-        "session": atlas_routes.get_log_session_id(session_id),
-        "entity_id": entity_id,
-        "success_count": result["success_count"],
-    })
-    return jsonify({"ok": True, "refresh": result})
 
 
 @atlas_routes.atlas_bp.route("/atlas/entities/<entity_id>/project_links", methods=["POST"])

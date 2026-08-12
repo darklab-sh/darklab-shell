@@ -112,7 +112,7 @@ describe('button primitive regression guard', () => {
     expect(hits).toEqual([])
   })
 
-  it('uses the amber token instead of undefined yellow in source styles', () => {
+  it('uses defined tokens and visible state treatments in source styles', () => {
     const hits = []
     for (const f of files.filter(file => /\.css$/.test(file))) {
       const src = readFileSync(f, 'utf8')
@@ -124,6 +124,9 @@ describe('button primitive regression guard', () => {
       })
     }
     expect(hits).toEqual([])
+
+    const components = readFileSync(join(REPO_ROOT, 'app/static/css/primitives/components.css'), 'utf8')
+    expect(components).toMatch(/\.chip\.is-active,[\s\S]*?\.chip\[aria-pressed="true"\][\s\S]*?font-weight: 700;/)
   })
 
   it('notification rows use badge primitives for passive metadata', () => {

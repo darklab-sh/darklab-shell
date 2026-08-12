@@ -392,6 +392,7 @@ def _diag_db_stats() -> dict:
     """Snapshot database health without letting optional probes blank the panel."""
     return diag_database_stats()
 
+
 @assets_bp.route("/diag")
 def diag():
     """Operator diagnostics endpoint.
@@ -409,10 +410,7 @@ def diag():
     client_ip = _require_diag_access()
     result: dict = {}
     # ── App ──────────────────────────────────────────────────────────────────
-    result["app"] = {
-        "version": APP_VERSION,
-        "name": CFG.get("app_name", ""),
-    }
+    result["app"] = {"version": APP_VERSION, "name": CFG.get("app_name", "")}
     # ── Operational config ───────────────────────────────────────────────────
     result["config"] = {
         "rate_limit_enabled":         CFG.get("rate_limit_enabled"),
@@ -422,6 +420,7 @@ def diag():
         "rate_limit_per_second":      CFG.get("rate_limit_per_second"),
         "command_timeout_seconds":    CFG.get("command_timeout_seconds"),
         "raw_packet_scanning_enabled": CFG.get("raw_packet_scanning_enabled"),
+        "assessment_intrusive_actions_enabled": CFG.get("assessment_intrusive_actions_enabled"),
         "heartbeat_interval_seconds": CFG.get("heartbeat_interval_seconds"),
         "high_volume_output_line_threshold": CFG.get("high_volume_output_line_threshold"),
         "high_volume_output_status_interval_lines": CFG.get("high_volume_output_status_interval_lines"),

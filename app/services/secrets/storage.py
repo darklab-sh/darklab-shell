@@ -240,6 +240,33 @@ def get_secret_value_for_env(
     return None
 
 
+def get_secret_value_by_name(
+    session_token: str,
+    name: str,
+    *,
+    audit_session_id: str = "",
+    team_id: str = "",
+) -> str | None:
+    """Return one exact named secret without consulting environment bindings."""
+    normalized_name = normalize_secret_name(name)
+    with get_db_connect()() as conn:
+        row = conn.execute(
+            "SELECT ciphertext, nonce FROM secrets "
+            "WHERE session_token = ? AND name = ?",
+            (session_token, normalized_name),
+        ).fetchone()
+    if not row:
+        return None
+    value = decrypt_secret(row["ciphertext"], row["nonce"])
+    emit_secret_event(
+        "SECRET_RETRIEVED",
+        audit_session_id or session_token,
+        name=normalized_name,
+        team_id=team_id,
+    )
+    return value
+
+
 def rewrap_session_secrets(
     session_token: str,
     *,

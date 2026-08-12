@@ -4,7 +4,7 @@
     {
       "label": "test:smoke",
       "type": "shell",
-      "command": "bash \"${workspaceFolder}/scripts/container_smoke_test.sh\"",
+      "command": "source \"/${workspaceFolder}/.venv/bin/activate\" && bash \"${workspaceFolder}/scripts/container_smoke_test.sh\"",
       "presentation": {
         "panel": "dedicated",
         "reveal": "always"

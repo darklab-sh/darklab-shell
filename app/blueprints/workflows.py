@@ -115,7 +115,6 @@ def workflow_executions_create():
             "session": get_log_session_id(session_id),
         })
         return jsonify({"error": str(exc)}), 400
-
     project = get_active_project(session_id, team_id=scope.team_id)
     member = scope.member or {}
     try:

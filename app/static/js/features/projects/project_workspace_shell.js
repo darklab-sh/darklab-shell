@@ -90,7 +90,9 @@ let exportedDarklabProjectWorkspaceShell = null;
 
     function normalizeProjectError(err) {
       if (String(err?.message || '') === 'team_forbidden') {
-        return new Error(projectWriteDeniedMessage());
+        const error = new Error(projectWriteDeniedMessage());
+        error.status = Number(err?.status || 0);
+        return error;
       }
       return err;
     }
@@ -124,12 +126,13 @@ let exportedDarklabProjectWorkspaceShell = null;
       if (!ctx.projectWorkspaceOverlay || !ctx.projectWorkspaceBody) return;
       ctx.closeMajorOverlays?.({ skipProjectWorkspace: true });
       ctx.blurVisibleComposerInputIfMobile?.();
-      ctx.setProjectWorkspaceTab?.('details');
+      const requestedTab = String(options.tab || '').trim();
+      if (requestedTab) ctx.setProjectWorkspaceTab?.(requestedTab);
       showOverlay();
       ctx.markInteractionSurfaceReady?.('projects', ctx.projectWorkspaceOverlay, ctx.projectWorkspaceModal);
       await ctx.refreshProjectWorkspace?.(options.refreshOptions || {});
       const mobileMode = document.body && document.body.classList.contains('mobile-terminal-mode');
-      if (!mobileMode && ctx.projectWorkspaceNameInput) {
+      if (!mobileMode && ctx.projectWorkspaceNameInput && ctx.projectWorkspaceTab?.() === 'details') {
         window.setTimeout(() => ctx.projectWorkspaceNameInput.focus(), 0);
       }
     }
@@ -169,7 +172,9 @@ let exportedDarklabProjectWorkspaceShell = null;
         if (data && data.error) message = data.error;
       } catch (_) {}
       if (message === 'team_forbidden') message = projectWriteDeniedMessage();
-      return new Error(message || fallback);
+      const error = new Error(message || fallback);
+      error.status = Number(resp.status || 0);
+      return error;
     }
 
     async function createProjectFromName(name, input) {

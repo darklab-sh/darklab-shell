@@ -78,6 +78,7 @@ import { clearTab as importedClearTab } from './tabs_bridge.js';
 import { cancelWelcome as importedCancelWelcome } from './welcome_bridge.js';
 import { loadProjectAutocompleteTargets as importedLoadProjectAutocompleteTargets } from './features/autocomplete/suggestions.js';
 import {
+  activateOptionsTab as importedActivateOptionsTab,
   getHudClockPreference as importedGetHudClockPreference,
   getPreference as importedGetPreference,
   setPreferenceCookie as importedSetPreferenceCookie,
@@ -96,16 +97,21 @@ import { showConfirm as importedShowConfirm } from './ui/ui_confirm.js';
 import {
   blurVisibleComposerInputIfMobile as importedBlurVisibleComposerInputIfMobile,
   enhanceAppSelects as importedEnhanceAppSelects,
+  focusElement as importedFocusElement,
+  hideModalOverlay as importedHideModalOverlay,
   markInteractionSurfaceReady as importedMarkInteractionSurfaceReady,
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,
+  showModalOverlay as importedShowModalOverlay,
   showWorkflowsOverlay as importedShowWorkflowsOverlay,
 } from './ui/ui_helpers.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
 
 let importedOpenStatusMonitor = importedRuntimeOpenStatusMonitor;
 let importedProjectActivity;
+let importedProjectAssessment;
 let importedProjectArtifacts;
+let importedProjectWebSurface;
 let importedProjectDetails;
 let importedProjectEntities;
 let importedProjectEntityEditor;
@@ -1828,6 +1834,7 @@ let importedProjectWorkspaceShell;
       projectWorkspaceModal,
       projectWorkspaceNameInput,
       projectWorkspaceOverlay,
+      projectWorkspaceTab: projectWorkspaceState.tab,
       refocusComposerAfterAction: (options) => {
         _shellRefocusComposer(options);
       },
@@ -2084,6 +2091,8 @@ let importedProjectWorkspaceShell;
 
   let projectActivityController = null;
   let projectActivityControllerPromise = null;
+  let projectAssessmentController = null;
+  let projectAssessmentControllerPromise = null;
   let projectOverviewController = null;
   let projectOverviewControllerPromise = null;
   let projectMonitoringController = null;
@@ -2127,6 +2136,63 @@ let importedProjectWorkspaceShell;
     return projectActivityControllerPromise;
   }
 
+  function _projectAssessmentController() {
+    if (projectAssessmentController) return projectAssessmentController;
+    const projectAssessment = _projectModule('DarklabProjectAssessment', importedProjectAssessment);
+    const factory = projectAssessment && projectAssessment.createProjectAssessmentController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectAssessment is unavailable');
+    projectAssessmentController = factory({
+      projectWorkspaceRequest: _projectWorkspaceRequest,
+      apiFetch: _shellApiFetch,
+      projectResponseError: _projectResponseError,
+      formatDate: _formatProjectDate,
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      emptyProjectPanel: _emptyProjectPanel,
+      enhanceAppSelects: _shellEnhanceAppSelects(),
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      invalidateProjectOverview: (projectId = '') => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectFindings: _invalidateProjectFindings,
+      setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      showConfirm: _shellFn('showConfirm', importedShowConfirm),
+      closeProjectWorkspace: (options = {}) => closeProjectWorkspace(options),
+      openHistoryRunDetails: _shellFn('openHistoryRunDetails', importedOpenHistoryRunDetails),
+      openWorkspace: _shellFn('openWorkspace', importedOpenWorkspace),
+      openAtlas: _shellOpenAtlas,
+      openSecretsOptions: () => {
+        importedOpenOptions?.();
+        importedActivateOptionsTab?.('secrets', { persist: true, focus: true });
+      },
+      actionSheetContainer: () => projectWorkspaceModal,
+      logClientError: _shellLogClientError,
+      mobileView: _projectMobileView,
+      canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),
+      canRunCommands: () => _shellActiveTeamScopeCan('run_commands'),
+      canManageSecrets: () => _shellActiveTeamScopeCan('manage_secrets'),
+      canTriageFindings: () => _shellActiveTeamScopeCan('triage_findings'),
+    });
+    return projectAssessmentController;
+  }
+
+  function _projectAssessmentControllerIfReady() {
+    return projectAssessmentController || null;
+  }
+
+  function _loadProjectAssessmentController() {
+    if (projectAssessmentController) return Promise.resolve(projectAssessmentController);
+    if (projectAssessmentControllerPromise) return projectAssessmentControllerPromise;
+    const loader = global.loadProjectAssessment;
+    projectAssessmentControllerPromise = (typeof loader === 'function' ? loader() : Promise.resolve())
+      .then((namespace) => {
+        if (namespace) importedProjectAssessment = namespace;
+        return _projectAssessmentController();
+      })
+      .finally(() => {
+        projectAssessmentControllerPromise = null;
+      });
+    return projectAssessmentControllerPromise;
+  }
+
   function _projectOverviewController() {
     if (projectOverviewController) return projectOverviewController;
     const projectOverview = _projectModule('DarklabProjectOverview', importedProjectOverview);
@@ -2142,6 +2208,7 @@ let importedProjectWorkspaceShell;
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       setProjectWorkspaceTab: projectWorkspaceState.setTab,
+      openProjectAssessment: _openProjectAssessment,
       setProjectEntityTab: projectWorkspaceState.setEntityTab,
       projectTargetFilterSet: _projectTargetFilterSet,
       projectRunFilterSet: _projectRunFilterSet,
@@ -2402,6 +2469,9 @@ let importedProjectWorkspaceShell;
       selectedFindingIds: projectWorkspaceState.selectedFindingIds,
       projectFindingPagination: (projectId, summary) => _projectFindingPagination(projectId, summary),
       projectFindingItems: _projectFindingItems,
+      projectFindingChanges: projectId => (
+        _projectFindingsDataControllerIfReady()?.findingChanges(projectId) || null
+      ),
       projectFindingBoard: (projectId, summary, options) => (
         _projectFindingsDataControllerIfReady()?.board(projectId, summary, options) || []
       ),
@@ -2413,6 +2483,7 @@ let importedProjectWorkspaceShell;
       entityMetadataChips: _entityMetadataChips,
       makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      openProjectAssessment: _openProjectAssessment,
       emptyProjectPanel: _emptyProjectPanel,
       renderProjectFindingBoard: (container, projectId, summary, board) => (
         _projectFindingsBoardController().renderBoard(container, projectId, summary, board)
@@ -2525,6 +2596,87 @@ let importedProjectWorkspaceShell;
         projectArtifactsControllerPromise = null;
       });
     return projectArtifactsControllerPromise;
+  }
+
+  let projectWebSurfaceController = null;
+  let projectWebSurfaceControllerPromise = null;
+
+  function _projectWebSurfaceControllerIfReady() {
+    return projectWebSurfaceController;
+  }
+
+  function _projectWebSurfaceFactoryReady() {
+    const namespace = _projectModule('DarklabProjectWebSurface', importedProjectWebSurface);
+    return !!(namespace && typeof namespace.createProjectWebSurfaceController === 'function');
+  }
+
+  function _projectWebSurfaceController() {
+    if (projectWebSurfaceController) return projectWebSurfaceController;
+    const namespace = _projectModule('DarklabProjectWebSurface', importedProjectWebSurface);
+    const factory = namespace && namespace.createProjectWebSurfaceController;
+    if (typeof factory !== 'function') throw new Error('DarklabProjectWebSurface is unavailable');
+    projectWebSurfaceController = factory({
+      apiFetch: _shellApiFetch,
+      projectResponseError: _projectResponseError,
+      emptyProjectPanel: _emptyProjectPanel,
+      formatDate: _formatProjectDate,
+      shortProjectRunId: _shortProjectRunId,
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      bindDismissible: importedBindDismissible,
+      bindFocusTrap: importedBindFocusTrap,
+      focusElement: importedFocusElement,
+      showModalOverlay: importedShowModalOverlay,
+      hideModalOverlay: importedHideModalOverlay,
+      markInteractionSurfaceReady: importedMarkInteractionSurfaceReady,
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      mobileView: _projectMobileView,
+      closeProjectWorkspace,
+      canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),
+      openPackageWithArtifact: (projectId, artifactId) => {
+        _loadProjectPackagesController()
+          .then(controller => controller.openWizardForArtifacts(projectId, [artifactId]))
+          .catch((err) => {
+            _shellLogClientError('failed to hand Web Surface screenshot to package builder', err);
+            _setProjectWorkspaceMessage('Could not open the screenshot in the package builder.', { error: true });
+          });
+      },
+      openReportWithArtifact: (projectId, artifact) => {
+        _loadProjectReportController()
+          .then(controller => controller.includeArtifact(projectId, artifact))
+          .then(() => {
+            projectWorkspaceState.setTab('report');
+            _renderProjectExplorer();
+            if (_projectMobileView() === 'detail') _renderProjectMobileDetail();
+          })
+          .catch((err) => {
+            _shellLogClientError('failed to hand Web Surface screenshot to report builder', err);
+            _setProjectWorkspaceMessage('Could not add the screenshot to the report.', { error: true });
+          });
+      },
+      openEntityInAtlas: (projectId, entity) => (
+        _openProjectEntityInAtlas(projectId, _projectSummary(projectId), entity)
+      ),
+      openHistoryRunDetails: _shellFn('openHistoryRunDetails', importedOpenHistoryRunDetails),
+      logClientError: (message, err, details) => _shellLogClientError(message, err, details),
+      metaSeparator: ' · ',
+    });
+    return projectWebSurfaceController;
+  }
+
+  function _loadProjectWebSurfaceController() {
+    if (projectWebSurfaceController) return Promise.resolve(projectWebSurfaceController);
+    if (projectWebSurfaceControllerPromise) return projectWebSurfaceControllerPromise;
+    if (_projectWebSurfaceFactoryReady()) return Promise.resolve(_projectWebSurfaceController());
+    projectWebSurfaceControllerPromise = _loadProjectWorkspaceDeferredModules(['project_web_surface'])
+      .then((modules) => {
+        if (modules?.DarklabProjectWebSurface) importedProjectWebSurface = modules.DarklabProjectWebSurface;
+        return _projectWebSurfaceController();
+      })
+      .finally(() => {
+        projectWebSurfaceControllerPromise = null;
+      });
+    return projectWebSurfaceControllerPromise;
   }
 
   let projectDetailsController = null;
@@ -2716,6 +2868,7 @@ let importedProjectWorkspaceShell;
       projectWorkspaceLoading: projectWorkspaceState.loading,
       projectWorkspaceSubtitle,
       renderProjectArtifacts: _renderProjectArtifacts,
+      renderProjectWebSurface: _renderProjectWebSurface,
       renderProjectDetails: _renderProjectDetails,
       renderProjectEntities: _renderProjectEntities,
       renderProjectFilterBar: _renderProjectFilterBar,
@@ -2724,6 +2877,7 @@ let importedProjectWorkspaceShell;
       renderProjectList: _renderProjectList,
       renderProjectMobile: _renderProjectMobile,
       renderProjectActivity: _renderProjectActivity,
+      renderProjectAssessment: _renderProjectAssessment,
       renderProjectOverview: _renderProjectOverview,
       renderProjectMonitoring: _renderProjectMonitoring,
       renderProjectPackages: _renderProjectPackages,
@@ -3022,6 +3176,9 @@ let importedProjectWorkspaceShell;
       projectArtifactServerFilterKey: _projectArtifactServerFilterKey,
       loadProjectArtifacts: _loadProjectArtifacts,
       projectFindingItems: _projectFindingItems,
+      projectFindingChanges: projectId => (
+        _projectFindingsDataControllerIfReady()?.findingChanges(projectId) || null
+      ),
       projectFindingsLoaded: _projectFindingsLoaded,
       projectFindingsLoadingId: () => _projectFindingsDataControllerIfReady()?.loadingId() || '',
       hasProjectFindings: _projectFindingsLoaded,
@@ -3053,11 +3210,14 @@ let importedProjectWorkspaceShell;
       shortProjectRunId: _shortProjectRunId,
       makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      openProjectAssessment: _openProjectAssessment,
       emptyProjectPanel: _emptyProjectPanel,
       findingReviewControl: _findingReviewControl,
       renderProjectMobileDetailTopbar: _renderProjectMobileDetailTopbar,
       renderProjectMobileTabs: _renderProjectMobileTabs,
       renderProjectMobileEntitiesTab: _renderProjectMobileEntitiesTab,
+      renderProjectMobileAssessmentTab: _renderProjectMobileAssessmentTab,
+      renderProjectWebSurface: _renderProjectWebSurface,
       renderProjectMobileOverviewTab: _renderProjectMobileOverviewTab,
       renderProjectMobilePackagesTab: _renderProjectMobilePackagesTab,
       renderProjectMobileReportTab: _renderProjectMobileReportTab,
@@ -3207,6 +3367,8 @@ let importedProjectWorkspaceShell;
       invalidateProjectTargetPage: projectId => _projectDetailsController().invalidateTargetPage(projectId),
       invalidateProjectEntities: (projectId = '') => _projectEntitiesControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectArtifacts: (projectId = '') => _projectArtifactsControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectWebSurface: (projectId = '') => _projectWebSurfaceControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectAssessment: (projectId = '') => _projectAssessmentControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectOverview: (projectId = '') => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectMonitoring: (projectId = '') => _projectMonitoringControllerIfReady()?.invalidate?.(projectId),
       renderProjectWorkspace: _renderProjectWorkspace,
@@ -4380,6 +4542,25 @@ let importedProjectWorkspaceShell;
       });
   }
 
+  function _renderProjectWebSurface(container, projectId) {
+    if (projectWebSurfaceController) {
+      projectWebSurfaceController.render(container, projectId);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading Web Surface captures...'));
+    _loadProjectWebSurfaceController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'web-surface') return;
+        container.replaceChildren();
+        controller.render(container, projectId);
+      })
+      .catch((err) => {
+        _shellLogClientError('failed to load project Web Surface', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load the Web Surface.'));
+      });
+  }
+
   function _renderProjectPackages(container, projectId, summary) {
     if (projectPackagesController) {
       projectPackagesController.renderPackages(container, projectId, summary);
@@ -4435,6 +4616,24 @@ let importedProjectWorkspaceShell;
       });
   }
 
+  function _renderProjectAssessment(container, projectId) {
+    if (projectAssessmentController) {
+      projectAssessmentController.renderAssessment(container, projectId);
+      return;
+    }
+    container.replaceChildren(_emptyProjectPanel('Loading project assessment...'));
+    _loadProjectAssessmentController()
+      .then((controller) => {
+        if (!container.isConnected || projectWorkspaceState.tab() !== 'assessment') return;
+        controller.renderAssessment(container, projectId);
+      })
+      .catch((err) => {
+        _shellLogClientError('failed to load project assessment', err);
+        if (!container.isConnected) return;
+        container.replaceChildren(_emptyProjectPanel('Could not load project assessment.'));
+      });
+  }
+
   function _renderProjectMonitoring(container, projectId, summary) {
     if (projectMonitoringController) {
       projectMonitoringController.renderMonitoring(container, projectId, summary);
@@ -4463,6 +4662,26 @@ let importedProjectWorkspaceShell;
     }
     projectWorkspaceState.setTab(normalizedTab);
     _renderProjectExplorer();
+  }
+
+  function _openProjectAssessment(projectId, {
+    assessmentId = '', category = '', state = '', priority = '',
+  } = {}) {
+    const normalizedProjectId = String(projectId || projectWorkspaceState.selectedId() || '').trim();
+    const normalizedAssessmentId = String(assessmentId || '').trim();
+    if (!normalizedProjectId || !normalizedAssessmentId) return;
+    projectWorkspaceState.setTab('assessment');
+    if (_projectMobileView() === 'detail') _renderProjectMobileDetail();
+    else _renderProjectExplorer();
+    _loadProjectAssessmentController()
+      .then(controller => controller.focusCycle(normalizedProjectId, normalizedAssessmentId, {
+        category: String(category || '').trim(),
+        state: String(state || '').trim(),
+        priority: String(priority || '').trim(),
+      }))
+      .catch((err) => {
+        _shellLogClientError('failed to open project assessment cycle', err);
+      });
   }
 
   function _openProjectActivity(projectId, { targetId = '', targetType = '' } = {}) {
@@ -4584,6 +4803,22 @@ let importedProjectWorkspaceShell;
     return panel;
   }
 
+  function _renderProjectMobileAssessmentTab(projectId) {
+    if (projectAssessmentController) return projectAssessmentController.renderMobileAssessmentTab(projectId);
+    const panel = _emptyProjectPanel('Loading project assessment...');
+    _loadProjectAssessmentController()
+      .then(() => {
+        if (projectWorkspaceState.tab() === 'assessment' && _projectMobileView() === 'detail') {
+          _renderProjectMobileDetail();
+        }
+      })
+      .catch((err) => {
+        _shellLogClientError('failed to load mobile project assessment', err);
+        if (panel.isConnected) panel.replaceChildren('Could not load project assessment.');
+      });
+    return panel;
+  }
+
   function _renderProjectMobileMonitoringTab(projectId, summary) {
     if (projectMonitoringController) return projectMonitoringController.renderMobileMonitoringTab(projectId, summary);
     const panel = _emptyProjectPanel('Loading project monitoring...');
@@ -4676,7 +4911,7 @@ let importedProjectWorkspaceShell;
 
   _projectActiveContextController().bindTargetDiscoveryEvent();
 
-  async function openProjectWorkspace() {
+  async function openProjectWorkspace(options = {}) {
     const openToken = ++projectWorkspaceOpenToken;
     await _ensureProjectWorkspaceDom();
     if (openToken !== projectWorkspaceOpenToken) return false;
@@ -4704,7 +4939,10 @@ let importedProjectWorkspaceShell;
       return false;
     }
     try {
-      await _projectWorkspaceShellController().open({ refreshOptions: { initialLoad } });
+      await _projectWorkspaceShellController().open({
+        ...options,
+        refreshOptions: { initialLoad, ...(options.refreshOptions || {}) },
+      });
     } catch (err) {
       _settleProjectWorkspaceInitialLoad(initialLoad);
       throw err;
@@ -4723,13 +4961,14 @@ let importedProjectWorkspaceShell;
     projectWorkspaceReturnToAtlas = options?.returnToAtlas && typeof options.returnToAtlas === 'object'
       ? { ...options.returnToAtlas }
       : null;
-    const opened = await openProjectWorkspace();
+    const requestedTab = String(options?.tab || 'details').trim() || 'details';
+    const opened = await openProjectWorkspace({ tab: requestedTab });
     if (!opened) {
       projectWorkspaceReturnToAtlas = null;
       return false;
     }
     projectWorkspaceState.setSelectedId(normalizedProjectId);
-    projectWorkspaceState.setTab('details');
+    projectWorkspaceState.setTab(requestedTab);
     await _ensureProjectSummary(normalizedProjectId);
     _renderProjectWorkspace();
     _renderProjectExplorer();

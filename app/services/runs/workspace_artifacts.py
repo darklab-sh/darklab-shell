@@ -6,13 +6,13 @@
 from __future__ import annotations
 
 import config as app_config
-from services.commands.registry import AMASS_DEFAULT_WORKSPACE_DIR, CommandValidationResult
+from services.commands.registry import CommandValidationResult
+from services.runs.workspace_artifact_metadata import (
+    is_app_managed_workspace_artifact_path,
+    workspace_artifact_metadata,
+)
 from services.teams.scope import OwnerContext, personal_owner_context
 from services.workspace.files import InvalidWorkspacePath, WorkspaceDisabled, resolve_owner_workspace_path
-
-APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES = (
-    AMASS_DEFAULT_WORKSPACE_DIR.strip("/"),
-)
 
 
 def _artifact_owner_context(session_id: str, owner_context: OwnerContext | None = None) -> OwnerContext:
@@ -47,6 +47,7 @@ def workspace_artifacts_from_validation(
     read_set = set(reads)
     write_set = set(writes)
     ordered_paths = reads + [path for path in writes if path not in read_set]
+    metadata_by_path = workspace_artifact_metadata(validation)
     artifacts = []
     for workspace_path in ordered_paths:
         if is_app_managed_workspace_artifact_path(workspace_path):
@@ -57,24 +58,15 @@ def workspace_artifacts_from_validation(
             kind = "output"
         else:
             kind = "input"
-        artifacts.append({
+        artifact = {
             "workspace_path": workspace_path,
             "display_name": workspace_path.rsplit("/", 1)[-1],
             "kind": kind,
             "detected_by": "workspace_flag",
-        })
+        }
+        artifact.update(metadata_by_path.get(workspace_path, {}))
+        artifacts.append(artifact)
     return artifacts
-
-
-def is_app_managed_workspace_artifact_path(workspace_path: str) -> bool:
-    normalized = str(workspace_path or "").strip().replace("\\", "/").strip("/")
-    if not normalized:
-        return False
-    return any(
-        normalized == prefix or normalized.startswith(f"{prefix}/")
-        for prefix in APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES
-        if prefix
-    )
 
 
 def workspace_artifacts_with_sizes(

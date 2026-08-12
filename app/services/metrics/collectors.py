@@ -23,6 +23,10 @@ from core.database_backend import (
 from services.diagnostics.storage import storage_snapshot
 from services.intel.registry import INTEL_PROVIDERS
 from services.metrics import build_info_labels
+from services.metrics.assessments import (
+    ASSESSMENT_PROFILE_KEY_LIMIT,
+    assessment_profile_key_label,
+)
 from services.workspace.files import workspace_root, workspace_settings
 
 
@@ -162,6 +166,32 @@ def _secret_envs_with_rows(conn: SQLiteConnection) -> set[str]:
             if token:
                 envs.add(token)
     return envs
+
+
+def _assessment_cycle_samples(rows: list[Any]) -> list[tuple[str, str, int]]:
+    normalized = [
+        (
+            "team" if str(row["owner_kind"] or "") == "team" else "personal",
+            assessment_profile_key_label(row["profile_key"]),
+            _safe_int(row["count"]),
+        )
+        for row in rows
+    ]
+    profile_keys = {profile for _owner, profile, _count in normalized}
+    non_other = sorted(profile_keys - {"other"})
+    needs_other = "other" in profile_keys or len(non_other) > ASSESSMENT_PROFILE_KEY_LIMIT
+    reserved = int(needs_other)
+    allowed = set(non_other[: max(0, ASSESSMENT_PROFILE_KEY_LIMIT - reserved)])
+    if needs_other:
+        allowed.add("other")
+    samples: dict[tuple[str, str], int] = {}
+    for owner, profile, count in normalized:
+        label = profile if profile in allowed else "other"
+        samples[(owner, label)] = samples.get((owner, label), 0) + count
+    return [
+        (owner, profile, count)
+        for (owner, profile), count in sorted(samples.items())
+    ]
 
 
 class RuntimeStateCollector:
@@ -310,6 +340,11 @@ class RuntimeStateCollector:
             "Age in seconds of the oldest AI assist heartbeat by bounded variant.",
             labels=("variant",),
         )
+        assessment_cycles = GaugeMetricFamily(
+            "darklab_assessment_active_cycles",
+            "Active Project assessment cycles by bounded owner kind and profile key.",
+            labels=("owner_kind", "profile_key"),
+        )
 
         try:
             with database.db_connect() as conn:
@@ -332,6 +367,7 @@ class RuntimeStateCollector:
                 self._add_snapshots(conn, snapshots)
                 self._add_intel_missing(conn, intel_missing)
                 self._add_ai_assists(conn, ai_assists, ai_queued_age, ai_in_progress_age, ai_heartbeat_age)
+                self._add_assessment_cycles(conn, assessment_cycles)
         except Exception:
             log.warning(
                 "METRICS_DB_COLLECT_FAILED",
@@ -356,6 +392,7 @@ class RuntimeStateCollector:
         yield ai_queued_age
         yield ai_in_progress_age
         yield ai_heartbeat_age
+        yield assessment_cycles
 
     def _add_atlas(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:
         try:
@@ -391,6 +428,24 @@ class RuntimeStateCollector:
             if not secret_env:
                 continue
             metric.add_metric([provider.id], 0 if secret_env in configured_envs else 1)
+
+    def _add_assessment_cycles(
+        self,
+        conn: SQLiteConnection,
+        metric: GaugeMetricFamily,
+    ) -> None:
+        try:
+            rows = conn.execute(
+                "SELECT CASE WHEN COALESCE(team_id, '') != '' THEN 'team' "
+                "ELSE 'personal' END AS owner_kind, profile_key, COUNT(*) AS count "
+                "FROM project_assessments WHERE status = 'active' "
+                "GROUP BY owner_kind, profile_key"
+            ).fetchall()
+        except Exception:
+            log.debug("METRICS_ASSESSMENT_CYCLES_COLLECT_FAILED", exc_info=True)
+            return
+        for owner, profile, count in _assessment_cycle_samples(list(rows)):
+            metric.add_metric([owner, profile], count)
 
     def _add_ai_assists(
         self,

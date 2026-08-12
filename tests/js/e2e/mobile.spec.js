@@ -861,7 +861,7 @@ test.beforeEach(async ({ page }) => {
     expect(box.height).toBeGreaterThan(viewport.height * 0.5)
   })
 
-  test('workflow exact exit-code routes stack cleanly in the mobile editor', async ({ page }) => {
+  test('workflow advanced controls stack cleanly in the mobile editor', async ({ page }) => {
     await openMobileWorkflows(page)
     await page.locator('#workflow-new-btn').click()
     await expect(page.locator('#workflow-editor-overlay')).toHaveClass(/\bopen\b/)
@@ -888,6 +888,35 @@ test.beforeEach(async ({ page }) => {
     expect(layout.destinationTop).toBeGreaterThanOrEqual(layout.codeBottom)
     await route.locator('.workflow-editor-remove-exit-code').click()
     await expect(firstStep.locator('[data-workflow-editor-exit-code]')).toHaveCount(0)
+
+    await firstStep.locator('.workflow-editor-add-capture').click()
+    const capture = firstStep.locator('[data-workflow-editor-capture]').first()
+    await capture.locator('.workflow-editor-capture-name').fill('hosts')
+    await capture.locator('.workflow-editor-capture-kind').selectOption('collection')
+    await expect(capture.locator('.workflow-editor-capture-limit-field')).toBeVisible()
+    await page.locator('#workflow-editor-add-step').click()
+    const secondStep = page.locator('[data-workflow-editor-step]').nth(1)
+    await secondStep.locator('.workflow-editor-fanout-enabled').check()
+    await expect(secondStep.locator('.workflow-editor-fanout-collection')).toHaveValue('')
+    await secondStep.locator('.workflow-editor-fanout-collection').selectOption('hosts')
+
+    const fanoutLayout = await secondStep.locator('.workflow-editor-fanout-controls').evaluate((controls) => {
+      const collectionField = controls.querySelector('[data-workflow-field$="collection"]')
+        ?.getBoundingClientRect()
+      const policyField = controls.querySelector('[data-workflow-field$="failure_mode"]')
+        ?.getBoundingClientRect()
+      const controlsBox = controls.getBoundingClientRect()
+      return {
+        collectionWidth: collectionField?.width || 0,
+        policyWidth: policyField?.width || 0,
+        controlsWidth: controlsBox.width,
+        collectionBottom: collectionField?.bottom || 0,
+        policyTop: policyField?.top || 0,
+      }
+    })
+    expect(fanoutLayout.collectionWidth).toBeGreaterThan(fanoutLayout.controlsWidth * 0.8)
+    expect(fanoutLayout.policyWidth).toBeGreaterThan(fanoutLayout.controlsWidth * 0.8)
+    expect(fanoutLayout.policyTop).toBeGreaterThanOrEqual(fanoutLayout.collectionBottom)
   })
 
   test('workflows sheet exposes the shared recent execution controls', async ({ page }) => {
@@ -924,6 +953,15 @@ test.beforeEach(async ({ page }) => {
               capture_names: ['service'],
               selected_transition: 'complete',
               transition_reason: 'success',
+              fanout_summary: {
+                total: 4,
+                pending: 1,
+                running: 1,
+                succeeded: 1,
+                failed: 0,
+                skipped: 1,
+                failure_samples: [],
+              },
             }],
           }],
         }),
@@ -945,6 +983,9 @@ test.beforeEach(async ({ page }) => {
     await expect(execution).toBeVisible()
     await expect(execution).toContainText('Current step: inspect')
     await expect(execution).toContainText('Captured: service')
+    await expect(execution).toContainText(
+      'Fan-out: 2/4 finished · 1 pending · 1 active · 1 succeeded · 1 skipped',
+    )
     await execution.getByRole('button', { name: 'Attach to run run-mobile' }).click()
     await expect(page.locator('#workflows-modal')).toBeHidden()
     await expect(page.locator('.tab-panel.active .output')).toContainText(

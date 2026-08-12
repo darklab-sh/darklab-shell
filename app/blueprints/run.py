@@ -343,8 +343,7 @@ def _save_completed_run(
     link_project_id="",
     run_kind=RUN_KIND_EXTERNAL,
     owner_tab_id="",
-    finalize_summary=None,
-    cfg=None,
+    finalize_summary=None, completion_policy=None, cfg=None,
 ):
     active_cfg = CFG if cfg is None else cfg
     return run_finalization.save_completed_run(
@@ -361,8 +360,7 @@ def _save_completed_run(
         link_project_id=link_project_id,
         run_kind=run_kind,
         owner_tab_id=owner_tab_id,
-        finalize_summary=finalize_summary,
-        cfg=active_cfg,
+        finalize_summary=finalize_summary, completion_policy=completion_policy, cfg=active_cfg,
         load_full_output_entries_fn=load_full_output_entries,
         workspace_artifacts_with_sizes_fn=_workspace_artifacts_with_sizes,
         record_run_findings_fn=record_run_findings,
@@ -388,7 +386,7 @@ def _finalize_completed_run(
     cmd_type="real",
     workspace_artifacts=None,
     owner_tab_id="",
-    link_project_id: str | None = "",
+    link_project_id: str | None = "", completion_policy=None,
 ):
     return run_finalization.finalize_completed_run(
         run_id,
@@ -402,8 +400,7 @@ def _finalize_completed_run(
         cmd_type=cmd_type,
         workspace_artifacts=workspace_artifacts,
         owner_tab_id=owner_tab_id,
-        link_project_id=link_project_id,
-        cfg=CFG,
+        link_project_id=link_project_id, completion_policy=completion_policy, cfg=CFG,
         save_completed_run_fn=_save_completed_run,
     )
 

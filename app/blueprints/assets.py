@@ -123,6 +123,7 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "command_timeout_seconds",
         "heartbeat_interval_seconds",
         "raw_packet_scanning_enabled",
+        "assessment_intrusive_actions_enabled",
         "high_volume_output_line_threshold",
         "high_volume_output_status_interval_lines",
         "interactive_pty_buffer_limit",

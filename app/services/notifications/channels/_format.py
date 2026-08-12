@@ -118,6 +118,8 @@ def _format_project_digest_fields(payload: dict[str, Any]) -> list[tuple[str, st
         ("recovered", "Recovered"),
         ("failed", "Failed"),
         ("highest_severity", "Highest Severity"),
+        ("cve_risk_changes", "CVE Risk Changes"),
+        ("unacknowledged_cve_risk_changes", "Unacknowledged CVE Risk Changes"),
         ("quiet", "Quiet Digest"),
         ("monitoring_link", "Monitoring"),
     )
@@ -138,6 +140,18 @@ def _format_project_digest_fields(payload: dict[str, Any]) -> list[tuple[str, st
             if watcher:
                 detail = f"{detail} ({truncate_text(watcher, 80)})"
             fields.append((f"Top Change {index}", truncate_text(detail, 220)))
+    risk_changes = payload.get("risk_changes")
+    if isinstance(risk_changes, list):
+        for index, item in enumerate(risk_changes[:5], start=1):
+            if not isinstance(item, dict):
+                continue
+            cve_id = str(item.get("cve_id") or "CVE").strip()
+            transition = str(item.get("transition_kind") or "risk changed").replace("_", " ").strip()
+            source = str(item.get("source") or "").upper().strip()
+            detail = f"{cve_id}: {transition}"
+            if source:
+                detail = f"{detail} ({source})"
+            fields.append((f"Risk Change {index}", truncate_text(detail, 220)))
     return fields
 
 
