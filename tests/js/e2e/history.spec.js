@@ -757,20 +757,30 @@ test.describe('history drawer', () => {
 
     // Star the run from the history panel
     await openHistoryWithEntries(page)
+    const saveStarredResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === '/session/starred'
+        && response.status() === 200
+    })
     await page.locator('.history-entry').first().locator('[data-action="star"]').click()
+    await saveStarredResponse
     await closeHistory(page)
 
     // Set up the response waiter before reload so it captures the /session/starred
     // request that loadStarredFromServer() makes on page initialization.
-    const starredResponse = page.waitForResponse(
-      resp => resp.url().includes('/session/starred') && resp.status() === 200,
-    )
+    const loadStarredResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === '/session/starred'
+        && response.status() === 200
+    })
 
     // Reload without clearing localStorage — session_id is preserved, so starred
     // commands are still in the server DB for this session.
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.locator('#cmd').waitFor()
-    await starredResponse
+    await loadStarredResponse
     // The reload re-fires the welcome boot path; wait for it to settle before
     // touching the rail so slow runners don't race the welcome animation.
     await ensurePromptReady(page)
