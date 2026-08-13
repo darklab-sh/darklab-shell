@@ -235,6 +235,13 @@ def test_probe_plan_fails_closed_for_profiles_features_and_target_types(monkeypa
         reject(409)
     logger.warning.assert_called_once()
 
+    @observe_probe("catalog")
+    def catalog(*, project_id):
+        return {"project": project_id}
+
+    catalog(project_id="prj_keyword")
+    assert logger.debug.call_args.kwargs["extra"]["project_id"] == "prj_keyword"
+
 
 def test_probe_digest_excludes_presentation_but_covers_execution_fields():
     plan = build_probe_plan(_request("curl"), _target())

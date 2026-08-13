@@ -34,7 +34,7 @@ def _fields(
     error_code: str = "",
 ) -> dict[str, Any]:
     request = _request(args, kwargs)
-    project_id = str(request.project_id if request else (args[1] if len(args) > 1 else ""))
+    project_id = str(request.project_id if request else kwargs.get("project_id", args[1] if len(args) > 1 else ""))
     return {
         "probe_phase": phase,
         "probe_outcome": outcome,
