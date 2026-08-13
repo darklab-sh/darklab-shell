@@ -3,6 +3,7 @@
 
 import inspect
 import json
+import re
 import sqlite3
 import stat
 import sys
@@ -38,6 +39,54 @@ if str(CLI_SRC) not in sys.path:
 
 def get_client():
     return reusable_test_app(__name__).test_client()
+
+
+def _assert_openapi_payload(value, schema, components, path="$"):
+    if "$ref" in schema:
+        name = schema["$ref"].rsplit("/", 1)[-1]
+        return _assert_openapi_payload(value, components[name], components, path)
+    if value is None and schema.get("nullable"):
+        return
+    if "oneOf" in schema:
+        matches = 0
+        for candidate in schema["oneOf"]:
+            try:
+                _assert_openapi_payload(value, candidate, components, path)
+            except AssertionError:
+                continue
+            matches += 1
+        assert matches == 1, f"{path}: expected exactly one schema match, got {matches}"
+        return
+    if "allOf" in schema:
+        for candidate in schema["allOf"]:
+            _assert_openapi_payload(value, candidate, components, path)
+    expected_type = schema.get("type")
+    if expected_type == "object":
+        assert isinstance(value, dict), f"{path}: expected object"
+        required = set(schema.get("required", []))
+        assert required <= set(value), f"{path}: missing {sorted(required - set(value))}"
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False:
+            assert set(value) <= set(properties), f"{path}: extra {sorted(set(value) - set(properties))}"
+        for key, item in value.items():
+            if key in properties:
+                _assert_openapi_payload(item, properties[key], components, f"{path}.{key}")
+    elif expected_type == "array":
+        assert isinstance(value, list), f"{path}: expected array"
+        for index, item in enumerate(value):
+            _assert_openapi_payload(item, schema["items"], components, f"{path}[{index}]")
+    elif expected_type == "string":
+        assert isinstance(value, str), f"{path}: expected string"
+    elif expected_type == "integer":
+        assert isinstance(value, int) and not isinstance(value, bool), f"{path}: expected integer"
+    elif expected_type == "boolean":
+        assert isinstance(value, bool), f"{path}: expected boolean"
+    if "enum" in schema:
+        assert value in schema["enum"], f"{path}: {value!r} isn't in {schema['enum']!r}"
+    if "pattern" in schema:
+        assert isinstance(value, str) and re.fullmatch(schema["pattern"], value), (
+            f"{path}: value doesn't match {schema['pattern']}"
+        )
 
 
 class _LiveCliServer:
@@ -7183,6 +7232,105 @@ def test_api_v1_openapi_generator_snapshot_is_current():
     generated = json.dumps(openapi_spec(), indent=2, sort_keys=True) + "\n"
 
     assert generated == checked_in
+
+
+def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
+    from services.api_v1.openapi import openapi_spec
+    from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+
+    client = get_client()
+    token = _token(client)
+    project = _create_project(client, token, name="Probe OpenAPI")
+    entity_id, _run_id = _seed_assessment_target(token, project["id"])
+    with sqlite3.connect(DB_PATH) as conn:
+        target_value = conn.execute(
+            "SELECT canonical_value FROM entities WHERE id = ?",
+            (entity_id,),
+        ).fetchone()[0]
+    snapshot = NucleiTemplateCacheSnapshot(
+        "ready", "v10.4.3", "sha256:" + "a" * 64, 12,
+    )
+    monkeypatch.setattr(
+        "services.assessments.probe_service.managed_nuclei_template_snapshot",
+        lambda: snapshot,
+    )
+    monkeypatch.setattr(
+        "services.assessments.probe_service.resolve_runtime_command",
+        lambda command: f"/usr/bin/{command}",
+    )
+    headers = _headers(token)
+    base = f"/api/v1/projects/{project['id']}/probes"
+    catalog = client.get(base, headers=headers).get_json()
+    resolved = client.post(
+        f"{base}/targets/resolve",
+        headers=headers,
+        json={"target_value": target_value},
+    ).get_json()
+    plan_response = client.post(
+        f"{base}/plan",
+        headers=headers,
+        json={"action_id": "ping", "entity_id": entity_id},
+    ).get_json()
+    plan = plan_response["plan"]
+    monkeypatch.setattr(
+        "blueprints.api_v1._start_brokered_run_service",
+        lambda **_kwargs: SimpleNamespace(run_id="run_probe_openapi", status="queued"),
+    )
+    monkeypatch.setattr("blueprints.api_v1.broker_available", lambda: True)
+    launched = client.post(
+        f"{base}/run",
+        headers=headers,
+        json={
+            "action_id": "ping", "entity_id": entity_id,
+            "confirmed": True, "plan_digest": plan["plan_digest"],
+        },
+    ).get_json()
+    monkeypatch.setattr(
+        "services.assessments.probe_service.resolve_runtime_command",
+        lambda _command: "",
+    )
+    unavailable = client.post(
+        f"{base}/plan",
+        headers=headers,
+        json={"action_id": "ping", "entity_id": entity_id},
+    ).get_json()
+
+    spec = openapi_spec()
+    schemas = spec["components"]["schemas"]
+    assert schemas["ProbeCatalog"]["properties"]["actions"]["items"] == {
+        "$ref": "#/components/schemas/ProbeCatalogAction"
+    }
+    assert schemas["ProbePlan"]["properties"]["bounds"] == {
+        "$ref": "#/components/schemas/ProbeBounds"
+    }
+    assert schemas["ProbeRunResponse"]["properties"]["run"] == {
+        "$ref": "#/components/schemas/ProbeStartedRun"
+    }
+    for schema_name in (
+        "ProbeCatalogAction", "ProbeServiceRecommendation", "ProbeTarget",
+        "ProbeHttpScope", "ProbeBounds", "ProbeStartedRun",
+    ):
+        assert schemas[schema_name]["required"]
+        assert schemas[schema_name]["additionalProperties"] is False
+    for payload, schema_name in (
+        (catalog, "ProbeCatalogResponse"),
+        (resolved, "ProbeTargetResolveResponse"),
+        (plan_response, "ProbePlanResponse"),
+        (unavailable, "ProbePlanResponse"),
+        (launched, "ProbeRunResponse"),
+    ):
+        _assert_openapi_payload(payload, schemas[schema_name], schemas)
+
+    paths = spec["paths"]
+    plan_examples = paths["/projects/{project_id}/probes/plan"]["post"]["responses"]["200"][
+        "content"
+    ]["application/json"]["examples"]
+    for example in plan_examples.values():
+        _assert_openapi_payload(example["value"], schemas["ProbePlanResponse"], schemas)
+    stable_error = paths["/projects/{project_id}/probes/run"]["post"]["responses"]["409"][
+        "content"
+    ]["application/json"]["example"]
+    _assert_openapi_payload(stable_error, schemas["ApiError"], schemas)
 
 
 def test_api_v1_openapi_contract_describes_public_shapes():

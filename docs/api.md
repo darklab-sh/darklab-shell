@@ -291,7 +291,7 @@ curl -sS \
   "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes"
 ```
 
-The optional `service` query returns reviewed recommendations for that discovered service, while `target_type` narrows actions to `domain`, `ip`, or `url`. Catalog and plan reads are side-effect free.
+The optional `service` query returns reviewed recommendations for that discovered service, while `target_type` narrows actions to `domain`, `ip`, or `url`. Catalog and plan reads are side-effect free. The checked-in OpenAPI contract describes each catalog action, local profile, recommendation, target, bound, scope, availability result, and started run instead of leaving those values as generic objects. It also includes examples for the catalog, available and unavailable plans, target resolution, launch responses, and stable errors.
 
 Probe resolution keeps exact target values in a strictly checked JSON body for both the same-origin browser and API v1, so those values don't appear in URLs, proxy caches, or ordinary access-log request lines. The browser still reads the final entity-anchored plan with `GET` and `cache: no-store`; API v1 uses a narrow JSON `POST` for its plan options. These requests are viewer-safe reads: they don't create a run, audit event, History row, or Assessment evidence.
 

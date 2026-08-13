@@ -1,142 +1,70 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""OpenAPI fragment for Project-scoped one-off probes."""
+"""OpenAPI paths for Project-scoped one-off probes."""
 
 from __future__ import annotations
 
+from typing import Any
 
-def _ref(name: str) -> dict:
+from services.api_v1.openapi_probe_examples import (
+    catalog_response_example,
+    plan_response_examples,
+    run_response_example,
+    stable_error_example,
+    target_response_example,
+)
+from services.api_v1.openapi_probe_schemas import probe_component_schemas
+
+
+def _ref(name: str) -> dict[str, str]:
     return {"$ref": f"#/components/schemas/{name}"}
 
 
-def _response(description: str, schema: str) -> dict:
-    return {"description": description, "content": {"application/json": {"schema": _ref(schema)}}}
+def _media(schema: str, *, example: Any = None, examples: Any = None) -> dict[str, Any]:
+    media: dict[str, Any] = {"schema": _ref(schema)}
+    if example is not None:
+        media["example"] = example
+    if examples is not None:
+        media["examples"] = examples
+    return {"application/json": media}
 
 
-def _error() -> dict:
-    return _response("Error", "ApiError")
-
-
-def probe_schemas() -> dict:
-    plan_request = {
-        "type": "object",
-        "required": ["action_id", "entity_id"],
-        "properties": {
-            "action_id": {"type": "string"},
-            "entity_id": {"type": "string"},
-            "http_profile_id": {"type": "string"},
-            "nmap_profile": {"type": "string"},
-            "nuclei_profile": {"type": "string", "default": "safe"},
-        },
-        "additionalProperties": False,
-    }
+def _response(
+    description: str,
+    schema: str,
+    *,
+    example: Any = None,
+    examples: Any = None,
+) -> dict[str, Any]:
     return {
-        "ProbeCatalog": {
-            "type": "object",
-            "required": [
-                "schema_version", "actions", "nmap_profiles", "nuclei_profiles",
-                "service_recommendations", "exclusions",
-            ],
-            "properties": {
-                "schema_version": {"type": "integer"},
-                "actions": {"type": "array", "items": {"type": "object"}},
-                "nmap_profiles": {"type": "array", "items": {"type": "object"}},
-                "nuclei_profiles": {"type": "array", "items": {"type": "object"}},
-                "service_recommendations": {"type": "array", "items": {"type": "object"}},
-                "exclusions": {"type": "array", "items": {"type": "string"}},
-            },
-            "additionalProperties": False,
-        },
-        "ProbeCatalogResponse": {
-            "type": "object",
-            "required": ["catalog"],
-            "properties": {"catalog": _ref("ProbeCatalog")},
-            "additionalProperties": False,
-        },
-        "ProbePlanRequest": plan_request,
-        "ProbePlan": {
-            "type": "object",
-            "required": [
-                "schema_version", "digest_version", "project_id", "action", "target",
-                "policy_level", "bounds", "display_command", "availability", "launchable",
-                "requires_confirmation", "plan_digest",
-            ],
-            "properties": {
-                "schema_version": {"type": "integer"},
-                "digest_version": {"type": "integer"},
-                "project_id": {"type": "string"},
-                "action": {"type": "object"},
-                "target": {"type": "object"},
-                "profile": {"type": "object"},
-                "profile_details": {"type": "object"},
-                "http_profile": {"type": "object"},
-                "policy_level": {"type": "string", "enum": ["safe", "standard", "intrusive", "destructive"]},
-                "required_features": {"type": "array", "items": {"type": "string"}},
-                "feature_gates": {"type": "array", "items": {"type": "string"}},
-                "scope": {"type": "object"},
-                "bounds": {"type": "object"},
-                "display_command": {"type": "string"},
-                "expected_evidence": {"type": "array", "items": {"type": "string"}},
-                "availability": {"type": "object"},
-                "launchable": {"type": "boolean"},
-                "unavailable_reason": {"type": "string"},
-                "requires_confirmation": {"type": "boolean"},
-                "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            },
-            "additionalProperties": False,
-        },
-        "ProbePlanResponse": {
-            "type": "object", "required": ["plan"],
-            "properties": {"plan": _ref("ProbePlan")}, "additionalProperties": False,
-        },
-        "ProbeRunRequest": {
-            **plan_request,
-            "required": ["action_id", "entity_id", "confirmed", "plan_digest"],
-            "properties": {
-                **plan_request["properties"],
-                "confirmed": {"type": "boolean", "enum": [True]},
-                "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-                "workspace_cwd": {"type": "string"},
-            },
-        },
-        "ProbeRunResponse": {
-            "type": "object", "required": ["run", "plan", "project_id"],
-            "properties": {
-                "run": {"type": "object"}, "plan": _ref("ProbePlan"),
-                "project_id": {"type": "string"},
-            },
-            "additionalProperties": False,
-        },
-        "ProbeTargetResolveRequest": {
-            "type": "object",
-            "required": ["target_value"],
-            "properties": {"target_value": {"type": "string"}},
-            "additionalProperties": False,
-        },
-        "ProbeTargetResolveResponse": {
-            "type": "object",
-            "required": ["target"],
-            "properties": {
-                "target": {
-                    "type": "object",
-                    "required": ["entity_id", "type", "value"],
-                    "properties": {
-                        "entity_id": {"type": "string"},
-                        "type": {"type": "string", "enum": ["domain", "ip", "url"]},
-                        "value": {"type": "string"},
-                    },
-                    "additionalProperties": False,
-                },
-            },
-            "additionalProperties": False,
-        },
+        "description": description,
+        "content": _media(schema, example=example, examples=examples),
     }
 
 
-def probe_paths() -> dict:
+def _error(description: str = "Stable probe error") -> dict[str, Any]:
+    return _response(description, "ApiError", example=stable_error_example())
+
+
+def _request(schema: str, example: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "required": True,
+        "content": _media(schema, example=example),
+    }
+
+
+def probe_schemas() -> dict[str, Any]:
+    return probe_component_schemas()
+
+
+def probe_paths() -> dict[str, Any]:
     project = {
-        "name": "project_id", "in": "path", "required": True, "schema": {"type": "string"},
+        "name": "project_id",
+        "in": "path",
+        "required": True,
+        "description": "Project that owns the confirmed target.",
+        "schema": {"type": "string"},
     }
     errors = {str(status): _error() for status in (400, 401, 403, 404, 409, 429)}
     return {
@@ -145,33 +73,59 @@ def probe_paths() -> dict:
                 "summary": "List reviewed probes and profiles for a Project",
                 "parameters": [
                     project,
-                    {"name": "service", "in": "query", "schema": {"type": "string"}},
-                    {"name": "target_type", "in": "query", "schema": {"type": "string"}},
+                    {
+                        "name": "service", "in": "query",
+                        "description": "Optional discovered service name for recommendations.",
+                        "schema": {"type": "string"},
+                    },
+                    {
+                        "name": "target_type", "in": "query",
+                        "description": "Optional compatible target type.",
+                        "schema": {"type": "string", "enum": ["domain", "ip", "url"]},
+                    },
                 ],
-                "responses": {"200": _response("Probe catalog", "ProbeCatalogResponse"), **errors},
+                "responses": {
+                    "200": _response(
+                        "Reviewed probe catalog",
+                        "ProbeCatalogResponse",
+                        example=catalog_response_example(),
+                    ),
+                    **errors,
+                },
             },
         },
         "/projects/{project_id}/probes/plan": {
             "post": {
                 "summary": "Preview one bounded Project probe",
                 "parameters": [project],
-                "requestBody": {"required": True, "content": {"application/json": {"schema": _ref("ProbePlanRequest")}}},
-                "responses": {"200": _response("Current probe plan", "ProbePlanResponse"), **errors},
+                "requestBody": _request(
+                    "ProbePlanRequest",
+                    {"action_id": "ping", "entity_id": "ent_example"},
+                ),
+                "responses": {
+                    "200": _response(
+                        "Current launchable or unavailable probe plan",
+                        "ProbePlanResponse",
+                        examples=plan_response_examples(),
+                    ),
+                    **errors,
+                },
             },
         },
         "/projects/{project_id}/probes/targets/resolve": {
             "post": {
                 "summary": "Resolve one exact confirmed Project target for a probe",
                 "parameters": [project],
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("ProbeTargetResolveRequest")}},
-                },
+                "requestBody": _request(
+                    "ProbeTargetResolveRequest",
+                    {"target_value": "example.test"},
+                ),
                 "responses": {
-                    "200": {
-                        "description": "Resolved Project target",
-                        "content": {"application/json": {"schema": _ref("ProbeTargetResolveResponse")}},
-                    },
+                    "200": _response(
+                        "Resolved Project target",
+                        "ProbeTargetResolveResponse",
+                        example=target_response_example(),
+                    ),
                     **errors,
                 },
             },
@@ -180,10 +134,22 @@ def probe_paths() -> dict:
             "post": {
                 "summary": "Confirm and start one bounded Project probe",
                 "parameters": [project],
-                "requestBody": {"required": True, "content": {"application/json": {"schema": _ref("ProbeRunRequest")}}},
+                "requestBody": _request(
+                    "ProbeRunRequest",
+                    {
+                        "action_id": "ping", "entity_id": "ent_example",
+                        "confirmed": True, "plan_digest": "a" * 64,
+                    },
+                ),
                 "responses": {
-                    "202": _response("Probe run started", "ProbeRunResponse"),
-                    **errors, "503": _error(),
+                    "202": _response(
+                        "Probe run started",
+                        "ProbeRunResponse",
+                        example=run_response_example(),
+                    ),
+                    **errors,
+                    "500": _error("Probe run could not start"),
+                    "503": _error("Run broker unavailable"),
                 },
             },
         },

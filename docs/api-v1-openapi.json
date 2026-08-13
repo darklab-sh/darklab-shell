@@ -7920,12 +7920,106 @@
         ],
         "type": "object"
       },
+      "ProbeAction": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "mode",
+          "label",
+          "purpose"
+        ],
+        "type": "object"
+      },
+      "ProbeAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "code",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ProbeBounds": {
+        "additionalProperties": false,
+        "properties": {
+          "credential_use": {
+            "enum": [
+              "none",
+              "protected_http_profile"
+            ],
+            "type": "string"
+          },
+          "fan_out": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "request_limit": {
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "target_count": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "time_limit_seconds": {
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target_count",
+          "fan_out",
+          "request_limit",
+          "time_limit_seconds",
+          "credential_use",
+          "summary"
+        ],
+        "type": "object"
+      },
       "ProbeCatalog": {
         "additionalProperties": false,
         "properties": {
           "actions": {
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/ProbeCatalogAction"
             },
             "type": "array"
           },
@@ -7937,22 +8031,25 @@
           },
           "nmap_profiles": {
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/ProbeNmapCatalogProfile"
             },
             "type": "array"
           },
           "nuclei_profiles": {
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/ProbeNucleiCatalogProfile"
             },
             "type": "array"
           },
           "schema_version": {
+            "enum": [
+              1
+            ],
             "type": "integer"
           },
           "service_recommendations": {
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/ProbeServiceRecommendation"
             },
             "type": "array"
           }
@@ -7964,6 +8061,85 @@
           "nuclei_profiles",
           "service_recommendations",
           "exclusions"
+        ],
+        "type": "object"
+      },
+      "ProbeCatalogAction": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ProbeAvailability"
+          },
+          "compatible_profiles": {
+            "$ref": "#/components/schemas/ProbeCompatibleProfiles"
+          },
+          "exclusions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expected_evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "required_features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "target_types": {
+            "items": {
+              "enum": [
+                "domain",
+                "ip",
+                "url"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "label",
+          "purpose",
+          "mode",
+          "policy_level",
+          "target_types",
+          "required_features",
+          "expected_evidence",
+          "exclusions",
+          "compatible_profiles",
+          "availability"
         ],
         "type": "object"
       },
@@ -7979,19 +8155,477 @@
         ],
         "type": "object"
       },
+      "ProbeCompatibleProfiles": {
+        "additionalProperties": false,
+        "properties": {
+          "nmap": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "nuclei": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "nmap",
+          "nuclei"
+        ],
+        "type": "object"
+      },
+      "ProbeHttpProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "concurrency": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "credential_use": {
+            "oneOf": [
+              {
+                "enum": [
+                  "none"
+                ],
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rate_limit_per_second": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "revision": {
+            "oneOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "role": {
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ProbeHttpScope"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "credential_use"
+        ],
+        "type": "object"
+      },
+      "ProbeHttpScope": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "exclude_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "include_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "allowed_hosts",
+          "scope_roots",
+          "include_paths",
+          "exclude_paths"
+        ],
+        "type": "object"
+      },
+      "ProbeNmapCatalogProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "excluded_category_selectors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fixed_script_arguments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "provenance": {
+            "enum": [
+              "app_owned"
+            ],
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "script_argument_file": {
+            "type": "boolean"
+          },
+          "script_arguments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "selector_kind": {
+            "enum": [
+              "category",
+              "scripts"
+            ],
+            "type": "string"
+          },
+          "selectors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "policy_level",
+          "selector_kind",
+          "selectors",
+          "evidence_kinds",
+          "excluded_category_selectors",
+          "fixed_script_arguments",
+          "script_arguments",
+          "script_argument_file",
+          "requires_confirmation",
+          "revision",
+          "provenance"
+        ],
+        "type": "object"
+      },
+      "ProbeNmapProfileDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "excluded_category_selectors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fixed_script_arguments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "type": "boolean"
+          },
+          "script_argument_file": {
+            "type": "boolean"
+          },
+          "script_arguments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "selector_kind": {
+            "enum": [
+              "category",
+              "scripts"
+            ],
+            "type": "string"
+          },
+          "selectors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "policy_level",
+          "selector_kind",
+          "selectors",
+          "evidence_kinds",
+          "excluded_category_selectors",
+          "fixed_script_arguments",
+          "script_arguments",
+          "script_argument_file",
+          "requires_confirmation"
+        ],
+        "type": "object"
+      },
+      "ProbeNucleiCatalogProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ProbeAvailability"
+          },
+          "dast": {
+            "type": "boolean"
+          },
+          "excluded_protocols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "excluded_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "headless": {
+            "type": "boolean"
+          },
+          "key": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "provenance": {
+            "enum": [
+              "managed_local_cache"
+            ],
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "template_families": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "template_snapshot": {
+            "$ref": "#/components/schemas/ProbeTemplateSnapshot"
+          },
+          "template_source": {
+            "enum": [
+              "managed_cache"
+            ],
+            "type": "string"
+          },
+          "update_policy": {
+            "enum": [
+              "explicit_only"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "policy_level",
+          "template_source",
+          "template_families",
+          "excluded_tags",
+          "excluded_protocols",
+          "headless",
+          "dast",
+          "update_policy",
+          "template_snapshot",
+          "revision",
+          "provenance",
+          "availability"
+        ],
+        "type": "object"
+      },
+      "ProbeNucleiProfileDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "dast": {
+            "type": "boolean"
+          },
+          "excluded_protocols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "excluded_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "headless": {
+            "type": "boolean"
+          },
+          "key": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "template_families": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "template_snapshot": {
+            "$ref": "#/components/schemas/ProbeTemplateSnapshot"
+          },
+          "template_source": {
+            "enum": [
+              "managed_cache"
+            ],
+            "type": "string"
+          },
+          "update_policy": {
+            "enum": [
+              "explicit_only"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "policy_level",
+          "template_source",
+          "template_families",
+          "excluded_tags",
+          "excluded_protocols",
+          "headless",
+          "dast",
+          "update_policy",
+          "template_snapshot"
+        ],
+        "type": "object"
+      },
       "ProbePlan": {
         "additionalProperties": false,
         "properties": {
           "action": {
-            "type": "object"
+            "$ref": "#/components/schemas/ProbeAction"
           },
           "availability": {
-            "type": "object"
+            "$ref": "#/components/schemas/ProbeAvailability"
           },
           "bounds": {
-            "type": "object"
+            "$ref": "#/components/schemas/ProbeBounds"
           },
           "digest_version": {
+            "enum": [
+              1
+            ],
             "type": "integer"
           },
           "display_command": {
@@ -8010,7 +8644,7 @@
             "type": "array"
           },
           "http_profile": {
-            "type": "object"
+            "$ref": "#/components/schemas/ProbeHttpProfile"
           },
           "launchable": {
             "type": "boolean"
@@ -8029,10 +8663,31 @@
             "type": "string"
           },
           "profile": {
-            "type": "object"
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "maxProperties": 0,
+                "type": "object"
+              },
+              {
+                "$ref": "#/components/schemas/ProbeSelectedProfile"
+              }
+            ]
           },
           "profile_details": {
-            "type": "object"
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "maxProperties": 0,
+                "type": "object"
+              },
+              {
+                "$ref": "#/components/schemas/ProbeNmapProfileDetails"
+              },
+              {
+                "$ref": "#/components/schemas/ProbeNucleiProfileDetails"
+              }
+            ]
           },
           "project_id": {
             "type": "string"
@@ -8047,13 +8702,16 @@
             "type": "boolean"
           },
           "schema_version": {
+            "enum": [
+              1
+            ],
             "type": "integer"
           },
           "scope": {
-            "type": "object"
+            "$ref": "#/components/schemas/ProbeScope"
           },
           "target": {
-            "type": "object"
+            "$ref": "#/components/schemas/ProbeTarget"
           },
           "unavailable_reason": {
             "type": "string"
@@ -8065,11 +8723,19 @@
           "project_id",
           "action",
           "target",
+          "profile",
+          "profile_details",
+          "http_profile",
           "policy_level",
+          "required_features",
+          "feature_gates",
+          "scope",
           "bounds",
           "display_command",
+          "expected_evidence",
           "availability",
           "launchable",
+          "unavailable_reason",
           "requires_confirmation",
           "plan_digest"
         ],
@@ -8079,9 +8745,11 @@
         "additionalProperties": false,
         "properties": {
           "action_id": {
+            "minLength": 1,
             "type": "string"
           },
           "entity_id": {
+            "minLength": 1,
             "type": "string"
           },
           "http_profile_id": {
@@ -8092,6 +8760,11 @@
           },
           "nuclei_profile": {
             "default": "safe",
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive"
+            ],
             "type": "string"
           }
         },
@@ -8117,6 +8790,7 @@
         "additionalProperties": false,
         "properties": {
           "action_id": {
+            "minLength": 1,
             "type": "string"
           },
           "confirmed": {
@@ -8126,6 +8800,7 @@
             "type": "boolean"
           },
           "entity_id": {
+            "minLength": 1,
             "type": "string"
           },
           "http_profile_id": {
@@ -8136,6 +8811,11 @@
           },
           "nuclei_profile": {
             "default": "safe",
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive"
+            ],
             "type": "string"
           },
           "plan_digest": {
@@ -8164,7 +8844,7 @@
             "type": "string"
           },
           "run": {
-            "type": "object"
+            "$ref": "#/components/schemas/ProbeStartedRun"
           }
         },
         "required": [
@@ -8174,10 +8854,215 @@
         ],
         "type": "object"
       },
+      "ProbeScope": {
+        "additionalProperties": false,
+        "properties": {
+          "fan_out": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "project_target"
+            ],
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "target_count": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "project_id",
+          "target_count",
+          "fan_out"
+        ],
+        "type": "object"
+      },
+      "ProbeSelectedProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "nmap",
+              "nuclei"
+            ],
+            "type": "string"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard",
+              "intrusive",
+              "destructive"
+            ],
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "template_snapshot": {
+            "$ref": "#/components/schemas/ProbeTemplateSnapshot"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "revision",
+          "policy_level",
+          "requires_confirmation",
+          "evidence_kinds"
+        ],
+        "type": "object"
+      },
+      "ProbeServiceRecommendation": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "expected_evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "nmap_profile": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "required_features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target_types": {
+            "items": {
+              "enum": [
+                "domain",
+                "ip",
+                "url"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "rationale",
+          "action_id",
+          "nmap_profile",
+          "target_types",
+          "required_features",
+          "expected_evidence"
+        ],
+        "type": "object"
+      },
+      "ProbeStartedRun": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "history_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "run_type": {
+            "enum": [
+              "external"
+            ],
+            "type": "string"
+          },
+          "started": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stream_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "run_type",
+          "status",
+          "command",
+          "started",
+          "stream_url",
+          "history_url"
+        ],
+        "type": "object"
+      },
+      "ProbeTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "domain",
+              "ip",
+              "url"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "type",
+          "value"
+        ],
+        "type": "object"
+      },
       "ProbeTargetResolveRequest": {
         "additionalProperties": false,
         "properties": {
           "target_value": {
+            "minLength": 1,
             "type": "string"
           }
         },
@@ -8190,33 +9075,47 @@
         "additionalProperties": false,
         "properties": {
           "target": {
-            "additionalProperties": false,
-            "properties": {
-              "entity_id": {
-                "type": "string"
-              },
-              "type": {
-                "enum": [
-                  "domain",
-                  "ip",
-                  "url"
-                ],
-                "type": "string"
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "entity_id",
-              "type",
-              "value"
-            ],
-            "type": "object"
+            "$ref": "#/components/schemas/ProbeTarget"
           }
         },
         "required": [
           "target"
+        ],
+        "type": "object"
+      },
+      "ProbeTemplateSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "content_digest": {
+            "type": "string"
+          },
+          "manifest_entry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "release_version": {
+            "type": "string"
+          },
+          "source_label": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "missing",
+              "oversized",
+              "invalid",
+              "unreadable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "source_label",
+          "release_version",
+          "content_digest",
+          "manifest_entry_count"
         ],
         "type": "object"
       },
@@ -16775,6 +17674,7 @@
       "get": {
         "parameters": [
           {
+            "description": "Project that owns the confirmed target.",
             "in": "path",
             "name": "project_id",
             "required": true,
@@ -16783,6 +17683,7 @@
             }
           },
           {
+            "description": "Optional discovered service name for recommendations.",
             "in": "query",
             "name": "service",
             "schema": {
@@ -16790,9 +17691,15 @@
             }
           },
           {
+            "description": "Optional compatible target type.",
             "in": "query",
             "name": "target_type",
             "schema": {
+              "enum": [
+                "domain",
+                "ip",
+                "url"
+              ],
               "type": "string"
             }
           }
@@ -16801,72 +17708,174 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "catalog": {
+                    "actions": [
+                      {
+                        "availability": {
+                          "available": true,
+                          "code": "",
+                          "reason": ""
+                        },
+                        "compatible_profiles": {
+                          "nmap": [],
+                          "nuclei": []
+                        },
+                        "exclusions": [],
+                        "expected_evidence": [
+                          "run"
+                        ],
+                        "id": "ping",
+                        "label": "Ping",
+                        "mode": "reachability",
+                        "policy_level": "safe",
+                        "purpose": "Check whether one approved host responds.",
+                        "required_features": [
+                          "ping"
+                        ],
+                        "revision": "1",
+                        "target_types": [
+                          "domain",
+                          "ip"
+                        ]
+                      }
+                    ],
+                    "exclusions": [
+                      "zap",
+                      "oast_allocation"
+                    ],
+                    "nmap_profiles": [
+                      {
+                        "evidence_kinds": [
+                          "service_metadata"
+                        ],
+                        "excluded_category_selectors": [
+                          "auth",
+                          "brute",
+                          "dos"
+                        ],
+                        "fixed_script_arguments": [],
+                        "key": "safe",
+                        "label": "Safe NSE review",
+                        "policy_level": "safe",
+                        "provenance": "app_owned",
+                        "requires_confirmation": false,
+                        "revision": "1",
+                        "script_argument_file": false,
+                        "script_arguments": [],
+                        "selector_kind": "category",
+                        "selectors": [
+                          "safe"
+                        ]
+                      }
+                    ],
+                    "nuclei_profiles": [],
+                    "schema_version": 1,
+                    "service_recommendations": []
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProbeCatalogResponse"
                 }
               }
             },
-            "description": "Probe catalog"
+            "description": "Reviewed probe catalog"
           },
           "400": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "401": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "403": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "404": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "409": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "429": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           }
         },
         "summary": "List reviewed probes and profiles for a Project"
@@ -16876,6 +17885,7 @@
       "post": {
         "parameters": [
           {
+            "description": "Project that owns the confirmed target.",
             "in": "path",
             "name": "project_id",
             "required": true,
@@ -16887,6 +17897,10 @@
         "requestBody": {
           "content": {
             "application/json": {
+              "example": {
+                "action_id": "ping",
+                "entity_id": "ent_example"
+              },
               "schema": {
                 "$ref": "#/components/schemas/ProbePlanRequest"
               }
@@ -16898,72 +17912,234 @@
           "200": {
             "content": {
               "application/json": {
+                "examples": {
+                  "available": {
+                    "summary": "Launchable bounded plan",
+                    "value": {
+                      "plan": {
+                        "action": {
+                          "id": "ping",
+                          "label": "Ping",
+                          "mode": "reachability",
+                          "purpose": "Check whether one approved host responds.",
+                          "revision": "1"
+                        },
+                        "availability": {
+                          "available": true,
+                          "code": "",
+                          "reason": ""
+                        },
+                        "bounds": {
+                          "credential_use": "none",
+                          "fan_out": 1,
+                          "request_limit": 4,
+                          "summary": "Four probes against one approved host.",
+                          "target_count": 1,
+                          "time_limit_seconds": 10
+                        },
+                        "digest_version": 1,
+                        "display_command": "ping -c 4 -W 2 example.test",
+                        "expected_evidence": [
+                          "run"
+                        ],
+                        "feature_gates": [],
+                        "http_profile": {
+                          "credential_use": "none",
+                          "id": "",
+                          "revision": ""
+                        },
+                        "launchable": true,
+                        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "policy_level": "safe",
+                        "profile": {},
+                        "profile_details": {},
+                        "project_id": "prj_example",
+                        "required_features": [
+                          "ping"
+                        ],
+                        "requires_confirmation": true,
+                        "schema_version": 1,
+                        "scope": {
+                          "fan_out": 1,
+                          "kind": "project_target",
+                          "project_id": "prj_example",
+                          "target_count": 1
+                        },
+                        "target": {
+                          "entity_id": "ent_example",
+                          "type": "domain",
+                          "value": "example.test"
+                        },
+                        "unavailable_reason": ""
+                      }
+                    }
+                  },
+                  "unavailable": {
+                    "summary": "Plan stopped by a feature gate",
+                    "value": {
+                      "plan": {
+                        "action": {
+                          "id": "ping",
+                          "label": "Ping",
+                          "mode": "reachability",
+                          "purpose": "Check whether one approved host responds.",
+                          "revision": "1"
+                        },
+                        "availability": {
+                          "available": false,
+                          "code": "feature_unavailable",
+                          "reason": "Required probe features aren't available."
+                        },
+                        "bounds": {
+                          "credential_use": "none",
+                          "fan_out": 1,
+                          "request_limit": 4,
+                          "summary": "Four probes against one approved host.",
+                          "target_count": 1,
+                          "time_limit_seconds": 10
+                        },
+                        "digest_version": 1,
+                        "display_command": "",
+                        "expected_evidence": [
+                          "run"
+                        ],
+                        "feature_gates": [
+                          "ping"
+                        ],
+                        "http_profile": {
+                          "credential_use": "none",
+                          "id": "",
+                          "revision": ""
+                        },
+                        "launchable": false,
+                        "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "policy_level": "safe",
+                        "profile": {},
+                        "profile_details": {},
+                        "project_id": "prj_example",
+                        "required_features": [
+                          "ping"
+                        ],
+                        "requires_confirmation": true,
+                        "schema_version": 1,
+                        "scope": {
+                          "fan_out": 1,
+                          "kind": "project_target",
+                          "project_id": "prj_example",
+                          "target_count": 1
+                        },
+                        "target": {
+                          "entity_id": "ent_example",
+                          "type": "domain",
+                          "value": "example.test"
+                        },
+                        "unavailable_reason": "Required probe features aren't available."
+                      }
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProbePlanResponse"
                 }
               }
             },
-            "description": "Current probe plan"
+            "description": "Current launchable or unavailable probe plan"
           },
           "400": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "401": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "403": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "404": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "409": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "429": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           }
         },
         "summary": "Preview one bounded Project probe"
@@ -16973,6 +18149,7 @@
       "post": {
         "parameters": [
           {
+            "description": "Project that owns the confirmed target.",
             "in": "path",
             "name": "project_id",
             "required": true,
@@ -16984,6 +18161,12 @@
         "requestBody": {
           "content": {
             "application/json": {
+              "example": {
+                "action_id": "ping",
+                "confirmed": true,
+                "entity_id": "ent_example",
+                "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
               "schema": {
                 "$ref": "#/components/schemas/ProbeRunRequest"
               }
@@ -16995,6 +18178,75 @@
           "202": {
             "content": {
               "application/json": {
+                "example": {
+                  "plan": {
+                    "action": {
+                      "id": "ping",
+                      "label": "Ping",
+                      "mode": "reachability",
+                      "purpose": "Check whether one approved host responds.",
+                      "revision": "1"
+                    },
+                    "availability": {
+                      "available": true,
+                      "code": "",
+                      "reason": ""
+                    },
+                    "bounds": {
+                      "credential_use": "none",
+                      "fan_out": 1,
+                      "request_limit": 4,
+                      "summary": "Four probes against one approved host.",
+                      "target_count": 1,
+                      "time_limit_seconds": 10
+                    },
+                    "digest_version": 1,
+                    "display_command": "ping -c 4 -W 2 example.test",
+                    "expected_evidence": [
+                      "run"
+                    ],
+                    "feature_gates": [],
+                    "http_profile": {
+                      "credential_use": "none",
+                      "id": "",
+                      "revision": ""
+                    },
+                    "launchable": true,
+                    "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "policy_level": "safe",
+                    "profile": {},
+                    "profile_details": {},
+                    "project_id": "prj_example",
+                    "required_features": [
+                      "ping"
+                    ],
+                    "requires_confirmation": true,
+                    "schema_version": 1,
+                    "scope": {
+                      "fan_out": 1,
+                      "kind": "project_target",
+                      "project_id": "prj_example",
+                      "target_count": 1
+                    },
+                    "target": {
+                      "entity_id": "ent_example",
+                      "type": "domain",
+                      "value": "example.test"
+                    },
+                    "unavailable_reason": ""
+                  },
+                  "project_id": "prj_example",
+                  "run": {
+                    "command": "ping -c 4 -W 2 example.test",
+                    "history_url": "/api/v1/history/run_example",
+                    "id": "run_example",
+                    "run_id": "run_example",
+                    "run_type": "external",
+                    "started": "2026-08-13T12:00:00+00:00",
+                    "status": "queued",
+                    "stream_url": "/api/v1/runs/run_example/stream"
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProbeRunResponse"
                 }
@@ -17005,72 +18257,130 @@
           "400": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "401": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "403": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "404": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "409": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "429": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Probe run could not start"
           },
           "503": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Run broker unavailable"
           }
         },
         "summary": "Confirm and start one bounded Project probe"
@@ -17080,6 +18390,7 @@
       "post": {
         "parameters": [
           {
+            "description": "Project that owns the confirmed target.",
             "in": "path",
             "name": "project_id",
             "required": true,
@@ -17091,6 +18402,9 @@
         "requestBody": {
           "content": {
             "application/json": {
+              "example": {
+                "target_value": "example.test"
+              },
               "schema": {
                 "$ref": "#/components/schemas/ProbeTargetResolveRequest"
               }
@@ -17102,6 +18416,13 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "target": {
+                    "entity_id": "ent_example",
+                    "type": "domain",
+                    "value": "example.test"
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProbeTargetResolveResponse"
                 }
@@ -17112,62 +18433,98 @@
           "400": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "401": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "403": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "404": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "409": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           },
           "429": {
             "content": {
               "application/json": {
+                "example": {
+                  "error": {
+                    "code": "stale_plan",
+                    "message": "The probe plan changed. Review the latest plan before confirming."
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
-            "description": "Error"
+            "description": "Stable probe error"
           }
         },
         "summary": "Resolve one exact confirmed Project target for a probe"
