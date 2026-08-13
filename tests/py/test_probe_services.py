@@ -28,7 +28,7 @@ from services.assessments.probe_contracts import (
 )
 from services.assessments.probe_plan_digest import probe_plan_digest
 from services.assessments.probe_plans import build_probe_plan, confirm_probe_plan
-from services.assessments.probe_observability import observe_probe
+from services.assessments.probe_observability import observe_probe, observed_probe_cleanup
 from services.assessments.probe_targets import resolve_probe_target
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 from services.projects.crud import create_project, delete_project, update_project
@@ -333,6 +333,35 @@ def test_probe_plan_fails_closed_for_profiles_features_and_target_types(monkeypa
 
     catalog(project_id="prj_keyword")
     assert logger.debug.call_args.kwargs["extra"]["project_id"] == "prj_keyword"
+
+
+def test_probe_cleanup_retries_failed_or_incomplete_removal(monkeypatch):
+    outcomes = []
+    logger = mock.Mock()
+    monkeypatch.setattr(
+        "services.assessments.probe_observability.app_metrics.record_probe_operation",
+        lambda _phase, outcome, **_kwargs: outcomes.append(outcome),
+    )
+    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+    results = iter((False, True))
+    cleanup = mock.Mock(side_effect=lambda: next(results))
+    observed = observed_probe_cleanup(cleanup)
+    assert observed is not None
+
+    assert observed() is False
+    assert observed() is True
+    assert observed() is None
+    assert cleanup.call_count == 2
+    assert outcomes == ["failed", "success"]
+    logger.debug.assert_called_once_with("PROJECT_PROBE_PROTECTED_CLEANUP_COMPLETED")
+
+    raised = mock.Mock(side_effect=(RuntimeError("remove failed"), True))
+    observed_raised = observed_probe_cleanup(raised)
+    assert observed_raised is not None
+    with pytest.raises(RuntimeError, match="remove failed"):
+        observed_raised()
+    assert observed_raised() is True
+    assert raised.call_count == 2
 
 
 def test_probe_digest_excludes_presentation_but_covers_execution_fields():

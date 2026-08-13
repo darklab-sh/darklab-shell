@@ -70,11 +70,7 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
                     extra=_fields(phase, args, kwargs, outcome="failed"),
                 )
                 raise
-            unavailable = (
-                isinstance(result, Mapping)
-                and "launchable" in result
-                and not bool(result.get("launchable"))
-            )
+            unavailable = isinstance(result, Mapping) and not result.get("launchable", True)
             outcome = "unavailable" if unavailable else "success"
             app_metrics.record_probe_operation(phase, outcome, protected=protected)
             event = "PROJECT_PROBE_OPERATION_COMPLETED"
@@ -96,13 +92,16 @@ def observed_probe_cleanup(cleanup: Callable[[], Any] | None) -> Callable[[], An
         nonlocal cleaned
         if cleaned:
             return None
-        cleaned = True
         try:
             result = cleanup()
         except Exception:
             app_metrics.record_probe_operation("cleanup", "failed", protected=True)
             log.exception("PROJECT_PROBE_PROTECTED_CLEANUP_FAILED")
             raise
+        if result is False:
+            app_metrics.record_probe_operation("cleanup", "failed", protected=True)
+            return False
+        cleaned = True
         app_metrics.record_probe_operation("cleanup", "success", protected=True)
         log.debug("PROJECT_PROBE_PROTECTED_CLEANUP_COMPLETED")
         return result

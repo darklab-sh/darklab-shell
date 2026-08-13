@@ -33683,6 +33683,47 @@ class TestSecretsVault:
 
 
 class TestAssessmentHttpProfileExecution:
+    def test_private_runtime_cleanup_can_retry_local_and_scanner_failures(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from services.assessments import http_profile_runtime as runtime
+
+        monkeypatch.setattr(runtime, "_scanner_user_exists", lambda: False)
+        monkeypatch.setattr(runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
+        local = runtime.PrivateHttpRunMaterial(cfg=build_test_config())
+        local.write_bytes("headers.txt", b"X-Test: protected\n")
+        real_rmtree = runtime.shutil.rmtree
+        monkeypatch.setattr(
+            runtime.shutil,
+            "rmtree",
+            mock.Mock(side_effect=runtime.PrivateHttpMaterialError("remove failed")),
+        )
+
+        assert local.cleanup() is False
+        assert local.path.exists()
+        monkeypatch.setattr(runtime.shutil, "rmtree", real_rmtree)
+        assert local.cleanup() is True
+        assert not local.path.exists()
+
+        scanner = runtime.PrivateHttpRunMaterial(cfg=build_test_config())
+        scanner._scanner_owned = True
+        monkeypatch.setattr(
+            runtime,
+            "_scanner_run",
+            mock.Mock(side_effect=runtime.PrivateHttpMaterialError("handoff failed")),
+        )
+        assert scanner.cleanup() is False
+        assert scanner.path.exists()
+        monkeypatch.setattr(
+            runtime,
+            "_scanner_run",
+            lambda arguments, **_kwargs: real_rmtree(arguments[-1]),
+        )
+        assert scanner.cleanup() is True
+        assert not scanner.path.exists()
+
     def test_private_runtime_material_is_mode_limited_and_stale_safe(
         self,
         monkeypatch,

@@ -122,15 +122,13 @@ class PrivateHttpRunMaterial(PrivateHttpRunMaterialReader):
             os.chmod(destination, _FILE_MODE)
         return destination
 
-    def cleanup(self) -> None:
+    def cleanup(self) -> bool:
         try:
             _remove_runtime_path(self.root, self.path, scanner_owned=self._scanner_owned)
         except PrivateHttpMaterialError:
-            log.error(
-                "HTTP_PROFILE_RUNTIME_MATERIAL_CLEANUP_FAILED",
-                exc_info=True,
-                extra={"material_count": 1},
-            )
+            log.error("HTTP_PROFILE_RUNTIME_MATERIAL_CLEANUP_FAILED", extra={"material_count": 1})
+            return False
+        return True
 
 
 def _remove_runtime_path(root: Path, path: Path, *, scanner_owned: bool) -> None:
