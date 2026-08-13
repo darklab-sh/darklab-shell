@@ -156,7 +156,8 @@ def _join_team_member(
 
 
 def test_probe_routes_list_resolve_and_plan_without_writes(client, caplog):
-    session_id = "probe-routes-" + uuid.uuid4().hex
+    session_id = "tok_probe_routes_" + uuid.uuid4().hex
+    _register_token(session_id)
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
     before = _table_counts()
@@ -213,6 +214,20 @@ def test_probe_routes_list_resolve_and_plan_without_writes(client, caplog):
     )
     assert query_rejected.status_code == 400
     assert query_rejected.get_json()["code"] == "unsupported_fields"
+
+    for prefix, headers in (
+        (f"/projects/{project['id']}", _headers(session_id)),
+        (f"/api/v1/projects/{project['id']}", {"Authorization": f"Bearer {session_id}"}),
+    ):
+        invalid_catalog = client.get(
+            f"{prefix}/probes?target_type=cidr",
+            headers=headers,
+        )
+        assert invalid_catalog.status_code == 400
+        payload = invalid_catalog.get_json()
+        assert payload.get("code") == "invalid_target_type" or (
+            payload.get("error") or {}
+        ).get("code") == "invalid_target_type"
 
 
 def test_probe_routes_fail_closed_for_foreign_archived_and_value_only_plans(client):

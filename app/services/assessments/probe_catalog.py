@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Collection
 
-from services.assessments.base_action_catalog import ACTIONS, base_action
+from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.nmap_profiles import nmap_profile_keys, public_nmap_profile
 from services.assessments.nuclei_profiles import (
     nuclei_profile_keys,
@@ -17,7 +17,10 @@ from services.assessments.probe_contracts import (
     PROBE_CATALOG_SCHEMA_VERSION,
     PROBE_EXCLUSIONS,
 )
-from services.assessments.service_actions import service_actions
+from services.assessments.probe_catalog_recommendations import (
+    probe_service_recommendations,
+    validate_probe_target_type,
+)
 from services.nuclei.template_cache import (
     NucleiTemplateCacheSnapshot,
     managed_nuclei_template_snapshot,
@@ -108,26 +111,6 @@ def _nuclei_profiles(
     return profiles
 
 
-def _service_recommendations(service: str, target_type: str) -> list[dict[str, Any]]:
-    recommendations = []
-    for recommendation in service_actions(service, target_type=target_type):
-        kind, separator, action_id = recommendation.command.partition(":")
-        action = base_action(action_id)
-        if kind != "command" or not separator or action is None:
-            continue
-        recommendations.append({
-            "key": recommendation.key,
-            "label": recommendation.label,
-            "rationale": recommendation.rationale,
-            "action_id": action.action_id,
-            "nmap_profile": recommendation.nmap_profile,
-            "target_types": sorted(recommendation.target_types),
-            "required_features": sorted(recommendation.required_features),
-            "expected_evidence": sorted(recommendation.expected_evidence),
-        })
-    return recommendations
-
-
 def probe_catalog(
     *,
     service: str = "",
@@ -137,6 +120,7 @@ def probe_catalog(
     intrusive_actions_enabled: bool = False,
 ) -> dict[str, Any]:
     """Return reviewed actions and profiles without allocating external resources."""
+    validate_probe_target_type(target_type)
     snapshot = template_snapshot or managed_nuclei_template_snapshot()
     return {
         "schema_version": PROBE_CATALOG_SCHEMA_VERSION,
@@ -148,7 +132,7 @@ def probe_catalog(
         "nmap_profiles": _nmap_profiles(),
         "nuclei_profiles": _nuclei_profiles(snapshot, intrusive_actions_enabled),
         "service_recommendations": (
-            _service_recommendations(service, target_type) if service else []
+            probe_service_recommendations(service, target_type) if service else []
         ),
         "exclusions": list(PROBE_EXCLUSIONS),
     }

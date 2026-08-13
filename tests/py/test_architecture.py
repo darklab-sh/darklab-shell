@@ -429,6 +429,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/manual_evidence_read.py", 58, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/plan_confirmation.py", 64, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_catalog.py", 160, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/probe_catalog_recommendations.py",
+        40,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/probe_confirmation.py", 35, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_execution.py", 75, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_probes.py", 190, "split-package-ratchet"),

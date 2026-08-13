@@ -159,6 +159,13 @@ def test_probe_catalog_pins_public_schema_and_excludes_cycle_only_actions():
     assert PROBE_LAUNCH_CAPABILITIES == frozenset({"run_commands"})
     assert PROBE_PROTECTED_CAPABILITIES == frozenset({"run_commands", "manage_secrets"})
 
+    with pytest.raises(ProbeError) as invalid_target_type:
+        probe_catalog(
+            target_type="cidr",
+            template_snapshot=_READY_TEMPLATES,
+        )
+    assert invalid_target_type.value.code == "invalid_target_type"
+
 
 def test_probe_plan_is_bounded_and_dalfox_never_reaches_intrusive_xss_mode(monkeypatch):
     monkeypatch.setattr(
