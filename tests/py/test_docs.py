@@ -39,6 +39,8 @@ _LOG_EVENT_INVENTORY_HASH = "3a391944120673239637dc37a12ef5aeb701bad70579018fb93
 _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/blueprints/projects_assessment*.py",
     "app/blueprints/api_v1_assessment*.py",
+    "app/blueprints/projects_probe*.py",
+    "app/blueprints/api_v1_probe*.py",
     "app/blueprints/projects_http_profiles.py",
     "app/blueprints/api_v1_http_profiles.py",
     "app/blueprints/projects_manual_findings.py",
@@ -51,11 +53,14 @@ _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/services/runs/broker_observability.py",
     "app/services/runs/finalization*.py",
     "app/services/runs/schemathesis_completion.py",
+    "app/static/js/features/probes/*.js",
 )
 _ASSESSMENT_LOG_EVENT_PREFIXES = (
     "ASSESSMENT_",
     "PROJECT_ASSESSMENT_",
     "API_PROJECT_ASSESSMENT_",
+    "PROJECT_PROBE_",
+    "API_PROJECT_PROBE_",
     "PROJECT_HTTP_PROFILE_",
     "API_PROJECT_HTTP_PROFILE_",
     "PROJECT_MANUAL_FINDING_",
@@ -396,6 +401,11 @@ def _assessment_log_event_literals() -> set[str]:
         "warning",
     }
     for path in sorted(paths):
+        if path.suffix == ".js":
+            for event in re.findall(r"['\"]([A-Z][A-Z0-9_]+)['\"]", path.read_text()):
+                if event.startswith(_ASSESSMENT_LOG_EVENT_PREFIXES):
+                    events.add(event)
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -847,7 +857,13 @@ class TestLoggingReference:
     def test_event_inventory_was_moved_without_dropping_contracts(self):
         body = _log_event_inventory_body()
         documented = set(re.findall(r"`([A-Z][A-Z0-9_]+)`", body))
-        missing = sorted(_assessment_log_event_literals() - documented)
+        emitted = _assessment_log_event_literals()
+        assert {
+            "PROJECT_PROBE_CLIENT_REQUEST_FAILED",
+            "PROJECT_PROBE_LAUNCHED",
+            "API_PROJECT_PROBE_LAUNCHED",
+        } <= emitted
+        missing = sorted(emitted - documented)
         assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
         level = r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)"
