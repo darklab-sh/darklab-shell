@@ -446,6 +446,38 @@ def test_probe_log_fields_reject_control_characters_and_unbounded_identifiers(mo
     assert malicious not in json.dumps(fields)
 
 
+def test_probe_logging_classifies_unavailable_plans_and_broker_modes(monkeypatch):
+    logger = mock.Mock()
+    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+
+    @observe_probe("plan")
+    def unavailable(code):
+        return {"launchable": False, "availability": {"code": code}}
+
+    unavailable("intrusive_actions_disabled")
+    assert logger.info.call_args.kwargs["extra"]["error_code"] == (
+        "intrusive_actions_disabled"
+    )
+    logger.reset_mock()
+    unavailable("feature_unavailable")
+    assert logger.warning.call_args.kwargs["extra"]["error_code"] == "feature_unavailable"
+
+    @observe_probe("launch")
+    def broker_failure(reason):
+        raise ProbeError("broker_unavailable", reason, status_code=503)
+
+    logger.reset_mock()
+    with pytest.raises(ProbeError):
+        broker_failure("Run broker is disabled by configuration.")
+    assert logger.info.call_args.kwargs["extra"]["error_code"] == "broker_disabled"
+    logger.reset_mock()
+    with pytest.raises(ProbeError):
+        broker_failure("Run broker requires Redis, but Redis is not available.")
+    assert logger.warning.call_args.kwargs["extra"]["error_code"] == (
+        "broker_dependency_unavailable"
+    )
+
+
 def test_probe_cleanup_observation_starts_before_launch_context_validation(monkeypatch):
     from services.assessments import probe_protected_launch
 

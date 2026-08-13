@@ -5,12 +5,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from functools import wraps
 import logging
 from typing import Any, TypeVar, cast
 
 from services.assessments.probe_contracts import ProbeError
+from services.assessments import probe_log_classification as classification
 from services.assessments.probe_observability_support import (
     probe_log_fields,
     probe_request,
@@ -26,7 +27,6 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 
 
 def observe_probe(phase: str) -> Callable[[_F], _F]:
-    """Observe one service phase without target values or unbounded metric labels."""
     def decorator(function: _F) -> _F:
         @wraps(function)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
@@ -35,12 +35,12 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
             try:
                 result = function(*args, **kwargs)
             except ProbeError as exc:
-                outcome = "unavailable" if exc.status_code == 503 else "rejected"
+                outcome, level, error_code = classification.classify_probe_error(exc)
                 app_metrics.record_probe_operation(phase, outcome, protected=protected)
-                (log.warning if exc.status_code in {403, 409, 429, 503} else log.info)(
+                getattr(log, level)(
                     "PROJECT_PROBE_OPERATION_REJECTED",
                     extra=probe_log_fields(
-                        phase, args, kwargs, outcome=outcome, error_code=exc.code,
+                        phase, args, kwargs, outcome=outcome, error_code=error_code,
                         error_class=type(exc).__name__,
                     ),
                 )
@@ -68,12 +68,12 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
                     ),
                 )
                 raise
-            unavailable = isinstance(result, Mapping) and not result.get("launchable", True)
-            outcome = "unavailable" if unavailable else "success"
+            outcome, level, error_code = classification.classify_probe_result(result, phase)
             app_metrics.record_probe_operation(phase, outcome, protected=protected)
-            event = "PROJECT_PROBE_OPERATION_COMPLETED"
-            logger = log.info if phase == "launch" else log.debug
-            logger(event, extra=probe_log_fields(phase, args, kwargs, outcome=outcome))
+            fields = probe_log_fields(
+                phase, args, kwargs, outcome=outcome, error_code=error_code,
+            )
+            getattr(log, level)("PROJECT_PROBE_OPERATION_COMPLETED", extra=fields)
             return result
 
         return cast(_F, wrapped)

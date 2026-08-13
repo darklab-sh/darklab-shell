@@ -706,6 +706,9 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget("app/services/assessments/probe_launch.py", 60, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_cleanup.py", 83, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/probe_log_classification.py", 39, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/probe_log_safety.py", 60, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_observability.py", 80, "split-package-ratchet"),
     ModuleSizeBudget(
