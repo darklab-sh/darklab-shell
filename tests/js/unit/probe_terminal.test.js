@@ -221,6 +221,7 @@ describe('Project probe terminal', () => {
       'tab-origin',
     );
     expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(pending.kind).toBe('probe');
     expect(pending.tabId).toBe('tab-origin');
     const launched = await pending.onYes();
     await pending.onComplete(launched);

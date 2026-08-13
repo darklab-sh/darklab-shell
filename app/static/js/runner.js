@@ -2682,6 +2682,14 @@ function cancelAllPendingTerminalConfirms({ refocus = false } = {}) {
   return tabIds.length;
 }
 
+function _cancelPendingTerminalConfirmsByKind(kind) {
+  const tabIds = [..._pendingTerminalConfirms.entries()]
+    .filter(([, pending]) => pending?.kind === kind)
+    .map(([tabId]) => tabId);
+  tabIds.forEach(tabId => cancelPendingTerminalConfirm(tabId, { refocus: false }));
+  return tabIds.length;
+}
+
 function _appendSessionTokenSetLines(token, tabId, execution) {
   _sessionAppendLine(execution, `session token set: ${maskSessionToken(token)}`, '', tabId);
   _sessionAppendLine(execution, 'reload other tabs to apply the new session token', '', tabId);
@@ -4353,8 +4361,10 @@ function runCommand() {
 }
 
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('app:active-project-changed', () => {
+    _cancelPendingTerminalConfirmsByKind('probe');
+  });
   for (const eventName of [
-    'app:active-project-changed',
     'app:scope-capabilities-changed',
     'app:scope-changed',
   ]) {

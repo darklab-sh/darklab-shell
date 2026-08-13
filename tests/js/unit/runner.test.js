@@ -3558,6 +3558,27 @@ describe('per-tab terminal confirmations', () => {
     expect(hasPendingTerminalConfirm('tab-2')).toBe(false)
     expect(cancelOne).toHaveBeenCalledOnce()
     expect(cancelTwo).toHaveBeenCalledOnce()
+
+    const cancelProbe = vi.fn()
+    const cancelSessionToken = vi.fn()
+    _setPendingTerminalConfirm({
+      kind: 'probe', tabId: 'tab-1', execution: pendingExecution('tab-1'),
+      onCancel: cancelProbe,
+    })
+    _setPendingTerminalConfirm({
+      kind: 'session-token', tabId: 'tab-2', execution: pendingExecution('tab-2'),
+      onCancel: cancelSessionToken,
+    })
+
+    document.dispatchEvent(new Event('app:active-project-changed'))
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(true)
+    expect(cancelProbe).toHaveBeenCalledOnce()
+    expect(cancelSessionToken).not.toHaveBeenCalled()
+
+    document.dispatchEvent(new Event('app:scope-changed'))
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(false)
+    expect(cancelSessionToken).toHaveBeenCalledOnce()
   })
 })
 

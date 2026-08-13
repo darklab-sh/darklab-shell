@@ -251,6 +251,7 @@ async function handleProbeTerminalCommand(command, tabId, execution, launchAdapt
       }
       append('Run this probe? Type yes or no.', 'notice');
       launchAdapter.requestConfirmation({
+        kind: 'probe',
         tabId,
         execution,
         onYes: async () => {
