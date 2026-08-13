@@ -876,6 +876,13 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
     assert audit_row is not None
     audit_details = json.loads(audit_row["details"] or "{}")
     assert audit_details["profile_id"] == profile_id
+    assert audit_details["profile_role"] == "user"
+    assert audit_details["credential_use"] == ["headers"]
+    assert audit_details.get("omitted_detail_keys", 0) == 0
+    assert set(audit_details) == {
+        "action", "credential_use", "entity_id", "policy_level", "profile_id",
+        "profile_role", "project_id", "run_id", "source",
+    }
     assert secret_value not in json.dumps(audit_details)
     assert str(secret_path) not in json.dumps(audit_details)
     assert callable(launch["run_cleanup_hook"])

@@ -294,6 +294,11 @@ ASSESSMENT_ACTION_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
     "schema_operation_count",
 })
 
+PROBE_LAUNCH_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
+    "credential_use",
+    "profile_role",
+})
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -376,6 +381,7 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditEventType.PROBE_LAUNCH,
         AuditTargetType.RUN,
         RecordingMode.BEST_EFFORT,
+        detail_keys=PROBE_LAUNCH_DETAIL_KEYS,
     ),
     AuditEventType.ASSESSMENT_OAST_RESERVE.value: _spec(
         AuditEventType.ASSESSMENT_OAST_RESERVE,
