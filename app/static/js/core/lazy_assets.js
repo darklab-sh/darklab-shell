@@ -12,6 +12,7 @@ import {
 } from '../features/atlas/atlas_bridge.js';
 import { setAtlasMobileLoader as importedSetAtlasMobileLoader } from '../features/atlas/atlas_mobile_bridge.js';
 import { setWorkflowHandlers as importedSetWorkflowHandlers } from '../features/workflows/workflows_bridge.js';
+import { setProbeTerminalHandler as importedSetProbeTerminalHandler } from '../features/probes/probe_terminal_bridge.js';
 import { setHistoryCompareHandlers as importedSetHistoryCompareHandlers } from '../features/run-comparison/history_compare_bridge.js';
 import { setCommandRegistryHandlers as importedSetCommandRegistryHandlers } from '../features/command-registry/command_registry_bridge.js';
 import {
@@ -165,6 +166,7 @@ let exportedLoadWatchersModal = null;
     if (name === 'options_notification_channels') return { url: '/static/js/features/preferences/notification_channels.js', type: 'module' };
     if (name === 'command_registry') return { url: '/static/js/features/command-registry/command_registry.js', type: 'module' };
     if (name === 'workflows') return { url: '/static/js/features/workflows/workflows.js', type: 'module' };
+    if (name === 'probe_terminal') return { url: '/static/js/features/probes/probe_terminal.js', type: 'module' };
     if (name === 'pty_controller') return { url: '/static/js/pty.js', type: 'module' };
     if (name === 'schedules_modal') return { url: '/static/js/features/schedules/schedules_modal.js', type: 'module' };
     if (name === 'mobile_running_indicator') {
@@ -1237,6 +1239,15 @@ let exportedLoadWatchersModal = null;
     };
   }
 
+  async function loadProbeTerminal() {
+    const probeModule = await loadLazyAsset('probe_terminal');
+    return _requireLazyModuleExport(
+      probeModule,
+      'handleProbeTerminalCommand',
+      value => typeof value === 'function' && value !== lazyHandleProbeTerminalCommand,
+    );
+  }
+
   async function lazyOpenWorkflowEditor(workflow = null) {
     const workflows = await loadWorkflows();
     const open = workflows?.openWorkflowEditor;
@@ -1663,6 +1674,12 @@ let exportedLoadWatchersModal = null;
     return lazyReloadWorkflowCatalog();
   }
 
+  async function lazyHandleProbeTerminalCommand(cmd, tabId, execution, launchAdapter = {}) {
+    const handle = await loadProbeTerminal();
+    if (typeof handle !== 'function' || handle === lazyHandleProbeTerminalCommand) return false;
+    return handle(cmd, tabId, execution, launchAdapter);
+  }
+
   async function lazyHandleWorkflowTerminalCommand(cmd, tabId) {
     const workflows = await loadWorkflows();
     const handle = workflows?.handleWorkflowTerminalCommand;
@@ -1896,6 +1913,12 @@ let exportedLoadWatchersModal = null;
   }
   if (typeof window.handleWorkflowTerminalCommand !== 'function') {
     window.handleWorkflowTerminalCommand = lazyHandleWorkflowTerminalCommand;
+  }
+  if (typeof window.handleProbeTerminalCommand !== 'function') {
+    window.handleProbeTerminalCommand = lazyHandleProbeTerminalCommand;
+  }
+  if (typeof importedSetProbeTerminalHandler === 'function') {
+    importedSetProbeTerminalHandler(lazyHandleProbeTerminalCommand);
   }
   if (typeof window.openWorkflowEditor !== 'function') window.openWorkflowEditor = lazyOpenWorkflowEditor;
   if (typeof importedSetWorkflowHandlers === 'function') {

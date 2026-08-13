@@ -8,26 +8,12 @@ from __future__ import annotations
 import shlex
 from typing import Any, Mapping
 
+from services.assessments.base_action_catalog import base_action_target_types
 from services.assessments.command_plan_contracts import CommandPlan
 from services.assessments.command_plans_tls import tls_command_plans
 from services.assessments.command_plans_web import web_command_plans
 from services.assessments.nmap_profiles import nmap_profile_suffix
 from services.assessments.nuclei_profiles import nuclei_profile as get_nuclei_profile, nuclei_profile_args
-
-_COMMAND_TARGET_TYPES = {
-    "curl": frozenset({"domain", "ip", "url"}),
-    "ping": frozenset({"domain", "ip"}),
-    "nmap": frozenset({"domain", "ip"}),
-    "dnsrecon": frozenset({"domain"}),
-    "gau": frozenset({"domain"}),
-    "httpx": frozenset({"domain", "ip", "url"}),
-    "katana": frozenset({"domain", "url"}),
-    "nuclei": frozenset({"domain", "ip", "url"}),
-    "dalfox": frozenset({"domain", "ip", "url"}),
-    "sqlmap": frozenset({"url"}),
-    "sslyze": frozenset({"domain", "ip"}),
-    "testssl": frozenset({"domain", "ip"}),
-}
 
 def command_plan(
     action_id: str,
@@ -42,7 +28,7 @@ def command_plan(
     allow_intrusive: bool = False,
 ) -> CommandPlan | None:
     """Return one bounded command without resolving any protected values."""
-    if target_type not in _COMMAND_TARGET_TYPES.get(action_id, frozenset()):
+    if target_type not in base_action_target_types(action_id):
         return None
     if action_id == "nuclei" and get_nuclei_profile(nuclei_profile).requires_confirmation and not allow_intrusive:
         return None

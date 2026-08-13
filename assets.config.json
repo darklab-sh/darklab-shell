@@ -141,6 +141,7 @@
     "/static/js/features/workflows/workflow_editor.js",
     "/static/js/features/workflows/workflow_parameters.js",
     "/static/js/features/workflows/workflows.js",
+    "/static/js/features/probes/probe_terminal.js",
     "/static/js/pty.js",
     "/static/js/features/schedules/schedules_modal.js",
     "/static/js/features/mobile/mobile_running_indicator.js",

@@ -96,6 +96,7 @@ _EXPECTED_BUILTIN_ROOTS = {
     "mv",
     "notify",
     "project",
+    "probe",
     "providers",
     "ps",
     "pwd",

@@ -8275,6 +8275,124 @@ def test_darklab_cli_run_requires_no_follow_for_json_start_payload(monkeypatch, 
     assert calls == [("POST", "/runs", {"command": "echo ok", "project_id": None})]
 
 
+def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+    calls = []
+    plan = {
+        "project_id": "prj_probe",
+        "action": {"id": "ping", "label": "Ping"},
+        "target": {"entity_id": "ent_probe", "type": "domain", "value": "probe.example"},
+        "policy_level": "safe",
+        "bounds": {"summary": "Four probes against one approved host."},
+        "expected_evidence": ["run"],
+        "availability": {"available": True, "code": "", "reason": ""},
+        "launchable": True,
+        "display_command": "ping -c 4 probe.example",
+        "plan_digest": "a" * 64,
+    }
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, **_kwargs):
+            calls.append((method, path, params, body))
+            if method == "GET" and path == "/projects/prj_probe/probes":
+                return {
+                    "catalog": {
+                        "actions": [{
+                            "id": "ping", "label": "Ping", "policy_level": "safe",
+                            "target_types": ["domain", "ip"],
+                            "availability": {"available": True},
+                        }],
+                        "nmap_profiles": [{"key": "safe"}],
+                        "nuclei_profiles": [{"key": "safe"}],
+                    },
+                }
+            if method == "POST" and path.endswith("/targets/resolve"):
+                assert body == {"target_value": "probe.example"}
+                return {"target": plan["target"]}
+            if method == "POST" and path.endswith("/plan"):
+                if body and body.get("http_profile_id"):
+                    assert body == {
+                        "action_id": "httpx", "entity_id": "ent_probe",
+                        "http_profile_id": "hpr_cli", "nuclei_profile": "safe",
+                    }
+                    return {"plan": {
+                        **plan,
+                        "action": {"id": "httpx", "label": "HTTPx"},
+                        "http_profile": {"id": "hpr_cli", "revision": 1},
+                        "display_command": "httpx -u https://probe.example -sf [protected]",
+                    }}
+                assert body == {
+                    "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
+                }
+                return {"plan": plan}
+            if method == "POST" and path.endswith("/run"):
+                assert body == {
+                    "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
+                    "confirmed": True, "plan_digest": "a" * 64,
+                }
+                return {
+                    "plan": plan,
+                    "project_id": "prj_probe",
+                    "run": {
+                        "id": "run_probe", "status": "queued",
+                        "command": plan["display_command"],
+                        "history_url": "/api/v1/history/run_probe",
+                    },
+                }
+            raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_probe_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["probe", "list", "--project", "prj_probe"]) == 0
+    assert "Ping" in capsys.readouterr().out
+
+    assert cli_main.main([
+        "probe", "plan", "ping", "probe.example", "--project", "prj_probe",
+    ]) == 0
+    assert "ping -c 4 probe.example" in capsys.readouterr().out
+
+    assert cli_main.main([
+        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
+    ]) == 0
+    assert "Preview only" in capsys.readouterr().out
+
+    assert cli_main.main([
+        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
+        "--confirm", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["run"]["id"] == "run_probe"
+    assert [call[1].rsplit("/", 1)[-1] for call in calls[-2:]] == ["plan", "run"]
+
+    assert cli_main.main([
+        "probe", "plan", "httpx", "--entity-id", "ent_probe",
+        "--project", "prj_probe", "--http-profile", "hpr_cli",
+    ]) == 0
+    assert "[protected]" in capsys.readouterr().out
+
+
+def test_darklab_cli_probe_requires_exactly_one_target_selector(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, *_args, **_kwargs):
+            raise AssertionError("invalid target selectors must fail before an API request")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_probe_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+    assert cli_main.main([
+        "probe", "plan", "ping", "probe.example", "--entity-id", "ent_probe",
+        "--project", "prj_probe",
+    ]) == 1
+    assert "either TARGET or --entity-id" in capsys.readouterr().err
+
+
 def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, capsys):
     cli_main = import_module("darklab_cli.__main__")
     calls = []

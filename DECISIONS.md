@@ -236,6 +236,24 @@ The exact reviewed ZAP plan lives briefly in a private app-data spool rather tha
 
 ZAP submission starts from confirmed Project URL entity ids, not arbitrary request URLs or caller-supplied YAML. The browser and API preview the same generated document and non-secret summary. A submit repeats the current owner, cycle, check, profile, Project-link, DNS, and network-scope checks and requires a digest over both the exact plan and its selection metadata. Job reads and cancellation use that same nested owner path, while audit events keep ids and counts but not targets or YAML.
 
+### Project Probe Planning Reuses Ordinary Runs
+
+**A Project-scoped probe is one bounded ordinary action, not a second Assessment or results model.**
+
+The shared action registry lists only commands with a reviewed bounded plan. It owns each canonical action id, mode, compatible target types, feature requirements, expected evidence, exclusions, and an explicit ordinary-action policy floor. Nmap and Nuclei profiles may narrow that contract or raise its policy, never lower it. Dalfox is limited to standard parameter discovery; its intrusive XSS path remains tied to the frozen Assessment check that supplies the stronger contract. OAST, takeover confirmation, Schemathesis, ZAP, and evidence-only correlation don't appear as ordinary probe actions.
+
+Probe planning accepts one confirmed Project target by entity id, or resolves one exact value inside the same personal or team Project scope. It rejects archived Projects plus missing, pending, suppressed, ambiguous, cross-owner, and cross-Project targets. Catalog and plan reads don't create a run, connector job, callback reservation, or separate probe record.
+
+The in-app `probe list` and `probe plan` commands are viewer-safe reads rather than synthetic built-in runs. They use Project-scoped browser endpoints, don't require `RUN_COMMANDS`, and are excluded from History and Recent commands. Exact target values are resolved to one confirmed Project entity before planning; the browser planning boundary accepts only that entity id.
+
+Probe plans use a versioned canonical digest projection over Project and target identity, action and profile revisions, the exact visible command, policy and feature gates, request and time limits, fan-out, credential classification, expected evidence, and availability. Labels, help text, and presentation order aren't approval inputs, and protected values never enter the projection. Confirmation rebuilds the current plan and compares that digest. Frozen Assessment actions keep their existing full-payload digest so this reusable boundary doesn't invalidate saved Assessment previews.
+
+`probe run` always launches through the Project-scoped server boundary rather than generic command submission. The server supplies the trusted Project link even when another Project is active or external-run auto-capture is off, and a browser launch supplies its validated tab id so the reviewed transcript and run stream stay together. Every launch requires `RUN_COMMANDS`; selecting a protected HTTP profile also requires `MANAGE_SECRETS`, and the profile's scope, revision, references, and permissions are checked again before private launch material exists. That material follows the existing protected-run cleanup path and never enters the public plan, digest, saved command, audit record, metrics, or log context.
+
+Transcript confirmations are coordinated per terminal tab. A tab can hold one pending prompt, different tabs can confirm independently, and only input from the originating tab can settle its prompt. Closing or resetting a tab, replacing the token, reloading, logging out, or changing personal/team scope clears the affected state. This applies equally to `session-token` and probes instead of preserving the earlier application-wide singleton.
+
+The browser, API v1, and external `darklab probe` client share one plan-and-confirm contract. CLI `probe run` previews by default and requires `--confirm` to submit the digest it just received. A successful probe is an ordinary Project-linked run with normal History, streaming, cancellation, structured evidence, and later evidence reconciliation; it creates no probe record and never changes Assessment state directly. ZAP, private OAST, takeover confirmation, Schemathesis, and evidence-only correlation stay on their cycle-specific boundaries.
+
 ### Shared CVE Risk Data and Ranking
 
 **A fresh install gets dated, bundled EPSS and KEV data; live network refresh remains an operator choice.**

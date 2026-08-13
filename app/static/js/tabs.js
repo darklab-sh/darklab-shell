@@ -38,8 +38,10 @@ import {
   syncOutputPrefixes as importedSyncOutputPrefixes,
 } from './output_bridge.js';
 import {
+  cancelPendingTerminalConfirm as importedCancelPendingTerminalConfirm,
   confirmKill as importedConfirmKill,
   setStatus as importedSetStatus,
+  syncPendingTerminalConfirmPromptMode as importedSyncPendingTerminalConfirmPromptMode,
   syncActiveRunTimer as importedSyncActiveRunTimer,
 } from './runner_bridge.js';
 import { bindOutsideClickClose as importedBindOutsideClickClose } from './ui/ui_outside_click.js';
@@ -903,7 +905,14 @@ function createTab(label) {
             || _tabGlobalFn('confirmKill');
           confirmKill?.(id);
         }
-        if (action === 'clear')     { _tabCancelWelcome(id); clearTab(id, { preserveRunState: true }); }
+        if (action === 'clear') {
+          _tabGlobalFn(
+            'cancelPendingTerminalConfirm',
+            importedCancelPendingTerminalConfirm,
+          )?.(id, { refocus: false });
+          _tabCancelWelcome(id);
+          clearTab(id, { preserveRunState: true });
+        }
         if (action === 'copy' && copyCurrentTab) copyCurrentTab(id);
         if (action === 'permalink' && permalinkCurrentTab) permalinkCurrentTab(id);
         if (action === 'save-menu') {
@@ -1018,6 +1027,10 @@ function activateTab(id, { focusComposer = true } = {}) {
   _setComposerValue(draft, draft.length, draft.length, { dispatch: false });
   _tabGlobalFn('resetCmdHistoryNav', importedResetCmdHistoryNav)?.();
   _tabGlobalFn('syncActiveRunTimer', importedSyncActiveRunTimer)?.(id);
+  _tabGlobalFn(
+    'syncPendingTerminalConfirmPromptMode',
+    importedSyncPendingTerminalConfirmPromptMode,
+  )?.(id);
   if (focusComposer) _refocusComposerAfterAction({ preventScroll: true });
   _syncRunButtonDisabled();
   _syncTabShellPrompt();

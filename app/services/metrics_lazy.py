@@ -15,12 +15,16 @@ class _MetricsProxy:
             return getattr(metrics, name)
         except AttributeError:
             from services.metrics import assessments  # noqa: PLC0415
+            from services.metrics import probes  # noqa: PLC0415
             from services.metrics import workflows  # noqa: PLC0415
 
             try:
                 return getattr(assessments, name)
             except AttributeError:
-                return getattr(workflows, name)
+                try:
+                    return getattr(probes, name)
+                except AttributeError:
+                    return getattr(workflows, name)
 
 
 app_metrics = _MetricsProxy()

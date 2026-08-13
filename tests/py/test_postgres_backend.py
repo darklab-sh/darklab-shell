@@ -4900,6 +4900,24 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers=browser_headers,
         json={"type": "domain", "value": "darklab.sh", "source_detail": {"source": "manual"}},
     )
+    target = json.loads(target_resp.data)["target"]
+    probe_catalog_resp = client.get(
+        f"/projects/{project['id']}/probes",
+        headers=browser_headers,
+    )
+    probe_resolve_resp = client.get(
+        f"/projects/{project['id']}/probes/targets/resolve?value=darklab.sh",
+        headers=browser_headers,
+    )
+    probe_plan_resp = client.get(
+        f"/projects/{project['id']}/probes/plan?action_id=ping&entity_id={target['id']}",
+        headers=browser_headers,
+    )
+    api_probe_plan_resp = client.post(
+        f"/api/v1/projects/{project['id']}/probes/plan",
+        headers=api_headers,
+        json={"action_id": "ping", "entity_id": target["id"]},
+    )
     secret_resp = client.post(
         "/session/secrets",
         headers=browser_headers,
@@ -5121,6 +5139,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert token_resp.status_code == 200
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
+    assert probe_catalog_resp.status_code == 200
+    assert json.loads(probe_resolve_resp.data)["target"]["entity_id"] == target["id"]
+    assert json.loads(probe_plan_resp.data)["plan"]["target"]["value"] == "darklab.sh"
+    assert json.loads(api_probe_plan_resp.data)["plan"]["target"]["entity_id"] == target["id"]
     assert secret_resp.status_code == 201
     assert http_profile_resp.status_code == 201
     assert http_profile["secret_refs"] == {

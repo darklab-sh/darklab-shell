@@ -1,0 +1,274 @@
+// SPDX-FileCopyrightText: 2026 mmayhew
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setProjectContextHandlers } from '../../../app/static/js/features/projects/project_context_bridge.js';
+import {
+  formatProbeCatalog,
+  formatProbePlan,
+  handleProbeTerminalCommand,
+  parseProbeCommand,
+} from '../../../app/static/js/features/probes/probe_terminal.js';
+import { setRuntimeHandlers } from '../../../app/static/js/runtime_bridge.js';
+
+
+function response(payload, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: vi.fn(async () => payload),
+  };
+}
+
+function execution() {
+  return {
+    appendLine: vi.fn(),
+    setPersistence: vi.fn(),
+    setRecordRecent: vi.fn(),
+    setStatus: vi.fn(),
+  };
+}
+
+describe('Project probe terminal', () => {
+  beforeEach(() => {
+    setProjectContextHandlers({
+      getActiveProjectContext: () => ({ id: 'prj_active' }),
+      refreshActiveProjectContext: async () => ({ id: 'prj_active' }),
+    });
+  });
+
+  it('parses exact-target and entity-id plans without weakening the selector contract', () => {
+    expect(parseProbeCommand('probe plan nmap example.test --project prj_1 --nmap-profile tls')).toMatchObject({
+      subcommand: 'plan',
+      actionId: 'nmap',
+      targetValue: 'example.test',
+      projectId: 'prj_1',
+      nmapProfile: 'tls',
+      errors: [],
+    });
+    expect(parseProbeCommand('probe plan ping --entity-id ent_1 --project=prj_1')).toMatchObject({
+      entityId: 'ent_1',
+      projectId: 'prj_1',
+      errors: [],
+    });
+    expect(parseProbeCommand(
+      'probe run httpx --entity-id ent_1 --project prj_1 --http-profile hpr_1',
+    )).toMatchObject({
+      actionId: 'httpx',
+      httpProfileId: 'hpr_1',
+      errors: [],
+    });
+    expect(parseProbeCommand('probe plan ping example.test --entity-id ent_1 --project prj_1').errors)
+      .toContain('provide either an exact target or --entity-id, not both');
+    expect(parseProbeCommand('probe list --unknown value').errors)
+      .toContain("unknown option '--unknown'");
+    expect(parseProbeCommand('probe run ping --entity-id ent_1 --project=prj_1')).toMatchObject({
+      subcommand: 'run',
+      entityId: 'ent_1',
+      projectId: 'prj_1',
+      errors: [],
+    });
+  });
+
+  it('formats catalogs and plans as compact terminal-native output', () => {
+    expect(formatProbeCatalog({
+      actions: [{
+        id: 'ping', label: 'Ping', policy_level: 'safe', target_types: ['domain', 'ip'],
+        availability: { available: true },
+      }],
+      nmap_profiles: [{ key: 'safe' }],
+      nuclei_profiles: [{ key: 'safe' }],
+      service_recommendations: [],
+    })).toEqual([
+      'Probe actions:',
+      '  ping  Ping [safe] (domain, ip)',
+      'Nmap profiles: safe',
+      'Nuclei profiles: safe',
+    ]);
+    const lines = formatProbePlan({
+      project_id: 'prj_1',
+      action: { id: 'ping', label: 'Ping' },
+      target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' },
+      policy_level: 'safe',
+      display_command: 'ping -c 4 example.test',
+      bounds: { summary: 'Four probes.', request_limit: 4, time_limit_seconds: 15, credential_use: 'none' },
+      expected_evidence: ['run'],
+      plan_digest: 'a'.repeat(64),
+      availability: { available: true },
+    });
+    expect(lines).toContain('  Command: ping -c 4 example.test');
+    expect(lines).toContain(`  Digest: ${'a'.repeat(64)}`);
+  });
+
+  it('loads the active Project catalog without creating a client History record', async () => {
+    const apiFetch = vi.fn(async () => response({
+      catalog: {
+        actions: [], nmap_profiles: [], nuclei_profiles: [], service_recommendations: [],
+      },
+    }));
+    setRuntimeHandlers({ apiFetch });
+    const commandExecution = execution();
+
+    await handleProbeTerminalCommand('probe list --service https', 'tab-1', commandExecution);
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/prj_active/probes?service=https',
+      { cache: 'no-store' },
+    );
+    expect(commandExecution.setPersistence).toHaveBeenCalledWith('none');
+    expect(commandExecution.setRecordRecent).toHaveBeenCalledWith(false);
+    expect(commandExecution.setStatus).toHaveBeenCalledWith('ok');
+  });
+
+  it('resolves an exact target before requesting an entity-anchored plan', async () => {
+    const apiFetch = vi.fn(async (url) => {
+      if (url.includes('/targets/resolve?')) {
+        return response({ target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' } });
+      }
+      return response({
+        plan: {
+          project_id: 'prj_1',
+          action: { id: 'ping', label: 'Ping' },
+          target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' },
+          policy_level: 'safe',
+          display_command: 'ping -c 4 example.test',
+          bounds: { summary: 'Four probes.', request_limit: 4, time_limit_seconds: 15, credential_use: 'none' },
+          expected_evidence: ['run'],
+          plan_digest: 'b'.repeat(64),
+          availability: { available: true },
+        },
+      });
+    });
+    setRuntimeHandlers({ apiFetch });
+    const commandExecution = execution();
+
+    await handleProbeTerminalCommand(
+      'probe plan ping example.test --project prj_1',
+      'tab-mobile',
+      commandExecution,
+    );
+
+    expect(apiFetch.mock.calls[0][0]).toBe(
+      '/projects/prj_1/probes/targets/resolve?value=example.test',
+    );
+    expect(apiFetch.mock.calls[1][0]).toContain(
+      '/projects/prj_1/probes/plan?action_id=ping&entity_id=ent_1',
+    );
+    expect(commandExecution.appendLine).toHaveBeenCalledWith(
+      '  Command: ping -c 4 example.test',
+      'builtin-help-row',
+      'tab-mobile',
+    );
+    expect(commandExecution.setPersistence).toHaveBeenCalledWith('none');
+    expect(commandExecution.setRecordRecent).toHaveBeenCalledWith(false);
+  });
+
+  it('reports server failures without persisting the read command', async () => {
+    setRuntimeHandlers({ apiFetch: vi.fn(async () => response({ error: 'Project not found' }, 404)) });
+    const commandExecution = execution();
+    await handleProbeTerminalCommand('probe list', 'tab-1', commandExecution);
+    expect(commandExecution.appendLine).toHaveBeenCalledWith(
+      '[probe] Project not found',
+      'exit-fail',
+      'tab-1',
+    );
+    expect(commandExecution.setStatus).toHaveBeenCalledWith('fail');
+    expect(commandExecution.setPersistence).toHaveBeenCalledWith('none');
+  });
+
+  it('previews before confirmation and launches only after an origin-tab yes', async () => {
+    const plan = {
+      project_id: 'prj_1',
+      action: { id: 'ping', label: 'Ping' },
+      target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' },
+      policy_level: 'safe',
+      display_command: 'ping -c 4 example.test',
+      bounds: { summary: 'Four probes.', request_limit: 4, time_limit_seconds: 15, credential_use: 'none' },
+      expected_evidence: ['run'],
+      plan_digest: 'c'.repeat(64),
+      availability: { available: true },
+      launchable: true,
+    };
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (options.method === 'POST') {
+        return response({
+          project_id: 'prj_1',
+          run: { run_id: 'run_1', command: plan.display_command, stream: '/runs/run_1/stream' },
+        }, 202);
+      }
+      return response({ plan });
+    });
+    setRuntimeHandlers({ apiFetch });
+    const commandExecution = execution();
+    let pending;
+    const bindStartedRun = vi.fn();
+
+    await handleProbeTerminalCommand(
+      'probe run ping --entity-id ent_1 --project prj_1 --http-profile hpr_1',
+      'tab-origin',
+      commandExecution,
+      {
+        workspaceCwd: 'evidence',
+        requestConfirmation: config => { pending = config; },
+        bindStartedRun,
+      },
+    );
+
+    expect(commandExecution.appendLine).toHaveBeenCalledWith(
+      'Run this probe? Type yes or no.',
+      'notice',
+      'tab-origin',
+    );
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(pending.tabId).toBe('tab-origin');
+    const launched = await pending.onYes();
+    await pending.onComplete(launched);
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/projects/prj_1/probes/run',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action_id: 'ping',
+          entity_id: 'ent_1',
+          http_profile_id: 'hpr_1',
+          nmap_profile: '',
+          nuclei_profile: 'safe',
+          confirmed: true,
+          plan_digest: 'c'.repeat(64),
+          tab_id: 'tab-origin',
+          workspace_cwd: 'evidence',
+        }),
+      }),
+    );
+    expect(bindStartedRun).toHaveBeenCalledWith(launched, 'tab-origin');
+  });
+
+  it('settles a declined probe without posting a launch', async () => {
+    const apiFetch = vi.fn(async () => response({
+      plan: {
+        project_id: 'prj_1', action: { id: 'ping', label: 'Ping' },
+        target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' },
+        policy_level: 'safe', display_command: 'ping -c 4 example.test',
+        bounds: {}, expected_evidence: [], plan_digest: 'd'.repeat(64),
+        availability: { available: true }, launchable: true,
+      },
+    }));
+    setRuntimeHandlers({ apiFetch });
+    const commandExecution = execution();
+    let pending;
+    await handleProbeTerminalCommand(
+      'probe run ping --entity-id ent_1 --project prj_1',
+      'tab-1',
+      commandExecution,
+      { requestConfirmation: config => { pending = config; }, bindStartedRun: vi.fn() },
+    );
+    pending.onNo();
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(commandExecution.appendLine).toHaveBeenCalledWith(
+      'Probe launch canceled.',
+      '',
+      'tab-1',
+    );
+  });
+});

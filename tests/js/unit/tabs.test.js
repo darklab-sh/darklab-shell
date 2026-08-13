@@ -35,6 +35,7 @@ function loadTabsFns({
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
+  cancelPendingTerminalConfirm = undefined,
   doKill = vi.fn(),
   showConfirm = undefined,
   detachRunStreamForTab = undefined,
@@ -111,6 +112,7 @@ function loadTabsFns({
       setStatus: () => {},
       clearSearch: () => {},
       confirmKill: () => {},
+      ...(cancelPendingTerminalConfirm ? { cancelPendingTerminalConfirm } : {}),
       doKill,
       ...(showConfirm ? { showConfirm } : {}),
       ...(detachRunStreamForTab ? { detachRunStreamForTab } : {}),
@@ -497,6 +499,16 @@ describe('tabs helpers', () => {
     expect(document.querySelector(`.tab-panel[data-id="${id}"]`).contains(shellPromptWrap)).toBe(
       false,
     )
+  })
+
+  it('the tab clear action cancels the confirmation owned by that tab', () => {
+    const cancelPendingTerminalConfirm = vi.fn()
+    const { createTab } = loadTabsFns({ cancelPendingTerminalConfirm })
+    const id = createTab('tab 1')
+
+    document.querySelector(`.tab-panel[data-id="${id}"] [data-action="clear"]`).click()
+
+    expect(cancelPendingTerminalConfirm).toHaveBeenCalledWith(id, { refocus: false })
   })
 
   it('clearTab clears the active un-ran composer input along with the tab output', () => {

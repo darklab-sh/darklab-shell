@@ -14,6 +14,7 @@ from services.commands.builtin_registry import (
     BuiltinExecutionContext,
     build_builtin_command_spec,
 )
+from services.commands.builtins_probe import probe_builtin_spec
 from services.commands.builtins_format import output_line
 from services.commands.registry_validation import split_command_argv
 from services.teams.capabilities import Capability, role_can
@@ -109,6 +110,7 @@ _URLSCOPE_AUTOCOMPLETE = {
 
 def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
     return (
+        probe_builtin_spec(),
         build_builtin_command_spec(
             _URLSCOPE_AUTOCOMPLETE,
             handler_key="urlscope",

@@ -31,6 +31,7 @@ names, and fixed choices such as output formats and notification channel kinds.
 - [Common Shapes](#common-shapes)
 - [Routes](#routes)
   - [Exact OSV package lookup](#exact-osv-package-lookup)
+- [Project Probes](#project-probes)
 - [Project Assessments](#project-assessments)
   - [HTTP profiles](#http-profiles)
   - [Recommended actions](#recommended-actions)
@@ -154,6 +155,10 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
+| `GET` | `/api/v1/projects/<project_id>/probes` | List reviewed one-off probe actions and profiles, optionally filtered by service or target type. |
+| `POST` | `/api/v1/projects/<project_id>/probes/targets/resolve` | Resolve one exact value to a confirmed Project entity id. |
+| `POST` | `/api/v1/projects/<project_id>/probes/plan` | Preview one bounded, redacted probe plan for a confirmed Project entity. |
+| `POST` | `/api/v1/projects/<project_id>/probes/run` | Rebuild, confirm, and start one ordinary Project-linked probe run. |
 | `GET` | `/api/v1/projects/<project_id>/assessments` | Assessment-cycle page with status, archived-visibility, limit, and offset controls plus the available profile keys and labels. |
 | `POST` | `/api/v1/projects/<project_id>/assessments` | Create an active assessment cycle from a saved profile definition. |
 | `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | One assessment cycle with coverage, finding-change, and fix-first rollups plus independently paged check and remediation worklists. Check filters use `category`, `state`, `target_type`, `policy_level`, and `evidence_state`; fix-first filters use `finding_priority`, `finding_limit`, and `finding_offset`. |
@@ -273,6 +278,54 @@ External OSV package acquisition is disabled by default. When an operator enable
 That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. Disabled mode returns `409`, and a provider failure returns `503` while keeping the last accepted data.
 
 ---
+
+## Project Probes
+
+Project probes run one reviewed command against one confirmed Project target without creating an Assessment cycle. They use the same bounded action catalog, target checks, policy gates, protected HTTP-profile handling, run broker, History, streaming, cancellation, and structured evidence finalization as the browser terminal. A probe doesn't create its own saved record and doesn't directly change an Assessment check.
+
+List the available actions and local profiles:
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes"
+```
+
+The optional `service` query returns reviewed recommendations for that discovered service, while `target_type` narrows actions to `domain`, `ip`, or `url`. Catalog and plan reads are side-effect free.
+
+API payloads use a confirmed `entity_id`. A client that starts with an exact hostname, address, or URL can resolve it first:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"target_value":"app.example.test"}' \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/targets/resolve"
+```
+
+The resolver rejects missing, pending, suppressed, ambiguous, cross-owner, and cross-Project records. Preview one action with the returned id:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"action_id\":\"httpx\",\"entity_id\":\"$ENTITY_ID\"}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/plan"
+```
+
+Optional `nmap_profile`, `nuclei_profile`, and `http_profile_id` fields select one reviewed local plan variant. A protected HTTP profile requires Secret-management permission and stays redacted: the response identifies its role and revision but never includes Secret values, private Files paths, generated arguments, or private environment data. The response shows the exact saved command, target, policy, bounds, credential classification, expected evidence, availability, and `plan_digest`.
+
+Launch only the freshly previewed plan:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"action_id\":\"httpx\",\"entity_id\":\"$ENTITY_ID\",\"confirmed\":true,\"plan_digest\":\"$PLAN_DIGEST\"}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/run"
+```
+
+Launch returns `202` with the ordinary run summary, stream and History locations, and rebuilt plan. It requires `RUN_COMMANDS`; a team launch with `http_profile_id` also requires `MANAGE_SECRETS`. The server binds the run to the requested Project independently of the active browser Project or automatic external-run capture setting. A changed target, profile, policy, feature gate, or command makes the digest stale and returns `409`. Validation errors return `400`, missing scoped records return `404`, rate limits return `429`, and an unavailable broker returns `503` with `Retry-After: 5`.
 
 ## Project Assessments
 
@@ -770,6 +823,9 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab atlas entity <entity_id> [--format text\|json]` | Show one Atlas entity. |
 | `darklab atlas findings [--review-state STATE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas findings. `--limit` defaults to 50 and caps at 200. |
 | `darklab atlas finding <finding_id> [--format text\|json]` | Show one Atlas finding. |
+| `darklab probe list --project PROJECT_ID [--service SERVICE] [--target-type domain\|ip\|url] [--format text\|json]` | List the reviewed Project probe catalog and local Nmap/Nuclei profiles. |
+| `darklab probe plan ACTION [TARGET\|--entity-id ENTITY_ID] --project PROJECT_ID [--http-profile PROFILE_ID] [--nmap-profile PROFILE] [--nuclei-profile PROFILE] [--format text\|json]` | Resolve one confirmed Project target and print the exact bounded, redacted probe plan without starting a run. |
+| `darklab probe run ACTION [TARGET\|--entity-id ENTITY_ID] --project PROJECT_ID [--http-profile PROFILE_ID] [--nmap-profile PROFILE] [--nuclei-profile PROFILE] [--confirm] [--workspace-cwd PATH] [--format text\|json]` | Preview one probe by default. `--confirm` immediately submits the freshly returned digest and prints the Project-linked run. |
 | `darklab projects [--limit N] [--offset N] [--format text\|json\|ndjson]` | List projects. `--limit` defaults to 50 and caps at 100. |
 | `darklab project <project_id> [--format text\|json]` | Show one project. |
 | `darklab project-link <run_id> <project_id> [--format text\|json]` | Link a completed run to a project. |
