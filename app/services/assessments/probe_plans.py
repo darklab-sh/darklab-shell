@@ -113,7 +113,7 @@ def build_probe_plan(
     request: ProbePlanRequest,
     target: Mapping[str, str],
     *,
-    available_features: Collection[str] | None = None,
+    available_features: Collection[str] = (),
     intrusive_actions_enabled: bool = False,
     template_snapshot: NucleiTemplateCacheSnapshot | None = None,
     http_profile: Mapping[str, Any] | None = None,
@@ -135,8 +135,6 @@ def build_probe_plan(
     required_features = set(action.required_features)
     missing_features = sorted(
         required_features - set(available_features)
-        if available_features is not None
-        else set()
     )
     target_type = str(target.get("type") or "")
     compatible = target_type in action.target_types

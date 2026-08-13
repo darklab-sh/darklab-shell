@@ -93,6 +93,11 @@ def test_probe_catalog_pins_public_schema_and_excludes_cycle_only_actions():
         service="microsoft-ds",
         target_type="ip",
         template_snapshot=_READY_TEMPLATES,
+        available_features={
+            "curl", "ping", "dnsrecon", "gau", "httpx", "katana", "dalfox",
+            "sqlmap", "sslyze", "testssl", "nmap", "reviewed_nse_profiles",
+            "nuclei", "managed_nuclei_templates",
+        },
     )
     assert set(catalog) == {
         "schema_version", "actions", "nmap_profiles", "nuclei_profiles",
@@ -116,6 +121,9 @@ def test_probe_catalog_pins_public_schema_and_excludes_cycle_only_actions():
     assert catalog["service_recommendations"][0]["nmap_profile"] == "smb"
     assert catalog["nuclei_profiles"][0]["provenance"] == "managed_local_cache"
     assert catalog["nuclei_profiles"][0]["template_snapshot"]["state"] == "ready"
+    omitted_features = probe_catalog(template_snapshot=_READY_TEMPLATES)
+    omitted_curl = next(item for item in omitted_features["actions"] if item["id"] == "curl")
+    assert omitted_curl["availability"]["code"] == "feature_unavailable"
     assert "version_cve_correlation" in catalog["exclusions"]
     assert not probe_catalog(
         service="version-cve",
@@ -151,6 +159,7 @@ def test_probe_profiles_can_raise_but_never_lower_the_base_policy():
     nmap = build_probe_plan(
         _request("nmap", nmap_profile="safe"),
         _target(target_type="ip"),
+        available_features={"nmap", "reviewed_nse_profiles"},
     )
     assert nmap["policy_level"] == "standard"
     assert nmap["profile"]["policy_level"] == "safe"
@@ -160,6 +169,7 @@ def test_probe_profiles_can_raise_but_never_lower_the_base_policy():
     nuclei = build_probe_plan(
         _request("nuclei", nuclei_profile="standard"),
         _target(),
+        available_features={"nuclei", "managed_nuclei_templates"},
         template_snapshot=_READY_TEMPLATES,
     )
     assert nuclei["policy_level"] == "standard"
@@ -168,13 +178,19 @@ def test_probe_profiles_can_raise_but_never_lower_the_base_policy():
 
 def test_intrusive_nuclei_requires_the_instance_gate_and_fresh_confirmation():
     request = _request("nuclei", nuclei_profile="intrusive")
-    disabled = build_probe_plan(request, _target(), template_snapshot=_READY_TEMPLATES)
+    disabled = build_probe_plan(
+        request,
+        _target(),
+        available_features={"nuclei", "managed_nuclei_templates"},
+        template_snapshot=_READY_TEMPLATES,
+    )
     assert disabled["launchable"] is False
     assert disabled["availability"]["code"] == "intrusive_actions_disabled"
 
     enabled = build_probe_plan(
         request,
         _target(),
+        available_features={"nuclei", "managed_nuclei_templates"},
         intrusive_actions_enabled=True,
         template_snapshot=_READY_TEMPLATES,
     )
@@ -192,7 +208,6 @@ def test_probe_plan_fails_closed_for_profiles_features_and_target_types():
     missing_feature = build_probe_plan(
         _request("curl"),
         _target(),
-        available_features=(),
     )
     assert missing_feature["availability"]["code"] == "feature_unavailable"
     assert missing_feature["feature_gates"] == ["curl"]
@@ -226,7 +241,11 @@ def test_probe_digest_excludes_presentation_but_covers_execution_fields():
 
 
 def test_probe_confirmation_rebuilds_the_plan_and_rejects_stale_or_extra_fields():
-    plan = build_probe_plan(_request("ping"), _target())
+    plan = build_probe_plan(
+        _request("ping"),
+        _target(),
+        available_features={"ping"},
+    )
     assert confirm_probe_plan(
         {"confirmed": True, "plan_digest": plan["plan_digest"]},
         lambda: plan,

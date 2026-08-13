@@ -31,12 +31,10 @@ NUCLEI_PROFILE_REVISION = "1"
 def _public_action(
     action,
     snapshot: NucleiTemplateCacheSnapshot,
-    available_features: Collection[str] | None,
+    available_features: Collection[str],
 ) -> dict[str, Any]:
     missing_features = sorted(
         action.required_features - set(available_features)
-        if available_features is not None
-        else set()
     )
     unavailable_reason = (
         "Required probe features aren't available."
@@ -135,7 +133,7 @@ def probe_catalog(
     service: str = "",
     target_type: str = "",
     template_snapshot: NucleiTemplateCacheSnapshot | None = None,
-    available_features: Collection[str] | None = None,
+    available_features: Collection[str] = (),
     intrusive_actions_enabled: bool = False,
 ) -> dict[str, Any]:
     """Return reviewed actions and profiles without allocating external resources."""
