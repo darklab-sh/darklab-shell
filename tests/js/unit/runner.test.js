@@ -889,6 +889,7 @@ function loadRunnerFns({
   welcomeDone = false,
   welcomeOwnsTab = () => false,
   clearTab: clearTabOverride = null,
+  setTabRunningCommand: setTabRunningCommandOverride = null,
   showToast: showToastOverride = null,
   confirmClearSessionToken: confirmClearSessionTokenOverride = null,
   setComposerPromptMode: setComposerPromptModeOverride = null,
@@ -989,6 +990,10 @@ function loadRunnerFns({
   cmdInput.blur = vi.fn()
 
   const setTabLabel = vi.fn()
+  const setTabRunningCommand = setTabRunningCommandOverride || vi.fn((id, command) => {
+    const tab = normalizedTabs.find((t) => t.id === id)
+    if (tab) tab.command = String(command || '')
+  })
   const setTabStatus = vi.fn((id, nextStatus) => {
     const tab = normalizedTabs.find((t) => t.id === id)
     if (tab) tab.st = nextStatus
@@ -1042,6 +1047,7 @@ function loadRunnerFns({
       addToHistory,
       addToRecentPreview,
       setTabLabel,
+      setTabRunningCommand,
       setTabStatus,
       activateTab,
       appendLine,
@@ -1179,6 +1185,7 @@ function loadRunnerFns({
     status,
     storage,
     setTabLabel,
+    setTabRunningCommand,
     setTabStatus,
     clearTab,
     activateTab,
@@ -1208,6 +1215,7 @@ describe('runner helpers', () => {
     const {
       _bindStartedProbeRun,
       clearTab,
+      setTabRunningCommand,
       tabs,
     } = loadRunnerFns({
       tabs: [{
@@ -1233,6 +1241,10 @@ describe('runner helpers', () => {
     expect(tabs[0].runId).toBe('run_probe')
     expect(tabs[0].historyRunId).toBe('run_probe')
     expect(tabs[0].command).toBe('ping -c 4 example.test')
+    expect(setTabRunningCommand).toHaveBeenCalledWith(
+      'tab-1',
+      'ping -c 4 example.test',
+    )
     expect(tabs[0].rawLines).toContainEqual({
       text: 'Probe plan: Ping', cls: 'builtin-section',
     })

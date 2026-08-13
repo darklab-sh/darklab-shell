@@ -1727,8 +1727,7 @@ function _bindStartedProbeRun(launched, tabId) {
   const run = launched?.run || {};
   const runId = String(run.run_id || '');
   if (!runId) throw new Error('The server did not return a probe run id.');
-  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
-  if (tab) tab.command = String(run.command || tab.command || '');
+  setTabRunningCommand(tabId, String(run.command || ''));
   appendLine(
     `[probe] started run ${runId} for Project ${launched.project_id || 'unknown'}`,
     'notice',
