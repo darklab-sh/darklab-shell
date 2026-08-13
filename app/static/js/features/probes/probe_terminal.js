@@ -190,10 +190,14 @@ async function _loadCatalog(parsed) {
 async function _loadPlan(parsed) {
   let entityId = parsed.entityId;
   if (!entityId) {
-    const targetQuery = new URLSearchParams({ value: parsed.targetValue });
     const targetResponse = await apiFetch(
-      `/projects/${encodeURIComponent(parsed.projectId)}/probes/targets/resolve?${targetQuery}`,
-      { cache: 'no-store' },
+      `/projects/${encodeURIComponent(parsed.projectId)}/probes/targets/resolve`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_value: parsed.targetValue }),
+        cache: 'no-store',
+      },
     );
     entityId = String((await _responseJson(targetResponse)).target?.entity_id || '');
   }

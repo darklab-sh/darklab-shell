@@ -8,7 +8,6 @@ from flask import jsonify, request
 from blueprints import projects as project_routes
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
 from services.assessments.probe_service import get_probe_catalog, get_probe_plan
-from services.assessments.probe_target_service import resolve_project_probe_target
 from services.teams.capabilities import Capability
 
 
@@ -35,23 +34,6 @@ def projects_probes_catalog(project_id):
     except ProbeError as exc:
         return _probe_error(exc)
     return jsonify({"catalog": catalog})
-
-
-@project_routes.projects_bp.get("/projects/<project_id>/probes/targets/resolve")
-def projects_probes_target_resolve(project_id):
-    session_id, team_id, error_response = project_routes._project_owner()
-    if error_response:
-        return error_response
-    try:
-        target = resolve_project_probe_target(
-            session_id,
-            project_id,
-            team_id=team_id,
-            target_value=str(request.args.get("value") or "").strip(),
-        )
-    except ProbeError as exc:
-        return _probe_error(exc)
-    return jsonify({"target": target})
 
 
 @project_routes.projects_bp.get("/projects/<project_id>/probes/plan")
@@ -83,4 +65,4 @@ def projects_probes_plan(project_id):
     return jsonify({"plan": plan})
 
 
-__all__ = ["projects_probes_catalog", "projects_probes_plan", "projects_probes_target_resolve"]
+__all__ = ["projects_probes_catalog", "projects_probes_plan"]

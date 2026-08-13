@@ -142,7 +142,7 @@ def _join_team_member(
     assert joined.status_code in {200, 201}
 
 
-def test_probe_routes_list_resolve_and_plan_without_writes(client):
+def test_probe_routes_list_resolve_and_plan_without_writes(client, caplog):
     session_id = "probe-routes-" + uuid.uuid4().hex
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
@@ -152,9 +152,9 @@ def test_probe_routes_list_resolve_and_plan_without_writes(client):
         f"/projects/{project['id']}/probes?service=https&target_type=url",
         headers=_headers(session_id),
     )
-    resolve_response = client.get(
+    resolve_response = client.post(
         f"/projects/{project['id']}/probes/targets/resolve",
-        query_string={"value": target["value"]},
+        json={"target_value": target["value"]},
         headers=_headers(session_id),
     )
     plan_response = client.get(
@@ -183,6 +183,23 @@ def test_probe_routes_list_resolve_and_plan_without_writes(client):
     assert "--script ssl-cert,ssl-enum-ciphers" in plan["display_command"]
     assert plan["availability"]["available"] is True
     assert _table_counts() == before
+    assert target["value"] not in caplog.text
+
+    rejected = client.post(
+        f"/projects/{project['id']}/probes/targets/resolve",
+        json={"target_value": target["value"], "entity_id": target["id"]},
+        headers=_headers(session_id),
+    )
+    assert rejected.status_code == 400
+    assert rejected.get_json()["code"] == "unsupported_fields"
+    query_rejected = client.post(
+        f"/projects/{project['id']}/probes/targets/resolve",
+        query_string={"target_value": target["value"]},
+        json={"target_value": target["value"]},
+        headers=_headers(session_id),
+    )
+    assert query_rejected.status_code == 400
+    assert query_rejected.get_json()["code"] == "unsupported_fields"
 
 
 def test_probe_routes_fail_closed_for_foreign_archived_and_value_only_plans(client):

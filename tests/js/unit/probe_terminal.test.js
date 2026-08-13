@@ -145,7 +145,7 @@ describe('Project probe terminal', () => {
 
   it('resolves an exact target before requesting an entity-anchored plan', async () => {
     const apiFetch = vi.fn(async (url) => {
-      if (url.includes('/targets/resolve?')) {
+      if (url.endsWith('/targets/resolve')) {
         return response({ target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' } });
       }
       return response({
@@ -171,9 +171,16 @@ describe('Project probe terminal', () => {
       commandExecution,
     );
 
-    expect(apiFetch.mock.calls[0][0]).toBe(
-      '/projects/prj_1/probes/targets/resolve?value=example.test',
-    );
+    expect(apiFetch.mock.calls[0]).toEqual([
+      '/projects/prj_1/probes/targets/resolve',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_value: 'example.test' }),
+        cache: 'no-store',
+      },
+    ]);
+    expect(apiFetch.mock.calls[0][0]).not.toContain('example.test');
     expect(apiFetch.mock.calls[1][0]).toContain(
       '/projects/prj_1/probes/plan?action_id=ping&entity_id=ent_1',
     );

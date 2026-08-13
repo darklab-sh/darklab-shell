@@ -8123,6 +8123,7 @@ class TestProjectRoutes:
         app = reusable_test_app(__name__)
         read_only_post_endpoints = {
             "projects.projects_artifacts_download_ticket",
+            "projects.projects_probes_target_resolve",
             "projects.projects_run_entity_link_preview",
             "projects.projects_run_entity_unlink_preview",
         }

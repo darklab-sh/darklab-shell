@@ -4905,9 +4905,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         f"/projects/{project['id']}/probes",
         headers=browser_headers,
     )
-    probe_resolve_resp = client.get(
-        f"/projects/{project['id']}/probes/targets/resolve?value=darklab.sh",
+    probe_resolve_resp = client.post(
+        f"/projects/{project['id']}/probes/targets/resolve",
         headers=browser_headers,
+        json={"target_value": "darklab.sh"},
     )
     probe_plan_resp = client.get(
         f"/projects/{project['id']}/probes/plan?action_id=ping&entity_id={target['id']}",
