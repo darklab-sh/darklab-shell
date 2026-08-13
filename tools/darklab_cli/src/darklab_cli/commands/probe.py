@@ -128,7 +128,7 @@ def _print_plan(plan: dict[str, Any]) -> None:
     }], ("action", "policy", "target", "launchable", "command"))
     print(f"Bounds: {bounds.get('summary') or 'No command bounds available'}")
     print(f"Expected evidence: {', '.join(str(value) for value in expected_evidence) or 'run output'}")
-    print(f"Digest: {plan.get('plan_digest') or ''}")
+    print(f"Approval digest: {str(plan.get('plan_digest') or '')[:12]}")
     if not availability.get("available"):
         print(f"Unavailable: {availability.get('reason') or availability.get('code') or 'not available'}")
 

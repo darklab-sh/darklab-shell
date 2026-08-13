@@ -109,7 +109,8 @@ describe('Project probe terminal', () => {
       availability: { available: true },
     });
     expect(lines).toContain('  Command: ping -c 4 example.test');
-    expect(lines).toContain(`  Digest: ${'a'.repeat(64)}`);
+    expect(lines).toContain(`  Approval digest: ${'a'.repeat(12)}`);
+    expect(lines.join('\n')).not.toContain('a'.repeat(64));
   });
 
   it('loads an explicit or active Project catalog without creating a client History record', async () => {

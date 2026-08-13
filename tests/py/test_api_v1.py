@@ -8353,7 +8353,10 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert cli_main.main([
         "probe", "plan", "ping", "probe.example", "--project", "prj_probe",
     ]) == 0
-    assert "ping -c 4 probe.example" in capsys.readouterr().out
+    preview_output = capsys.readouterr().out
+    assert "ping -c 4 probe.example" in preview_output
+    assert f"Approval digest: {'a' * 12}" in preview_output
+    assert "a" * 64 not in preview_output
 
     assert cli_main.main([
         "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",

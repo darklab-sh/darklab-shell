@@ -161,7 +161,7 @@ function formatProbePlan(plan) {
     `  Requests: ${plan.bounds?.request_limit ?? 'tool bounded'}; time: ${plan.bounds?.time_limit_seconds ?? 'tool bounded'} seconds`,
     `  Credentials: ${plan.bounds?.credential_use || 'none'}`,
     `  Evidence: ${(plan.expected_evidence || []).join(', ') || 'run output'}`,
-    `  Digest: ${plan.plan_digest || ''}`,
+    `  Approval digest: ${String(plan.plan_digest || '').slice(0, 12)}`,
   ];
   if (!plan.availability?.available) {
     lines.push(`  Unavailable: ${plan.availability?.reason || plan.availability?.code || 'not available'}`);
