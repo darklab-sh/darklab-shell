@@ -1153,6 +1153,7 @@ function loadRunnerFns({
     cancelPendingTerminalConfirm,
     cancelAllPendingTerminalConfirms,
     _setPendingTerminalConfirm,
+    updateSessionId,
     runCommand,
     attachActiveRunFromMonitor,
     killActiveRunFromMonitor,
@@ -3638,6 +3639,48 @@ describe('per-tab terminal confirmations', () => {
 
     document.dispatchEvent(new Event('app:scope-changed'))
     expect(hasPendingTerminalConfirm('tab-2')).toBe(false)
+    expect(cancelSessionToken).toHaveBeenCalledOnce()
+
+    const cancelCapabilities = vi.fn()
+    _setPendingTerminalConfirm({
+      kind: 'probe', tabId: 'tab-1', execution: pendingExecution('tab-1'),
+      onCancel: cancelCapabilities,
+    })
+    document.dispatchEvent(new Event('app:scope-capabilities-changed'))
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
+    expect(cancelCapabilities).toHaveBeenCalledOnce()
+  })
+
+  it('cancels every pending confirmation when the session identity changes', () => {
+    const updateSessionId = vi.fn()
+    const cancelProbe = vi.fn()
+    const cancelSessionToken = vi.fn()
+    const {
+      _setPendingTerminalConfirm,
+      hasPendingTerminalConfirm,
+      updateSessionId: replaceSessionId,
+    } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false },
+        { id: 'tab-2', st: 'idle', runId: null, killed: false, pendingKill: false },
+      ],
+      updateSessionId,
+    })
+    _setPendingTerminalConfirm({
+      kind: 'probe', tabId: 'tab-1', execution: pendingExecution('tab-1'),
+      onCancel: cancelProbe,
+    })
+    _setPendingTerminalConfirm({
+      kind: 'session-token', tabId: 'tab-2', execution: pendingExecution('tab-2'),
+      onCancel: cancelSessionToken,
+    })
+
+    replaceSessionId('session-replacement')
+
+    expect(updateSessionId).toHaveBeenCalledWith('session-replacement')
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(false)
+    expect(cancelProbe).toHaveBeenCalledOnce()
     expect(cancelSessionToken).toHaveBeenCalledOnce()
   })
 })

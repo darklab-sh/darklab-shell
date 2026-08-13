@@ -511,6 +511,21 @@ describe('tabs helpers', () => {
     expect(cancelPendingTerminalConfirm).toHaveBeenCalledWith(id, { refocus: false })
   })
 
+  it('closing a tab cancels only the confirmation owned by that tab', () => {
+    const cancelPendingTerminalConfirm = vi.fn()
+    const { createTab, closeTab } = loadTabsFns({ cancelPendingTerminalConfirm })
+    const firstId = createTab('tab 1')
+    createTab('tab 2')
+
+    closeTab(firstId)
+
+    expect(cancelPendingTerminalConfirm).toHaveBeenCalledTimes(1)
+    expect(cancelPendingTerminalConfirm).toHaveBeenCalledWith(
+      firstId,
+      { refocus: false },
+    )
+  })
+
   it('clearTab clears the active un-ran composer input along with the tab output', () => {
     const { createTab, clearTab, _getTabs } = loadTabsFns()
     const id = createTab('tab 1')

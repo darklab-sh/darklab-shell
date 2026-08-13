@@ -99,6 +99,34 @@ test.describe('Project probe terminal', () => {
     expect(launchRequests).toBe(0)
   })
 
+  test('does not retain a probe approval across a page reload', async ({ page }) => {
+    const fixture = await createActiveProbeProject(page)
+    let launchRequests = 0
+    page.on('request', request => {
+      if (request.method() === 'POST' && /\/probes\/run$/.test(request.url())) {
+        launchRequests += 1
+      }
+    })
+    await runCommand(
+      page,
+      `probe run ping ${fixture.target.value} --project ${fixture.project.id}`,
+    )
+    await expect(page.locator('.tab-panel.active .output')).toContainText(
+      'Run this probe? Type yes or no.',
+    )
+
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
+    const input = page.locator('#cmd')
+    await input.fill('yes')
+    await input.press('Enter')
+    await page.waitForTimeout(300)
+
+    expect(launchRequests).toBe(0)
+    expect(await page.evaluate(() => window.APP_STATE_API.getActiveTab()?.runId || '')).toBe('')
+  })
+
   test('confirms, streams, saves, and links a probe in the origin tab', async ({ page }) => {
     const fixture = await createActiveProbeProject(page, {
       targetType: 'ip',
