@@ -33,6 +33,7 @@ from services.assessments.probe_contracts import (
 from services.assessments.probe_plan_digest import probe_plan_digest
 from services.assessments.probe_plans import build_probe_plan, confirm_probe_plan
 from services.assessments.probe_cleanup import observed_probe_cleanup
+from services.assessments.probe_broker_launch import launch_confirmed_probe
 from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_observability import observe_probe
 from services.assessments.http_profile_execution import ProtectedHttpLaunch
@@ -374,6 +375,76 @@ def test_probe_cleanup_retries_failed_or_incomplete_removal(monkeypatch):
         observed_raised()
     assert observed_raised() is True
     assert raised.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        RunPreparationError("probe preparation failed"),
+        RunSpawnError("probe spawn failed"),
+        RuntimeError("unexpected probe start failure"),
+    ),
+    ids=("preparation", "spawn", "unexpected"),
+)
+def test_probe_broker_cleans_material_when_start_raises(monkeypatch, failure):
+    cleanup = mock.Mock(return_value=True)
+    protected = ProtectedHttpLaunch(
+        execution_command="httpx -u example.test",
+        trusted_execution_args=("-H", "Authorization: protected"),
+        private_values=("Authorization: protected",),
+        cleanup=cleanup,
+        audit_summary={},
+    )
+    context = SimpleNamespace(
+        broker_kwargs=lambda: {"trusted_execution_args": protected.trusted_execution_args},
+    )
+    monkeypatch.setattr(
+        "services.assessments.probe_broker_launch.materialize_probe_run_launch",
+        lambda *_args, **_kwargs: (protected, context),
+    )
+
+    def failed_start(**_kwargs):
+        raise failure
+
+    with pytest.raises(type(failure), match=str(failure)):
+        launch_confirmed_probe(
+            {"display_command": "httpx -u example.test"},
+            session_id="session-probe", project_id="prj_probe", team_id="",
+            team_role="", actor_member_id="", client_ip="127.0.0.1",
+            owner_client_id="client-probe", owner_tab_id="tab-probe",
+            workspace_cwd="", handlers={}, start_run=failed_start,
+            thread_name_prefix="probe-test",
+        )
+
+    cleanup.assert_called_once_with()
+
+
+def test_probe_broker_preserves_start_failure_when_cleanup_is_incomplete(monkeypatch):
+    cleanup = mock.Mock(return_value=False)
+    protected = ProtectedHttpLaunch(
+        execution_command="httpx -u example.test",
+        trusted_execution_args=(), private_values=(), cleanup=cleanup, audit_summary={},
+    )
+    context = SimpleNamespace(broker_kwargs=lambda: {"trusted_execution_args": ()})
+    monkeypatch.setattr(
+        "services.assessments.probe_broker_launch.materialize_probe_run_launch",
+        lambda *_args, **_kwargs: (protected, context),
+    )
+
+    def failed_start(**_kwargs):
+        raise RunSpawnError("primary spawn failure")
+
+    with pytest.raises(RunSpawnError, match="primary spawn failure"):
+        launch_confirmed_probe(
+            {"display_command": "httpx -u example.test"},
+            session_id="session-probe", project_id="prj_probe", team_id="",
+            team_role="", actor_member_id="", client_ip="127.0.0.1",
+            owner_client_id="client-probe", owner_tab_id="tab-probe",
+            workspace_cwd="", handlers={}, start_run=failed_start,
+            thread_name_prefix="probe-test",
+        )
+
+    cleanup.assert_called_once_with()
 
 
 def test_probe_failure_logging_sanitizes_chained_run_errors(monkeypatch):

@@ -1039,7 +1039,6 @@ def test_protected_probe_rejects_stale_profile_and_cleans_failed_spawn(
 
     def _failed_start(**kwargs):
         material_paths.append(Path(kwargs["trusted_execution_args"][1]).parent)
-        kwargs["run_cleanup_hook"]()
         raise RunSpawnError("spawn failed after protected materialization")
 
     monkeypatch.setattr("blueprints.api_v1._start_brokered_run_service", _failed_start)
