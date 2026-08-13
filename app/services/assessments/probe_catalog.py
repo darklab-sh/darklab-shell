@@ -28,7 +28,6 @@ from services.nuclei.template_cache import (
 NMAP_PROFILE_REVISION = "1"
 NUCLEI_PROFILE_REVISION = "1"
 
-
 def _public_action(
     action,
     snapshot: NucleiTemplateCacheSnapshot,
@@ -146,6 +145,7 @@ def probe_catalog(
         "actions": [
             _public_action(action, snapshot, available_features)
             for action in ACTIONS.values()
+            if not target_type or target_type in action.target_types
         ],
         "nmap_profiles": _nmap_profiles(),
         "nuclei_profiles": _nuclei_profiles(snapshot, intrusive_actions_enabled),

@@ -149,7 +149,7 @@ def test_probe_routes_list_resolve_and_plan_without_writes(client):
     before = _table_counts()
 
     catalog_response = client.get(
-        f"/projects/{project['id']}/probes?service=https",
+        f"/projects/{project['id']}/probes?service=https&target_type=url",
         headers=_headers(session_id),
     )
     resolve_response = client.get(
@@ -166,6 +166,9 @@ def test_probe_routes_list_resolve_and_plan_without_writes(client):
     assert catalog_response.status_code == 200
     catalog = catalog_response.get_json()["catalog"]
     assert catalog["schema_version"] == 1
+    assert {item["id"] for item in catalog["actions"]} == {
+        "curl", "dalfox", "httpx", "katana", "nuclei", "sqlmap",
+    }
     assert catalog["service_recommendations"][0]["action_id"] == "httpx"
     assert resolve_response.get_json()["target"] == {
         "entity_id": target["id"],

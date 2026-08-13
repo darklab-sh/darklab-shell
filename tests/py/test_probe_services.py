@@ -98,7 +98,11 @@ def test_probe_catalog_pins_public_schema_and_excludes_cycle_only_actions():
         "schema_version", "actions", "nmap_profiles", "nuclei_profiles",
         "service_recommendations", "exclusions",
     }
-    assert [item["id"] for item in catalog["actions"]] == list(_ACTION_IDS)
+    assert [item["id"] for item in catalog["actions"]] == [
+        action_id for action_id in _ACTION_IDS
+        if "ip" in ACTIONS[action_id].target_types
+    ]
+    assert all("ip" in item["target_types"] for item in catalog["actions"])
     assert set(catalog["actions"][0]) == {
         "id", "revision", "label", "purpose", "mode", "policy_level",
         "target_types", "required_features", "expected_evidence", "exclusions",
