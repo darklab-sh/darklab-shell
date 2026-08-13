@@ -578,6 +578,91 @@ def test_probe_logging_classifies_unavailable_plans_and_broker_modes(monkeypatch
     )
 
 
+@pytest.mark.parametrize(
+    ("case", "outcome", "level", "event", "error_code"),
+    (
+        ("success", "success", "debug", "PROJECT_PROBE_OPERATION_COMPLETED", ""),
+        (
+            "unavailable_result", "unavailable", "warning",
+            "PROJECT_PROBE_OPERATION_COMPLETED", "feature_unavailable",
+        ),
+        (
+            "rejected", "rejected", "info",
+            "PROJECT_PROBE_OPERATION_REJECTED", "probe_target_not_found",
+        ),
+        (
+            "unavailable_error", "unavailable", "warning",
+            "PROJECT_PROBE_OPERATION_REJECTED", "provider_unavailable",
+        ),
+        (
+            "failed", "failed", "error",
+            "PROJECT_PROBE_OPERATION_FAILED", "unexpected_failure",
+        ),
+    ),
+)
+def test_probe_observer_records_each_outcome_without_private_labels(
+    monkeypatch,
+    case,
+    outcome,
+    level,
+    event,
+    error_code,
+):
+    sensitive = "private-target.example Bearer-secret /tmp/private-probe-profile"
+    logger = mock.Mock()
+    metrics = mock.Mock()
+    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+    monkeypatch.setattr(
+        "services.assessments.probe_observability.app_metrics.record_probe_operation",
+        metrics,
+    )
+    request = ProbePlanRequest(
+        project_id="prj_observed",
+        action_id="httpx",
+        entity_id="ent_observed",
+        target_value=sensitive,
+        http_profile_id="hpr_observed",
+    )
+
+    @observe_probe("plan")
+    def observed(_request):
+        if case == "success":
+            return {"launchable": True, "display_command": sensitive}
+        if case == "unavailable_result":
+            return {
+                "launchable": False,
+                "availability": {"code": "feature_unavailable", "reason": sensitive},
+            }
+        if case == "rejected":
+            raise ProbeError("probe_target_not_found", sensitive, status_code=404)
+        if case == "unavailable_error":
+            raise ProbeError("provider_unavailable", sensitive, status_code=503)
+        raise RuntimeError(sensitive)
+
+    if case in {"success", "unavailable_result"}:
+        observed(request)
+    else:
+        with pytest.raises((ProbeError, RuntimeError)):
+            observed(request)
+
+    metrics.assert_called_once_with("plan", outcome, protected=True)
+    log_call = getattr(logger, level).call_args
+    assert log_call.args == (event,)
+    fields = log_call.kwargs["extra"]
+    assert fields["probe_phase"] == "plan"
+    assert fields["probe_outcome"] == outcome
+    assert fields["project_id"] == "prj_observed"
+    assert fields["entity_id"] == "ent_observed"
+    assert fields["action_id"] == "httpx"
+    assert fields["protected"] is True
+    assert fields["error_code"] == error_code
+    serialized = json.dumps(
+        {"metrics": metrics.call_args_list, "log": log_call},
+        default=str,
+    )
+    assert sensitive not in serialized
+
+
 def test_probe_logs_and_audit_rows_share_bounded_request_correlation(monkeypatch):
     logger = mock.Mock()
     monkeypatch.setattr("services.assessments.probe_observability.log", logger)
