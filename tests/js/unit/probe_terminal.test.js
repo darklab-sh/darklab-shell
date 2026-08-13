@@ -63,6 +63,12 @@ describe('Project probe terminal', () => {
       .toContain('provide either an exact target or --entity-id, not both');
     expect(parseProbeCommand('probe list --unknown value').errors)
       .toContain("unknown option '--unknown'");
+    expect(parseProbeCommand('probe list --project prj_2 --service https')).toMatchObject({
+      subcommand: 'list',
+      projectId: 'prj_2',
+      service: 'https',
+      errors: [],
+    });
     expect(parseProbeCommand('probe run ping --entity-id ent_1 --project=prj_1')).toMatchObject({
       subcommand: 'run',
       entityId: 'ent_1',
@@ -101,7 +107,7 @@ describe('Project probe terminal', () => {
     expect(lines).toContain(`  Digest: ${'a'.repeat(64)}`);
   });
 
-  it('loads the active Project catalog without creating a client History record', async () => {
+  it('loads an explicit or active Project catalog without creating a client History record', async () => {
     const apiFetch = vi.fn(async () => response({
       catalog: {
         actions: [], nmap_profiles: [], nuclei_profiles: [], service_recommendations: [],
@@ -119,6 +125,16 @@ describe('Project probe terminal', () => {
     expect(commandExecution.setPersistence).toHaveBeenCalledWith('none');
     expect(commandExecution.setRecordRecent).toHaveBeenCalledWith(false);
     expect(commandExecution.setStatus).toHaveBeenCalledWith('ok');
+
+    await handleProbeTerminalCommand(
+      'probe list --project prj_explicit --service http',
+      'tab-1',
+      commandExecution,
+    );
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/projects/prj_explicit/probes?service=http',
+      { cache: 'no-store' },
+    );
   });
 
   it('resolves an exact target before requesting an entity-anchored plan', async () => {

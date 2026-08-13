@@ -12,7 +12,7 @@ import { setProbeTerminalHandler } from './probe_terminal_bridge.js';
 
 const PROBE_USAGE = [
   'Usage:',
-  '  probe list [--service <service>]',
+  '  probe list [--project <project-id>] [--service <service>]',
   '  probe plan <action> <target> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
   '  probe plan <action> --entity-id <entity-id> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
   '  probe run <action> <target> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
@@ -74,9 +74,17 @@ function parseProbeCommand(command) {
     return { subcommand: 'help', errors: [] };
   }
   if (subcommand === 'list') {
-    const parsed = _parseFlags(tokens.slice(2), { '--service': 'service' });
+    const parsed = _parseFlags(tokens.slice(2), {
+      '--project': 'projectId',
+      '--service': 'service',
+    });
     if (parsed.positional.length) parsed.errors.push('probe list does not accept positional values');
-    return { subcommand, service: parsed.values.service || '', errors: parsed.errors };
+    return {
+      subcommand,
+      projectId: parsed.values.projectId || '',
+      service: parsed.values.service || '',
+      errors: parsed.errors,
+    };
   }
   if (!['plan', 'run'].includes(subcommand)) {
     return { subcommand, errors: [`unknown subcommand '${subcommand}'`] };
@@ -164,7 +172,7 @@ async function _activeProjectId() {
 }
 
 async function _loadCatalog(parsed) {
-  const projectId = await _activeProjectId();
+  const projectId = parsed.projectId || await _activeProjectId();
   if (!projectId) throw new Error('select an active Project before listing probes');
   const query = new URLSearchParams();
   if (parsed.service) query.set('service', parsed.service);

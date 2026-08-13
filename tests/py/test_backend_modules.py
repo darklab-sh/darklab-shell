@@ -19722,6 +19722,13 @@ class TestDerivedCommandRegistry:
         ]
         assert context["var"]["close_after"] == {"list": 0, "set": 2, "unset": 1}
         probe_context = context["probe"]["subcommands"]
+        list_flags = probe_context["list"]["flags"]
+        list_project = next(item for item in list_flags if item["value"] == "--project")
+        assert list_project == {
+            "value": "--project",
+            "description": "Project id; defaults to the active Project",
+        }
+        assert "--project" in probe_context["list"]["expects_value"]
         for subcommand in ("plan", "run"):
             flags = probe_context[subcommand]["flags"]
             http_profile = next(item for item in flags if item["value"] == "--http-profile")

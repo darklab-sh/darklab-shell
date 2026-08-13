@@ -35,12 +35,19 @@ _PROBE_AUTOCOMPLETE = {
         "subcommands": {
             "list": {
                 "description": "List reviewed probe actions and profiles",
-                "flags": [{
-                    "value": "--service",
-                    "takes_value": True,
-                    "description": "Show recommendations for one detected service",
-                    "suggest": _value_suggestions(_probe_services(), "Detected service name"),
-                }],
+                "flags": [
+                    {
+                        "value": "--project",
+                        "takes_value": True,
+                        "description": "Project id; defaults to the active Project",
+                    },
+                    {
+                        "value": "--service",
+                        "takes_value": True,
+                        "description": "Show recommendations for one detected service",
+                        "suggest": _value_suggestions(_probe_services(), "Detected service name"),
+                    },
+                ],
             },
             "plan": {
                 "description": "Preview one bounded command for a confirmed Project target",
