@@ -8,8 +8,8 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from services.assessments.http_profile_execution import ProtectedHttpLaunch
+from services.assessments.probe_cleanup import best_effort_probe_cleanup
 from services.assessments.probe_launch import probe_run_launch_context
-from services.assessments.probe_observability import observed_probe_cleanup
 from services.assessments.probe_protected_launch import materialize_probe_run_launch
 
 
@@ -30,13 +30,11 @@ def launch_confirmed_probe(
     thread_name_prefix: str,
 ):
     protected: ProtectedHttpLaunch | None = None
-    cleanup: Callable[[], Any] | None = None
     try:
         protected, context = materialize_probe_run_launch(
             session_id, project_id, plan, launch_context=probe_run_launch_context,
             team_id=team_id, actor_member_id=actor_member_id,
         )
-        cleanup = observed_probe_cleanup(protected.cleanup)
         started = start_run(
             original_command=protected.execution_command,
             display_command=plan["display_command"],
@@ -50,13 +48,12 @@ def launch_confirmed_probe(
             workspace_cwd=workspace_cwd,
             link_project_id=project_id,
             private_values=protected.private_values,
-            run_cleanup_hook=cleanup,
+            run_cleanup_hook=protected.cleanup,
             thread_name_prefix=thread_name_prefix,
             **context.broker_kwargs(),
         )
     except Exception:
-        if protected is not None and protected.cleanup:
-            (cleanup or protected.cleanup)()
+        best_effort_probe_cleanup(protected.cleanup if protected else None)
         raise
     assert protected is not None
     return started, protected.audit_summary

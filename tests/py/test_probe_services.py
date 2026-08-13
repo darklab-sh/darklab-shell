@@ -31,7 +31,9 @@ from services.assessments.probe_contracts import (
 )
 from services.assessments.probe_plan_digest import probe_plan_digest
 from services.assessments.probe_plans import build_probe_plan, confirm_probe_plan
-from services.assessments.probe_observability import observe_probe, observed_probe_cleanup
+from services.assessments.probe_cleanup import observed_probe_cleanup
+from services.assessments.probe_observability import observe_probe
+from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.probe_targets import resolve_probe_target
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 from services.projects.crud import create_project, delete_project, update_project
@@ -343,10 +345,10 @@ def test_probe_cleanup_retries_failed_or_incomplete_removal(monkeypatch):
     outcomes = []
     logger = mock.Mock()
     monkeypatch.setattr(
-        "services.assessments.probe_observability.app_metrics.record_probe_operation",
+        "services.assessments.probe_cleanup.app_metrics.record_probe_operation",
         lambda _phase, outcome, **_kwargs: outcomes.append(outcome),
     )
-    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+    monkeypatch.setattr("services.assessments.probe_cleanup.log", logger)
     results = iter((False, True))
     cleanup = mock.Mock(side_effect=lambda: next(results))
     observed = observed_probe_cleanup(cleanup)
@@ -357,7 +359,9 @@ def test_probe_cleanup_retries_failed_or_incomplete_removal(monkeypatch):
     assert observed() is None
     assert cleanup.call_count == 2
     assert outcomes == ["failed", "success"]
-    logger.debug.assert_called_once_with("PROJECT_PROBE_PROTECTED_CLEANUP_COMPLETED")
+    logger.debug.assert_called_once()
+    assert logger.debug.call_args.args == ("PROJECT_PROBE_PROTECTED_CLEANUP_COMPLETED",)
+    assert logger.debug.call_args.kwargs["extra"]["cleanup_stage"] == "protected_material"
 
     raised = mock.Mock(side_effect=(RuntimeError("remove failed"), True))
     observed_raised = observed_probe_cleanup(raised)
@@ -414,6 +418,80 @@ def test_probe_failure_logging_sanitizes_chained_run_errors(monkeypatch):
     logger.warning.assert_called_once()
     assert logger.warning.call_args.kwargs["extra"]["error_code"] == "run_preparation_rejected"
     assert "exc_info" not in logger.warning.call_args.kwargs
+
+
+def test_probe_cleanup_observation_starts_before_launch_context_validation(monkeypatch):
+    from services.assessments import probe_protected_launch
+
+    outcomes = []
+    cleanup = mock.Mock(side_effect=RuntimeError("cleanup failed"))
+    protected = ProtectedHttpLaunch("ping example.test", (), (), cleanup, {})
+    monkeypatch.setattr(
+        probe_protected_launch,
+        "materialize_http_profile_launch",
+        lambda *_args, **_kwargs: protected,
+    )
+    monkeypatch.setattr(
+        "services.assessments.probe_cleanup.app_metrics.record_probe_operation",
+        lambda phase, outcome, **_kwargs: outcomes.append((phase, outcome)),
+    )
+    logger = mock.Mock()
+    monkeypatch.setattr("services.assessments.probe_cleanup.log", logger)
+
+    def reject_context(*_args, **_kwargs):
+        raise ValueError("primary context failure")
+
+    with pytest.raises(ValueError, match="primary context failure"):
+        probe_protected_launch.materialize_probe_run_launch(
+            "session-probe",
+            "prj_probe",
+            {"display_command": "ping example.test"},
+            launch_context=reject_context,
+        )
+
+    cleanup.assert_called_once()
+    assert outcomes == [("cleanup", "failed")]
+    fields = logger.error.call_args.kwargs["extra"]
+    assert fields == {
+        "project_id": "",
+        "entity_id": "",
+        "action_id": "",
+        "profile_id": "",
+        "cleanup_stage": "protected_material",
+        "error_class": "RuntimeError",
+    }
+
+
+def test_probe_cleanup_tracebacks_never_render_private_values(monkeypatch):
+    sensitive = "Bearer-cleanup-secret /tmp/private-http-runs/run-private"
+    logger = logging.Logger("probe-cleanup-test", logging.DEBUG)
+    logger.propagate = False
+    monkeypatch.setattr("services.assessments.probe_cleanup.log", logger)
+
+    def fail_cleanup():
+        raise OSError(sensitive)
+
+    for formatter in (_TextFormatter(), GELFFormatter()):
+        stream = StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(formatter)
+        logger.handlers[:] = [handler]
+        cleanup = observed_probe_cleanup(
+            fail_cleanup,
+            context={
+                "project_id": "prj_safe",
+                "entity_id": "ent_safe",
+                "action_id": "httpx",
+                "profile_id": "hpr_safe",
+            },
+        )
+        assert cleanup is not None
+        with pytest.raises(OSError):
+            cleanup()
+        body = stream.getvalue()
+        assert sensitive not in body
+        assert "Project probe operation failed" in body
+        assert "cleanup_stage" in body
 
 
 def test_probe_digest_excludes_presentation_but_covers_execution_fields():

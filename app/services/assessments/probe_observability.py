@@ -80,31 +80,4 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
     return decorator
 
 
-def observed_probe_cleanup(cleanup: Callable[[], Any] | None) -> Callable[[], Any] | None:
-    """Wrap protected cleanup with safe success/failure telemetry."""
-    if cleanup is None:
-        return None
-    cleaned = False
-
-    def observed() -> Any:
-        nonlocal cleaned
-        if cleaned:
-            return None
-        try:
-            result = cleanup()
-        except Exception:
-            app_metrics.record_probe_operation("cleanup", "failed", protected=True)
-            log.exception("PROJECT_PROBE_PROTECTED_CLEANUP_FAILED")
-            raise
-        if result is False:
-            app_metrics.record_probe_operation("cleanup", "failed", protected=True)
-            return False
-        cleaned = True
-        app_metrics.record_probe_operation("cleanup", "success", protected=True)
-        log.debug("PROJECT_PROBE_PROTECTED_CLEANUP_COMPLETED")
-        return result
-
-    return observed
-
-
-__all__ = ["observe_probe", "observed_probe_cleanup"]
+__all__ = ["observe_probe"]
