@@ -735,33 +735,20 @@ def test_probe_cleanup_tracebacks_never_render_private_values(monkeypatch):
         assert "cleanup_stage" in body
 
 
-def test_probe_digest_excludes_presentation_but_covers_execution_fields():
-    plan = build_probe_plan(_request("curl"), _target())
-    assert set(plan) == {
-        "schema_version", "digest_version", "project_id", "action", "target", "profile",
-        "profile_details", "http_profile", "policy_level", "required_features",
-        "feature_gates", "scope", "bounds", "display_command", "expected_evidence",
-        "availability", "launchable", "unavailable_reason", "requires_confirmation",
-        "plan_digest",
-    }
-    presentation_change = deepcopy(plan)
-    presentation_change["action"]["label"] = "Localized label"
-    presentation_change["action"]["purpose"] = "Localized help"
-    presentation_change["profile_details"] = {"label": "Presentation only"}
-    presentation_change["availability"]["reason"] = "Friendlier explanation"
-    assert probe_plan_digest(presentation_change) == plan["plan_digest"]
-
-    execution_change = deepcopy(plan)
-    execution_change["display_command"] += " --changed"
-    assert probe_plan_digest(execution_change) != plan["plan_digest"]
-
-    protected = build_probe_plan(
-        _request("httpx", http_profile_id="hpr_digest"),
+def _digest_test_plan():
+    return build_probe_plan(
+        _request(
+            "nuclei",
+            nuclei_profile="standard",
+            http_profile_id="hpr_digest",
+        ),
         _target(target_type="url"),
-        available_features={"httpx"},
+        available_features={"nuclei", "managed_nuclei_templates"},
+        template_snapshot=_READY_TEMPLATES,
         http_profile={
-            "id": "hpr_digest", "revision": 2, "role": "user",
-            "credential_use": ["headers"],
+            "id": "hpr_digest", "revision": 2, "name": "Digest profile",
+            "role": "user", "credential_use": ["headers"], "enabled": True,
+            "rate_limit_per_second": 3, "concurrency": 2,
             "scope": {
                 "allowed_hosts": ["example.test"],
                 "scope_roots": ["https://example.test/app"],
@@ -771,9 +758,104 @@ def test_probe_digest_excludes_presentation_but_covers_execution_fields():
         },
         http_profile_target="https://example.test/path",
     )
-    scope_change = deepcopy(protected)
-    scope_change["http_profile"]["scope"]["exclude_paths"] = ["/different"]
-    assert probe_plan_digest(scope_change) != protected["plan_digest"]
+
+
+def _replace_digest_field(plan, path, value):
+    changed = deepcopy(plan)
+    target = changed
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    return changed
+
+
+@pytest.mark.parametrize(("path", "value"), (
+    (("digest_version",), 999),
+    (("schema_version",), 999),
+    (("project_id",), "prj_changed"),
+    (("action", "id"), "httpx"),
+    (("action", "revision"), "changed"),
+    (("action", "mode"), "changed"),
+    (("target", "entity_id"), "ent_changed"),
+    (("target", "type"), "domain"),
+    (("target", "value"), "https://changed.example/path"),
+    (("profile", "kind"), "nmap"),
+    (("profile", "id"), "intrusive"),
+    (("profile", "revision"), 999),
+    (("profile", "policy_level"), "intrusive"),
+    (("profile", "requires_confirmation"), True),
+    (("profile", "evidence_kinds"), ["services"]),
+    (("profile", "template_snapshot", "state"), "stale"),
+    (("profile", "template_snapshot", "release_version"), "v99"),
+    (("profile", "template_snapshot", "content_digest"), "sha256:changed"),
+    (("profile", "template_snapshot", "manifest_entry_count"), 999),
+    (("http_profile", "id"), "hpr_changed"),
+    (("http_profile", "revision"), 3),
+    (("http_profile", "role"), "administrator"),
+    (("http_profile", "credential_use"), ["cookies"]),
+    (("http_profile", "scope"), {"allowed_hosts": ["changed.example"]}),
+    (("policy_level",), "intrusive"),
+    (("required_features",), ["nuclei"]),
+    (("feature_gates",), ["managed_nuclei_templates"]),
+    (("scope",), {"kind": "changed"}),
+    (("bounds",), {"target_count": 2}),
+    (("display_command",), "nuclei -u https://changed.example"),
+    (("expected_evidence",), ["services"]),
+    (("availability", "code"), "feature_unavailable"),
+    (("availability", "available"), False),
+    (("launchable",), False),
+    (("requires_confirmation",), False),
+))
+def test_probe_digest_changes_for_every_approval_field(path, value):
+    plan = _digest_test_plan()
+
+    assert probe_plan_digest(_replace_digest_field(plan, path, value)) != plan["plan_digest"]
+
+
+@pytest.mark.parametrize(("path", "value"), (
+    (("action", "label"), "Localized label"),
+    (("action", "purpose"), "Localized help"),
+    (("profile_details",), {"label": "Presentation only"}),
+    (("http_profile", "name"), "Localized profile name"),
+    (("http_profile", "enabled"), False),
+    (("http_profile", "rate_limit_per_second"), 99),
+    (("http_profile", "concurrency"), 99),
+    (("availability", "reason"), "Friendlier explanation"),
+    (("unavailable_reason",), "Friendlier explanation"),
+    (("plan_digest",), "caller-supplied-value-is-ignored"),
+))
+def test_probe_digest_ignores_every_presentation_field(path, value):
+    plan = _digest_test_plan()
+
+    assert probe_plan_digest(_replace_digest_field(plan, path, value)) == plan["plan_digest"]
+
+
+def test_probe_digest_normalizes_set_like_list_order():
+    plan = _digest_test_plan()
+    plan["required_features"] = ["zeta", "alpha"]
+    plan["feature_gates"] = ["second", "first"]
+    plan["expected_evidence"] = ["findings", "services"]
+    plan["profile"]["evidence_kinds"] = ["findings", "services"]
+    digest = probe_plan_digest(plan)
+    reordered = deepcopy(plan)
+    reordered["required_features"].reverse()
+    reordered["feature_gates"].reverse()
+    reordered["expected_evidence"].reverse()
+    reordered["profile"]["evidence_kinds"].reverse()
+
+    assert probe_plan_digest(reordered) == digest
+
+
+def test_probe_digest_public_shape_remains_versioned():
+    plan = _digest_test_plan()
+    assert set(plan) == {
+        "schema_version", "digest_version", "project_id", "action", "target", "profile",
+        "profile_details", "http_profile", "policy_level", "required_features",
+        "feature_gates", "scope", "bounds", "display_command", "expected_evidence",
+        "availability", "launchable", "unavailable_reason", "requires_confirmation",
+        "plan_digest",
+    }
+    assert plan["digest_version"] == 1
 
 
 def test_probe_confirmation_rebuilds_the_plan_and_rejects_stale_or_extra_fields():
