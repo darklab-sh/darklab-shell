@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, cast
 from urllib.parse import urlsplit
 
+import config as app_config
 from core.database_access import get_db_connect
 from services.assessments.http_profile_contracts import HttpProfileError
 from services.assessments.command_plans import command_plan
@@ -213,6 +214,19 @@ def _scope_arguments(profile: Mapping[str, Any], tool: str, target_value: str) -
     return arguments
 
 
+def _reviewed_nuclei_profile(plan: Mapping[str, Any]) -> str:
+    probe_profile = plan.get("profile")
+    if (
+        isinstance(probe_profile, Mapping)
+        and str(probe_profile.get("kind") or "") == "nuclei"
+    ):
+        return str(probe_profile.get("id") or "safe")
+    assessment_profile = plan.get("nuclei_profile")
+    if isinstance(assessment_profile, Mapping):
+        return str(assessment_profile.get("key") or "safe")
+    return "safe"
+
+
 def materialize_http_profile_launch(
     session_id: str,
     project_id: str,
@@ -268,6 +282,10 @@ def materialize_http_profile_launch(
         web_target=target_value,
         http_profile=summary,
         protected_display=False,
+        nuclei_profile=_reviewed_nuclei_profile(plan),
+        allow_intrusive=bool(
+            app_config.CFG.get("assessment_intrusive_actions_enabled", False)
+        ),
     )
     if protected_command is None:
         raise HttpProfileExecutionError(

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from types import SimpleNamespace
 from unittest import mock
 import uuid
 
@@ -200,6 +201,73 @@ def test_intrusive_nuclei_requires_the_instance_gate_and_fresh_confirmation():
     assert enabled["policy_level"] == "intrusive"
     assert "-headless" in enabled["display_command"]
     assert enabled["requires_confirmation"] is True
+
+
+@pytest.mark.parametrize("profile_key", ("safe", "standard", "intrusive"))
+def test_protected_nuclei_launch_keeps_the_reviewed_profile(
+    monkeypatch,
+    profile_key,
+):
+    from services.assessments import http_profile_execution
+
+    http_summary = {
+        "id": "ahp_probe_nuclei",
+        "revision": 1,
+        "role": "user",
+        "credential_use": ["headers"],
+        "rate_limit_per_second": 3,
+        "concurrency": 2,
+    }
+    plan = build_probe_plan(
+        _request(
+            "nuclei",
+            nuclei_profile=profile_key,
+            http_profile_id=http_summary["id"],
+        ),
+        _target(target_type="url"),
+        available_features={"nuclei", "managed_nuclei_templates"},
+        intrusive_actions_enabled=True,
+        template_snapshot=_READY_TEMPLATES,
+        http_profile=http_summary,
+        http_profile_target="https://example.test/path",
+    )
+    monkeypatch.setitem(
+        http_profile_execution.app_config.CFG,
+        "assessment_intrusive_actions_enabled",
+        True,
+    )
+    monkeypatch.setattr(
+        http_profile_execution,
+        "load_http_profile_plan_context",
+        lambda *_args, **_kwargs: (
+            http_summary,
+            "https://example.test/path",
+            "",
+            {"include_paths": [], "exclude_paths": []},
+        ),
+    )
+    monkeypatch.setattr(
+        http_profile_execution,
+        "_resolved_headers",
+        lambda *_args, **_kwargs: ([], []),
+    )
+    monkeypatch.setattr(
+        http_profile_execution,
+        "materialize_tool_profile",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            trusted_args=(), private_values=(), cleanup=None,
+        ),
+    )
+
+    materialized = http_profile_execution.materialize_http_profile_launch(
+        "session-probe",
+        "prj_probe",
+        plan,
+    )
+
+    assert materialized.execution_command == plan["display_command"].removesuffix(
+        " -sf [protected]"
+    )
 
 
 def test_probe_plan_fails_closed_for_profiles_features_and_target_types(monkeypatch):
