@@ -298,24 +298,26 @@ Probe resolution keeps exact target values in a strictly checked JSON body for b
 API payloads use a confirmed `entity_id`. A client that starts with an exact hostname, address, or URL can resolve it first:
 
 ```bash
-curl -sS -X POST \
+TARGET_RESPONSE="$(curl -sS -X POST \
   -H "Authorization: Bearer $DARKLAB_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"target_value":"app.example.test"}' \
-  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/targets/resolve"
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/targets/resolve")"
+ENTITY_ID="$(printf '%s' "$TARGET_RESPONSE" | jq -r '.target.entity_id')"
 ```
 
 The resolver rejects missing, pending, suppressed, ambiguous, cross-owner, and cross-Project records. Preview one action with the returned id:
 
 ```bash
-curl -sS -X POST \
+PLAN_RESPONSE="$(curl -sS -X POST \
   -H "Authorization: Bearer $DARKLAB_TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"action_id\":\"httpx\",\"entity_id\":\"$ENTITY_ID\"}" \
-  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/plan"
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/plan")"
+PLAN_DIGEST="$(printf '%s' "$PLAN_RESPONSE" | jq -r '.plan.plan_digest')"
 ```
 
-Optional `nmap_profile`, `nuclei_profile`, and `http_profile_id` fields select one reviewed local plan variant. A protected HTTP profile requires Secret-management permission and stays redacted: the response identifies its role, revision, allowed hosts, scope roots, and included or excluded paths, but never includes Secret values, private Files paths, generated arguments, or private environment data. Those scope fields are part of `plan_digest`, alongside the exact saved command, target, policy, bounds, credential classification, expected evidence, and availability.
+Optional `nmap_profile`, `nuclei_profile`, and `http_profile_id` fields select one reviewed local plan variant. The launch body must repeat every selection from the preview exactly; omitting or changing one rebuilds a different plan and returns `409 stale_plan`. A protected HTTP profile requires Secret-management permission and stays redacted: the response identifies its role, revision, allowed hosts, scope roots, and included or excluded paths, but never includes Secret values, private Files paths, generated arguments, or private environment data. Those scope fields are part of `plan_digest`, alongside the exact saved command, target, policy, bounds, credential classification, expected evidence, and availability.
 
 Launch only the freshly previewed plan:
 
@@ -326,6 +328,25 @@ curl -sS -X POST \
   -d "{\"action_id\":\"httpx\",\"entity_id\":\"$ENTITY_ID\",\"confirmed\":true,\"plan_digest\":\"$PLAN_DIGEST\"}" \
   "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/run"
 ```
+
+For example, a reviewed Nmap TLS profile is previewed and launched with the same `nmap_profile` field:
+
+```bash
+PLAN_RESPONSE="$(curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"action_id\":\"nmap\",\"entity_id\":\"$ENTITY_ID\",\"nmap_profile\":\"tls\"}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/plan")"
+PLAN_DIGEST="$(printf '%s' "$PLAN_RESPONSE" | jq -r '.plan.plan_digest')"
+
+curl -sS -X POST \
+  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"action_id\":\"nmap\",\"entity_id\":\"$ENTITY_ID\",\"nmap_profile\":\"tls\",\"confirmed\":true,\"plan_digest\":\"$PLAN_DIGEST\"}" \
+  "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/run"
+```
+
+Use the same pattern for `nuclei_profile` or `http_profile_id`: send the chosen field in both requests and use the digest returned by that exact preview.
 
 Launch returns `202` with the ordinary run summary, stream and History locations, and rebuilt plan. It requires `RUN_COMMANDS`; a team launch with `http_profile_id` also requires `MANAGE_SECRETS`. The server binds the run to the requested Project independently of the active browser Project or automatic external-run capture setting. A changed target, profile, policy, feature gate, or command makes the digest stale and returns `409`. Validation errors return `400`, missing scoped records return `404`, rate limits return `429`, and an unavailable broker returns `503` with `Retry-After: 5`.
 
