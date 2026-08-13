@@ -8499,11 +8499,19 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                         action for action in actions
                         if target_type in action["target_types"]
                     ]
+                service = str((params or {}).get("service") or "")
                 return {
                     "catalog": {
                         "actions": actions,
                         "nmap_profiles": [{"key": "safe"}],
                         "nuclei_profiles": [{"key": "safe"}],
+                        "service_recommendations": ([{
+                            "action_id": "nmap",
+                            "nmap_profile": "smb",
+                            "target_types": ["domain", "ip"],
+                            "label": "Review SMB services",
+                            "rationale": "Confirm the discovered SMB surface.",
+                        }] if service == "microsoft-ds" else []),
                     },
                 }
             if method == "POST" and path.endswith("/targets/resolve"):
@@ -8566,6 +8574,17 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert "DNSRecon" not in ip_output
     assert "SQLmap" not in ip_output
     assert calls[-1][2] == {"service": None, "target_type": "ip"}
+
+    assert cli_main.main([
+        "probe", "list", "--project", "prj_probe", "--service", "microsoft-ds",
+        "--target-type", "ip",
+    ]) == 0
+    service_output = capsys.readouterr().out
+    assert "Service recommendations:" in service_output
+    assert "nmap" in service_output
+    assert "smb" in service_output
+    assert "Confirm the discovered SMB surface." in service_output
+    assert calls[-1][2] == {"service": "microsoft-ds", "target_type": "ip"}
 
     assert cli_main.main([
         "probe", "list", "--project", "prj_probe", "--target-type", "url",
