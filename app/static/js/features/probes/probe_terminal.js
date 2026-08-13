@@ -269,9 +269,7 @@ async function handleProbeTerminalCommand(command, tabId, execution, launchAdapt
         tabId,
         execution,
         onYes: async () => {
-          const launched = await _launchPlan(parsed, plan, tabId, launchAdapter);
-          execution.setStatus('ok');
-          return launched;
+          return _launchPlan(parsed, plan, tabId, launchAdapter);
         },
         onNo: () => {
           append('Probe launch canceled.');

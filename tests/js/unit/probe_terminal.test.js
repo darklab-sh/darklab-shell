@@ -267,6 +267,7 @@ describe('Project probe terminal', () => {
       }),
     );
     expect(bindStartedRun).toHaveBeenCalledWith(launched, 'tab-origin');
+    expect(commandExecution.setStatus).not.toHaveBeenCalledWith('ok');
   });
 
   it('settles a declined probe without posting a launch', async () => {
