@@ -63,12 +63,17 @@ describe('Project probe terminal', () => {
       .toContain('provide either an exact target or --entity-id, not both');
     expect(parseProbeCommand('probe list --unknown value').errors)
       .toContain("unknown option '--unknown'");
-    expect(parseProbeCommand('probe list --project prj_2 --service https')).toMatchObject({
+    expect(parseProbeCommand(
+      'probe list --project prj_2 --service https --target-type url',
+    )).toMatchObject({
       subcommand: 'list',
       projectId: 'prj_2',
       service: 'https',
+      targetType: 'url',
       errors: [],
     });
+    expect(parseProbeCommand('probe list --target-type cidr').errors)
+      .toContain("option '--target-type' must be domain, ip, or url");
     expect(parseProbeCommand('probe run ping --entity-id ent_1 --project=prj_1')).toMatchObject({
       subcommand: 'run',
       entityId: 'ent_1',
@@ -127,12 +132,12 @@ describe('Project probe terminal', () => {
     expect(commandExecution.setStatus).toHaveBeenCalledWith('ok');
 
     await handleProbeTerminalCommand(
-      'probe list --project prj_explicit --service http',
+      'probe list --project prj_explicit --service http --target-type url',
       'tab-1',
       commandExecution,
     );
     expect(apiFetch).toHaveBeenLastCalledWith(
-      '/projects/prj_explicit/probes?service=http',
+      '/projects/prj_explicit/probes?service=http&target_type=url',
       { cache: 'no-store' },
     );
   });

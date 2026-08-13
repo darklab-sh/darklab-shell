@@ -12,7 +12,7 @@ import { setProbeTerminalHandler } from './probe_terminal_bridge.js';
 
 const PROBE_USAGE = [
   'Usage:',
-  '  probe list [--project <project-id>] [--service <service>]',
+  '  probe list [--project <project-id>] [--service <service>] [--target-type <domain|ip|url>]',
   '  probe plan <action> <target> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
   '  probe plan <action> --entity-id <entity-id> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
   '  probe run <action> <target> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
@@ -77,12 +77,17 @@ function parseProbeCommand(command) {
     const parsed = _parseFlags(tokens.slice(2), {
       '--project': 'projectId',
       '--service': 'service',
+      '--target-type': 'targetType',
     });
+    if (parsed.values.targetType && !['domain', 'ip', 'url'].includes(parsed.values.targetType)) {
+      parsed.errors.push("option '--target-type' must be domain, ip, or url");
+    }
     if (parsed.positional.length) parsed.errors.push('probe list does not accept positional values');
     return {
       subcommand,
       projectId: parsed.values.projectId || '',
       service: parsed.values.service || '',
+      targetType: parsed.values.targetType || '',
       errors: parsed.errors,
     };
   }
@@ -176,6 +181,7 @@ async function _loadCatalog(parsed) {
   if (!projectId) throw new Error('select an active Project before listing probes');
   const query = new URLSearchParams();
   if (parsed.service) query.set('service', parsed.service);
+  if (parsed.targetType) query.set('target_type', parsed.targetType);
   const suffix = query.size ? `?${query}` : '';
   const response = await apiFetch(`/projects/${encodeURIComponent(projectId)}/probes${suffix}`, { cache: 'no-store' });
   return (await _responseJson(response)).catalog || {};

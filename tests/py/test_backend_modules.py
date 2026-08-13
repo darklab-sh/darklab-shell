@@ -19729,6 +19729,12 @@ class TestDerivedCommandRegistry:
             "description": "Project id; defaults to the active Project",
         }
         assert "--project" in probe_context["list"]["expects_value"]
+        assert any(item["value"] == "--target-type" for item in list_flags)
+        assert [
+            item["value"]
+            for item in probe_context["list"]["arg_hints"]["--target-type"]
+        ] == ["domain", "ip", "url"]
+        assert "--target-type" in probe_context["list"]["expects_value"]
         for subcommand in ("plan", "run"):
             flags = probe_context[subcommand]["flags"]
             http_profile = next(item for item in flags if item["value"] == "--http-profile")

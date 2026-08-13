@@ -47,6 +47,15 @@ _PROBE_AUTOCOMPLETE = {
                         "description": "Show recommendations for one detected service",
                         "suggest": _value_suggestions(_probe_services(), "Detected service name"),
                     },
+                    {
+                        "value": "--target-type",
+                        "takes_value": True,
+                        "description": "Show actions compatible with one target type",
+                        "suggest": _value_suggestions(
+                            ("domain", "ip", "url"),
+                            "Confirmed Project target type",
+                        ),
+                    },
                 ],
             },
             "plan": {
