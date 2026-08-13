@@ -13,6 +13,7 @@ from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.probe_catalog import probe_catalog
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
 from services.assessments.probe_http_profile_plans import probe_http_profile_plan_context
+from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_observability import observe_probe
 from services.assessments.probe_plans import build_probe_plan
 from services.assessments.probe_targets import (
@@ -47,6 +48,7 @@ def get_probe_catalog(
     team_id: str = "",
     service: str = "",
     target_type: str = "",
+    observability: ProbeLogContext | None = None,
 ) -> dict[str, Any]:
     """Return the reviewed local probe catalog for one current Project."""
     snapshot = managed_nuclei_template_snapshot()
@@ -69,6 +71,7 @@ def get_probe_plan(
     *,
     team_id: str = "",
     actor_member_id: str = "",
+    observability: ProbeLogContext | None = None,
 ) -> dict[str, Any]:
     """Build one read-only plan from an explicit confirmed entity id."""
     if request.project_id != project_id:

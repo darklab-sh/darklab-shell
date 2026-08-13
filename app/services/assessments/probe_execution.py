@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping
 from services.assessments.probe_confirmation import confirm_project_probe_plan
 from services.assessments.probe_broker_launch import launch_confirmed_probe
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_observability import observe_probe
 
 
@@ -42,6 +43,7 @@ def start_project_probe(
     broker_available: Callable[[], bool] = lambda: True,
     broker_unavailable_reason: Callable[[], str] = lambda: "Run broker unavailable.",
     thread_name_prefix: str = "probe-run-broker",
+    observability: ProbeLogContext | None = None,
 ) -> ProbeExecutionResult:
     """Rebuild, confirm, and start one explicit Project-bound ordinary run."""
     plan = confirm_project_probe_plan(
@@ -72,6 +74,5 @@ def start_project_probe(
         thread_name_prefix=thread_name_prefix,
     )
     return ProbeExecutionResult(plan=plan, started=started, audit_summary=audit_summary)
-
 
 __all__ = ["ProbeExecutionResult", "start_project_probe"]

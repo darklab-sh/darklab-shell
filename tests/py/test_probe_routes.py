@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import uuid
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -455,9 +456,14 @@ def test_probe_launch_revalidates_and_binds_the_requested_project_and_tab(
 
     monkeypatch.setattr("blueprints.run.broker_available", lambda: True)
     monkeypatch.setattr("blueprints.run._start_brokered_run_service", _start)
+    logger = mock.Mock()
+    monkeypatch.setattr("blueprints.projects.log", logger)
     response = client.post(
         f"/projects/{project['id']}/probes/run",
-        headers={**_headers(session_id), "X-Client-ID": "client-probe"},
+        headers={
+            **_headers(session_id), "X-Client-ID": "client-probe",
+            "X-Request-ID": "probe-browser-request",
+        },
         json={
             "action_id": "ping",
             "entity_id": target["id"],
@@ -480,6 +486,18 @@ def test_probe_launch_revalidates_and_binds_the_requested_project_and_tab(
     assert launch["owner_tab_id"] == "tab-probe"
     assert launch["workspace_cwd"] == "evidence"
     assert launch["trusted_execution_args"] == ()
+    log_call = next(
+        call for call in logger.info.call_args_list
+        if call.args == ("PROJECT_PROBE_LAUNCHED",)
+    )
+    assert log_call.kwargs["extra"]["request_id"] == "probe-browser-request"
+    assert log_call.kwargs["extra"]["source"] == "browser_terminal"
+    with db_connect() as conn:
+        audit = conn.execute(
+            "SELECT request_id FROM audit_events WHERE target_id = ?",
+            ("run_probe_route",),
+        ).fetchone()
+    assert audit["request_id"] == "probe-browser-request"
 
 
 def test_probe_launch_itself_writes_no_cycle_evidence_but_finalized_run_can_cover(
@@ -630,7 +648,9 @@ def test_api_v1_probe_catalog_plan_and_launch_share_the_project_bound_service(
     _register_token(token)
     project = _create_project(client, token)
     target = _create_target(client, token, project["id"])
-    api_headers = {"Authorization": f"Bearer {token}"}
+    api_headers = {
+        "Authorization": f"Bearer {token}", "X-Request-ID": "probe-api-request",
+    }
 
     catalog = client.get(f"/api/v1/projects/{project['id']}/probes", headers=api_headers)
     resolved = client.post(
@@ -651,6 +671,8 @@ def test_api_v1_probe_catalog_plan_and_launch_share_the_project_bound_service(
 
     calls = []
     monkeypatch.setattr("blueprints.api_v1.broker_available", lambda: True)
+    logger = mock.Mock()
+    monkeypatch.setattr("blueprints.api_v1.log", logger)
     monkeypatch.setattr(
         "blueprints.api_v1._start_brokered_run_service",
         lambda **kwargs: calls.append(kwargs) or SimpleNamespace(
@@ -673,6 +695,12 @@ def test_api_v1_probe_catalog_plan_and_launch_share_the_project_bound_service(
     assert calls[0]["link_project_id"] == project["id"]
     assert calls[0]["owner_tab_id"] == ""
     assert calls[0]["display_command"] == plan["display_command"]
+    log_call = next(
+        call for call in logger.info.call_args_list
+        if call.args == ("API_PROJECT_PROBE_LAUNCHED",)
+    )
+    assert log_call.kwargs["extra"]["request_id"] == "probe-api-request"
+    assert log_call.kwargs["extra"]["source"] == "api_v1"
 
 
 def test_api_v1_probe_routes_require_auth_and_reject_client_owned_plan_fields(client):

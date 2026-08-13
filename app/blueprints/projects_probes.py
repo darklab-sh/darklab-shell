@@ -7,6 +7,7 @@ from flask import jsonify, request
 
 from blueprints import projects as project_routes
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_service import get_probe_catalog, get_probe_plan
 from services.teams.capabilities import Capability
 
@@ -23,6 +24,9 @@ def projects_probes_catalog(project_id):
     session_id, team_id, error_response = project_routes._project_owner()
     if error_response:
         return error_response
+    observability = ProbeLogContext(
+        "browser_terminal", request.environ.get("darklab_request_id", ""), session_id, team_id
+    )
     try:
         catalog = get_probe_catalog(
             session_id,
@@ -30,6 +34,7 @@ def projects_probes_catalog(project_id):
             team_id=team_id,
             service=str(request.args.get("service") or "").strip(),
             target_type=str(request.args.get("target_type") or "").strip(),
+            observability=observability,
         )
     except ProbeError as exc:
         return _probe_error(exc)
@@ -44,6 +49,9 @@ def projects_probes_plan(project_id):
     )
     if error_response:
         return error_response
+    observability = ProbeLogContext(
+        "browser_terminal", request.environ.get("darklab_request_id", ""), session_id, team_id
+    )
     probe_request = ProbePlanRequest(
         project_id=project_id,
         action_id=str(request.args.get("action_id") or "").strip(),
@@ -59,6 +67,7 @@ def projects_probes_plan(project_id):
             probe_request,
             team_id=team_id,
             actor_member_id=project_routes._project_actor_member_id(session_id, team_id),
+            observability=observability,
         )
     except ProbeError as exc:
         return _probe_error(exc)

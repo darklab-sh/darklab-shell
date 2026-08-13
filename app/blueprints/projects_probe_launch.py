@@ -11,6 +11,7 @@ from blueprints import projects as project_routes
 from extensions import limiter
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
 from services.assessments.probe_execution import start_project_probe
+from services.assessments.probe_log_context import ProbeLogContext
 from services.audit.models import AuditEventType
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.teams.capabilities import Capability
@@ -40,6 +41,9 @@ def project_probe_launch(project_id):
     )
     if error_response:
         return error_response
+    observability = ProbeLogContext(
+        "browser_terminal", request.environ.get("darklab_request_id", ""), session_id, team_id
+    )
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return _error(ProbeError("invalid_body", "Request body must be a JSON object."))
@@ -95,6 +99,7 @@ def project_probe_launch(project_id):
             workspace_cwd=run_routes._workspace_cwd_value(data.get("workspace_cwd", "")),
             start_run=run_routes._start_brokered_run_service,
             thread_name_prefix="probe-run-broker",
+            observability=observability,
         )
         plan, started = result.plan, result.started
     except ProbeError as exc:
@@ -134,6 +139,8 @@ def project_probe_launch(project_id):
         "run_id": started.run_id,
         "owner_tab_id_present": bool(owner_tab_id),
         "http_profile_id": str(result.audit_summary.get("profile_id") or ""),
+        "request_id": observability.request_id,
+        "source": observability.source,
     })
     return jsonify({
         "run": {

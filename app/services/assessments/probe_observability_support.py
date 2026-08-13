@@ -11,6 +11,7 @@ from types import TracebackType
 from typing import Any
 
 from services.assessments.probe_contracts import ProbePlanRequest
+from services.assessments import probe_log_context
 from services.assessments import probe_log_safety as log_safety
 from services.runs.contracts import RunPreparationError, RunStartRejected
 
@@ -30,6 +31,7 @@ def probe_log_fields(
     outcome: str,
     error_code: str = "",
     error_class: str = "",
+    result: Any = None,
 ) -> dict[str, Any]:
     request = probe_request(args, kwargs)
     project_id = str(
@@ -46,6 +48,8 @@ def probe_log_fields(
         "protected": bool(request and request.http_profile_id),
         "error_code": log_safety.safe_probe_code(error_code, "") if error_code else "",
         "error_class": log_safety.safe_probe_error_class(error_class) if error_class else "",
+        **probe_log_context.probe_context_fields(args, kwargs),
+        **probe_log_context.probe_result_fields(result),
     }
 
 

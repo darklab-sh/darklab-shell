@@ -438,6 +438,7 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget("app/services/assessments/probe_confirmation.py", 35, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_execution.py", 75, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/probe_log_context.py", 59, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_probe_examples.py", 123, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_probe_schemas.py", 370, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_probes.py", 156, "split-package-ratchet"),

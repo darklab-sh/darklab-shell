@@ -14,6 +14,7 @@ from unittest import mock
 import uuid
 
 import pytest
+from flask import Request
 
 from core.database import db_connect, db_init
 from core.logging_setup import GELFFormatter, _TextFormatter
@@ -32,9 +33,11 @@ from services.assessments.probe_contracts import (
 from services.assessments.probe_plan_digest import probe_plan_digest
 from services.assessments.probe_plans import build_probe_plan, confirm_probe_plan
 from services.assessments.probe_cleanup import observed_probe_cleanup
+from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_observability import observe_probe
 from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.probe_targets import resolve_probe_target
+from services.audit.context import request_audit_fields
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 from services.projects.crud import create_project, delete_project, update_project
 from services.projects.targets import add_project_target
@@ -476,6 +479,41 @@ def test_probe_logging_classifies_unavailable_plans_and_broker_modes(monkeypatch
     assert logger.warning.call_args.kwargs["extra"]["error_code"] == (
         "broker_dependency_unavailable"
     )
+
+
+def test_probe_logs_and_audit_rows_share_bounded_request_correlation(monkeypatch):
+    logger = mock.Mock()
+    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+    context = ProbeLogContext(
+        "api_v1", "request-probe-123", "tok_probe-secret", "team_probe"
+    )
+
+    @observe_probe("launch")
+    def launch(_request, *, observability):
+        del observability
+        return SimpleNamespace(
+            plan={"policy_level": "standard"},
+            started=SimpleNamespace(run_id="run_probe_context"),
+        )
+
+    launch(_request("ping"), observability=context)
+    fields = logger.info.call_args.kwargs["extra"]
+    assert fields == {
+        **fields,
+        "source": "api_v1",
+        "request_id": "request-probe-123",
+        "session": "tok_prob********",
+        "team_id": "team_probe",
+        "policy_level": "standard",
+        "run_id": "run_probe_context",
+    }
+
+    audit_request = Request.from_values(headers={"X-Request-ID": "caller-request"})
+    audit_request.environ["darklab_request_id"] = "server-request"
+    assert request_audit_fields(audit_request)["request_id"] == "server-request"
+    invalid_request = Request.from_values()
+    invalid_request.environ["HTTP_X_REQUEST_ID"] = "forged\nrequest"
+    assert request_audit_fields(invalid_request)["request_id"] == ""
 
 
 def test_probe_cleanup_observation_starts_before_launch_context_validation(monkeypatch):

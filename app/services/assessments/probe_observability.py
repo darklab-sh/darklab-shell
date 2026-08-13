@@ -71,7 +71,7 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
             outcome, level, error_code = classification.classify_probe_result(result, phase)
             app_metrics.record_probe_operation(phase, outcome, protected=protected)
             fields = probe_log_fields(
-                phase, args, kwargs, outcome=outcome, error_code=error_code,
+                phase, args, kwargs, outcome=outcome, error_code=error_code, result=result,
             )
             getattr(log, level)("PROJECT_PROBE_OPERATION_COMPLETED", extra=fields)
             return result

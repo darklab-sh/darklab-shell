@@ -7,6 +7,7 @@ from flask import jsonify, request
 
 from blueprints import api_v1 as api_routes
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_service import get_probe_catalog, get_probe_plan
 from services.teams.capabilities import Capability
 from services.teams.contracts import TeamPermissionDenied
@@ -31,12 +32,17 @@ def api_project_probes(project_id):
     try:
         session_id = api_routes._require_session_id()
         owner_scope = api_routes._api_request_scope()
+        observability = ProbeLogContext(
+            "api_v1", request.environ.get("darklab_request_id", ""),
+            session_id, owner_scope.team_id,
+        )
         catalog = get_probe_catalog(
             session_id,
             project_id,
             team_id=owner_scope.team_id,
             service=str(request.args.get("service") or "").strip(),
             target_type=str(request.args.get("target_type") or "").strip(),
+            observability=observability,
         )
     except ProbeError as exc:
         return _error(exc)
@@ -53,6 +59,10 @@ def api_project_probe_plan(project_id):
     try:
         session_id = api_routes._require_session_id()
         owner_scope = api_routes._api_request_scope()
+        observability = ProbeLogContext(
+            "api_v1", request.environ.get("darklab_request_id", ""),
+            session_id, owner_scope.team_id,
+        )
         data = api_routes._json_body()
         if set(data) - _PLAN_FIELDS:
             raise ProbeError("unsupported_fields", "Probe plan contains unsupported fields.")
@@ -75,6 +85,7 @@ def api_project_probe_plan(project_id):
             ),
             team_id=owner_scope.team_id,
             actor_member_id=str((owner_scope.member or {}).get("id") or ""),
+            observability=observability,
         )
     except (ProbeError, TeamPermissionDenied) as exc:
         if isinstance(exc, TeamPermissionDenied):

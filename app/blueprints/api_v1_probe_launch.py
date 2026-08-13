@@ -11,6 +11,7 @@ from blueprints import api_v1 as api_routes
 from core.helpers import get_client_ip, get_log_session_id
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
 from services.assessments.probe_execution import start_project_probe
+from services.assessments.probe_log_context import ProbeLogContext
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
@@ -46,6 +47,10 @@ def api_project_probe_launch(project_id):
     try:
         session_id = api_routes._require_session_id()
         owner_scope = api_routes._api_request_scope()
+        observability = ProbeLogContext(
+            "api_v1", request.environ.get("darklab_request_id", ""),
+            session_id, owner_scope.team_id,
+        )
         api_routes._require_api_team_capability(owner_scope, Capability.RUN_COMMANDS)
         data = api_routes._json_body()
         if set(data) - _FIELDS:
@@ -76,6 +81,7 @@ def api_project_probe_launch(project_id):
             broker_available=api_routes.broker_available,
             broker_unavailable_reason=api_routes.broker_unavailable_reason,
             thread_name_prefix="api-probe-run-broker",
+            observability=observability,
         )
     except (ProbeError, TeamPermissionDenied) as exc:
         return _error(exc)
@@ -106,6 +112,7 @@ def api_project_probe_launch(project_id):
         "entity_id": target["entity_id"], "action_id": action["id"],
         "policy_level": plan["policy_level"], "run_id": started.run_id,
         "http_profile_id": str(result.audit_summary.get("profile_id") or ""),
+        "request_id": observability.request_id, "source": observability.source,
     })
     started_at = datetime.now(timezone.utc).isoformat()
     return jsonify({
