@@ -281,6 +281,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_probes.py", 84, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_probe_launch.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_probe_targets.py", 40, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/probe_log_context.py", 16, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_report.py", 301, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_targets.py", 111, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_verification_actions.py", 169, "split-package-ratchet"),
@@ -719,6 +720,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/probe_http_profile_plans.py", 44, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_protected_launch.py", 47, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_target_service.py", 20, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/probe_target_resolution.py", 96, "split-package-ratchet"
+    ),
     ModuleSizeBudget(
         "app/services/assessments/nuclei_takeover_contracts.py", 20, "split-package-ratchet"
     ),

@@ -3,9 +3,8 @@
 
 """Read facade for exact Project probe-target resolution."""
 
-from core.database_access import get_db_connect
-from services.assessments.probe_contracts import ProbePlanRequest
-from services.assessments.probe_targets import resolve_probe_target
+from services.assessments.probe_log_context import ProbeLogContext
+from services.assessments.probe_target_resolution import resolve_observed_probe_target
 
 
 def resolve_project_probe_target(
@@ -14,10 +13,11 @@ def resolve_project_probe_target(
     *,
     team_id: str = "",
     target_value: str,
+    observability: ProbeLogContext | None = None,
 ) -> dict[str, str]:
-    request = ProbePlanRequest(project_id=project_id, action_id="", target_value=target_value)
-    with get_db_connect()() as conn:
-        return resolve_probe_target(conn, session_id, team_id, request)
-
+    return resolve_observed_probe_target(
+        session_id, project_id, team_id=team_id,
+        target_value=target_value, observability=observability,
+    )
 
 __all__ = ["resolve_project_probe_target"]

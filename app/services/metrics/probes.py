@@ -10,7 +10,7 @@ from typing import Any
 from prometheus_client import Counter
 
 
-PROBE_PHASES = frozenset({"catalog", "plan", "confirm", "launch", "cleanup"})
+PROBE_PHASES = frozenset({"catalog", "plan", "confirm", "launch", "cleanup", "resolve"})
 PROBE_OUTCOMES = frozenset({"success", "rejected", "unavailable", "failed"})
 PROBE_CREDENTIAL_USE = frozenset({"none", "protected"})
 

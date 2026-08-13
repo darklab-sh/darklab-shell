@@ -37,6 +37,7 @@ from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_observability import observe_probe
 from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.probe_targets import resolve_probe_target
+from services.assessments.probe_target_service import resolve_project_probe_target
 from services.audit.context import request_audit_fields
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 from services.projects.crud import create_project, delete_project, update_project
@@ -514,6 +515,54 @@ def test_probe_logs_and_audit_rows_share_bounded_request_correlation(monkeypatch
     invalid_request = Request.from_values()
     invalid_request.environ["HTTP_X_REQUEST_ID"] = "forged\nrequest"
     assert request_audit_fields(invalid_request)["request_id"] == ""
+
+
+def test_probe_target_resolution_emits_bounded_success_and_rejection_events(monkeypatch):
+    from services.assessments import probe_target_resolution
+
+    logger = mock.Mock()
+    metrics = mock.Mock()
+    database = mock.MagicMock()
+    database.__enter__.return_value = mock.Mock()
+    monkeypatch.setattr(probe_target_resolution, "log", logger)
+    monkeypatch.setattr(probe_target_resolution.app_metrics, "record_probe_operation", metrics)
+    monkeypatch.setattr(probe_target_resolution, "get_db_connect", lambda: lambda: database)
+    target_value = "private-target.example"
+    resolved = {"entity_id": "ent_probe", "type": "domain", "value": target_value}
+    monkeypatch.setattr(probe_target_resolution, "resolve_probe_target", mock.Mock(return_value=resolved))
+    context = ProbeLogContext("browser_terminal", "request-resolve", "session-resolve")
+
+    assert resolve_project_probe_target(
+        "session-resolve", "prj_probe", target_value=target_value,
+        observability=context,
+    ) == resolved
+    fields = logger.debug.call_args.kwargs["extra"]
+    assert logger.debug.call_args.args == ("PROJECT_PROBE_TARGET_RESOLVED",)
+    assert fields["entity_id"] == "ent_probe"
+    assert fields["target_type"] == "domain"
+    assert fields["selector_kind"] == "exact_value"
+    assert fields["candidate_count"] == 1
+    assert fields["request_id"] == "request-resolve"
+    assert target_value not in json.dumps(fields)
+
+    ambiguous = ProbeError(
+        "probe_target_ambiguous", "Ambiguous", status_code=409,
+        details={"candidate_entity_ids": ["ent_one", "ent_two"]},
+    )
+    probe_target_resolution.resolve_probe_target.side_effect = ambiguous
+    with pytest.raises(ProbeError):
+        resolve_project_probe_target(
+            "session-resolve", "prj_probe", target_value=target_value,
+            observability=context,
+        )
+    rejected = logger.warning.call_args.kwargs["extra"]
+    assert logger.warning.call_args.args == ("PROJECT_PROBE_TARGET_REJECTED",)
+    assert rejected["candidate_count"] == 2
+    assert rejected["error_code"] == "probe_target_ambiguous"
+    assert target_value not in json.dumps(rejected)
+    assert [call.args[:2] for call in metrics.call_args_list] == [
+        ("resolve", "success"), ("resolve", "rejected"),
+    ]
 
 
 def test_probe_cleanup_observation_starts_before_launch_context_validation(monkeypatch):
