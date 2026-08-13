@@ -11,6 +11,7 @@ from types import TracebackType
 from typing import Any
 
 from services.assessments.probe_contracts import ProbePlanRequest
+from services.assessments import probe_log_safety as log_safety
 from services.runs.contracts import RunPreparationError, RunStartRejected
 
 
@@ -39,12 +40,12 @@ def probe_log_fields(
     return {
         "probe_phase": phase,
         "probe_outcome": outcome,
-        "project_id": project_id,
-        "entity_id": str(request.entity_id if request else ""),
-        "action_id": str(request.action_id if request else ""),
+        "project_id": log_safety.safe_probe_id(project_id, "prj"),
+        "entity_id": log_safety.safe_probe_id(request.entity_id if request else "", "ent"),
+        "action_id": log_safety.safe_probe_action(request.action_id if request else ""),
         "protected": bool(request and request.http_profile_id),
-        "error_code": error_code,
-        "error_class": error_class,
+        "error_code": log_safety.safe_probe_code(error_code, "") if error_code else "",
+        "error_class": log_safety.safe_probe_error_class(error_class) if error_class else "",
     }
 
 
@@ -72,9 +73,4 @@ def sanitized_probe_exc_info(
         return RuntimeError, safe_error, safe_error.__traceback__
 
 
-__all__ = [
-    "probe_log_fields",
-    "probe_request",
-    "probe_run_rejection",
-    "sanitized_probe_exc_info",
-]
+__all__ = ["probe_log_fields", "probe_request", "probe_run_rejection", "sanitized_probe_exc_info"]

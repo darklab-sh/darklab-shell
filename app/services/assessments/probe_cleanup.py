@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 import logging
 from typing import Any
 
+from services.assessments.probe_log_safety import safe_probe_cleanup_fields
 from services.assessments.probe_observability_support import sanitized_probe_exc_info
 from services.metrics_lazy import app_metrics
 
@@ -17,11 +18,7 @@ log = logging.getLogger("shell")
 
 
 def _fields(context: Mapping[str, object] | None, error_class: str = "") -> dict[str, object]:
-    source = context or {}
-    return {
-        key: str(source.get(key, ""))
-        for key in ("project_id", "entity_id", "action_id", "profile_id")
-    } | {"cleanup_stage": "protected_material", "error_class": error_class}
+    return safe_probe_cleanup_fields(context, error_class)
 
 
 def cleanup_context(plan: Mapping[str, Any]) -> dict[str, object]:

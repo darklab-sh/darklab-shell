@@ -420,6 +420,32 @@ def test_probe_failure_logging_sanitizes_chained_run_errors(monkeypatch):
     assert "exc_info" not in logger.warning.call_args.kwargs
 
 
+def test_probe_log_fields_reject_control_characters_and_unbounded_identifiers(monkeypatch):
+    logger = mock.Mock()
+    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+    malicious = "forged\nrecord" + "x" * 5000
+    request = ProbePlanRequest(
+        project_id=malicious,
+        entity_id=malicious,
+        action_id=malicious,
+    )
+
+    @observe_probe("plan")
+    def reject(_request):
+        raise ProbeError(malicious, "Rejected", status_code=400)
+
+    with pytest.raises(ProbeError):
+        reject(request)
+
+    fields = logger.info.call_args.kwargs["extra"]
+    assert fields["project_id"] == ""
+    assert fields["entity_id"] == ""
+    assert fields["action_id"] == "unknown"
+    assert fields["error_code"] == ""
+    assert fields["error_class"] == "ProbeError"
+    assert malicious not in json.dumps(fields)
+
+
 def test_probe_cleanup_observation_starts_before_launch_context_validation(monkeypatch):
     from services.assessments import probe_protected_launch
 
