@@ -19721,6 +19721,15 @@ class TestDerivedCommandRegistry:
             "unset",
         ]
         assert context["var"]["close_after"] == {"list": 0, "set": 2, "unset": 1}
+        probe_context = context["probe"]["subcommands"]
+        for subcommand in ("plan", "run"):
+            flags = probe_context[subcommand]["flags"]
+            http_profile = next(item for item in flags if item["value"] == "--http-profile")
+            assert http_profile == {
+                "value": "--http-profile",
+                "description": "Project HTTP profile id",
+            }
+            assert "--http-profile" in probe_context[subcommand]["expects_value"]
 
     def test_builtin_autocomplete_workspace_roots_follow_feature_flag(self):
         disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})

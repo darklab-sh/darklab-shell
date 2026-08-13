@@ -52,6 +52,10 @@ _PROBE_AUTOCOMPLETE = {
                     {"value": "--project", "takes_value": True, "description": "Project id"},
                     {"value": "--entity-id", "takes_value": True, "description": "Confirmed target entity id"},
                     {
+                        "value": "--http-profile", "takes_value": True,
+                        "description": "Project HTTP profile id",
+                    },
+                    {
                         "value": "--nmap-profile", "takes_value": True,
                         "description": "Reviewed Nmap profile",
                         "suggest": _value_suggestions(nmap_profile_keys(), "Nmap profile"),
@@ -72,6 +76,10 @@ _PROBE_AUTOCOMPLETE = {
                 "flags": [
                     {"value": "--project", "takes_value": True, "description": "Project id"},
                     {"value": "--entity-id", "takes_value": True, "description": "Confirmed target entity id"},
+                    {
+                        "value": "--http-profile", "takes_value": True,
+                        "description": "Project HTTP profile id",
+                    },
                     {
                         "value": "--nmap-profile", "takes_value": True,
                         "description": "Reviewed Nmap profile",
