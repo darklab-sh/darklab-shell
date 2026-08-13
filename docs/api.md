@@ -327,6 +327,8 @@ curl -sS -X POST \
 
 Launch returns `202` with the ordinary run summary, stream and History locations, and rebuilt plan. It requires `RUN_COMMANDS`; a team launch with `http_profile_id` also requires `MANAGE_SECRETS`. The server binds the run to the requested Project independently of the active browser Project or automatic external-run capture setting. A changed target, profile, policy, feature gate, or command makes the digest stale and returns `409`. Validation errors return `400`, missing scoped records return `404`, rate limits return `429`, and an unavailable broker returns `503` with `Retry-After: 5`.
 
+The browser workspace and API v1 intentionally shape that run summary for their own clients. The browser response uses `stream` and includes `last_event_id` so the originating tab can attach to SSE immediately. API v1 uses `stream_url` and adds `history_url` for headless clients; its run also has both `id` and the compatibility alias `run_id`. Clients should use the field names from the surface they called instead of translating one response shape into the other.
+
 ## Project Assessments
 
 Assessment routes reuse the browser's saved cycle, check, and evidence services. List and detail reads work in personal or team scope. Team writes require the same Project mutation permission as the browser, so a viewer can inspect a cycle but can't change it.
