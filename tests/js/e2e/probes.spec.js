@@ -3,12 +3,14 @@
 
 import { expect, test } from '@playwright/test'
 
-import { ensurePromptReady, runCommand } from './helpers.js'
+import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
 
 
-async function createActiveProbeProject(page) {
-  const targetValue = `probe-${Date.now()}.example.com`
-  return page.evaluate(async (value) => {
+async function createActiveProbeProject(
+  page,
+  { targetType = 'domain', targetValue = `probe-${Date.now()}.example.com` } = {},
+) {
+  return page.evaluate(async ({ type, value }) => {
     const createdResponse = await apiFetch('/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -25,11 +27,24 @@ async function createActiveProbeProject(page) {
     const targetResponse = await apiFetch(`/projects/${encodeURIComponent(project.id)}/targets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'domain', value }),
+      body: JSON.stringify({ type, value }),
     })
     if (!targetResponse.ok) throw new Error(`target create failed: ${targetResponse.status}`)
     return { project, target: (await targetResponse.json()).target }
-  }, targetValue)
+  }, { type: targetType, value: targetValue })
+}
+
+async function projectRunLinkIds(page, projectId) {
+  return page.evaluate(async (id) => {
+    const response = await apiFetch(`/projects/${encodeURIComponent(id)}/links`, {
+      cache: 'no-store',
+    })
+    if (!response.ok) throw new Error(`project links failed: ${response.status}`)
+    const data = await response.json()
+    return (Array.isArray(data.links) ? data.links : [])
+      .filter(link => link?.entity_type === 'run')
+      .map(link => String(link.entity_id || ''))
+  }, projectId)
 }
 
 
@@ -82,5 +97,47 @@ test.describe('Project probe terminal', () => {
     await expect(output).toContainText('Probe launch canceled.')
     expect(await page.evaluate(() => window.APP_STATE_API.getActiveTabId())).toBe(tabId)
     expect(launchRequests).toBe(0)
+  })
+
+  test('confirms, streams, saves, and links a probe in the origin tab', async ({ page }) => {
+    const fixture = await createActiveProbeProject(page, {
+      targetType: 'ip',
+      targetValue: '8.8.8.8',
+    })
+    const originTabId = await page.evaluate(() => window.APP_STATE_API.getActiveTabId())
+    const tabCount = await page.locator('.tab').count()
+    const command = `probe run ping --entity-id ${fixture.target.id} --project ${fixture.project.id}`
+    await runCommand(page, command)
+
+    const output = page.locator('.tab-panel.active .output')
+    await expect(output).toContainText('Probe plan: Ping')
+    await expect(output).toContainText('Command: ping -c 4 -W 2 8.8.8.8')
+    await expect(output).toContainText('Run this probe? Type yes or no.')
+
+    const launchedResponse = page.waitForResponse(response => (
+      response.request().method() === 'POST'
+      && /\/probes\/run$/.test(response.url())
+      && response.status() === 202
+    ))
+    const input = page.locator('#cmd')
+    await input.fill('yes')
+    await input.press('Enter')
+    const launched = await (await launchedResponse).json()
+    const runId = String(launched.run?.run_id || '')
+    expect(runId).not.toBe('')
+
+    await page.waitForFunction(() => {
+      const tab = window.APP_STATE_API?.getActiveTab?.()
+      return tab && (tab.st === 'ok' || tab.st === 'fail') && !tab.runId
+    }, undefined, { timeout: 30_000 })
+    await expect(output).toContainText('Probe plan: Ping')
+    await expect(output).toContainText('[process exited with code')
+    await expect(page.locator('.tab')).toHaveCount(tabCount)
+    expect(await page.evaluate(() => window.APP_STATE_API.getActiveTabId())).toBe(originTabId)
+
+    const runs = await waitForHistoryRuns(page, 1)
+    const saved = runs.find(run => String(run.id || '') === runId)
+    expect(saved?.command).toBe('ping -c 4 -W 2 8.8.8.8')
+    expect(await projectRunLinkIds(page, fixture.project.id)).toContain(runId)
   })
 })
