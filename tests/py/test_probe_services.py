@@ -91,6 +91,23 @@ def test_base_action_registry_is_complete_and_drives_command_target_compatibilit
         assert command_plan(action.action_id, "port", "443") is None
 
 
+@pytest.mark.parametrize(
+    "action_id",
+    ("curl", "httpx", "dalfox", "nuclei", "testssl"),
+)
+def test_url_bearing_ip_actions_bracket_ipv6_literals(action_id):
+    plan = command_plan(
+        action_id,
+        "ip",
+        "2001:db8::20",
+        allow_intrusive=True,
+    )
+
+    assert plan is not None
+    assert "https://[2001:db8::20]" in plan.command
+    assert "https://2001:db8::20" not in plan.command
+
+
 def test_probe_catalog_pins_public_schema_and_excludes_cycle_only_actions():
     catalog = probe_catalog(
         service="microsoft-ds",

@@ -891,6 +891,46 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
     assert "PROBE_HTTP_TOKEN" not in rendered
 
 
+def test_ipv6_web_probe_plans_use_bracketed_urls_with_and_without_a_profile(client):
+    token = "tok_" + uuid.uuid4().hex
+    _register_token(token)
+    project = _create_project(client, token)
+    target_value = "2001:db8::21"
+    target = _create_target(
+        client,
+        token,
+        project["id"],
+        target_type="ip",
+        value=target_value,
+    )
+    profile_id, _secret_value = _create_protected_http_profile(
+        client,
+        token,
+        project["id"],
+        target_value,
+        base_url=f"https://[{target_value}]/app",
+        allowed_host=target_value,
+    )
+    route = f"/api/v1/projects/{project['id']}/probes/plan"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    for action_id in ("curl", "httpx", "dalfox", "nuclei"):
+        for protected in (False, True):
+            response = client.post(
+                route,
+                headers=headers,
+                json={
+                    "action_id": action_id,
+                    "entity_id": target["id"],
+                    **({"http_profile_id": profile_id} if protected else {}),
+                },
+            )
+            assert response.status_code == 200, (action_id, protected)
+            command = response.get_json()["plan"]["display_command"]
+            assert f"https://[{target_value}]" in command
+            assert f"https://{target_value}" not in command
+
+
 def test_protected_probe_rejects_stale_profile_and_cleans_failed_spawn(
     client,
     monkeypatch,

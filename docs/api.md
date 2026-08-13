@@ -281,7 +281,7 @@ That action sends only those two values to OSV. It doesn't upload an SBOM, saved
 
 ## Project Probes
 
-Project probes run one reviewed command against one confirmed Project target without creating an Assessment cycle. They use the same bounded action catalog, target checks, policy gates, protected HTTP-profile handling, run broker, History, streaming, cancellation, and structured evidence finalization as the browser terminal. A probe doesn't create its own saved record and doesn't directly change an Assessment check.
+Project probes run one reviewed command against one confirmed Project target without creating an Assessment cycle. They use the same bounded action catalog, target checks, policy gates, protected HTTP-profile handling, run broker, History, streaming, cancellation, and structured evidence finalization as the browser terminal. URL-bearing plans bracket saved IPv6 literals before placing them in an HTTP(S) URL. A probe doesn't create its own saved record and doesn't directly change an Assessment check.
 
 List the available actions and local profiles:
 

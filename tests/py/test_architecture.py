@@ -395,6 +395,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/action_plans.py", 318, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/base_action_catalog.py", 129, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_plan_contracts.py", 12, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/command_target_urls.py", 22, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_modes.py", 83, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_modes_tls.py", 33, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/command_modes_dalfox.py", 83, "split-package-ratchet"),

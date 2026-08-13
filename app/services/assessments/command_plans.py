@@ -12,6 +12,7 @@ from services.assessments.base_action_catalog import base_action_target_types
 from services.assessments.command_plan_contracts import CommandPlan
 from services.assessments.command_plans_tls import tls_command_plans
 from services.assessments.command_plans_web import web_command_plans
+from services.assessments.command_target_urls import default_https_target
 from services.assessments.nmap_profiles import nmap_profile_suffix
 from services.assessments.nuclei_profiles import nuclei_profile as get_nuclei_profile, nuclei_profile_args
 
@@ -39,7 +40,7 @@ def command_plan(
         and target_type in {"domain", "ip"}
         and action_id in {"curl", "httpx", "katana", "nuclei", "dalfox"}
     ):
-        selected_web_target = f"https://{target_value}"
+        selected_web_target = default_https_target(target_type, target_value)
     quoted_web = shlex.quote(selected_web_target)
     rate = int((http_profile or {}).get("rate_limit_per_second") or 10)
     concurrency = int((http_profile or {}).get("concurrency") or 5)
