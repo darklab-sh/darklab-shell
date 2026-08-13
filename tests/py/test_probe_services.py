@@ -10,6 +10,7 @@ from io import StringIO
 import json
 import logging
 from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 import uuid
 
@@ -690,10 +691,12 @@ def test_probe_logs_and_audit_rows_share_bounded_request_correlation(monkeypatch
         "run_id": "run_probe_context",
     }
 
-    audit_request = Request.from_values(headers={"X-Request-ID": "caller-request"})
+    audit_request = cast(
+        Request, Request.from_values(headers={"X-Request-ID": "caller-request"})
+    )
     audit_request.environ["darklab_request_id"] = "server-request"
     assert request_audit_fields(audit_request)["request_id"] == "server-request"
-    invalid_request = Request.from_values()
+    invalid_request = cast(Request, Request.from_values())
     invalid_request.environ["HTTP_X_REQUEST_ID"] = "forged\nrequest"
     assert request_audit_fields(invalid_request)["request_id"] == ""
 
@@ -710,7 +713,8 @@ def test_probe_target_resolution_emits_bounded_success_and_rejection_events(monk
     monkeypatch.setattr(probe_target_resolution, "get_db_connect", lambda: lambda: database)
     target_value = "private-target.example"
     resolved = {"entity_id": "ent_probe", "type": "domain", "value": target_value}
-    monkeypatch.setattr(probe_target_resolution, "resolve_probe_target", mock.Mock(return_value=resolved))
+    resolve_target = mock.Mock(return_value=resolved)
+    monkeypatch.setattr(probe_target_resolution, "resolve_probe_target", resolve_target)
     context = ProbeLogContext("browser_terminal", "request-resolve", "session-resolve")
 
     assert resolve_project_probe_target(
@@ -730,7 +734,7 @@ def test_probe_target_resolution_emits_bounded_success_and_rejection_events(monk
         "probe_target_ambiguous", "Ambiguous", status_code=409,
         details={"candidate_entity_ids": ["ent_one", "ent_two"]},
     )
-    probe_target_resolution.resolve_probe_target.side_effect = ambiguous
+    resolve_target.side_effect = ambiguous
     with pytest.raises(ProbeError):
         resolve_project_probe_target(
             "session-resolve", "prj_probe", target_value=target_value,

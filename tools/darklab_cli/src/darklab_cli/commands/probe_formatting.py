@@ -11,20 +11,24 @@ from ..formatting import print_table
 from .probe_catalog_formatting import print_probe_catalog
 
 
+def _dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _scope_values(scope: dict[str, Any], key: str) -> str:
     values = scope.get(key)
     return ", ".join(str(item) for item in values) if isinstance(values, list) and values else "none"
 
 
 def print_probe_plan(plan: dict[str, Any]) -> None:
-    action = plan.get("action") if isinstance(plan.get("action"), dict) else {}
-    target = plan.get("target") if isinstance(plan.get("target"), dict) else {}
-    bounds = plan.get("bounds") if isinstance(plan.get("bounds"), dict) else {}
-    availability = plan.get("availability") if isinstance(plan.get("availability"), dict) else {}
+    action = _dict_value(plan.get("action"))
+    target = _dict_value(plan.get("target"))
+    bounds = _dict_value(plan.get("bounds"))
+    availability = _dict_value(plan.get("availability"))
     evidence = plan.get("expected_evidence")
     evidence = evidence if isinstance(evidence, list) else []
-    profile = plan.get("http_profile") if isinstance(plan.get("http_profile"), dict) else {}
-    scope = profile.get("scope") if isinstance(profile.get("scope"), dict) else {}
+    profile = _dict_value(plan.get("http_profile"))
+    scope = _dict_value(profile.get("scope"))
     print_table([{
         "action": action.get("id"), "policy": plan.get("policy_level"),
         "target": f"{target.get('type') or ''}:{target.get('value') or ''}",

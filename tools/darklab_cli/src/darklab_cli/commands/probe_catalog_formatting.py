@@ -18,7 +18,8 @@ def _profile_keys(raw_profiles: Any) -> str:
 
 def print_probe_catalog(raw_catalog: Any) -> None:
     catalog = raw_catalog if isinstance(raw_catalog, dict) else {}
-    actions = catalog.get("actions") if isinstance(catalog.get("actions"), list) else []
+    raw_actions = catalog.get("actions")
+    actions = raw_actions if isinstance(raw_actions, list) else []
     rows = []
     for raw_action in actions:
         if not isinstance(raw_action, dict):

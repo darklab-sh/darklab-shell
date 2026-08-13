@@ -22,9 +22,12 @@ def _fields(context: Mapping[str, object] | None, error_class: str = "") -> dict
 
 
 def cleanup_context(plan: Mapping[str, Any]) -> dict[str, object]:
-    target = plan.get("target") if isinstance(plan.get("target"), Mapping) else {}
-    action = plan.get("action") if isinstance(plan.get("action"), Mapping) else {}
-    profile = plan.get("http_profile") if isinstance(plan.get("http_profile"), Mapping) else {}
+    target = plan.get("target")
+    action = plan.get("action")
+    profile = plan.get("http_profile")
+    target = target if isinstance(target, Mapping) else {}
+    action = action if isinstance(action, Mapping) else {}
+    profile = profile if isinstance(profile, Mapping) else {}
     return {
         "project_id": plan.get("project_id", ""), "entity_id": target.get("entity_id", ""),
         "action_id": action.get("id", ""), "profile_id": profile.get("id", ""),
