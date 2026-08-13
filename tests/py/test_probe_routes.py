@@ -397,7 +397,7 @@ def test_team_probe_role_matrix_keeps_protected_launches_admin_only(client, monk
         },
     )
     assert operator_launch.status_code == 202
-    assert client.post(
+    operator_protected = client.post(
         f"{route}/plan",
         headers=api_headers(operator),
         json={
@@ -405,7 +405,29 @@ def test_team_probe_role_matrix_keeps_protected_launches_admin_only(client, monk
             "entity_id": target["id"],
             "http_profile_id": profile_id,
         },
-    ).status_code == 403
+    )
+    assert operator_protected.status_code == 403
+    owner_protected_plan = client.post(
+        f"{route}/plan",
+        headers=api_headers(owner),
+        json={
+            "action_id": "httpx",
+            "entity_id": target["id"],
+            "http_profile_id": profile_id,
+        },
+    ).get_json()["plan"]
+    browser_operator_launch = client.post(
+        f"/projects/{project['id']}/probes/run",
+        headers=_headers(operator, team_id),
+        json={
+            "action_id": "httpx",
+            "entity_id": target["id"],
+            "http_profile_id": profile_id,
+            "confirmed": True,
+            "plan_digest": owner_protected_plan["plan_digest"],
+        },
+    )
+    assert browser_operator_launch.status_code == 403
 
     for token in (admin, owner):
         protected_body = {
@@ -886,6 +908,74 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
     assert secret_value not in json.dumps(audit_details)
     assert str(secret_path) not in json.dumps(audit_details)
     assert callable(launch["run_cleanup_hook"])
+    launch["run_cleanup_hook"]()
+    assert not secret_path.parent.exists()
+
+
+def test_browser_protected_probe_is_redacted_project_bound_and_cleanup_safe(
+    client, monkeypatch, tmp_path,
+):
+    from services.assessments import http_profile_runtime
+
+    session_id = "tok_probe_browser_protected_" + uuid.uuid4().hex
+    _register_token(session_id)
+    project = _create_project(client, session_id)
+    target = _create_target(client, session_id, project["id"])
+    profile_id, secret_value = _create_protected_http_profile(
+        client, session_id, project["id"], target["value"],
+        secret_value="browser-probe-private-value",
+    )
+    plan_query = {
+        "action_id": "httpx", "entity_id": target["id"],
+        "http_profile_id": profile_id,
+    }
+    preview = client.get(
+        f"/projects/{project['id']}/probes/plan",
+        headers=_headers(session_id), query_string=plan_query,
+    )
+
+    assert preview.status_code == 200
+    plan = preview.get_json()["plan"]
+    assert plan["display_command"].endswith("-sf [protected]")
+    assert secret_value not in preview.get_data(as_text=True)
+
+    monkeypatch.setattr(http_profile_runtime, "_scanner_user_exists", lambda: False)
+    monkeypatch.setattr(http_profile_runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
+    calls = []
+    monkeypatch.setattr("blueprints.run.broker_available", lambda: True)
+    monkeypatch.setattr(
+        "blueprints.run._start_brokered_run_service",
+        lambda **kwargs: calls.append(kwargs) or SimpleNamespace(
+            run_id="run_browser_protected_probe", status="queued"
+        ),
+    )
+    logger = mock.Mock()
+    monkeypatch.setattr("blueprints.projects.log", logger)
+    launched = client.post(
+        f"/projects/{project['id']}/probes/run",
+        headers=_headers(session_id),
+        json={
+            **plan_query, "confirmed": True, "plan_digest": plan["plan_digest"],
+            "tab_id": "probe-origin-tab",
+        },
+    )
+
+    assert launched.status_code == 202
+    assert launched.get_json()["run"]["command"] == plan["display_command"]
+    assert secret_value not in launched.get_data(as_text=True)
+    launch = calls[0]
+    assert launch["link_project_id"] == project["id"]
+    assert launch["owner_tab_id"] == "probe-origin-tab"
+    assert launch["display_command"] == plan["display_command"]
+    assert secret_value not in launch["original_command"]
+    assert launch["trusted_execution_args"][:1] == ("-sf",)
+    secret_path = Path(launch["trusted_execution_args"][1])
+    assert secret_value in secret_path.read_text(encoding="utf-8")
+    assert secret_value in launch["private_values"]
+    assert str(secret_path) in launch["private_values"]
+    assert secret_value not in json.dumps([
+        {"args": call.args, "kwargs": call.kwargs} for call in logger.method_calls
+    ], default=str)
     launch["run_cleanup_hook"]()
     assert not secret_path.parent.exists()
 

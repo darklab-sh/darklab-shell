@@ -264,12 +264,22 @@ describe('Project probe terminal', () => {
   it('previews before confirmation and launches only after an origin-tab yes', async () => {
     const plan = {
       project_id: 'prj_1',
-      action: { id: 'ping', label: 'Ping' },
-      target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' },
+      action: { id: 'httpx', label: 'HTTPx' },
+      target: { entity_id: 'ent_1', type: 'url', value: 'https://example.test/app' },
       policy_level: 'safe',
-      display_command: 'ping -c 4 example.test',
-      bounds: { summary: 'Four probes.', request_limit: 4, time_limit_seconds: 15, credential_use: 'none' },
+      display_command: 'httpx -u https://example.test/app -sf [protected]',
+      bounds: {
+        summary: 'One protected HTTP request.', request_limit: 1,
+        time_limit_seconds: 30, credential_use: 'protected_http_profile',
+      },
       expected_evidence: ['run'],
+      http_profile: {
+        id: 'hpr_1', name: 'User session', role: 'user', revision: 1,
+        scope: {
+          allowed_hosts: ['example.test'], scope_roots: ['https://example.test/app'],
+          include_paths: ['/app'], exclude_paths: ['/app/private'],
+        },
+      },
       plan_digest: 'c'.repeat(64),
       availability: { available: true },
       launchable: true,
@@ -289,7 +299,7 @@ describe('Project probe terminal', () => {
     const bindStartedRun = vi.fn();
 
     await handleProbeTerminalCommand(
-      'probe run ping --entity-id ent_1 --project prj_1 --http-profile hpr_1',
+      'probe run httpx --entity-id ent_1 --project prj_1 --http-profile hpr_1',
       'tab-origin',
       commandExecution,
       {
@@ -316,7 +326,7 @@ describe('Project probe terminal', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          action_id: 'ping',
+          action_id: 'httpx',
           entity_id: 'ent_1',
           http_profile_id: 'hpr_1',
           nmap_profile: '',

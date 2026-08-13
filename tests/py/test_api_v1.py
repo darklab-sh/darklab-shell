@@ -8444,6 +8444,25 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
         "display_command": "ping -c 4 probe.example",
         "plan_digest": "a" * 64,
     }
+    protected_plan = {
+        **plan,
+        "action": {"id": "httpx", "label": "HTTPx"},
+        "bounds": {
+            "summary": "One protected HTTP request.",
+            "credential_use": "protected_http_profile",
+        },
+        "http_profile": {
+            "id": "hpr_cli", "name": "User session", "role": "user", "revision": 1,
+            "scope": {
+                "allowed_hosts": ["probe.example"],
+                "scope_roots": ["https://probe.example/app"],
+                "include_paths": ["/app"],
+                "exclude_paths": ["/app/private"],
+            },
+        },
+        "display_command": "httpx -u https://probe.example -sf [protected]",
+        "plan_digest": "b" * 64,
+    }
 
     class FakeClient:
         def __init__(self, _config):
@@ -8472,26 +8491,27 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                         "action_id": "httpx", "entity_id": "ent_probe",
                         "http_profile_id": "hpr_cli", "nuclei_profile": "safe",
                     }
-                    return {"plan": {
-                        **plan,
-                        "action": {"id": "httpx", "label": "HTTPx"},
-                        "http_profile": {
-                            "id": "hpr_cli", "name": "User session", "role": "user",
-                            "revision": 1,
-                            "scope": {
-                                "allowed_hosts": ["probe.example"],
-                                "scope_roots": ["https://probe.example/app"],
-                                "include_paths": ["/app"],
-                                "exclude_paths": ["/app/private"],
-                            },
-                        },
-                        "display_command": "httpx -u https://probe.example -sf [protected]",
-                    }}
+                    return {"plan": protected_plan}
                 assert body == {
                     "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
                 }
                 return {"plan": plan}
             if method == "POST" and path.endswith("/run"):
+                if body and body.get("http_profile_id"):
+                    assert body == {
+                        "action_id": "httpx", "entity_id": "ent_probe",
+                        "http_profile_id": "hpr_cli", "nuclei_profile": "safe",
+                        "confirmed": True, "plan_digest": "b" * 64,
+                    }
+                    return {
+                        "plan": protected_plan,
+                        "project_id": "prj_probe",
+                        "run": {
+                            "id": "run_protected_probe", "status": "queued",
+                            "command": protected_plan["display_command"],
+                            "history_url": "/api/v1/history/run_protected_probe",
+                        },
+                    }
                 assert body == {
                     "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
                     "confirmed": True, "plan_digest": "a" * 64,
@@ -8541,6 +8561,21 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert "[protected]" in protected_output
     assert "HTTP profile: User session (user)" in protected_output
     assert "HTTP scope: hosts probe.example; roots https://probe.example/app" in protected_output
+
+    assert cli_main.main([
+        "probe", "run", "httpx", "--entity-id", "ent_probe",
+        "--project", "prj_probe", "--http-profile", "hpr_cli",
+        "--confirm", "--format", "json",
+    ]) == 0
+    protected_launch_output = capsys.readouterr().out
+    protected_payload = json.loads(protected_launch_output)
+    assert protected_payload["run"]["id"] == "run_protected_probe"
+    assert protected_payload["run"]["command"].endswith("-sf [protected]")
+    assert [call[1].rsplit("/", 1)[-1] for call in calls[-2:]] == ["plan", "run"]
+    assert "trusted_execution_args" not in protected_launch_output
+    assert "private_values" not in protected_launch_output
+    assert "trusted_execution_args" not in json.dumps(calls, default=str)
+    assert "private_values" not in json.dumps(calls, default=str)
 
 
 def test_darklab_cli_probe_requires_exactly_one_target_selector(monkeypatch, capsys):
