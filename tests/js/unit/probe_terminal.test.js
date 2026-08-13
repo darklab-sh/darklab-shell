@@ -31,7 +31,11 @@ function execution() {
 }
 
 describe('Project probe terminal', () => {
+  let clientLog;
+
   beforeEach(() => {
+    clientLog = vi.fn();
+    setRuntimeHandlers({ logClientError: clientLog });
     setProjectContextHandlers({
       getActiveProjectContext: () => ({ id: 'prj_active' }),
       refreshActiveProjectContext: async () => ({ id: 'prj_active' }),
@@ -205,16 +209,56 @@ describe('Project probe terminal', () => {
   });
 
   it('reports server failures without persisting the read command', async () => {
-    setRuntimeHandlers({ apiFetch: vi.fn(async () => response({ error: 'Project not found' }, 404)) });
+    setRuntimeHandlers({
+      apiFetch: vi.fn(async () => response({ error: 'Project not found operator-secret' }, 404)),
+    });
     const commandExecution = execution();
     await handleProbeTerminalCommand('probe list', 'tab-1', commandExecution);
     expect(commandExecution.appendLine).toHaveBeenCalledWith(
-      '[probe] Project not found',
+      '[probe] Project not found operator-secret',
       'exit-fail',
       'tab-1',
     );
     expect(commandExecution.setStatus).toHaveBeenCalledWith('fail');
     expect(commandExecution.setPersistence).toHaveBeenCalledWith('none');
+    expect(clientLog).toHaveBeenCalledWith(
+      'PROJECT_PROBE_CLIENT_REQUEST_FAILED',
+      expect.objectContaining({
+        name: 'ProbeRequestError',
+        message: 'Probe request failed',
+        status: 404,
+      }),
+      {
+        page: 'probe_terminal',
+        event: 'PROJECT_PROBE_CLIENT_REQUEST_FAILED',
+        level: 'warning',
+        source: 'browser_terminal',
+        phase: 'catalog',
+        project_id: 'prj_active',
+        status: 404,
+        error_name: 'ProbeRequestError',
+      },
+    );
+    expect(JSON.stringify(clientLog.mock.calls)).not.toContain('operator-secret');
+  });
+
+  it('reports an invalid success payload as a client response-shape error', async () => {
+    setRuntimeHandlers({ apiFetch: vi.fn(async () => response([])) });
+    const commandExecution = execution();
+
+    await handleProbeTerminalCommand('probe list', 'tab-1', commandExecution);
+
+    expect(commandExecution.setStatus).toHaveBeenCalledWith('fail');
+    expect(clientLog).toHaveBeenCalledWith(
+      'PROJECT_PROBE_CLIENT_REQUEST_FAILED',
+      expect.objectContaining({ name: 'ProbeResponseError' }),
+      expect.objectContaining({
+        level: 'error',
+        phase: 'catalog',
+        project_id: 'prj_active',
+        error_name: 'ProbeResponseError',
+      }),
+    );
   });
 
   it('previews before confirmation and launches only after an origin-tab yes', async () => {
@@ -313,6 +357,44 @@ describe('Project probe terminal', () => {
       'Probe launch canceled.',
       '',
       'tab-1',
+    );
+  });
+
+  it('reports a confirmed launch failure with only bounded probe context', async () => {
+    const plan = {
+      project_id: 'prj_1', action: { id: 'httpx', label: 'HTTPx' },
+      target: { entity_id: 'ent_1', type: 'url', value: 'https://operator-secret.test' },
+      policy_level: 'safe', display_command: 'httpx -u https://operator-secret.test',
+      bounds: {}, expected_evidence: [], plan_digest: 'e'.repeat(64),
+      availability: { available: true }, launchable: true,
+    };
+    const apiFetch = vi.fn(async (_url, options = {}) => {
+      if (options.method === 'POST') {
+        return response({ error: 'profile hpr_operator_secret failed' }, 503);
+      }
+      return response({ plan });
+    });
+    setRuntimeHandlers({ apiFetch });
+    const commandExecution = execution();
+    let pending;
+    await handleProbeTerminalCommand(
+      'probe run httpx --entity-id ent_1 --project prj_1 --http-profile hpr_operator_secret',
+      'tab-1',
+      commandExecution,
+      { requestConfirmation: config => { pending = config; }, bindStartedRun: vi.fn() },
+    );
+
+    await expect(pending.onYes()).rejects.toThrow('profile hpr_operator_secret failed');
+
+    expect(clientLog).toHaveBeenCalledWith(
+      'PROJECT_PROBE_CLIENT_REQUEST_FAILED',
+      expect.objectContaining({ name: 'ProbeRequestError', message: 'Probe request failed' }),
+      expect.objectContaining({
+        level: 'warning', phase: 'launch', project_id: 'prj_1', status: 503,
+      }),
+    );
+    expect(JSON.stringify(clientLog.mock.calls)).not.toMatch(
+      /operator-secret|hpr_operator_secret|httpx -u|\/probes\/run/,
     );
   });
 });

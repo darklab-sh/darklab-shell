@@ -3,12 +3,53 @@
 
 // Terminal client for Project-scoped probe catalogs, plans, and confirmed runs.
 
-import { apiFetch } from '../../runtime_bridge.js';
+import { apiFetch, logClientError } from '../../runtime_bridge.js';
 import {
   getActiveProjectContext,
   refreshActiveProjectContext,
 } from '../projects/project_context_bridge.js';
 import { setProbeTerminalHandler } from './probe_terminal_bridge.js';
+
+const PROBE_CLIENT_FAILURE_EVENT = 'PROJECT_PROBE_CLIENT_REQUEST_FAILED';
+const PROBE_CLIENT_PHASES = new Set(['catalog', 'resolve', 'plan', 'launch']);
+const PROBE_PROJECT_ID_RE = /^prj_[A-Za-z0-9_-]{1,64}$/;
+const PROBE_ERROR_NAME_RE = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
+
+function _probeErrorStatus(error) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0;
+}
+
+function _probeNetworkDegraded(error) {
+  const name = String(error?.name || '');
+  const message = String(error?.message || error || '').toLowerCase();
+  return name === 'AbortError'
+    || name === 'NetworkError'
+    || /failed to fetch|fetch failed|networkerror|network request failed/.test(message);
+}
+
+function _probeClientLogLevel(error) {
+  return _probeErrorStatus(error) || _probeNetworkDegraded(error) ? 'warning' : 'error';
+}
+
+function logProbeClientFailure(error, { phase = '', projectId = '' } = {}) {
+  const payload = {
+    page: 'probe_terminal',
+    event: PROBE_CLIENT_FAILURE_EVENT,
+    level: _probeClientLogLevel(error),
+    source: 'browser_terminal',
+    phase: PROBE_CLIENT_PHASES.has(phase) ? phase : 'unknown',
+  };
+  if (PROBE_PROJECT_ID_RE.test(projectId)) payload.project_id = projectId;
+  const status = _probeErrorStatus(error);
+  if (status) payload.status = status;
+  const errorName = String(error?.name || 'Error');
+  payload.error_name = PROBE_ERROR_NAME_RE.test(errorName) ? errorName : 'Error';
+  const safeError = new Error('Probe request failed');
+  safeError.name = payload.error_name;
+  if (status) safeError.status = status;
+  logClientError(PROBE_CLIENT_FAILURE_EVENT, safeError, payload);
+}
 
 const PROBE_USAGE = [
   'Usage:',
@@ -124,10 +165,31 @@ function parseProbeCommand(command) {
   };
 }
 
-async function _responseJson(response) {
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+async function _responseJson(response, phase) {
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(data?.error || `HTTP ${response.status}`);
+    error.name = 'ProbeRequestError';
+    error.status = response.status;
+    error.probePhase = phase;
+    throw error;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    const error = new Error('Probe response was not a JSON object');
+    error.name = 'ProbeResponseError';
+    error.probePhase = phase;
+    throw error;
+  }
   return data;
+}
+
+function _responseObject(data, key, phase) {
+  const value = data?.[key];
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  const error = new Error(`Probe response did not include ${key}`);
+  error.name = 'ProbeResponseError';
+  error.probePhase = phase;
+  throw error;
 }
 
 function formatProbeCatalog(catalog) {
@@ -188,12 +250,13 @@ async function _activeProjectId() {
 async function _loadCatalog(parsed) {
   const projectId = parsed.projectId || await _activeProjectId();
   if (!projectId) throw new Error('select an active Project before listing probes');
+  parsed.projectId = projectId;
   const query = new URLSearchParams();
   if (parsed.service) query.set('service', parsed.service);
   if (parsed.targetType) query.set('target_type', parsed.targetType);
   const suffix = query.size ? `?${query}` : '';
   const response = await apiFetch(`/projects/${encodeURIComponent(projectId)}/probes${suffix}`, { cache: 'no-store' });
-  return (await _responseJson(response)).catalog || {};
+  return _responseObject(await _responseJson(response, 'catalog'), 'catalog', 'catalog');
 }
 
 async function _loadPlan(parsed) {
@@ -208,7 +271,10 @@ async function _loadPlan(parsed) {
         cache: 'no-store',
       },
     );
-    entityId = String((await _responseJson(targetResponse)).target?.entity_id || '');
+    const target = _responseObject(
+      await _responseJson(targetResponse, 'resolve'), 'target', 'resolve',
+    );
+    entityId = String(target.entity_id || '');
   }
   const query = new URLSearchParams({ action_id: parsed.actionId, entity_id: entityId });
   if (parsed.nmapProfile) query.set('nmap_profile', parsed.nmapProfile);
@@ -218,7 +284,7 @@ async function _loadPlan(parsed) {
     `/projects/${encodeURIComponent(parsed.projectId)}/probes/plan?${query}`,
     { cache: 'no-store' },
   );
-  return (await _responseJson(response)).plan || {};
+  return _responseObject(await _responseJson(response, 'plan'), 'plan', 'plan');
 }
 
 async function _launchPlan(parsed, plan, tabId, launchAdapter) {
@@ -240,7 +306,7 @@ async function _launchPlan(parsed, plan, tabId, launchAdapter) {
       }),
     },
   );
-  return _responseJson(response);
+  return _responseJson(response, 'launch');
 }
 
 async function handleProbeTerminalCommand(command, tabId, execution, launchAdapter = {}) {
@@ -282,7 +348,14 @@ async function handleProbeTerminalCommand(command, tabId, execution, launchAdapt
         tabId,
         execution,
         onYes: async () => {
-          return _launchPlan(parsed, plan, tabId, launchAdapter);
+          try {
+            return await _launchPlan(parsed, plan, tabId, launchAdapter);
+          } catch (error) {
+            logProbeClientFailure(error, {
+              phase: error?.probePhase || 'launch', projectId: parsed.projectId,
+            });
+            throw error;
+          }
         },
         onNo: () => {
           append('Probe launch canceled.');
@@ -302,6 +375,10 @@ async function handleProbeTerminalCommand(command, tabId, execution, launchAdapt
     lines.forEach((line, index) => append(line, index === 0 ? 'builtin-section' : 'builtin-help-row'));
     execution.setStatus('ok');
   } catch (error) {
+    logProbeClientFailure(error, {
+      phase: error?.probePhase || (parsed.subcommand === 'list' ? 'catalog' : 'plan'),
+      projectId: parsed.projectId || '',
+    });
     append(`[probe] ${error.message || 'request failed'}`, 'exit-fail');
     execution.setStatus('fail');
   }
