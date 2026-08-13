@@ -293,7 +293,7 @@ curl -sS \
 
 The optional `service` query returns reviewed recommendations for that discovered service, while `target_type` narrows actions to `domain`, `ip`, or `url`. Catalog and plan reads are side-effect free.
 
-Probe resolution and planning deliberately use different HTTP methods across the two client surfaces. The same-origin browser workspace uses `GET` with `cache: no-store`, matching its other internal read adapters; its resolver value and plan ids therefore appear in the request URL and must never contain Secrets. API v1 uses `POST` with a strictly checked JSON body so token clients keep selectors and plan options out of URLs, proxy caches, and ordinary access-log request lines. These API requests are still viewer-safe reads: they use read rate limits and don't create a run, audit event, History row, or Assessment evidence.
+Probe resolution keeps exact target values in a strictly checked JSON body for both the same-origin browser and API v1, so those values don't appear in URLs, proxy caches, or ordinary access-log request lines. The browser still reads the final entity-anchored plan with `GET` and `cache: no-store`; API v1 uses a narrow JSON `POST` for its plan options. These requests are viewer-safe reads: they don't create a run, audit event, History row, or Assessment evidence.
 
 API payloads use a confirmed `entity_id`. A client that starts with an exact hostname, address, or URL can resolve it first:
 
@@ -315,7 +315,7 @@ curl -sS -X POST \
   "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/plan"
 ```
 
-Optional `nmap_profile`, `nuclei_profile`, and `http_profile_id` fields select one reviewed local plan variant. A protected HTTP profile requires Secret-management permission and stays redacted: the response identifies its role and revision but never includes Secret values, private Files paths, generated arguments, or private environment data. The response shows the exact saved command, target, policy, bounds, credential classification, expected evidence, availability, and `plan_digest`.
+Optional `nmap_profile`, `nuclei_profile`, and `http_profile_id` fields select one reviewed local plan variant. A protected HTTP profile requires Secret-management permission and stays redacted: the response identifies its role, revision, allowed hosts, scope roots, and included or excluded paths, but never includes Secret values, private Files paths, generated arguments, or private environment data. Those scope fields are part of `plan_digest`, alongside the exact saved command, target, policy, bounds, credential classification, expected evidence, and availability.
 
 Launch only the freshly previewed plan:
 

@@ -104,11 +104,22 @@ describe('Project probe terminal', () => {
       policy_level: 'safe',
       display_command: 'ping -c 4 example.test',
       bounds: { summary: 'Four probes.', request_limit: 4, time_limit_seconds: 15, credential_use: 'none' },
+      http_profile: {
+        id: 'hpr_1', name: 'User session', role: 'user',
+        scope: {
+          allowed_hosts: ['example.test'], scope_roots: ['https://example.test/app'],
+          include_paths: ['/app'], exclude_paths: ['/app/private'],
+        },
+      },
       expected_evidence: ['run'],
       plan_digest: 'a'.repeat(64),
       availability: { available: true },
     });
     expect(lines).toContain('  Command: ping -c 4 example.test');
+    expect(lines).toContain('  HTTP profile: User session (user)');
+    expect(lines).toContain(
+      '  HTTP scope: hosts example.test; roots https://example.test/app; include /app; exclude /app/private',
+    );
     expect(lines).toContain(`  Approval digest: ${'a'.repeat(12)}`);
     expect(lines.join('\n')).not.toContain('a'.repeat(64));
   });

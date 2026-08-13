@@ -69,6 +69,14 @@ def _credential_use(profile: Mapping[str, Any]) -> list[str]:
     return sorted(uses)
 
 
+def _public_scope(profile: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Return only the saved request boundary an operator can safely review."""
+    return {
+        key: [str(value) for value in profile.get(key, [])]
+        for key in ("allowed_hosts", "scope_roots", "include_paths", "exclude_paths")
+    }
+
+
 def _unsupported_reason(profile: Mapping[str, Any], tool: str) -> str:
     if tool not in _SUPPORTED_TOOLS:
         return "This assessment tool does not yet have a protected HTTP-profile adapter."
@@ -109,6 +117,7 @@ def load_http_profile_plan_context(
         "name": profile["name"],
         "role": profile["role"],
         "credential_use": _credential_use(profile),
+        "scope": _public_scope(profile),
         "enabled": bool(profile["enabled"]),
         "revision": int(profile["revision"]),
         "rate_limit_per_second": int(profile["rate_limit_per_second"]),

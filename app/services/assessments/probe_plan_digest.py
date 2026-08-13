@@ -43,7 +43,7 @@ def probe_plan_digest_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
         },
         "http_profile": _selected(
             http_profile,
-            ("id", "revision", "credential_use"),
+            ("id", "revision", "role", "credential_use", "scope"),
         ),
         "policy_level": plan.get("policy_level"),
         "required_features": sorted(plan.get("required_features") or []),

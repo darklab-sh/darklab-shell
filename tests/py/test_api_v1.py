@@ -2212,6 +2212,12 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
         "name": "Authenticated application",
         "role": "user",
         "credential_use": ["headers"],
+        "scope": {
+            "allowed_hosts": [check["target_value"]],
+            "scope_roots": [f"https://{check['target_value']}"],
+            "include_paths": [],
+            "exclude_paths": [],
+        },
         "enabled": True,
         "revision": 1,
         "rate_limit_per_second": 3,
@@ -8321,7 +8327,16 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                     return {"plan": {
                         **plan,
                         "action": {"id": "httpx", "label": "HTTPx"},
-                        "http_profile": {"id": "hpr_cli", "revision": 1},
+                        "http_profile": {
+                            "id": "hpr_cli", "name": "User session", "role": "user",
+                            "revision": 1,
+                            "scope": {
+                                "allowed_hosts": ["probe.example"],
+                                "scope_roots": ["https://probe.example/app"],
+                                "include_paths": ["/app"],
+                                "exclude_paths": ["/app/private"],
+                            },
+                        },
                         "display_command": "httpx -u https://probe.example -sf [protected]",
                     }}
                 assert body == {
@@ -8374,7 +8389,10 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
         "probe", "plan", "httpx", "--entity-id", "ent_probe",
         "--project", "prj_probe", "--http-profile", "hpr_cli",
     ]) == 0
-    assert "[protected]" in capsys.readouterr().out
+    protected_output = capsys.readouterr().out
+    assert "[protected]" in protected_output
+    assert "HTTP profile: User session (user)" in protected_output
+    assert "HTTP scope: hosts probe.example; roots https://probe.example/app" in protected_output
 
 
 def test_darklab_cli_probe_requires_exactly_one_target_selector(monkeypatch, capsys):

@@ -58,11 +58,19 @@ def _create_project(client, session_id: str, *, team_id: str = "") -> dict:
     return response.get_json()["project"]
 
 
-def _create_target(client, session_id: str, project_id: str, *, team_id: str = "") -> dict:
+def _create_target(
+    client,
+    session_id: str,
+    project_id: str,
+    *,
+    team_id: str = "",
+    target_type: str = "domain",
+    value: str = "probe-route.example.com",
+) -> dict:
     response = client.post(
         f"/projects/{project_id}/targets",
         headers=_headers(session_id, team_id),
-        json={"type": "domain", "value": "probe-route.example.com"},
+        json={"type": target_type, "value": value},
     )
     assert response.status_code == 201
     return response.get_json()["target"]
@@ -94,6 +102,8 @@ def _create_protected_http_profile(
     target_value: str,
     *,
     secret_value: str = "probe-profile-secret",
+    base_url: str = "",
+    allowed_host: str = "",
 ) -> tuple[str, str]:
     stored = client.post(
         "/session/secrets",
@@ -107,8 +117,11 @@ def _create_protected_http_profile(
         json={
             "name": "Protected probe application",
             "role": "user",
-            "base_url": f"https://{target_value}",
-            "allowed_hosts": [target_value],
+            "base_url": base_url or f"https://{target_value}",
+            "scope_roots": [base_url or f"https://{target_value}"],
+            "allowed_hosts": [allowed_host or target_value],
+            "include_paths": ["/app"],
+            "exclude_paths": ["/app/private"],
             "headers": [{
                 "name": "X-Probe-Token",
                 "secret_name": "PROBE_HTTP_TOKEN",
@@ -762,6 +775,12 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
         "name": "Protected probe application",
         "role": "user",
         "credential_use": ["headers"],
+        "scope": {
+            "allowed_hosts": [target["value"]],
+            "scope_roots": [f"https://{target['value']}"],
+            "include_paths": ["/app"],
+            "exclude_paths": ["/app/private"],
+        },
         "enabled": True,
         "revision": 1,
         "rate_limit_per_second": 3,
@@ -770,6 +789,7 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
     assert plan["bounds"]["credential_use"] == "protected_http_profile"
     assert plan["display_command"].endswith("-sf [protected]")
     assert secret_value not in preview.get_data(as_text=True)
+    assert not ({"headers", "secret_refs", "file_refs", "private_args"} & plan["http_profile"].keys())
 
     monkeypatch.setattr(http_profile_runtime, "_scanner_user_exists", lambda: False)
     monkeypatch.setattr(http_profile_runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
@@ -818,6 +838,57 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
     assert callable(launch["run_cleanup_hook"])
     launch["run_cleanup_hook"]()
     assert not secret_path.parent.exists()
+
+
+@pytest.mark.parametrize(("target_type", "target_value", "base_url", "allowed_host"), (
+    ("domain", "scope-domain.example", "https://scope-domain.example/app", "scope-domain.example"),
+    ("ip", "2001:db8::20", "https://[2001:db8::20]/app", "2001:db8::20"),
+    ("url", "https://scope-url.example/app/page", "https://scope-url.example/app", "scope-url.example"),
+))
+def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
+    client,
+    target_type,
+    target_value,
+    base_url,
+    allowed_host,
+):
+    token = "tok_" + uuid.uuid4().hex
+    _register_token(token)
+    project = _create_project(client, token)
+    target = _create_target(
+        client,
+        token,
+        project["id"],
+        target_type=target_type,
+        value=target_value,
+    )
+    profile_id, secret_value = _create_protected_http_profile(
+        client,
+        token,
+        project["id"],
+        target_value,
+        base_url=base_url,
+        allowed_host=allowed_host,
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/probes/plan",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"action_id": "httpx", "entity_id": target["id"], "http_profile_id": profile_id},
+    )
+
+    assert response.status_code == 200
+    profile = response.get_json()["plan"]["http_profile"]
+    assert profile["role"] == "user"
+    assert profile["scope"] == {
+        "allowed_hosts": [allowed_host],
+        "scope_roots": [base_url],
+        "include_paths": ["/app"],
+        "exclude_paths": ["/app/private"],
+    }
+    rendered = response.get_data(as_text=True)
+    assert secret_value not in rendered
+    assert "PROBE_HTTP_TOKEN" not in rendered
 
 
 def test_protected_probe_rejects_stale_profile_and_cleans_failed_spawn(

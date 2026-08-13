@@ -331,6 +331,26 @@ def test_probe_digest_excludes_presentation_but_covers_execution_fields():
     execution_change["display_command"] += " --changed"
     assert probe_plan_digest(execution_change) != plan["plan_digest"]
 
+    protected = build_probe_plan(
+        _request("httpx", http_profile_id="hpr_digest"),
+        _target(target_type="url"),
+        available_features={"httpx"},
+        http_profile={
+            "id": "hpr_digest", "revision": 2, "role": "user",
+            "credential_use": ["headers"],
+            "scope": {
+                "allowed_hosts": ["example.test"],
+                "scope_roots": ["https://example.test/app"],
+                "include_paths": ["/app"],
+                "exclude_paths": ["/app/private"],
+            },
+        },
+        http_profile_target="https://example.test/path",
+    )
+    scope_change = deepcopy(protected)
+    scope_change["http_profile"]["scope"]["exclude_paths"] = ["/different"]
+    assert probe_plan_digest(scope_change) != protected["plan_digest"]
+
 
 def test_probe_confirmation_rebuilds_the_plan_and_rejects_stale_or_extra_fields():
     plan = build_probe_plan(

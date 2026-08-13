@@ -151,6 +151,8 @@ function formatProbeCatalog(catalog) {
 }
 
 function formatProbePlan(plan) {
+  const httpProfile = plan.http_profile || {};
+  const httpScope = httpProfile.scope || {};
   const lines = [
     `Probe plan: ${plan.action?.label || plan.action?.id || 'Unknown action'}`,
     `  Project: ${plan.project_id}`,
@@ -163,6 +165,13 @@ function formatProbePlan(plan) {
     `  Evidence: ${(plan.expected_evidence || []).join(', ') || 'run output'}`,
     `  Approval digest: ${String(plan.plan_digest || '').slice(0, 12)}`,
   ];
+  if (httpProfile.id) {
+    const values = key => (httpScope[key] || []).join(', ') || 'none';
+    lines.splice(8, 0,
+      `  HTTP profile: ${httpProfile.name || httpProfile.id} (${httpProfile.role || 'anonymous'})`,
+      `  HTTP scope: hosts ${values('allowed_hosts')}; roots ${values('scope_roots')}; include ${values('include_paths')}; exclude ${values('exclude_paths')}`,
+    );
+  }
   if (!plan.availability?.available) {
     lines.push(`  Unavailable: ${plan.availability?.reason || plan.availability?.code || 'not available'}`);
   }
