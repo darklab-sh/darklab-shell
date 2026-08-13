@@ -3530,6 +3530,66 @@ describe('per-tab terminal confirmations', () => {
     expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
   })
 
+  it('keeps an accepted confirmation settling in its origin tab', async () => {
+    let resolveLaunch
+    const launch = new Promise(resolve => { resolveLaunch = resolve })
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(pendingBrokerStreamResponse()))
+    const {
+      _bindStartedProbeRun,
+      _setPendingTerminalConfirm,
+      __setActiveTabIdForTest,
+      runBtn,
+      status,
+      submitCommand,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false },
+        { id: 'tab-2', st: 'idle', runId: null, killed: false, pendingKill: false },
+      ],
+      appendLine,
+      apiFetch,
+    })
+    _setPendingTerminalConfirm({
+      kind: 'probe',
+      tabId: 'tab-1',
+      execution: pendingExecution('tab-1'),
+      onYes: () => launch,
+      onComplete: launched => _bindStartedProbeRun(launched, 'tab-1'),
+    })
+
+    submitCommand('yes')
+    submitCommand('pwd')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[pending] The confirmed action is still starting.',
+      'notice',
+      'tab-1',
+    )
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(tabs).toHaveLength(2)
+
+    __setActiveTabIdForTest('tab-2')
+    status.className = 'status-pill idle'
+    status.textContent = 'IDLE'
+    resolveLaunch({
+      project_id: 'prj_1',
+      run: {
+        run_id: 'run_probe',
+        command: 'ping -c 4 example.test',
+        stream: '/runs/run_probe/stream',
+        last_event_id: '',
+      },
+    })
+    await vi.waitFor(() => expect(tabs[0].runId).toBe('run_probe'))
+
+    expect(tabs[0].st).toBe('running')
+    expect(tabs[1].st).toBe('idle')
+    expect(status.className).toBe('status-pill idle')
+    expect(runBtn.disabled).toBe(false)
+  })
+
   it('rejects a second confirmation in one tab and can cancel every pending tab', () => {
     const cancelOne = vi.fn()
     const cancelTwo = vi.fn()

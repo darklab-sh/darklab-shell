@@ -554,6 +554,7 @@ function _runnerWorkspaceCacheApi() {
 // Transcript-owned confirmations belong to their origin tab. Multiple tabs may
 // wait independently, but one tab cannot replace or answer another tab's prompt.
 const _pendingTerminalConfirms = new Map();
+const _settlingTerminalConfirmTabs = new Set();
 
 function _runnerPersistenceHelpers() {
   if (!_runnerPersistence) {
@@ -1733,11 +1734,14 @@ function _bindStartedProbeRun(launched, tabId) {
     'notice',
     tabId,
   );
-  if (tabId === _runnerActiveTabId()) setStatus('running');
+  const isActiveTab = tabId === _runnerActiveTabId();
+  if (isActiveTab) setStatus('running');
   if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
-  _setRunButtonDisabled(true);
   showTabKillBtn(tabId);
-  startTimer();
+  if (isActiveTab) {
+    _setRunButtonDisabled(true);
+    startTimer();
+  }
   _markTabRunStarted(tabId, runId);
   return _subscribeRunStream(runId, tabId, {
     streamUrl: String(run.stream || ''),
@@ -2619,36 +2623,48 @@ function _publishPendingExecutionLines(execution) {
   });
 }
 
-async function _runPendingTerminalConfirmHandler(promptTabId, handler, pending = null) {
+async function _runPendingTerminalConfirmHandler(
+  promptTabId,
+  handler,
+  pending = null,
+  { trackSettling = true } = {},
+) {
   const execution = pending?.execution;
   if (!execution) {
     throw new Error('Terminal confirmation is missing its command execution');
   }
-  let handlerResult;
-  let handlerFailed = false;
+  if (trackSettling) _settlingTerminalConfirmTabs.add(promptTabId);
   try {
-    handlerResult = await Promise.resolve(typeof handler === 'function' ? handler() : undefined);
-  } catch (err) {
-    handlerFailed = true;
-    execution.appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
-    execution.setStatus('fail');
-    execution.setRecordRecent(false);
-    logClientError('terminal confirmation failed', err);
-  }
-  const nextPendingUsesExecution = (
-    _pendingTerminalConfirmForTab(promptTabId)?.execution === execution
-  );
-  if (nextPendingUsesExecution) {
-    _publishPendingExecutionLines(execution);
-    if (typeof setTabStatus === 'function') setTabStatus(promptTabId, 'idle');
-    return;
-  }
-  execution.setPending(false);
-  if (typeof execution.completePending === 'function') {
-    await execution.completePending();
-  }
-  if (!handlerFailed && typeof pending.onComplete === 'function') {
-    await Promise.resolve(pending.onComplete(handlerResult));
+    let handlerResult;
+    let handlerFailed = false;
+    try {
+      handlerResult = await Promise.resolve(
+        typeof handler === 'function' ? handler() : undefined,
+      );
+    } catch (err) {
+      handlerFailed = true;
+      execution.appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
+      execution.setStatus('fail');
+      execution.setRecordRecent(false);
+      logClientError('terminal confirmation failed', err);
+    }
+    const nextPendingUsesExecution = (
+      _pendingTerminalConfirmForTab(promptTabId)?.execution === execution
+    );
+    if (nextPendingUsesExecution) {
+      _publishPendingExecutionLines(execution);
+      if (typeof setTabStatus === 'function') setTabStatus(promptTabId, 'idle');
+      return;
+    }
+    execution.setPending(false);
+    if (typeof execution.completePending === 'function') {
+      await execution.completePending();
+    }
+    if (!handlerFailed && typeof pending.onComplete === 'function') {
+      await Promise.resolve(pending.onComplete(handlerResult));
+    }
+  } finally {
+    if (trackSettling) _settlingTerminalConfirmTabs.delete(promptTabId);
   }
 }
 
@@ -2667,6 +2683,7 @@ function cancelPendingTerminalConfirm(
     promptTabId,
     cancelHandler,
     { ...pending, onComplete: null },
+    { trackSettling: false },
   ).catch((err) => {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
     setStatus('fail');
@@ -3971,6 +3988,15 @@ function submitCommand(rawCmd) {
   // This is the main run path: validate local state, open the SSE stream, then
   // feed output into the active tab while mirroring completion into persistence.
   const cmd = (rawCmd || '').trim();
+  const activePromptTabId = _runnerActiveTabId();
+  if (_settlingTerminalConfirmTabs.has(activePromptTabId)) {
+    appendLine(
+      '[pending] The confirmed action is still starting.',
+      'notice',
+      activePromptTabId,
+    );
+    return true;
+  }
   if (!cmd) {
     if (_isWelcomeActive() && !_isWelcomeDone() && _welcomeOwns(_runnerActiveTabId())) {
       _requestWelcomeSettle(_runnerActiveTabId());
@@ -3984,7 +4010,6 @@ function submitCommand(rawCmd) {
   }
 
   // Intercept yes/no answer to a pending terminal confirmation prompt.
-  const activePromptTabId = _runnerActiveTabId();
   const pendingTerminalConfirm = _pendingTerminalConfirmForTab(activePromptTabId);
   if (pendingTerminalConfirm) {
     const pending = pendingTerminalConfirm;
@@ -4018,6 +4043,7 @@ function submitCommand(rawCmd) {
         promptTabId,
         pending.onNo,
         { ...pending, onComplete: null },
+        { trackSettling: false },
       ).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
         setStatus('fail');
