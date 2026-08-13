@@ -178,6 +178,31 @@ def test_probe_catalog_pins_public_schema_and_excludes_cycle_only_actions():
     assert invalid_target_type.value.code == "invalid_target_type"
 
 
+@pytest.mark.parametrize(("target_type", "expected_actions"), (
+    ("domain", {
+        "curl", "ping", "dnsrecon", "gau", "httpx", "katana", "dalfox",
+        "sslyze", "testssl", "nmap", "nuclei",
+    }),
+    ("ip", {
+        "curl", "ping", "httpx", "dalfox", "sslyze", "testssl", "nmap", "nuclei",
+    }),
+    ("url", {"curl", "httpx", "katana", "dalfox", "sqlmap", "nuclei"}),
+))
+def test_probe_catalog_filters_every_action_by_target_type(target_type, expected_actions):
+    catalog = probe_catalog(
+        target_type=target_type,
+        template_snapshot=_READY_TEMPLATES,
+        available_features={
+            "curl", "ping", "dnsrecon", "gau", "httpx", "katana", "dalfox",
+            "sqlmap", "sslyze", "testssl", "nmap", "reviewed_nse_profiles",
+            "nuclei", "managed_nuclei_templates",
+        },
+    )
+
+    assert {action["id"] for action in catalog["actions"]} == expected_actions
+    assert all(target_type in action["target_types"] for action in catalog["actions"])
+
+
 def test_probe_plan_is_bounded_and_dalfox_never_reaches_intrusive_xss_mode(monkeypatch):
     monkeypatch.setattr(
         "services.assessments.probe_plans.managed_nuclei_template_snapshot",

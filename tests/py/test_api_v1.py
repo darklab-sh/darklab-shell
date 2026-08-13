@@ -8471,13 +8471,37 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
         def request(self, method, path, *, params=None, body=None, **_kwargs):
             calls.append((method, path, params, body))
             if method == "GET" and path == "/projects/prj_probe/probes":
+                actions = [
+                    {
+                        "id": "ping", "label": "Ping", "policy_level": "safe",
+                        "target_types": ["domain", "ip"],
+                        "availability": {"available": True},
+                    },
+                    {
+                        "id": "dnsrecon", "label": "DNSRecon", "policy_level": "safe",
+                        "target_types": ["domain"],
+                        "availability": {"available": True},
+                    },
+                    {
+                        "id": "httpx", "label": "HTTPx", "policy_level": "safe",
+                        "target_types": ["domain", "ip", "url"],
+                        "availability": {"available": True},
+                    },
+                    {
+                        "id": "sqlmap", "label": "SQLmap", "policy_level": "standard",
+                        "target_types": ["url"],
+                        "availability": {"available": True},
+                    },
+                ]
+                target_type = str((params or {}).get("target_type") or "")
+                if target_type:
+                    actions = [
+                        action for action in actions
+                        if target_type in action["target_types"]
+                    ]
                 return {
                     "catalog": {
-                        "actions": [{
-                            "id": "ping", "label": "Ping", "policy_level": "safe",
-                            "target_types": ["domain", "ip"],
-                            "availability": {"available": True},
-                        }],
+                        "actions": actions,
                         "nmap_profiles": [{"key": "safe"}],
                         "nuclei_profiles": [{"key": "safe"}],
                     },
@@ -8532,6 +8556,26 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
 
     assert cli_main.main(["probe", "list", "--project", "prj_probe"]) == 0
     assert "Ping" in capsys.readouterr().out
+
+    assert cli_main.main([
+        "probe", "list", "--project", "prj_probe", "--target-type", "ip",
+    ]) == 0
+    ip_output = capsys.readouterr().out
+    assert "Ping" in ip_output
+    assert "HTTPx" in ip_output
+    assert "DNSRecon" not in ip_output
+    assert "SQLmap" not in ip_output
+    assert calls[-1][2] == {"service": None, "target_type": "ip"}
+
+    assert cli_main.main([
+        "probe", "list", "--project", "prj_probe", "--target-type", "url",
+        "--format", "json",
+    ]) == 0
+    url_payload = json.loads(capsys.readouterr().out)
+    assert {action["id"] for action in url_payload["catalog"]["actions"]} == {
+        "httpx", "sqlmap",
+    }
+    assert calls[-1][2] == {"service": None, "target_type": "url"}
 
     assert cli_main.main([
         "probe", "plan", "ping", "probe.example", "--project", "prj_probe",
