@@ -1011,7 +1011,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `INTERACTIVE_PTY_ENABLED` | Docker Compose, Flask app | Enables guarded terminal sessions for approved interactive tools; detailed PTY limits remain in YAML |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. The same value drives app validation and scanner-user OUTPUT deny rules |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
-| `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions. It doesn't bypass the per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; destructive actions remain unavailable |
+| `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions and the reviewed intrusive Nuclei profile for Project probes. It doesn't bypass per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; intrusive Dalfox probes and destructive actions remain unavailable |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
@@ -1047,9 +1047,9 @@ The optional database and AI tuning variables are escape hatches for process-man
 
 ---
 
-## Intrusive Assessment Actions
+## Intrusive Assessment and Probe Actions
 
-Intrusive Assessment actions are off by default because they send active validation payloads rather than only collecting or comparing evidence. Enable them only for Projects whose scope and authorization you've reviewed:
+Intrusive Assessment actions and the intrusive Nuclei profile for Project probes are off by default because they send active validation payloads rather than only collecting or comparing evidence. Enable them only for Projects whose scope and authorization you've reviewed:
 
 ```env
 ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true
@@ -1059,7 +1059,7 @@ ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true
 docker compose up -d --force-recreate shell
 ```
 
-The setting only makes maintained intrusive actions available. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project context immediately before starting the command. That includes one saved Dalfox parameter for XSS validation or the exact reviewed headless and low-aggression DAST profile for Nuclei. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
+The setting only makes maintained intrusive choices available. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project context immediately before starting the command. Assessment cycles can use one saved Dalfox parameter for XSS validation or an exact reviewed headless and low-aggression DAST profile for Nuclei. Project probes can select the reviewed intrusive Nuclei profile, but their Dalfox action remains parameter discovery without XSS payloads. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
 
 ---
 
