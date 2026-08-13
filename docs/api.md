@@ -293,6 +293,8 @@ curl -sS \
 
 The optional `service` query returns reviewed recommendations for that discovered service, while `target_type` narrows actions to `domain`, `ip`, or `url`. Catalog and plan reads are side-effect free.
 
+Probe resolution and planning deliberately use different HTTP methods across the two client surfaces. The same-origin browser workspace uses `GET` with `cache: no-store`, matching its other internal read adapters; its resolver value and plan ids therefore appear in the request URL and must never contain Secrets. API v1 uses `POST` with a strictly checked JSON body so token clients keep selectors and plan options out of URLs, proxy caches, and ordinary access-log request lines. These API requests are still viewer-safe reads: they use read rate limits and don't create a run, audit event, History row, or Assessment evidence.
+
 API payloads use a confirmed `entity_id`. A client that starts with an exact hostname, address, or URL can resolve it first:
 
 ```bash
