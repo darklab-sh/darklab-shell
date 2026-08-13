@@ -863,6 +863,29 @@ def test_probe_target_resolver_requires_one_confirmed_owner_scoped_project_link(
                 ProbePlanRequest(project_id, "ping", entity_id=str(confirmed["id"])),
             )
         assert foreign.value.code == "project_not_found"
+        with pytest.raises(ProbeError) as empty_selector:
+            resolve_probe_target(
+                conn, session_id, "",
+                ProbePlanRequest(project_id, "ping"),
+            )
+        assert empty_selector.value.code == "target_selector_invalid"
+
+        conn.execute(
+            "UPDATE entities SET type = 'email' WHERE id = ?",
+            (confirmed["id"],),
+        )
+        conn.commit()
+        with pytest.raises(ProbeError) as unsupported:
+            resolve_probe_target(
+                conn, session_id, "",
+                ProbePlanRequest(project_id, "ping", entity_id=str(confirmed["id"])),
+            )
+        assert unsupported.value.code == "probe_target_type_unsupported"
+        conn.execute(
+            "UPDATE entities SET type = 'domain' WHERE id = ?",
+            (confirmed["id"],),
+        )
+        conn.commit()
 
     update_project(session_id, project_id, {"status": "archived"})
     with db_connect() as conn, pytest.raises(ProbeError) as archived:

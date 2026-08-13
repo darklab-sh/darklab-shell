@@ -522,6 +522,120 @@ def test_probe_launch_revalidates_and_binds_the_requested_project_and_tab(
     assert audit["request_id"] == "probe-browser-request"
 
 
+@pytest.mark.parametrize("surface", ("browser", "api"))
+@pytest.mark.parametrize("mutation", ("suppress", "unlink", "change"))
+def test_probe_launch_rejects_a_target_changed_after_preview(
+    client,
+    monkeypatch,
+    surface,
+    mutation,
+):
+    session_id = "tok_probe_target_recheck_" + uuid.uuid4().hex
+    _register_token(session_id)
+    project = _create_project(client, session_id)
+    target = _create_target(client, session_id, project["id"])
+    browser_headers = _headers(session_id)
+    api_headers = {"Authorization": f"Bearer {session_id}"}
+    plan_body = {"action_id": "ping", "entity_id": target["id"]}
+    if surface == "browser":
+        plan_response = client.get(
+            f"/projects/{project['id']}/probes/plan",
+            headers=browser_headers,
+            query_string=plan_body,
+        )
+        launch_route = f"/projects/{project['id']}/probes/run"
+        launch_headers = browser_headers
+    else:
+        plan_response = client.post(
+            f"/api/v1/projects/{project['id']}/probes/plan",
+            headers=api_headers,
+            json=plan_body,
+        )
+        launch_route = f"/api/v1/projects/{project['id']}/probes/run"
+        launch_headers = api_headers
+    assert plan_response.status_code == 200
+    plan = plan_response.get_json()["plan"]
+
+    if mutation == "change":
+        changed = client.put(
+            f"/projects/{project['id']}/targets/{target['id']}",
+            headers=browser_headers,
+            json={"value": "changed-probe-route.example.com"},
+        )
+        assert changed.status_code == 200
+    else:
+        with db_connect() as conn:
+            if mutation == "suppress":
+                conn.execute("UPDATE entities SET suppressed = 1 WHERE id = ?", (target["id"],))
+            else:
+                conn.execute(
+                    "DELETE FROM project_links WHERE project_id = ? "
+                    "AND entity_type = 'atlas_entity' AND entity_id = ?",
+                    (project["id"], target["id"]),
+                )
+            conn.commit()
+
+    broker_calls = []
+    monkeypatch.setattr("blueprints.run.broker_available", lambda: True)
+    monkeypatch.setattr(
+        "blueprints.run._start_brokered_run_service",
+        lambda **kwargs: broker_calls.append(kwargs),
+    )
+    monkeypatch.setattr("blueprints.api_v1.broker_available", lambda: True)
+    monkeypatch.setattr(
+        "blueprints.api_v1._start_brokered_run_service",
+        lambda **kwargs: broker_calls.append(kwargs),
+    )
+    rejected = client.post(
+        launch_route,
+        headers=launch_headers,
+        json={
+            **plan_body,
+            "confirmed": True,
+            "plan_digest": plan["plan_digest"],
+        },
+    )
+
+    assert rejected.status_code == 404
+    payload = rejected.get_json()
+    error_code = payload.get("code") or (payload.get("error") or {}).get("code")
+    assert error_code == "probe_target_not_found"
+    assert broker_calls == []
+
+
+@pytest.mark.parametrize("surface", ("browser", "api"))
+def test_probe_plan_rejects_a_same_owner_target_from_another_project(client, surface):
+    session_id = "tok_probe_project_boundary_" + uuid.uuid4().hex
+    _register_token(session_id)
+    project_a = _create_project(client, session_id)
+    project_b = _create_project(client, session_id)
+    target_b = _create_target(
+        client,
+        session_id,
+        project_b["id"],
+        value="project-b-only.example.com",
+    )
+    body = {"action_id": "ping", "entity_id": target_b["id"]}
+
+    if surface == "browser":
+        response = client.get(
+            f"/projects/{project_a['id']}/probes/plan",
+            headers=_headers(session_id),
+            query_string=body,
+        )
+    else:
+        response = client.post(
+            f"/api/v1/projects/{project_a['id']}/probes/plan",
+            headers={"Authorization": f"Bearer {session_id}"},
+            json=body,
+        )
+
+    assert response.status_code == 404
+    payload = response.get_json()
+    error_code = payload.get("code") or (payload.get("error") or {}).get("code")
+    assert error_code == "probe_target_not_found"
+
+
 def test_probe_launch_itself_writes_no_cycle_evidence_but_finalized_run_can_cover(
     client,
     monkeypatch,
