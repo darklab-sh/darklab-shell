@@ -878,3 +878,39 @@ def test_protected_probe_rejects_stale_profile_and_cleans_failed_spawn(
     assert failed.get_json()["error"]["code"] == "spawn_failed"
     assert len(material_paths) == 1
     assert not material_paths[0].exists()
+
+    from services.assessments import probe_protected_launch
+    from services.assessments.http_profile_target_scope import HttpProfileExecutionError
+    from services.assessments.probe_contracts import ProbeError
+
+    cleanup_calls = []
+    protected = probe_protected_launch.ProtectedHttpLaunch(
+        execution_command="httpx -u probe-route.example.com",
+        trusted_execution_args=("-H", "Authorization: protected"),
+        private_values=("Authorization: protected",),
+        cleanup=lambda: cleanup_calls.append("cleaned"),
+        audit_summary={},
+    )
+    monkeypatch.setattr(
+        probe_protected_launch,
+        "materialize_http_profile_launch",
+        lambda *_args, **_kwargs: protected,
+    )
+
+    def _rejected_context(*_args, **_kwargs):
+        raise HttpProfileExecutionError(
+            "profile_scope_changed",
+            "Profile scope changed after materialization.",
+            status_code=409,
+        )
+
+    with pytest.raises(ProbeError, match="Profile scope changed") as exc_info:
+        probe_protected_launch.materialize_probe_run_launch(
+            token,
+            project["id"],
+            current,
+            launch_context=_rejected_context,
+        )
+    assert exc_info.value.code == "profile_scope_changed"
+    assert exc_info.value.status_code == 409
+    assert cleanup_calls == ["cleaned"]

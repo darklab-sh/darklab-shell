@@ -36,11 +36,11 @@ def materialize_probe_run_launch(
             plan,
             trusted_execution_args=protected.trusted_execution_args,
         )
-    except HttpProfileExecutionError as exc:
-        raise ProbeError(exc.code, str(exc), status_code=exc.status_code) from exc
-    except Exception:
+    except Exception as exc:
         if protected is not None and protected.cleanup:
             protected.cleanup()
+        if isinstance(exc, HttpProfileExecutionError):
+            raise ProbeError(exc.code, str(exc), status_code=exc.status_code) from exc
         raise
     assert protected is not None
     return protected, context
