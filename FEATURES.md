@@ -826,6 +826,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - History responses include the same batched artifact, finding, Atlas entity, and Atlas finding counts shown in History and Run Details.
 - Project assessment routes let API clients discover available cycle profiles, create and review cycles, page and filter target-specific checks, record reasoned manual exclusions, attach compatible saved evidence, preview or start a check's current recommended action, preview or start a finding's saved verification action, and complete, archive, preview, or delete a cycle through the same Project and team-permission boundaries as the browser. Project probe schemas describe their complete catalog, plan, target-resolution, availability, bounds, and launch payloads and include representative examples for generated clients.
 - The bundled `darklab` CLI wraps the API with `whoami`, `run`, `active`, `tail`, `cancel`, `history`, `grep`, `show`, `output`, `artifacts`, `atlas`, `projects`, `project`, `project-findings`, `project-runs`, `project-entities`, `project-packages`, `assessment`, `team`, `schedule`, `notify`, `completion`, and `download` commands. `darklab assessment ...` lists and inspects Project cycles, filters their checks, records or clears reasoned manual decisions, previews a check's current recommended action, and starts it only after an explicit `--confirm`. It can select the same protected HTTP profile, reviewed Dalfox observation, or saved Schemathesis schema used by the browser. `darklab run --wait` waits for final status for shell scripts, `darklab active` lists current jobs for the token, `darklab run --link-project NAME` resolves friendly project names before linking completed external runs, `darklab history --type` filters run history by external commands or built-ins, `darklab grep <pattern>` searches saved output across runs, `darklab atlas ...` reads Atlas summary, source runs, entities, and findings, `darklab team ...` creates teams, manages members and invites, joins scopes, and saves the active CLI team, `darklab schedule ...` manages saved recurring commands, `darklab notify ...` manages notification channels without accepting plaintext secrets on the command line, `darklab completion bash|zsh|fish` prints static shell completion, and `darklab completion install --shell auto` installs it into the current user's shell-completion directory. Live tailing fails clearly if a stream closes before the run reaches an exit, killed, or error event, and Ctrl+C while following output detaches without cancelling the server-side run.
+- `darklab probe list`, `darklab probe plan`, and `darklab probe run` expose the same Project-scoped catalog, preview, approval digest, and launch checks as the browser terminal. Text and JSON output support scripts as well as interactive use.
 - CLI configuration uses flags first, then `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, and `DARKLAB_TIMEOUT`, then the TOML file at `~/.config/darklab/config.toml`. CLI writes keep that file at `0600` because it can store a session token.
 
 **Limits:** API v1 is intentionally non-interactive. Outside the assessment-cycle contract and completed-run project links, it does not expose general Project mutation routes. It also does not expose Interactive PTY start/input/resize routes, workflow execution, API-only token scopes, or workspace ZIP downloads.
@@ -998,6 +999,43 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Observation references keep inferred, imported, manual, and actively confirmed evidence separate. Matching issues can share a remediation reference, review state, and guidance without merging different owners, affected subjects, or vulnerabilities. The triage editor can explicitly merge remediation groups when different targets, CVEs, or rules still describe one fix; verification steps, status, notes, evidence, and validation method stay with each observation.
 - CVE findings use the same server-side priority order in Projects and Atlas: CISA KEV first, then EPSS probability and percentile, stored NVD CVSS, and newer findings as the stable tie-breaker. Compact labels explain KEV, EPSS, CVSS, advisory status, and source freshness instead of hiding them behind a composite score.
 - Command, severity, scope, run, target, review-state, verification-status, label, and note filters narrow busy Projects without loading every finding. Verification status uses `not_started`, `ready_to_verify`, `verified`, `needs_retest`, or `not_applicable`. The list supports visible-page bulk review, and inline or larger boards group the filtered findings into review lanes. Finding rows open Atlas, **See in run** jumps to the exact output line, and cards open the shared triage editor. Labels and notes remain editable through the shared entity metadata editor.
+
+### Project probes
+
+Project probes run one reviewed command against one confirmed Project target without creating an Assessment cycle. Listing and planning are read-only. Running a probe shows the exact bounded command and waits for approval before it starts; the resulting run streams in the originating browser tab, appears in History, links to the chosen Project, and can produce the same structured evidence as an ordinary run.
+
+| Action | Compatible targets | Minimum policy | What it does |
+| --- | --- | --- | --- |
+| Curl | Domain, IP, URL | Safe | Reads one HTTP response's headers without following redirects. |
+| Ping | Domain, IP | Safe | Sends four reachability probes to one host. |
+| DNSRecon | Domain | Safe | Collects standard DNS records. |
+| Gau | Domain | Safe | Collects passive historical URLs without probing them. |
+| HTTPx | Domain, IP, URL | Safe | Records response metadata and detected web technologies. |
+| Katana | Domain, URL | Standard | Crawls one web target to depth one. |
+| Dalfox | Domain, IP, URL | Standard | Discovers parameter names without sending XSS payloads. |
+| SQLmap | URL | Standard | Performs bounded SQL-injection detection without extraction or takeover. |
+| SSLyze | Domain, IP | Safe | Reviews one TLS certificate chain. |
+| testssl | Domain, IP | Standard | Runs a fast, high-severity TLS review. |
+| Nmap | Domain, IP | Standard | Reviews the top 100 TCP ports or one fixed app-owned NSE profile. |
+| Nuclei | Domain, IP, URL | Safe | Runs one reviewed local template profile; the selected profile can raise the policy. |
+
+The browser terminal accepts either the exact saved target value or its stable `ent_...` id. `probe list` uses the active Project unless `--project` is supplied. These examples list URL-compatible HTTPS recommendations, preview the TLS Nmap profile by entity id, and then request the same reviewed launch:
+
+```text
+probe list --service https --target-type url
+probe plan nmap --entity-id ent_example --project prj_example --nmap-profile tls
+probe run nmap --entity-id ent_example --project prj_example --nmap-profile tls
+```
+
+Use `darklab probe ... --project prj_example` for the same flow from a local shell or script. The external CLI's `run` stays in preview mode unless `--confirm` is present. API clients can obtain an exact entity id through the Project target resolver described in [docs/api.md](docs/api.md#project-probes).
+
+`probe list` shows the installed app-owned Nmap profiles and managed Nuclei profiles. Nmap choices cover general discovery and fixed service families such as TLS, SSH, mail, SMB, SNMP, LDAP, NFS, RPC, FTP, DNS, MySQL, and Redis; they never accept caller-supplied NSE scripts or argument files. Nuclei offers safe and standard local template sets, plus an intrusive set only when the operator has enabled intrusive Assessment and probe actions. A missing or changed managed template snapshot leaves the plan unavailable until it is reviewed again.
+
+Protected Curl, HTTPx, Katana, Nuclei, Dalfox, and detection-only SQLmap probes can add `--http-profile hpr_...`. The preview identifies the saved role and allowed hosts and paths, while Secret values and Files paths stay out of the command, response, transcript, logs, and History. A personal owner can launch their own probes. In team scope, viewers can list and plan; launching requires run permission, and a protected launch also requires Secret-management permission.
+
+Every launch remains one action against one confirmed target. Its preview states the request, time, port, crawl, template, or worker bounds that apply. Project probes don't allocate ZAP jobs or OAST callbacks and don't expose Schemathesis, takeover confirmation, intrusive Dalfox payloads, destructive actions, or evidence-only CVE correlation. They also don't directly mark an Assessment check covered; normal Project-linked evidence reconciliation decides whether a later cycle can use the run.
+
+If a plan says it is unavailable, check the action's target compatibility, installed command features, selected profile, and intrusive-action setting. Missing, pending, suppressed, ambiguous, or cross-Project targets are rejected. Permission failures stop before launch, and any target, profile, policy, template, or feature change after preview returns a stale-plan error so the operator can review a fresh command.
 
 ### Assessment worklist and actions
 
