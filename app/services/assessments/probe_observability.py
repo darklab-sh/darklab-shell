@@ -58,7 +58,7 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
             except ProbeError as exc:
                 outcome = "unavailable" if exc.status_code == 503 else "rejected"
                 app_metrics.record_probe_operation(phase, outcome, protected=protected)
-                log.warning(
+                (log.warning if exc.status_code in {403, 409, 429, 503} else log.info)(
                     "PROJECT_PROBE_OPERATION_REJECTED",
                     extra=_fields(phase, args, kwargs, outcome=outcome, error_code=exc.code),
                 )

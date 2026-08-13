@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from unittest import mock
 import uuid
 
 import pytest
@@ -26,6 +27,7 @@ from services.assessments.probe_contracts import (
 )
 from services.assessments.probe_plan_digest import probe_plan_digest
 from services.assessments.probe_plans import build_probe_plan, confirm_probe_plan
+from services.assessments.probe_observability import observe_probe
 from services.assessments.probe_targets import resolve_probe_target
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 from services.projects.crud import create_project, delete_project, update_project
@@ -200,7 +202,7 @@ def test_intrusive_nuclei_requires_the_instance_gate_and_fresh_confirmation():
     assert enabled["requires_confirmation"] is True
 
 
-def test_probe_plan_fails_closed_for_profiles_features_and_target_types():
+def test_probe_plan_fails_closed_for_profiles_features_and_target_types(monkeypatch):
     with pytest.raises(ProbeError, match="Nmap profile") as unknown:
         build_probe_plan(_request("nmap", nmap_profile="missing"), _target())
     assert unknown.value.code == "probe_profile_not_found"
@@ -217,6 +219,21 @@ def test_probe_plan_fails_closed_for_profiles_features_and_target_types():
         _target(),
     )
     assert incompatible["availability"]["code"] == "unsupported_target_type"
+
+    logger = mock.Mock()
+    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+
+    @observe_probe("plan")
+    def reject(status_code):
+        raise ProbeError("test_rejection", "Rejected", status_code=status_code)
+
+    with pytest.raises(ProbeError):
+        reject(404)
+    logger.info.assert_called_once()
+    logger.warning.assert_not_called()
+    with pytest.raises(ProbeError):
+        reject(409)
+    logger.warning.assert_called_once()
 
 
 def test_probe_digest_excludes_presentation_but_covers_execution_fields():
