@@ -233,9 +233,9 @@ async function _launchPlan(parsed, plan, tabId, launchAdapter) {
 async function handleProbeTerminalCommand(command, tabId, execution, launchAdapter = {}) {
   if (!execution) throw new Error('Probe terminal commands require a command execution');
   execution.setPersistence('none');
-  execution.setRecordRecent(false);
   const append = (line, className = '') => execution.appendLine(line, className, tabId);
   const parsed = parseProbeCommand(command);
+  execution.setRecordRecent(parsed.subcommand === 'run' && parsed.errors.length === 0);
   if (parsed.errors.length) {
     parsed.errors.forEach(error => append(`[probe] ${error}`, 'exit-fail'));
     PROBE_USAGE.forEach(line => append(line));

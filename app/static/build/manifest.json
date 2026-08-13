@@ -412,8 +412,8 @@
       "hash": "69584641c9c6aab0e7d3470b8c50a871060e82839b68f6ddd0cce0309c0fd482"
     },
     "/static/js/features/probes/probe_terminal.js": {
-      "path": "/static/build/static-probe-terminal.3ed8281cf011.js",
-      "hash": "3d42d6cc5ef779021e4181984989c624d629bc3c739fdbf036f67e3e51602a14"
+      "path": "/static/build/static-probe-terminal.0bd3e513f683.js",
+      "hash": "e5ed6c7cf2580a2cddd7a6036ecd36dccb3761abef53de2f9c1b4238edd31cfe"
     },
     "/static/js/features/projects/project_activity.js": {
       "path": "/static/build/static-project-activity.5c62a8ac4744.js",

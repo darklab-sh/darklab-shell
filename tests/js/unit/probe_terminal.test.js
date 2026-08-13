@@ -244,6 +244,8 @@ describe('Project probe terminal', () => {
     expect(apiFetch).toHaveBeenCalledTimes(1);
     expect(pending.kind).toBe('probe');
     expect(pending.tabId).toBe('tab-origin');
+    expect(commandExecution.setPersistence).toHaveBeenCalledWith('none');
+    expect(commandExecution.setRecordRecent).toHaveBeenCalledWith(true);
     const launched = await pending.onYes();
     await pending.onComplete(launched);
     expect(apiFetch).toHaveBeenLastCalledWith(
