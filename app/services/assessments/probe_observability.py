@@ -10,40 +10,19 @@ from functools import wraps
 import logging
 from typing import Any, TypeVar, cast
 
-from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_contracts import ProbeError
+from services.assessments.probe_observability_support import (
+    probe_log_fields,
+    probe_request,
+    probe_run_rejection,
+    sanitized_probe_exc_info,
+)
 from services.metrics_lazy import app_metrics
+from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 
 
 log = logging.getLogger("shell")
 _F = TypeVar("_F", bound=Callable[..., Any])
-
-
-def _request(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> ProbePlanRequest | None:
-    for value in (*args, *kwargs.values()):
-        if isinstance(value, ProbePlanRequest):
-            return value
-    return None
-
-
-def _fields(
-    phase: str,
-    args: tuple[Any, ...],
-    kwargs: Mapping[str, Any],
-    *,
-    outcome: str,
-    error_code: str = "",
-) -> dict[str, Any]:
-    request = _request(args, kwargs)
-    project_id = str(request.project_id if request else kwargs.get("project_id", args[1] if len(args) > 1 else ""))
-    return {
-        "probe_phase": phase,
-        "probe_outcome": outcome,
-        "project_id": project_id,
-        "entity_id": str(request.entity_id if request else ""),
-        "action_id": str(request.action_id if request else ""),
-        "protected": bool(request and request.http_profile_id),
-        "error_code": error_code,
-    }
 
 
 def observe_probe(phase: str) -> Callable[[_F], _F]:
@@ -51,7 +30,7 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
     def decorator(function: _F) -> _F:
         @wraps(function)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
-            request = _request(args, kwargs)
+            request = probe_request(args, kwargs)
             protected = bool(request and request.http_profile_id)
             try:
                 result = function(*args, **kwargs)
@@ -60,14 +39,33 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
                 app_metrics.record_probe_operation(phase, outcome, protected=protected)
                 (log.warning if exc.status_code in {403, 409, 429, 503} else log.info)(
                     "PROJECT_PROBE_OPERATION_REJECTED",
-                    extra=_fields(phase, args, kwargs, outcome=outcome, error_code=exc.code),
+                    extra=probe_log_fields(
+                        phase, args, kwargs, outcome=outcome, error_code=exc.code,
+                        error_class=type(exc).__name__,
+                    ),
                 )
                 raise
-            except Exception:
+            except (RunStartRejected, RunPreparationError) as exc:
+                status_code, error_code = probe_run_rejection(exc)
+                app_metrics.record_probe_operation(phase, "rejected", protected=protected)
+                (log.warning if status_code >= 403 else log.info)(
+                    "PROJECT_PROBE_OPERATION_REJECTED",
+                    extra=probe_log_fields(
+                        phase, args, kwargs, outcome="rejected", error_code=error_code,
+                        error_class=type(exc).__name__,
+                    ),
+                )
+                raise
+            except Exception as exc:
                 app_metrics.record_probe_operation(phase, "failed", protected=protected)
-                log.exception(
+                error_code = "run_spawn_failed" if isinstance(exc, RunSpawnError) else "unexpected_failure"
+                log.error(
                     "PROJECT_PROBE_OPERATION_FAILED",
-                    extra=_fields(phase, args, kwargs, outcome="failed"),
+                    exc_info=sanitized_probe_exc_info(exc),
+                    extra=probe_log_fields(
+                        phase, args, kwargs, outcome="failed", error_code=error_code,
+                        error_class=type(exc).__name__,
+                    ),
                 )
                 raise
             unavailable = isinstance(result, Mapping) and not result.get("launchable", True)
@@ -75,7 +73,7 @@ def observe_probe(phase: str) -> Callable[[_F], _F]:
             app_metrics.record_probe_operation(phase, outcome, protected=protected)
             event = "PROJECT_PROBE_OPERATION_COMPLETED"
             logger = log.info if phase == "launch" else log.debug
-            logger(event, extra=_fields(phase, args, kwargs, outcome=outcome))
+            logger(event, extra=probe_log_fields(phase, args, kwargs, outcome=outcome))
             return result
 
         return cast(_F, wrapped)

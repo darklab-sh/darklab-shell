@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from io import StringIO
 import json
+import logging
 from types import SimpleNamespace
 from unittest import mock
 import uuid
@@ -14,6 +16,7 @@ import uuid
 import pytest
 
 from core.database import db_connect, db_init
+from core.logging_setup import GELFFormatter, _TextFormatter
 from services.assessments.action_plan_payload import digest_plan
 from services.assessments.action_plans import build_assessment_action_plan
 from services.assessments.base_action_catalog import ACTIONS, base_action_ids
@@ -33,6 +36,7 @@ from services.assessments.probe_targets import resolve_probe_target
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 from services.projects.crud import create_project, delete_project, update_project
 from services.projects.targets import add_project_target
+from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 
 
 _READY_TEMPLATES = NucleiTemplateCacheSnapshot(
@@ -362,6 +366,54 @@ def test_probe_cleanup_retries_failed_or_incomplete_removal(monkeypatch):
         observed_raised()
     assert observed_raised() is True
     assert raised.call_count == 2
+
+
+def test_probe_failure_logging_sanitizes_chained_run_errors(monkeypatch):
+    sensitive = "Bearer-probe-secret nmap target.example /tmp/private-http-runs/run-secret"
+    rendered = []
+    logger = logging.Logger("probe-observability-test", logging.DEBUG)
+    logger.propagate = False
+    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+
+    @observe_probe("launch")
+    def fail_spawn(_request):
+        try:
+            raise ValueError(sensitive)
+        except ValueError as cause:
+            raise RunSpawnError("Run could not start") from cause
+
+    for formatter in (_TextFormatter(), GELFFormatter()):
+        stream = StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(formatter)
+        logger.handlers[:] = [handler]
+        with pytest.raises(RunSpawnError):
+            fail_spawn(_request("httpx", http_profile_id="hpr_private"))
+        rendered.append(stream.getvalue())
+
+    assert all("PROJECT_PROBE_OPERATION_FAILED" in body for body in rendered)
+    assert all("Project probe operation failed" in body for body in rendered)
+    assert all(sensitive not in body for body in rendered)
+    assert all("run_spawn_failed" in body for body in rendered)
+
+    logger = mock.Mock()
+    monkeypatch.setattr("services.assessments.probe_observability.log", logger)
+
+    @observe_probe("launch")
+    def reject_start(_request, error):
+        raise error
+
+    with pytest.raises(RunStartRejected):
+        reject_start(_request("ping"), RunStartRejected("raw_code", sensitive))
+    logger.info.assert_called_once()
+    assert logger.info.call_args.kwargs["extra"]["error_code"] == "run_start_rejected"
+    assert "exc_info" not in logger.info.call_args.kwargs
+
+    with pytest.raises(RunPreparationError):
+        reject_start(_request("ping"), RunPreparationError(sensitive))
+    logger.warning.assert_called_once()
+    assert logger.warning.call_args.kwargs["extra"]["error_code"] == "run_preparation_rejected"
+    assert "exc_info" not in logger.warning.call_args.kwargs
 
 
 def test_probe_digest_excludes_presentation_but_covers_execution_fields():
