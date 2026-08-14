@@ -171,6 +171,35 @@ mkdir -p /tmp/.config/nuclei /tmp/.config/uncover /tmp/.cache
 chown -R scanner:scanner /tmp/.config /tmp/.cache
 chmod -R 755 /tmp/.config /tmp/.cache
 
+# Nuclei creates a new templates directory with mode 0700, which prevents the
+# appuser web process from reading the managed checksum after scanner installs
+# templates. Prepare the shared root first so scanner keeps write ownership and
+# appuser can traverse it to verify the exact template snapshot used by plans.
+prepare_managed_nuclei_cache() {
+    NUCLEI_TEMPLATES_DIR="${NUCLEI_TEMPLATES_DIR:-/tmp/nuclei-templates}"
+    export NUCLEI_TEMPLATES_DIR
+
+    if [ -L "$NUCLEI_TEMPLATES_DIR" ] \
+        || { [ -e "$NUCLEI_TEMPLATES_DIR" ] && [ ! -d "$NUCLEI_TEMPLATES_DIR" ]; }; then
+        echo "NUCLEI_TEMPLATE_CACHE_INVALID path=$NUCLEI_TEMPLATES_DIR" >&2
+        exit 1
+    fi
+    mkdir -p "$NUCLEI_TEMPLATES_DIR" || {
+        echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=mkdir path=$NUCLEI_TEMPLATES_DIR" >&2
+        exit 1
+    }
+    chown scanner:appuser "$NUCLEI_TEMPLATES_DIR" || {
+        echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=chown path=$NUCLEI_TEMPLATES_DIR" >&2
+        exit 1
+    }
+    chmod 0750 "$NUCLEI_TEMPLATES_DIR" || {
+        echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=chmod path=$NUCLEI_TEMPLATES_DIR" >&2
+        exit 1
+    }
+}
+
+prepare_managed_nuclei_cache
+
 # Block the scanner user from reaching this container's app port without
 # reserving that same port on authorized remote targets. Prefer addrtype so
 # loopback and every address assigned to the container stay covered. Older

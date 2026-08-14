@@ -1653,6 +1653,30 @@ def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_
         f"events={events[:10]}; output={visible_lines[:12]!r}"
     )
 
+    shell_container = _run(
+        container_smoke_test.compose + ["ps", "-q", "shell"],
+        timeout=30,
+    ).stdout.strip()
+    assert shell_container, "shell container id was not available after Nuclei warmup"
+    _run(
+        [
+            "docker",
+            "exec",
+            "--user",
+            "appuser:appuser",
+            shell_container,
+            "python",
+            "-c",
+            (
+                "from services.nuclei.template_cache import "
+                "managed_nuclei_template_snapshot; "
+                "snapshot = managed_nuclei_template_snapshot(); "
+                "assert snapshot.state == 'ready', snapshot"
+            ),
+        ],
+        timeout=30,
+    )
+
 
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")

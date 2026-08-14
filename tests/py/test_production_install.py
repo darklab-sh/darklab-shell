@@ -1263,6 +1263,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'echo "PROCESS_ROLE_INVALID role=$process_role"' in entrypoint
     assert 'exec gosu appuser python -m "$process_module"' in entrypoint
     assert "/tmp/darklab-process-role.ready" in entrypoint
+    assert 'NUCLEI_TEMPLATES_DIR="${NUCLEI_TEMPLATES_DIR:-/tmp/nuclei-templates}"' in entrypoint
+    assert 'chown scanner:appuser "$NUCLEI_TEMPLATES_DIR"' in entrypoint
+    assert 'chmod 0750 "$NUCLEI_TEMPLATES_DIR"' in entrypoint
+    cache_prepare = entrypoint.index("\nprepare_managed_nuclei_cache\n")
+    assert cache_prepare < entrypoint.index("exec gosu appuser gunicorn")
     assert 'cp -R "${source_dir%/}/."' in source_stager
     assert 'chmod -R u+rX,a-w "$runtime_dir"' in source_stager
     assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=$stage" in source_stager
