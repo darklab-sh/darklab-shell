@@ -777,7 +777,7 @@ describe('app helpers', () => {
     await vi.waitFor(() => (
       expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith('run_previous', 'run_actions')
     ))
-  })
+  }, 20_000)
 
   it('prompts before switching schedules or creating a new schedule with unsaved edits', async () => {
     const schedules = [

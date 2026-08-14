@@ -19743,6 +19743,20 @@ class TestDerivedCommandRegistry:
                 "description": "Project HTTP profile id",
             }
             assert "--http-profile" in probe_context[subcommand]["expects_value"]
+            assert [
+                item["value"]
+                for item in probe_context[subcommand]["arg_hints"]["--nuclei-profile"]
+            ] == ["safe", "standard"]
+
+        intrusive_context = load_autocomplete_context_from_commands_registry({
+            "workspace_enabled": True,
+            "assessment_intrusive_actions_enabled": True,
+        })["probe"]["subcommands"]
+        for subcommand in ("plan", "run"):
+            assert [
+                item["value"]
+                for item in intrusive_context[subcommand]["arg_hints"]["--nuclei-profile"]
+            ] == ["safe", "standard", "intrusive"]
 
     def test_builtin_autocomplete_workspace_roots_follow_feature_flag(self):
         disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})

@@ -104,7 +104,7 @@ def _normalize_smoke_metadata(raw_value):
     return result or None
 
 
-def _filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
+def filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
     filtered: dict[str, dict] = {}
     for root, raw_spec in (context or {}).items():
         if not isinstance(raw_spec, dict):

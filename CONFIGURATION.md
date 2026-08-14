@@ -1059,7 +1059,7 @@ ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true
 docker compose up -d --force-recreate shell
 ```
 
-The setting only makes maintained intrusive choices available. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project context immediately before starting the command. Assessment cycles can use one saved Dalfox parameter for XSS validation or an exact reviewed headless and low-aggression DAST profile for Nuclei. Project probes can select the reviewed intrusive Nuclei profile, but their Dalfox action remains parameter discovery without XSS payloads. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
+The setting only makes maintained intrusive choices available. While it is off, terminal autocomplete leaves the intrusive Nuclei profile out of `probe plan` and `probe run` suggestions. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project context immediately before starting the command. Assessment cycles can use one saved Dalfox parameter for XSS validation or an exact reviewed headless and low-aggression DAST profile for Nuclei. Project probes can select the reviewed intrusive Nuclei profile, but their Dalfox action remains parameter discovery without XSS payloads. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
 
 ---
 

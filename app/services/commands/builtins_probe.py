@@ -28,6 +28,21 @@ def _value_suggestions(values, description):
     return [{"value": value, "description": description} for value in values]
 
 
+def _nuclei_profile_suggestions():
+    return [
+        {
+            "value": value,
+            "description": "Nuclei profile",
+            **(
+                {"feature_required": "assessment_intrusive_actions_enabled"}
+                if value == "intrusive"
+                else {}
+            ),
+        }
+        for value in nuclei_profile_keys()
+    ]
+
+
 _PROBE_AUTOCOMPLETE = {
     "root": "probe",
     "description": "built-in: inspect bounded one-off checks for confirmed Project targets",
@@ -79,7 +94,7 @@ _PROBE_AUTOCOMPLETE = {
                     {
                         "value": "--nuclei-profile", "takes_value": True,
                         "description": "Managed Nuclei profile",
-                        "suggest": _value_suggestions(nuclei_profile_keys(), "Nuclei profile"),
+                        "suggest": _nuclei_profile_suggestions(),
                     },
                 ],
             },
@@ -104,7 +119,7 @@ _PROBE_AUTOCOMPLETE = {
                     {
                         "value": "--nuclei-profile", "takes_value": True,
                         "description": "Managed Nuclei profile",
-                        "suggest": _value_suggestions(nuclei_profile_keys(), "Nuclei profile"),
+                        "suggest": _nuclei_profile_suggestions(),
                     },
                 ],
             },
