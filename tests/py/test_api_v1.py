@@ -8470,6 +8470,17 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
 
         def request(self, method, path, *, params=None, body=None, **_kwargs):
             calls.append((method, path, params, body))
+            if method == "GET" and path == "/projects":
+                assert params == {"limit": 100, "offset": 0}
+                return {
+                    "projects": [{
+                        "id": "prj_probe",
+                        "slug": "probe-project",
+                        "name": "Probe Project",
+                        "status": "active",
+                    }],
+                    "has_more": False,
+                }
             if method == "GET" and path == "/projects/prj_probe/probes":
                 actions = [
                     {
@@ -8562,8 +8573,11 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_probe_cli")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
-    assert cli_main.main(["probe", "list", "--project", "prj_probe"]) == 0
+    assert cli_main.main(["probe", "list", "--project", "probe-project"]) == 0
     assert "Ping" in capsys.readouterr().out
+    assert calls[-2][1:] == (
+        "/projects", {"limit": 100, "offset": 0}, None,
+    )
 
     assert cli_main.main([
         "probe", "list", "--project", "prj_probe", "--target-type", "ip",

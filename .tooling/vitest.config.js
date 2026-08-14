@@ -18,5 +18,9 @@ export default defineConfig({
     globals: true,
     root: rootDir,
     include: ['tests/js/unit/**/*.test.js'],
+    // Large jsdom suites contend heavily when every host CPU becomes a worker.
+    // Keep file-level parallelism bounded so ordinary 5s interaction budgets
+    // measure the test instead of scheduler starvation.
+    maxWorkers: 2,
   },
 })

@@ -1019,15 +1019,15 @@ Project probes run one reviewed command against one confirmed Project target wit
 | Nmap | Domain, IP | Standard | Reviews the top 100 TCP ports or one fixed app-owned NSE profile. |
 | Nuclei | Domain, IP, URL | Safe | Runs one reviewed local template profile; the selected profile can raise the policy. |
 
-The browser terminal accepts either the exact saved target value or its stable `ent_...` id. `probe list` uses the active Project unless `--project` is supplied. These examples list URL-compatible HTTPS recommendations, preview the TLS Nmap profile by entity id, and then request the same reviewed launch:
+The browser terminal accepts either the exact saved target value or its stable `ent_...` id. `probe list` uses the active Project unless `--project` is supplied. That option accepts an active Project slug or stable `prj_...` id, and autocomplete offers the active slugs in the current owner scope. These examples list URL-compatible HTTPS recommendations, preview the TLS Nmap profile by entity id, and then request the same reviewed launch:
 
 ```text
 probe list --service https --target-type url
-probe plan nmap --entity-id ent_example --project prj_example --nmap-profile tls
-probe run nmap --entity-id ent_example --project prj_example --nmap-profile tls
+probe plan nmap --entity-id ent_example --project example-project --nmap-profile tls
+probe run nmap --entity-id ent_example --project example-project --nmap-profile tls
 ```
 
-Use `darklab probe ... --project prj_example` for the same flow from a local shell or script. The external CLI's `run` stays in preview mode unless `--confirm` is present. API clients can obtain an exact entity id through the Project target resolver described in [docs/api.md](docs/api.md#project-probes).
+Use `darklab probe ... --project example-project` for the same flow from a local shell or script; it also accepts the stable Project id. The external CLI's `run` stays in preview mode unless `--confirm` is present. API clients continue to use canonical Project ids in route paths and can obtain an exact entity id through the Project target resolver described in [docs/api.md](docs/api.md#project-probes).
 
 `probe list` shows the installed app-owned Nmap profiles and managed Nuclei profiles. Nmap choices cover general discovery and fixed service families such as TLS, SSH, mail, SMB, SNMP, LDAP, NFS, RPC, FTP, DNS, MySQL, and Redis; they never accept caller-supplied NSE scripts or argument files. Nuclei offers safe and standard local template sets, plus an intrusive set only when the operator has enabled intrusive Assessment and probe actions. Terminal autocomplete follows that setting: it hides the intrusive value while the feature is off, though an explicitly typed intrusive request still returns an unavailable plan instead of silently changing profiles. A missing or changed managed template snapshot leaves the plan unavailable until it is reviewed again. An explicit `nuclei -update-templates` refreshes an empty container cache even when Files still holds an older ProjectDiscovery version marker.
 

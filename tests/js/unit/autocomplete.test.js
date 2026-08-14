@@ -1185,6 +1185,17 @@ describe('autocomplete helpers', () => {
               },
             },
           },
+          probe: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {},
+            subcommands: Object.fromEntries(['list', 'plan', 'run'].map(name => [name, {
+              flags: [{ value: '--project', description: 'Project slug or id' }],
+              expects_value: ['--project'],
+              arg_hints: {},
+              subcommands: {},
+            }])),
+          },
           ping: { flags: [], expects_value: [], arg_hints: {} },
         },
         acFiltered: [],
@@ -1211,6 +1222,14 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('project archive ', 16).map(item => item.value)).toEqual(['active-case'])
     expect(getAutocompleteMatches('project unarchive ', 18).map(item => item.value)).toEqual(['archived-case'])
     expect(getAutocompleteMatches('project delete ', 15).map(item => item.value)).toEqual(['active-case', 'archived-case'])
+    const probeProjectCommands = [
+      'probe list --project ',
+      'probe plan ping example.test --project ',
+      'probe run ping example.test --project ',
+    ]
+    probeProjectCommands.forEach((command) => {
+      expect(getAutocompleteMatches(command, command.length).map(item => item.value)).toEqual(['active-case'])
+    })
   })
 
   it('suggests schedule ids for terminal schedule actions', () => {

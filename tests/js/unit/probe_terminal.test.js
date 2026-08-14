@@ -129,7 +129,12 @@ describe('Project probe terminal', () => {
   });
 
   it('loads an explicit or active Project catalog without creating a client History record', async () => {
-    const apiFetch = vi.fn(async () => response({
+    const apiFetch = vi.fn(async (url) => response(url === '/projects?include_archived=1' ? {
+      projects: [
+        { id: 'prj_explicit', slug: 'explicit-case', name: 'Explicit Case', status: 'active' },
+        { id: 'prj_archived', slug: 'archived-case', name: 'Archived Case', status: 'archived' },
+      ],
+    } : {
       catalog: {
         actions: [], nmap_profiles: [], nuclei_profiles: [], service_recommendations: [],
       },
@@ -148,7 +153,7 @@ describe('Project probe terminal', () => {
     expect(commandExecution.setStatus).toHaveBeenCalledWith('ok');
 
     await handleProbeTerminalCommand(
-      'probe list --project prj_explicit --service http --target-type url',
+      'probe list --project explicit-case --service http --target-type url',
       'tab-1',
       commandExecution,
     );
@@ -160,6 +165,11 @@ describe('Project probe terminal', () => {
 
   it('resolves an exact target before requesting an entity-anchored plan', async () => {
     const apiFetch = vi.fn(async (url) => {
+      if (url === '/projects?include_archived=1') {
+        return response({
+          projects: [{ id: 'prj_1', slug: 'project-one', name: 'Project One', status: 'active' }],
+        });
+      }
       if (url.endsWith('/targets/resolve')) {
         return response({ target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' } });
       }
@@ -181,12 +191,12 @@ describe('Project probe terminal', () => {
     const commandExecution = execution();
 
     await handleProbeTerminalCommand(
-      'probe plan ping example.test --project prj_1',
+      'probe plan ping example.test --project project-one',
       'tab-mobile',
       commandExecution,
     );
 
-    expect(apiFetch.mock.calls[0]).toEqual([
+    expect(apiFetch.mock.calls[1]).toEqual([
       '/projects/prj_1/probes/targets/resolve',
       {
         method: 'POST',
@@ -195,8 +205,8 @@ describe('Project probe terminal', () => {
         cache: 'no-store',
       },
     ]);
-    expect(apiFetch.mock.calls[0][0]).not.toContain('example.test');
-    expect(apiFetch.mock.calls[1][0]).toContain(
+    expect(apiFetch.mock.calls[1][0]).not.toContain('example.test');
+    expect(apiFetch.mock.calls[2][0]).toContain(
       '/projects/prj_1/probes/plan?action_id=ping&entity_id=ent_1',
     );
     expect(commandExecution.appendLine).toHaveBeenCalledWith(
@@ -285,6 +295,11 @@ describe('Project probe terminal', () => {
       launchable: true,
     };
     const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/projects?include_archived=1') {
+        return response({
+          projects: [{ id: 'prj_1', slug: 'project-one', name: 'Project One', status: 'active' }],
+        });
+      }
       if (options.method === 'POST') {
         return response({
           project_id: 'prj_1',
@@ -299,7 +314,7 @@ describe('Project probe terminal', () => {
     const bindStartedRun = vi.fn();
 
     await handleProbeTerminalCommand(
-      'probe run httpx --entity-id ent_1 --project prj_1 --http-profile hpr_1',
+      'probe run httpx --entity-id ent_1 --project project-one --http-profile hpr_1',
       'tab-origin',
       commandExecution,
       {
@@ -314,7 +329,7 @@ describe('Project probe terminal', () => {
       'notice',
       'tab-origin',
     );
-    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(apiFetch).toHaveBeenCalledTimes(2);
     expect(pending.kind).toBe('probe');
     expect(pending.tabId).toBe('tab-origin');
     expect(commandExecution.setPersistence).toHaveBeenCalledWith('none');

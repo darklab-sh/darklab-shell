@@ -8,10 +8,13 @@ import {
   getActiveProjectContext,
   refreshActiveProjectContext,
 } from '../projects/project_context_bridge.js';
+import {
+  _readAutocompleteProjects,
+} from '../autocomplete/suggestions.js';
 import { setProbeTerminalHandler } from './probe_terminal_bridge.js';
 
 const PROBE_CLIENT_FAILURE_EVENT = 'PROJECT_PROBE_CLIENT_REQUEST_FAILED';
-const PROBE_CLIENT_PHASES = new Set(['catalog', 'resolve', 'plan', 'launch']);
+const PROBE_CLIENT_PHASES = new Set(['project', 'catalog', 'resolve', 'plan', 'launch']);
 const PROBE_PROJECT_ID_RE = /^prj_[A-Za-z0-9_-]{1,64}$/;
 const PROBE_ERROR_NAME_RE = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 
@@ -53,11 +56,11 @@ function logProbeClientFailure(error, { phase = '', projectId = '' } = {}) {
 
 const PROBE_USAGE = [
   'Usage:',
-  '  probe list [--project <project-id>] [--service <service>] [--target-type <domain|ip|url>]',
-  '  probe plan <action> <target> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
-  '  probe plan <action> --entity-id <entity-id> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
-  '  probe run <action> <target> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
-  '  probe run <action> --entity-id <entity-id> --project <project-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
+  '  probe list [--project <project-slug-or-id>] [--service <service>] [--target-type <domain|ip|url>]',
+  '  probe plan <action> <target> --project <project-slug-or-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
+  '  probe plan <action> --entity-id <entity-id> --project <project-slug-or-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
+  '  probe run <action> <target> --project <project-slug-or-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
+  '  probe run <action> --entity-id <entity-id> --project <project-slug-or-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
 ];
 
 function _probeCommandTokens(command) {
@@ -247,9 +250,39 @@ async function _activeProjectId() {
   return String(refreshed?.id || '');
 }
 
+function _activeProjectForReference(projectRef, projects = _readAutocompleteProjects()) {
+  const normalized = String(projectRef || '').trim().toLowerCase();
+  if (!normalized) return null;
+  return (Array.isArray(projects) ? projects : []).find((project) => (
+    String(project?.status || '').toLowerCase() === 'active'
+    && (
+      String(project?.id || '') === projectRef
+      || String(project?.slug || '').toLowerCase() === normalized
+    )
+  )) || null;
+}
+
+async function _canonicalProjectId(projectRef) {
+  const reference = String(projectRef || '').trim();
+  if (PROBE_PROJECT_ID_RE.test(reference)) return reference;
+  let project = _activeProjectForReference(reference);
+  if (!project) {
+    const response = await apiFetch('/projects?include_archived=1', { cache: 'no-store' });
+    const data = await _responseJson(response, 'project');
+    project = _activeProjectForReference(reference, data.projects);
+  }
+  const projectId = String(project?.id || '');
+  if (PROBE_PROJECT_ID_RE.test(projectId)) return projectId;
+  const error = new Error(`Project slug '${reference}' doesn't match an active Project.`);
+  error.name = 'ProbeProjectReferenceError';
+  error.probePhase = 'project';
+  throw error;
+}
+
 async function _loadCatalog(parsed) {
-  const projectId = parsed.projectId || await _activeProjectId();
-  if (!projectId) throw new Error('select an active Project before listing probes');
+  const projectRef = parsed.projectId || await _activeProjectId();
+  if (!projectRef) throw new Error('select an active Project before listing probes');
+  const projectId = await _canonicalProjectId(projectRef);
   parsed.projectId = projectId;
   const query = new URLSearchParams();
   if (parsed.service) query.set('service', parsed.service);
@@ -260,6 +293,7 @@ async function _loadCatalog(parsed) {
 }
 
 async function _loadPlan(parsed) {
+  parsed.projectId = await _canonicalProjectId(parsed.projectId);
   let entityId = parsed.entityId;
   if (!entityId) {
     const targetResponse = await apiFetch(

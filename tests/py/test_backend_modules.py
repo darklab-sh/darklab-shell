@@ -19726,7 +19726,7 @@ class TestDerivedCommandRegistry:
         list_project = next(item for item in list_flags if item["value"] == "--project")
         assert list_project == {
             "value": "--project",
-            "description": "Project id; defaults to the active Project",
+            "description": "Project slug or id; defaults to the active Project",
         }
         assert "--project" in probe_context["list"]["expects_value"]
         assert any(item["value"] == "--target-type" for item in list_flags)

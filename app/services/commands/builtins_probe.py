@@ -54,7 +54,7 @@ _PROBE_AUTOCOMPLETE = {
                     {
                         "value": "--project",
                         "takes_value": True,
-                        "description": "Project id; defaults to the active Project",
+                        "description": "Project slug or id; defaults to the active Project",
                     },
                     {
                         "value": "--service",
@@ -80,7 +80,7 @@ _PROBE_AUTOCOMPLETE = {
                     "description": "Exact confirmed Project target",
                 }],
                 "flags": [
-                    {"value": "--project", "takes_value": True, "description": "Project id"},
+                    {"value": "--project", "takes_value": True, "description": "Project slug or id"},
                     {"value": "--entity-id", "takes_value": True, "description": "Confirmed target entity id"},
                     {
                         "value": "--http-profile", "takes_value": True,
@@ -105,7 +105,7 @@ _PROBE_AUTOCOMPLETE = {
                     "description": "Exact confirmed Project target",
                 }],
                 "flags": [
-                    {"value": "--project", "takes_value": True, "description": "Project id"},
+                    {"value": "--project", "takes_value": True, "description": "Project slug or id"},
                     {"value": "--entity-id", "takes_value": True, "description": "Confirmed target entity id"},
                     {
                         "value": "--http-profile", "takes_value": True,
@@ -133,7 +133,7 @@ def probe_builtin_spec() -> BuiltinCommandSpec:
         _PROBE_AUTOCOMPLETE,
         handler_key="probe",
         handler=lambda _command, _context: run_builtin_client_side_command("probe"),
-        name="probe list | probe plan|run <action> <target> --project <project-id>",
+        name="probe list | probe plan|run <action> <target> --project <project-slug-or-id>",
         description="List, preview, and run bounded checks for confirmed Project targets.",
         execution_owner=BuiltinExecutionOwner.BROWSER,
         browser_fallback_stub=True,
