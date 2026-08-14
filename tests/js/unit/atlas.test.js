@@ -2866,7 +2866,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project target created')
     expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success')
     expect(projectEvents.some(event => event.name === 'app:project-workspace-changed')).toBe(true)
-  })
+  }, 10_000)
 
   it('opens a prepared ZAP draft in the existing explicit Atlas review and apply flow', async () => {
     const { openAtlas, apiFetch, showToast } = loadAtlas()

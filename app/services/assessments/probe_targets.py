@@ -27,7 +27,7 @@ def require_probe_project(
         table_alias="p",
     )
     row = conn.execute(
-        f"SELECT p.status FROM projects p WHERE {owner_sql} AND p.id = ? LIMIT 1",  # nosec B608
+        f"SELECT p.status FROM projects p WHERE {owner_sql} AND p.id = ? LIMIT 1",  # nosec
         (*owner_params, project_id),
     ).fetchone()
     if not row:

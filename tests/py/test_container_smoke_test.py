@@ -1622,6 +1622,41 @@ def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_
         return
 
     warmup_session_id = _new_smoke_session_id()
+    _workspace_payload(container_smoke_test, warmup_session_id)
+    shell_container = _run(
+        container_smoke_test.compose + ["ps", "-q", "shell"],
+        timeout=30,
+    ).stdout.strip()
+    assert shell_container, "shell container id was not available before Nuclei warmup"
+    workspace_name = "sess_" + hashlib.sha256(
+        warmup_session_id.encode("utf-8")
+    ).hexdigest()[:32]
+    stale_config_dir = (
+        f"/tmp/darklab_shell-workspaces/{workspace_name}/tools/nuclei"
+    )
+    stale_config = json.dumps({
+        "nuclei-templates-directory": "/tmp/nuclei-templates",
+        "nuclei-templates-version": "v999.0.0",
+    })
+    _run(
+        [
+            "docker",
+            "exec",
+            shell_container,
+            "sh",
+            "-c",
+            (
+                'install -d -o scanner -g appuser -m 3770 "$1" && '
+                'printf "%s\\n" "$2" > "$1/.templates-config.json" && '
+                'chown scanner:appuser "$1/.templates-config.json" && '
+                'chmod 0640 "$1/.templates-config.json"'
+            ),
+            "sh",
+            stale_config_dir,
+            stale_config,
+        ],
+        timeout=30,
+    )
     print(
         f"[container-smoke-test] warming nuclei templates: {NUCLEI_TEMPLATE_WARMUP_COMMAND}",
         flush=True,
@@ -1653,11 +1688,6 @@ def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_
         f"events={events[:10]}; output={visible_lines[:12]!r}"
     )
 
-    shell_container = _run(
-        container_smoke_test.compose + ["ps", "-q", "shell"],
-        timeout=30,
-    ).stdout.strip()
-    assert shell_container, "shell container id was not available after Nuclei warmup"
     _run(
         [
             "docker",

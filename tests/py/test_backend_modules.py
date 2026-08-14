@@ -20307,6 +20307,46 @@ class TestDerivedCommandRegistry:
                     assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
                     assert exec_tokens[2] == command.split()[0]
 
+                nuclei_scan = commands.validate_command(
+                    "nuclei -u https://ip.darklab.sh -severity high",
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+                assert nuclei_scan.allowed, nuclei_scan.reason
+                rewritten_scan, scan_notice = commands.rewrite_command(
+                    nuclei_scan.exec_command,
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+                assert scan_notice is None
+                scan_tokens = commands.split_command_argv(rewritten_scan)
+                assert scan_tokens[0] == "env"
+                assert scan_tokens[1].startswith("XDG_CONFIG_HOME=")
+                assert scan_tokens[2] == "nuclei"
+
+                for update_flag in ("-update-templates", "-ut"):
+                    nuclei_update = commands.validate_command(
+                        f"nuclei {update_flag}",
+                        session_id=session_id,
+                        cfg=cfg,
+                    )
+                    assert nuclei_update.allowed, nuclei_update.reason
+                    rewritten_update, update_notice = commands.rewrite_command(
+                        nuclei_update.exec_command,
+                        session_id=session_id,
+                        cfg=cfg,
+                    )
+                    assert update_notice is None
+                    update_tokens = commands.split_command_argv(
+                        rewritten_update
+                    )
+                    assert update_tokens[0] == "nuclei"
+                    assert "-ud" in update_tokens
+                    assert all(
+                        not token.startswith("XDG_CONFIG_HOME=")
+                        for token in update_tokens
+                    )
+
                 result = commands.validate_command(
                     "amass subs -d darklab.sh -names -dir custom-amass-db",
                     session_id=session_id,

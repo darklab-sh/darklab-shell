@@ -5891,6 +5891,9 @@ commands:
             - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
+          unless_any:
+            - -update-templates
+            - -ut
     autocomplete:
       examples:
         - value: nuclei -h

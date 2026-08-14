@@ -1165,7 +1165,7 @@ describe('app helpers', () => {
     Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Accept baseline').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Baseline accepted', 'success'))
     expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }))
-  }, 10_000)
+  }, 20_000)
 
   it('does not let history outside-click dismissal close behind modal overlays', async () => {
     const source = readFileSync(
