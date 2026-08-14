@@ -51,6 +51,7 @@ import core.process as process
 import services.pty.service as pty_service
 import services.runs.broker as run_broker
 import core.database as database
+import core.database_access as database_access
 import core.database_backend as database_backend
 from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceQuotaExceeded
 import services.projects.workspace as project_workspace
@@ -7815,7 +7816,7 @@ class TestDatabaseBackend:
         ) is True
         assert database_backend.is_transient_postgres_error(RuntimeError("permission denied")) is False
 
-    def test_db_connect_routes_to_postgres_compat_when_configured(self, monkeypatch):
+    def test_db_connect_and_connection_scope_route_configured_backends(self, monkeypatch):
         postgres_context = object()
         sqlite_context = object()
         postgres_connect = mock.Mock(return_value=postgres_context)
@@ -7832,6 +7833,42 @@ class TestDatabaseBackend:
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         assert database.db_connect() is sqlite_context
         sqlite_connect.assert_called_once_with(database.DB_PATH, timeout=10)
+
+        events = []
+
+        class FakeConnection:
+            def execute(self):
+                return None
+
+            def close(self):
+                events.append("sqlite_close")
+
+        sqlite_connection = FakeConnection()
+        monkeypatch.setattr(database_access, "get_db_connect", lambda: lambda: sqlite_connection)
+        with database_access.db_connection_scope() as opened:
+            assert opened is sqlite_connection
+        assert events == ["sqlite_close"]
+
+        postgres_connection = object()
+
+        class FakePostgresContext:
+            def __enter__(self):
+                events.append("postgres_enter")
+                return postgres_connection
+
+            def __exit__(self, exc_type, exc, traceback):
+                events.append(("postgres_exit", exc_type))
+                return False
+
+        monkeypatch.setattr(database_access, "get_db_connect", lambda: lambda: FakePostgresContext())
+        with database_access.db_connection_scope() as opened:
+            assert opened is postgres_connection
+        assert events[-2:] == ["postgres_enter", ("postgres_exit", None)]
+
+        caller_connection = FakeConnection()
+        with database_access.db_connection_scope(caller_connection) as opened:
+            assert opened is caller_connection
+        assert events.count("sqlite_close") == 1
 
     def test_postgres_requires_database_url(self):
         with pytest.raises(database_backend.PostgresConnectionError, match="database_url"):

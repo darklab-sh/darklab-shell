@@ -4889,6 +4889,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     session_id = json.loads(token_resp.data)["session_token"]
     browser_headers = {"X-Session-ID": session_id}
     api_headers = {"Authorization": f"Bearer {session_id}"}
+    command_catalog_resp = client.get("/commands/catalog", headers=browser_headers)
     create_resp = client.post(
         "/projects",
         headers=browser_headers,
@@ -5138,6 +5139,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     ).fetchone()
 
     assert token_resp.status_code == 200
+    assert command_catalog_resp.status_code == 200
+    assert {
+        item["source"] for item in json.loads(command_catalog_resp.data)["cve_risk_feeds"]
+    } == {"epss", "kev"}
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
     assert probe_catalog_resp.status_code == 200

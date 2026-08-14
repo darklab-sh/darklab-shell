@@ -11,7 +11,7 @@ import json
 import re
 from typing import Any, Mapping
 
-from core.database_access import get_db_connect
+from core.database_access import db_connection_scope
 from services.projects.finding_dispositions import (
     apply_primary_remediation_disposition,
     attach_remediation_dispositions,
@@ -315,9 +315,7 @@ def attach_risk_to_findings(
         cves_by_finding,
         owner_by_finding_id=owner_by_finding_id,
     )
-    owns_connection = conn is None
-    active = conn or get_db_connect()()
-    try:
+    with db_connection_scope(conn) as active:
         attach_remediation_dispositions(
             active,
             findings,
@@ -391,9 +389,6 @@ def attach_risk_to_findings(
             finding["priority_context"] = finding_priority_context(finding)
             apply_primary_remediation_disposition(finding)
         return findings
-    finally:
-        if owns_connection:
-            active.close()
 
 
 def _aggregate_priority_context(observations: list[dict[str, Any]]) -> dict[str, Any]:
