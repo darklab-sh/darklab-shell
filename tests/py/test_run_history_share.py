@@ -1364,6 +1364,14 @@ class TestRunStreaming:
         assert [item["raw_line"] for item in findings] == ["80/tcp open http"]
         assert by_value["darklab.sh"]["id"] in findings[0]["target_ids"]
 
+        confirmed_resp = client.put(
+            f"/projects/{project['id']}/targets/{by_value['darklab.sh']['id']}",
+            json={"review_state": "confirmed"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert confirmed_resp.status_code == 200
+        assert json.loads(confirmed_resp.data)["target"]["review_state"] == "confirmed"
+
         second_proc = _FakeProc(lines=["Nmap scan report for darklab.sh\n", "80/tcp open http\n", ""])
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
@@ -1379,6 +1387,11 @@ class TestRunStreaming:
             rerun_body = rerun.get_data(as_text=True)
         assert rerun.status_code == 200
         assert "[project] discovered" not in rerun_body
+        rerun_targets = json.loads(client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        ).data)["targets"]
+        assert next(item for item in rerun_targets if item["value"] == "darklab.sh")["review_state"] == "confirmed"
 
         with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True}, clear=False):
             target_file = shell_workspace.resolve_workspace_path(
