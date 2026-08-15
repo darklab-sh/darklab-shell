@@ -550,7 +550,9 @@ COPY deploy/third-party-licenses/ /usr/share/doc/darklab-shell/licenses/
 
 COPY entrypoint.sh /entrypoint.sh
 COPY scripts/container/stage_runtime_source.sh /usr/local/libexec/darklab-stage-runtime-source
-RUN chmod +x /entrypoint.sh /usr/local/libexec/darklab-stage-runtime-source
+COPY scripts/container/bootstrap_nuclei_templates.sh /usr/local/libexec/darklab-bootstrap-nuclei-templates
+RUN chmod +x /entrypoint.sh /usr/local/libexec/darklab-stage-runtime-source \
+    /usr/local/libexec/darklab-bootstrap-nuclei-templates
 
 ARG APP_PORT=8888
 EXPOSE ${APP_PORT}

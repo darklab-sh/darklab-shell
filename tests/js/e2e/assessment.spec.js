@@ -21,6 +21,7 @@ async function issueAndActivateSessionToken(page) {
 }
 
 async function createAndSelectTeam(page, suffix) {
+  await page.evaluate(() => window.DarklabTeamScope.refreshTeamScopes())
   const team = await page.evaluate(async ({ teamSuffix }) => {
     const response = await apiFetch('/session/teams', {
       method: 'POST',

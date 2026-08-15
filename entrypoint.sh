@@ -200,6 +200,11 @@ prepare_managed_nuclei_cache() {
 
 prepare_managed_nuclei_cache
 
+# A fresh deployment should be able to preview reviewed Nuclei probes without
+# first running a manual terminal command. Bootstrap only an empty managed
+# cache; existing snapshots remain unchanged until an operator updates them.
+/usr/local/libexec/darklab-bootstrap-nuclei-templates
+
 # Block the scanner user from reaching this container's app port without
 # reserving that same port on authorized remote targets. Prefer addrtype so
 # loopback and every address assigned to the container stay covered. Older

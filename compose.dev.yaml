@@ -95,6 +95,7 @@ services:
     volumes:
       - ./app:/opt/darklab-source/app:ro
       - ./data:/data
+      - nuclei-templates:/tmp/nuclei-templates
     tmpfs:
       - /tmp
       - /app
@@ -151,6 +152,7 @@ services:
       # bounding set and scanner binary file capabilities to be intact.
       - RAW_PACKET_SCANNING_ENABLED=${RAW_PACKET_SCANNING_ENABLED:-false}
       - ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}
+      - NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s
@@ -170,3 +172,4 @@ services:
 volumes:
   postgres-data:
   llama-cache:
+  nuclei-templates:

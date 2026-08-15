@@ -950,6 +950,7 @@ cp .env.example .env
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # RAW_PACKET_SCANNING_ENABLED=false
 # ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=false
+# NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=true
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -1012,6 +1013,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. The same value drives app validation and scanner-user OUTPUT deny rules |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
 | `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions and the reviewed intrusive Nuclei profile for Project probes. It doesn't bypass per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; intrusive Dalfox probes and destructive actions remain unavailable |
+| `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED` | Docker Compose, Docker entrypoint | When enabled, installs managed Nuclei templates if the persistent cache has no manifest. The attempt is bounded and non-fatal, and it never refreshes an installed snapshot |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
@@ -1044,6 +1046,8 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain `4` workers and `4` threads. The production stack keeps those defaults unless `.env` changes them. Any value above `1` requires a reachable Redis instance at startup; without Redis, set `WEB_CONCURRENCY=1` for local single-worker fallback mode.
 
 The optional database and AI tuning variables are escape hatches for process-managed deployments. Leave them unset in the shipped Compose stacks to use `config.local.yaml`; their Compose entries intentionally pass empty values, which the app ignores.
+
+Both shipped Compose stacks mount the managed Nuclei templates at `/tmp/nuclei-templates` through the `nuclei-templates` named volume. The first web-container startup fills an empty volume. Set `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false` when startup must not contact ProjectDiscovery; Nuclei plans stay unavailable until an operator runs `nuclei -update-templates`. Removing the named volume also removes the installed template snapshot.
 
 ---
 
