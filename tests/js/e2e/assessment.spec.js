@@ -379,6 +379,29 @@ test.describe('project assessment qualification', () => {
     await assessment.locator('.project-assessment-start-form select').selectOption('web')
     await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
     await expect(assessment).toContainText('Web assessment')
+
+    await page.setViewportSize({ width: 810, height: 766 })
+    const newProfile = assessment.getByRole('button', { name: 'New HTTP profile' })
+    await newProfile.click()
+    const profileEditor = page.locator('#confirm-host .project-http-profile-editor')
+    await expect(profileEditor).toBeVisible()
+    const profileLayout = await page.locator('#confirm-host').evaluate((host) => {
+      const card = host.querySelector('[data-confirm-card]')?.getBoundingClientRect()
+      const editor = host.querySelector('.project-http-profile-editor')?.getBoundingClientRect()
+      if (!card || !editor) return null
+      return {
+        cardLeft: card.left,
+        cardRight: card.right,
+        editorLeft: editor.left,
+        editorRight: editor.right,
+      }
+    })
+    expect(profileLayout).not.toBeNull()
+    expect(profileLayout.editorLeft).toBeGreaterThanOrEqual(profileLayout.cardLeft)
+    expect(profileLayout.editorRight).toBeLessThanOrEqual(profileLayout.cardRight)
+    await confirmAssessmentAction(page, 'cancel')
+    await expect(profileEditor).toBeHidden()
+
     await assessment.locator('.project-assessment-target-toggle').click()
     const runHttpx = assessment.getByRole('button', { name: 'Run Httpx' })
     await runHttpx.click()

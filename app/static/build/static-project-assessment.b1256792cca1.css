@@ -281,11 +281,20 @@
   color: var(--text);
 }
 
+#confirm-host .modal-card-compact:has(.project-http-profile-editor) {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.modal-confirm-content:has(.project-http-profile-editor) {
+  min-width: 0;
+}
+
 .project-http-profile-editor {
   display: grid;
   gap: 12px;
+  width: 100%;
   max-height: min(62vh, 660px);
-  min-width: min(74vw, 680px);
+  min-width: 0;
   overflow: auto;
   padding-right: 4px;
 }
