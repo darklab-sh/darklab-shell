@@ -3886,7 +3886,7 @@ async function _completeBufferedBrowserCommand(execution, {
   );
   const persistedLines = outputLines.concat(sinkErrorLines).map(line => ({
     ...line,
-    rendered: suppressOutput && !sinkErrorLines.includes(line),
+    rendered: line.rendered === true || (suppressOutput && !sinkErrorLines.includes(line)),
   }));
   const result = execution.toResult({
     command,

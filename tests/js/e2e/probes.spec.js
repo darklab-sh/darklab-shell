@@ -95,6 +95,8 @@ test.describe('Project probe terminal', () => {
     await input.fill('no')
     await input.press('Enter')
     await expect(output).toContainText('Probe launch canceled.')
+    await expect(output.getByText('Probe plan: Ping', { exact: true })).toHaveCount(1)
+    await expect(output.getByText('Run this probe? Type yes or no.', { exact: true })).toHaveCount(1)
     expect(await page.evaluate(() => window.APP_STATE_API.getActiveTabId())).toBe(tabId)
     expect(launchRequests).toBe(0)
   })
@@ -160,6 +162,8 @@ test.describe('Project probe terminal', () => {
     }, undefined, { timeout: 30_000 })
     await expect(output).toContainText('Probe plan: Ping')
     await expect(output).toContainText('[process exited with code')
+    await expect(output.getByText('Probe plan: Ping', { exact: true })).toHaveCount(1)
+    await expect(output.getByText('Run this probe? Type yes or no.', { exact: true })).toHaveCount(1)
     await expect(page.locator('.tab')).toHaveCount(tabCount)
     expect(await page.evaluate(() => window.APP_STATE_API.getActiveTabId())).toBe(originTabId)
 
