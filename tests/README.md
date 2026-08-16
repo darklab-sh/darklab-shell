@@ -250,8 +250,9 @@ npm run test:unit
 ```
 
 The shared Vitest configuration runs at most two test files at once. This keeps
-the jsdom-heavy suites responsive on high-core development and CI hosts without
-making individual interaction timeouts less strict.
+the jsdom-heavy suites responsive on high-core development and CI hosts. Tests
+also have a 20-second wall-clock ceiling so a ready worker isn't mistaken for a
+hung interaction when a constrained host takes longer to schedule it.
 
 #### Shared browser modules and Atlas
 

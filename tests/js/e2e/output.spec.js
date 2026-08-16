@@ -266,32 +266,19 @@ test.describe('output follow helper', () => {
       const out = getOutput(activeTabId)
       const tab = getTab(activeTabId)
       setTabStatus(activeTabId, 'running')
+      tab.outputUserScrollUntil = Date.now() + 1000
       out.scrollTop = 0
       tab.followOutput = false
       updateOutputFollowButton(activeTabId)
     })
 
-    await page.waitForFunction(
-      () => {
-        const tab = getTab(activeTabId)
-        const btn = document.querySelector('.tab-panel.active .output-follow-btn')
-        return (
-          !!tab &&
-          tab.st === 'running' &&
-          !tab.followOutput &&
-          !!btn &&
-          !btn.hidden &&
-          btn.textContent === 'jump to live'
-        )
-      },
-      { timeout: 5000 },
-    )
     await expect
       .poll(async () =>
         page.evaluate(() => {
           const tab = getTab(activeTabId)
           const btn = document.querySelector('.tab-panel.active .output-follow-btn')
           return {
+            status: tab?.st || '',
             followOutput: !!tab && tab.followOutput,
             hidden: !!btn && btn.hidden,
             text: btn?.textContent || '',
@@ -299,6 +286,7 @@ test.describe('output follow helper', () => {
         }),
       )
       .toEqual({
+        status: 'running',
         followOutput: false,
         hidden: false,
         text: 'jump to live',
@@ -320,6 +308,7 @@ test.describe('output follow helper', () => {
             requestAnimationFrame(() => {
               const out = getOutput(activeTabId)
               const tab = getTab(activeTabId)
+              tab.outputUserScrollUntil = Date.now() + 1000
               tab.suppressOutputScrollTracking = true
               out.scrollTop = 0
               tab.followOutput = false

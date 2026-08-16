@@ -37,6 +37,7 @@ container run --rm \
     --user scanner:appuser \
     --cap-add NET_RAW \
     --cap-add NET_ADMIN \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m \
     --entrypoint sh \
     "$image" -c '
 set -eu
@@ -50,7 +51,7 @@ for tool in \
     openssl sslscan nuclei subfinder httpx dnsx naabu katana tlsx cdncheck gau \
     amass assetfinder gobuster ffuf tcping trufflehog massdns puredns testssl \
     nikto sslyze wafw00f rustscan dalfox schemathesis wpscan vt ipinfo urlscan-cli chaos nmap \
-    masscan pg_dump pg_restore python ruby perl; do
+    masscan chromium pg_dump pg_restore python ruby perl; do
     command -v "$tool" >/dev/null 2>&1 \
         || verification_failed "$tool" "executable missing"
 done
@@ -106,6 +107,11 @@ probe urlscan-cli urlscan-cli --help
 probe chaos chaos -h
 probe nmap nmap --version
 probe masscan masscan --version
+probe chromium chromium --version
+if ! chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
+    --dump-dom about:blank >/dev/null 2>&1; then
+    verification_failed chromium-headless "container-isolated headless browser could not start"
+fi
 probe pg_dump pg_dump --version
 probe pg_restore pg_restore --version
 for postgresql_tool in pg_dump pg_restore; do

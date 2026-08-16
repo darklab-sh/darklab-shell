@@ -718,6 +718,8 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     intrusive_args = nuclei_profile_args("intrusive")
     assert intrusive_args[-3:] == ("-dast", "-fuzz-aggression", "low")
     assert "-headless" in intrusive_args
+    assert "-system-chrome" in intrusive_args
+    assert intrusive_args[intrusive_args.index("-headless-options") + 1] == "--no-sandbox"
     assert "exploit" in nuclei_profile("safe").excluded_tags
     assert nuclei_profile("intrusive").requires_confirmation is True
     assert nuclei_profile("safe").template_source == "managed_cache"
@@ -754,6 +756,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     assert "-tags exposure,misconfig,cve,tech,network,ssl,api" in standard.command
     assert "-no-interactsh -disable-redirects -disable-update-check" in standard.command
     assert "-headless" in intrusive.command
+    assert "-headless -system-chrome -headless-options --no-sandbox" in intrusive.command
     row = {
         "check_id": "ach_nuclei",
         "assessment_id": "asm_nuclei",
@@ -848,7 +851,9 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     )
     assert enabled["launchable"] is True
     assert enabled["nuclei_profile"]["key"] == "intrusive"
-    assert "-headless -dast -fuzz-aggression low" in enabled["display_command"]
+    assert "-headless -system-chrome -headless-options --no-sandbox -dast" in (
+        enabled["display_command"]
+    )
     assert assessment_run_launch_context(enabled).output_signal_context == (
         RunOutputSignalContext(nuclei_template_snapshot=template_snapshot)
     )

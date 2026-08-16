@@ -6,6 +6,7 @@
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
     "apt:ca-certificates": "Python container base and Debian packages",
+    "apt:chromium": "Python container base and Debian packages",
     "apt:curl": "Python container base and Debian packages",
     "apt:dnsenum": "Python container base and Debian packages",
     "apt:dnsrecon": "Python container base and Debian packages",

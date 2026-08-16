@@ -2749,7 +2749,9 @@ def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
     assert plan["launchable"] is True
     assert plan["policy_level"] == "intrusive"
     assert plan["nuclei_profile"]["key"] == "intrusive"
-    assert "-headless -dast -fuzz-aggression low" in plan["display_command"]
+    assert "-headless -system-chrome -headless-options --no-sandbox -dast" in (
+        plan["display_command"]
+    )
 
     monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", False)
     stale = client.post(

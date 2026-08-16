@@ -3646,6 +3646,12 @@ describe('per-tab terminal confirmations', () => {
       kind: 'probe', tabId: 'tab-1', execution: pendingExecution('tab-1'),
       onCancel: cancelCapabilities,
     })
+    document.dispatchEvent(new CustomEvent('app:scope-capabilities-changed', {
+      detail: { changed: false, initial: true },
+    }))
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(true)
+    expect(cancelCapabilities).not.toHaveBeenCalled()
+
     document.dispatchEvent(new Event('app:scope-capabilities-changed'))
     expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
     expect(cancelCapabilities).toHaveBeenCalledOnce()

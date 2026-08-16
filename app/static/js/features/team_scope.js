@@ -581,7 +581,21 @@ let DarklabTeamScope = null;
     })).filter(team => team.id);
   }
 
+  function scopeCapabilitySignature() {
+    const activeTeam = teams.find(team => team.id === activeTeamId) || null;
+    return JSON.stringify({
+      team_id: activeTeamId || '',
+      role: activeTeam?.role || '',
+      status: activeTeam?.status || '',
+      capabilities: Array.isArray(activeTeam?.capabilities)
+        ? [...activeTeam.capabilities].sort()
+        : [],
+    });
+  }
+
   function replaceTeamScopes(payload) {
+    const wasResolved = teamScopesResolved;
+    const previousSignature = scopeCapabilitySignature();
     teams = normalizeTeams(payload);
     const stored = normalizeTeamId(getStoredTeamId());
     activeTeamId = teams.some(team => team.id === stored) ? stored : '';
@@ -590,7 +604,11 @@ let DarklabTeamScope = null;
     if (!activeTeamId) storeTeamId('');
     render();
     document.dispatchEvent(new CustomEvent('app:scope-capabilities-changed', {
-      detail: { team_id: activeTeamId },
+      detail: {
+        team_id: activeTeamId,
+        changed: wasResolved && previousSignature !== scopeCapabilitySignature(),
+        initial: !wasResolved,
+      },
     }));
     return teams;
   }

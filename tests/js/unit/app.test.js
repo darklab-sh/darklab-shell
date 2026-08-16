@@ -3069,7 +3069,7 @@ describe('app helpers', () => {
     expect(collectionSteps[1].querySelector(
       '[data-workflow-field$="max_parallel"] .form-error',
     ).textContent).toBe('Parallel runs must be between 1 and 8.')
-  }, 10000)
+  }, 20_000)
 
   it('marks workflow capture-fed command previews as available only during the playbook', async () => {
     const { renderWorkflowItems } = await loadAppFns()

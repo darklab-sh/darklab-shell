@@ -107,19 +107,22 @@ test.describe('timestamp toggle', () => {
     )
   })
 
-  test('toggling timestamps or line numbers keeps a long man page pinned to the live bottom', async ({
+  test('toggling timestamps or line numbers keeps long output pinned to the live bottom', async ({
     page,
   }) => {
-    test.setTimeout(90_000)
-    await page.waitForFunction(() => {
-      const text = document.querySelector('.wlc-command-text')?.textContent || ''
-      return text.length >= 5
+    await ensurePromptReady(page, { cancelWelcome: true })
+    await page.evaluate(() => {
+      clearTab(activeTabId)
+      for (let index = 0; index < 600; index += 1) {
+        appendLine(`line ${index} ${'x'.repeat(60)}`, '', activeTabId)
+      }
     })
-
-    await runCommand(page, 'man curl', { timeout: 60_000 })
-    await expect(page.locator('#hud-last-exit')).toHaveText('0', { timeout: 15_000 })
+    await waitForActiveOutputSettled(page)
 
     const output = page.locator('.tab-panel.active .output')
+    await expect
+      .poll(() => output.evaluate((el) => el.scrollHeight > el.clientHeight + 50))
+      .toBeTruthy()
     await pinActiveOutputToLiveBottom(page)
 
     const isAtBottom = async () =>

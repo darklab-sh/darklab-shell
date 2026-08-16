@@ -1349,6 +1349,15 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     ) in dockerfile
     assert "https://apt.postgresql.org/pub/repos/apt" in dockerfile
     assert "postgresql-client-${POSTGRESQL_CLIENT_VERSION}" in dockerfile
+    assert "postgresql-client-${POSTGRESQL_CLIENT_VERSION} chromium" in dockerfile
+    assert "masscan chromium pg_dump" in bundled_tool_smoke
+    assert "--tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m" in bundled_tool_smoke
+    assert "probe chromium chromium --version" in bundled_tool_smoke
+    assert "if ! chromium --headless --no-sandbox --disable-gpu" in bundled_tool_smoke
+    assert (
+        'verification_failed chromium-headless "container-isolated headless browser could not start"'
+        in bundled_tool_smoke
+    )
     assert "expected PostgreSQL 18 client" in bundled_tool_smoke
     assert 'pg_dump_version "PostgreSQL 18"' in image_smoke
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
@@ -1993,6 +2002,9 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     install_coverage = inventory["dockerfile_install_coverage"]
     assert install_coverage["apt:nmap"] == "Debian Nmap package"
     assert install_coverage["apt:masscan"] == "Debian Masscan package"
+    assert install_coverage["apt:chromium"] == (
+        "Python container base and Debian packages"
+    )
     assert install_coverage["apt:postgresql-client-${POSTGRESQL_CLIENT_VERSION}"] == (
         "PostgreSQL 18 client"
     )

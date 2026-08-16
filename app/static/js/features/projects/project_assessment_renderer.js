@@ -1184,6 +1184,13 @@ function createProjectAssessmentRenderer(context, actions) {
     if (mobile) {
       const button = makeElement('button', 'btn btn-secondary btn-compact', 'Check actions');
       button.type = 'button';
+      button.dataset.projectAssessmentActionFocus = [
+        'mobile',
+        projectId,
+        detail?.assessment?.id,
+        check?.id,
+        'menu',
+      ].map(value => String(value || '')).join(':');
       const items = checkActionItems(projectId, detail, check, button);
       button.disabled = !items.length;
       ctx.bindProjectRuntimePressable?.(button, {
@@ -1199,6 +1206,13 @@ function createProjectAssessmentRenderer(context, actions) {
       checkActionItems(projectId, detail, check, null).forEach((item) => {
         const button = makeElement('button', 'btn btn-secondary btn-compact', item.label);
         button.type = 'button';
+        button.dataset.projectAssessmentActionFocus = [
+          'desktop',
+          projectId,
+          detail?.assessment?.id,
+          check?.id,
+          item.label,
+        ].map(value => String(value || '')).join(':');
         button.disabled = item.disabled;
         if (item.disabled) {
           button.title = item.disabledTitle || (item.label === 'Create finding'

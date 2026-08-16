@@ -677,7 +677,8 @@ export async function ensurePromptReady(
         : null
       const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
       if (cancel) {
-        if (typeof cancelWelcome === 'function') cancelWelcome(tabId)
+        const cancelWelcomeFn = window.__darklabE2E?.cancelWelcome
+        if (typeof cancelWelcomeFn === 'function') cancelWelcomeFn(tabId)
         return
       }
       if (
@@ -692,19 +693,22 @@ export async function ensurePromptReady(
     { cancel: cancelWelcome },
   )
 
-  await page.waitForFunction(
-    () => {
+  const welcomeReady = page.waitForFunction(
+    ({ cancel }) => {
       const active = typeof _welcomeActive !== 'undefined' ? _welcomeActive : false
       const bootPending = typeof _welcomeBootPending !== 'undefined' ? _welcomeBootPending : false
       const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
       const activeTab = typeof window.APP_STATE_API?.getActiveTabId === 'function'
         ? window.APP_STATE_API.getActiveTabId()
         : null
+      if (cancel) return !active && !bootPending
       return !bootPending || (active && welcomeTabId !== activeTab)
     },
-    undefined,
+    { cancel: cancelWelcome },
     { timeout: Math.min(timeout, 3_000) },
-  ).catch(() => {})
+  )
+  if (cancelWelcome) await welcomeReady
+  else await welcomeReady.catch(() => {})
 
   await page.waitForFunction(
     () => {

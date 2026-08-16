@@ -17,12 +17,21 @@ function responseError(payload, status, fallback) {
   return error;
 }
 
+function liveFocusTarget(target) {
+  if (target?.isConnected) return target;
+  const key = text(target?.dataset?.projectAssessmentActionFocus);
+  if (!key || typeof document === 'undefined') return target;
+  return [...document.querySelectorAll('[data-project-assessment-action-focus]')]
+    .find(node => node.dataset.projectAssessmentActionFocus === key) || target;
+}
+
 function restoreFocus(target) {
-  if (!target?.isConnected || target.disabled || typeof target.focus !== 'function') return;
+  const focusTarget = liveFocusTarget(target);
+  if (!focusTarget?.isConnected || focusTarget.disabled || typeof focusTarget.focus !== 'function') return;
   try {
-    target.focus({ preventScroll: true });
+    focusTarget.focus({ preventScroll: true });
   } catch (_) {
-    target.focus();
+    focusTarget.focus();
   }
 }
 

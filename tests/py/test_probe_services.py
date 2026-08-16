@@ -260,7 +260,9 @@ def test_intrusive_nuclei_requires_the_instance_gate_and_fresh_confirmation():
     )
     assert enabled["launchable"] is True
     assert enabled["policy_level"] == "intrusive"
-    assert "-headless" in enabled["display_command"]
+    assert "-headless -system-chrome -headless-options --no-sandbox" in (
+        enabled["display_command"]
+    )
     assert enabled["requires_confirmation"] is True
 
 

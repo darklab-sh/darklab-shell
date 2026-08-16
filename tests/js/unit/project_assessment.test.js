@@ -1639,7 +1639,7 @@ describe('project assessment controller', () => {
       policy_level: 'intrusive',
       scope: { target_count: 1, fan_out: 1 },
       bounds: { summary: 'One approved target.', credential_use: 'none' },
-      display_command: 'nuclei -u https://example.com -headless -dast -fuzz-aggression low',
+      display_command: 'nuclei -u https://example.com -headless -system-chrome -headless-options --no-sandbox -dast -fuzz-aggression low',
       launchable: true,
       plan_digest: 'f'.repeat(64),
     }

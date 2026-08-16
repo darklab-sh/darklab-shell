@@ -471,7 +471,7 @@ RUN rm -f /etc/dpkg/dpkg.cfg.d/docker && \
         libnet-ssleay-perl rubygems ruby libxml-writer-perl libjson-perl fping \
         python3-requests fierce dnsenum libcap2-bin sudo groff-base \
         bsdextrautils iptables masscan libpcap0.8 ca-certificates perl \
-        postgresql-client-${POSTGRESQL_CLIENT_VERSION} zlib1g unzip \
+        postgresql-client-${POSTGRESQL_CLIENT_VERSION} chromium zlib1g unzip \
         inetutils-telnet httping && \
     rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /usr/share/doc/darklab-shell/licenses

@@ -388,6 +388,10 @@ test.describe('project assessment qualification', () => {
     const missingOption = confirm.locator('option', { hasText: 'Member role with missing token' })
     await expect(missingOption).toContainText('missing Secret')
     await expect(missingOption).toHaveAttribute('disabled', '')
+    // Assessment data can finish refreshing while the role picker is open.
+    // Model that rerender so focus restoration must find the live replacement
+    // instead of relying on the detached button that opened the dialog.
+    await runHttpx.evaluate((button) => button.replaceWith(button.cloneNode(true)))
     await confirmAssessmentAction(page, 'cancel')
     await expect(runHttpx).toBeFocused()
   })

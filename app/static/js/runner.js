@@ -4394,7 +4394,8 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
     'app:scope-capabilities-changed',
     'app:scope-changed',
   ]) {
-    document.addEventListener(eventName, () => {
+    document.addEventListener(eventName, (event) => {
+      if (event?.detail?.changed === false) return;
       cancelAllPendingTerminalConfirms({ refocus: false });
     });
   }
