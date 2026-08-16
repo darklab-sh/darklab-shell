@@ -216,6 +216,7 @@ def test_probe_plan_is_bounded_and_dalfox_never_reaches_intrusive_xss_mode(monke
     plan = build_probe_plan(_request("dalfox"), _target())
     assert plan["policy_level"] == "standard"
     assert plan["action"]["mode"] == "parameter_discovery"
+    assert plan["display_command"].startswith("dalfox scan ")
     assert "--only-discovery" in plan["display_command"]
     assert "--skip-mining-dict" in plan["display_command"]
     assert "--custom-payload" not in plan["display_command"]

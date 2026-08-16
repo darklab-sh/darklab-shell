@@ -42,7 +42,7 @@ def live_web_review_workflow() -> dict[str, object]:
             {
                 "id": "inventory_parameters",
                 "cmd": (
-                    "dalfox {{url}} --only-discovery --skip-mining-dict --format jsonl "
+                    "dalfox scan {{url}} --only-discovery --skip-mining-dict --format jsonl "
                     "--no-color --timeout 10 --scan-timeout 60 --rate-limit 5 "
                     "--workers 2 --max-concurrent-targets 1 --max-targets-per-host 1"
                 ),

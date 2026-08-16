@@ -2791,7 +2791,7 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
 
 def test_dalfox_discovery_jsonl_preserves_bounded_parameter_evidence():
     state = DalfoxParameterObservationState(
-        "dalfox https://App.Example.test/search?q=one --only-discovery "
+        "dalfox scan https://App.Example.test/search?q=one --only-discovery "
         "--skip-mining-dict --format jsonl",
         "run-dalfox",
     )
@@ -2838,7 +2838,7 @@ def test_dalfox_discovery_jsonl_preserves_bounded_parameter_evidence():
 
 def test_dalfox_discovery_jsonl_fails_closed_on_untrusted_or_malformed_rows():
     command = (
-        "dalfox https://app.example.test/search?q=one --only-discovery "
+        "dalfox scan https://app.example.test/search?q=one --only-discovery "
         "--skip-mining-dict --format jsonl"
     )
     invalid_commands = (
@@ -2875,7 +2875,7 @@ def test_dalfox_discovery_jsonl_fails_closed_on_untrusted_or_malformed_rows():
 
 def test_dalfox_discovery_jsonl_rejects_new_rows_after_the_fixed_cap():
     state = DalfoxParameterObservationState(
-        "dalfox https://app.example.test --only-discovery --skip-mining-dict --format=jsonl",
+        "dalfox scan https://app.example.test --only-discovery --skip-mining-dict --format=jsonl",
         "run-dalfox",
     )
     assert state.metadata(json.dumps({"meta": {
@@ -2902,7 +2902,7 @@ def test_dalfox_parameter_observations_survive_run_event_wire_round_trip():
 
     capture = Capture()
     classifier = OutputSignalClassifier(
-        "dalfox https://app.example.test --only-discovery --skip-mining-dict --format jsonl",
+        "dalfox scan https://app.example.test --only-discovery --skip-mining-dict --format jsonl",
         source_run_id="run-dalfox",
     )
     capture_event_with_signals(capture, classifier, json.dumps({"meta": {
@@ -2936,7 +2936,7 @@ def _dalfox_xss_context(**overrides):
 
 def _dalfox_xss_classifier(context=None):
     return OutputSignalClassifier(
-        "dalfox https://app.example.test/search?q=one -p q:query --skip-discovery "
+        "dalfox scan https://app.example.test/search?q=one -p q:query --skip-discovery "
         "--skip-mining --format jsonl",
         source_run_id="run-dalfox-xss",
         dalfox_xss_context=context or _dalfox_xss_context(),
@@ -2964,6 +2964,7 @@ def test_reviewed_dalfox_xss_command_is_exact_bounded_and_evidence_derived():
     plan = reviewed_dalfox_xss_command_plan(evidence)
 
     assert plan is not None
+    assert plan.command.startswith("dalfox scan ")
     assert plan.request_limit is not None
     assert plan.request_limit == DALFOX_XSS_REQUEST_LIMIT == 256
     assert plan.time_limit_seconds == DALFOX_XSS_TIME_LIMIT_SECONDS == 90
@@ -3344,10 +3345,10 @@ def test_reviewed_dalfox_xss_context_and_rows_fail_closed():
         "scan_duration_ms": 2500,
     }})
     commands = (
-        "dalfox https://app.example.test/search?q=one -p q:query --skip-mining --format jsonl",
-        "dalfox https://app.example.test/search?q=one -p q:query --skip-discovery --format jsonl",
-        "dalfox https://app.example.test/search?q=one -p other:query --skip-discovery --skip-mining --format jsonl",
-        "dalfox https://other.example.test/search?q=one -p q:query --skip-discovery --skip-mining --format jsonl",
+        "dalfox scan https://app.example.test/search?q=one -p q:query --skip-mining --format jsonl",
+        "dalfox scan https://app.example.test/search?q=one -p q:query --skip-discovery --format jsonl",
+        "dalfox scan https://app.example.test/search?q=one -p other:query --skip-discovery --skip-mining --format jsonl",
+        "dalfox scan https://other.example.test/search?q=one -p q:query --skip-discovery --skip-mining --format jsonl",
     )
     assert all("dalfox_xss_scan" not in _source_detail(OutputSignalClassifier(
         command,

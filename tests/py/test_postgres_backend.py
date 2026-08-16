@@ -1390,7 +1390,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     target = "https://app.example.test/search?q=one"
     run_id = "run-dalfox-parameter-pg"
     command = (
-        f"dalfox {target} --only-discovery --skip-mining-dict "
+        f"dalfox scan {target} --only-discovery --skip-mining-dict "
         "--format jsonl --no-color"
     )
     state = DalfoxParameterObservationState(command, run_id)

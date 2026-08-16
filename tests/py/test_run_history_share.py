@@ -787,7 +787,7 @@ class TestRunStreaming:
 
     def test_broker_accepts_reviewed_dalfox_findings_exit_and_preserves_tool_code(self):
         command = (
-            "dalfox https://app.example.test/search?q=one -p q:query "
+            "dalfox scan https://app.example.test/search?q=one -p q:query "
             "--skip-discovery --skip-mining --format jsonl"
         )
         context = ReviewedDalfoxXssContext(

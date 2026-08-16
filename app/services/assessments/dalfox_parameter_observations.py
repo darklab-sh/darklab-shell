@@ -11,6 +11,7 @@ from typing import Any, TypeGuard
 from urllib.parse import urlsplit
 
 from core.output_targets import tokenize_command
+from services.assessments.dalfox_command_tokens import dalfox_scan_target
 from services.intel.canonical import CanonicalizationError, canonical_url
 
 
@@ -89,7 +90,8 @@ class DalfoxParameterObservationState:
 
 def _discovery_target(command: str) -> str:
     tokens = tokenize_command(command)
-    if len(tokens) < 2 or tokens[0].casefold() != "dalfox":
+    target = dalfox_scan_target(tokens)
+    if not target:
         return ""
     if (
         "--only-discovery" not in tokens
@@ -98,7 +100,7 @@ def _discovery_target(command: str) -> str:
     ):
         return ""
     output_format = _flag_value(tokens, "--format")
-    return _url(tokens[1]) if output_format.casefold() == "jsonl" else ""
+    return _url(target) if output_format.casefold() == "jsonl" else ""
 
 
 def _flag_value(tokens: list[str], name: str) -> str:

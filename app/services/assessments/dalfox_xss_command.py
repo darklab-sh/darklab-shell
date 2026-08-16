@@ -61,7 +61,7 @@ def reviewed_dalfox_xss_command_plan(
     target = shlex.quote(evidence.target)
     parameter = shlex.quote(f"{evidence.parameter}:query")
     return CommandPlan(
-        f"dalfox {target} --input-type url --param {parameter} --skip-discovery "
+        f"dalfox scan {target} --input-type url --param {parameter} --skip-discovery "
         f"--skip-mining --format jsonl --no-color --timeout 10 "
         f"--scan-timeout {DALFOX_XSS_SCAN_TIMEOUT_SECONDS} --retries 0 "
         f"--rate-limit {DALFOX_XSS_RATE_LIMIT_PER_SECOND} "

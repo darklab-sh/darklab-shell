@@ -126,7 +126,7 @@ Saved output records whether a finding used the managed cache, a workspace templ
 
 ### `dalfox`
 
-darklab_shell uses Dalfox for bounded parameter discovery. Normal commands and the Project Assessment action add discovery-only mode and disable remote mining dictionaries, so Dalfox doesn't send XSS payloads. Server, callback, file/pipe input, proxy, redirect, custom payload, and remote-wordlist modes remain blocked. A protected Project HTTP profile can supply request headers through a short-lived private config without placing their values in the command or saved history.
+darklab_shell uses Dalfox for bounded parameter discovery. Use `dalfox scan https://example.com`; if you enter a URL directly after `dalfox`, the app adds the required `scan` subcommand. Normal commands and the Project Assessment action also add discovery-only mode and disable remote mining dictionaries, so Dalfox doesn't send XSS payloads. Server, callback, file/pipe input, proxy, redirect, custom payload, and remote-wordlist modes remain blocked. A protected Project HTTP profile can supply request headers through a short-lived private config without placing their values in the command or saved history.
 
 ### `schemathesis`
 

@@ -19474,6 +19474,7 @@ class TestDerivedCommandRegistry:
             ("gobuster", "dir:-u", "url"),
             ("gobuster", "tftp:-s", "host"),
             ("ffuf", "-u", "url"),
+            ("dalfox", "scan:__positional__", "url"),
             ("naabu", "-l", "host"),
             ("katana", "-list", "url"),
             ("wafw00f", "-i", "url"),
@@ -19663,7 +19664,7 @@ class TestDerivedCommandRegistry:
             },
         ]
 
-    def test_nuclei_url_target_discovery_ignores_template_path_flags(self):
+    def test_subcommand_and_flag_url_target_discovery_uses_the_real_target(self):
         inputs = commands.command_project_target_inputs(
             "nuclei -u https://ip.darklab.sh -t http/",
             cfg={"workspace_enabled": True},
@@ -19675,6 +19676,14 @@ class TestDerivedCommandRegistry:
             "source_kind": "flag",
             "source_name": "-u",
             "target_list_file": "",
+        }]
+        assert commands.command_project_target_inputs(
+            "dalfox scan https://ip.darklab.sh --format jsonl --timeout 10"
+        ) == [{
+            "value": "https://ip.darklab.sh",
+            "value_type": "url",
+            "source_kind": "positional",
+            "source_name": "argument_1",
         }]
 
     def test_autocomplete_context_can_be_derived_from_commands_registry(self):
@@ -19865,11 +19874,15 @@ class TestDerivedCommandRegistry:
             "dalfox --remote-wordlists",
             "dalfox --blind-oob",
         }.issubset(set(dalfox["policy"]["deny"]))
-        assert is_command_allowed("dalfox https://darklab.sh/?view=summary")[0]
+        assert is_command_allowed("dalfox scan https://darklab.sh/?view=summary")[0]
         assert not is_command_allowed("dalfox server")[0]
-        assert not is_command_allowed("dalfox https://darklab.sh/ --follow-redirects")[0]
+        assert not is_command_allowed("dalfox scan https://darklab.sh/ --follow-redirects")[0]
         rewritten, _notice = commands.rewrite_command("dalfox https://darklab.sh/")
-        assert rewritten.endswith("--only-discovery --skip-mining-dict")
+        assert rewritten == (
+            "dalfox scan https://darklab.sh/ --only-discovery --skip-mining-dict"
+        )
+        current, _notice = commands.rewrite_command("dalfox scan https://darklab.sh/")
+        assert current == rewritten
         help_command, _notice = commands.rewrite_command("dalfox --help")
         assert help_command == "dalfox --help"
         schemathesis = by_root["schemathesis"]
@@ -26943,6 +26956,7 @@ class TestWorkflowInputLoading:
         assert "--only-discovery --skip-mining-dict --format jsonl" in str(
             live_web_steps[1]["cmd"]
         )
+        assert str(live_web_steps[1]["cmd"]).startswith("dalfox scan ")
         live_web_commands = [
             render_workflow_command(str(step["cmd"]), {"url": "https://example.com/search?q=one"})
             for step in live_web_steps

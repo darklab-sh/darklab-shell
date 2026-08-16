@@ -5,22 +5,23 @@
 
 from __future__ import annotations
 
+from services.assessments.dalfox_command_tokens import canonical_dalfox_scan_tokens
 
 _PROTECTED_CONFIG_SUFFIX = ["--config", "[protected]"]
 
 
 def is_reviewed_dalfox_oast_validation(tokens: list[str]) -> bool:
     """Return whether tokens match the redacted app-owned callback command."""
-    command = (
+    command = canonical_dalfox_scan_tokens(
         tokens[:-2]
         if tokens[-2:] == _PROTECTED_CONFIG_SUFFIX
         else tokens
     )
-    if len(command) != 37:
+    if len(command) != 38:
         return False
-    parameter, separator, location = command[5].rpartition(":")
+    parameter, separator, location = command[6].rpartition(":")
     expected = [
-        "dalfox", command[1], "--input-type", "url", "--param", command[5],
+        "dalfox", "scan", command[2], "--input-type", "url", "--param", command[6],
         "--skip-discovery", "--skip-mining", "--blind",
         "https://[private-oast-callback]", "--format", "jsonl", "--no-color",
         "--timeout", "10", "--scan-timeout", "60", "--retries", "0",
