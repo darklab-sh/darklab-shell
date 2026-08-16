@@ -26936,7 +26936,10 @@ class TestWorkflowInputLoading:
             "success": "inventory_parameters",
             "failure": "stop",
         }
-        assert "-screenshot -srd live-web-screenshots" in str(live_web_steps[0]["cmd"])
+        assert (
+            "-screenshot -system-chrome -headless-options --no-sandbox "
+            "-srd live-web-screenshots"
+        ) in str(live_web_steps[0]["cmd"])
         assert "--only-discovery --skip-mining-dict --format jsonl" in str(
             live_web_steps[1]["cmd"]
         )

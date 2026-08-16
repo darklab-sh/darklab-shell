@@ -30,8 +30,8 @@ def live_web_review_workflow() -> dict[str, object]:
                 "id": "capture_screenshot",
                 "cmd": (
                     "httpx -u {{url}} -status-code -title -tech-detect -json "
-                    "-screenshot -srd live-web-screenshots -silent -threads 1 "
-                    "-timeout 10 -retries 1"
+                    "-screenshot -system-chrome -headless-options --no-sandbox "
+                    "-srd live-web-screenshots -silent -threads 1 -timeout 10 -retries 1"
                 ),
                 "note": (
                     "Save the verified screenshot in Files with its URL, status, title, "

@@ -2512,8 +2512,8 @@ commands:
         - value: httpx -l urls.txt -status-code -sr -srd httpx-responses
           description: Store HTTP responses in a session directory
           feature_required: workspace
-        - value: httpx -l urls.txt -screenshot -srd httpx-screenshots
-          description: Save screenshots in a session directory
+        - value: httpx -l urls.txt -screenshot -system-chrome -headless-options --no-sandbox -srd httpx-screenshots
+          description: Save screenshots with the bundled Chromium browser
           feature_required: workspace
       flags:
         - value: -h
@@ -2597,6 +2597,14 @@ commands:
           description: Save screenshots with headless browser
         - value: -screenshot
           description: Save screenshots with headless browser
+        - value: -system-chrome
+          description: Use the system Chromium installation for screenshots
+        - value: -ho
+          description: Pass additional options to headless Chromium
+          takes_value: true
+        - value: -headless-options
+          description: Pass additional options to headless Chromium
+          takes_value: true
         - value: -config
           description: Read httpx config from a session file
           takes_value: true

@@ -112,6 +112,22 @@ if ! chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
     --dump-dom about:blank >/dev/null 2>&1; then
     verification_failed chromium-headless "container-isolated headless browser could not start"
 fi
+python -m http.server 18080 --bind 127.0.0.1 >/tmp/httpx-browser-smoke.log 2>&1 &
+httpx_server_pid=$!
+trap "kill $httpx_server_pid 2>/dev/null || true" EXIT HUP INT TERM
+sleep 1
+if ! httpx -u http://127.0.0.1:18080 -screenshot -system-chrome \
+    -headless-options --no-sandbox -srd /tmp/httpx-browser-smoke \
+    -silent -threads 1 -timeout 10 -retries 0 -disable-update-check \
+    >/tmp/httpx-browser-smoke.out 2>&1; then
+    verification_failed httpx-headless "HTTPx system-Chromium screenshot failed"
+fi
+if ! find /tmp/httpx-browser-smoke -type f -print -quit | grep -q .; then
+    verification_failed httpx-headless "HTTPx did not save a screenshot"
+fi
+kill "$httpx_server_pid" 2>/dev/null || true
+wait "$httpx_server_pid" 2>/dev/null || true
+trap - EXIT HUP INT TERM
 probe pg_dump pg_dump --version
 probe pg_restore pg_restore --version
 for postgresql_tool in pg_dump pg_restore; do

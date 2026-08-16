@@ -1308,6 +1308,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     go_installer = (ROOT / "scripts" / "container" / "install_go_tool.sh").read_text(
         encoding="utf-8"
     )
+    httpx_patch = (
+        ROOT / "scripts" / "container" / "patches" / "httpx-disable-leakless.patch"
+    ).read_text(encoding="utf-8")
     source_stager = (
         ROOT / "scripts" / "container" / "stage_runtime_source.sh"
     ).read_text(encoding="utf-8")
@@ -1353,6 +1356,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "masscan chromium pg_dump" in bundled_tool_smoke
     assert "--tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m" in bundled_tool_smoke
     assert "probe chromium chromium --version" in bundled_tool_smoke
+    assert "httpx -u http://127.0.0.1:18080" in bundled_tool_smoke
+    assert "-screenshot -system-chrome" in bundled_tool_smoke
+    assert "-headless-options --no-sandbox" in bundled_tool_smoke
+    assert "HTTPx system-Chromium screenshot failed" in bundled_tool_smoke
     assert "if ! chromium --headless --no-sandbox --disable-gpu" in bundled_tool_smoke
     assert (
         'verification_failed chromium-headless "container-isolated headless browser could not start"'
@@ -1368,6 +1375,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
+    assert "!scripts/container/patches/httpx-disable-leakless.patch" in dockerignore
     assert "!scripts/container/patches/nuclei-kin-openapi-v0.144.patch" in dockerignore
     assert "!scripts/container/stage_runtime_source.sh" in dockerignore
     assert "!scripts/container/bootstrap_nuclei_templates.sh" in dockerignore
@@ -1477,6 +1485,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "Go tool dependency floor mismatch" in go_installer
     assert 'git -C "$module_dir" apply --check "$GO_TOOL_SOURCE_PATCH"' in go_installer
     assert "Applied Go tool source patch" in go_installer
+    httpx_patch_additions = [
+        line for line in httpx_patch.splitlines() if line.startswith("+")
+    ]
+    assert "+\t\tLeakless(false)." in httpx_patch_additions
+    assert all("Leakless(true)" not in line for line in httpx_patch_additions)
     assert 'selected_version=$(go list -m -f \'{{.Version}}\' "$module_path")' in go_installer
     assert 'expected_version=$(go list -m -f \'{{.Version}}\'' in go_installer
     assert 'go version -m "$target"' in go_installer
@@ -1518,6 +1531,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert (
         "GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/"
         "nuclei-kin-openapi-v0.144.patch"
+    ) in projectdiscovery_stage
+    assert (
+        "GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/"
+        "httpx-disable-leakless.patch"
     ) in projectdiscovery_stage
     assert "ARG GOBUSTER_VERSION" not in projectdiscovery_stage
     assert "ARG GOBUSTER_VERSION" in other_go_stage
@@ -3026,6 +3043,10 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     assert build_inputs["source"]["commit_sha"] == evidence_args["commit_sha"]
     assert ".gitlab-ci.yml" in build_inputs["source"]["files"]
     assert "scripts/container/install_go_tool.sh" in build_inputs["source"]["files"]
+    assert (
+        "scripts/container/patches/httpx-disable-leakless.patch"
+        in build_inputs["source"]["files"]
+    )
     assert (
         "scripts/container/patches/nuclei-kin-openapi-v0.144.patch"
         in build_inputs["source"]["files"]

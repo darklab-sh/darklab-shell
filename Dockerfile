@@ -123,7 +123,10 @@ RUN GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/nuclei-kin-openapi-v0.
         "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}" \
         "github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}"
-RUN install-go-tool "github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}"
+# Rod's leakless helper is unpacked below /tmp at runtime. The runtime keeps
+# /tmp non-executable, so launch the reviewed system Chromium directly instead.
+RUN GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/httpx-disable-leakless.patch \
+    install-go-tool "github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}"
