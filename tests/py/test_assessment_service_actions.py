@@ -2619,17 +2619,30 @@ def test_dnsx_event_review_rejects_limits_and_never_returns_partial_rows():
 
 def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
     record = normalize_httpx_screenshot({
-        "url": "https://app.example.test/login", "screenshot_path": "/scanner/output/app.png",
-        "screenshot_path_rel": "app.png",
+        "url": "https://app.example.test/login",
+        "screenshot_path": "/scanner/output/screenshots/screenshot/app.example.test/app.png",
+        "screenshot_path_rel": "app.example.test/app.png",
         "status_code": "200", "title": "  Login   page ", "technologies": ["nginx", "nginx"],
         "run_id": "run-1", "profile_role": "authenticated",
     }, output_directory="screenshots")
     assert record == {
-        "url": "https://app.example.test/login", "artifact_path": "screenshots/app.png",
+        "url": "https://app.example.test/login",
+        "artifact_path": "screenshots/screenshot/app.example.test/app.png",
         "status_code": 200, "title": "Login page", "technologies": ["nginx", "nginx"],
         "captured_at": "", "visual_hash": "", "source_run_id": "run-1", "profile_role": "authenticated",
     }
+    prefixed = normalize_httpx_screenshot({
+        "url": "https://app.example.test",
+        "screenshot_path_rel": "screenshot/app.example.test/prefixed.png",
+    }, output_directory="screenshots")
+    assert prefixed and prefixed["artifact_path"] == (
+        "screenshots/screenshot/app.example.test/prefixed.png"
+    )
     assert normalize_httpx_screenshot({"url": "https://app.example.test", "screenshot_path": "../secret.png"}) is None
+    assert normalize_httpx_screenshot({
+        "url": "https://app.example.test",
+        "screenshot_path_rel": "../secret.png",
+    }, output_directory="screenshots") is None
     assert normalize_httpx_screenshot({"url": "https://user:pass@app.example.test", "screenshot_path": "ok.png"}) is None
 
 
@@ -2764,11 +2777,12 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
         profile_role="anonymous",
     )
     metadata = classifier.classify_line(
-        '{"url":"https://app.example.test","screenshot_path":"/scanner/output/app.png",'
-        '"screenshot_path_rel":"app.png","status_code":200}'
+        '{"url":"https://app.example.test","screenshot_path":"/screenshots/screenshot/app.example.test/app.png",'
+        '"screenshot_path_rel":"app.example.test/app.png","status_code":200}'
     )
     assert metadata["screenshots"] == [{
-        "url": "https://app.example.test", "artifact_path": "screenshots/app.png",
+        "url": "https://app.example.test",
+        "artifact_path": "screenshots/screenshot/app.example.test/app.png",
         "status_code": 200, "title": "", "technologies": [], "captured_at": "",
         "visual_hash": "", "source_run_id": "run-httpx", "profile_role": "anonymous",
     }]

@@ -322,14 +322,15 @@ def test_run_finalization_records_verified_httpx_screenshot_children(tmp_path):
     cfg = _cfg(tmp_path)
     owner = personal_owner_context("web-surface-finalize")
     root = ensure_owner_workspace(owner, cfg)
-    (root / "shots").mkdir()
-    (root / "shots" / "app.webp").write_bytes(b"RIFF\x04\x00\x00\x00WEBPdata")
+    (root / "shots" / "screenshot" / "app.example.test").mkdir(parents=True)
+    screenshot_path = "shots/screenshot/app.example.test/app.webp"
+    (root / screenshot_path).write_bytes(b"RIFF\x04\x00\x00\x00WEBPdata")
     base = [{
         "workspace_path": "shots",
         "kind": "output",
         "structured_output": HTTPX_SCREENSHOT_DIRECTORY,
     }]
-    entries = [{"source_detail": {"screenshots": [{"artifact_path": "shots/app.webp"}]}}]
+    entries = [{"source_detail": {"screenshots": [{"artifact_path": screenshot_path}]}}]
 
     conn = _artifact_conn()
     with (
@@ -368,10 +369,10 @@ def test_run_finalization_records_verified_httpx_screenshot_children(tmp_path):
             workspace_artifacts_with_sizes_fn=lambda _session, artifacts: artifacts,
         )
 
-    assert [item["workspace_path"] for item in recorded] == ["shots", "shots/app.webp"]
+    assert [item["workspace_path"] for item in recorded] == ["shots", screenshot_path]
     assert recorded[1]["content_type"] == "image/webp"
     assert failed_run_artifacts == base
-    assert not (root / "shots" / "app.webp").exists()
+    assert not (root / screenshot_path).exists()
     conn.close()
 
 
