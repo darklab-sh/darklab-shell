@@ -41,6 +41,7 @@ from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.probe_targets import resolve_probe_target
 from services.assessments.probe_target_service import resolve_project_probe_target
 from services.audit.context import request_audit_fields
+from services.commands.registry import is_command_allowed
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 from services.projects.crud import create_project, delete_project, update_project
 from services.projects.targets import add_project_target
@@ -100,6 +101,9 @@ def test_base_action_registry_is_complete_and_drives_command_target_compatibilit
                 allow_intrusive=True,
             )
             assert plan is not None, (action.action_id, target_type)
+            if action.action_id == "httpx":
+                allowed, reason = is_command_allowed(plan.command)
+                assert allowed, reason
         assert command_plan(action.action_id, "port", "443") is None
 
 

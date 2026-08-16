@@ -1407,6 +1407,14 @@ class TestDenyPrefix:
         # -zv does not contain -e or -c, should be allowed
         ok, _ = _check("nc -zv example.com 80", allow=["nc"], deny=["nc -e", "nc -c"])
         assert ok
+        # ProjectDiscovery uses multi-character, single-dash options that are
+        # not POSIX bundles. HTTPx's rate limit must not match denied file input.
+        ok, _ = _check(
+            "httpx -u https://example.com -status-code -rl 10 -threads 5",
+            allow=["httpx"],
+            deny=["httpx -l", "httpx -o"],
+        )
+        assert ok
 
     def test_deny_single_char_does_not_affect_multi_char_matching(self):
         # Multi-char flag --script should still use exact-token matching, not char search
