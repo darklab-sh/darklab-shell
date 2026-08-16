@@ -73,6 +73,12 @@ test.describe('source-mode lazy ESM surfaces', () => {
   })
 
   test('opens high-risk lazy app surfaces through user controls', async ({ page }, testInfo) => {
+    await runCommand(page, 'workflow list')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('Workflows:')
+    await expect(page.locator('.tab-panel.active .output')).not.toContainText(
+      'Workflow terminal commands require a command execution',
+    )
+
     const overviewProjectId = await page.evaluate(async () => {
       const resp = await apiFetch('/projects', {
         method: 'POST',

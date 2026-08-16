@@ -1217,10 +1217,15 @@ describe('frontend config bootstrap', () => {
       detail: { count: 1, items },
     }])
 
-    const commandPromise = window.handleWorkflowTerminalCommand('workflow list', 'tab-1')
+    const execution = { appendLine: vi.fn(), setStatus: vi.fn() }
+    const commandPromise = window.handleWorkflowTerminalCommand(
+      'workflow list',
+      'tab-1',
+      execution,
+    )
 
     await expect(commandPromise).resolves.toBe(true)
-    expect(realHandler).toHaveBeenCalledWith('workflow list', 'tab-1')
+    expect(realHandler).toHaveBeenCalledWith('workflow list', 'tab-1', execution)
     expect(imported).toEqual(['/static/js/features/workflows/workflows.js?v=workflows-hash'])
     expect(appended).toEqual([])
   })

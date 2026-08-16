@@ -1680,7 +1680,7 @@ let exportedLoadWatchersModal = null;
     return handle(cmd, tabId, execution, launchAdapter);
   }
 
-  async function lazyHandleWorkflowTerminalCommand(cmd, tabId) {
+  async function lazyHandleWorkflowTerminalCommand(cmd, tabId, execution) {
     const workflows = await loadWorkflows();
     const handle = workflows?.handleWorkflowTerminalCommand;
     if (
@@ -1689,7 +1689,7 @@ let exportedLoadWatchersModal = null;
     ) {
       return false;
     }
-    return handle(cmd, tabId);
+    return handle(cmd, tabId, execution);
   }
 
   async function lazyOpenHistoryCompareLauncher(run, options = {}) {
