@@ -82,7 +82,7 @@ def target_review_hints(row: Any) -> tuple[dict[str, str], ...]:
         hints.append(
             {
                 "code": "discovered_target",
-                "reason": f"This confirmed target came from {source} discovery.",
+                "reason": f"Discovered by {source}; review whether this is intended infrastructure or third-party scope.",
             }
         )
     if str(row["target_type"] or "") == "ip":

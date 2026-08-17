@@ -440,7 +440,7 @@ def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
 def test_batch_child_evidence_considers_only_independently_matching_mapped_checks(
     batch_builder,
 ):
-    batch = batch_builder()
+    batch = batch_builder(3)
     run_id = "run-batch-coverage-" + uuid.uuid4().hex
     created = "2026-08-17 12:01:00"
     target = "target-0.example.test"
@@ -536,6 +536,18 @@ def test_batch_child_evidence_considers_only_independently_matching_mapped_check
             "exit_code = 0, started = ?, finished = ? "
             "WHERE execution_id = ? AND step_id = 'chunk_0001' AND ordinal = 0",
             (run_id, created, created, batch["batch_id"]),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_children SET status = 'failed', "
+            "error_code = 'child_failed', exit_code = 1, finished = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001' AND ordinal = 1",
+            (created, batch["batch_id"]),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_children SET status = 'canceled', "
+            "error_code = 'cancelled', finished = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001' AND ordinal = 2",
+            (created, batch["batch_id"]),
         )
         summary = reconcile_run_evidence_on_conn(
             conn,

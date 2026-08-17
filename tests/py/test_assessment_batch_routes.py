@@ -113,6 +113,30 @@ def _api_headers(session_id: str, team_id: str = "") -> dict[str, str]:
     return headers
 
 
+def _join_team_member(
+    client,
+    owner: str,
+    member: str,
+    team_id: str,
+    role: str,
+) -> None:
+    invite = client.post(
+        f"/session/teams/{team_id}/invites",
+        headers=_browser_headers(owner),
+        json={"role": role, "label": f"Batch {role}"},
+    )
+    assert invite.status_code == 201
+    joined = client.post(
+        "/session/teams/join",
+        headers=_browser_headers(member),
+        json={
+            "code": invite.get_json()["invite"]["code"],
+            "display_name": role.title(),
+        },
+    )
+    assert joined.status_code in {200, 201}
+
+
 def _preview_counts() -> tuple[int, int, int]:
     with get_db_connect()() as conn:
         return tuple(
@@ -711,6 +735,98 @@ def test_team_viewer_can_compile_and_read_a_batch_preview(client, monkeypatch):
             },
         )
         assert denied.status_code == 403
+
+
+def test_team_batch_role_matrix_keeps_preview_readable_and_writes_capability_gated(
+    client,
+    monkeypatch,
+):
+    owner = "tok_batch_matrix_owner_" + uuid.uuid4().hex
+    viewer = "tok_batch_matrix_viewer_" + uuid.uuid4().hex
+    operator = "tok_batch_matrix_operator_" + uuid.uuid4().hex
+    admin = "tok_batch_matrix_admin_" + uuid.uuid4().hex
+    for token in (owner, viewer, operator, admin):
+        _register_token(token)
+    team_response = client.post(
+        "/session/teams",
+        headers=_browser_headers(owner),
+        json={"name": "Batch role matrix", "display_name": "Owner"},
+    )
+    assert team_response.status_code == 201
+    team_id = str(team_response.get_json()["team"]["id"])
+    for token, role in (
+        (viewer, "viewer"),
+        (operator, "operator"),
+        (admin, "admin"),
+    ):
+        _join_team_member(client, owner, token, team_id, role)
+    project = create_project(owner, {"name": "Batch role matrix"}, team_id=team_id)
+    assert project is not None
+    project_id = str(project["id"])
+    target = add_project_target(
+        owner,
+        project_id,
+        {
+            "type": "domain",
+            "value": "batch-role-matrix.example.test",
+            "review_state": "confirmed",
+        },
+        team_id=team_id,
+    )
+    assert target is not None
+    cycle = create_assessment_cycle(owner, project_id, "network", team_id=team_id)
+    assessment_id = str(cycle["assessment"]["id"])
+    monkeypatch.setattr(
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
+        _runtime,
+    )
+    monkeypatch.setattr(
+        "services.assessments.batch.lifecycle_actions.launch_assessment_batch",
+        lambda batch_id: {
+            "status": "queued",
+            "batch_id": batch_id,
+            "launched": 0,
+            "reason_code": "fairness_limit",
+        },
+    )
+
+    for token, role in (
+        (viewer, "viewer"),
+        (operator, "operator"),
+        (admin, "admin"),
+        (owner, "owner"),
+    ):
+        headers = _api_headers(token, team_id)
+        preview_response = client.post(
+            f"/api/v1/projects/{project_id}/assessments/{assessment_id}/batch-previews",
+            headers=headers,
+            json={},
+        )
+        assert preview_response.status_code == 201
+        preview = preview_response.get_json()["preview"]
+        started = client.post(
+            f"/api/v1/projects/{project_id}/assessments/{assessment_id}/assessment-batches",
+            headers=headers,
+            json={
+                "preview_id": preview["preview_id"],
+                "plan_digest": preview["plan_digest"],
+                "confirmed": True,
+            },
+        )
+        if role == "viewer":
+            assert started.status_code == 403
+            continue
+        assert started.status_code == 202
+        batch_id = str(started.get_json()["batch"]["batch_id"])
+        canceled = client.post(
+            f"/api/v1/projects/{project_id}/assessment-batches/{batch_id}/cancel",
+            headers=headers,
+            json={},
+        )
+        assert canceled.status_code == 200
+        assert canceled.get_json()["batch"]["status"] == "canceled"
+
+    delete_project(owner, project_id, team_id=team_id)
 
 
 @pytest.mark.parametrize("prefix", ["", "/api/v1"])

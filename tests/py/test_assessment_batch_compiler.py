@@ -16,6 +16,7 @@ from core.database_backend import dialect_for_backend
 from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.batch.contracts import AssessmentBatchError
 from services.assessments.batch.preview_builder import BatchPreviewBuilder
+from services.assessments.batch.preview_classification import check_exclusion_reason
 from services.assessments.batch.preview_compiler import compile_batch_preview
 from services.assessments.batch.preview_estimate import estimate_batch_duration
 from services.assessments.batch.preview_models import (
@@ -113,6 +114,91 @@ def _duplicate_ping_check(assessment_id: str) -> None:
         conn.commit()
 
 
+def _classification_row(**overrides: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "state": "not_started",
+        "state_source": "derived",
+        "policy_level": "safe",
+        "recommended_action_key": "command:ping",
+        "check_key": "host_reachability",
+        "applicability": "applicable",
+        "unavailable_evidence_count": 0,
+        "current_target_id": "ent-classification",
+        "current_target_type": "domain",
+        "current_target_value": "classification.example.test",
+        "target_type": "domain",
+        "target_value": "classification.example.test",
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.mark.parametrize(
+    ("row_overrides", "expected_reason"),
+    (
+        (
+            {
+                "check_key": "intrusive_template_validation",
+                "policy_level": "intrusive",
+                "recommended_action_key": "command:nuclei",
+            },
+            "intrusive",
+        ),
+        (
+            {
+                "check_key": "destructive_validation",
+                "policy_level": "destructive",
+                "recommended_action_key": "command:sqlmap",
+            },
+            "destructive",
+        ),
+        (
+            {
+                "check_key": "subdomain_takeover_confirmation",
+                "policy_level": "standard",
+                "recommended_action_key": "command:nuclei",
+            },
+            "takeover_confirmation",
+        ),
+        (
+            {
+                "check_key": "private_callback_validation",
+                "policy_level": "standard",
+                "recommended_action_key": "oast_private_callback",
+            },
+            "oast",
+        ),
+        (
+            {
+                "check_key": "api_schema_conformance",
+                "policy_level": "standard",
+                "recommended_action_key": "command:schemathesis",
+            },
+            "schemathesis",
+        ),
+        (
+            {
+                "check_key": "zap_active_scan",
+                "policy_level": "standard",
+                "recommended_action_key": "zap_active_scan",
+            },
+            "non_runnable",
+        ),
+    ),
+)
+def test_batch_classifier_explicitly_excludes_unsupported_action_families(
+    row_overrides,
+    expected_reason,
+):
+    row = _classification_row(**row_overrides)
+    frozen = {
+        "recommended_action": row["recommended_action_key"],
+        "policy_level": row["policy_level"],
+    }
+
+    assert check_exclusion_reason(row, frozen) == expected_reason
+
+
 def test_compiler_defaults_to_safe_deduplicates_and_explains_standard_work(batch_cycle):
     session_id, project_id, assessment_id, target_id = batch_cycle
     _duplicate_ping_check(assessment_id)
@@ -138,7 +224,10 @@ def test_compiler_defaults_to_safe_deduplicates_and_explains_standard_work(batch
             "hints": [
                 {
                     "code": "discovered_target",
-                    "reason": "This confirmed target came from auto_command discovery.",
+                    "reason": (
+                        "Discovered by auto_command; review whether this is intended "
+                        "infrastructure or third-party scope."
+                    ),
                 }
             ],
         }
