@@ -22,6 +22,8 @@ def feature_enabled(feature: object, cfg: Mapping[str, Any] | None = None) -> bo
         return bool(active_cfg.get("workspace_enabled", False))
     if normalized in {"interactive_pty", "pty"}:
         return bool(active_cfg.get("interactive_pty_enabled", False))
+    if normalized == "assessment_intrusive_actions_enabled":
+        return bool(active_cfg.get("assessment_intrusive_actions_enabled", False))
     if normalized == "raw_packet_scanning":
         return raw_packet_scanning_active(active_cfg, tool="nmap")
     prefix = "raw_packet_scanning_"

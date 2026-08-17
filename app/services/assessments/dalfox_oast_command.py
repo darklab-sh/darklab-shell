@@ -101,7 +101,7 @@ def reviewed_dalfox_oast_command_plan(
     parameter = shlex.quote(f"{evidence.parameter}:query")
     reviewed_callback = shlex.quote(callback)
     return CommandPlan(
-        f"dalfox {target} --input-type url --param {parameter} --skip-discovery "
+        f"dalfox scan {target} --input-type url --param {parameter} --skip-discovery "
         f"--skip-mining --blind {reviewed_callback} --format jsonl --no-color "
         f"--timeout 10 --scan-timeout {DALFOX_XSS_SCAN_TIMEOUT_SECONDS} "
         f"--retries 0 --rate-limit {DALFOX_XSS_RATE_LIMIT_PER_SECOND} "

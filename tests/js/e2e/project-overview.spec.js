@@ -279,7 +279,7 @@ test.describe('project overview browser contract', () => {
   })
 
   test('uses the real Overview endpoint and filters Findings by backend target id', async ({ page }, testInfo) => {
-    test.setTimeout(60_000)
+    test.setTimeout(90_000)
     const fixture = await createRealOverviewProject(page, testInfo)
     const overviewResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())

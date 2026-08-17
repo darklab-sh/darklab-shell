@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from core.database_access import get_db_connect
+from core.database_access import db_connection_scope
 from .links import finding_cves
 from .nvd_advisory import get_advisory_source_status
 from .store import get_configured_feed_status
@@ -37,9 +37,7 @@ def build_cve_risk_snapshot(
     cve_ids = _selected_cves(findings)
     if not cve_ids:
         return {}
-    owns_connection = conn is None
-    active = conn or get_db_connect()()
-    try:
+    with db_connection_scope(conn) as active:
         records: list[dict[str, Any]] = []
         for offset in range(0, len(cve_ids), 500):
             chunk = cve_ids[offset:offset + 500]
@@ -76,6 +74,3 @@ def build_cve_risk_snapshot(
             "records": records,
             "non_endorsement": NON_ENDORSEMENT,
         }
-    finally:
-        if owns_connection:
-            active.close()

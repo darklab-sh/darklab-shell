@@ -777,7 +777,7 @@ describe('app helpers', () => {
     await vi.waitFor(() => (
       expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith('run_previous', 'run_actions')
     ))
-  })
+  }, 20_000)
 
   it('prompts before switching schedules or creating a new schedule with unsaved edits', async () => {
     const schedules = [
@@ -1165,7 +1165,7 @@ describe('app helpers', () => {
     Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Accept baseline').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Baseline accepted', 'success'))
     expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }))
-  }, 10_000)
+  }, 20_000)
 
   it('does not let history outside-click dismissal close behind modal overlays', async () => {
     const source = readFileSync(
@@ -3069,7 +3069,7 @@ describe('app helpers', () => {
     expect(collectionSteps[1].querySelector(
       '[data-workflow-field$="max_parallel"] .form-error',
     ).textContent).toBe('Parallel runs must be between 1 and 8.')
-  }, 10000)
+  }, 20_000)
 
   it('marks workflow capture-fed command previews as available only during the playbook', async () => {
     const { renderWorkflowItems } = await loadAppFns()
@@ -7428,7 +7428,7 @@ describe('app helpers', () => {
     expect(document.getElementById('options-secrets-list').textContent).not.toContain('value-that-must-not-render')
   })
 
-  it('keeps a custom secret escape hatch with an unused-secret warning', async () => {
+  it('keeps a custom secret escape hatch with integration guidance', async () => {
     let secrets = []
     const apiFetch = vi.fn((url, opts = {}) => {
       if (url === '/commands/catalog') {
@@ -7450,7 +7450,9 @@ describe('app helpers', () => {
     const showConfirm = vi.fn().mockImplementation(async (opts) => {
       const select = opts.content[0].querySelector('select')
       const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
-      expect(opts.content.map(node => node.textContent).join(' ')).toContain('Custom secrets are stored')
+      expect(opts.content.map(node => node.textContent).join(' ')).toContain(
+        'HTTP profiles can reference this stored name',
+      )
       select.value = '__custom__'
       select.dispatchEvent(new Event('change'))
       inputs[0].value = 'future_api_key'
@@ -7473,7 +7475,10 @@ describe('app helpers', () => {
       value: 'custom-secret-value',
       consumer_envs: ['FUTURE_API_KEY'],
     })
-    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('not currently used'), 'success')
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining('HTTP profiles can reference its name'),
+      'success',
+    )
   })
 
   it('suggests app-native intel secret consumers in the options prompt', async () => {

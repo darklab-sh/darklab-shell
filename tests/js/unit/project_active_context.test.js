@@ -9,6 +9,7 @@ describe('project active context controller', () => {
     const projects = [
       { id: 'proj_1', name: 'Project One' },
       { id: 'proj_2', name: 'Project Two' },
+      { id: 'proj_2', name: 'Project Two updated' },
     ]
     let requestIndex = 0
     const deferred = []
@@ -20,9 +21,10 @@ describe('project active context controller', () => {
         json: vi.fn(async () => ({ project: projects[index] })),
       }))
     }))
+    const emitUiEvent = vi.fn()
     const controller = DarklabProjectActiveContext.createProjectActiveContextController({
       apiFetch,
-      emitUiEvent: vi.fn(),
+      emitUiEvent,
       projectDisplayName: project => project?.name || '',
       setValueColor: vi.fn(),
       syncProjectNotesForm: vi.fn(),
@@ -34,6 +36,10 @@ describe('project active context controller', () => {
     expect(apiFetch).toHaveBeenCalledTimes(1)
     deferred[0]()
     await expect(Promise.all([firstLoad, secondLoad])).resolves.toEqual([projects[0], projects[0]])
+    expect(emitUiEvent).toHaveBeenLastCalledWith('app:active-project-changed', {
+      project: projects[0],
+      changed: true,
+    })
 
     const nextLoad = controller.load()
 
@@ -41,5 +47,14 @@ describe('project active context controller', () => {
     deferred[1]()
     await expect(nextLoad).resolves.toBe(projects[1])
     expect(controller.project()).toBe(projects[1])
+
+    const unchangedLoad = controller.load()
+    expect(apiFetch).toHaveBeenCalledTimes(3)
+    deferred[2]()
+    await expect(unchangedLoad).resolves.toBe(projects[2])
+    expect(emitUiEvent).toHaveBeenLastCalledWith('app:active-project-changed', {
+      project: projects[2],
+      changed: false,
+    })
   })
 })

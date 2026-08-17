@@ -22,7 +22,7 @@ The playbook uses structured collection capture rather than a temporary Files li
 
 ### Live Web Review
 
-The built-in **Live Web Review** playbook starts from one approved HTTP or HTTPS URL. HTTPx records its response status, title, technology hints, and a verified screenshot in the fixed `live-web-screenshots` Files directory. The screenshot crosses the same file-size, count, total-storage, content-signature, and authenticated-download checks as any other Web Surface capture.
+The built-in **Live Web Review** playbook starts from one approved HTTP or HTTPS URL. HTTPx uses the Chromium included with darklab_shell to record its response status, title, technology hints, and a verified screenshot in the fixed `live-web-screenshots` Files directory. It doesn't download a separate browser when the playbook runs. The screenshot crosses the same file-size, count, total-storage, content-signature, and authenticated-download checks as any other Web Surface capture.
 
 After the screenshot succeeds, Dalfox builds a structured parameter inventory in discovery-only mode. It doesn't send XSS payloads, follow redirects, or use remote dictionary mining, and it keeps one target inside fixed request-rate, worker, and time limits. This step doesn't create an intermediate file; the saved run output and normalized parameter observations remain the durable evidence.
 

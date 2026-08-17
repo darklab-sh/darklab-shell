@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from services.assessments.dalfox_command_tokens import canonical_dalfox_scan_tokens
 from services.assessments.command_modes_dalfox_oast import (
     is_reviewed_dalfox_oast_validation,
 )
@@ -27,12 +28,12 @@ def _bounded_decimal(value: str, *, maximum: int) -> bool:
 
 
 def _is_discovery(tokens: list[str]) -> bool:
-    command = _without_protected_config(tokens)
-    if len(command) != 19:
+    command = canonical_dalfox_scan_tokens(_without_protected_config(tokens))
+    if len(command) != 20:
         return False
-    rate, workers = command[12], command[14]
+    rate, workers = command[13], command[15]
     expected = [
-        "dalfox", command[1], "--only-discovery", "--skip-mining-dict",
+        "dalfox", "scan", command[2], "--only-discovery", "--skip-mining-dict",
         "--format", "jsonl", "--no-color", "--timeout", "10",
         "--scan-timeout", "60", "--rate-limit", rate, "--workers", workers,
         "--max-concurrent-targets", "1", "--max-targets-per-host", "1",
@@ -45,12 +46,12 @@ def _is_discovery(tokens: list[str]) -> bool:
 
 
 def _is_reviewed_xss_validation(tokens: list[str]) -> bool:
-    command = _without_protected_config(tokens)
-    if len(command) != 35:
+    command = canonical_dalfox_scan_tokens(_without_protected_config(tokens))
+    if len(command) != 36:
         return False
-    parameter, separator, location = command[5].rpartition(":")
+    parameter, separator, location = command[6].rpartition(":")
     expected = [
-        "dalfox", command[1], "--input-type", "url", "--param", command[5],
+        "dalfox", "scan", command[2], "--input-type", "url", "--param", command[6],
         "--skip-discovery", "--skip-mining", "--format", "jsonl", "--no-color",
         "--timeout", "10", "--scan-timeout", "60", "--retries", "0",
         "--rate-limit", "2", "--workers", "1", "--max-concurrent-targets", "1",

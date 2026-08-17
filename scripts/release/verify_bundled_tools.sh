@@ -37,6 +37,7 @@ container run --rm \
     --user scanner:appuser \
     --cap-add NET_RAW \
     --cap-add NET_ADMIN \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m \
     --entrypoint sh \
     "$image" -c '
 set -eu
@@ -50,7 +51,7 @@ for tool in \
     openssl sslscan nuclei subfinder httpx dnsx naabu katana tlsx cdncheck gau \
     amass assetfinder gobuster ffuf tcping trufflehog massdns puredns testssl \
     nikto sslyze wafw00f rustscan dalfox schemathesis wpscan vt ipinfo urlscan-cli chaos nmap \
-    masscan pg_dump pg_restore python ruby perl; do
+    masscan chromium pg_dump pg_restore python ruby perl; do
     command -v "$tool" >/dev/null 2>&1 \
         || verification_failed "$tool" "executable missing"
 done
@@ -106,6 +107,27 @@ probe urlscan-cli urlscan-cli --help
 probe chaos chaos -h
 probe nmap nmap --version
 probe masscan masscan --version
+probe chromium chromium --version
+if ! chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
+    --dump-dom about:blank >/dev/null 2>&1; then
+    verification_failed chromium-headless "container-isolated headless browser could not start"
+fi
+python -m http.server 18080 --bind 127.0.0.1 >/tmp/httpx-browser-smoke.log 2>&1 &
+httpx_server_pid=$!
+trap "kill $httpx_server_pid 2>/dev/null || true" EXIT HUP INT TERM
+sleep 1
+if ! httpx -u http://127.0.0.1:18080 -screenshot -system-chrome \
+    -headless-options --no-sandbox -srd /tmp/httpx-browser-smoke \
+    -silent -threads 1 -timeout 10 -retries 0 -disable-update-check \
+    >/tmp/httpx-browser-smoke.out 2>&1; then
+    verification_failed httpx-headless "HTTPx system-Chromium screenshot failed"
+fi
+if ! find /tmp/httpx-browser-smoke -type f -print -quit | grep -q .; then
+    verification_failed httpx-headless "HTTPx did not save a screenshot"
+fi
+kill "$httpx_server_pid" 2>/dev/null || true
+wait "$httpx_server_pid" 2>/dev/null || true
+trap - EXIT HUP INT TERM
 probe pg_dump pg_dump --version
 probe pg_restore pg_restore --version
 for postgresql_tool in pg_dump pg_restore; do

@@ -6668,6 +6668,58 @@ class TestProjectRoutes:
         assert created["protected_references_visible"] is True
         assert created["reference_counts"]["secret_refs"] == 0
 
+        for name, consumer_env in (
+            ("BROWSER_BASIC_USER", "BROWSER_LOGIN_USERNAME"),
+            ("BROWSER_BASIC_PASS", "BROWSER_LOGIN_PASSWORD"),
+        ):
+            secret_response = client.post(
+                "/session/secrets",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "name": name,
+                    "value": f"value-for-{name.lower()}",
+                    "consumer_envs": [consumer_env],
+                },
+            )
+            assert secret_response.status_code == 201
+        protected_response = client.post(
+            route,
+            headers={"X-Session-ID": session_id},
+            json={
+                "name": "Custom Secret bindings",
+                "role": "member",
+                "base_url": f"https://{target}",
+                "secret_refs": {
+                    "basic_username": "BROWSER_LOGIN_USERNAME",
+                    "basic_password": "BROWSER_LOGIN_PASSWORD",
+                },
+            },
+        )
+        assert protected_response.status_code == 201
+        protected = protected_response.get_json()["profile"]
+        assert protected["secret_refs"] == {
+            "basic_password": {"name": "BROWSER_BASIC_PASS", "available": True},
+            "basic_username": {"name": "BROWSER_BASIC_USER", "available": True},
+        }
+        missing_username = client.post(
+            route,
+            headers={"X-Session-ID": session_id},
+            json={
+                "name": "Incomplete basic authentication",
+                "role": "member",
+                "base_url": f"https://{target}",
+                "secret_refs": {
+                    "basic_username": "MISSING_BROWSER_USER",
+                    "basic_password": "BROWSER_LOGIN_PASSWORD",
+                },
+            },
+        )
+        assert missing_username.status_code == 400
+        assert missing_username.get_json()["error"] == (
+            "HTTP profile Secret references aren't available in this Project scope: "
+            "Basic username Secret"
+        )
+
         detail_route = f"{route}/{created['id']}"
         listed = client.get(route, headers={"X-Session-ID": session_id})
         detail = client.get(detail_route, headers={"X-Session-ID": session_id})
@@ -6677,7 +6729,10 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
             json={"revision": created["revision"], "enabled": False},
         )
-        assert listed.get_json()["profiles"][0]["id"] == created["id"]
+        assert {item["id"] for item in listed.get_json()["profiles"]} == {
+            created["id"],
+            protected["id"],
+        }
         assert detail.get_json()["profile"]["id"] == created["id"]
         assert foreign.status_code == 404
         assert updated.status_code == 200
@@ -8006,6 +8061,23 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         target = json.loads(resp.data)["target"]
+        slash_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "url", "value": "https://portal.darklab.sh/login/"},
+            headers={"X-Session-ID": session_id},
+        )
+        slash_target = json.loads(slash_resp.data)["target"]
+        updated_resp = client.put(
+            f"/projects/{project['id']}/targets/{target['id']}",
+            json={"type": "url", "value": "https://portal.darklab.sh/login/"},
+            headers={"X-Session-ID": session_id},
+        )
+        updated_target = json.loads(updated_resp.data)["target"]
+        resolved = client.post(
+            f"/projects/{project['id']}/probes/targets/resolve",
+            json={"target_value": "https://portal.darklab.sh/login/"},
+            headers={"X-Session-ID": session_id},
+        )
         listed = client.get(
             f"/projects/{project['id']}/targets",
             headers={"X-Session-ID": session_id},
@@ -8015,24 +8087,45 @@ class TestProjectRoutes:
                 (row["type"], row["canonical_value"]): dict(row)
                 for row in conn.execute(
                     "SELECT id, session_id, team_id, type, canonical_value, host_entity_id "
-                    "FROM entities WHERE session_id = ? AND canonical_value IN (?, ?) "
+                    "FROM entities WHERE session_id = ? AND canonical_value IN (?, ?, ?) "
                     "ORDER BY type, canonical_value",
-                    (session_id, "https://portal.darklab.sh/login", "portal.darklab.sh"),
+                    (
+                        session_id,
+                        "https://portal.darklab.sh/login",
+                        "https://portal.darklab.sh/login/",
+                        "portal.darklab.sh",
+                    ),
                 ).fetchall()
             }
 
         url_row = rows[("url", "https://portal.darklab.sh/login")]
+        updated_url_row = rows[("url", "https://portal.darklab.sh/login/")]
         host_row = rows[("domain", "portal.darklab.sh")]
         listed_targets = json.loads(listed.data)["targets"]
         assert resp.status_code == 201
+        assert slash_resp.status_code == 201
+        assert updated_resp.status_code == 200
+        assert resolved.status_code == 200
         assert listed.status_code == 200
         assert target["type"] == "url"
         assert target["value"] == "https://portal.darklab.sh/login"
         assert target["id"] == url_row["id"]
         assert url_row["host_entity_id"] == host_row["id"]
+        assert slash_target["value"] == "https://portal.darklab.sh/login/"
+        assert slash_target["id"] != target["id"]
+        assert updated_target["value"] == "https://portal.darklab.sh/login/"
+        assert updated_target["id"] == updated_url_row["id"]
+        assert updated_target["id"] == slash_target["id"]
+        assert updated_target["id"] != target["id"]
+        assert updated_url_row["host_entity_id"] == host_row["id"]
+        assert json.loads(resolved.data)["target"] == {
+            "entity_id": updated_target["id"],
+            "type": "url",
+            "value": "https://portal.darklab.sh/login/",
+        }
         assert host_row["team_id"] == ""
         assert [(item["type"], item["value"]) for item in listed_targets] == [
-            ("url", "https://portal.darklab.sh/login")
+            ("url", "https://portal.darklab.sh/login/")
         ]
 
     def test_project_targets_list_supports_pagination_type_search_and_auto_filter(self):
@@ -8123,6 +8216,7 @@ class TestProjectRoutes:
         app = reusable_test_app(__name__)
         read_only_post_endpoints = {
             "projects.projects_artifacts_download_ticket",
+            "projects.projects_probes_target_resolve",
             "projects.projects_run_entity_link_preview",
             "projects.projects_run_entity_unlink_preview",
         }

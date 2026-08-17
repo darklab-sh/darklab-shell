@@ -170,6 +170,10 @@ import {
   reloadWorkflowCatalog as importedReloadWorkflowCatalog,
 } from './features/workflows/workflows_bridge.js';
 import {
+  handleProbeTerminalCommand as importedHandleProbeTerminalCommand,
+  hasProbeTerminalHandler as importedHasProbeTerminalHandler,
+} from './features/probes/probe_terminal_bridge.js';
+import {
   handleSecretCommand as importedHandleSecretCommand,
   hasSecretsHandler as importedHasSecretsHandler,
 } from './features/preferences/secrets_bridge.js';
@@ -275,6 +279,7 @@ var emitUiEvent = (...args) => _runnerFn('emitUiEvent', importedEmitUiEvent)?.(.
 var logClientError = (...args) => _runnerFn('logClientError', importedLogClientError)?.(...args);
 var maskSessionToken = (...args) => _runnerFn('maskSessionToken', importedMaskSessionToken)?.(...args);
 var updateSessionId = (...args) => {
+  cancelAllPendingTerminalConfirms({ refocus: false });
   const fn = _runnerFn('updateSessionId', importedUpdateSessionId);
   const result = typeof fn === 'function' ? fn(...args) : undefined;
   if (typeof importedGetSessionId === 'function') SESSION_ID = importedGetSessionId();
@@ -391,6 +396,13 @@ var _runnerHandleWorkflowTerminalCommandAdapter = (...args) => {
   const fn = (typeof importedHasWorkflowHandler === 'function' && importedHasWorkflowHandler('handleWorkflowTerminalCommand'))
     ? importedHandleWorkflowTerminalCommand
     : _runnerFn('handleWorkflowTerminalCommand');
+  return typeof fn === 'function' ? fn(...args) : false;
+};
+var _runnerHandleProbeTerminalCommandAdapter = (...args) => {
+  const fn = (
+    typeof importedHasProbeTerminalHandler === 'function'
+    && importedHasProbeTerminalHandler()
+  ) ? importedHandleProbeTerminalCommand : _runnerFn('handleProbeTerminalCommand');
   return typeof fn === 'function' ? fn(...args) : false;
 };
 var hideRunTimer = (...args) => _runnerFn('hideRunTimer', importedHideRunTimer)?.(...args);
@@ -539,11 +551,10 @@ function _runnerWorkspaceCacheApi() {
   };
 }
 
-// Pending terminal confirmation: used by transcript-owned yes/no flows such as
-// session-token migration and token-clear confirmation. While set, the next
-// typed answer is consumed as part of the active script-style prompt instead of
-// as a normal shell command.
-let _pendingTerminalConfirm = null;
+// Transcript-owned confirmations belong to their origin tab. Multiple tabs may
+// wait independently, but one tab cannot replace or answer another tab's prompt.
+const _pendingTerminalConfirms = new Map();
+const _settlingTerminalConfirmTabs = new Set();
 
 function _runnerPersistenceHelpers() {
   if (!_runnerPersistence) {
@@ -1713,6 +1724,31 @@ function _markTabRunStarted(tabId, runId) {
   }
 }
 
+function _bindStartedProbeRun(launched, tabId) {
+  const run = launched?.run || {};
+  const runId = String(run.run_id || '');
+  if (!runId) throw new Error('The server did not return a probe run id.');
+  setTabRunningCommand(tabId, String(run.command || ''));
+  appendLine(
+    `[probe] started run ${runId} for Project ${launched.project_id || 'unknown'}`,
+    'notice',
+    tabId,
+  );
+  const isActiveTab = tabId === _runnerActiveTabId();
+  if (isActiveTab) setStatus('running');
+  if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
+  showTabKillBtn(tabId);
+  if (isActiveTab) {
+    _setRunButtonDisabled(true);
+    startTimer();
+  }
+  _markTabRunStarted(tabId, runId);
+  return _subscribeRunStream(runId, tabId, {
+    streamUrl: String(run.stream || ''),
+    after: String(run.last_event_id || ''),
+  });
+}
+
 function _handleRunStreamMessage(msg, tabId, streamState = null) {
   if (!msg || typeof msg !== 'object') return;
   const t = getTab(tabId);
@@ -2538,26 +2574,48 @@ async function _seedLocalStorageStarsToServer() {
   if (typeof loadStarredFromServer === 'function') await loadStarredFromServer();
 }
 
-function _setPendingTerminalConfirm(config) {
-  if (config && !config.execution) {
-    throw new Error('Terminal confirmations require a command execution');
-  }
-  _pendingTerminalConfirm = config || null;
-  if (_pendingTerminalConfirm?.execution) {
-    _pendingTerminalConfirm.execution.setPending(true);
-    _publishPendingExecutionLines(_pendingTerminalConfirm.execution);
-    const promptTabId = _pendingTerminalConfirm.tabId || _pendingTerminalConfirm.execution.state.tabId;
-    if (promptTabId === _runnerActiveTabId()) setStatus('idle');
-    if (typeof setTabStatus === 'function') setTabStatus(promptTabId, 'idle');
-  }
+function _pendingTerminalConfirmForTab(tabId = _runnerActiveTabId()) {
+  return _pendingTerminalConfirms.get(String(tabId || '')) || null;
+}
+
+function syncPendingTerminalConfirmPromptMode(tabId = _runnerActiveTabId()) {
+  const pending = _pendingTerminalConfirmForTab(tabId);
   if (typeof setComposerPromptMode === 'function') {
-    const mode = _pendingTerminalConfirm?.kind === 'secret' ? 'secret' : 'confirm';
-    setComposerPromptMode(_pendingTerminalConfirm ? mode : null);
+    const mode = pending?.kind === 'secret' ? 'secret' : 'confirm';
+    setComposerPromptMode(pending ? mode : null);
   }
 }
 
-function hasPendingTerminalConfirm() {
-  return !!_pendingTerminalConfirm;
+function _setPendingTerminalConfirm(config, tabId = '') {
+  if (config && !config.execution) {
+    throw new Error('Terminal confirmations require a command execution');
+  }
+  const promptTabId = String(
+    config?.tabId || config?.execution?.state?.tabId || tabId || _runnerActiveTabId() || '',
+  );
+  if (!promptTabId) throw new Error('Terminal confirmations require an origin tab');
+  if (config) {
+    if (_pendingTerminalConfirms.has(promptTabId)) {
+      const error = new Error(
+        'Finish or cancel the pending confirmation in this tab before starting another probe.',
+      );
+      error.name = 'TerminalConfirmationPendingError';
+      throw error;
+    }
+    const pending = { ...config, tabId: promptTabId };
+    _pendingTerminalConfirms.set(promptTabId, pending);
+    pending.execution.setPending(true);
+    _publishPendingExecutionLines(pending.execution);
+    if (promptTabId === _runnerActiveTabId()) setStatus('idle');
+    if (typeof setTabStatus === 'function') setTabStatus(promptTabId, 'idle');
+  } else {
+    _pendingTerminalConfirms.delete(promptTabId);
+  }
+  if (promptTabId === _runnerActiveTabId()) syncPendingTerminalConfirmPromptMode(promptTabId);
+}
+
+function hasPendingTerminalConfirm(tabId = _runnerActiveTabId()) {
+  return !!_pendingTerminalConfirmForTab(tabId);
 }
 
 function _publishPendingExecutionLines(execution) {
@@ -2569,45 +2627,88 @@ function _publishPendingExecutionLines(execution) {
   });
 }
 
-async function _runPendingTerminalConfirmHandler(promptTabId, handler, pending = null) {
+async function _runPendingTerminalConfirmHandler(
+  promptTabId,
+  handler,
+  pending = null,
+  { trackSettling = true } = {},
+) {
   const execution = pending?.execution;
   if (!execution) {
     throw new Error('Terminal confirmation is missing its command execution');
   }
+  if (trackSettling) _settlingTerminalConfirmTabs.add(promptTabId);
   try {
-    await Promise.resolve(typeof handler === 'function' ? handler() : undefined);
-  } catch (err) {
-    execution.appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
-    execution.setStatus('fail');
-    execution.setRecordRecent(false);
-    logClientError('terminal confirmation failed', err);
-  }
-  const nextPendingUsesExecution = _pendingTerminalConfirm?.execution === execution;
-  if (nextPendingUsesExecution) {
-    _publishPendingExecutionLines(execution);
-    if (typeof setTabStatus === 'function') setTabStatus(promptTabId, 'idle');
-    return;
-  }
-  execution.setPending(false);
-  if (typeof execution.completePending === 'function') {
-    await execution.completePending();
+    let handlerResult;
+    let handlerFailed = false;
+    try {
+      handlerResult = await Promise.resolve(
+        typeof handler === 'function' ? handler() : undefined,
+      );
+    } catch (err) {
+      handlerFailed = true;
+      execution.appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
+      execution.setStatus('fail');
+      execution.setRecordRecent(false);
+      logClientError('terminal confirmation failed', err);
+    }
+    const nextPendingUsesExecution = (
+      _pendingTerminalConfirmForTab(promptTabId)?.execution === execution
+    );
+    if (nextPendingUsesExecution) {
+      _publishPendingExecutionLines(execution);
+      if (typeof setTabStatus === 'function') setTabStatus(promptTabId, 'idle');
+      return;
+    }
+    execution.setPending(false);
+    if (typeof execution.completePending === 'function') {
+      await execution.completePending();
+    }
+    if (!handlerFailed && typeof pending.onComplete === 'function') {
+      await Promise.resolve(pending.onComplete(handlerResult));
+    }
+  } finally {
+    if (trackSettling) _settlingTerminalConfirmTabs.delete(promptTabId);
   }
 }
 
-function cancelPendingTerminalConfirm(tabId = _runnerActiveTabId()) {
-  if (!_pendingTerminalConfirm) return false;
-  const pending = _pendingTerminalConfirm;
+function cancelPendingTerminalConfirm(
+  tabId = _runnerActiveTabId(),
+  { refocus = true } = {},
+) {
+  const pending = _pendingTerminalConfirmForTab(tabId);
+  if (!pending) return false;
   const promptTabId = pending.tabId || tabId || _runnerActiveTabId();
-  _setPendingTerminalConfirm(null);
+  _setPendingTerminalConfirm(null, promptTabId);
   const cancelHandler = typeof pending.onCancel === 'function'
     ? pending.onCancel
     : (typeof pending.onNo === 'function' ? pending.onNo : null);
-  _runPendingTerminalConfirmHandler(promptTabId, cancelHandler, pending).catch((err) => {
+  _runPendingTerminalConfirmHandler(
+    promptTabId,
+    cancelHandler,
+    { ...pending, onComplete: null },
+    { trackSettling: false },
+  ).catch((err) => {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
     setStatus('fail');
   });
-  refocusComposerAfterAction();
+  if (refocus) refocusComposerAfterAction();
   return true;
+}
+
+function cancelAllPendingTerminalConfirms({ refocus = false } = {}) {
+  const tabIds = [..._pendingTerminalConfirms.keys()];
+  tabIds.forEach(tabId => cancelPendingTerminalConfirm(tabId, { refocus: false }));
+  if (refocus && tabIds.length) refocusComposerAfterAction();
+  return tabIds.length;
+}
+
+function _cancelPendingTerminalConfirmsByKind(kind) {
+  const tabIds = [..._pendingTerminalConfirms.entries()]
+    .filter(([, pending]) => pending?.kind === kind)
+    .map(([tabId]) => tabId);
+  tabIds.forEach(tabId => cancelPendingTerminalConfirm(tabId, { refocus: false }));
+  return tabIds.length;
 }
 
 function _appendSessionTokenSetLines(token, tabId, execution) {
@@ -2702,6 +2803,11 @@ async function _sessionTokenGenerate(tabId, execution) {
           if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
           _sessionRecordSuccess(execution);
           _sessionAppendLine(execution, 'History, file, workflow, and recent-value migration skipped.', '', tabId);
+          _sessionSetStatus(execution, 'idle');
+        },
+        onCancel: async () => {
+          _sessionAppendLine(execution, 'Session token generation canceled.', '', tabId);
+          _sessionCancelPersistence(execution);
           _sessionSetStatus(execution, 'idle');
         },
       });
@@ -2877,6 +2983,11 @@ async function _sessionTokenClear(tabId, execution) {
       _sessionSetStatus(execution, 'ok');
     },
     onNo: async () => {
+      _sessionAppendLine(execution, 'Session token clear canceled.', '', tabId);
+      _sessionCancelPersistence(execution);
+      _sessionSetStatus(execution, 'idle');
+    },
+    onCancel: async () => {
       _sessionAppendLine(execution, 'Session token clear canceled.', '', tabId);
       _sessionCancelPersistence(execution);
       _sessionSetStatus(execution, 'idle');
@@ -3779,7 +3890,7 @@ async function _completeBufferedBrowserCommand(execution, {
   );
   const persistedLines = outputLines.concat(sinkErrorLines).map(line => ({
     ...line,
-    rendered: suppressOutput && !sinkErrorLines.includes(line),
+    rendered: line.rendered === true || (suppressOutput && !sinkErrorLines.includes(line)),
   }));
   const result = execution.toResult({
     command,
@@ -3881,6 +3992,15 @@ function submitCommand(rawCmd) {
   // This is the main run path: validate local state, open the SSE stream, then
   // feed output into the active tab while mirroring completion into persistence.
   const cmd = (rawCmd || '').trim();
+  const activePromptTabId = _runnerActiveTabId();
+  if (_settlingTerminalConfirmTabs.has(activePromptTabId)) {
+    appendLine(
+      '[pending] The confirmed action is still starting.',
+      'notice',
+      activePromptTabId,
+    );
+    return true;
+  }
   if (!cmd) {
     if (_isWelcomeActive() && !_isWelcomeDone() && _welcomeOwns(_runnerActiveTabId())) {
       _requestWelcomeSettle(_runnerActiveTabId());
@@ -3894,12 +4014,13 @@ function submitCommand(rawCmd) {
   }
 
   // Intercept yes/no answer to a pending terminal confirmation prompt.
-  if (_pendingTerminalConfirm) {
-    const pending = _pendingTerminalConfirm;
-    const promptTabId = pending.tabId || _runnerActiveTabId();
+  const pendingTerminalConfirm = _pendingTerminalConfirmForTab(activePromptTabId);
+  if (pendingTerminalConfirm) {
+    const pending = pendingTerminalConfirm;
+    const promptTabId = pending.tabId || activePromptTabId;
     if (pending.kind !== 'secret') appendCommandEcho(cmd, promptTabId);
     if (pending.kind === 'text' || pending.kind === 'secret') {
-      _setPendingTerminalConfirm(null);
+      _setPendingTerminalConfirm(null, promptTabId);
       _runPendingTerminalConfirmHandler(
         promptTabId,
         () => (typeof pending.onAnswer === 'function' ? pending.onAnswer(cmd) : undefined),
@@ -3915,14 +4036,19 @@ function submitCommand(rawCmd) {
       appendLine('please answer yes or no', 'notice', promptTabId);
       return true;
     }
-    _setPendingTerminalConfirm(null);
+    _setPendingTerminalConfirm(null, promptTabId);
     if (answer === 'yes' || answer === 'y') {
       _runPendingTerminalConfirmHandler(promptTabId, pending.onYes, pending).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
         setStatus('fail');
       });
     } else {
-      _runPendingTerminalConfirmHandler(promptTabId, pending.onNo, pending).catch((err) => {
+      _runPendingTerminalConfirmHandler(
+        promptTabId,
+        pending.onNo,
+        { ...pending, onComplete: null },
+        { trackSettling: false },
+      ).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
         setStatus('fail');
       });
@@ -4061,6 +4187,27 @@ function submitCommand(rawCmd) {
     void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
       _handleWorkspaceDownloadCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
+    return true;
+  }
+
+  if (String(cmd || '').trim().toLowerCase().split(/\s+/, 1)[0] === 'probe') {
+    void _runBufferedBrowserCommandWithOptionalPipe(
+      cmd,
+      _runnerActiveTabId(),
+      (baseCommand, execution) => (
+        _runnerHandleProbeTerminalCommandAdapter(
+          baseCommand,
+          _runnerActiveTabId(),
+          execution,
+          {
+            requestConfirmation: config => _setPendingTerminalConfirm(config),
+            hasPendingConfirmation: tabId => hasPendingTerminalConfirm(tabId),
+            bindStartedRun: (launched, tabId) => _bindStartedProbeRun(launched, tabId),
+            workspaceCwd: _runnerWorkspaceCwdAdapter(_runnerActiveTabId()),
+          },
+        )
+      ),
+    );
     return true;
   }
 
@@ -4238,6 +4385,22 @@ function runCommand() {
   submitComposerCommand(value, { dismissKeyboard: true });
 }
 
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('app:active-project-changed', (event) => {
+    if (event?.detail?.changed === false) return;
+    _cancelPendingTerminalConfirmsByKind('probe');
+  });
+  for (const eventName of [
+    'app:scope-capabilities-changed',
+    'app:scope-changed',
+  ]) {
+    document.addEventListener(eventName, (event) => {
+      if (event?.detail?.changed === false) return;
+      cancelAllPendingTerminalConfirms({ refocus: false });
+    });
+  }
+}
+
 if (typeof importedSetRunnerHandlers === 'function') {
   importedSetRunnerHandlers({
     _readRunErrorMessage,
@@ -4264,6 +4427,7 @@ if (typeof importedSetRunnerHandlers === 'function') {
     submitComposerCommand,
     submitVisibleComposerCommand,
     syncActiveRunTimer,
+    syncPendingTerminalConfirmPromptMode,
   });
 }
 
@@ -4278,6 +4442,7 @@ export {
   appendPromptNewline,
   attachActiveRunFromMonitor,
   cancelPendingTerminalConfirm,
+  cancelAllPendingTerminalConfirms,
   confirmKill,
   detachRunStreamForTab,
   doKill,
@@ -4289,6 +4454,7 @@ export {
   restoreActiveRunsAfterReload,
   runCommand,
   setStatus,
+  syncPendingTerminalConfirmPromptMode,
   submitCommand,
   submitComposerCommand,
   submitVisibleComposerCommand,

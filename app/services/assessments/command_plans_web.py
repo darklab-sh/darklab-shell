@@ -57,7 +57,7 @@ def web_command_plans(
             credential_use,
         ),
         "dalfox": CommandPlan(
-            f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl "
+            f"dalfox scan {target} --only-discovery --skip-mining-dict --format jsonl "
             f"--no-color --timeout 10 --scan-timeout 60 --rate-limit {rate} "
             f"--workers {concurrency} --max-concurrent-targets 1 "
             f"--max-targets-per-host 1{protected_suffix}",

@@ -658,6 +658,8 @@ commands:
 
 Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current personal or team scope, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row. Personal secrets are not inherited by team scope; team owners and admins create shared team secrets explicitly.
 
+The Project HTTP-profile editor lists the Secret names available in the Project's current personal or team scope. Basic authentication needs separate stored references for its username and password. API clients can refer to a Secret by its stored name or by one of its unique consumer env bindings; either form resolves to the stored name before the profile is saved. Personal Secrets don't become available to team Projects, or vice versa.
+
 Inside each command's `autocomplete` block, a root can define:
 
 ```yaml
@@ -950,6 +952,7 @@ cp .env.example .env
 # RESTRICTED_COMMAND_INPUT_CIDRS=169.254.169.254/32,10.0.0.0/8
 # RAW_PACKET_SCANNING_ENABLED=false
 # ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=false
+# NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=true
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -1011,7 +1014,8 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `INTERACTIVE_PTY_ENABLED` | Docker Compose, Flask app | Enables guarded terminal sessions for approved interactive tools; detailed PTY limits remain in YAML |
 | `RESTRICTED_COMMAND_INPUT_CIDRS` | Docker entrypoint, Compose environment, Flask app | Optional comma-separated CIDRs that user-submitted scanner commands cannot target. The same value drives app validation and scanner-user OUTPUT deny rules |
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
-| `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions. It doesn't bypass the per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; destructive actions remain unavailable |
+| `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions and the reviewed intrusive Nuclei profile for Project probes. It doesn't bypass per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; intrusive Dalfox probes and destructive actions remain unavailable |
+| `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED` | Docker Compose, Docker entrypoint | When enabled, installs managed Nuclei templates if the persistent cache has no manifest. The attempt is bounded and non-fatal, and it never refreshes an installed snapshot |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
@@ -1045,11 +1049,13 @@ If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain
 
 The optional database and AI tuning variables are escape hatches for process-managed deployments. Leave them unset in the shipped Compose stacks to use `config.local.yaml`; their Compose entries intentionally pass empty values, which the app ignores.
 
+Both shipped Compose stacks mount the managed Nuclei templates at `/tmp/nuclei-templates` through the `nuclei-templates` named volume. The first web-container startup fills an empty volume. Container logs show only the fixed bootstrap lifecycle records, not output from the Nuclei updater. The shell healthcheck gives that bounded download enough startup grace before a failed check can mark the container unhealthy. Set `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false` when startup must not contact ProjectDiscovery; Nuclei plans stay unavailable until an operator runs `nuclei -update-templates`. Removing the named volume also removes the installed template snapshot.
+
 ---
 
-## Intrusive Assessment Actions
+## Intrusive Assessment and Probe Actions
 
-Intrusive Assessment actions are off by default because they send active validation payloads rather than only collecting or comparing evidence. Enable them only for Projects whose scope and authorization you've reviewed:
+Intrusive Assessment actions and the intrusive Nuclei profile for Project probes are off by default because they send active validation payloads rather than only collecting or comparing evidence. Enable them only for Projects whose scope and authorization you've reviewed:
 
 ```env
 ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true
@@ -1059,7 +1065,7 @@ ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true
 docker compose up -d --force-recreate shell
 ```
 
-The setting only makes maintained intrusive actions available. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project context immediately before starting the command. That includes one saved Dalfox parameter for XSS validation or the exact reviewed headless and low-aggression DAST profile for Nuclei. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
+The setting only makes maintained intrusive choices available. While it is off, terminal autocomplete leaves the intrusive Nuclei profile out of `probe plan` and `probe run` suggestions. The app still shows the exact target, policy, request and time limits, requires confirmation for every launch, and rechecks the saved Project context immediately before starting the command. Assessment cycles can use one saved Dalfox parameter for XSS validation or an exact reviewed headless and low-aggression DAST profile for Nuclei. Project probes can select the reviewed intrusive Nuclei profile, but their Dalfox action remains parameter discovery without XSS payloads. The image includes Chromium for these headless Nuclei runs, and the maintained profile selects that system browser rather than downloading another executable at run time. Direct commands, workflows, API clients, and the CLI can't use this switch to reach destructive actions.
 
 ---
 

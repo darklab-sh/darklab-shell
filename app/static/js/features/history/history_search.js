@@ -125,14 +125,22 @@ function _histSearchFetch(q) {
   if (query) params.set('q', query);
   const url = `/history?${params.toString()}`;
   _historySearchApiFetch(url).then(r => r.json()).then(data => {
-    if (!_histSearchMode) return;
+    if (!_histSearchMode || query !== _histSearchQuery) return;
+    const currentMatches = _histSearchMatches();
+    const selectedCommand = _histSearchIndex >= 0
+      ? currentMatches[_histSearchIndex] || ''
+      : '';
     _histSearchRuns = Array.isArray(data.runs)
       ? [...new Set(data.runs.map(r => r.command))]
       : [];
-    _histSearchIndex = _histSearchRuns.length > 0 ? 0 : -1;
+    const nextMatches = _histSearchMatches();
+    const preservedIndex = selectedCommand ? nextMatches.indexOf(selectedCommand) : -1;
+    _histSearchIndex = preservedIndex >= 0 ? preservedIndex : (nextMatches.length ? 0 : -1);
     _renderHistSearch();
   }).catch(() => {
-    if (_histSearchRuns === null) _histSearchRuns = [];
+    if (_histSearchMode && query === _histSearchQuery && _histSearchRuns === null) {
+      _histSearchRuns = [];
+    }
   });
 }
 

@@ -66,5 +66,11 @@ test-results/
 .DS_Store
 Thumbs.db
 
+# Local screenshots belong outside the repository root.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+
 # Downloaded CI job artifacts
 artifacts/

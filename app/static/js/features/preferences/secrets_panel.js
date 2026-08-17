@@ -753,7 +753,7 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
 
   const customWarning = document.createElement('div');
   customWarning.className = 'options-session-token-msg';
-  customWarning.textContent = 'Custom secrets are stored, but commands only use them when a registry entry declares a matching consumer env.';
+  customWarning.textContent = 'HTTP profiles can reference this stored name. External commands use it only when their registry entry declares a matching consumer env.';
 
   const err = document.createElement('div');
   err.className = 'options-session-token-msg is-error';
@@ -838,7 +838,7 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
         await refreshOptionsSecrets({ force: true });
         _optionsSecretsToast(
           isCustom && !isExisting
-            ? `${normalizedName} saved. It is not currently used unless a command declares that consumer env.`
+            ? `${normalizedName} saved. HTTP profiles can reference its name; external commands need a matching consumer env.`
             : (isExisting ? `${normalizedName} replaced.` : `${normalizedName} saved.`),
         );
         return true;

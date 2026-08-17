@@ -148,7 +148,10 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
-    if denied and is_denied(command_to_validate.strip(), denied, exempt_flags=exempt_flags):
+    if denied and is_denied(
+        command_to_validate.strip(), denied, exempt_flags=exempt_flags,
+        allow_grouping=allow_grouping,
+    ):
         return result_cls(
             False,
             f"Command not allowed: '{command.strip()}'",

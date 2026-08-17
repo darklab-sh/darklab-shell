@@ -683,7 +683,7 @@ def _suggestion_enabled_for_features(item, cfg=None) -> bool:
 
 
 def _filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
-    return registry_autocomplete._filter_autocomplete_context_by_features(context, cfg)
+    return registry_autocomplete.filter_autocomplete_context_by_features(context, cfg)
 
 
 def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = True) -> dict:

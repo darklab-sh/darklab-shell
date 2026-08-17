@@ -14,6 +14,7 @@ import {
   resetAnsiRendererForTab as importedResetAnsiRendererForTab,
 } from '../../output.js';
 import {
+  cancelPendingTerminalConfirm as importedCancelPendingTerminalConfirm,
   detachRunStreamForTab as importedDetachRunStreamForTab,
   doKill as importedDoKill,
 } from '../../runner.js';
@@ -182,6 +183,14 @@ function _tabCloseDetachRunStreamForTab(id) {
   const detach = (typeof importedDetachRunStreamForTab !== 'undefined' && importedDetachRunStreamForTab)
     || _tabCloseGlobalFunction('detachRunStreamForTab');
   if (typeof detach === 'function') detach(id);
+}
+
+function _tabCloseCancelPendingTerminalConfirm(id) {
+  const cancel = (
+    typeof importedCancelPendingTerminalConfirm !== 'undefined'
+    && importedCancelPendingTerminalConfirm
+  ) || _tabCloseGlobalFunction('cancelPendingTerminalConfirm');
+  if (typeof cancel === 'function') cancel(id, { refocus: false });
 }
 
 function _tabCloseDetachInteractivePtyForTab(id) {
@@ -377,6 +386,7 @@ function closeTab(id) {
   // Closing a tab may need to preserve run state until the kill flow or output
   // persistence finishes, so final removal is sometimes deferred.
   _tabCloseCancelWelcome(id);
+  _tabCloseCancelPendingTerminalConfirm(id);
   const currentTabs = _tabCloseTabs();
   const idx = currentTabs.findIndex(t => t.id === id);
   _tabCloseCancelPendingOutputBatch(id);

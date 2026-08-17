@@ -111,6 +111,7 @@ def _review_base_url(value: str) -> str:
             "invalid_base_url",
             "The reviewed API base URL must be an HTTP or HTTPS URL.",
         ) from exc
+    reviewed = reviewed.rstrip("/")
     _safe_path(urlsplit(reviewed).path, code="invalid_base_url")
     return reviewed
 

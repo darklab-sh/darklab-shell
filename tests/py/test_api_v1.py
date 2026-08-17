@@ -3,6 +3,7 @@
 
 import inspect
 import json
+import re
 import sqlite3
 import stat
 import sys
@@ -38,6 +39,54 @@ if str(CLI_SRC) not in sys.path:
 
 def get_client():
     return reusable_test_app(__name__).test_client()
+
+
+def _assert_openapi_payload(value, schema, components, path="$"):
+    if "$ref" in schema:
+        name = schema["$ref"].rsplit("/", 1)[-1]
+        return _assert_openapi_payload(value, components[name], components, path)
+    if value is None and schema.get("nullable"):
+        return
+    if "oneOf" in schema:
+        matches = 0
+        for candidate in schema["oneOf"]:
+            try:
+                _assert_openapi_payload(value, candidate, components, path)
+            except AssertionError:
+                continue
+            matches += 1
+        assert matches == 1, f"{path}: expected exactly one schema match, got {matches}"
+        return
+    if "allOf" in schema:
+        for candidate in schema["allOf"]:
+            _assert_openapi_payload(value, candidate, components, path)
+    expected_type = schema.get("type")
+    if expected_type == "object":
+        assert isinstance(value, dict), f"{path}: expected object"
+        required = set(schema.get("required", []))
+        assert required <= set(value), f"{path}: missing {sorted(required - set(value))}"
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False:
+            assert set(value) <= set(properties), f"{path}: extra {sorted(set(value) - set(properties))}"
+        for key, item in value.items():
+            if key in properties:
+                _assert_openapi_payload(item, properties[key], components, f"{path}.{key}")
+    elif expected_type == "array":
+        assert isinstance(value, list), f"{path}: expected array"
+        for index, item in enumerate(value):
+            _assert_openapi_payload(item, schema["items"], components, f"{path}[{index}]")
+    elif expected_type == "string":
+        assert isinstance(value, str), f"{path}: expected string"
+    elif expected_type == "integer":
+        assert isinstance(value, int) and not isinstance(value, bool), f"{path}: expected integer"
+    elif expected_type == "boolean":
+        assert isinstance(value, bool), f"{path}: expected boolean"
+    if "enum" in schema:
+        assert value in schema["enum"], f"{path}: {value!r} isn't in {schema['enum']!r}"
+    if "pattern" in schema:
+        assert isinstance(value, str) and re.fullmatch(schema["pattern"], value), (
+            f"{path}: value doesn't match {schema['pattern']}"
+        )
 
 
 class _LiveCliServer:
@@ -2212,6 +2261,12 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
         "name": "Authenticated application",
         "role": "user",
         "credential_use": ["headers"],
+        "scope": {
+            "allowed_hosts": [check["target_value"]],
+            "scope_roots": [f"https://{check['target_value']}"],
+            "include_paths": [],
+            "exclude_paths": [],
+        },
         "enabled": True,
         "revision": 1,
         "rate_limit_per_second": 3,
@@ -2694,7 +2749,9 @@ def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
     assert plan["launchable"] is True
     assert plan["policy_level"] == "intrusive"
     assert plan["nuclei_profile"]["key"] == "intrusive"
-    assert "-headless -dast -fuzz-aggression low" in plan["display_command"]
+    assert "-headless -system-chrome -headless-options --no-sandbox -dast" in (
+        plan["display_command"]
+    )
 
     monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", False)
     stale = client.post(
@@ -7179,6 +7236,105 @@ def test_api_v1_openapi_generator_snapshot_is_current():
     assert generated == checked_in
 
 
+def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
+    from services.api_v1.openapi import openapi_spec
+    from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+
+    client = get_client()
+    token = _token(client)
+    project = _create_project(client, token, name="Probe OpenAPI")
+    entity_id, _run_id = _seed_assessment_target(token, project["id"])
+    with sqlite3.connect(DB_PATH) as conn:
+        target_value = conn.execute(
+            "SELECT canonical_value FROM entities WHERE id = ?",
+            (entity_id,),
+        ).fetchone()[0]
+    snapshot = NucleiTemplateCacheSnapshot(
+        "ready", "v10.4.3", "sha256:" + "a" * 64, 12,
+    )
+    monkeypatch.setattr(
+        "services.assessments.probe_service.managed_nuclei_template_snapshot",
+        lambda: snapshot,
+    )
+    monkeypatch.setattr(
+        "services.assessments.probe_service.resolve_runtime_command",
+        lambda command: f"/usr/bin/{command}",
+    )
+    headers = _headers(token)
+    base = f"/api/v1/projects/{project['id']}/probes"
+    catalog = client.get(base, headers=headers).get_json()
+    resolved = client.post(
+        f"{base}/targets/resolve",
+        headers=headers,
+        json={"target_value": target_value},
+    ).get_json()
+    plan_response = client.post(
+        f"{base}/plan",
+        headers=headers,
+        json={"action_id": "ping", "entity_id": entity_id},
+    ).get_json()
+    plan = plan_response["plan"]
+    monkeypatch.setattr(
+        "blueprints.api_v1._start_brokered_run_service",
+        lambda **_kwargs: SimpleNamespace(run_id="run_probe_openapi", status="queued"),
+    )
+    monkeypatch.setattr("blueprints.api_v1.broker_available", lambda: True)
+    launched = client.post(
+        f"{base}/run",
+        headers=headers,
+        json={
+            "action_id": "ping", "entity_id": entity_id,
+            "confirmed": True, "plan_digest": plan["plan_digest"],
+        },
+    ).get_json()
+    monkeypatch.setattr(
+        "services.assessments.probe_service.resolve_runtime_command",
+        lambda _command: "",
+    )
+    unavailable = client.post(
+        f"{base}/plan",
+        headers=headers,
+        json={"action_id": "ping", "entity_id": entity_id},
+    ).get_json()
+
+    spec = openapi_spec()
+    schemas = spec["components"]["schemas"]
+    assert schemas["ProbeCatalog"]["properties"]["actions"]["items"] == {
+        "$ref": "#/components/schemas/ProbeCatalogAction"
+    }
+    assert schemas["ProbePlan"]["properties"]["bounds"] == {
+        "$ref": "#/components/schemas/ProbeBounds"
+    }
+    assert schemas["ProbeRunResponse"]["properties"]["run"] == {
+        "$ref": "#/components/schemas/ProbeStartedRun"
+    }
+    for schema_name in (
+        "ProbeCatalogAction", "ProbeServiceRecommendation", "ProbeTarget",
+        "ProbeHttpScope", "ProbeBounds", "ProbeStartedRun",
+    ):
+        assert schemas[schema_name]["required"]
+        assert schemas[schema_name]["additionalProperties"] is False
+    for payload, schema_name in (
+        (catalog, "ProbeCatalogResponse"),
+        (resolved, "ProbeTargetResolveResponse"),
+        (plan_response, "ProbePlanResponse"),
+        (unavailable, "ProbePlanResponse"),
+        (launched, "ProbeRunResponse"),
+    ):
+        _assert_openapi_payload(payload, schemas[schema_name], schemas)
+
+    paths = spec["paths"]
+    plan_examples = paths["/projects/{project_id}/probes/plan"]["post"]["responses"]["200"][
+        "content"
+    ]["application/json"]["examples"]
+    for example in plan_examples.values():
+        _assert_openapi_payload(example["value"], schemas["ProbePlanResponse"], schemas)
+    stable_error = paths["/projects/{project_id}/probes/run"]["post"]["responses"]["409"][
+        "content"
+    ]["application/json"]["example"]
+    _assert_openapi_payload(stable_error, schemas["ApiError"], schemas)
+
+
 def test_api_v1_openapi_contract_describes_public_shapes():
     from services.api_v1.openapi import openapi_spec
 
@@ -8275,6 +8431,315 @@ def test_darklab_cli_run_requires_no_follow_for_json_start_payload(monkeypatch, 
     assert calls == [("POST", "/runs", {"command": "echo ok", "project_id": None})]
 
 
+def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+    calls = []
+    plan = {
+        "project_id": "prj_probe",
+        "action": {"id": "ping", "label": "Ping"},
+        "target": {"entity_id": "ent_probe", "type": "domain", "value": "probe.example"},
+        "policy_level": "safe",
+        "bounds": {"summary": "Four probes against one approved host."},
+        "expected_evidence": ["run"],
+        "availability": {"available": True, "code": "", "reason": ""},
+        "launchable": True,
+        "launch_authorization": {
+            "authorized": True,
+            "required_capabilities": ["run_commands"],
+            "missing_capabilities": [],
+            "reason": "",
+        },
+        "display_command": "ping -c 4 probe.example",
+        "plan_digest": "a" * 64,
+    }
+    protected_plan = {
+        **plan,
+        "action": {"id": "httpx", "label": "HTTPx"},
+        "bounds": {
+            "summary": "One protected HTTP request.",
+            "credential_use": "protected_http_profile",
+        },
+        "http_profile": {
+            "id": "hpr_cli", "name": "User session", "role": "user", "revision": 1,
+            "scope": {
+                "allowed_hosts": ["probe.example"],
+                "scope_roots": ["https://probe.example/app"],
+                "include_paths": ["/app"],
+                "exclude_paths": ["/app/private"],
+            },
+        },
+        "display_command": "httpx -u https://probe.example -sf [protected]",
+        "plan_digest": "b" * 64,
+    }
+    unavailable_plan = {
+        **plan,
+        "action": {"id": "dnsrecon", "label": "DNSRecon"},
+        "availability": {
+            "available": False,
+            "code": "feature_unavailable",
+            "reason": "Required probe features aren't available.",
+        },
+        "feature_gates": ["dnsrecon"],
+        "launchable": False,
+        "display_command": "",
+        "plan_digest": "c" * 64,
+    }
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, **_kwargs):
+            calls.append((method, path, params, body))
+            if method == "GET" and path == "/projects":
+                assert params == {"limit": 100, "offset": 0}
+                return {
+                    "projects": [{
+                        "id": "prj_probe",
+                        "slug": "probe-project",
+                        "name": "Probe Project",
+                        "status": "active",
+                    }],
+                    "has_more": False,
+                }
+            if method == "GET" and path == "/projects/prj_probe/probes":
+                actions = [
+                    {
+                        "id": "ping", "label": "Ping", "policy_level": "safe",
+                        "target_types": ["domain", "ip"],
+                        "availability": {"available": True},
+                    },
+                    {
+                        "id": "dnsrecon", "label": "DNSRecon", "policy_level": "safe",
+                        "target_types": ["domain"],
+                        "availability": {"available": True},
+                    },
+                    {
+                        "id": "httpx", "label": "HTTPx", "policy_level": "safe",
+                        "target_types": ["domain", "ip", "url"],
+                        "availability": {"available": True},
+                    },
+                    {
+                        "id": "sqlmap", "label": "SQLmap", "policy_level": "standard",
+                        "target_types": ["url"],
+                        "exclusions": ["destructive_sql"],
+                        "availability": {"available": True},
+                    },
+                ]
+                target_type = str((params or {}).get("target_type") or "")
+                if target_type:
+                    actions = [
+                        action for action in actions
+                        if target_type in action["target_types"]
+                    ]
+                service = str((params or {}).get("service") or "")
+                return {
+                    "catalog": {
+                        "actions": actions,
+                        "nmap_profiles": [{"key": "safe"}],
+                        "nuclei_profiles": [{
+                            "key": "intrusive",
+                            "availability": {
+                                "available": False,
+                                "reason": "Intrusive probe actions aren't enabled.",
+                            },
+                        }],
+                        "service_recommendations": ([{
+                            "action_id": "nmap",
+                            "nmap_profile": "smb",
+                            "target_types": ["domain", "ip"],
+                            "label": "Review SMB services",
+                            "rationale": "Confirm the discovered SMB surface.",
+                        }] if service == "microsoft-ds" else []),
+                        "exclusions": ["zap", "oast_allocation"],
+                    },
+                }
+            if method == "POST" and path.endswith("/targets/resolve"):
+                assert body == {"target_value": "probe.example"}
+                return {"target": plan["target"]}
+            if method == "POST" and path.endswith("/plan"):
+                if body and body.get("http_profile_id"):
+                    assert body == {
+                        "action_id": "httpx", "entity_id": "ent_probe",
+                        "http_profile_id": "User session", "nuclei_profile": "safe",
+                    }
+                    return {"plan": protected_plan}
+                if body and body.get("action_id") == "dnsrecon":
+                    assert body == {
+                        "action_id": "dnsrecon", "entity_id": "ent_probe",
+                        "nuclei_profile": "safe",
+                    }
+                    return {"plan": unavailable_plan}
+                assert body == {
+                    "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
+                }
+                return {"plan": plan}
+            if method == "POST" and path.endswith("/run"):
+                if body and body.get("http_profile_id"):
+                    assert body == {
+                        "action_id": "httpx", "entity_id": "ent_probe",
+                        "http_profile_id": "User session", "nuclei_profile": "safe",
+                        "confirmed": True, "plan_digest": "b" * 64,
+                    }
+                    return {
+                        "plan": protected_plan,
+                        "project_id": "prj_probe",
+                        "run": {
+                            "id": "run_protected_probe", "status": "queued",
+                            "command": protected_plan["display_command"],
+                            "history_url": "/api/v1/history/run_protected_probe",
+                        },
+                    }
+                assert body == {
+                    "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
+                    "confirmed": True, "plan_digest": "a" * 64,
+                }
+                return {
+                    "plan": plan,
+                    "project_id": "prj_probe",
+                    "run": {
+                        "id": "run_probe", "status": "queued",
+                        "command": plan["display_command"],
+                        "history_url": "/api/v1/history/run_probe",
+                    },
+                }
+            raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_probe_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["probe", "list", "--project", "probe-project"]) == 0
+    assert "Ping" in capsys.readouterr().out
+    assert calls[-2][1:] == (
+        "/projects", {"limit": 100, "offset": 0}, None,
+    )
+
+    assert cli_main.main([
+        "probe", "list", "--project", "prj_probe", "--target-type", "ip",
+    ]) == 0
+    ip_output = capsys.readouterr().out
+    assert "Ping" in ip_output
+    assert "HTTPx" in ip_output
+    assert "DNSRecon" not in ip_output
+    assert "SQLmap" not in ip_output
+    assert calls[-1][2] == {"service": None, "target_type": "ip"}
+
+    assert cli_main.main([
+        "probe", "list", "--project", "prj_probe", "--service", "microsoft-ds",
+        "--target-type", "ip",
+    ]) == 0
+    service_output = capsys.readouterr().out
+    assert "Service recommendations:" in service_output
+    assert "nmap" in service_output
+    assert "smb" in service_output
+    assert "Confirm the discovered SMB surface." in service_output
+    assert "Intrusive probe actions aren't enabled." in service_output
+    assert "Excluded from probes: zap,oast_allocation" in service_output
+    assert calls[-1][2] == {"service": "microsoft-ds", "target_type": "ip"}
+
+    assert cli_main.main([
+        "probe", "list", "--project", "prj_probe", "--target-type", "url",
+        "--format", "json",
+    ]) == 0
+    url_payload = json.loads(capsys.readouterr().out)
+    assert {action["id"] for action in url_payload["catalog"]["actions"]} == {
+        "httpx", "sqlmap",
+    }
+    assert calls[-1][2] == {"service": None, "target_type": "url"}
+
+    assert cli_main.main([
+        "probe", "plan", "ping", "probe.example", "--project", "prj_probe",
+    ]) == 0
+    preview_output = capsys.readouterr().out
+    assert "ping -c 4 probe.example" in preview_output
+    assert f"Approval digest: {'a' * 12}" in preview_output
+    assert "a" * 64 not in preview_output
+
+    assert cli_main.main([
+        "probe", "plan", "dnsrecon", "probe.example", "--project", "prj_probe",
+    ]) == 0
+    unavailable_output = capsys.readouterr().out
+    assert "Required probe features aren't available." in unavailable_output
+    assert "Missing features: dnsrecon" in unavailable_output
+
+    assert cli_main.main([
+        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
+    ]) == 0
+    assert "Preview only" in capsys.readouterr().out
+
+    assert cli_main.main([
+        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
+        "--confirm",
+    ]) == 0
+    confirmed_output = capsys.readouterr().out
+    assert confirmed_output.index("ping -c 4 probe.example") < confirmed_output.index("run_probe")
+    assert "Follow this run with: darklab tail run_probe" in confirmed_output
+
+    assert cli_main.main([
+        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
+        "--confirm", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["run"]["id"] == "run_probe"
+    assert [call[1].rsplit("/", 1)[-1] for call in calls[-2:]] == ["plan", "run"]
+
+    assert cli_main.main([
+        "probe", "plan", "httpx", "--entity-id", "ent_probe",
+        "--project", "prj_probe", "--http-profile", "User session",
+    ]) == 0
+    protected_output = capsys.readouterr().out
+    assert "[protected]" in protected_output
+    assert "HTTP profile: User session (user)" in protected_output
+    assert "HTTP scope: hosts probe.example; roots https://probe.example/app" in protected_output
+
+    assert cli_main.main([
+        "probe", "run", "httpx", "--entity-id", "ent_probe",
+        "--project", "prj_probe", "--http-profile", "User session",
+        "--confirm", "--format", "json",
+    ]) == 0
+    protected_launch_output = capsys.readouterr().out
+    protected_payload = json.loads(protected_launch_output)
+    assert protected_payload["run"]["id"] == "run_protected_probe"
+    assert protected_payload["run"]["command"].endswith("-sf [protected]")
+    assert [call[1].rsplit("/", 1)[-1] for call in calls[-2:]] == ["plan", "run"]
+    assert "trusted_execution_args" not in protected_launch_output
+    assert "private_values" not in protected_launch_output
+    assert "trusted_execution_args" not in json.dumps(calls, default=str)
+    assert "private_values" not in json.dumps(calls, default=str)
+
+    plan["launch_authorization"] = {
+        "authorized": False,
+        "required_capabilities": ["run_commands"],
+        "missing_capabilities": ["run_commands"],
+        "reason": "Your Team role doesn't allow probe launches in this scope.",
+    }
+    denied_call_count = len(calls)
+    assert cli_main.main([
+        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
+        "--confirm",
+    ]) == 1
+    assert "doesn't allow probe launches" in capsys.readouterr().err
+    assert [call[1].rsplit("/", 1)[-1] for call in calls[denied_call_count:]] == ["plan"]
+
+
+def test_darklab_cli_probe_requires_exactly_one_target_selector(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, *_args, **_kwargs):
+            raise AssertionError("invalid target selectors must fail before an API request")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_probe_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+    assert cli_main.main([
+        "probe", "plan", "ping", "probe.example", "--entity-id", "ent_probe",
+        "--project", "prj_probe",
+    ]) == 1
+    assert "either TARGET or --entity-id" in capsys.readouterr().err
+
+
 def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, capsys):
     cli_main = import_module("darklab_cli.__main__")
     calls = []
@@ -8320,10 +8785,17 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
 
         def request(self, method, path, *, params=None, body=None, **_kwargs):
             calls.append((method, path, params, body))
+            if path == "/projects" and method == "GET":
+                return {
+                    "projects": [{
+                        "id": "prj_cli", "slug": "assessment-project", "status": "active",
+                    }],
+                    "has_more": False,
+                }
             if path == "/projects/prj_cli/assessments" and method == "GET":
                 return {
-                    "assessments": [assessment],
-                    "total": 1,
+                    "assessments": [] if (params or {}).get("status") == "completed" else [assessment],
+                    "total": 0 if (params or {}).get("status") == "completed" else 1,
                     "limit": 50,
                     "offset": 0,
                     "has_more": False,
@@ -8392,17 +8864,20 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
     assert cli_main.main([
         "assessment",
         "list",
-        "prj_cli",
+        "assessment-project",
         "--status",
         "archived",
     ]) == 0
     assert "asmt_cli" in capsys.readouterr().out
-    assert calls[-1] == (
-        "GET",
-        "/projects/prj_cli/assessments",
-        {"limit": 50, "offset": 0, "status": "archived", "include_archived": True},
-        None,
-    )
+    assert calls[-2:] == [
+        ("GET", "/projects", {"limit": 100, "offset": 0}, None),
+        (
+            "GET",
+            "/projects/prj_cli/assessments",
+            {"limit": 50, "offset": 0, "status": "archived", "include_archived": True},
+            None,
+        ),
+    ]
 
     assert cli_main.main([
         "assessment",
@@ -8419,6 +8894,11 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         "tls",
         "combined",
     ]
+
+    assert cli_main.main([
+        "assessment", "list", "prj_cli", "--status", "completed",
+    ]) == 0
+    assert capsys.readouterr().out == "No results.\n"
 
     assert cli_main.main(["assessment", "show", "prj_cli", "asmt_cli"]) == 0
     show_output = capsys.readouterr().out
@@ -8511,6 +8991,17 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         None,
         None,
     )
+
+    assert cli_main.main([
+        "assessment",
+        "start-action",
+        "prj_cli",
+        "asmt_cli",
+        "asmc_cli",
+        "--confirm",
+    ]) == 0
+    confirmed_output = capsys.readouterr().out
+    assert confirmed_output.index("command:nmap") < confirmed_output.index("run_cli_verification")
 
     call_count = len(calls)
     assert cli_main.main([

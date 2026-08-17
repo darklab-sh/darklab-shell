@@ -2714,6 +2714,7 @@ let importedProjectWorkspaceShell;
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       emptyProjectPanel: _emptyProjectPanel,
       renderProjectTargets: _renderProjectTargets,
+      focusElement: importedFocusElement,
       projectResponseError: _projectResponseError,
       syncEntityLabels: _syncEntityLabels,
       projectWorkspaceRequest: _projectWorkspaceRequest,

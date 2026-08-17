@@ -10,8 +10,10 @@ from typing import Any, Mapping
 
 import config as app_config
 from services.assessments.action_plans import AssessmentActionError
-from services.assessments.command_modes import assessment_command_mode
-from services.assessments.command_modes_nuclei import NUCLEI_PROFILE_MODES
+from services.assessments.nuclei_profile_launch import (
+    NucleiProfileLaunchError,
+    validate_nuclei_profile_launch,
+)
 from services.assessments.nuclei_takeover_command import reviewed_takeover_launch_plan_matches
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_templates import (
@@ -91,44 +93,43 @@ def _validate_generic_nuclei_template_snapshot(
         return None
     profile = plan.get("nuclei_profile")
     profile_key = str(profile.get("key") or "") if isinstance(profile, Mapping) else ""
-    expected_mode = NUCLEI_PROFILE_MODES.get(profile_key, "")
-    current_mode = assessment_command_mode(plan.get("display_command"))
-    intrusive = str(plan.get("policy_level") or "") == "intrusive"
-    if (
-        not expected_mode
-        or current_mode != expected_mode
-        or (intrusive and profile_key != "intrusive")
-        or (intrusive and not app_config.CFG.get("assessment_intrusive_actions_enabled", False))
-    ):
-        log.warning("ASSESSMENT_NUCLEI_PROFILE_CONTRACT_CHANGED", extra={
-            "project_id": str(plan.get("project_id") or "")[:64],
-            "assessment_id": str(plan.get("assessment_id") or "")[:64],
-            "check_id": str(plan.get("check_id") or "")[:64],
-            "profile_key": profile_key[:32],
-            "policy_level": str(plan.get("policy_level") or "")[:32],
-            "deployment_gate_enabled": bool(
+    expected = profile.get("template_snapshot") if isinstance(profile, Mapping) else None
+    try:
+        return validate_nuclei_profile_launch(
+            display_command=plan.get("display_command"),
+            profile_key=profile_key,
+            expected_snapshot=expected if isinstance(expected, Mapping) else None,
+            policy_level=plan.get("policy_level"),
+            intrusive_actions_enabled=bool(
                 app_config.CFG.get("assessment_intrusive_actions_enabled", False)
             ),
-        })
-        raise AssessmentActionError(
-            "nuclei_profile_contract_changed",
-            "The reviewed Nuclei profile is no longer available. Review the action again.",
-            status_code=409,
+            current_snapshot=managed_nuclei_template_snapshot(),
         )
-    expected = profile.get("template_snapshot") if isinstance(profile, Mapping) else None
-    current = managed_nuclei_template_snapshot()
-    current_public = current.public()
-    if isinstance(expected, Mapping) and dict(expected) == current_public and current.state == "ready":
-        return current
-    log.warning("ASSESSMENT_NUCLEI_TEMPLATE_CACHE_CHANGED", extra={
-        "project_id": str(plan.get("project_id") or "")[:64],
-        "assessment_id": str(plan.get("assessment_id") or "")[:64],
-        "check_id": str(plan.get("check_id") or "")[:64],
-        "expected_state": str(expected.get("state") or "") if isinstance(expected, Mapping) else "",
-        "current_state": current.state,
-    })
-    raise AssessmentActionError(
-        "nuclei_template_cache_changed",
-        "The managed Nuclei templates changed after preview. Review the action again.",
-        status_code=409,
-    )
+    except NucleiProfileLaunchError as exc:
+        if exc.code == "nuclei_profile_contract_changed":
+            log.warning("ASSESSMENT_NUCLEI_PROFILE_CONTRACT_CHANGED", extra={
+                "project_id": str(plan.get("project_id") or "")[:64],
+                "assessment_id": str(plan.get("assessment_id") or "")[:64],
+                "check_id": str(plan.get("check_id") or "")[:64],
+                "profile_key": profile_key[:32],
+                "policy_level": str(plan.get("policy_level") or "")[:32],
+                "deployment_gate_enabled": bool(
+                    app_config.CFG.get("assessment_intrusive_actions_enabled", False)
+                ),
+            })
+        else:
+            current_state = ""
+            try:
+                current_state = managed_nuclei_template_snapshot().state
+            except Exception:  # pragma: no cover - logging must not mask rejection
+                current_state = "unavailable"
+            log.warning("ASSESSMENT_NUCLEI_TEMPLATE_CACHE_CHANGED", extra={
+                "project_id": str(plan.get("project_id") or "")[:64],
+                "assessment_id": str(plan.get("assessment_id") or "")[:64],
+                "check_id": str(plan.get("check_id") or "")[:64],
+                "expected_state": (
+                    str(expected.get("state") or "") if isinstance(expected, Mapping) else ""
+                ),
+                "current_state": current_state,
+            })
+        raise AssessmentActionError(exc.code, str(exc), status_code=409) from exc

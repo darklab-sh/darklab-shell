@@ -408,6 +408,14 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "dalfox scan --help",
+      "expected_text": [
+        "--only-discovery"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "nuclei -h",
       "expected_text": [
         "Nuclei is a fast, template"

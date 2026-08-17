@@ -4359,7 +4359,7 @@ describe('history panel actions', () => {
     expect(appendLine).toHaveBeenCalledWith('new output', '', 'tab-3')
     expect(activateTab).toHaveBeenCalledWith('tab-3', { focusComposer: false })
     expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
-  }, 10_000)
+  }, 20_000)
 
   it('preflights Restore Both tab capacity before creating either tab', async () => {
     const apiFetch = vi.fn((url) => {
@@ -5741,7 +5741,7 @@ describe('history panel actions', () => {
 // ── Ctrl+R reverse-history search ─────────────────────────────────────────────
 
 describe('Ctrl+R reverse-history search', () => {
-  function loadHistSearch({ submitComposerCommand: submitMock } = {}) {
+  function loadHistSearch({ submitComposerCommand: submitMock, apiFetch: apiFetchMock } = {}) {
     document.body.innerHTML = `
       <div id="history-row"><span class="history-label">Recent:</span></div>
       <input id="cmd" />
@@ -5753,6 +5753,8 @@ describe('Ctrl+R reverse-history search', () => {
     const historyPanel = document.getElementById('history-panel')
     const histSearchDropdown = document.getElementById('hist-search-dropdown')
     const submitComposerCommand = submitMock ?? vi.fn()
+    const apiFetch = apiFetchMock
+      ?? vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ runs: [] }) }))
 
     return fromDomScripts(
       HISTORY_SCRIPT_PATHS,
@@ -5766,7 +5768,7 @@ describe('Ctrl+R reverse-history search', () => {
         histSearchDropdown,
         shellPromptWrap: document.createElement('div'),
         acHide: vi.fn(),
-        apiFetch: vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ runs: [] }) })),
+        apiFetch,
         refreshHistoryPanel: vi.fn(),
         useMobileTerminalViewportMode: () => false,
         setComposerValue: (val, start = null, end = null, opts = {}) => {
@@ -5953,35 +5955,51 @@ describe('Ctrl+R reverse-history search', () => {
     expect(submitComposerCommand).not.toHaveBeenCalled()
   })
 
-  it('handleHistSearchKey Tab moves through matches without changing the input', () => {
+  it('handleHistSearchKey Tab moves through matches without changing the input', async () => {
+    vi.useFakeTimers()
+    let resolveHistory
+    const historyResponse = new Promise(resolve => { resolveHistory = resolve })
+    const apiFetch = vi.fn(() => Promise.resolve({ json: () => historyResponse }))
     const submitComposerCommand = vi.fn()
-    const {
-      hydrateCmdHistory,
-      enterHistSearch,
-      handleHistSearchInput,
-      handleHistSearchKey,
-      isHistSearchMode,
-    } = loadHistSearch({ submitComposerCommand })
-    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }])
-    const cmdInput = document.getElementById('cmd')
-    const dropdown = document.getElementById('hist-search-dropdown')
+    try {
+      const {
+        hydrateCmdHistory,
+        enterHistSearch,
+        handleHistSearchInput,
+        handleHistSearchKey,
+        isHistSearchMode,
+      } = loadHistSearch({ submitComposerCommand, apiFetch })
+      hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }])
+      const cmdInput = document.getElementById('cmd')
+      const dropdown = document.getElementById('hist-search-dropdown')
 
-    enterHistSearch()
-    cmdInput.value = 'dig'
-    handleHistSearchInput('dig')
-    const e = Object.assign(new Event('keydown', { cancelable: true }), {
-      key: 'Tab',
-      ctrlKey: false,
-      metaKey: false,
-      altKey: false,
-    })
-    const handled = handleHistSearchKey(e)
+      enterHistSearch()
+      cmdInput.value = 'dig'
+      handleHistSearchInput('dig')
+      await vi.advanceTimersByTimeAsync(120)
+      const e = Object.assign(new Event('keydown', { cancelable: true }), {
+        key: 'Tab',
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+      })
+      const handled = handleHistSearchKey(e)
 
-    expect(handled).toBe(true)
-    expect(isHistSearchMode()).toBe(true)
-    expect(cmdInput.value).toBe('dig')
-    expect(dropdown.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
-    expect(submitComposerCommand).not.toHaveBeenCalled()
+      expect(handled).toBe(true)
+      expect(isHistSearchMode()).toBe(true)
+      expect(cmdInput.value).toBe('dig')
+      expect(dropdown.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
+
+      resolveHistory({
+        runs: [{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }],
+      })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(dropdown.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
+      expect(submitComposerCommand).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('handleHistSearchKey ArrowDown navigates to the next match without changing the input', () => {

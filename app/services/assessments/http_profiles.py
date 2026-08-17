@@ -17,6 +17,12 @@ from services.assessments.http_profile_contracts import (
     HttpProfileNotFound,
 )
 from services.assessments.http_profile_scope import project_hosts as _project_hosts
+from services.assessments.http_profile_secret_references import (
+    available_secret_names as _available_secret_names,
+    canonicalize_secret_references as _canonicalize_secret_references,
+    referenced_secret_names as _referenced_secret_names,
+    secret_reference_lookup as _secret_reference_lookup,
+)
 from services.assessments.http_profile_validation import (
     HTTP_PROFILE_INPUT_FIELDS,
     normalize_http_profile_payload,
@@ -29,6 +35,14 @@ from services.workspace.files import WorkspaceError, owner_workspace_path_info
 
 
 DEFAULT_MAX_HTTP_PROFILES_PER_PROJECT = 50
+_SECRET_REFERENCE_LABELS = {
+    "bearer_token": "Bearer token Secret",
+    "cookie": "Cookie Secret",
+    "basic_username": "Basic username Secret",
+    "basic_password": "Basic password Secret",
+    "proxy_authorization": "Proxy authorization Secret",
+    "client_key_passphrase": "Client-key passphrase Secret",
+}
 _SELECT_COLUMNS = (
     "h.id, h.session_id, h.team_id, h.project_id, h.name, h.name_key, h.role_key, "
     "h.base_url, h.scope_roots_json, h.allowed_hosts_json, h.headers_json, "
@@ -110,24 +124,6 @@ def _profile_row(
     return conn.execute(sql, (*owner_params, project_id, profile_id)).fetchone()
 
 
-def _referenced_secret_names(profile: Mapping[str, Any]) -> set[str]:
-    names = {str(value) for value in profile.get("secret_refs", {}).values() if str(value)}
-    names.update(
-        str(header.get("secret_name") or "")
-        for header in profile.get("headers", [])
-        if isinstance(header, Mapping) and str(header.get("secret_name") or "")
-    )
-    return names
-
-
-def _available_secret_names(conn: Any, owner_id: str) -> set[str]:
-    rows = conn.execute(
-        "SELECT name FROM secrets WHERE session_token = ? ORDER BY name",
-        (owner_id,),
-    ).fetchall()
-    return {str(row["name"] or "") for row in rows}
-
-
 def _workflow_ids(conn: Any, session_id: str, team_id: str) -> set[str]:
     owner_sql, owner_params = shared_owner_where(
         session_id, team_id=team_id, table_alias="w"
@@ -149,14 +145,27 @@ def _validate_references(
     session_id: str,
     team_id: str,
     actor_member_id: str,
-    profile: Mapping[str, Any],
+    profile: dict[str, Any],
 ) -> None:
     owner_id = team_id or session_id
-    missing_secrets = sorted(
-        _referenced_secret_names(profile) - _available_secret_names(conn, owner_id)
-    )
-    if missing_secrets:
-        raise HttpProfileError("HTTP profile references a missing Secret")
+    references = _secret_reference_lookup(conn, owner_id)
+    missing_fields = {
+        _SECRET_REFERENCE_LABELS.get(str(slot), "Protected Secret")
+        for slot, value in profile.get("secret_refs", {}).items()
+        if str(value) and str(value) not in references
+    }
+    if any(
+        str(header.get("secret_name") or "") not in references
+        for header in profile.get("headers", [])
+        if isinstance(header, Mapping) and str(header.get("secret_name") or "")
+    ):
+        missing_fields.add("Custom header Secrets")
+    if missing_fields:
+        raise HttpProfileError(
+            "HTTP profile Secret references aren't available in this Project scope: "
+            + ", ".join(sorted(missing_fields))
+        )
+    _canonicalize_secret_references(profile, references)
     workflow_id = str(profile.get("login_workflow_id") or "")
     if workflow_id and workflow_id not in _workflow_ids(conn, session_id, team_id):
         raise HttpProfileError("HTTP profile login workflow was not found in this owner scope")

@@ -1390,7 +1390,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     target = "https://app.example.test/search?q=one"
     run_id = "run-dalfox-parameter-pg"
     command = (
-        f"dalfox {target} --only-discovery --skip-mining-dict "
+        f"dalfox scan {target} --only-discovery --skip-mining-dict "
         "--format jsonl --no-color"
     )
     state = DalfoxParameterObservationState(command, run_id)
@@ -4889,6 +4889,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     session_id = json.loads(token_resp.data)["session_token"]
     browser_headers = {"X-Session-ID": session_id}
     api_headers = {"Authorization": f"Bearer {session_id}"}
+    command_catalog_resp = client.get("/commands/catalog", headers=browser_headers)
     create_resp = client.post(
         "/projects",
         headers=browser_headers,
@@ -4900,10 +4901,33 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers=browser_headers,
         json={"type": "domain", "value": "darklab.sh", "source_detail": {"source": "manual"}},
     )
+    target = json.loads(target_resp.data)["target"]
+    probe_catalog_resp = client.get(
+        f"/projects/{project['id']}/probes",
+        headers=browser_headers,
+    )
+    probe_resolve_resp = client.post(
+        f"/projects/{project['id']}/probes/targets/resolve",
+        headers=browser_headers,
+        json={"target_value": "darklab.sh"},
+    )
+    probe_plan_resp = client.get(
+        f"/projects/{project['id']}/probes/plan?action_id=ping&entity_id={target['id']}",
+        headers=browser_headers,
+    )
+    api_probe_plan_resp = client.post(
+        f"/api/v1/projects/{project['id']}/probes/plan",
+        headers=api_headers,
+        json={"action_id": "ping", "entity_id": target["id"]},
+    )
     secret_resp = client.post(
         "/session/secrets",
         headers=browser_headers,
-        json={"name": "POSTGRES_ASSESSMENT_TOKEN", "value": "postgres-route-secret"},
+        json={
+            "name": "POSTGRES_ASSESSMENT_TOKEN",
+            "value": "postgres-route-secret",
+            "consumer_envs": ["POSTGRES_HTTP_BEARER"],
+        },
     )
     http_profile_resp = client.post(
         f"/projects/{project['id']}/http-profiles",
@@ -4915,7 +4939,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             "scope_roots": ["https://darklab.sh/admin"],
             "allowed_hosts": ["darklab.sh"],
             "include_paths": ["/admin"],
-            "secret_refs": {"bearer_token": "POSTGRES_ASSESSMENT_TOKEN"},
+            "secret_refs": {"bearer_token": "POSTGRES_HTTP_BEARER"},
             "token_capture_rules": [{
                 "name": "csrf",
                 "source": "header",
@@ -5119,8 +5143,16 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     ).fetchone()
 
     assert token_resp.status_code == 200
+    assert command_catalog_resp.status_code == 200
+    assert {
+        item["source"] for item in json.loads(command_catalog_resp.data)["cve_risk_feeds"]
+    } == {"epss", "kev"}
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
+    assert probe_catalog_resp.status_code == 200
+    assert json.loads(probe_resolve_resp.data)["target"]["entity_id"] == target["id"]
+    assert json.loads(probe_plan_resp.data)["plan"]["target"]["value"] == "darklab.sh"
+    assert json.loads(api_probe_plan_resp.data)["plan"]["target"]["entity_id"] == target["id"]
     assert secret_resp.status_code == 201
     assert http_profile_resp.status_code == 201
     assert http_profile["secret_refs"] == {
@@ -5195,6 +5227,173 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert prefs_row["preferences"]["pref_active_project_id"] == project["id"]
     assert port_row is not None
     assert port_row["attributes_json"] == {"service": "https", "version": "nginx"}
+
+
+@pytest.mark.postgres
+def test_probe_launch_confirmation_uses_postgres_query_path(
+    monkeypatch,
+    postgres_schema,
+    tmp_path,
+):
+    from app import create_app
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.assessments import http_profile_runtime
+
+    app = create_app()
+    app.config["TESTING"] = True
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield PostgresSqliteCompatConnection(conn)
+
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(
+        "services.assessments.probe_service.resolve_runtime_command",
+        lambda action_id: action_id if action_id in {"httpx", "ping"} else None,
+    )
+    monkeypatch.setattr(http_profile_runtime, "_scanner_user_exists", lambda: False)
+    monkeypatch.setattr(http_profile_runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
+
+    client = app.test_client()
+    bootstrap_session_id = str(uuid.uuid4())
+    token_response = client.get(
+        "/session/token/generate",
+        headers={"X-Session-ID": bootstrap_session_id},
+    )
+    session_id = token_response.get_json()["session_token"]
+    browser_headers = {"X-Session-ID": session_id}
+    api_headers = {"Authorization": f"Bearer {session_id}"}
+    project = client.post(
+        "/projects",
+        headers=browser_headers,
+        json={"name": "Postgres Probe Launch"},
+    ).get_json()["project"]
+    target = client.post(
+        f"/projects/{project['id']}/targets",
+        headers=browser_headers,
+        json={"type": "domain", "value": "probe-postgres.example"},
+    ).get_json()["target"]
+
+    anonymous_plan = client.get(
+        f"/projects/{project['id']}/probes/plan",
+        headers=browser_headers,
+        query_string={"action_id": "ping", "entity_id": target["id"]},
+    ).get_json()["plan"]
+    launches = []
+
+    def _start_probe(**kwargs):
+        launches.append(kwargs)
+        return SimpleNamespace(
+            run_id=f"run_postgres_probe_{len(launches)}",
+            status="queued",
+        )
+
+    monkeypatch.setattr("blueprints.run.broker_available", lambda: True)
+    monkeypatch.setattr("blueprints.run._start_brokered_run_service", _start_probe)
+    anonymous_launch = client.post(
+        f"/projects/{project['id']}/probes/run",
+        headers=browser_headers,
+        json={
+            "action_id": "ping",
+            "entity_id": target["id"],
+            "confirmed": True,
+            "plan_digest": anonymous_plan["plan_digest"],
+            "tab_id": "postgres-probe-tab",
+        },
+    )
+
+    assert anonymous_launch.status_code == 202
+    anonymous_call = launches[0]
+    assert anonymous_call["link_project_id"] == project["id"]
+    assert anonymous_call["owner_tab_id"] == "postgres-probe-tab"
+    assert anonymous_call["display_command"] == anonymous_plan["display_command"]
+    assert anonymous_call["trusted_execution_args"] == ()
+
+    secret_value = "postgres-probe-private-value"
+    secret_response = client.post(
+        "/session/secrets",
+        headers=browser_headers,
+        json={"name": "POSTGRES_PROBE_TOKEN", "value": secret_value},
+    )
+    assert secret_response.status_code == 201
+    profile = client.post(
+        f"/projects/{project['id']}/http-profiles",
+        headers=browser_headers,
+        json={
+            "name": "Protected probe",
+            "role": "user",
+            "base_url": "https://probe-postgres.example/app",
+            "scope_roots": ["https://probe-postgres.example/app"],
+            "allowed_hosts": ["probe-postgres.example"],
+            "include_paths": ["/app"],
+            "secret_refs": {"bearer_token": "POSTGRES_PROBE_TOKEN"},
+            "rate_limit_per_second": 3,
+            "concurrency": 2,
+        },
+    ).get_json()["profile"]
+    protected_body = {
+        "action_id": "httpx",
+        "entity_id": target["id"],
+        "http_profile_id": "Protected probe",
+    }
+    protected_plan_response = client.post(
+        f"/api/v1/projects/{project['id']}/probes/plan",
+        headers=api_headers,
+        json=protected_body,
+    )
+    protected_plan = protected_plan_response.get_json()["plan"]
+    assert protected_plan["http_profile"]["id"] == profile["id"]
+    assert protected_plan["display_command"].endswith("-sf [protected]")
+    assert secret_value not in protected_plan_response.get_data(as_text=True)
+
+    monkeypatch.setattr("blueprints.api_v1.broker_available", lambda: True)
+    monkeypatch.setattr("blueprints.api_v1._start_brokered_run_service", _start_probe)
+    protected_launch = client.post(
+        f"/api/v1/projects/{project['id']}/probes/run",
+        headers=api_headers,
+        json={
+            **protected_body,
+            "confirmed": True,
+            "plan_digest": protected_plan["plan_digest"],
+        },
+    )
+
+    assert protected_launch.status_code == 202, protected_launch.get_json()
+    assert secret_value not in protected_launch.get_data(as_text=True)
+    protected_call = launches[1]
+    assert protected_call["link_project_id"] == project["id"]
+    assert protected_call["display_command"] == protected_plan["display_command"]
+    assert secret_value not in protected_call["original_command"]
+    assert protected_call["trusted_execution_args"][:1] == ("-sf",)
+    private_path = Path(protected_call["trusted_execution_args"][1])
+    assert secret_value in private_path.read_text(encoding="utf-8")
+    assert secret_value in protected_call["private_values"]
+    protected_call["run_cleanup_hook"]()
+    assert not private_path.parent.exists()
+
+    updated_profile = client.patch(
+        f"/api/v1/projects/{project['id']}/http-profiles/{profile['id']}",
+        headers=api_headers,
+        json={"revision": profile["revision"], "rate_limit_per_second": 4},
+    )
+    assert updated_profile.status_code == 200
+    stale_launch = client.post(
+        f"/api/v1/projects/{project['id']}/probes/run",
+        headers=api_headers,
+        json={
+            **protected_body,
+            "confirmed": True,
+            "plan_digest": protected_plan["plan_digest"],
+        },
+    )
+
+    assert stale_launch.status_code == 409
+    assert stale_launch.get_json()["error"]["code"] == "stale_plan"
+    assert len(launches) == 2
 
 
 @pytest.mark.postgres

@@ -288,6 +288,7 @@ class TestMetricsEndpoint:
         app_metrics.record_completed_pty("mtr darklab.sh", 130, 0.5)
         app_metrics.record_workspace_evictions(2, "manual")
         from services.metrics import assessments as assessment_metrics
+        from services.metrics import probes as probe_metrics
         from services.metrics import workflows as workflow_metrics
 
         assessment_metrics.record_assessment_parser_result("command_registry", "parsed")
@@ -302,6 +303,9 @@ class TestMetricsEndpoint:
         assessment_metrics.record_assessment_connector_operation(
             "provider_private", "callback_private", "job_private", float("nan")
         )
+        probe_metrics.record_probe_operation("launch", "success", protected=True)
+        probe_metrics.record_probe_operation("resolve", "rejected")
+        probe_metrics.record_probe_operation("raw_phase", "raw_outcome")
         workflow_metrics.record_workflow_execution_outcome("completed", 2.5)
         workflow_metrics.record_workflow_step_outcome("succeeded", 1.25)
         workflow_metrics.record_workflow_capture_failure("required_missing")
@@ -328,6 +332,21 @@ class TestMetricsEndpoint:
         assert 'darklab_ai_requests_total{error_code="unexpected_ai_error"' not in body
         assert 'darklab_ai_requests_total{error_code="ai_unavailable",status="error",variant="summary"}' in body
         assert 'darklab_history_search_fallbacks_total{reason="missing_fts"}' in body
+        assert re.search(
+            r'darklab_probe_operations_total\{credential_use="protected",outcome="success",'
+            r'phase="launch"\} [1-9]\d*(?:\.0)?',
+            body,
+        )
+        assert re.search(
+            r'darklab_probe_operations_total\{credential_use="none",outcome="failed",'
+            r'phase="plan"\} [1-9]\d*(?:\.0)?',
+            body,
+        )
+        assert re.search(
+            r'darklab_probe_operations_total\{credential_use="none",outcome="rejected",'
+            r'phase="resolve"\} [1-9]\d*(?:\.0)?',
+            body,
+        )
         assert 'darklab_evidence_package_build_duration_seconds_bucket{le="0.5",outcome="success"}' in body
         assert "darklab_evidence_package_archive_bytes_bucket" in body
         assert 'darklab_evidence_package_skipped_items_total{kind="artifact"}' in body

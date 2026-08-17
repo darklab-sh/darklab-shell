@@ -51,6 +51,7 @@ import core.process as process
 import services.pty.service as pty_service
 import services.runs.broker as run_broker
 import core.database as database
+import core.database_access as database_access
 import core.database_backend as database_backend
 from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceQuotaExceeded
 import services.projects.workspace as project_workspace
@@ -7815,7 +7816,7 @@ class TestDatabaseBackend:
         ) is True
         assert database_backend.is_transient_postgres_error(RuntimeError("permission denied")) is False
 
-    def test_db_connect_routes_to_postgres_compat_when_configured(self, monkeypatch):
+    def test_db_connect_and_connection_scope_route_configured_backends(self, monkeypatch):
         postgres_context = object()
         sqlite_context = object()
         postgres_connect = mock.Mock(return_value=postgres_context)
@@ -7832,6 +7833,42 @@ class TestDatabaseBackend:
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         assert database.db_connect() is sqlite_context
         sqlite_connect.assert_called_once_with(database.DB_PATH, timeout=10)
+
+        events = []
+
+        class FakeConnection:
+            def execute(self):
+                return None
+
+            def close(self):
+                events.append("sqlite_close")
+
+        sqlite_connection = FakeConnection()
+        monkeypatch.setattr(database_access, "get_db_connect", lambda: lambda: sqlite_connection)
+        with database_access.db_connection_scope() as opened:
+            assert opened is sqlite_connection
+        assert events == ["sqlite_close"]
+
+        postgres_connection = object()
+
+        class FakePostgresContext:
+            def __enter__(self):
+                events.append("postgres_enter")
+                return postgres_connection
+
+            def __exit__(self, exc_type, exc, traceback):
+                events.append(("postgres_exit", exc_type))
+                return False
+
+        monkeypatch.setattr(database_access, "get_db_connect", lambda: lambda: FakePostgresContext())
+        with database_access.db_connection_scope() as opened:
+            assert opened is postgres_connection
+        assert events[-2:] == ["postgres_enter", ("postgres_exit", None)]
+
+        caller_connection = FakeConnection()
+        with database_access.db_connection_scope(caller_connection) as opened:
+            assert opened is caller_connection
+        assert events.count("sqlite_close") == 1
 
     def test_postgres_requires_database_url(self):
         with pytest.raises(database_backend.PostgresConnectionError, match="database_url"):
@@ -15263,7 +15300,7 @@ class TestIntelServices:
             "https://xn--bcher-kva.example/a%20b?q=one%20two"
         )
         assert canonical.canonical_entity("url", "https://Example.com:443/path/#section") == (
-            "https://example.com/path"
+            "https://example.com/path/"
         )
         assert canonical.canonical_entity("url", "http://Example.com:80/?b=2&a=1") == (
             "http://example.com/?b=2&a=1"
@@ -15272,8 +15309,9 @@ class TestIntelServices:
             "https://example.com/path/?q=1"
         )
         assert canonical.canonical_entity("url", "HTTP://[2001:0DB8::0001]:8080/path/") == (
-            "http://[2001:db8::1]:8080/path"
+            "http://[2001:db8::1]:8080/path/"
         )
+        assert canonical.canonical_entity("url", "https://Example.com/") == "https://example.com"
         for path in ("../secret", "%2e%2e/secret", "%2e./secret"):
             assert canonical.canonical_entity(
                 "url", f"https://example.test/allowed/{path}"
@@ -19437,6 +19475,7 @@ class TestDerivedCommandRegistry:
             ("gobuster", "dir:-u", "url"),
             ("gobuster", "tftp:-s", "host"),
             ("ffuf", "-u", "url"),
+            ("dalfox", "scan:__positional__", "url"),
             ("naabu", "-l", "host"),
             ("katana", "-list", "url"),
             ("wafw00f", "-i", "url"),
@@ -19626,7 +19665,7 @@ class TestDerivedCommandRegistry:
             },
         ]
 
-    def test_nuclei_url_target_discovery_ignores_template_path_flags(self):
+    def test_subcommand_and_flag_url_target_discovery_uses_the_real_target(self):
         inputs = commands.command_project_target_inputs(
             "nuclei -u https://ip.darklab.sh -t http/",
             cfg={"workspace_enabled": True},
@@ -19638,6 +19677,14 @@ class TestDerivedCommandRegistry:
             "source_kind": "flag",
             "source_name": "-u",
             "target_list_file": "",
+        }]
+        assert commands.command_project_target_inputs(
+            "dalfox scan https://ip.darklab.sh --format jsonl --timeout 10"
+        ) == [{
+            "value": "https://ip.darklab.sh",
+            "value_type": "url",
+            "source_kind": "positional",
+            "source_name": "argument_1",
         }]
 
     def test_autocomplete_context_can_be_derived_from_commands_registry(self):
@@ -19721,6 +19768,43 @@ class TestDerivedCommandRegistry:
             "unset",
         ]
         assert context["var"]["close_after"] == {"list": 0, "set": 2, "unset": 1}
+        probe_context = context["probe"]["subcommands"]
+        list_flags = probe_context["list"]["flags"]
+        list_project = next(item for item in list_flags if item["value"] == "--project")
+        assert list_project == {
+            "value": "--project",
+            "description": "Project slug or id; defaults to the active Project",
+        }
+        assert "--project" in probe_context["list"]["expects_value"]
+        assert any(item["value"] == "--target-type" for item in list_flags)
+        assert [
+            item["value"]
+            for item in probe_context["list"]["arg_hints"]["--target-type"]
+        ] == ["domain", "ip", "url"]
+        assert "--target-type" in probe_context["list"]["expects_value"]
+        for subcommand in ("plan", "run"):
+            flags = probe_context[subcommand]["flags"]
+            http_profile = next(item for item in flags if item["value"] == "--http-profile")
+            assert http_profile == {
+                "value": "--http-profile",
+                "description": "Enabled Project HTTP profile name or id",
+                "value_type": "http_profile",
+            }
+            assert "--http-profile" in probe_context[subcommand]["expects_value"]
+            assert [
+                item["value"]
+                for item in probe_context[subcommand]["arg_hints"]["--nuclei-profile"]
+            ] == ["safe", "standard"]
+
+        intrusive_context = load_autocomplete_context_from_commands_registry({
+            "workspace_enabled": True,
+            "assessment_intrusive_actions_enabled": True,
+        })["probe"]["subcommands"]
+        for subcommand in ("plan", "run"):
+            assert [
+                item["value"]
+                for item in intrusive_context[subcommand]["arg_hints"]["--nuclei-profile"]
+            ] == ["safe", "standard", "intrusive"]
 
     def test_builtin_autocomplete_workspace_roots_follow_feature_flag(self):
         disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})
@@ -19792,11 +19876,15 @@ class TestDerivedCommandRegistry:
             "dalfox --remote-wordlists",
             "dalfox --blind-oob",
         }.issubset(set(dalfox["policy"]["deny"]))
-        assert is_command_allowed("dalfox https://darklab.sh/?view=summary")[0]
+        assert is_command_allowed("dalfox scan https://darklab.sh/?view=summary")[0]
         assert not is_command_allowed("dalfox server")[0]
-        assert not is_command_allowed("dalfox https://darklab.sh/ --follow-redirects")[0]
+        assert not is_command_allowed("dalfox scan https://darklab.sh/ --follow-redirects")[0]
         rewritten, _notice = commands.rewrite_command("dalfox https://darklab.sh/")
-        assert rewritten.endswith("--only-discovery --skip-mining-dict")
+        assert rewritten == (
+            "dalfox scan https://darklab.sh/ --only-discovery --skip-mining-dict"
+        )
+        current, _notice = commands.rewrite_command("dalfox scan https://darklab.sh/")
+        assert current == rewritten
         help_command, _notice = commands.rewrite_command("dalfox --help")
         assert help_command == "dalfox --help"
         schemathesis = by_root["schemathesis"]
@@ -20284,6 +20372,46 @@ class TestDerivedCommandRegistry:
                     assert exec_tokens[0] == "env"
                     assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
                     assert exec_tokens[2] == command.split()[0]
+
+                nuclei_scan = commands.validate_command(
+                    "nuclei -u https://ip.darklab.sh -severity high",
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+                assert nuclei_scan.allowed, nuclei_scan.reason
+                rewritten_scan, scan_notice = commands.rewrite_command(
+                    nuclei_scan.exec_command,
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+                assert scan_notice is None
+                scan_tokens = commands.split_command_argv(rewritten_scan)
+                assert scan_tokens[0] == "env"
+                assert scan_tokens[1].startswith("XDG_CONFIG_HOME=")
+                assert scan_tokens[2] == "nuclei"
+
+                for update_flag in ("-update-templates", "-ut"):
+                    nuclei_update = commands.validate_command(
+                        f"nuclei {update_flag}",
+                        session_id=session_id,
+                        cfg=cfg,
+                    )
+                    assert nuclei_update.allowed, nuclei_update.reason
+                    rewritten_update, update_notice = commands.rewrite_command(
+                        nuclei_update.exec_command,
+                        session_id=session_id,
+                        cfg=cfg,
+                    )
+                    assert update_notice is None
+                    update_tokens = commands.split_command_argv(
+                        rewritten_update
+                    )
+                    assert update_tokens[0] == "nuclei"
+                    assert "-ud" in update_tokens
+                    assert all(
+                        not token.startswith("XDG_CONFIG_HOME=")
+                        for token in update_tokens
+                    )
 
                 result = commands.validate_command(
                     "amass subs -d darklab.sh -names -dir custom-amass-db",
@@ -24616,7 +24744,7 @@ class TestOutputSignals:
         )
         gobuster_group = gobuster_derived["groups"][0]
         assert gobuster_group["added"][0]["canonical_url"] == "https://tor-stats.darklab.sh/static"
-        assert gobuster_group["added"][0]["redirect_canonical_url"] == "https://tor-stats.darklab.sh/static"
+        assert gobuster_group["added"][0]["redirect_canonical_url"] == "https://tor-stats.darklab.sh/static/"
         assert gobuster_group["removed"][0]["canonical_url"] == "https://tor-stats.darklab.sh/index.html"
 
         katana_derived = run_comparison.compare_derived_changes(
@@ -26823,10 +26951,14 @@ class TestWorkflowInputLoading:
             "success": "inventory_parameters",
             "failure": "stop",
         }
-        assert "-screenshot -srd live-web-screenshots" in str(live_web_steps[0]["cmd"])
+        assert (
+            "-screenshot -system-chrome -headless-options --no-sandbox "
+            "-srd live-web-screenshots"
+        ) in str(live_web_steps[0]["cmd"])
         assert "--only-discovery --skip-mining-dict --format jsonl" in str(
             live_web_steps[1]["cmd"]
         )
+        assert str(live_web_steps[1]["cmd"]).startswith("dalfox scan ")
         live_web_commands = [
             render_workflow_command(str(step["cmd"]), {"url": "https://example.com/search?q=one"})
             for step in live_web_steps
@@ -29882,7 +30014,7 @@ class TestDatabaseInit:
 
         assert [(entity.kind, entity.canonical_value) for entity in result.entities] == [
             ("url", "https://darklab.sh/Login"),
-            ("url", "http://[2001:db8::1]:8080/path"),
+            ("url", "http://[2001:db8::1]:8080/path/"),
             ("ip", "192.0.2.10"),
             ("cve", "CVE-2026-12345"),
             ("hash", f"sha256:{'a' * 64}"),
@@ -32319,6 +32451,17 @@ SQL syntax error near q</response>
                     "name": "Any exact URL",
                     "target_entity_kind": "any",
                     "match_mode": "exact",
+                    "pattern": "HTTPS://DarkLab.SH/admin",
+                },
+            )
+            slash_url_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Distinct slash URL",
+                    "target_entity_kind": "any",
+                    "match_mode": "exact",
                     "pattern": "HTTPS://DarkLab.SH/admin/",
                 },
             )
@@ -32327,6 +32470,7 @@ SQL syntax error near q</response>
         assert [item["id"] for item in domain_preview["matches"]] == ["ent-auto-domain"]
         assert [item["id"] for item in port_preview["matches"]] == ["ent-auto-port"]
         assert [item["id"] for item in url_preview["matches"]] == ["ent-auto-url"]
+        assert slash_url_preview["matches"] == []
 
     def test_auto_promote_rule_matches_ui_exposed_mode_kind_pairs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -33661,6 +33805,47 @@ class TestSecretsVault:
 
 
 class TestAssessmentHttpProfileExecution:
+    def test_private_runtime_cleanup_can_retry_local_and_scanner_failures(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from services.assessments import http_profile_runtime as runtime
+
+        monkeypatch.setattr(runtime, "_scanner_user_exists", lambda: False)
+        monkeypatch.setattr(runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
+        local = runtime.PrivateHttpRunMaterial(cfg=build_test_config())
+        local.write_bytes("headers.txt", b"X-Test: protected\n")
+        real_rmtree = runtime.shutil.rmtree
+        monkeypatch.setattr(
+            runtime.shutil,
+            "rmtree",
+            mock.Mock(side_effect=runtime.PrivateHttpMaterialError("remove failed")),
+        )
+
+        assert local.cleanup() is False
+        assert local.path.exists()
+        monkeypatch.setattr(runtime.shutil, "rmtree", real_rmtree)
+        assert local.cleanup() is True
+        assert not local.path.exists()
+
+        scanner = runtime.PrivateHttpRunMaterial(cfg=build_test_config())
+        scanner._scanner_owned = True
+        monkeypatch.setattr(
+            runtime,
+            "_scanner_run",
+            mock.Mock(side_effect=runtime.PrivateHttpMaterialError("handoff failed")),
+        )
+        assert scanner.cleanup() is False
+        assert scanner.path.exists()
+        monkeypatch.setattr(
+            runtime,
+            "_scanner_run",
+            lambda arguments, **_kwargs: real_rmtree(arguments[-1]),
+        )
+        assert scanner.cleanup() is True
+        assert not scanner.path.exists()
+
     def test_private_runtime_material_is_mode_limited_and_stale_safe(
         self,
         monkeypatch,
@@ -33722,6 +33907,7 @@ class TestAssessmentHttpProfileExecution:
         from services.assessments.command_plans import command_plan
         from services.assessments.http_profile_execution import (
             HttpProfileExecutionError,
+            NUCLEI_HTTP_PROFILE_UNAVAILABLE,
             _SUPPORTED_TOOLS,
             _execution_target,
             _scope_arguments,
@@ -33729,6 +33915,8 @@ class TestAssessmentHttpProfileExecution:
             materialize_http_profile_launch,
         )
         from services.assessments.http_profile_material import (
+            HttpProfileMaterialError,
+            materialize_tool_profile,
             private_file_values,
         )
         from services.assessments.http_profile_material_formats import (
@@ -33842,13 +34030,15 @@ class TestAssessmentHttpProfileExecution:
             "include_paths": ["/allowed"],
             "exclude_paths": ["/secret"],
         }
-        assert _SUPPORTED_TOOLS == {
-            "curl", "httpx", "katana", "nuclei", "dalfox", "sqlmap",
-        }
+        assert _SUPPORTED_TOOLS == {"curl", "httpx", "katana", "dalfox", "sqlmap"}
         assert _execution_target(
             scoped_profile,
             {"type": "url", "value": "https://app.example/allowed/./page"},
         ) == "https://app.example/allowed/page"
+        assert _execution_target(
+            scoped_profile,
+            {"type": "url", "value": "https://app.example/allowed/page/"},
+        ) == "https://app.example/allowed/page/"
         for path in (
             "../secret",
             "%2e%2e/secret",
@@ -33870,7 +34060,26 @@ class TestAssessmentHttpProfileExecution:
         )[3]
         assert _scope_arguments(profile, "curl", "https://app.example/admin") == []
         assert _scope_arguments(profile, "dalfox", "https://app.example/admin") == []
-        assert _scope_arguments(profile, "nuclei", "https://app.example") == ["-dr", "-ni"]
+        with pytest.raises(HttpProfileExecutionError) as nuclei_scope:
+            _scope_arguments(profile, "nuclei", "https://app.example")
+        assert nuclei_scope.value.code == "http_profile_tool_unsupported"
+        assert str(nuclei_scope.value) == NUCLEI_HTTP_PROFILE_UNAVAILABLE
+        assert _unsupported_reason(profile, "nuclei") == NUCLEI_HTTP_PROFILE_UNAVAILABLE
+        assert command_plan(
+            "nuclei",
+            "url",
+            "https://app.example/admin",
+            http_profile=summary,
+        ) is None
+        with pytest.raises(HttpProfileMaterialError, match="exact request scope"):
+            materialize_tool_profile(
+                "nuclei",
+                {"allowed_hosts": ["app.example"], "file_refs": {}},
+                [("Authorization", "Bearer protected")],
+                session_id="tok-nuclei-profile",
+                team_id="",
+                actor_member_id="",
+            )
         assert "proxy allowlist" in _unsupported_reason({"proxy_url": "https://proxy.example"}, "httpx")
         assert "client certificate" in _unsupported_reason(
             {"file_refs": {"client_certificate": "cert.pem"}},

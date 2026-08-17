@@ -23,7 +23,7 @@ def attach_manual_evidence(conn: Any, checks: list[dict[str, Any]]) -> None:
         placeholders = ",".join("?" for _ in check_ids)
         # Check IDs stay bound; only generated parameter markers are interpolated.
         query = (
-            "SELECT * FROM (SELECT e.*, "  # nosec B608
+            "SELECT * FROM (SELECT e.*, "  # nosec
             "ROW_NUMBER() OVER (PARTITION BY e.check_id "
             "ORDER BY e.observed_at DESC, e.id DESC) AS item_rank, "
             "COUNT(*) OVER (PARTITION BY e.check_id) AS item_total "

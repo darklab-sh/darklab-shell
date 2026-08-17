@@ -989,6 +989,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "./conf:/config:ro" in shell["volumes"]
     assert "./data:/data" in shell["volumes"]
     assert "./workspaces:/workspaces" in shell["volumes"]
+    assert "nuclei-templates:/tmp/nuclei-templates" in shell["volumes"]
     assert shell["ports"] == [
         "${HOST_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8888}:${APP_PORT:-8888}"
     ]
@@ -999,6 +1000,10 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED"] == (
         "${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}"
     )
+    assert shell["environment"]["NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED"] == (
+        "${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}"
+    )
+    assert shell["healthcheck"]["start_period"] == "210s"
     assert shell["environment"]["SECRETS_MASTER_KEY"] == "${SECRETS_MASTER_KEY:-}"
     assert shell["environment"]["DARKLAB_ZAP_API_KEY"] == (
         "${DARKLAB_ZAP_API_KEY:-}"
@@ -1036,11 +1041,13 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "# INTERACTIVE_PTY_ENABLED=true" in env_example
     assert "# RAW_PACKET_SCANNING_ENABLED=true" in env_example
     assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in env_example
+    assert "# NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false" in env_example
     assert "# DARKLAB_ZAP_API_KEY=" in env_example
     assert "# DARKLAB_ZAP_SCOPE_POLICY_TOKEN=" in env_example
     assert "# DARKLAB_OAST_TOKEN=" in env_example
     assert services["postgres"]["profiles"] == ["postgres"]
     assert services["llama"]["profiles"] == ["llama"]
+    assert "nuclei-templates" in compose["volumes"]
     worker_contracts = {
         "zap-worker": {
             "profile": "zap",
@@ -1101,6 +1108,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     development_shell = development_compose["services"]["shell"]
     assert development_shell["build"]["context"] == "."
     assert "./app:/opt/darklab-source/app:ro" in development_shell["volumes"]
+    assert "nuclei-templates:/tmp/nuclei-templates" in development_shell["volumes"]
     assert all("./app:/app" not in volume for volume in development_shell["volumes"])
     assert "/app" in development_shell["tmpfs"]
     assert development_shell["read_only"] is True
@@ -1108,6 +1116,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
         "${DEV_HOST_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8888}:${APP_PORT:-8888}"
     ]
     assert development_shell["labels"]["sh.darklab.environment"] == "development"
+    assert development_shell["healthcheck"]["start_period"] == "210s"
     assert all("container_name" not in service for service in development_services.values())
     development_environment = development_shell["environment"]
     assert "APP_SOURCE_DIR=/opt/darklab-source/app" in development_environment
@@ -1118,6 +1127,10 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
         "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}"
         in development_environment
     )
+    assert (
+        "NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}"
+        in development_environment
+    )
     assert "DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-}" in development_environment
     assert "DATABASE_POSTGRES_JIT=${DATABASE_POSTGRES_JIT:-}" in development_environment
     assert "AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-}" in development_environment
@@ -1125,7 +1138,118 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "DEV_HOST_BIND_ADDRESS=127.0.0.1" in development_env_example
     assert "DARKLAB_IMAGE=" not in development_env_example
     assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in development_env_example
+    assert "# NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false" in development_env_example
+    assert "nuclei-templates" in development_compose["volumes"]
     assert not (ROOT / "examples" / "docker-compose.prod.yml").exists()
+
+
+def test_nuclei_template_bootstrap_is_conditional_and_non_fatal(tmp_path: Path):
+    bootstrap = ROOT / "scripts" / "container" / "bootstrap_nuclei_templates.sh"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "nuclei.calls"
+
+    (fake_bin / "timeout").write_text(
+        "#!/bin/sh\nshift\nexec \"$@\"\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "gosu").write_text(
+        "#!/bin/sh\n[ \"$1\" = scanner ] && shift\nexec \"$@\"\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "nuclei").write_text(
+        """#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_NUCLEI_CALLS"
+printf '%s\n' 'FAKE_NUCLEI_STDOUT_SENTINEL'
+printf '%s\n' 'FAKE_NUCLEI_STDERR_SENTINEL' >&2
+cache_dir=""
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "-ud" ]; then
+        shift
+        cache_dir="$1"
+    fi
+    shift
+done
+case "$FAKE_NUCLEI_MODE" in
+    success)
+        mkdir -p "$cache_dir"
+        printf 'http/test.yaml,d41d8cd98f00b204e9800998ecf8427e;' > "$cache_dir/.checksum"
+        exit 0
+        ;;
+    no-manifest)
+        exit 0
+        ;;
+    *)
+        exit 17
+        ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    for executable in fake_bin.iterdir():
+        executable.chmod(0o755)
+
+    def run(cache_dir: Path, *, enabled: str = "true", mode: str = "success"):
+        return subprocess.run(
+            ["sh", str(bootstrap)],
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+                "NUCLEI_TEMPLATES_DIR": str(cache_dir),
+                "NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED": enabled,
+                "FAKE_NUCLEI_CALLS": str(calls),
+                "FAKE_NUCLEI_MODE": mode,
+            },
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    disabled_cache = tmp_path / "disabled"
+    disabled = run(disabled_cache, enabled="false")
+    assert disabled.returncode == 0
+    assert "NUCLEI_TEMPLATE_BOOTSTRAP_SKIPPED reason=disabled" in disabled.stdout
+    assert not calls.exists()
+
+    ready_cache = tmp_path / "ready"
+    ready_cache.mkdir()
+    (ready_cache / ".checksum").write_text("already-installed", encoding="utf-8")
+    ready = run(ready_cache, mode="failure")
+    assert ready.returncode == 0
+    assert "NUCLEI_TEMPLATE_BOOTSTRAP_SKIPPED reason=cache_present" in ready.stdout
+    assert not calls.exists()
+
+    empty_cache = tmp_path / "empty"
+    installed = run(empty_cache)
+    assert installed.returncode == 0
+    assert "NUCLEI_TEMPLATE_BOOTSTRAP_STARTED" in installed.stdout
+    assert "NUCLEI_TEMPLATE_BOOTSTRAP_SUCCEEDED" in installed.stdout
+    assert "FAKE_NUCLEI_" not in installed.stdout
+    assert "FAKE_NUCLEI_" not in installed.stderr
+    assert (empty_cache / ".checksum").is_file()
+    assert calls.read_text(encoding="utf-8").strip() == (
+        f"-update-templates -ud {empty_cache}"
+    )
+
+    failed_cache = tmp_path / "failed"
+    failed = run(failed_cache, mode="failure")
+    assert failed.returncode == 0
+    assert "reason=update_failed exit_status=17" in failed.stderr
+    assert "FAKE_NUCLEI_" not in failed.stdout
+    assert "FAKE_NUCLEI_" not in failed.stderr
+
+    incomplete_cache = tmp_path / "incomplete"
+    incomplete = run(incomplete_cache, mode="no-manifest")
+    assert incomplete.returncode == 0
+    assert "reason=manifest_missing_after_update" in incomplete.stderr
+
+    unsafe_cache = tmp_path / "unsafe"
+    unsafe_cache.mkdir()
+    (unsafe_cache / ".checksum").symlink_to(tmp_path / "outside")
+    unsafe = run(unsafe_cache)
+    assert unsafe.returncode == 0
+    assert "reason=unsafe_manifest" in unsafe.stderr
 
 
 def test_development_source_staging_normalizes_private_files_and_fails_closed(
@@ -1192,6 +1316,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     go_installer = (ROOT / "scripts" / "container" / "install_go_tool.sh").read_text(
         encoding="utf-8"
     )
+    httpx_patch = (
+        ROOT / "scripts" / "container" / "patches" / "httpx-disable-leakless.patch"
+    ).read_text(encoding="utf-8")
     source_stager = (
         ROOT / "scripts" / "container" / "stage_runtime_source.sh"
     ).read_text(encoding="utf-8")
@@ -1233,6 +1360,19 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     ) in dockerfile
     assert "https://apt.postgresql.org/pub/repos/apt" in dockerfile
     assert "postgresql-client-${POSTGRESQL_CLIENT_VERSION}" in dockerfile
+    assert "postgresql-client-${POSTGRESQL_CLIENT_VERSION} chromium" in dockerfile
+    assert "masscan chromium pg_dump" in bundled_tool_smoke
+    assert "--tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m" in bundled_tool_smoke
+    assert "probe chromium chromium --version" in bundled_tool_smoke
+    assert "httpx -u http://127.0.0.1:18080" in bundled_tool_smoke
+    assert "-screenshot -system-chrome" in bundled_tool_smoke
+    assert "-headless-options --no-sandbox" in bundled_tool_smoke
+    assert "HTTPx system-Chromium screenshot failed" in bundled_tool_smoke
+    assert "if ! chromium --headless --no-sandbox --disable-gpu" in bundled_tool_smoke
+    assert (
+        'verification_failed chromium-headless "container-isolated headless browser could not start"'
+        in bundled_tool_smoke
+    )
     assert "expected PostgreSQL 18 client" in bundled_tool_smoke
     assert 'pg_dump_version "PostgreSQL 18"' in image_smoke
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
@@ -1243,13 +1383,19 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
+    assert "!scripts/container/patches/httpx-disable-leakless.patch" in dockerignore
     assert "!scripts/container/patches/nuclei-kin-openapi-v0.144.patch" in dockerignore
     assert "!scripts/container/stage_runtime_source.sh" in dockerignore
+    assert "!scripts/container/bootstrap_nuclei_templates.sh" in dockerignore
     assert "!scripts/operations/migrate_sqlite_to_postgres.py" in dockerignore
     assert "!scripts/operations/restore_system.py" in dockerignore
     assert (
         "COPY scripts/container/stage_runtime_source.sh "
         "/usr/local/libexec/darklab-stage-runtime-source"
+    ) in dockerfile
+    assert (
+        "COPY scripts/container/bootstrap_nuclei_templates.sh "
+        "/usr/local/libexec/darklab-bootstrap-nuclei-templates"
     ) in dockerfile
     assert "/usr/local/libexec/darklab-stage-runtime-source" in entrypoint
     assert entrypoint.index("/usr/local/libexec/darklab-stage-runtime-source") < (
@@ -1263,6 +1409,14 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'echo "PROCESS_ROLE_INVALID role=$process_role"' in entrypoint
     assert 'exec gosu appuser python -m "$process_module"' in entrypoint
     assert "/tmp/darklab-process-role.ready" in entrypoint
+    assert 'NUCLEI_TEMPLATES_DIR="${NUCLEI_TEMPLATES_DIR:-/tmp/nuclei-templates}"' in entrypoint
+    assert 'chown scanner:appuser "$NUCLEI_TEMPLATES_DIR"' in entrypoint
+    assert 'chmod 0750 "$NUCLEI_TEMPLATES_DIR"' in entrypoint
+    cache_prepare = entrypoint.index("\nprepare_managed_nuclei_cache\n")
+    cache_bootstrap = entrypoint.index(
+        "\n/usr/local/libexec/darklab-bootstrap-nuclei-templates\n"
+    )
+    assert cache_prepare < cache_bootstrap < entrypoint.index("exec gosu appuser gunicorn")
     assert 'cp -R "${source_dir%/}/."' in source_stager
     assert 'chmod -R u+rX,a-w "$runtime_dir"' in source_stager
     assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=$stage" in source_stager
@@ -1284,10 +1438,18 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         nuclei_patch_member = context_members[
             "scripts/container/patches/nuclei-kin-openapi-v0.144.patch"
         ]
+        nuclei_bootstrap_member = context_members[
+            "scripts/container/bootstrap_nuclei_templates.sh"
+        ]
         assert stat.S_IMODE(go_installer_member.mode) == 0o755
         assert stat.S_IMODE(nuclei_patch_member.mode) == 0o644
-        assert go_installer_member.uid == nuclei_patch_member.uid == 0
-        assert go_installer_member.gid == nuclei_patch_member.gid == 0
+        assert stat.S_IMODE(nuclei_bootstrap_member.mode) == 0o755
+        assert go_installer_member.uid == nuclei_patch_member.uid == (
+            nuclei_bootstrap_member.uid
+        ) == 0
+        assert go_installer_member.gid == nuclei_patch_member.gid == (
+            nuclei_bootstrap_member.gid
+        ) == 0
         assert all(
             not key.lower().startswith("schily.xattr.")
             for member in context_members.values()
@@ -1331,6 +1493,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "Go tool dependency floor mismatch" in go_installer
     assert 'git -C "$module_dir" apply --check "$GO_TOOL_SOURCE_PATCH"' in go_installer
     assert "Applied Go tool source patch" in go_installer
+    httpx_patch_additions = [
+        line for line in httpx_patch.splitlines() if line.startswith("+")
+    ]
+    assert "+\t\tLeakless(false)." in httpx_patch_additions
+    assert all("Leakless(true)" not in line for line in httpx_patch_additions)
     assert 'selected_version=$(go list -m -f \'{{.Version}}\' "$module_path")' in go_installer
     assert 'expected_version=$(go list -m -f \'{{.Version}}\'' in go_installer
     assert 'go version -m "$target"' in go_installer
@@ -1372,6 +1539,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert (
         "GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/"
         "nuclei-kin-openapi-v0.144.patch"
+    ) in projectdiscovery_stage
+    assert (
+        "GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/"
+        "httpx-disable-leakless.patch"
     ) in projectdiscovery_stage
     assert "ARG GOBUSTER_VERSION" not in projectdiscovery_stage
     assert "ARG GOBUSTER_VERSION" in other_go_stage
@@ -1856,6 +2027,9 @@ def test_container_license_inventory_matches_dockerfile_and_release():
     install_coverage = inventory["dockerfile_install_coverage"]
     assert install_coverage["apt:nmap"] == "Debian Nmap package"
     assert install_coverage["apt:masscan"] == "Debian Masscan package"
+    assert install_coverage["apt:chromium"] == (
+        "Python container base and Debian packages"
+    )
     assert install_coverage["apt:postgresql-client-${POSTGRESQL_CLIENT_VERSION}"] == (
         "PostgreSQL 18 client"
     )
@@ -2877,6 +3051,10 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     assert build_inputs["source"]["commit_sha"] == evidence_args["commit_sha"]
     assert ".gitlab-ci.yml" in build_inputs["source"]["files"]
     assert "scripts/container/install_go_tool.sh" in build_inputs["source"]["files"]
+    assert (
+        "scripts/container/patches/httpx-disable-leakless.patch"
+        in build_inputs["source"]["files"]
+    )
     assert (
         "scripts/container/patches/nuclei-kin-openapi-v0.144.patch"
         in build_inputs["source"]["files"]

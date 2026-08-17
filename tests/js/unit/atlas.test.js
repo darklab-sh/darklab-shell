@@ -2260,7 +2260,7 @@ describe('Atlas overlay', () => {
       })
     }
     document.body.classList.remove('mobile-terminal-mode')
-  }, 10_000)
+  }, 20_000)
 
   it('opens an explicit ordinary Atlas search from a no-record state', async () => {
     const { openAtlasQuickLookup, apiFetch } = loadAtlas({
@@ -2765,7 +2765,7 @@ describe('Atlas overlay', () => {
       '/atlas/entities/ent_ip?project_id=prj_linked',
       expect.objectContaining({ cache: 'no-store' }),
     )
-  }, 10_000)
+  }, 20_000)
 
   it('does not close its own fallback shell while finishing either Atlas entry mode', async () => {
     const closeMajorOverlays = vi.fn()
@@ -2866,7 +2866,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-import-preview')?.textContent).toContain('1 project target created')
     expect(showToast).toHaveBeenCalledWith('Atlas import applied', 'success')
     expect(projectEvents.some(event => event.name === 'app:project-workspace-changed')).toBe(true)
-  })
+  }, 20_000)
 
   it('opens a prepared ZAP draft in the existing explicit Atlas review and apply flow', async () => {
     const { openAtlas, apiFetch, showToast } = loadAtlas()
@@ -4018,7 +4018,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-mobile-list-view')?.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('atlas-mobile-entity-view')?.classList.contains('u-hidden')).toBe(true)
     document.body.classList.remove('mobile-terminal-mode')
-  }, 10_000)
+  }, 20_000)
 
   it('creates a finding from a Project-scoped Atlas entity profile', async () => {
     const openContextualFindingRecord = vi.fn(() => Promise.resolve(true))

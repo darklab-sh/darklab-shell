@@ -13,7 +13,10 @@ from typing import Any, TypeAlias, cast
 
 import config as app_config
 from services.commands.features import feature_enabled
-from services.commands.registry_autocomplete import normalize_autocomplete_spec
+from services.commands.registry_autocomplete import (
+    filter_autocomplete_context_by_features,
+    normalize_autocomplete_spec,
+)
 from services.commands.registry_validation import split_command_argv
 from services.teams import scope as team_scope
 from services.teams.scope import OwnerContext
@@ -581,7 +584,7 @@ class BuiltinCommandRegistry:
                     spec.feature_required[0] if len(spec.feature_required) == 1 else list(spec.feature_required)
                 )
             context[spec.autocomplete_root] = autocomplete
-        return context
+        return filter_autocomplete_context_by_features(context, cfg)
 
     def execute(
         self,

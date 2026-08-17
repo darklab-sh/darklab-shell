@@ -8,26 +8,13 @@ from __future__ import annotations
 import shlex
 from typing import Any, Mapping
 
+from services.assessments.base_action_catalog import base_action_target_types
 from services.assessments.command_plan_contracts import CommandPlan
 from services.assessments.command_plans_tls import tls_command_plans
 from services.assessments.command_plans_web import web_command_plans
+from services.assessments.command_target_urls import default_https_target
 from services.assessments.nmap_profiles import nmap_profile_suffix
 from services.assessments.nuclei_profiles import nuclei_profile as get_nuclei_profile, nuclei_profile_args
-
-_COMMAND_TARGET_TYPES = {
-    "curl": frozenset({"domain", "ip", "url"}),
-    "ping": frozenset({"domain", "ip"}),
-    "nmap": frozenset({"domain", "ip"}),
-    "dnsrecon": frozenset({"domain"}),
-    "gau": frozenset({"domain"}),
-    "httpx": frozenset({"domain", "ip", "url"}),
-    "katana": frozenset({"domain", "url"}),
-    "nuclei": frozenset({"domain", "ip", "url"}),
-    "dalfox": frozenset({"domain", "ip", "url"}),
-    "sqlmap": frozenset({"url"}),
-    "sslyze": frozenset({"domain", "ip"}),
-    "testssl": frozenset({"domain", "ip"}),
-}
 
 def command_plan(
     action_id: str,
@@ -42,7 +29,9 @@ def command_plan(
     allow_intrusive: bool = False,
 ) -> CommandPlan | None:
     """Return one bounded command without resolving any protected values."""
-    if target_type not in _COMMAND_TARGET_TYPES.get(action_id, frozenset()):
+    if target_type not in base_action_target_types(action_id):
+        return None
+    if action_id == "nuclei" and http_profile:
         return None
     if action_id == "nuclei" and get_nuclei_profile(nuclei_profile).requires_confirmation and not allow_intrusive:
         return None
@@ -53,7 +42,7 @@ def command_plan(
         and target_type in {"domain", "ip"}
         and action_id in {"curl", "httpx", "katana", "nuclei", "dalfox"}
     ):
-        selected_web_target = f"https://{target_value}"
+        selected_web_target = default_https_target(target_type, target_value)
     quoted_web = shlex.quote(selected_web_target)
     rate = int((http_profile or {}).get("rate_limit_per_second") or 10)
     concurrency = int((http_profile or {}).get("concurrency") or 5)

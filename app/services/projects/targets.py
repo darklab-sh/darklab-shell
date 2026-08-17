@@ -789,12 +789,14 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
                 "SELECT id FROM entities WHERE session_id = ? AND type = ? AND signature_hash = ?",
                 (session_id, entity_type, entity_signature(entity_type, canonical_value)),
             ).fetchone()
-            already_linked = False
+            existing_link = None
             if existing_entity:
-                already_linked = conn.execute(
-                    "SELECT 1 FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
+                existing_link = conn.execute(
+                    "SELECT review_state FROM project_links "
+                    "WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
                     (project_id, existing_entity["id"]),
-                ).fetchone() is not None
+                ).fetchone()
+            already_linked = existing_link is not None
             entity_id = _ensure_project_entity_link(
                 conn,
                 session_id,
@@ -803,7 +805,7 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
                 canonical_value,
                 source,
                 confidence=confidence,
-                review_state="pending",
+                review_state=str(existing_link["review_state"] or "pending") if existing_link else "pending",
                 source_detail=detail,
             )
             _link_entity_to_run(conn, entity_id, run_id, created, 0)

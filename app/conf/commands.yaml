@@ -2512,8 +2512,8 @@ commands:
         - value: httpx -l urls.txt -status-code -sr -srd httpx-responses
           description: Store HTTP responses in a session directory
           feature_required: workspace
-        - value: httpx -l urls.txt -screenshot -srd httpx-screenshots
-          description: Save screenshots in a session directory
+        - value: httpx -l urls.txt -screenshot -system-chrome -headless-options --no-sandbox -srd httpx-screenshots
+          description: Save screenshots with the bundled Chromium browser
           feature_required: workspace
       flags:
         - value: -h
@@ -2597,6 +2597,14 @@ commands:
           description: Save screenshots with headless browser
         - value: -screenshot
           description: Save screenshots with headless browser
+        - value: -system-chrome
+          description: Use the system Chromium installation for screenshots
+        - value: -ho
+          description: Pass additional options to headless Chromium
+          takes_value: true
+        - value: -headless-options
+          description: Pass additional options to headless Chromium
+          takes_value: true
         - value: -config
           description: Read httpx config from a session file
           takes_value: true
@@ -5664,6 +5672,21 @@ commands:
     runtime_adaptations:
       inject_flags:
         - flags:
+            - scan
+          position: prepend
+          unless_any:
+            - scan
+            - url
+            - server
+            - payload
+            - mcp
+            - file
+            - pipe
+            - -h
+            - --help
+            - -V
+            - --version
+        - flags:
             - --only-discovery
           position: append
           unless_any:
@@ -5672,6 +5695,11 @@ commands:
             - --help
             - -V
             - --version
+            - server
+            - payload
+            - mcp
+            - file
+            - pipe
         - flags:
             - --skip-mining-dict
           position: append
@@ -5681,12 +5709,20 @@ commands:
             - --help
             - -V
             - --version
+            - server
+            - payload
+            - mcp
+            - file
+            - pipe
     autocomplete:
       examples:
         - value: dalfox --help
           description: Show discovery options and usage
           smoke:
             profile: unauthenticated
+        - value: dalfox scan https://ip.darklab.sh
+          description: Discover parameters for one URL without sending XSS payloads
+          smoke: manual
       flags:
         - value: -h
           description: Show help and usage
@@ -5700,41 +5736,58 @@ commands:
         - value: --version
           description: Show the installed Dalfox version
           closes: true
-        - value: --only-discovery
-          description: Stop after parameter discovery
-        - value: --skip-mining-dict
-          description: Disable dictionary parameter mining
-        - value: --format
-          description: Output format
-          takes_value: true
-          suggest:
-            - value: jsonl
-              description: Machine-readable JSON lines
-        - value: --no-color
-          description: Disable ANSI colors
-        - value: --timeout
-          description: Per-request timeout in seconds
-          takes_value: true
-        - value: --scan-timeout
-          description: Scan-stage timeout in seconds
-          takes_value: true
-        - value: --rate-limit
-          description: Total requests per second
-          takes_value: true
-        - value: --workers
-          description: Concurrent workers for the target
-          takes_value: true
-        - value: --max-concurrent-targets
-          description: Concurrent target cap
-          takes_value: true
-        - value: --max-targets-per-host
-          description: Per-host target cap
-          takes_value: true
       arguments:
         - placeholder: <url>
           hint_only: true
           value_type: url
           description: One exact HTTP or HTTPS target
+      subcommands:
+        scan:
+          description: Discover parameters for one HTTP or HTTPS URL
+          examples:
+            - value: dalfox scan --help
+              description: Show scan-mode options and usage
+              smoke:
+                profile: unauthenticated
+            - value: dalfox scan https://ip.darklab.sh
+              description: Run the bounded parameter-discovery pass
+              smoke: manual
+          flags:
+            - value: --only-discovery
+              description: Stop after parameter discovery
+            - value: --skip-mining-dict
+              description: Disable dictionary parameter mining
+            - value: --format
+              description: Output format
+              takes_value: true
+              suggest:
+                - value: jsonl
+                  description: Machine-readable JSON lines
+            - value: --no-color
+              description: Disable ANSI colors
+            - value: --timeout
+              description: Per-request timeout in seconds
+              takes_value: true
+            - value: --scan-timeout
+              description: Scan-stage timeout in seconds
+              takes_value: true
+            - value: --rate-limit
+              description: Total requests per second
+              takes_value: true
+            - value: --workers
+              description: Concurrent workers for the target
+              takes_value: true
+            - value: --max-concurrent-targets
+              description: Concurrent target cap
+              takes_value: true
+            - value: --max-targets-per-host
+              description: Per-host target cap
+              takes_value: true
+          arguments:
+            - placeholder: <url>
+              hint_only: true
+              value_type: url
+              description: One exact HTTP or HTTPS target
   - root: nuclei
     description: Runs template-based checks to detect known exposures, misconfigurations, and vulnerabilities.
     category: Vulnerability Scanning
@@ -5891,6 +5944,9 @@ commands:
             - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
+          unless_any:
+            - -update-templates
+            - -ut
     autocomplete:
       examples:
         - value: nuclei -h

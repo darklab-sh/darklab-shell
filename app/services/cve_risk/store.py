@@ -10,7 +10,7 @@ import hashlib
 from typing import Any, Iterable
 import uuid
 
-from core.database_access import get_db_connect
+from core.database_access import db_connection_scope
 from core.database_backend import DatabaseBackend
 from .constants import SOURCE_ATTRIBUTION, SOURCE_TERMS_URL, SOURCE_URL
 from .links import linked_cve_ids
@@ -423,9 +423,7 @@ def get_feed_status(
     stale_after_hours: int = 48,
     live_refresh_enabled: bool = False,
 ) -> list[dict[str, Any]]:
-    owns_connection = conn is None
-    active = conn or get_db_connect()()
-    try:
+    with db_connection_scope(conn) as active:
         rows = active.execute(
             "SELECT * FROM cve_risk_sources ORDER BY source"
         ).fetchall()
@@ -466,9 +464,6 @@ def get_feed_status(
                 "live_refresh_enabled": bool(live_refresh_enabled),
             })
         return result
-    finally:
-        if owns_connection:
-            active.close()
 
 
 def get_configured_feed_status(
@@ -489,9 +484,7 @@ def get_configured_feed_status(
 
 def get_cve_risk(cve_id: str, conn: Any | None = None) -> dict[str, Any] | None:
     normalized = str(cve_id or "").strip().upper()
-    owns_connection = conn is None
-    active = conn or get_db_connect()()
-    try:
+    with db_connection_scope(conn) as active:
         row = active.execute(
             "SELECT * FROM cve_risk_records WHERE cve_id = ?",
             (normalized,),
@@ -507,9 +500,6 @@ def get_cve_risk(cve_id: str, conn: Any | None = None) -> dict[str, Any] | None:
             get_advisory_source_status(active),
         ]
         return payload
-    finally:
-        if owns_connection:
-            active.close()
 
 
 def sha256_bytes(payload: bytes) -> str:
