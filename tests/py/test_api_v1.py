@@ -9587,7 +9587,7 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "complete -F _darklab_completion darklab" in bash_completion
     assert "active artifacts assessment atlas cancel completion download grep history notify" in bash_completion
     assert "assessment) _darklab_comp_words 'batch checks clear-state list set-state show start-action'" in bash_completion
-    assert "assessment:batch) _darklab_comp_words 'cancel follow list plan show start'" in bash_completion
+    assert "assessment:batch) _darklab_comp_words 'cancel follow list plan retry show start'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
     assert "team:invite) _darklab_word_in \"$word\" 'create revoke'" in bash_completion
     invite_create_completion = (

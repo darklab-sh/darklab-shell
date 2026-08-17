@@ -4904,6 +4904,18 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             ),
         ),
     )
+    monkeypatch.setattr(
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
+        lambda: ProbePlanningRuntime(
+            available_features=frozenset(
+                {*ACTIONS, "reviewed_nse_profiles", "managed_nuclei_templates"}
+            ),
+            intrusive_actions_enabled=True,
+            template_snapshot=NucleiTemplateCacheSnapshot(
+                "ready", "v10.4.7", "sha256:" + "1" * 64, 100
+            ),
+        ),
+    )
 
     client = app.test_client()
     bootstrap_session_id = str(uuid.uuid4())
