@@ -350,19 +350,19 @@ class BatchPreviewBuilder:
         if not selected:
             raise AssessmentBatchError(
                 "empty_batch_plan",
-                "No supported assessment commands are selected. Include standard checks or change the target and category selection.",
+                "No supported assessment commands are selected. Include standard "
+                "checks or change the target and category selection.",
                 status_code=409,
                 details={"reason_counts": dict(sorted(self.reasons.items()))},
             )
         if len(selected) > self.selection.item_limit:
             raise AssessmentBatchError(
                 "preview_item_limit_exceeded",
-                f"The selection has {len(selected)} commands, above its {self.selection.item_limit}-item limit. Narrow the selection or raise the limit and preview again.",
+                f"The selection has {len(selected)} commands, above its "
+                f"{self.selection.item_limit}-item limit. Narrow the selection or "
+                "raise the limit and preview again.",
                 status_code=409,
-                details={
-                    "selected_item_count": len(selected),
-                    "item_limit": self.selection.item_limit,
-                },
+                details={"selected_item_count": len(selected), "item_limit": self.selection.item_limit},
             )
         estimate = estimate_batch_duration(
             items, parallel=self.selection.concurrency.batch
