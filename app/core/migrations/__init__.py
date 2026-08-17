@@ -86,6 +86,7 @@ from . import (
     v0073_oast_interactions,
     v0074_workflow_execution_kinds,
     v0075_assessment_batch_coordinator,
+    v0076_assessment_batch_items,
 )
 
 _ = baseline
@@ -166,4 +167,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0073_oast_interactions.MIGRATION,
     v0074_workflow_execution_kinds.MIGRATION,
     v0075_assessment_batch_coordinator.MIGRATION,
+    v0076_assessment_batch_items.MIGRATION,
 )

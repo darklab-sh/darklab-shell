@@ -13,7 +13,10 @@ import pytest
 from conftest import make_test_app
 from core.database_access import get_db_connect
 from core.migrations import MIGRATIONS
-from core.migrations.v0075_assessment_batch_coordinator import MIGRATION
+from core.migrations.v0075_assessment_batch_coordinator import (
+    MIGRATION as COORDINATOR_MIGRATION,
+)
+from core.migrations.v0076_assessment_batch_items import MIGRATION as ITEM_MIGRATION
 from services.assessments.batch.contracts import (
     AssessmentBatchError,
     BATCH_PREVIEW_PAGE_MAX_BYTES,
@@ -180,11 +183,16 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
 
 def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     make_test_app()
-    assert MIGRATIONS[-1] is MIGRATION
-    assert MIGRATION.version == "0075"
+    assert MIGRATIONS[-2] is COORDINATOR_MIGRATION
+    assert MIGRATIONS[-1] is ITEM_MIGRATION
+    assert ITEM_MIGRATION.version == "0076"
     assert any(
         "details_json JSONB" in statement
-        for statement in MIGRATION.postgres_statements or ()
+        for statement in COORDINATOR_MIGRATION.postgres_statements or ()
+    )
+    assert any(
+        "public_plan_json JSONB" in statement
+        for statement in ITEM_MIGRATION.postgres_statements or ()
     )
     timestamp = "2026-08-17 12:00:00"
     session_id = "batch-storage-owner"
@@ -199,6 +207,24 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
             str(row["name"]): str(row["type"])
             for row in conn.execute(
                 "PRAGMA table_info(assessment_batch_events)"
+            ).fetchall()
+        }
+        preview_columns = {
+            str(row["name"]): str(row["type"])
+            for row in conn.execute(
+                "PRAGMA table_info(assessment_batch_previews)"
+            ).fetchall()
+        }
+        preview_item_columns = {
+            str(row["name"]): str(row["type"])
+            for row in conn.execute(
+                "PRAGMA table_info(assessment_batch_preview_items)"
+            ).fetchall()
+        }
+        item_columns = {
+            str(row["name"]): str(row["type"])
+            for row in conn.execute(
+                "PRAGMA table_info(assessment_batch_items)"
             ).fetchall()
         }
         parent_foreign_keys = conn.execute(
@@ -245,6 +271,10 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     assert parent_columns["execution_id"] == "TEXT"
     assert parent_columns["item_count"] == "INTEGER"
     assert event_columns["details_json"] == "TEXT"
+    assert preview_columns["summary_json"] == "TEXT"
+    assert preview_columns["selected_item_count"] == "INTEGER"
+    assert preview_item_columns["public_plan_json"] == "TEXT"
+    assert item_columns["child_ordinal"] == "INTEGER"
     assert {str(row["table"]) for row in parent_foreign_keys} == {
         "assessment_batches",
         "workflow_executions",
@@ -252,6 +282,60 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     assert {str(row["table"]) for row in event_foreign_keys} == {"assessment_batches"}
     assert "idx_assessment_batches_assessment_created" in indexes
     assert "idx_assessment_batch_events_cursor" in indexes
+    assert "idx_assessment_batch_previews_personal_expiry" in indexes
+    assert "idx_assessment_batch_items_child" in indexes
+
+    preview_id = "abp_batch_storage"
+    with get_db_connect()() as conn:
+        conn.execute(
+            "INSERT INTO assessment_batch_previews "
+            "(id, session_id, project_id, assessment_id, profile_key, profile_version, "
+            "selection_json, summary_json, plan_digest, candidate_item_count, "
+            "selected_item_count, mapping_count, safe_item_count, standard_item_count, "
+            "max_parallel, max_owner_parallel, max_instance_parallel, expires_at, created) "
+            "VALUES (?, ?, ?, ?, 'network', '1.0', '{}', '{}', ?, 2, 1, 2, 1, 1, "
+            "8, 16, 32, ?, ?)",
+            (preview_id, session_id, project_id, assessment_id, "b" * 64, timestamp, timestamp),
+        )
+        for item_index, selected, policy_level, execution_key in (
+            (0, 1, "safe", "c" * 64),
+            (1, 0, "standard", "d" * 64),
+        ):
+            conn.execute(
+                "INSERT INTO assessment_batch_preview_items "
+                "(preview_id, item_index, execution_key, selected, policy_level, "
+                "action_key, action_id, target_entity_id, target_type, target_value, "
+                "profile_identity_json, bounds_json, display_command, public_plan_digest, "
+                "public_plan_json, duration_bound_seconds, created) "
+                "VALUES (?, ?, ?, ?, ?, 'command:nmap', 'nmap', 'ent-batch-storage', "
+                "'domain', 'batch.example', '{}', '{}', 'nmap batch.example', ?, '{}', 600, ?)",
+                (
+                    preview_id,
+                    item_index,
+                    execution_key,
+                    selected,
+                    policy_level,
+                    execution_key,
+                    timestamp,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO assessment_batch_preview_item_checks "
+                "(preview_id, item_index, mapping_index, assessment_id, check_id, check_key, "
+                "target_entity_id, coverage_key, frozen_check_digest, created) "
+                "VALUES (?, ?, 0, ?, ?, ?, 'ent-batch-storage', ?, ?, ?)",
+                (
+                    preview_id,
+                    item_index,
+                    assessment_id,
+                    f"chk-batch-{item_index}",
+                    f"check-{item_index}",
+                    execution_key,
+                    "e" * 64,
+                    timestamp,
+                ),
+            )
+        conn.commit()
 
     parent = create_batch_parent(
         session_id=session_id,
@@ -352,6 +436,27 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     assert execution_count["n"] == 1
 
     with get_db_connect()() as conn:
+        conn.execute(
+            "INSERT INTO assessment_batch_items "
+            "(batch_id, item_index, step_id, child_ordinal, source_preview_id, execution_key, "
+            "policy_level, action_key, action_id, target_entity_id, target_type, target_value, "
+            "profile_identity_json, bounds_json, display_command, public_plan_digest, "
+            "public_plan_json, duration_bound_seconds, created) "
+            "VALUES (?, 0, 'chunk_0001', 0, ?, ?, 'safe', 'command:nmap', 'nmap', "
+            "'ent-batch-storage', 'domain', 'batch.example', '{}', '{}', "
+            "'nmap batch.example', ?, '{}', 600, ?)",
+            (batch_id, preview_id, "c" * 64, "c" * 64, timestamp),
+        )
+        conn.execute(
+            "INSERT INTO assessment_batch_item_checks "
+            "(batch_id, item_index, mapping_index, assessment_id, check_id, check_key, "
+            "target_entity_id, coverage_key, frozen_check_digest, created) "
+            "VALUES (?, 0, 0, ?, 'chk-batch-0', 'check-0', 'ent-batch-storage', ?, ?, ?)",
+            (batch_id, assessment_id, "c" * 64, "e" * 64, timestamp),
+        )
+        conn.commit()
+
+    with get_db_connect()() as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("DELETE FROM workflow_executions WHERE id = ?", (batch_id,))
         conn.commit()
@@ -369,3 +474,21 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
             ).fetchone()["n"]
             == 0
         )
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM assessment_batch_items WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()["n"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM assessment_batch_item_checks WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()["n"] == 0
+        conn.execute("DELETE FROM assessment_batch_previews WHERE id = ?", (preview_id,))
+        conn.commit()
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM assessment_batch_preview_items WHERE preview_id = ?",
+            (preview_id,),
+        ).fetchone()["n"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM assessment_batch_preview_item_checks WHERE preview_id = ?",
+            (preview_id,),
+        ).fetchone()["n"] == 0
