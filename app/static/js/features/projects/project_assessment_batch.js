@@ -341,6 +341,16 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     return choice === options.confirmId;
   }
 
+  function standardConfirmationNote(preview) {
+    const summary = preview?.summary || {};
+    const concurrency = preview?.concurrency || {};
+    const targets = Number(summary.selected_target_count || 0);
+    const commands = Number(preview?.selected_item_count || 0);
+    const explicit = Number(summary.explicit_request_limit_item_count || 0);
+    const toolBounded = Number(summary.tool_bounded_request_item_count || 0);
+    return `${targets} ${targets === 1 ? 'target' : 'targets'}; ${commands} ${commands === 1 ? 'command' : 'commands'}; fan-out ${Number(summary.fan_out || 0)} with up to ${Number(concurrency.batch || 0)} concurrent; request bounds: ${explicit} explicit-limit and ${toolBounded} tool-bounded commands; maximum per-command time bound ${Number(summary.maximum_item_duration_bound_seconds || 0)} seconds; credentials: ${String(summary.credential_classification || 'none')}.`;
+  }
+
   async function startBatch(projectId, assessmentId, returnFocus = null) {
     const st = stateFor(projectId, assessmentId);
     if (!st.preview || st.previewDirty || st.starting) return false;
@@ -355,7 +365,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
         note: retry
           ? 'This creates a new batch. Succeeded source commands, completed runs, and existing evidence stay unchanged.'
           : (standard
-          ? 'Standard commands were selected separately. Review their targets, fan-out, request bounds, and commands before continuing.'
+          ? standardConfirmationNote(st.preview)
           : 'The batch keeps completed evidence if another command fails or you cancel later.'),
       },
       tone: standard ? 'warning' : null,
@@ -375,7 +385,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       const standardConfirmed = await confirmAction({
         body: {
           text: 'Include standard commands in this retry?',
-          note: 'Standard commands were selected separately. Review their targets, bounds, and exact commands before continuing.',
+          note: standardConfirmationNote(st.preview),
         },
         tone: 'warning',
         confirmId: 'start_retry_standard',

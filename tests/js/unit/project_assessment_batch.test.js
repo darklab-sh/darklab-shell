@@ -35,9 +35,15 @@ const preview = {
   selected_item_count: 1,
   candidate_item_count: 2,
   potential_covered_check_count: 2,
+  concurrency: { batch: 8, target: 1, owner: 16, instance: 32 },
   summary: {
     selected_target_count: 1,
     potential_covered_check_count: 2,
+    fan_out: 1,
+    explicit_request_limit_item_count: 1,
+    tool_bounded_request_item_count: 0,
+    maximum_item_duration_bound_seconds: 600,
+    credential_classification: 'none',
     estimated_min_seconds: 10,
     estimated_max_seconds: 40,
     estimate_label: 'Planning estimate, not a completion promise.',
@@ -403,6 +409,9 @@ describe('Project assessment batches', () => {
     }))
     expect(ctx.showConfirm.mock.calls.at(-1)[0].body.text)
       .toBe('Run safe and standard assessment commands?')
+    expect(ctx.showConfirm.mock.calls.at(-1)[0].body.note).toBe(
+      '1 target; 2 commands; fan-out 1 with up to 8 concurrent; request bounds: 1 explicit-limit and 0 tool-bounded commands; maximum per-command time bound 600 seconds; credentials: none.',
+    )
     manager.invalidate()
   })
 
