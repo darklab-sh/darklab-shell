@@ -3631,7 +3631,15 @@ describe('per-tab terminal confirmations', () => {
       onCancel: cancelSessionToken,
     })
 
-    document.dispatchEvent(new Event('app:active-project-changed'))
+    document.dispatchEvent(new CustomEvent('app:active-project-changed', {
+      detail: { changed: false },
+    }))
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(true)
+    expect(cancelProbe).not.toHaveBeenCalled()
+
+    document.dispatchEvent(new CustomEvent('app:active-project-changed', {
+      detail: { changed: true },
+    }))
     expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
     expect(hasPendingTerminalConfirm('tab-2')).toBe(true)
     expect(cancelProbe).toHaveBeenCalledOnce()

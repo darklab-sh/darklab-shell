@@ -452,7 +452,12 @@ function _autocompleteReloadProjectTargets() {
   loadProjectAutocompleteTargets().catch(() => {});
 }
 
-_autocompleteOnUiEvent('app:active-project-changed', _autocompleteReloadProjectTargets);
+function _autocompleteHandleActiveProjectChanged(event) {
+  if (event?.detail?.changed === false) return;
+  _autocompleteReloadProjectTargets();
+}
+
+_autocompleteOnUiEvent('app:active-project-changed', _autocompleteHandleActiveProjectChanged);
 _autocompleteOnUiEvent('app:project-workspace-changed', _autocompleteReloadProjectTargets);
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {

@@ -19,10 +19,12 @@ let exportedDarklabProjectActiveContext = null;
     }
 
     function setProject(nextProject) {
+      const previousProjectId = String(activeProject && activeProject.id || '');
       activeProject = nextProject && typeof nextProject === 'object' ? nextProject : null;
+      const changed = previousProjectId !== String(activeProject && activeProject.id || '');
       render();
       ctx.syncProjectNotesForm?.();
-      ctx.emitUiEvent?.('app:active-project-changed', { project: activeProject });
+      ctx.emitUiEvent?.('app:active-project-changed', { project: activeProject, changed });
       return activeProject;
     }
 
@@ -44,6 +46,7 @@ let exportedDarklabProjectActiveContext = null;
       if (typeof ctx.apiFetch !== 'function') return null;
       if (activeProjectLoadPromise && options.force !== true) return activeProjectLoadPromise;
       const request = (async () => {
+        const previousProjectId = String(activeProject && activeProject.id || '');
         try {
           const resp = await ctx.apiFetch('/projects/active', { cache: 'no-store' });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -53,9 +56,10 @@ let exportedDarklabProjectActiveContext = null;
           activeProject = null;
           ctx.logClientError?.('failed to load /projects/active', err);
         }
+        const changed = previousProjectId !== String(activeProject && activeProject.id || '');
         render();
         ctx.syncProjectNotesForm?.();
-        ctx.emitUiEvent?.('app:active-project-changed', { project: activeProject });
+        ctx.emitUiEvent?.('app:active-project-changed', { project: activeProject, changed });
         return activeProject;
       })();
       activeProjectLoadPromise = request;

@@ -1692,8 +1692,14 @@ describe('autocomplete helpers', () => {
       `{
       _readAutocompleteHttpProfiles,
       _readProjectTargets,
-    }`,
+      }`,
     )
+
+    document.dispatchEvent(new CustomEvent('app:active-project-changed', {
+      detail: { changed: false },
+    }))
+    for (let i = 0; i < 4; i += 1) await Promise.resolve()
+    expect(apiFetch).not.toHaveBeenCalled()
 
     window.dispatchEvent(new StorageEvent('storage', {
       key: 'darklab_project_workspace_changed',

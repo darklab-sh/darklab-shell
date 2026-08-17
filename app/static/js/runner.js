@@ -4387,7 +4387,8 @@ function runCommand() {
 }
 
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-  document.addEventListener('app:active-project-changed', () => {
+  document.addEventListener('app:active-project-changed', (event) => {
+    if (event?.detail?.changed === false) return;
     _cancelPendingTerminalConfirmsByKind('probe');
   });
   for (const eventName of [
