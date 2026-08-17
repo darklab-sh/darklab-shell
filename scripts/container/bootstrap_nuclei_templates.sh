@@ -35,7 +35,7 @@ echo "NUCLEI_TEMPLATE_BOOTSTRAP_STARTED"
 if timeout 180 gosu scanner env \
     HOME=/tmp \
     XDG_CONFIG_HOME=/tmp/.config \
-    nuclei -update-templates -ud "$cache_dir"; then
+    nuclei -update-templates -ud "$cache_dir" >/dev/null 2>&1; then
     if [ -s "$manifest" ] && [ -f "$manifest" ] && [ ! -L "$manifest" ]; then
         echo "NUCLEI_TEMPLATE_BOOTSTRAP_SUCCEEDED"
     else

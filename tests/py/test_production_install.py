@@ -1160,6 +1160,8 @@ def test_nuclei_template_bootstrap_is_conditional_and_non_fatal(tmp_path: Path):
     (fake_bin / "nuclei").write_text(
         """#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_NUCLEI_CALLS"
+printf '%s\n' 'FAKE_NUCLEI_STDOUT_SENTINEL'
+printf '%s\n' 'FAKE_NUCLEI_STDERR_SENTINEL' >&2
 cache_dir=""
 while [ "$#" -gt 0 ]; do
     if [ "$1" = "-ud" ]; then
@@ -1223,6 +1225,8 @@ esac
     assert installed.returncode == 0
     assert "NUCLEI_TEMPLATE_BOOTSTRAP_STARTED" in installed.stdout
     assert "NUCLEI_TEMPLATE_BOOTSTRAP_SUCCEEDED" in installed.stdout
+    assert "FAKE_NUCLEI_" not in installed.stdout
+    assert "FAKE_NUCLEI_" not in installed.stderr
     assert (empty_cache / ".checksum").is_file()
     assert calls.read_text(encoding="utf-8").strip() == (
         f"-update-templates -ud {empty_cache}"
@@ -1232,6 +1236,8 @@ esac
     failed = run(failed_cache, mode="failure")
     assert failed.returncode == 0
     assert "reason=update_failed exit_status=17" in failed.stderr
+    assert "FAKE_NUCLEI_" not in failed.stdout
+    assert "FAKE_NUCLEI_" not in failed.stderr
 
     incomplete_cache = tmp_path / "incomplete"
     incomplete = run(incomplete_cache, mode="no-manifest")
