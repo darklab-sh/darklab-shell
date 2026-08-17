@@ -237,16 +237,18 @@ function formatProbePlan(plan) {
     `  Bounds: ${plan.bounds?.summary || 'No command bounds available'}`,
     `  Requests: ${plan.bounds?.request_limit ?? 'tool bounded'}; time: ${plan.bounds?.time_limit_seconds ?? 'tool bounded'} seconds`,
     `  Credentials: ${plan.bounds?.credential_use || 'none'}`,
-    `  Evidence: ${(plan.expected_evidence || []).join(', ') || 'run output'}`,
-    `  Approval digest: ${String(plan.plan_digest || '').slice(0, 12)}`,
   ];
   if (httpProfile.id) {
     const values = key => (httpScope[key] || []).join(', ') || 'none';
-    lines.splice(8, 0,
+    lines.push(
       `  HTTP profile: ${httpProfile.name || httpProfile.id} (${httpProfile.role || 'anonymous'})`,
       `  HTTP scope: hosts ${values('allowed_hosts')}; roots ${values('scope_roots')}; include ${values('include_paths')}; exclude ${values('exclude_paths')}`,
     );
   }
+  lines.push(
+    `  Evidence: ${(plan.expected_evidence || []).join(', ') || 'run output'}`,
+    `  Approval digest: ${String(plan.plan_digest || '').slice(0, 12)}`,
+  );
   if (!plan.availability?.available) {
     lines.push(`  Unavailable: ${plan.availability?.reason || plan.availability?.code || 'not available'}`);
   }

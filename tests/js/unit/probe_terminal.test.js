@@ -147,6 +147,12 @@ describe('Project probe terminal', () => {
     expect(lines).toContain(
       '  HTTP scope: hosts example.test; roots https://example.test/app; include /app; exclude /app/private',
     );
+    expect(lines.indexOf('  Credentials: none')).toBeLessThan(
+      lines.indexOf('  HTTP profile: User session (user)'),
+    );
+    expect(lines.indexOf('  HTTP profile: User session (user)')).toBeLessThan(
+      lines.indexOf('  Evidence: run'),
+    );
     expect(lines).toContain(`  Approval digest: ${'a'.repeat(12)}`);
     expect(lines).toContain('  Missing features: ping');
     expect(lines.join('\n')).not.toContain('a'.repeat(64));
