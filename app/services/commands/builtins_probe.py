@@ -3,7 +3,7 @@
 
 """Catalog contract for the browser-owned Project probe command."""
 
-from services.assessments.base_action_catalog import base_action_ids
+from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.nmap_profiles import nmap_profile_keys
 from services.assessments.nuclei_profiles import nuclei_profile_keys
 from services.assessments import service_actions as service_action_registry
@@ -43,6 +43,45 @@ def _nuclei_profile_suggestions():
     ]
 
 
+def _probe_action_subcommands():
+    return {
+        action_id: {
+            "description": action.purpose,
+            "arguments": [{
+                "value": "<target>",
+                "hint_only": True,
+                "value_type": "project_target",
+                "target_types": sorted(action.target_types),
+                "position": 1,
+                "description": "Compatible confirmed Project target",
+            }],
+        }
+        for action_id, action in ACTIONS.items()
+    }
+
+
+def _probe_plan_flags():
+    return [
+        {"value": "--project", "takes_value": True, "description": "Project slug or id"},
+        {"value": "--entity-id", "takes_value": True, "description": "Confirmed target entity id"},
+        {
+            "value": "--http-profile", "takes_value": True,
+            "value_type": "http_profile",
+            "description": "Enabled Project HTTP profile name or id",
+        },
+        {
+            "value": "--nmap-profile", "takes_value": True,
+            "description": "Reviewed Nmap profile",
+            "suggest": _value_suggestions(nmap_profile_keys(), "Nmap profile"),
+        },
+        {
+            "value": "--nuclei-profile", "takes_value": True,
+            "description": "Managed Nuclei profile",
+            "suggest": _nuclei_profile_suggestions(),
+        },
+    ]
+
+
 _PROBE_AUTOCOMPLETE = {
     "root": "probe",
     "description": "built-in: inspect bounded one-off checks for confirmed Project targets",
@@ -75,53 +114,13 @@ _PROBE_AUTOCOMPLETE = {
             },
             "plan": {
                 "description": "Preview one bounded command for a confirmed Project target",
-                "arguments": _value_suggestions(base_action_ids(), "Reviewed probe action") + [{
-                    "value": "<target>", "hint_only": True,
-                    "description": "Exact confirmed Project target",
-                }],
-                "flags": [
-                    {"value": "--project", "takes_value": True, "description": "Project slug or id"},
-                    {"value": "--entity-id", "takes_value": True, "description": "Confirmed target entity id"},
-                    {
-                        "value": "--http-profile", "takes_value": True,
-                        "description": "Project HTTP profile id",
-                    },
-                    {
-                        "value": "--nmap-profile", "takes_value": True,
-                        "description": "Reviewed Nmap profile",
-                        "suggest": _value_suggestions(nmap_profile_keys(), "Nmap profile"),
-                    },
-                    {
-                        "value": "--nuclei-profile", "takes_value": True,
-                        "description": "Managed Nuclei profile",
-                        "suggest": _nuclei_profile_suggestions(),
-                    },
-                ],
+                "flags": _probe_plan_flags(),
+                "subcommands": _probe_action_subcommands(),
             },
             "run": {
                 "description": "Preview, confirm, and run one bounded Project probe",
-                "arguments": _value_suggestions(base_action_ids(), "Reviewed probe action") + [{
-                    "value": "<target>", "hint_only": True,
-                    "description": "Exact confirmed Project target",
-                }],
-                "flags": [
-                    {"value": "--project", "takes_value": True, "description": "Project slug or id"},
-                    {"value": "--entity-id", "takes_value": True, "description": "Confirmed target entity id"},
-                    {
-                        "value": "--http-profile", "takes_value": True,
-                        "description": "Project HTTP profile id",
-                    },
-                    {
-                        "value": "--nmap-profile", "takes_value": True,
-                        "description": "Reviewed Nmap profile",
-                        "suggest": _value_suggestions(nmap_profile_keys(), "Nmap profile"),
-                    },
-                    {
-                        "value": "--nuclei-profile", "takes_value": True,
-                        "description": "Managed Nuclei profile",
-                        "suggest": _nuclei_profile_suggestions(),
-                    },
-                ],
+                "flags": _probe_plan_flags(),
+                "subcommands": _probe_action_subcommands(),
             },
         },
     },

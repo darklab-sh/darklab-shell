@@ -201,7 +201,7 @@ def _plan_schemas() -> dict[str, Any]:
         {
             "action_id": {"type": "string", "minLength": 1},
             "entity_id": {"type": "string", "minLength": 1},
-            "http_profile_id": {"type": "string"},
+            "http_profile_id": {"type": "string", "description": "Project profile name or id."},
             "nmap_profile": {"type": "string"},
             "nuclei_profile": {
                 "type": "string", "enum": ["safe", "standard", "intrusive"], "default": "safe",

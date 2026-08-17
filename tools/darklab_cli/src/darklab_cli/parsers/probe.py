@@ -13,7 +13,7 @@ def _target_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("target_value", nargs="?", metavar="TARGET")
     parser.add_argument("--project", dest="project_id", required=True, help="Active Project slug or id that owns the target.")
     parser.add_argument("--entity-id", help="Confirmed Project target id instead of an exact target value.")
-    parser.add_argument("--http-profile", dest="http_profile_id", help="Protected Project HTTP profile id.")
+    parser.add_argument("--http-profile", dest="http_profile_id", help="Protected Project HTTP profile name or id.")
     parser.add_argument("--nmap-profile")
     parser.add_argument("--nuclei-profile", default="safe")
     parser.add_argument("--format", choices=("text", "json"), default="text")

@@ -8753,6 +8753,7 @@
             "type": "string"
           },
           "http_profile_id": {
+            "description": "Project profile name or id.",
             "type": "string"
           },
           "nmap_profile": {
@@ -8804,6 +8805,7 @@
             "type": "string"
           },
           "http_profile_id": {
+            "description": "Project profile name or id.",
             "type": "string"
           },
           "nmap_profile": {

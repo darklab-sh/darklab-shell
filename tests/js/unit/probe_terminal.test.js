@@ -63,6 +63,13 @@ describe('Project probe terminal', () => {
       httpProfileId: 'hpr_1',
       errors: [],
     });
+    expect(parseProbeCommand(
+      'probe run httpx --entity-id ent_1 --project prj_1 --http-profile "Protected probe application"',
+    )).toMatchObject({
+      actionId: 'httpx',
+      httpProfileId: 'Protected probe application',
+      errors: [],
+    });
     expect(parseProbeCommand('probe plan ping example.test --entity-id ent_1 --project prj_1').errors)
       .toContain('provide either an exact target or --entity-id, not both');
     expect(parseProbeCommand('probe list --unknown value').errors)

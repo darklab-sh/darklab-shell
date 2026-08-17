@@ -939,7 +939,7 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
     plan_body = {
         "action_id": "httpx",
         "entity_id": target["id"],
-        "http_profile_id": profile_id,
+        "http_profile_id": "protected PROBE application",
     }
     preview = client.post(
         f"/api/v1/projects/{project['id']}/probes/plan",

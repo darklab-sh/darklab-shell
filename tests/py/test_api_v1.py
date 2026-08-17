@@ -8534,7 +8534,7 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                 if body and body.get("http_profile_id"):
                     assert body == {
                         "action_id": "httpx", "entity_id": "ent_probe",
-                        "http_profile_id": "hpr_cli", "nuclei_profile": "safe",
+                        "http_profile_id": "User session", "nuclei_profile": "safe",
                     }
                     return {"plan": protected_plan}
                 assert body == {
@@ -8545,7 +8545,7 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                 if body and body.get("http_profile_id"):
                     assert body == {
                         "action_id": "httpx", "entity_id": "ent_probe",
-                        "http_profile_id": "hpr_cli", "nuclei_profile": "safe",
+                        "http_profile_id": "User session", "nuclei_profile": "safe",
                         "confirmed": True, "plan_digest": "b" * 64,
                     }
                     return {
@@ -8634,7 +8634,7 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
 
     assert cli_main.main([
         "probe", "plan", "httpx", "--entity-id", "ent_probe",
-        "--project", "prj_probe", "--http-profile", "hpr_cli",
+        "--project", "prj_probe", "--http-profile", "User session",
     ]) == 0
     protected_output = capsys.readouterr().out
     assert "[protected]" in protected_output
@@ -8643,7 +8643,7 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
 
     assert cli_main.main([
         "probe", "run", "httpx", "--entity-id", "ent_probe",
-        "--project", "prj_probe", "--http-profile", "hpr_cli",
+        "--project", "prj_probe", "--http-profile", "User session",
         "--confirm", "--format", "json",
     ]) == 0
     protected_launch_output = capsys.readouterr().out

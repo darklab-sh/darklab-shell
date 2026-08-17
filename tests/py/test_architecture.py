@@ -724,6 +724,7 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget("app/services/assessments/probe_broker_launch.py", 61, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_http_profile_plans.py", 44, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/probe_http_profile_references.py", 40, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_protected_launch.py", 47, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/probe_target_service.py", 20, "split-package-ratchet"),
     ModuleSizeBudget(

@@ -57,10 +57,10 @@ function logProbeClientFailure(error, { phase = '', projectId = '' } = {}) {
 const PROBE_USAGE = [
   'Usage:',
   '  probe list [--project <project-slug-or-id>] [--service <service>] [--target-type <domain|ip|url>]',
-  '  probe plan <action> <target> --project <project-slug-or-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
-  '  probe plan <action> --entity-id <entity-id> --project <project-slug-or-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
-  '  probe run <action> <target> --project <project-slug-or-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
-  '  probe run <action> --entity-id <entity-id> --project <project-slug-or-id> [--http-profile <profile-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
+  '  probe plan <action> <target> --project <project-slug-or-id> [--http-profile <profile-name-or-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
+  '  probe plan <action> --entity-id <entity-id> --project <project-slug-or-id> [--http-profile <profile-name-or-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
+  '  probe run <action> <target> --project <project-slug-or-id> [--http-profile <profile-name-or-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
+  '  probe run <action> --entity-id <entity-id> --project <project-slug-or-id> [--http-profile <profile-name-or-id>] [--nmap-profile <profile>] [--nuclei-profile <profile>]',
 ];
 
 function _probeCommandTokens(command) {

@@ -1496,6 +1496,16 @@ class TestBuiltinCommandRegistry:
         assert ownership["clear"] == "server"
         assert ownership["theme"] == "browser"
         assert ownership["file"] == "mixed"
+        probe_plan = legacy_autocomplete["probe"]["subcommands"]["plan"]
+        assert probe_plan["arg_hints"]["--http-profile"][0]["value_type"] == "http_profile"
+        assert (
+            probe_plan["subcommands"]["ping"]["arg_hints"]["__positional__"][0]
+            ["target_types"]
+        ) == ["domain", "ip"]
+        assert (
+            probe_plan["subcommands"]["sqlmap"]["arg_hints"]["__positional__"][0]
+            ["target_types"]
+        ) == ["url"]
 
     def test_every_user_facing_spec_appears_in_discovery_details_search_and_autocomplete(self):
         cfg = {"workspace_enabled": True, "tour_enabled": True}

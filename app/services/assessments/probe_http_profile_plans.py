@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from services.assessments.base_action_catalog import base_action
-from services.assessments.http_profile_execution import load_http_profile_plan_context
+from services.assessments.probe_http_profile_references import load_probe_http_profile_plan_context
 from services.assessments.http_profile_target_scope import HttpProfileExecutionError
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
 
@@ -29,7 +29,7 @@ def probe_http_profile_plan_context(
     if action is None:
         return None, "", ""
     try:
-        summary, target_value, unavailable, _profile = load_http_profile_plan_context(
+        summary, target_value, unavailable, _profile = load_probe_http_profile_plan_context(
             conn,
             session_id,
             project_id,

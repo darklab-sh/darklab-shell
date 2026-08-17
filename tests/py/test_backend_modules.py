@@ -19787,7 +19787,8 @@ class TestDerivedCommandRegistry:
             http_profile = next(item for item in flags if item["value"] == "--http-profile")
             assert http_profile == {
                 "value": "--http-profile",
-                "description": "Project HTTP profile id",
+                "description": "Enabled Project HTTP profile name or id",
+                "value_type": "http_profile",
             }
             assert "--http-profile" in probe_context[subcommand]["expects_value"]
             assert [

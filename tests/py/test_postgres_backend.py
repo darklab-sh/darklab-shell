@@ -5338,7 +5338,7 @@ def test_probe_launch_confirmation_uses_postgres_query_path(
     protected_body = {
         "action_id": "httpx",
         "entity_id": target["id"],
-        "http_profile_id": profile["id"],
+        "http_profile_id": "Protected probe",
     }
     protected_plan_response = client.post(
         f"/api/v1/projects/{project['id']}/probes/plan",
@@ -5346,6 +5346,7 @@ def test_probe_launch_confirmation_uses_postgres_query_path(
         json=protected_body,
     )
     protected_plan = protected_plan_response.get_json()["plan"]
+    assert protected_plan["http_profile"]["id"] == profile["id"]
     assert protected_plan["display_command"].endswith("-sf [protected]")
     assert secret_value not in protected_plan_response.get_data(as_text=True)
 
