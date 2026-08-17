@@ -189,6 +189,8 @@ Execution deduplication and coverage stay separate. The execution key uses the e
 
 The preview is a short-lived server-owned approval object, not a client-supplied launch plan. It keeps the exact public probe plans and frozen-check mappings for 15 minutes, uses one SHA-256 digest over the complete stable-ordered snapshot, and pages complete items at no more than 100 entries or 1 MiB. Confirmation names only that preview and digest. This keeps large cycle reads bounded and prevents a caller from changing an item between review and start.
 
+The compiler reads one active frozen cycle through a bounded cursor and resolves tool and managed-template readiness once for the whole preview. Safe actions are selected by default; supported standard actions stay visible but unchecked until the assessor includes them. Covered or manually excluded checks and actions that are intrusive, destructive, credentialed, connector-backed, takeover-specific, or dependent on a saved API artifact never become batch items. Target and category filters are explicit, and discovery or infrastructure hints ask for review without making the final scope decision. Exact public probe plans provide the command, policy, bounds, and availability contract. Identical execution keys merge only after those plans match, while every frozen check keeps its own coverage mapping.
+
 ---
 
 ## Atlas Decisions

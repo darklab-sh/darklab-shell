@@ -20,10 +20,7 @@ from services.assessments.batch.contracts import (
     BATCH_PREVIEW_TTL_SECONDS,
 )
 from services.assessments.batch.preview_digest import batch_preview_digest
-from services.assessments.batch.preview_models import (
-    BatchPreviewDraft,
-    BatchPreviewItem,
-)
+from services.assessments.batch.preview_models import BatchPreviewDraft, BatchPreviewItem
 from services.assessments.batch.preview_validation import validate_preview_draft
 from services.projects.scope import shared_owner_where
 
@@ -225,6 +222,7 @@ def _page_int(
 
 
 def _public_preview(row: Any) -> dict[str, object]:
+    summary = _dialect().decode_json_dict(row["summary_json"])
     return {
         "schema_version": 1,
         "preview_id": str(row["id"] or ""),
@@ -235,11 +233,11 @@ def _public_preview(row: Any) -> dict[str, object]:
             "version": str(row["profile_version"] or ""),
         },
         "selection": _dialect().decode_json_dict(row["selection_json"]),
-        "summary": _dialect().decode_json_dict(row["summary_json"]),
+        "summary": summary,
         "plan_digest": str(row["plan_digest"] or ""),
         "candidate_item_count": int(row["candidate_item_count"] or 0),
         "selected_item_count": int(row["selected_item_count"] or 0),
-        "potential_covered_check_count": int(row["mapping_count"] or 0),
+        "potential_covered_check_count": int(summary.get("potential_covered_check_count", row["mapping_count"] or 0) or 0),
         "safe_item_count": int(row["safe_item_count"] or 0),
         "standard_item_count": int(row["standard_item_count"] or 0),
         "concurrency": {
