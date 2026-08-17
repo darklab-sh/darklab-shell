@@ -688,6 +688,10 @@ let exportedDarklabProjectDetails = null;
       targetNew.setAttribute('aria-label', 'Add project target');
       targetHeading.append(targetTitle, targetNew);
       targetSection.appendChild(targetHeading);
+      const probeHint = document.createElement('div');
+      probeHint.className = 'project-target-value-help project-target-probe-hint';
+      probeHint.textContent = 'Use probe list, probe plan, and probe run in the terminal with confirmed targets.';
+      targetSection.appendChild(probeHint);
       targetSection.appendChild(renderTargetBrowser(projectId, summary));
       container.appendChild(targetSection);
 

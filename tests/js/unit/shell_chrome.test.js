@@ -1420,6 +1420,9 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0', { cache: 'no-store' })
+    expect(document.querySelector('.project-target-probe-hint')?.textContent).toBe(
+      'Use probe list, probe plan, and probe run in the terminal with confirmed targets.',
+    )
     expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.sh')
     document.querySelector('.project-workspace-close')?.click()
     await tick()
