@@ -922,6 +922,8 @@ External dependencies: local vendor routes serving committed builds of `ansi_up`
 
 `project_filters.js` also owns the Project workspace filter state, finding filter query parameters, and the filtered Runs, Findings, and Artifacts collections used by the modal.
 
+`project_details.js` owns the paged Project target browser and its type, search, and auto-discovery filters. A debounced search refresh replaces the target browser from authoritative results while preserving focus and the caret or selection only when the search input still owns focus at render time.
+
 `project_entities.js` also owns the Project Entities auto-promote rules panel, including rule list rendering, preview/save/apply/delete browser flows, and the source-detail chip shown on auto-promoted entity rows.
 
 `project_overview.js` owns the Project Overview tab controller, including lazy endpoint loading, per-project cached overview state, empty/error/degraded target states, rollup and target row rendering, desktop/mobile action wiring, and backend-provided Entities/Findings filter hints. Its active-assessment card uses the assessment domain's compact coverage and fix-first projections and calls the shell's explicit assessment bridge, so opening it selects the named cycle and optional risk filter instead of whichever Assessment state the tab last remembered. `project_finding_changes.js` owns the compact remediation-change summary shared by Overview, desktop Findings, and the mobile Findings sheet; every launch carries the exact assessment id instead of depending on remembered tab state.

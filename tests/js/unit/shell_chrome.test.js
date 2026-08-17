@@ -1461,10 +1461,17 @@ describe('shell chrome project workspace', () => {
 
     const search = document.querySelector('.project-target-search')
     search.value = 'login'
+    search.focus()
+    search.setSelectionRange(2, 4)
     search.dispatchEvent(new Event('input', { bubbles: true }))
     await new Promise(resolve => setTimeout(resolve, 300))
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0&type=domain&q=login', { cache: 'no-store' })
+    const refreshedSearch = document.querySelector('.project-target-search')
+    expect(refreshedSearch).not.toBe(search)
+    expect(document.activeElement).toBe(refreshedSearch)
+    expect(refreshedSearch.selectionStart).toBe(2)
+    expect(refreshedSearch.selectionEnd).toBe(4)
 
     document.querySelector('[data-project-target-type=""]').click()
     await tick()
