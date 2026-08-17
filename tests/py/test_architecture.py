@@ -924,6 +924,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/web_gallery.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/collections.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout.py", 140, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workflows/execution_kinds.py", 30, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_policy.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_checkpoint.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_summary.py", 120, "split-package-ratchet"),

@@ -43,15 +43,23 @@ from services.workflows.compiler import (
     workflow_private_values,
 )
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
+from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 from services.workflows.storage import (
+    active_execution_count,
+    active_execution_count_for_actor,
+    active_execution_page_for_recovery,
     bind_step_run,
     cancel_execution,
     claim_step_for_launch,
     create_execution,
+    execution_for_run,
+    fail_execution_for_run,
     finalize_run_step,
     get_execution,
+    get_execution_by_id,
     public_execution,
     set_fanout_checkpoint,
+    workflow_provenance_for_run,
 )
 from services.runs.start import BrokeredRunStartResult
 
@@ -1492,9 +1500,52 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
         headers={"X-Session-ID": session_id},
     )
     execution = response.get_json()["execution"]
+    batch_id = "abx_" + uuid.uuid4().hex
+    batch_run_id = "run-batch-kind-" + uuid.uuid4().hex
+    with get_db_connect()() as conn:
+        conn.execute(
+            "INSERT INTO workflow_executions "
+            "(id, execution_kind, session_id, workflow_id, workflow_source, title, status, created, updated) "
+            "VALUES (?, ?, ?, '', 'assessment', 'Assessment batch', 'running', datetime('now'), datetime('now'))",
+            (batch_id, ASSESSMENT_BATCH_EXECUTION_KIND, session_id),
+        )
+        conn.execute(
+            "INSERT INTO workflow_execution_steps "
+            "(id, execution_id, step_id, step_index, run_id, status, created) "
+            "VALUES (?, ?, 'chunk_1', 0, ?, 'running', datetime('now'))",
+            ("wst_" + uuid.uuid4().hex, batch_id, batch_run_id),
+        )
+        conn.commit()
+    batch = get_execution_by_id(
+        batch_id,
+        execution_kind=ASSESSMENT_BATCH_EXECUTION_KIND,
+    )
 
     assert response.status_code == 202
     assert launches == [execution["id"]]
+    assert execution["execution_kind"] == "workflow"
+    assert batch is not None
+    assert batch["execution_kind"] == ASSESSMENT_BATCH_EXECUTION_KIND
+    assert public_execution(batch) == {}
+    assert get_execution_by_id(batch_id) is None
+    assert active_execution_count(session_id) == 1
+    assert active_execution_count_for_actor(session_id) == 2
+    assert batch_id not in {item[0] for item in active_execution_page_for_recovery()}
+    assert batch_id in {
+        item[0]
+        for item in active_execution_page_for_recovery(
+            execution_kind=ASSESSMENT_BATCH_EXECUTION_KIND,
+        )
+    }
+    assert execution_for_run(batch_run_id) is None
+    assert workflow_provenance_for_run(batch_run_id) is None
+    assert fail_execution_for_run(batch_run_id, "workflow_hook_failed", "ignored") is False
+    unchanged_batch = get_execution_by_id(
+        batch_id,
+        execution_kind=ASSESSMENT_BATCH_EXECUTION_KIND,
+    )
+    assert unchanged_batch is not None
+    assert unchanged_batch["status"] == "running"
     _assert_public_execution_payload(execution, "example.com", "61001-61003", session_id)
     listed = client.get(
         "/workflow-executions?limit=10",
@@ -1516,6 +1567,18 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
         "/workflow-executions?limit=10",
         headers={"X-Session-ID": other_session},
     ).get_json()["executions"] == []
+    assert client.get(
+        f"/workflow-executions/{batch_id}",
+        headers={"X-Session-ID": session_id},
+    ).status_code == 404
+    assert client.get(
+        f"/workflow-executions/{batch_id}/events",
+        headers={"X-Session-ID": session_id},
+    ).status_code == 404
+    assert client.post(
+        f"/workflow-executions/{batch_id}/cancel",
+        headers={"X-Session-ID": session_id},
+    ).status_code == 404
     monkeypatch.setattr(
         workflow_routes,
         "resolve_effective_cfg",

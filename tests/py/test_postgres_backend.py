@@ -566,6 +566,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0071",
         "0072",
         "0073",
+        "0074",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -3996,7 +3997,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "SELECT table_name, column_name, data_type FROM information_schema.columns "
         "WHERE table_schema = current_schema() AND "
         "((table_name = 'workflow_executions' AND column_name IN "
-        "('definition_snapshot', 'input_values', 'variables')) OR "
+        "('execution_kind', 'definition_snapshot', 'input_values', 'variables')) OR "
         "(table_name = 'workflow_execution_steps' AND column_name = 'capture_names') OR "
         "(table_name = 'workflow_execution_children' AND column_name IN "
         "('created', 'started', 'finished')))"
@@ -4006,6 +4007,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         for row in workflow_column_rows
     }
     assert workflow_column_types == {
+        ("workflow_executions", "execution_kind"): "text",
         ("workflow_executions", "definition_snapshot"): "jsonb",
         ("workflow_executions", "input_values"): "jsonb",
         ("workflow_executions", "variables"): "jsonb",
@@ -4026,6 +4028,9 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "idx_workflow_executions_personal_updated",
         "idx_workflow_executions_team_updated",
         "idx_workflow_executions_active",
+        "idx_workflow_executions_kind_personal_updated",
+        "idx_workflow_executions_kind_team_updated",
+        "idx_workflow_executions_kind_active",
         "idx_workflow_execution_steps_execution_step",
         "idx_workflow_execution_steps_execution_order",
         "idx_workflow_execution_steps_run",
