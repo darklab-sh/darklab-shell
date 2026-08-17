@@ -312,7 +312,15 @@ def _metrics_log_extra(metrics):
     return extra
 
 
-def _record_job_audit(job, *, status, reason="", archive_bytes=0, metrics=None):
+def _record_job_audit(
+    job,
+    *,
+    status,
+    reason="",
+    archive_bytes=0,
+    metrics=None,
+    audit_fields=None,
+):
     details = {
         "project_id": str(job.get("project_id") or ""),
         "job_id": str(job.get("id") or ""),
@@ -323,6 +331,10 @@ def _record_job_audit(job, *, status, reason="", archive_bytes=0, metrics=None):
         details["reason"] = failure_reason
     if archive_bytes:
         details["archive_bytes"] = int(archive_bytes)
+    if status == "queued":
+        draft = job.get("draft") if isinstance(job.get("draft"), dict) else {}
+        export = draft.get("export") if isinstance(draft.get("export"), dict) else {}
+        details["redaction_mode"] = str(export.get("redaction_mode") or "")
     if isinstance(metrics, dict):
         for key in (
             "run_count",
@@ -341,17 +353,22 @@ def _record_job_audit(job, *, status, reason="", archive_bytes=0, metrics=None):
             if isinstance(value, dict):
                 details[key] = dict(value)
     try:
+        event_fields = {
+            "session_id": str(job.get("session_id") or ""),
+            "actor_session_id": str(job.get("session_id") or ""),
+            "team_id": str(job.get("team_id") or ""),
+            "actor_member_id": str(job.get("actor_member_id") or ""),
+        }
+        if isinstance(audit_fields, dict):
+            event_fields.update(audit_fields)
         record_event(
             AuditEventType.REPORT_BUILD,
             target_id=str(job.get("id") or ""),
             project_id=str(job.get("project_id") or ""),
             job_id=str(job.get("id") or ""),
             correlation_id=str(job.get("id") or ""),
-            session_id=str(job.get("session_id") or ""),
-            actor_session_id=str(job.get("session_id") or ""),
-            team_id=str(job.get("team_id") or ""),
-            actor_member_id=str(job.get("actor_member_id") or ""),
             details=details,
+            **event_fields,
         )
     except Exception:
         log.exception("REPORT_EXPORT_AUDIT_FAILED", extra=_audit_log_extra(job, details=details))
@@ -490,7 +507,16 @@ def _run_job(job_id, cfg_snapshot):
     )
 
 
-def start_report_export_job(session_id, project_id, draft, *, cfg=None, team_id="", actor_member_id=""):
+def start_report_export_job(
+    session_id,
+    project_id,
+    draft,
+    *,
+    cfg=None,
+    team_id="",
+    actor_member_id="",
+    audit_fields=None,
+):
     cleanup_report_export_jobs()
     _ensure_job_dir()
     created = _iso(_now())
@@ -509,6 +535,7 @@ def start_report_export_job(session_id, project_id, draft, *, cfg=None, team_id=
     }
     _write_job(job)
     log.info("REPORT_EXPORT_JOB_QUEUED", extra=_job_log_extra(job))
+    _record_job_audit(job, status="queued", audit_fields=audit_fields)
     cfg_snapshot = dict(resolve_effective_cfg(cfg))
     _EXECUTOR.submit(_run_job, job["id"], cfg_snapshot)
     return _public_job(job)

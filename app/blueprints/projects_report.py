@@ -168,23 +168,9 @@ def projects_report_export_job_create(project_id):
         cfg=CFG,
         team_id=team_id,
         actor_member_id=actor_member_id,
+        audit_fields=project_routes._project_audit_fields(session_id, team_id),
     )
     job_id = str((job or {}).get("id") or "")
-    report_export = draft.get("export") if isinstance(draft, dict) else {}
-    record_event(
-        AuditEventType.REPORT_BUILD,
-        target_id=job_id,
-        project_id=project_id,
-        job_id=job_id,
-        correlation_id=job_id,
-        details={
-            "project_id": project_id,
-            "job_id": job_id,
-            "status": "queued",
-            "redaction_mode": str((report_export or {}).get("redaction_mode") or ""),
-        },
-        **project_routes._project_audit_fields(session_id, team_id),
-    )
     project_routes.log.info("PROJECT_REPORT_EXPORT_JOB_STARTED", extra={
         "ip": project_routes.get_client_ip(),
         "session": project_routes.get_log_session_id(session_id),
