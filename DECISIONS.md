@@ -16,6 +16,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
   - [AI Assists: Private Provider, Worker, and Validation Boundary](#ai-assists-private-provider-worker-and-validation-boundary)
   - [Durable Workflows: Server-Owned Steps and Bounded Captures](#durable-workflows-server-owned-steps-and-bounded-captures)
+  - [Bounded Assessment Batches Reuse Workflow Coordination](#bounded-assessment-batches-reuse-workflow-coordination)
 - [Security and Isolation Decisions](#security-and-isolation-decisions)
   - [Cross-User Process Killing](#cross-user-process-killing)
   - [Two-User Security Model](#two-user-security-model)
@@ -173,6 +174,16 @@ Durability also needs a bounded recovery rule. Web startup reconciles active exe
 Interactive PTY commands remain outside this model. Their completion depends on durable terminal-screen capture and input/replay state, not just a normal command exit and normalized line stream. The workflow launcher therefore detects registry-declared PTY trigger flags and fails that step before broker dispatch instead of silently running it through the wrong transport.
 
 Execution events are derived from the durable execution and step rows rather than copied into another event table. Stable logical ordering gives clients a replay cursor for start, step, capture-name, and terminal changes while keeping commands and values out of the feed. Create, list, detail, and cancel routes project the private execution record into a fixed public status shape, so even an authorized team viewer doesn't receive stored inputs, variables, snapshots, tokens, actor context, or browser ownership hints. The same privacy boundary applies to workflow audit rows, lifecycle logs, and metric labels: they carry bounded ids, counts, status, timing, exit, transition, and failure-class fields only.
+
+### Bounded Assessment Batches Reuse Workflow Coordination
+
+**An assessment batch is one durable coordinator over ordinary runs, not a larger workflow or a second run system.**
+
+Assessment plans contain different actions, targets, profiles, bounds, and coverage mappings, so they can't use a workflow's one-template-over-one-string-collection expansion. They do reuse the workflow execution, step, child-attempt, checkpoint, run-binding, cancellation, and recovery primitives. An explicit execution kind keeps workflow routes, quotas, provenance, metrics, and startup dispatch from treating a batch as a saved playbook.
+
+One user-facing parent owns ordered chunks of at most 32 child items, preserving the workflow child ceiling without silently truncating a larger plan. A batch defaults to 128 selected items and always rejects more than 512. It defaults to eight active children, one per target, sixteen per owner, and thirty-two instance-wide; the hard limits are eight, one, thirty-two, and sixty-four. The target limit isn't configurable because serial work against one target is part of the safety boundary.
+
+Workflow checkpoints remain authoritative for pending, active, and terminal child state. Batch progress is a deterministic rollup over those attempts, with unavailable and cancellation outcomes classified from fixed reason codes instead of another mutable item status. A dedicated batch event table is the exception to workflow's derived event view: heterogeneous item progress needs an immutable parent-wide sequence that can cross chunk boundaries and resume after the last acknowledged event. The event rows contain bounded ids, state, reason codes, counts, and retry lineage; commands, target values, private arguments, output, and credentials don't belong there.
 
 ---
 

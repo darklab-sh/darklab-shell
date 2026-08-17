@@ -8176,6 +8176,7 @@ class TestPostgresMigrations:
             "0072",
             "0073",
             "0074",
+            "0075",
         ]
         for table_name in (
             "runs",
@@ -9506,7 +9507,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0074",
+            "9999",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -9558,7 +9559,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0074"
+        assert rows[-1]["version"] == "0075"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -10023,6 +10024,7 @@ class TestPostgresMigrations:
             "0072",
             "0073",
             "0074",
+            "0075",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -10061,7 +10063,8 @@ class TestPostgresMigrations:
         assert "0072" in conn.applied_versions
         assert "0073" in conn.applied_versions
         assert "0074" in conn.applied_versions
-        assert conn.commit_count == 36
+        assert "0075" in conn.applied_versions
+        assert conn.commit_count == 37
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -10214,7 +10217,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0074",
+            "9999",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -10239,9 +10242,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0074"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "9999"]
         assert table_exists is not None
-        assert "0074" in versions
+        assert "9999" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
