@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import Any
 
 from ..client import DarklabClient, die
 from ..formatting import print_collection, print_payload, print_table
@@ -78,7 +79,8 @@ def _start_action(client: DarklabClient, args: argparse.Namespace, base_path: st
             "schema_artifact_id": args.schema_artifact_id,
         }.items() if value}
     preview = client.request("GET", action_path, params=selections or None)
-    plan = preview.get("plan") if isinstance(preview, dict) and isinstance(preview.get("plan"), dict) else {}
+    raw_plan = preview.get("plan") if isinstance(preview, dict) else {}
+    plan: dict[str, Any] = raw_plan if isinstance(raw_plan, dict) else {}
     if not args.confirm:
         if args.format == "json":
             return print_payload(preview, "json")
