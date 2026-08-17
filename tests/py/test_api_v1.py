@@ -8673,6 +8673,7 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     ]) == 0
     confirmed_output = capsys.readouterr().out
     assert confirmed_output.index("ping -c 4 probe.example") < confirmed_output.index("run_probe")
+    assert "Follow this run with: darklab tail run_probe" in confirmed_output
 
     assert cli_main.main([
         "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",

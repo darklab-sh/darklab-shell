@@ -68,6 +68,9 @@ def handle_probe(client: DarklabClient, args: argparse.Namespace) -> int:
     run = launched.get("run") if isinstance(launched, dict) else {}
     if isinstance(run, dict):
         print_table([run], ("id", "status", "command", "history_url"))
+        run_id = str(run.get("id") or "")
+        if run_id:
+            print(f"Follow this run with: darklab tail {run_id}")
     return 0
 
 
