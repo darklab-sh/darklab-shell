@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +19,10 @@ from services.assessments.batch.contracts import AssessmentBatchError, BatchConc
 from services.assessments.batch.events import list_batch_events
 from services.assessments.batch.execution import launch_assessment_batch
 from services.assessments.batch.finalization import finalize_assessment_batch_run
+from services.assessments.batch.recovery import (
+    recover_assessment_batch,
+    recover_assessment_batches,
+)
 from services.assessments.batch.revalidation import build_batch_child_launch_spec
 from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.batch.storage import create_batch_parent
@@ -497,6 +502,408 @@ def _make_batch_child_active(batch: dict[str, str], *, run_id: str) -> None:
             ),
         )
         conn.commit()
+
+
+def _make_batch_child_launching(batch: dict[str, str]) -> None:
+    dialect = dialect_for_backend(get_db_backend())
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_executions SET status = 'running' WHERE id = ?",
+            (batch["batch_id"],),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_steps SET status = 'launching', started = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001'",
+            ("2026-08-17 12:00:01", batch["batch_id"]),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_children SET status = 'launching', started = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001' AND ordinal = 0",
+            ("2026-08-17 12:00:01", batch["batch_id"]),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_steps SET fanout_checkpoint = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001'",
+            (
+                dialect.json_param({
+                    "pending": [],
+                    "running": [0],
+                    "completed": [],
+                    "failed": [],
+                    "skipped": [],
+                    "cancelled": False,
+                }),
+                batch["batch_id"],
+            ),
+        )
+        conn.commit()
+
+
+def _insert_completed_run(batch: dict[str, str], run_id: str, *, exit_code: int = 0) -> None:
+    finished = datetime.now(timezone.utc).isoformat()
+    with get_db_connect()() as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, command, started, finished, exit_code, output_preview, "
+            "output_line_count) VALUES (?, ?, 'ping -c 4 target-0.example.test', "
+            "?, ?, ?, '[]', 0)",
+            (run_id, batch["session_id"], finished, finished, exit_code),
+        )
+        conn.commit()
+
+
+def test_batch_recovery_resets_an_abandoned_claim_and_records_one_event(
+    batch_builder,
+    monkeypatch,
+):
+    batch = batch_builder()
+    _make_batch_child_launching(batch)
+    launches: list[str] = []
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.launch_assessment_batch",
+        lambda batch_id: launches.append(batch_id)
+        or {"status": "running", "launched": 1},
+    )
+
+    assert recover_assessment_batch(batch["batch_id"]) == "recovered"
+    assert launches == [batch["batch_id"]]
+    with get_db_connect()() as conn:
+        child = conn.execute(
+            "SELECT status, run_id FROM workflow_execution_children "
+            "WHERE execution_id = ?",
+            (batch["batch_id"],),
+        ).fetchone()
+    assert (child["status"], child["run_id"]) == ("pending", "")
+    recovered_events = [
+        event
+        for event in list_batch_events(batch["session_id"], batch["batch_id"])
+        if event["event_type"] == "item_recovered"
+    ]
+    assert [(event["reason_code"], event["details"]) for event in recovered_events] == [
+        ("recovery_claim_reset", {"attempt": 1})
+    ]
+
+
+def test_batch_recovery_replays_completed_runs_and_leaves_live_runs_bound(
+    batch_builder,
+    monkeypatch,
+):
+    completed = batch_builder()
+    _make_batch_child_active(completed, run_id="run-batch-recovery-completed")
+    _insert_completed_run(completed, "run-batch-recovery-completed")
+    monkeypatch.setattr(
+        "services.assessments.batch.finalization.launch_assessment_batch",
+        lambda _batch_id: {"status": "completed", "launched": 0},
+    )
+
+    assert recover_assessment_batch(completed["batch_id"]) == "recovered"
+    completed_parent = get_batch_parent(completed["session_id"], completed["batch_id"])
+    assert completed_parent is not None and completed_parent["status"] == "completed"
+
+    live = batch_builder()
+    _make_batch_child_active(live, run_id="run-batch-recovery-live")
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.run_is_still_active",
+        lambda _execution, _run_id: True,
+    )
+    assert recover_assessment_batch(live["batch_id"]) == "left_running"
+    with get_db_connect()() as conn:
+        children = conn.execute(
+            "SELECT attempt, run_id, status FROM workflow_execution_children "
+            "WHERE execution_id = ?",
+            (live["batch_id"],),
+        ).fetchall()
+    assert [tuple(row) for row in children] == [
+        (1, "run-batch-recovery-live", "running")
+    ]
+
+
+def test_batch_recovery_retries_one_vanished_run_without_duplicate_launch(
+    batch_builder,
+    monkeypatch,
+):
+    batch = batch_builder()
+    _make_batch_child_active(batch, run_id="run-batch-recovery-missing")
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.run_is_still_active",
+        lambda _execution, _run_id: False,
+    )
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.launch_assessment_batch",
+        lambda _batch_id: {"status": "running", "launched": 0},
+    )
+
+    assert recover_assessment_batch(batch["batch_id"]) == "recovered"
+    with get_db_connect()() as conn:
+        children = conn.execute(
+            "SELECT attempt, run_id, status, error_code "
+            "FROM workflow_execution_children WHERE execution_id = ? "
+            "ORDER BY attempt",
+            (batch["batch_id"],),
+        ).fetchall()
+    assert [tuple(row) for row in children] == [
+        (1, "run-batch-recovery-missing", "failed", "active_run_missing"),
+        (2, "", "pending", ""),
+    ]
+
+
+def test_batch_recovery_reapplies_cancellation_without_retrying(
+    batch_builder,
+    monkeypatch,
+):
+    batch = batch_builder()
+    _make_batch_child_active(batch, run_id="run-batch-recovery-cancel")
+    requested = cancel_assessment_batch(
+        batch["session_id"],
+        batch["batch_id"],
+        cancel_run_fn=lambda *_args, **_kwargs: True,
+    )
+    assert requested is not None and requested["batch"]["status"] == "canceling"
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.run_is_still_active",
+        lambda _execution, _run_id: False,
+    )
+
+    assert recover_assessment_batch(batch["batch_id"]) == "recovered"
+    parent = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert parent is not None and parent["status"] == "canceled"
+    with get_db_connect()() as conn:
+        attempts = conn.execute(
+            "SELECT COUNT(*) AS n FROM workflow_execution_children "
+            "WHERE execution_id = ?",
+            (batch["batch_id"],),
+        ).fetchone()["n"]
+    assert attempts == 1
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    (
+        ("scope", "scope_unavailable"),
+        ("timeout", "execution_timeout"),
+        ("permission", "permission_revoked"),
+    ),
+)
+def test_batch_recovery_fails_non_runnable_work_without_launching(
+    batch_builder,
+    monkeypatch,
+    failure,
+    expected_code,
+):
+    batch = batch_builder()
+    if failure == "scope":
+        with get_db_connect()() as conn:
+            conn.execute(
+                "UPDATE workflow_executions SET project_id = 'prj_missing_recovery' "
+                "WHERE id = ?",
+                (batch["batch_id"],),
+            )
+            conn.commit()
+    elif failure == "timeout":
+        monkeypatch.setattr(
+            "services.assessments.batch.recovery.execution_expired",
+            lambda _execution: True,
+        )
+    else:
+        monkeypatch.setattr(
+            "services.assessments.batch.recovery.current_execution_role",
+            lambda _execution: (
+                "permission_revoked",
+                "The initiator can no longer run commands.",
+                "viewer",
+            ),
+        )
+    starts: list[str] = []
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.launch_assessment_batch",
+        lambda batch_id: starts.append(batch_id),
+    )
+
+    assert recover_assessment_batch(batch["batch_id"]) == "failed"
+    assert starts == []
+    parent = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert parent is not None
+    assert (parent["status"], parent["failure_code"]) == ("failed", expected_code)
+    assert parent["progress"]["unavailable"] == (1 if failure == "scope" else 0)
+
+
+def test_batch_recovery_waits_for_a_live_run_after_project_scope_disappears(
+    batch_builder,
+    monkeypatch,
+):
+    batch = batch_builder()
+    _make_batch_child_active(batch, run_id="run-batch-scope-loss")
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_executions SET project_id = 'prj_missing_live_recovery' "
+            "WHERE id = ?",
+            (batch["batch_id"],),
+        )
+        conn.commit()
+    signaled: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery_stop.signal_batch_cancellation_runs",
+        lambda _session_id, batch_runs, **_kwargs: signaled.extend(
+            tuple(run_ids) for _batch_id, run_ids in batch_runs
+        ),
+    )
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.run_is_still_active",
+        lambda _execution, _run_id: True,
+    )
+
+    assert recover_assessment_batch(batch["batch_id"]) == "failed"
+    waiting = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert waiting is not None
+    assert (waiting["status"], waiting["failure_code"]) == (
+        "canceling",
+        "scope_unavailable",
+    )
+    assert signaled == [("run-batch-scope-loss",)]
+
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.run_is_still_active",
+        lambda _execution, _run_id: False,
+    )
+    assert recover_assessment_batch(batch["batch_id"]) == "failed"
+    settled = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert settled is not None
+    assert (settled["status"], settled["failure_code"]) == (
+        "failed",
+        "scope_unavailable",
+    )
+    assert settled["progress"]["canceled"] == 1
+    with get_db_connect()() as conn:
+        attempts = conn.execute(
+            "SELECT COUNT(*) AS n FROM workflow_execution_children "
+            "WHERE execution_id = ?",
+            (batch["batch_id"],),
+        ).fetchone()["n"]
+    assert attempts == 1
+
+
+def test_batch_recovery_repairs_and_fails_a_malformed_checkpoint(
+    batch_builder,
+    monkeypatch,
+):
+    batch = batch_builder()
+    dialect = dialect_for_backend(get_db_backend())
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_execution_steps SET fanout_checkpoint = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001'",
+            (
+                dialect.json_param({
+                    "pending": [0],
+                    "running": [0],
+                    "completed": [],
+                    "failed": [],
+                    "skipped": [],
+                    "cancelled": False,
+                }),
+                batch["batch_id"],
+            ),
+        )
+        conn.commit()
+    starts: list[str] = []
+    monkeypatch.setattr(
+        "services.assessments.batch.recovery.launch_assessment_batch",
+        lambda batch_id: starts.append(batch_id),
+    )
+
+    assert recover_assessment_batch(batch["batch_id"]) == "failed"
+    assert starts == []
+    parent = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert parent is not None
+    assert (parent["status"], parent["failure_code"]) == (
+        "failed",
+        "recovery_snapshot_invalid",
+    )
+
+
+def test_batch_recovery_pages_all_executions_and_isolates_errors(monkeypatch, caplog):
+    from services.assessments.batch import recovery
+
+    refs = [
+        (f"abx_recovery_{index:03d}", f"2026-08-17 00:{index // 60:02d}:{index % 60:02d}")
+        for index in range(205)
+    ]
+
+    def recovery_page(*, limit, after_created="", after_id="", execution_kind=""):
+        assert execution_kind == "assessment_batch"
+        return [item for item in refs if (item[1], item[0]) > (after_created, after_id)][:limit]
+
+    examined: list[str] = []
+    monkeypatch.setattr(recovery.storage, "active_execution_page_for_recovery", recovery_page)
+    monkeypatch.setattr(
+        recovery,
+        "recover_assessment_batch",
+        lambda batch_id: examined.append(batch_id)
+        or ((_ for _ in ()).throw(RuntimeError("recovery error")) if batch_id == refs[57][0] else "left_running"),
+    )
+    recorded: list[str] = []
+    monkeypatch.setattr(
+        recovery.app_metrics,
+        "record_assessment_batch_recovery_action",
+        lambda outcome: recorded.append(outcome),
+    )
+
+    result = recover_assessment_batches(limit=100)
+
+    assert result == {
+        "recovered": 0,
+        "left_running": 204,
+        "failed": 0,
+        "ignored": 0,
+        "errors": 1,
+    }
+    assert examined == [batch_id for batch_id, _created in refs]
+    assert recorded.count("left_running") == 204
+    assert recorded.count("failed") == 1
+    error = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "ASSESSMENT_BATCH_RECOVERY_ERROR"
+    )
+    assert error.batch_id == refs[57][0]
+    assert error.stage == "recover_batch"
+
+
+def test_runtime_bootstrap_runs_batch_recovery_after_workflow_recovery(monkeypatch):
+    import runtime_bootstrap
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "cleanup_active_run_metadata_on_startup",
+        lambda: calls.append("active_runs"),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "cleanup_http_profile_runtime_on_startup",
+        lambda: calls.append("http_profiles"),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "recover_workflow_executions_on_startup",
+        lambda: calls.append("workflows"),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "recover_assessment_batches_on_startup",
+        lambda: calls.append("assessment_batches"),
+    )
+
+    runtime_bootstrap.bootstrap_runtime(
+        init_metrics=False,
+        init_logging=False,
+        init_process=False,
+        init_db=False,
+        cleanup_active_runs=True,
+        runtime_name="batch-recovery-test",
+    )
+
+    assert calls == ["active_runs", "http_profiles", "workflows", "assessment_batches"]
 
 
 def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_builder):

@@ -287,6 +287,7 @@ class TestMetricsEndpoint:
         )
         app_metrics.record_completed_pty("mtr darklab.sh", 130, 0.5)
         app_metrics.record_workspace_evictions(2, "manual")
+        from services.metrics import assessment_batches as assessment_batch_metrics
         from services.metrics import assessments as assessment_metrics
         from services.metrics import probes as probe_metrics
         from services.metrics import workflows as workflow_metrics
@@ -303,6 +304,7 @@ class TestMetricsEndpoint:
         assessment_metrics.record_assessment_connector_operation(
             "provider_private", "callback_private", "job_private", float("nan")
         )
+        assessment_batch_metrics.record_assessment_batch_recovery_action("recovered")
         probe_metrics.record_probe_operation("launch", "success", protected=True)
         probe_metrics.record_probe_operation("resolve", "rejected")
         probe_metrics.record_probe_operation("raw_phase", "raw_outcome")
@@ -401,6 +403,10 @@ class TestMetricsEndpoint:
         assert 'darklab_workflow_capture_failures_total{reason="required_missing"}' in body
         assert re.search(r"darklab_workflow_cancellations_total [1-9]", body)
         assert 'darklab_workflow_recovery_actions_total{action="recovered"}' in body
+        assert (
+            'darklab_assessment_batch_recovery_actions_total{action="recovered"}'
+            in body
+        )
 
 
 class TestMetricsDefinitionDrift:

@@ -34,6 +34,7 @@ from services.workflows.execution_authorization import (
     execution_expired as _execution_expired,
     max_execution_runtime_seconds as _max_runtime_seconds,
 )
+from services.workflows.recovery_runs import run_is_still_active
 from services.workflows import storage
 
 
@@ -506,12 +507,7 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
 
 
 def _run_is_still_active(execution: Mapping[str, object], run_id: str) -> bool:
-    from core.process import pid_for_session, pid_for_team  # noqa: PLC0415
-
-    team_id = str(execution.get("team_id") or "")
-    if team_id:
-        return pid_for_team(run_id, team_id) is not None
-    return pid_for_session(run_id, str(execution.get("session_id") or "")) is not None
+    return run_is_still_active(execution, run_id)
 
 
 def _recover_completed_step(

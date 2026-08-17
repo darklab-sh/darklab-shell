@@ -82,7 +82,7 @@ def get_batch_parent(
         "preview_id": str(parent["preview_id"]),
         "preview_digest": str(parent["preview_digest"]),
         "source_batch_id": str(parent["source_execution_id"] or ""),
-        "status": progress.status,
+        "status": "failed" if str(parent["status"] or "") == "failed" else progress.status,
         "item_count": int(parent["item_count"]),
         "chunk_count": len(chunks),
         "concurrency": {

@@ -638,6 +638,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/process.py", 1170, "ratchet-only"),
     ModuleSizeBudget("app/services/metrics/__init__.py", 987, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/metrics/assessments.py", 340, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/metrics/assessment_batches.py", 45, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/metrics/probes.py", 64, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/auto_promote.py", 963, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/runs/broker_worker.py", 496, "split-package-ratchet"),
@@ -962,6 +965,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/fanout_parent_completion.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_parent_kind.py", 32, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_kind_events.py", 47, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workflows/recovery_runs.py", 30, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/child_launch_spec.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_launch.py", 170, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_run.py", 185, "split-package-ratchet"),
@@ -1027,6 +1031,24 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/batch/rollup.py", 100, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/batch/revalidation.py", 157, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/recovery.py", 300, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/recovery_events.py",
+        30,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/recovery_snapshot.py",
+        225,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/recovery_stop.py",
+        300,
+        "split-package-ratchet",
     ),
     ModuleSizeBudget("app/services/assessments/batch/start.py", 144, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/start_storage.py", 315, "split-package-ratchet"),

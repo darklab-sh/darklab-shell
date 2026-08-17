@@ -24,6 +24,7 @@ from services.workflows.fanout_child_state import (
     save_child_checkpoint as _save_checkpoint,
 )
 from services.workflows.fanout_parent_completion import finalize_fanout_parent_on_conn
+from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 
 
 _ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -182,6 +183,12 @@ def reset_launching_fanout_child_for_recovery(child_id: str) -> bool:
         )
         if changed.rowcount == 1:
             _save_checkpoint(conn, row, checkpoint.reset_running([ordinal]))
+            if str(row["execution_kind"] or "") == ASSESSMENT_BATCH_EXECUTION_KIND:
+                from services.assessments.batch.recovery_events import (  # noqa: PLC0415
+                    record_batch_child_recovered_on_conn,
+                )
+
+                record_batch_child_recovered_on_conn(conn, row)
         conn.commit()
     return changed.rowcount == 1
 

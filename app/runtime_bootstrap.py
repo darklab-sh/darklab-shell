@@ -242,6 +242,26 @@ def recover_workflow_executions_on_startup() -> None:
         })
 
 
+def recover_assessment_batches_on_startup() -> None:
+    from services.assessments.batch.recovery import (  # noqa: PLC0415
+        recover_assessment_batches,
+    )
+
+    try:
+        recover_assessment_batches()
+    except Exception:
+        log.error(
+            "ASSESSMENT_BATCH_RECOVERY_ERROR",
+            exc_info=True,
+            extra={
+                "batch_id": "",
+                "stage": "recovery_page",
+                "pid": os.getpid(),
+                "recovery_owner": True,
+            },
+        )
+
+
 def cleanup_http_profile_runtime_on_startup() -> None:
     from services.assessments.http_profile_runtime import (  # noqa: PLC0415
         cleanup_stale_http_profile_runtime,
@@ -321,6 +341,7 @@ def bootstrap_runtime(
         ("active_run_cleanup", cleanup_active_runs, cleanup_active_run_metadata_on_startup),
         ("http_profile_runtime_cleanup", cleanup_active_runs, cleanup_http_profile_runtime_on_startup),
         ("workflow_recovery", cleanup_active_runs, recover_workflow_executions_on_startup),
+        ("assessment_batch_recovery", cleanup_active_runs, recover_assessment_batches_on_startup),
     )
     for step, enabled, func in steps:
         if not enabled:

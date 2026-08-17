@@ -16,6 +16,9 @@ from services.assessments.batch.contracts import (
 )
 from services.assessments.batch.events import append_batch_event
 from services.assessments.batch.revalidation import build_batch_child_launch_spec
+from services.assessments.batch.recovery_stop import (
+    stop_assessment_batch_for_recovery,
+)
 from services.workflows import storage
 from services.workflows.execution_authorization import (
     current_execution_role,
@@ -36,22 +39,21 @@ def _execution(batch_id: str) -> dict[str, object] | None:
     )
 
 
-def _fail_execution(
+def _stop_execution(
     execution: Mapping[str, object],
     code: str,
     detail: str,
 ) -> None:
-    storage.fail_execution(
+    stop_assessment_batch_for_recovery(
         str(execution.get("id") or ""),
         code,
         detail,
-        step_id=str(execution.get("current_step_id") or ""),
     )
 
 
 def _authorized_role(execution: Mapping[str, object]) -> tuple[bool, str]:
     if execution_expired(execution):
-        _fail_execution(
+        _stop_execution(
             execution,
             "execution_timeout",
             "The assessment batch exceeded its maximum runtime.",
@@ -59,7 +61,7 @@ def _authorized_role(execution: Mapping[str, object]) -> tuple[bool, str]:
         return False, ""
     code, detail, role = current_execution_role(execution)
     if code:
-        _fail_execution(execution, code, detail)
+        _stop_execution(execution, code, detail)
         return False, ""
     return True, role
 

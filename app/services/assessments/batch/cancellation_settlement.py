@@ -55,7 +55,8 @@ def finalize_canceling_batch_run(
         conn.execute(dialect.begin_immediate_sql())
         row = conn.execute(
             "SELECT c.*, s.step_index, s.fanout_checkpoint, "
-            "e.status AS execution_status FROM workflow_execution_children c "
+            "e.status AS execution_status, e.failure_code AS parent_failure_code "
+            "FROM workflow_execution_children c "
             "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
             "AND s.step_id = c.step_id "
             "JOIN workflow_executions e ON e.id = c.execution_id "
@@ -113,19 +114,28 @@ def finalize_canceling_batch_run(
                 error_code=error_code,
             )
         if not next_checkpoint.pending and not next_checkpoint.running:
+            parent_failure = str(row["parent_failure_code"] or "")
+            chunk_status = "failed" if parent_failure else "canceled"
+            chunk_reason = parent_failure or "cancelled"
             conn.execute(
-                "UPDATE workflow_execution_steps SET status = 'canceled', finished = ? "
+                "UPDATE workflow_execution_steps SET status = ?, error_code = ?, finished = ? "
                 "WHERE execution_id = ? AND step_id = ? "
                 "AND status IN ('launching', 'running')",
-                (finished, str(row["execution_id"]), str(row["step_id"])),
+                (
+                    chunk_status,
+                    chunk_reason,
+                    finished,
+                    str(row["execution_id"]),
+                    str(row["step_id"]),
+                ),
             )
             append_batch_event_on_conn(
                 conn,
                 str(row["execution_id"]),
                 "chunk_status_changed",
                 chunk_index=int(row["step_index"]),
-                status="canceled",
-                reason_code="cancelled",
+                status=chunk_status,
+                reason_code=chunk_reason,
                 created=finished,
             )
         terminalize_batch_cancellation_on_conn(
