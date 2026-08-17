@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -33,6 +34,8 @@ from services.assessments.run_launch_context import AssessmentRunLaunchContext
 from services.notifications import channels_store
 from services.notifications.models import NotificationEvent
 from services.metrics.assessment_batch_state import assessment_batch_metric_families
+from services.projects.packages import evidence_manifest_from_summary
+from services.projects.queries import get_project_summary
 from services.runs.start_contracts import BrokeredRunStartResult
 from services.workflows.child_launch_spec import ChildLaunchSpec
 from services.workflows.executions import finalize_workflow_run
@@ -45,9 +48,14 @@ def batch_builder():
     make_test_app()
     project_ids: list[str] = []
 
-    def build(item_count: int = 1, *, parallel: int = 1) -> dict[str, str]:
+    def build(
+        item_count: int = 1,
+        *,
+        parallel: int = 1,
+        session_id: str = "",
+    ) -> dict[str, str]:
         suffix = uuid.uuid4().hex
-        session_id = "batch-execution-" + suffix
+        session_id = session_id or "batch-execution-" + suffix
         project_id = "prj_batch_" + suffix[:20]
         project_ids.append(project_id)
         assessment_id = "asm_batch_" + suffix[:20]
@@ -282,6 +290,149 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
         "item_run_bound",
     ]
     assert all("target" not in event["details"] for event in events)
+
+
+def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
+    batch_builder,
+):
+    client = make_test_app().test_client()
+    token = client.get("/session/token/generate").get_json()["session_token"]
+    batch = batch_builder(session_id=token)
+    run_id = "run-batch-provenance-" + uuid.uuid4().hex
+    check_id = "chk-batch-provenance-" + uuid.uuid4().hex
+    evidence_id = "ase-batch-provenance-" + uuid.uuid4().hex
+    created = "2026-08-17 12:01:00"
+    with get_db_connect()() as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, run_kind, command, started, finished, exit_code, "
+            "output_preview, output_line_count) "
+            "VALUES (?, ?, 'external', 'ping -c 4 target-0.example.test', ?, ?, 0, '[]', 0)",
+            (run_id, batch["session_id"], created, created),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_children SET run_id = ?, status = 'succeeded', "
+            "exit_code = 0, started = ?, finished = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001' AND ordinal = 0",
+            (run_id, created, created, batch["batch_id"]),
+        )
+        conn.execute(
+            "INSERT INTO project_assessment_checks "
+            "(id, assessment_id, category, check_key, target_entity_id, target_type, "
+            "target_value, target_value_hash, applicability, policy_level, state, "
+            "state_source, state_reason, recommended_action_key, first_evidence_at, "
+            "last_evidence_at, created_at, updated_at) "
+            "VALUES (?, ?, 'network', 'batch_provenance', 'ent_batch_provenance', "
+            "'domain', 'target-0.example.test', ?, 'applicable', 'safe', 'covered', "
+            "'derived', '', 'command:ping', ?, ?, ?, ?)",
+            (check_id, batch["assessment_id"], "a" * 64, created, created, created, created),
+        )
+        conn.execute(
+            "INSERT INTO assessment_batch_item_checks "
+            "(batch_id, item_index, mapping_index, assessment_id, check_id, check_key, "
+            "target_entity_id, coverage_key, frozen_check_digest, created) "
+            "VALUES (?, 0, 0, ?, ?, 'batch_provenance', 'ent_batch_provenance', ?, ?, ?)",
+            (batch["batch_id"], batch["assessment_id"], check_id, "b" * 64, "c" * 64, created),
+        )
+        conn.execute(
+            "INSERT INTO project_assessment_evidence "
+            "(id, assessment_id, check_id, evidence_type, evidence_id, source_state, "
+            "observed_at, match_rule_key, match_rule_version, linked_by, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'run', ?, 'available', ?, 'command:ping', '1', "
+            "'derived', ?, ?)",
+            (evidence_id, batch["assessment_id"], check_id, run_id, created, created, created),
+        )
+        conn.commit()
+
+    headers = {"X-Session-ID": batch["session_id"]}
+    linked = client.post(
+        f"/projects/{batch['project_id']}/links",
+        json={"entity_type": "run", "entity_id": run_id, "source": "manual"},
+        headers=headers,
+    )
+    assert linked.status_code == 201
+
+    history_run = client.get(f"/history/{run_id}?json=1", headers=headers).get_json()
+    project_runs = client.get(
+        f"/projects/{batch['project_id']}/runs",
+        headers=headers,
+    ).get_json()["runs"]
+    assessment = client.get(
+        f"/projects/{batch['project_id']}/assessments/{batch['assessment_id']}",
+        headers=headers,
+    ).get_json()
+    api_headers = {"Authorization": f"Bearer {token}"}
+    api_history_run = client.get(
+        f"/api/v1/history/{run_id}",
+        headers=api_headers,
+    ).get_json()["run"]
+    api_history_page = client.get(
+        "/api/v1/history",
+        headers=api_headers,
+    ).get_json()["runs"]
+    provenance = history_run["assessment_batch"]
+    assert history_run["assessment_batch_id"] == batch["batch_id"]
+    assert history_run["assessment_batch_item_index"] == 0
+    assert provenance["batch_id"] == batch["batch_id"]
+    assert provenance["assessment_id"] == batch["assessment_id"]
+    assert provenance["project_id"] == batch["project_id"]
+    assert provenance["item"] == {
+        "item_index": 0,
+        "step_id": "chunk_0001",
+        "attempt": 1,
+        "status": "succeeded",
+        "run_id": run_id,
+        "exit_code": 0,
+        "check_count": 1,
+    }
+    assert history_run["workflow_execution"] is None
+    assert project_runs[0]["assessment_batch"] == provenance
+    assert api_history_run["assessment_batch"] == provenance
+    assert api_history_run["assessment_batch_id"] == batch["batch_id"]
+    assert api_history_run["assessment_batch_item_index"] == 0
+    assert api_history_page[0]["assessment_batch"] == provenance
+    recent = assessment["recent_evidence"]["evidence"][0]
+    assert recent["evidence_id"] == run_id
+    assert recent["assessment_batch"] == provenance
+    serialized = json.dumps(provenance, sort_keys=True)
+    for private_value in (
+        "target-0.example.test",
+        "ping -c 4",
+        "display_command",
+        "public_plan",
+        "profile",
+        "output",
+    ):
+        assert private_value not in serialized
+
+    summary = get_project_summary(batch["session_id"], batch["project_id"])
+    assert summary is not None
+    manifest = evidence_manifest_from_summary(
+        summary,
+        {
+            "selection": {
+                "run_ids": [run_id],
+                "transcript_run_ids": [run_id],
+                "finding_ids": [],
+                "artifact_ids": [],
+                "target_ids": [],
+            },
+            "package_format_version": 2,
+            "preset": "custom",
+            "include_artifacts": False,
+            "include_private_notes": False,
+            "redaction_mode": "raw",
+        },
+    )
+    assert manifest["runs"][0]["assessment_batch"] == provenance
+
+    hidden = client.get(
+        f"/history/{run_id}?json=1",
+        headers={"X-Session-ID": "other-session"},
+    ).get_json()
+    assert hidden["assessment_batch"] is None
+    assert hidden["assessment_batch_id"] == ""
+    assert hidden["assessment_batch_item_index"] is None
 
 
 def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypatch):

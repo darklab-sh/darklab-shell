@@ -40,6 +40,7 @@ import { bindDismissible as importedBindDismissible } from '../../ui/ui_dismissi
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import { openHistoryCompareLauncher as importedOpenHistoryCompareLauncher } from '../run-comparison/history_compare_launcher.js';
 import { openContextualFindingRecord as importedOpenContextualFindingRecord } from '../findings/finding_record_context.js';
+import { openProjectAssessment as importedOpenProjectAssessment } from '../projects/project_context_bridge.js';
 import { renderNmapServiceEvidence } from '../nmap_service_evidence.js';
 import { openWorkflows as importedOpenWorkflows } from '../../controller_action_bridge.js';
 import { _closeHistoryRunActionMenus } from './history_actions.js';
@@ -936,6 +937,41 @@ function _historyRunWorkflowSummary(run) {
   return wrap;
 }
 
+function _historyRunAssessmentBatchSummary(run) {
+  const provenance = run?.assessment_batch;
+  if (!provenance || typeof provenance !== 'object') return null;
+  const batchId = String(provenance.batch_id || run.assessment_batch_id || '').trim();
+  const projectId = String(provenance.project_id || '').trim();
+  const assessmentId = String(provenance.assessment_id || '').trim();
+  if (!batchId) return null;
+  const itemIndex = Number(provenance.item?.item_index ?? run.assessment_batch_item_index);
+  const itemNumber = Number.isInteger(itemIndex) && itemIndex >= 0 ? itemIndex + 1 : null;
+  const checkCount = Number(provenance.item?.check_count || 0);
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-provenance-summary history-run-assessment-batch-summary';
+  const identity = document.createElement('span');
+  identity.className = 'history-run-provenance-label';
+  identity.textContent = [
+    itemNumber ? `Item ${itemNumber}` : '',
+    checkCount ? `${checkCount.toLocaleString()} mapped check${checkCount === 1 ? '' : 's'}` : '',
+    String(provenance.item?.status || provenance.status || '').replaceAll('_', ' '),
+  ].filter(Boolean).join(' · ') || batchId;
+  wrap.appendChild(identity);
+  if (projectId && assessmentId) {
+    const actions = document.createElement('div');
+    actions.className = 'history-run-provenance-actions';
+    const view = document.createElement('button');
+    view.type = 'button';
+    view.className = 'btn btn-secondary btn-compact';
+    view.dataset.historyRunAction = 'open-assessment-batch';
+    view.textContent = 'View batch';
+    view.title = `Open assessment batch ${batchId}`;
+    actions.appendChild(view);
+    wrap.appendChild(actions);
+  }
+  return wrap;
+}
+
 function _historyRunActionButton(label, action, { disabled = false, tone = 'secondary' } = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -1518,6 +1554,10 @@ function _renderHistoryRunSummary(body, run) {
   const workflowSummary = _historyRunWorkflowSummary(run);
   if (workflowSummary) {
     summaryRows.splice(1, 0, _historyRunMetaRow('Playbook', workflowSummary));
+  }
+  const batchSummary = _historyRunAssessmentBatchSummary(run);
+  if (batchSummary) {
+    summaryRows.splice(1, 0, _historyRunMetaRow('Assessment batch', batchSummary));
   }
   summary.append(...summaryRows);
   body.appendChild(summary);
@@ -2967,6 +3007,14 @@ async function _handleHistoryRunModalAction(action) {
     const openWorkflows = (typeof importedOpenWorkflows === 'function' && importedOpenWorkflows)
       || _historyRunGlobalFunction('openWorkflows');
     openWorkflows?.({ executionId });
+  } else if (action === 'open-assessment-batch') {
+    const provenance = run.assessment_batch || {};
+    const projectId = String(provenance.project_id || '').trim();
+    const assessmentId = String(provenance.assessment_id || '').trim();
+    const batchId = String(provenance.batch_id || run.assessment_batch_id || '').trim();
+    if (!projectId || !assessmentId || !batchId) return;
+    closeHistoryRunOverlay();
+    void importedOpenProjectAssessment(projectId, { assessmentId, batchId });
   } else if (action.startsWith('open-workflow-run:')) {
     const siblingRunId = action.slice('open-workflow-run:'.length).trim();
     if (siblingRunId) openHistoryRunDetails({ id: siblingRunId });

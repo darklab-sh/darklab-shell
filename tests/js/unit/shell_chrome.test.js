@@ -57,6 +57,7 @@ const SHELL_CHROME_SRC = readScriptSource('app/static/js/shell_chrome.js').repla
   `
   global.__darklabShellChromeExports = {
     closeProjectWorkspace,
+    openProjectAssessment,
     openProjectWorkspace,
     openProjectWorkspaceById,
     openProjectAutoPromoteRuleFromAtlas,
@@ -540,6 +541,7 @@ function loadShellChrome({
       ${SHELL_CHROME_SRC}
       global.openProjectWorkspace = global.__darklabShellChromeExports.openProjectWorkspace;
       global.openProjectWorkspaceById = global.__darklabShellChromeExports.openProjectWorkspaceById;
+      global.openProjectAssessment = global.__darklabShellChromeExports.openProjectAssessment;
       global.closeProjectWorkspace = global.__darklabShellChromeExports.closeProjectWorkspace;
       global.openProjectAutoPromoteRuleFromAtlas = global.__darklabShellChromeExports.openProjectAutoPromoteRuleFromAtlas;
       global.refreshProjectWorkspace = global.__darklabShellChromeExports.refreshProjectWorkspace;
@@ -643,6 +645,7 @@ function loadShellChrome({
     closeProjectWorkspace: global.closeProjectWorkspace,
     openProjectWorkspace: global.openProjectWorkspace,
     openProjectWorkspaceById: global.openProjectWorkspaceById,
+    openProjectAssessment: global.openProjectAssessment,
     openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
     enhanceAppSelects,
@@ -1249,6 +1252,19 @@ describe('shell chrome project workspace', () => {
       expect(logClientError.mock.calls).toEqual([])
       await vi.waitFor(() => {
         expect(focusCycle).toHaveBeenCalledWith('project-1', 'asmt-active', {
+          batch_id: '',
+          category: '',
+          state: '',
+          priority: '',
+        })
+      })
+      await shell.openProjectAssessment('project-1', {
+        assessmentId: 'asmt-active',
+        batchId: 'abx-focused',
+      })
+      await vi.waitFor(() => {
+        expect(focusCycle).toHaveBeenLastCalledWith('project-1', 'asmt-active', {
+          batch_id: 'abx-focused',
           category: '',
           state: '',
           priority: '',

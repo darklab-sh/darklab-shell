@@ -167,6 +167,14 @@ function createProjectAssessmentRenderer(context, actions) {
       const target = [evidence?.target_type, evidence?.target_value].filter(Boolean).join(' · ');
       if (target) meta.push(target);
     }
+    if (evidence?.assessment_batch_id) {
+      const itemIndex = Number(evidence?.assessment_batch_item_index);
+      meta.push(
+        Number.isInteger(itemIndex) && itemIndex >= 0
+          ? `Assessment batch item ${itemIndex + 1}`
+          : 'Assessment batch',
+      );
+    }
     meta.push(evidence?.linked_by === 'manual' ? 'Linked manually' : 'Matched automatically');
     const observedAt = displayDate(evidence?.observed_at);
     if (observedAt) meta.push(observedAt);

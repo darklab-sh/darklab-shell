@@ -218,10 +218,11 @@ pre { background: #f7f9fb; border: 1px solid #d9e1e8; overflow-wrap: anywhere; p
 {% else %}<p class="muted">No findings are selected for this report.</p>{% endif %}
 {% elif section.type == "included_runs" %}
 {% if runs %}
-<table><thead><tr><th>Command</th><th>Started</th><th>Exit</th><th>Lines</th></tr></thead><tbody>
+<table><thead><tr><th>Command</th><th>Source</th><th>Started</th><th>Exit</th><th>Lines</th></tr></thead><tbody>
 {% for run in runs %}
 <tr>
 <td><code>{{ run.command or run.id }}</code></td>
+<td>{{ run_source_label(run) }}</td>
 <td>{{ run.started }}</td>
 <td>{{ run.exit_code }}</td>
 <td>{{ run.output_line_count }}</td>
@@ -369,6 +370,22 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
     for row in rows:
         lines.append("| " + " | ".join(_md_table_cell(item) for item in row) + " |")
     return lines
+
+
+def _run_source_label(run: Mapping[str, Any]) -> str:
+    batch = run.get("assessment_batch")
+    if isinstance(batch, Mapping) and batch.get("batch_id"):
+        item = batch.get("item") if isinstance(batch.get("item"), Mapping) else {}
+        item_number = int(item.get("item_index") or 0) + 1
+        check_count = int(item.get("check_count") or 0)
+        check_label = f" · {check_count} mapped check{'s' if check_count != 1 else ''}" if check_count else ""
+        return f"Assessment batch {batch['batch_id']} · item {item_number}{check_label}"
+    workflow = run.get("workflow_execution")
+    if isinstance(workflow, Mapping) and workflow.get("execution_id"):
+        step = workflow.get("step") if isinstance(workflow.get("step"), Mapping) else {}
+        step_label = f" · step {step['step_id']}" if step.get("step_id") else ""
+        return f"Playbook {workflow.get('title') or workflow['execution_id']}{step_label}"
+    return "Direct run"
 
 
 def _append_assessment_finding_changes_markdown(
@@ -586,13 +603,14 @@ def _render_markdown_section(section: dict[str, Any], context: dict[str, Any]) -
         rows = [
             [
                 run.get("command") or run.get("id"),
+                _run_source_label(run),
                 run.get("started"),
                 run.get("exit_code"),
                 run.get("output_line_count"),
             ]
             for run in context.get("runs", [])
         ]
-        run_table = _markdown_table(["Command", "Started", "Exit", "Lines"], rows)
+        run_table = _markdown_table(["Command", "Source", "Started", "Exit", "Lines"], rows)
         lines.extend(run_table or ["_No runs are selected for this report._"])
     elif section_type == "artifacts":
         if not context.get("artifacts"):
@@ -709,6 +727,7 @@ def render_report_html_from_context(
         metadata_items=_metadata_items(context),
         counts=context.get("counts") or {},
         runs=context.get("runs") or [],
+        run_source_label=_run_source_label,
         targets=context.get("targets") or [],
         findings_by_severity=context.get("findings_by_severity") or [],
         assessment_context=context.get("assessment_context") or {},

@@ -17,6 +17,10 @@ from core.database_backend import DatabaseBackend, SQLiteOperationalError, diale
 from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE, get_log_session_id
 from core.output_signals import command_root as output_command_root
 from core.process import active_runs_for_session
+from services.assessments.batch.provenance import (
+    apply_assessment_batch_provenance,
+    assessment_batch_provenance_by_run,
+)
 from services.metrics_lazy import app_metrics
 from services.history.run_metadata import (
     history_add_filters,
@@ -619,6 +623,11 @@ def list_history_items(
             run_ids,
             owner_scope=owner_scope,
         )
+        batch_provenance = assessment_batch_provenance_by_run(
+            conn,
+            run_ids,
+            owner_scope=owner_scope,
+        )
         labels_by_snapshot = entity_labels_by_entity_ids(conn, "snapshot", snapshot_ids)
         notes_by_snapshot = entity_notes_by_entity_ids(conn, "snapshot", snapshot_ids)
         for item in paged_runs:
@@ -638,6 +647,10 @@ def list_history_items(
             }))
             _apply_schedule_ref(item, scheduled_by_run.get(str(item["id"])))
             apply_workflow_provenance(item, workflow_provenance.get(str(item["id"])))
+            apply_assessment_batch_provenance(
+                item,
+                batch_provenance.get(str(item["id"])),
+            )
         for item in paged_snapshots:
             item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
             item["note"] = (notes_by_snapshot.get(str(item["id"]), []) or [None])[0]
@@ -806,6 +819,8 @@ def history_run_row(run_id: str):
         if run:
             provenance = workflow_provenance_by_run(conn, [run_id], include_steps=True).get(run_id)
             apply_workflow_provenance(run, provenance)
+            batch_provenance = assessment_batch_provenance_by_run(conn, [run_id]).get(run_id)
+            apply_assessment_batch_provenance(run, batch_provenance)
     return run
 
 

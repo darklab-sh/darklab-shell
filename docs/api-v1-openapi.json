@@ -1582,6 +1582,90 @@
         ],
         "type": "object"
       },
+      "AssessmentBatchRunItem": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "check_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "item_index": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_index",
+          "step_id",
+          "attempt",
+          "status",
+          "run_id",
+          "exit_code",
+          "check_count"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchRunProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "batch_id": {
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "item": {
+            "$ref": "#/components/schemas/AssessmentBatchRunItem"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "source_batch_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "batch_id",
+          "assessment_id",
+          "project_id",
+          "status",
+          "source_batch_id",
+          "created",
+          "item"
+        ],
+        "type": "object"
+      },
       "AssessmentBatchStartRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11234,8 +11318,25 @@
         "type": "object"
       },
       "RunSummary": {
+        "additionalProperties": false,
         "properties": {
           "artifact_count": {
+            "type": "integer"
+          },
+          "assessment_batch": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssessmentBatchRunProvenance"
+              }
+            ],
+            "nullable": true
+          },
+          "assessment_batch_id": {
+            "type": "string"
+          },
+          "assessment_batch_item_index": {
+            "minimum": 0,
+            "nullable": true,
             "type": "integer"
           },
           "atlas_entity_count": {
@@ -11315,7 +11416,10 @@
           "atlas_entity_count",
           "atlas_finding_count",
           "scheduled",
-          "schedule_id"
+          "schedule_id",
+          "assessment_batch",
+          "assessment_batch_id",
+          "assessment_batch_item_index"
         ],
         "type": "object"
       },

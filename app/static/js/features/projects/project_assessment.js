@@ -302,11 +302,18 @@ function createProjectAssessmentController(context) {
     st.findingOffset = 0;
     resetDetailState(st, { findings: false });
     renderViews();
+    let loaded;
     if (st.loaded && st.assessments.some(item => String(item?.id || '') === nextId)) {
-      return loadDetail(id);
+      loaded = await loadDetail(id);
+    } else {
+      st.loaded = false;
+      loaded = await load(id, { force: true });
     }
-    st.loaded = false;
-    return load(id, { force: true });
+    const batchId = String(filters.batch_id || '');
+    if (loaded && batchId) {
+      await batchManager.focusBatch(id, nextId, batchId);
+    }
+    return loaded;
   }
 
   async function setFilter(projectId, key, value) {

@@ -20,6 +20,7 @@ from services.api_v1.openapi_finding_evidence import finding_evidence_paths, fin
 from services.api_v1.openapi_http_profiles import http_profile_paths, http_profile_schemas
 from services.api_v1.openapi_osv_lookup import osv_lookup_paths, osv_lookup_schemas
 from services.api_v1.openapi_probes import probe_paths, probe_schemas
+from services.api_v1.openapi_run_summary import run_summary_schemas
 from services.api_v1.openapi_verification_actions import verification_action_paths as action_paths, verification_action_schemas
 from services.scheduler.models import CADENCE_PRESETS
 from services.watchers.models import (
@@ -368,51 +369,7 @@ OPENAPI_SPEC: dict = {
                     "updated": {"type": "string", "nullable": True},
                 },
             },
-            "RunSummary": {
-                "type": "object",
-                "required": [
-                    "id",
-                    "command",
-                    "started",
-                    "finished",
-                    "status",
-                    "exit_code",
-                    "run_kind",
-                    "output_line_count",
-                    "preview_truncated",
-                    "full_output_available",
-                    "full_output_truncated",
-                    "artifact_count",
-                    "finding_count",
-                    "label_count",
-                    "note_count",
-                    "atlas_entity_count",
-                    "atlas_finding_count",
-                    "scheduled",
-                    "schedule_id",
-                ],
-                "properties": {
-                    "id": {"type": "string"},
-                    "command": {"type": "string"},
-                    "started": {"type": "string", "nullable": True},
-                    "finished": {"type": "string", "nullable": True},
-                    "status": {"type": "string"},
-                    "exit_code": {"type": "integer", "nullable": True},
-                    "run_kind": {"type": "string"},
-                    "output_line_count": {"type": "integer"},
-                    "preview_truncated": {"type": "boolean"},
-                    "full_output_available": {"type": "boolean"},
-                    "full_output_truncated": {"type": "boolean"},
-                    "artifact_count": {"type": "integer"},
-                    "finding_count": {"type": "integer"},
-                    "label_count": {"type": "integer"},
-                    "note_count": {"type": "integer"},
-                    "atlas_entity_count": {"type": "integer"},
-                    "atlas_finding_count": {"type": "integer"},
-                    "scheduled": {"type": "boolean"},
-                    "schedule_id": {"type": "string"},
-                },
-            },
+            **run_summary_schemas(),
             "RunPage": {
                 "type": "object",
                 "required": ["runs", "total", "limit", "offset", "has_more"],

@@ -512,6 +512,19 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     return refreshBatch(st, { render: true });
   }
 
+  async function focusBatch(projectId, assessmentId, batchId) {
+    const st = stateFor(projectId, assessmentId);
+    const nextId = String(batchId || '');
+    if (!nextId) return false;
+    const loaded = await load(projectId, assessmentId);
+    if (!loaded) return false;
+    if (st.selectedBatchId === nextId && st.batch) {
+      renderViews();
+      return true;
+    }
+    return selectBatch(projectId, assessmentId, nextId);
+  }
+
   async function loadMorePreviewItems(projectId, assessmentId) {
     const st = stateFor(projectId, assessmentId);
     const loaded = await loadPreviewItemPage(st, { append: true });
@@ -540,7 +553,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     return renderer.render(projectId, assessment, detail, st, { mobile });
   }
 
-  return { invalidate, load, renderSection, stateFor };
+  return { focusBatch, invalidate, load, renderSection, stateFor };
 }
 
 export { ACTIVE_BATCH_STATUSES, createProjectAssessmentBatchManager };

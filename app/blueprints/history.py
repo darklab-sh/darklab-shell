@@ -774,7 +774,14 @@ def get_run(run_id):
     notes_by_run = run_metadata["notes_by_run"]
     scheduled_by_run = run_metadata["scheduled_by_run"]
     if not include_private_metadata:
-        run.update({"workflow_execution": None, "workflow_execution_id": "", "workflow_step_id": ""})
+        run.update({
+            "workflow_execution": None,
+            "workflow_execution_id": "",
+            "workflow_step_id": "",
+            "assessment_batch": None,
+            "assessment_batch_id": "",
+            "assessment_batch_item_index": None,
+        })
         run["output_entries"] = line_entries_from_events(omit_raw_only_line_entries(run["output_entries"]))
         run["output"] = [
             str(entry.get("text", "")) if isinstance(entry, dict) else str(entry)

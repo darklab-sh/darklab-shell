@@ -5116,6 +5116,15 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             "darklab.sh",
         ),
     )
+    conn.execute(
+        "UPDATE workflow_execution_children SET run_id = %s, status = 'succeeded', "
+        "exit_code = 0, error_code = '', finished = %s WHERE id = %s",
+        (
+            run_id,
+            "2026-05-17T00:01:00Z",
+            claimed_batch_item["child"]["id"],
+        ),
+    )
     conn.commit()
     link_resp = client.post(
         f"/projects/{project['id']}/links",
@@ -5249,6 +5258,22 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
         headers=api_headers,
     )
+    browser_history_detail_resp = client.get(
+        f"/history/{run_id}?json=1",
+        headers=browser_headers,
+    )
+    project_runs_resp = client.get(
+        f"/projects/{project['id']}/runs",
+        headers=browser_headers,
+    )
+    api_history_detail_resp = client.get(
+        f"/api/v1/history/{run_id}",
+        headers=api_headers,
+    )
+    api_history_page_resp = client.get(
+        "/api/v1/history?limit=10",
+        headers=api_headers,
+    )
     http_profile_delete_resp = client.delete(
         f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
         headers=browser_headers,
@@ -5346,6 +5371,23 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
     assert service_check["state"] == "covered"
     assert service_check["evidence_previews"]["evidence"][0]["evidence_id"] == run_id
+    assessment_provenance = service_check["evidence_previews"]["evidence"][0][
+        "assessment_batch"
+    ]
+    assert assessment_provenance["batch_id"] == started_batch["batch_id"]
+    assert assessment_provenance["item"]["check_count"] >= 1
+    browser_history_detail = json.loads(browser_history_detail_resp.data)
+    assert browser_history_detail["assessment_batch"] == assessment_provenance
+    assert json.loads(project_runs_resp.data)["runs"][0]["assessment_batch"] == (
+        assessment_provenance
+    )
+    api_history_detail = json.loads(api_history_detail_resp.data)["run"]
+    assert api_history_detail["assessment_batch"] == assessment_provenance
+    assert api_history_detail["assessment_batch_id"] == started_batch["batch_id"]
+    assert api_history_detail["assessment_batch_item_index"] == 0
+    assert json.loads(api_history_page_resp.data)["runs"][0]["assessment_batch"] == (
+        assessment_provenance
+    )
     assert http_profile_delete_resp.status_code == 200
     assert active_resp.status_code == 200
     assert link_resp.status_code == 201

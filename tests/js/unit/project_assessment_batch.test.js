@@ -152,6 +152,49 @@ afterEach(() => {
 })
 
 describe('Project assessment batches', () => {
+  it('focuses a batch outside the first history page by loading its exact id', async () => {
+    const requestedBatch = {
+      ...activeBatch,
+      batch_id: 'abx_exact_history',
+      status: 'completed',
+      progress: { ...activeBatch.progress, running: 0, succeeded: 1, settled: 1 },
+    }
+    const projectWorkspaceRequest = vi.fn(async (url) => {
+      const value = String(url)
+      if (value.startsWith('/projects/prj_batch_1/assessment-batches?')) {
+        return response({ batches: [], has_more: true })
+      }
+      if (value === '/assessment-batches/abx_exact_history') {
+        return response({ batch: requestedBatch })
+      }
+      if (value.endsWith('/items?cursor=0&limit=100')) {
+        return response({ items: [{ ...batchItem, status: 'succeeded' }], next_cursor: null })
+      }
+      if (value.includes('/events?')) {
+        return response({ events: [], next_cursor: null, has_more: false })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const manager = createProjectAssessmentBatchManager(
+      context(projectWorkspaceRequest),
+      { renderViews: vi.fn() },
+    )
+
+    expect(await manager.focusBatch(
+      'prj_batch_1',
+      assessment.id,
+      requestedBatch.batch_id,
+    )).toBe(true)
+    const state = manager.stateFor('prj_batch_1', assessment.id)
+    expect(state.selectedBatchId).toBe(requestedBatch.batch_id)
+    expect(state.batch).toEqual(requestedBatch)
+    expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      '/assessment-batches/abx_exact_history',
+      { cache: 'no-store' },
+    )
+    manager.invalidate()
+  })
+
   it('does not offer a new plan on a terminal cycle without batch history', async () => {
     const projectWorkspaceRequest = vi.fn(async (url) => {
       if (String(url).startsWith('/projects/prj_batch_1/assessment-batches?')) {

@@ -728,6 +728,10 @@ def test_api_v1_history_is_token_scoped_and_uses_page_envelope():
     assert data["total"] >= 1
     assert any(item["id"] == run_id for item in data["runs"])
     assert all(item["command"] != "echo other" for item in data["runs"])
+    from services.api_v1.openapi import openapi_spec
+
+    schemas = openapi_spec()["components"]["schemas"]
+    _assert_openapi_payload(data["runs"][0], schemas["RunSummary"], schemas)
     assert search.status_code == 200
     search_data = json.loads(search.data)
     assert search_data["query"] == "scoped"

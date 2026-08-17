@@ -4666,7 +4666,7 @@ let importedProjectWorkspaceShell;
   }
 
   function _openProjectAssessment(projectId, {
-    assessmentId = '', category = '', state = '', priority = '',
+    assessmentId = '', batchId = '', category = '', state = '', priority = '',
   } = {}) {
     const normalizedProjectId = String(projectId || projectWorkspaceState.selectedId() || '').trim();
     const normalizedAssessmentId = String(assessmentId || '').trim();
@@ -4676,6 +4676,7 @@ let importedProjectWorkspaceShell;
     else _renderProjectExplorer();
     _loadProjectAssessmentController()
       .then(controller => controller.focusCycle(normalizedProjectId, normalizedAssessmentId, {
+        batch_id: String(batchId || '').trim(),
         category: String(category || '').trim(),
         state: String(state || '').trim(),
         priority: String(priority || '').trim(),
@@ -4973,6 +4974,13 @@ let importedProjectWorkspaceShell;
     await _ensureProjectSummary(normalizedProjectId);
     _renderProjectWorkspace();
     _renderProjectExplorer();
+    return true;
+  }
+
+  async function openProjectAssessment(projectId, options = {}) {
+    const opened = await openProjectWorkspaceById(projectId, { tab: 'assessment' });
+    if (!opened) return false;
+    _openProjectAssessment(projectId, options);
     return true;
   }
 
@@ -5354,6 +5362,7 @@ let importedProjectWorkspaceShell;
       notifyProjectWorkspaceChanged: _notifyProjectWorkspaceChanged,
       openEntityMetadataEditor,
       openProjectAutoPromoteRuleFromAtlas,
+      openProjectAssessment,
       openProjectWorkspace,
       openProjectWorkspaceById,
       refreshActiveProjectContext: loadActiveProjectContext,
