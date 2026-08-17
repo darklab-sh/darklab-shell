@@ -64,7 +64,7 @@ def get_batch_parent(
     child_rows = [{str(key): row[key] for key in row.keys()} for row in children]
     progress = derive_batch_progress(
         child_rows,
-        cancellation_requested=str(parent["status"] or "") == "canceling",
+        cancellation_requested=str(parent["status"] or "") in {"canceling", "canceled"},
     )
     if progress.total != int(parent["item_count"]):
         raise AssessmentBatchError(

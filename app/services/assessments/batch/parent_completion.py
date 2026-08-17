@@ -24,7 +24,7 @@ def _latest_children(conn: Any, batch_id: str) -> list[dict[str, object]]:
     return [{str(key): row[key] for key in row.keys()} for row in rows]
 
 
-def _progress_details(conn: Any, batch_id: str) -> dict[str, int]:
+def batch_progress_details_on_conn(conn: Any, batch_id: str) -> dict[str, int]:
     progress = derive_batch_progress(_latest_children(conn, batch_id))
     return {
         "pending": progress.pending,
@@ -99,7 +99,7 @@ def finalize_batch_chunk_on_conn(
             batch_id,
             "parent_status_changed",
             status="completed",
-            details=_progress_details(conn, batch_id),
+            details=batch_progress_details_on_conn(conn, batch_id),
             created=finished,
         )
     else:
@@ -122,4 +122,4 @@ def finalize_batch_chunk_on_conn(
     }
 
 
-__all__ = ["finalize_batch_chunk_on_conn"]
+__all__ = ["batch_progress_details_on_conn", "finalize_batch_chunk_on_conn"]

@@ -973,8 +973,27 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/batch/events.py", 310, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/execution.py", 204, "split-package-ratchet"),
     ModuleSizeBudget(
+        "app/services/assessments/batch/cancellation.py", 330, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/cancellation_events.py",
+        40,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/cancellation_settlement.py",
+        180,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/cancellation_state.py",
+        70,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/batch/finalization.py", 80, "split-package-ratchet"
     ),
+    ModuleSizeBudget("app/services/runs/cancellation.py", 70, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/batch/lifecycle_events.py", 82, "split-package-ratchet"
     ),

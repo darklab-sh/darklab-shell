@@ -8,6 +8,9 @@ from __future__ import annotations
 import logging
 
 from core.helpers import get_log_session_id
+from services.assessments.batch.cancellation_settlement import (
+    finalize_canceling_batch_run,
+)
 from services.assessments.batch.execution import launch_assessment_batch
 from services.workflows import storage
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
@@ -29,6 +32,9 @@ def finalize_assessment_batch_run(
         or str(child.get("execution_kind") or "") != ASSESSMENT_BATCH_EXECUTION_KIND
     ):
         return None
+    canceled = finalize_canceling_batch_run(run_id, int(exit_code))
+    if canceled is not None:
+        return canceled
     finalized = finalize_fanout_child_run(run_id, int(exit_code))
     if not finalized:
         return None

@@ -13,10 +13,13 @@ import pytest
 from conftest import make_test_app
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
+from services.assessments.batch.cancellation import cancel_assessment_batch
 from services.assessments.batch.contracts import AssessmentBatchError, BatchConcurrency
 from services.assessments.batch.events import list_batch_events
 from services.assessments.batch.execution import launch_assessment_batch
+from services.assessments.batch.finalization import finalize_assessment_batch_run
 from services.assessments.batch.revalidation import build_batch_child_launch_spec
+from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.batch.storage import create_batch_parent
 from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.run_launch_context import AssessmentRunLaunchContext
@@ -453,3 +456,159 @@ def test_run_finalization_can_suppress_only_the_child_notification(monkeypatch):
         save_completed_run_fn=lambda *_args, **_kwargs: None,
     )
     assert notifications == ["run-ordinary"]
+
+
+def _make_batch_child_active(batch: dict[str, str], *, run_id: str) -> None:
+    dialect = dialect_for_backend(get_db_backend())
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_executions SET status = 'running', "
+            "current_step_id = 'chunk_0001' WHERE id = ?",
+            (batch["batch_id"],),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_steps SET status = 'running', started = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001'",
+            ("2026-08-17 12:00:01", batch["batch_id"]),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_children SET status = 'running', run_id = ?, "
+            "started = ? WHERE execution_id = ? AND step_id = 'chunk_0001' "
+            "AND ordinal = 0",
+            (run_id, "2026-08-17 12:00:01", batch["batch_id"]),
+        )
+        item_count = conn.execute(
+            "SELECT item_count FROM assessment_batches WHERE execution_id = ?",
+            (batch["batch_id"],),
+        ).fetchone()["item_count"]
+        conn.execute(
+            "UPDATE workflow_execution_steps SET fanout_checkpoint = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001'",
+            (
+                dialect.json_param({
+                    "pending": list(range(1, int(item_count))),
+                    "running": [0],
+                    "completed": [],
+                    "failed": [],
+                    "skipped": [],
+                    "cancelled": False,
+                }),
+                batch["batch_id"],
+            ),
+        )
+        conn.commit()
+
+
+def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_builder):
+    batch = batch_builder(2, parallel=2)
+    signaled: list[str] = []
+
+    first = cancel_assessment_batch(
+        batch["session_id"],
+        batch["batch_id"],
+        cancel_run_fn=lambda run_id, *_args, **_kwargs: signaled.append(run_id),
+    )
+    second = cancel_assessment_batch(
+        batch["session_id"],
+        batch["batch_id"],
+        cancel_run_fn=lambda run_id, *_args, **_kwargs: signaled.append(run_id),
+    )
+
+    assert first is not None and second is not None
+    assert signaled == []
+    assert first["batch"]["status"] == "canceled"
+    assert first["batch"]["progress"]["canceled"] == 2
+    assert second["batch"]["status"] == "canceled"
+    events = list_batch_events(batch["session_id"], batch["batch_id"])
+    assert [event["event_type"] for event in events].count("item_canceled") == 2
+    assert [event["status"] for event in events if event["event_type"] == "parent_status_changed"][-2:] == [
+        "canceling",
+        "canceled",
+    ]
+
+
+def test_running_batch_cancellation_waits_for_the_bound_run_without_retry(batch_builder):
+    batch = batch_builder(2, parallel=2)
+    _make_batch_child_active(batch, run_id="run-batch-cancel")
+    signaled: list[str] = []
+
+    requested = cancel_assessment_batch(
+        batch["session_id"],
+        batch["batch_id"],
+        cancel_run_fn=lambda run_id, *_args, **_kwargs: signaled.append(run_id) or True,
+    )
+
+    assert requested is not None
+    assert requested["batch"]["status"] == "canceling"
+    assert requested["batch"]["progress"]["running"] == 1
+    assert requested["batch"]["progress"]["canceled"] == 1
+    assert signaled == ["run-batch-cancel"]
+    settled = finalize_assessment_batch_run("run-batch-cancel", -15)
+    assert settled is not None
+    assert settled["status"] == "canceled"
+    parent = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert parent is not None
+    assert parent["status"] == "canceled"
+    assert parent["progress"]["canceled"] == 2
+    with get_db_connect()() as conn:
+        attempts = conn.execute(
+            "SELECT COUNT(*) AS n FROM workflow_execution_children "
+            "WHERE execution_id = ?",
+            (batch["batch_id"],),
+        ).fetchone()["n"]
+    assert attempts == 2
+
+
+def test_batch_cancellation_retains_a_failed_signal_until_the_run_settles(batch_builder):
+    batch = batch_builder()
+    _make_batch_child_active(batch, run_id="run-batch-signal-failure")
+
+    def fail_signal(*_args, **_kwargs):
+        raise OSError("bounded cancellation failure")
+
+    requested = cancel_assessment_batch(
+        batch["session_id"],
+        batch["batch_id"],
+        cancel_run_fn=fail_signal,
+    )
+
+    assert requested is not None
+    assert requested["signal_failures"] == 1
+    assert requested["batch"]["status"] == "canceling"
+    settled = finalize_assessment_batch_run("run-batch-signal-failure", 0)
+    assert settled is not None
+    assert settled["status"] == "failed"
+    assert settled["error_code"] == "could_not_cancel"
+    parent = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert parent is not None
+    assert parent["status"] == "canceled"
+    assert parent["progress"]["could_not_cancel"] == 1
+
+
+def test_surface_neutral_run_cancellation_uses_the_scoped_process_group(monkeypatch):
+    from services.runs import cancellation
+
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(cancellation, "pid_for_session", lambda *_args: 4321)
+    monkeypatch.setattr(
+        cancellation,
+        "ensure_scanner_process_group_current",
+        lambda run_id, pid, *_args, **_kwargs: calls.append((run_id, pid)),
+    )
+    monkeypatch.setattr(
+        cancellation,
+        "signal_process_group",
+        lambda pid, **_kwargs: calls.append(("signal", pid)),
+    )
+    monkeypatch.setattr(
+        cancellation,
+        "publish_run_event",
+        lambda run_id, event, payload: calls.append((event, (run_id, payload))),
+    )
+
+    assert cancellation.request_active_run_cancellation("run-scoped", "owner") is True
+    assert calls == [
+        ("run-scoped", 4321),
+        ("signal", 4321),
+        ("killed", ("run-scoped", {"coordinator": "assessment_batch"})),
+    ]

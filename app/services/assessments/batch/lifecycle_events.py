@@ -26,13 +26,13 @@ def _item(conn: Any, row: Any) -> Any:
     return item
 
 
-def _event_identity(conn: Any, row: Any) -> tuple[int, int]:
+def batch_child_event_identity(conn: Any, row: Any) -> tuple[int, int]:
     item_index = int(_item(conn, row)["item_index"])
     return item_index // BATCH_CHUNK_ITEM_LIMIT, item_index
 
 
 def record_batch_child_bound_on_conn(conn: Any, row: Any, run_id: str) -> None:
-    chunk_index, item_index = _event_identity(conn, row)
+    chunk_index, item_index = batch_child_event_identity(conn, row)
     append_batch_event_on_conn(
         conn,
         str(row["execution_id"]),
@@ -53,7 +53,7 @@ def record_batch_child_settled_on_conn(
     error_code: str,
     retry_child_id: str = "",
 ) -> None:
-    chunk_index, item_index = _event_identity(conn, row)
+    chunk_index, item_index = batch_child_event_identity(conn, row)
     event_type = "item_succeeded" if status == "succeeded" else "item_failed"
     append_batch_event_on_conn(
         conn,
@@ -78,8 +78,8 @@ def record_batch_child_settled_on_conn(
             details={"attempt": int(row["attempt"]) + 1},
         )
 
-
 __all__ = [
+    "batch_child_event_identity",
     "record_batch_child_bound_on_conn",
     "record_batch_child_settled_on_conn",
 ]
