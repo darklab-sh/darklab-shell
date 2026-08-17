@@ -8785,6 +8785,13 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
 
         def request(self, method, path, *, params=None, body=None, **_kwargs):
             calls.append((method, path, params, body))
+            if path == "/projects" and method == "GET":
+                return {
+                    "projects": [{
+                        "id": "prj_cli", "slug": "assessment-project", "status": "active",
+                    }],
+                    "has_more": False,
+                }
             if path == "/projects/prj_cli/assessments" and method == "GET":
                 return {
                     "assessments": [assessment],
@@ -8857,17 +8864,20 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
     assert cli_main.main([
         "assessment",
         "list",
-        "prj_cli",
+        "assessment-project",
         "--status",
         "archived",
     ]) == 0
     assert "asmt_cli" in capsys.readouterr().out
-    assert calls[-1] == (
-        "GET",
-        "/projects/prj_cli/assessments",
-        {"limit": 50, "offset": 0, "status": "archived", "include_archived": True},
-        None,
-    )
+    assert calls[-2:] == [
+        ("GET", "/projects", {"limit": 100, "offset": 0}, None),
+        (
+            "GET",
+            "/projects/prj_cli/assessments",
+            {"limit": 50, "offset": 0, "status": "archived", "include_archived": True},
+            None,
+        ),
+    ]
 
     assert cli_main.main([
         "assessment",

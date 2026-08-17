@@ -6,14 +6,15 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any
 
 from ..client import DarklabClient, die
 from ..formatting import print_collection, print_payload, print_table
+from .assessment_formatting import print_assessment_action_plan
+from .project_references import resolve_active_project_id
 
 
 def handle_assessment(client: DarklabClient, args: argparse.Namespace) -> int:
-    base_path = f"/projects/{args.project_id}/assessments"
+    base_path = f"/projects/{resolve_active_project_id(client, args.project_id)}/assessments"
     match args.assessment_command:
         case "list":
             payload = client.request("GET", base_path, params={
@@ -100,20 +101,4 @@ def _start_action(client: DarklabClient, args: argparse.Namespace, base_path: st
         print_table([run], ("id", "status", "command"))
     return 0
 
-
-def print_assessment_action_plan(plan: dict[str, Any]) -> None:
-    raw_target = plan.get("target")
-    raw_action = plan.get("action")
-    raw_http_profile = plan.get("http_profile")
-    target = raw_target if isinstance(raw_target, dict) else {}
-    action = raw_action if isinstance(raw_action, dict) else {}
-    http_profile = raw_http_profile if isinstance(raw_http_profile, dict) else {}
-    print_table([{
-        "action": action.get("key") or "", "policy": plan.get("policy_level") or "",
-        "target": f"{target.get('type') or ''}:{target.get('value') or ''}",
-        "http_profile": http_profile.get("name") or "None",
-        "launchable": bool(plan.get("launchable")), "command": plan.get("display_command") or "",
-    }], ("action", "policy", "target", "http_profile", "launchable", "command"))
-
-
-__all__ = ["handle_assessment", "print_assessment_action_plan"]
+__all__ = ["handle_assessment"]

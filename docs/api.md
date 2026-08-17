@@ -509,21 +509,21 @@ The response uses `observations`, `total`, `limit`, `offset`, and `has_more`. `l
 
 Across these routes, lifecycle conflicts and quota failures return `409`; invalid profiles, filters, states, transitions, or evidence return `400`; cross-scope records return `404`; team permission failures return `403`; and rate limits return `429`. Responses and the OpenAPI contract omit personal session ids, profile file paths, secrets, protected HTTP context, private workspace paths, and stored command variables.
 
-The bundled CLI exposes the same read and manual-state contract:
+The bundled CLI exposes the same read and manual-state contract. Each Assessment command accepts either an active Project slug or its stable `prj_...` id:
 
 ```bash
-darklab assessment list prj_123 --status active
-darklab assessment show prj_123 asmt_123
-darklab assessment checks prj_123 asmt_123 --state not_started --policy-level safe
-darklab assessment set-state prj_123 asmt_123 asmc_123 blocked --reason "Waiting for authorization"
-darklab assessment clear-state prj_123 asmt_123 asmc_123
-darklab assessment start-action prj_123 asmt_123 asmc_123
-darklab assessment start-action prj_123 asmt_123 asmc_123 --confirm
-darklab assessment start-action prj_123 asmt_123 asmc_123 \
+darklab assessment list darklab-sh --status active
+darklab assessment show darklab-sh asmt_123
+darklab assessment checks darklab-sh asmt_123 --state not_started --policy-level safe
+darklab assessment set-state darklab-sh asmt_123 asmc_123 blocked --reason "Waiting for authorization"
+darklab assessment clear-state darklab-sh asmt_123 asmc_123
+darklab assessment start-action darklab-sh asmt_123 asmc_123
+darklab assessment start-action darklab-sh asmt_123 asmc_123 --confirm
+darklab assessment start-action darklab-sh asmt_123 asmc_123 \
   --http-profile-id htp_123 --confirm
-darklab assessment start-action prj_123 asmt_123 asmc_123 \
+darklab assessment start-action darklab-sh asmt_123 asmc_123 \
   --source-run-id run_123 --parameter-observation-id dpx_123 --confirm
-darklab assessment start-action prj_123 asmt_123 asmc_123 \
+darklab assessment start-action darklab-sh asmt_123 asmc_123 \
   --schema-artifact-id art_123 --confirm
 ```
 
@@ -859,12 +859,12 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. `--limit` defaults to 50 and caps at 100. |
-| `darklab assessment list <project_id> [--status active\|completed\|archived] [--include-archived] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Project assessment cycles. `--limit` defaults to 50 and caps at 200. |
-| `darklab assessment show <project_id> <assessment_id> [--format text\|json]` | Show one cycle with its coverage rollup. JSON output retains the full detail response, including the first bounded check page. |
-| `darklab assessment checks <project_id> <assessment_id> [--category NAME] [--state STATE] [--target-type TYPE] [--policy-level LEVEL] [--evidence-state available\|unavailable\|none] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page and filter checks for one cycle. `--limit` defaults to 50 and caps at 200. |
-| `darklab assessment set-state <project_id> <assessment_id> <check_id> blocked\|skipped\|not_applicable --reason TEXT [--format text\|json]` | Save a reasoned manual decision on an active check. |
-| `darklab assessment clear-state <project_id> <assessment_id> <check_id> [--format text\|json]` | Clear a manual decision and restore the check's evidence-derived state. |
-| `darklab assessment start-action <project_id> <assessment_id> <check_id> [--http-profile-id ID] [--source-run-id ID] [--parameter-observation-id ID] [--schema-artifact-id ID] [--confirm] [--workspace-cwd PATH] [--format text\|json]` | Preview the saved check's recommended action. Add `--confirm` to start the freshly revalidated bounded action and link its run to the Project. The optional ids select a protected HTTP profile, reviewed Dalfox observation, or saved Schemathesis schema when that check requires one. |
+| `darklab assessment list <project-slug-or-id> [--status active\|completed\|archived] [--include-archived] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Project assessment cycles. `--limit` defaults to 50 and caps at 200. |
+| `darklab assessment show <project-slug-or-id> <assessment_id> [--format text\|json]` | Show one cycle with its coverage rollup. JSON output retains the full detail response, including the first bounded check page. |
+| `darklab assessment checks <project-slug-or-id> <assessment_id> [--category NAME] [--state STATE] [--target-type TYPE] [--policy-level LEVEL] [--evidence-state available\|unavailable\|none] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page and filter checks for one cycle. `--limit` defaults to 50 and caps at 200. |
+| `darklab assessment set-state <project-slug-or-id> <assessment_id> <check_id> blocked\|skipped\|not_applicable --reason TEXT [--format text\|json]` | Save a reasoned manual decision on an active check. |
+| `darklab assessment clear-state <project-slug-or-id> <assessment_id> <check_id> [--format text\|json]` | Clear a manual decision and restore the check's evidence-derived state. |
+| `darklab assessment start-action <project-slug-or-id> <assessment_id> <check_id> [--http-profile-id ID] [--source-run-id ID] [--parameter-observation-id ID] [--schema-artifact-id ID] [--confirm] [--workspace-cwd PATH] [--format text\|json]` | Preview the saved check's recommended action. Add `--confirm` to start the freshly revalidated bounded action and link its run to the Project. The optional ids select a protected HTTP profile, reviewed Dalfox observation, or saved Schemathesis schema when that check requires one. |
 | `darklab team list\|status [--format text\|json]` | List joined teams or show the active CLI scope. |
 | `darklab team create <name> [--slug SLUG] [--display-name NAME] [--format text\|json]` | Create a team and print the one-time recovery code. |
 | `darklab team switch <team-id\|slug\|name\|personal>` | Save the active CLI team scope, or clear it with `personal`. |

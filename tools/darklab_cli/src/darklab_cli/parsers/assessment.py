@@ -23,7 +23,7 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     commands = assessment.add_subparsers(dest="assessment_command", required=True)
 
     listing = commands.add_parser("list", help="List assessment cycles for one project.")
-    listing.add_argument("project_id")
+    listing.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     listing.add_argument("--status", choices=_STATUS_CHOICES)
     listing.add_argument("--include-archived", action="store_true")
     listing.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 200.")
@@ -31,12 +31,12 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     listing.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
     show = commands.add_parser("show", help="Show one assessment cycle and its coverage rollup.")
-    show.add_argument("project_id")
+    show.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     show.add_argument("assessment_id")
     show.add_argument("--format", choices=("text", "json"), default="text")
 
     checks = commands.add_parser("checks", help="List checks for one assessment cycle.")
-    checks.add_argument("project_id")
+    checks.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     checks.add_argument("assessment_id")
     checks.add_argument("--category")
     checks.add_argument("--state", choices=_CHECK_STATE_CHOICES)
@@ -48,7 +48,7 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     checks.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
     set_state = commands.add_parser("set-state", help="Set a reasoned manual state for one assessment check.")
-    set_state.add_argument("project_id")
+    set_state.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     set_state.add_argument("assessment_id")
     set_state.add_argument("check_id")
     set_state.add_argument("state", choices=_MANUAL_STATE_CHOICES)
@@ -58,7 +58,7 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     clear_state = commands.add_parser(
         "clear-state", help="Clear a manual check state and restore its evidence-derived state."
     )
-    clear_state.add_argument("project_id")
+    clear_state.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     clear_state.add_argument("assessment_id")
     clear_state.add_argument("check_id")
     clear_state.add_argument("--format", choices=("text", "json"), default="text")
@@ -66,7 +66,7 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     start_action = commands.add_parser(
         "start-action", help="Preview or explicitly start an Assessment check recommendation."
     )
-    start_action.add_argument("project_id")
+    start_action.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     start_action.add_argument("assessment_id")
     start_action.add_argument("check_id")
     start_action.add_argument("--http-profile-id")
