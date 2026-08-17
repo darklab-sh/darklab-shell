@@ -4877,6 +4877,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from services.atlas.materializer import materialize_run_entities
     from services.assessments.base_action_catalog import ACTIONS
     from services.assessments.probe_runtime import ProbePlanningRuntime
+    from services.assessments.batch.claim import claim_next_batch_item
     from services.assessments.batch.start import start_assessment_batch
     from services.assessments.coverage import reconcile_run_evidence_on_conn
     from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
@@ -5017,6 +5018,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         plan_digest=batch_preview["plan_digest"],
         confirmed=True,
     )
+    claimed_batch_item = claim_next_batch_item(str(started_batch["batch_id"]))
     api_batch_preview_resp = client.get(
         f"/api/v1/assessment-batch-previews/{batch_preview['preview_id']}",
         headers=api_headers,
@@ -5228,6 +5230,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert batch_preview["selected_item_count"] >= 1
     assert started_batch["item_count"] == batch_preview["selected_item_count"]
     assert replayed_batch["batch_id"] == started_batch["batch_id"]
+    assert claimed_batch_item["status"] == "claimed"
+    assert claimed_batch_item["item"]["display_command"]
     assert json.loads(api_batch_preview_resp.data)["preview"] == batch_preview
     api_batch_items = json.loads(api_batch_items_resp.data)
     assert len(api_batch_items["items"]) == batch_preview["candidate_item_count"]

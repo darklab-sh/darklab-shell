@@ -660,6 +660,8 @@ Assessment-batch previews stream one active cycle's frozen checks through explic
 
 Confirmed start rebuilds that preview from its stored selection and current cycle state, compares the complete digest, and requires a separate confirmation when standard work is selected. One transaction claims the preview and copies the exact selected public plans and frozen-check mappings into the immutable coordinator snapshot alongside its chunk children. A copy or count mismatch rolls the whole transaction back. A matching retry returns the already-created batch before checking preview expiry or current cycle state, while concurrent starts serialize on the owner and preview claim so they can't create duplicate work. No command starts until the coordinator later claims an item.
 
+The assessment claim adapter takes the next pending ordinal through the shared fan-out claim transition without using workflow template expansion. Before that transition, one short serialized transaction enforces the saved batch limit, the most restrictive active owner and instance limits, and one active item per exact target. A busy target doesn't block unrelated work later in the stable pending order, and the deferred item never changes identity. The same transaction activates the current chunk, advances the authoritative checkpoint, and appends the sanitized parent, chunk, and item events. A claim alone never creates a run.
+
 ### Project Routes
 
 | Method | Endpoint | Description |

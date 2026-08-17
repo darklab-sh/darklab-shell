@@ -33,7 +33,8 @@ def _begin_locked(conn: Any) -> str:
 def _context(conn: Any, child_id: str, lock_sql: str) -> Any:
     return conn.execute(
         "SELECT c.*, s.status AS parent_status, s.started AS parent_started, "
-        "s.fanout_checkpoint, e.status AS execution_status, e.definition_snapshot "
+        "s.fanout_checkpoint, e.status AS execution_status, e.execution_kind, "
+        "e.definition_snapshot "
         "FROM workflow_execution_children c "
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
         "AND s.step_id = c.step_id "
@@ -138,7 +139,7 @@ def finalize_empty_fanout_parent(
         row = conn.execute(
             "SELECT s.execution_id, s.step_id, s.status AS parent_status, "
             "s.started AS parent_started, s.fanout_checkpoint, "
-            "e.status AS execution_status, e.definition_snapshot "
+            "e.status AS execution_status, e.execution_kind, e.definition_snapshot "
             "FROM workflow_execution_steps s "
             "JOIN workflow_executions e ON e.id = s.execution_id "
             "WHERE s.execution_id = ? AND s.step_id = ?" + lock_sql,  # nosec

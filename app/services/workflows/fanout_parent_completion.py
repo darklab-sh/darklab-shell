@@ -41,7 +41,7 @@ def finalize_fanout_parent_on_conn(
     """Finalize a parent step once no child ordinal remains unfinished."""
     if checkpoint.pending or checkpoint.running or checkpoint.cancelled:
         return None
-    policy = fanout_policy_for_row(row)
+    policy = fanout_policy_for_row(conn, row)
     failure_limit_reached = bool(checkpoint.failed) and len(checkpoint.failed) >= policy.max_failures
     exit_code = 1 if failure_limit_reached else 0
     definition = row["definition_snapshot"]

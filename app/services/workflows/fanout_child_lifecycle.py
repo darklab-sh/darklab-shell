@@ -11,7 +11,8 @@ from typing import Any
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
-from services.workflows.fanout_child_failures import fanout_policy_for_row, resolve_failed_fanout_child
+from services.workflows.fanout_child_claim import claim_fanout_child
+from services.workflows.fanout_child_failures import resolve_failed_fanout_child
 from services.workflows.fanout_checkpoint import FanoutCheckpoint, checkpoint_from_payload
 from services.workflows.fanout_parent_completion import finalize_fanout_parent_on_conn
 
@@ -52,7 +53,7 @@ def _context_for_child(
     query = (
         "SELECT c.*, s.status AS parent_status, s.started AS parent_started, "  # nosec
         "s.fanout_checkpoint, "
-        "e.status AS execution_status, e.definition_snapshot "
+        "e.status AS execution_status, e.execution_kind, e.definition_snapshot "
         "FROM workflow_execution_children c "
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
         "AND s.step_id = c.step_id "
@@ -87,51 +88,6 @@ def _save_checkpoint(conn: Any, row: Any, checkpoint: FanoutCheckpoint) -> None:
             str(row["step_id"]),
         ),
     )
-
-
-def claim_fanout_child(
-    execution_id: str,
-    step_id: str,
-    ordinal: int,
-    *,
-    attempt: int = 1,
-) -> dict[str, object] | None:
-    """Claim one pending child and checkpoint its ordinal as running."""
-    child_ordinal = _bounded_number(ordinal, "ordinal", 0, 31)
-    child_attempt = _bounded_number(attempt, "attempt", 1, 4)
-    with get_db_connect()() as conn:
-        lock_sql = _begin_locked(conn)
-        row = _context_for_child(
-            conn,
-            "c.execution_id = ? AND c.step_id = ? AND c.ordinal = ? AND c.attempt = ?",
-            (execution_id, step_id, child_ordinal, child_attempt),
-            lock_sql,
-        )
-        if not _active_context(row) or str(row["status"] or "") != "pending":
-            conn.rollback()
-            return None
-        checkpoint = _checkpoint_from_row(row)
-        if child_ordinal not in checkpoint.pending:
-            conn.rollback()
-            return None
-        if len(checkpoint.running) >= fanout_policy_for_row(row).max_parallel:
-            conn.rollback()
-            return None
-        changed = conn.execute(
-            "UPDATE workflow_execution_children SET status = 'launching', started = ? "
-            "WHERE id = ? AND status = 'pending'",
-            (_now(), str(row["id"])),
-        )
-        if changed.rowcount != 1:
-            conn.rollback()
-            return None
-        _save_checkpoint(conn, row, checkpoint.mark_running([child_ordinal]))
-        updated = conn.execute(
-            "SELECT * FROM workflow_execution_children WHERE id = ?",
-            (str(row["id"]),),
-        ).fetchone()
-        conn.commit()
-    return _child_from_row(updated) if updated else None
 
 
 def bind_fanout_child_run(child_id: str, run_id: str) -> bool:
@@ -261,3 +217,11 @@ def reset_launching_fanout_child_for_recovery(child_id: str) -> bool:
             _save_checkpoint(conn, row, checkpoint.reset_running([ordinal]))
         conn.commit()
     return changed.rowcount == 1
+
+
+__all__ = [
+    "bind_fanout_child_run",
+    "claim_fanout_child",
+    "finalize_fanout_child_run",
+    "reset_launching_fanout_child_for_recovery",
+]
