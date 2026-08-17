@@ -5294,7 +5294,7 @@ def test_probe_launch_confirmation_uses_postgres_query_path(
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(
-        "services.assessments.probe_service.resolve_runtime_command",
+        "services.assessments.probe_runtime.resolve_runtime_command",
         lambda action_id: action_id if action_id in {"httpx", "ping"} else None,
     )
     monkeypatch.setattr(http_profile_runtime, "_scanner_user_exists", lambda: False)

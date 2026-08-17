@@ -7253,11 +7253,11 @@ def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
         "ready", "v10.4.3", "sha256:" + "a" * 64, 12,
     )
     monkeypatch.setattr(
-        "services.assessments.probe_service.managed_nuclei_template_snapshot",
+        "services.assessments.probe_runtime.managed_nuclei_template_snapshot",
         lambda: snapshot,
     )
     monkeypatch.setattr(
-        "services.assessments.probe_service.resolve_runtime_command",
+        "services.assessments.probe_runtime.resolve_runtime_command",
         lambda command: f"/usr/bin/{command}",
     )
     headers = _headers(token)
@@ -7288,7 +7288,7 @@ def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
         },
     ).get_json()
     monkeypatch.setattr(
-        "services.assessments.probe_service.resolve_runtime_command",
+        "services.assessments.probe_runtime.resolve_runtime_command",
         lambda _command: "",
     )
     unavailable = client.post(

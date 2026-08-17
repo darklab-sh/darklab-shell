@@ -31,11 +31,11 @@ def client():
 @pytest.fixture(autouse=True)
 def _probe_runtime(monkeypatch):
     monkeypatch.setattr(
-        "services.assessments.probe_service.resolve_runtime_command",
+        "services.assessments.probe_runtime.resolve_runtime_command",
         lambda command: f"/usr/bin/{command}",
     )
     monkeypatch.setattr(
-        "services.assessments.probe_service.managed_nuclei_template_snapshot",
+        "services.assessments.probe_runtime.managed_nuclei_template_snapshot",
         lambda: NucleiTemplateCacheSnapshot(
             "ready", "v10.4.3", "sha256:" + "a" * 64, 12,
         ),
@@ -1136,7 +1136,7 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
     base_url,
     allowed_host,
 ):
-    from services.assessments import probe_service
+    from services.assessments import probe_runtime
 
     token = "tok_" + uuid.uuid4().hex
     _register_token(token)
@@ -1177,7 +1177,7 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
     assert "PROBE_HTTP_TOKEN" not in rendered
 
     monkeypatch.setitem(
-        probe_service.app_config.CFG,
+        probe_runtime.app_config.CFG,
         "assessment_intrusive_actions_enabled",
         True,
     )
