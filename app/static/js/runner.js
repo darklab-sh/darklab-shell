@@ -2596,7 +2596,11 @@ function _setPendingTerminalConfirm(config, tabId = '') {
   if (!promptTabId) throw new Error('Terminal confirmations require an origin tab');
   if (config) {
     if (_pendingTerminalConfirms.has(promptTabId)) {
-      throw new Error('This tab already has a pending terminal confirmation');
+      const error = new Error(
+        'Finish or cancel the pending confirmation in this tab before starting another probe.',
+      );
+      error.name = 'TerminalConfirmationPendingError';
+      throw error;
     }
     const pending = { ...config, tabId: promptTabId };
     _pendingTerminalConfirms.set(promptTabId, pending);
@@ -4187,28 +4191,23 @@ function submitCommand(rawCmd) {
   }
 
   if (String(cmd || '').trim().toLowerCase().split(/\s+/, 1)[0] === 'probe') {
-    if (typeof _runnerHandleProbeTerminalCommandAdapter === 'function') {
-      void _runBufferedBrowserCommandWithOptionalPipe(
-        cmd,
-        _runnerActiveTabId(),
-        (baseCommand, execution) => (
-          _runnerHandleProbeTerminalCommandAdapter(
-            baseCommand,
-            _runnerActiveTabId(),
-            execution,
-            {
-              requestConfirmation: config => _setPendingTerminalConfirm(config),
-              bindStartedRun: (launched, tabId) => _bindStartedProbeRun(launched, tabId),
-              workspaceCwd: _runnerWorkspaceCwdAdapter(_runnerActiveTabId()),
-            },
-          )
-        ),
-      );
-      return true;
-    }
-    appendCommandEcho(cmd);
-    appendLine('[error] probe command is not ready — reload the page and try again', 'exit-fail', _runnerActiveTabId());
-    setStatus('fail');
+    void _runBufferedBrowserCommandWithOptionalPipe(
+      cmd,
+      _runnerActiveTabId(),
+      (baseCommand, execution) => (
+        _runnerHandleProbeTerminalCommandAdapter(
+          baseCommand,
+          _runnerActiveTabId(),
+          execution,
+          {
+            requestConfirmation: config => _setPendingTerminalConfirm(config),
+            hasPendingConfirmation: tabId => hasPendingTerminalConfirm(tabId),
+            bindStartedRun: (launched, tabId) => _bindStartedProbeRun(launched, tabId),
+            workspaceCwd: _runnerWorkspaceCwdAdapter(_runnerActiveTabId()),
+          },
+        )
+      ),
+    );
     return true;
   }
 

@@ -454,6 +454,45 @@ describe('Project probe terminal', () => {
       'tab-viewer',
     );
     expect(deniedExecution.setStatus).toHaveBeenCalledWith('fail');
+
+    const conflictExecution = execution();
+    const requestConfirmation = vi.fn();
+    const hasPendingConfirmation = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    const conflictFetch = vi.fn(async () => response({
+      plan: {
+        project_id: 'prj_1', action: { id: 'ping', label: 'Ping' },
+        target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' },
+        policy_level: 'safe', display_command: 'ping -c 4 example.test',
+        bounds: {}, expected_evidence: [], plan_digest: '9'.repeat(64),
+        availability: { available: true }, launchable: true,
+      },
+    }));
+    clientLog.mockClear();
+    setRuntimeHandlers({ apiFetch: conflictFetch });
+    await handleProbeTerminalCommand(
+      'probe run ping --entity-id ent_1 --project prj_1',
+      'tab-conflict',
+      conflictExecution,
+      { requestConfirmation, hasPendingConfirmation, bindStartedRun: vi.fn() },
+    );
+    expect(hasPendingConfirmation).toHaveBeenCalledTimes(2);
+    expect(conflictFetch).toHaveBeenCalledOnce();
+    expect(requestConfirmation).not.toHaveBeenCalled();
+    expect(conflictExecution.appendLine).toHaveBeenCalledWith(
+      '[probe] Finish or cancel the pending confirmation in this tab before starting another probe.',
+      'exit-fail',
+      'tab-conflict',
+    );
+    expect(clientLog).toHaveBeenCalledWith(
+      'PROJECT_PROBE_CLIENT_REQUEST_FAILED',
+      expect.objectContaining({ name: 'TerminalConfirmationPendingError' }),
+      expect.objectContaining({
+        level: 'warning', phase: 'plan', project_id: 'prj_1',
+        error_name: 'TerminalConfirmationPendingError',
+      }),
+    );
   });
 
   it('reports a confirmed launch failure with only bounded probe context', async () => {

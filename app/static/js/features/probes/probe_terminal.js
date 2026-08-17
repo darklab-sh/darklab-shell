@@ -17,6 +17,8 @@ const PROBE_CLIENT_FAILURE_EVENT = 'PROJECT_PROBE_CLIENT_REQUEST_FAILED';
 const PROBE_CLIENT_PHASES = new Set(['project', 'catalog', 'resolve', 'plan', 'launch']);
 const PROBE_PROJECT_ID_RE = /^prj_[A-Za-z0-9_-]{1,64}$/;
 const PROBE_ERROR_NAME_RE = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
+const PENDING_CONFIRMATION_ERROR_NAME = 'TerminalConfirmationPendingError';
+const PENDING_CONFIRMATION_MESSAGE = 'Finish or cancel the pending confirmation in this tab before starting another probe.';
 
 function _probeErrorStatus(error) {
   const status = Number(error?.status || error?.statusCode || 0);
@@ -32,7 +34,16 @@ function _probeNetworkDegraded(error) {
 }
 
 function _probeClientLogLevel(error) {
+  if (error?.name === PENDING_CONFIRMATION_ERROR_NAME) return 'warning';
   return _probeErrorStatus(error) || _probeNetworkDegraded(error) ? 'warning' : 'error';
+}
+
+function _assertProbeConfirmationAvailable(launchAdapter, tabId) {
+  if (launchAdapter.hasPendingConfirmation?.(tabId) !== true) return;
+  const error = new Error(PENDING_CONFIRMATION_MESSAGE);
+  error.name = PENDING_CONFIRMATION_ERROR_NAME;
+  error.probePhase = 'plan';
+  throw error;
 }
 
 function logProbeClientFailure(error, { phase = '', projectId = '' } = {}) {
@@ -386,7 +397,9 @@ async function handleProbeTerminalCommand(command, tabId, execution, launchAdapt
       ) {
         throw new Error('probe launch controls are not ready — reload the page and try again');
       }
+      _assertProbeConfirmationAvailable(launchAdapter, tabId);
       const plan = await _loadPlan(parsed);
+      _assertProbeConfirmationAvailable(launchAdapter, tabId);
       formatProbePlan(plan).forEach((line, index) => {
         append(line, index === 0 ? 'builtin-section' : 'builtin-help-row');
       });

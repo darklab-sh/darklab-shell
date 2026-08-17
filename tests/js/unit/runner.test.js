@@ -3607,9 +3607,18 @@ describe('per-tab terminal confirmations', () => {
     _setPendingTerminalConfirm({
       tabId: 'tab-1', execution: pendingExecution('tab-1'), onCancel: cancelOne,
     })
-    expect(() => _setPendingTerminalConfirm({
-      tabId: 'tab-1', execution: pendingExecution('tab-1'), onCancel: vi.fn(),
-    })).toThrow('already has a pending terminal confirmation')
+    let confirmationError
+    try {
+      _setPendingTerminalConfirm({
+        tabId: 'tab-1', execution: pendingExecution('tab-1'), onCancel: vi.fn(),
+      })
+    } catch (error) {
+      confirmationError = error
+    }
+    expect(confirmationError).toMatchObject({
+      name: 'TerminalConfirmationPendingError',
+      message: 'Finish or cancel the pending confirmation in this tab before starting another probe.',
+    })
     _setPendingTerminalConfirm({
       tabId: 'tab-2', execution: pendingExecution('tab-2'), onCancel: cancelTwo,
     })
