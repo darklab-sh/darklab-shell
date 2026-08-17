@@ -396,8 +396,8 @@
       "hash": "c5bac9ec1de8739c1272771d9ad5333bfe7a2a534f1b0b697f6c25227390bf42"
     },
     "/static/js/features/preferences/notification_channels.js": {
-      "path": "/static/build/static-notification-channels.004cb305deeb.js",
-      "hash": "f895bfcadec7970fd10b9294dd7622f3d1097348f1a53a7f0a1eaaa253b4ab04"
+      "path": "/static/build/static-notification-channels.3e95b46a4d4f.js",
+      "hash": "af111d76ab10e70c9f2ea6c4dce70f7119acc4c53e818b7ec9c624abe5002db2"
     },
     "/static/js/features/preferences/secrets_panel.js": {
       "path": "/static/build/static-secrets-panel.362fbd8119e5.js",

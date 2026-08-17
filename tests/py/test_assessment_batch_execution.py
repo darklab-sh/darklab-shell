@@ -8,6 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -19,6 +20,7 @@ from services.assessments.batch.contracts import AssessmentBatchError, BatchConc
 from services.assessments.batch.events import list_batch_events
 from services.assessments.batch.execution import launch_assessment_batch
 from services.assessments.batch.finalization import finalize_assessment_batch_run
+from services.assessments.batch.notifications import enqueue_terminal_batch_summary
 from services.assessments.batch.recovery import (
     recover_assessment_batch,
     recover_assessment_batches,
@@ -28,6 +30,8 @@ from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.batch.storage import create_batch_parent
 from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.run_launch_context import AssessmentRunLaunchContext
+from services.notifications import channels_store
+from services.notifications.models import NotificationEvent
 from services.runs.start_contracts import BrokeredRunStartResult
 from services.workflows.child_launch_spec import ChildLaunchSpec
 from services.workflows.executions import finalize_workflow_run
@@ -273,6 +277,7 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
 
 def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypatch):
     batch = batch_builder()
+    _add_batch_notification_channels(batch)
     starts: list[str] = []
     monkeypatch.setattr(
         "services.assessments.batch.execution.build_batch_child_launch_spec",
@@ -301,6 +306,9 @@ def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypa
     assert events[-1]["event_type"] == "parent_status_changed"
     failed = next(event for event in events if event["event_type"] == "item_failed")
     assert failed["reason_code"] == "plan_changed"
+    summary = _batch_notification_events(batch)[0]["payload"]["summary_fields"]
+    assert summary["unavailable"] == 1
+    assert summary["succeeded"] == 0
 
 
 def test_batch_completion_advances_across_chunks_and_stays_out_of_workflows(
@@ -461,6 +469,106 @@ def test_run_finalization_can_suppress_only_the_child_notification(monkeypatch):
         save_completed_run_fn=lambda *_args, **_kwargs: None,
     )
     assert notifications == ["run-ordinary"]
+
+
+def _add_batch_notification_channels(batch: dict[str, str]) -> None:
+    with get_db_connect()() as conn:
+        for channel_id, trigger in (
+            ("ntc_batch_complete", "run_complete"),
+            ("ntc_batch_unrelated", "watcher_error"),
+        ):
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, team_id, kind, label, secrets_json, config_json, "
+                "triggers_json, muted, created, updated) "
+                "VALUES (?, ?, '', 'webhook', ?, '{}', '{}', ?, 0, ?, ?)",
+                (
+                    channel_id + batch["batch_id"],
+                    batch["session_id"],
+                    channel_id,
+                    f'["{trigger}"]',
+                    "2026-08-17 12:00:00",
+                    "2026-08-17 12:00:00",
+                ),
+            )
+        conn.commit()
+
+
+def _batch_notification_events(batch: dict[str, str]) -> list[dict[str, Any]]:
+    with get_db_connect()() as conn:
+        rows = conn.execute(
+            "SELECT id, session_token, team_id, channel_id, trigger, payload_json, "
+            "status, attempts, next_attempt_at, last_attempt_at, last_error, run_id, "
+            "created, dead_at FROM notification_events WHERE session_token = ?",
+            (batch["session_id"],),
+        ).fetchall()
+    return [
+        channels_store._serialize_event(NotificationEvent.from_row(row))  # noqa: SLF001
+        for row in rows
+    ]
+
+
+def test_terminal_batch_enqueues_one_bounded_preference_aware_summary(batch_builder):
+    batch = batch_builder()
+    _add_batch_notification_channels(batch)
+    _make_batch_child_active(batch, run_id="run-batch-notification")
+
+    settled = finalize_assessment_batch_run("run-batch-notification", 0)
+    duplicate = enqueue_terminal_batch_summary(batch["batch_id"])
+
+    assert settled is not None
+    assert duplicate
+    events = _batch_notification_events(batch)
+    assert len(events) == 1
+    event = events[0]
+    assert event["trigger"] == "run_complete"
+    assert event["run_id"] == ""
+    assert event["assessment_batch"] == {
+        "batch_id": batch["batch_id"],
+        "project_id": batch["project_id"],
+        "assessment_id": batch["assessment_id"],
+        "status": "completed",
+        "url": (
+            f"/projects/{batch['project_id']}/assessment-batches/{batch['batch_id']}"
+        ),
+    }
+    summary = event["payload"]["summary_fields"]
+    assert summary == {
+        "status": "completed",
+        "succeeded": 1,
+        "failed": 0,
+        "unavailable": 0,
+        "canceled": 0,
+        "could_not_cancel": 0,
+        "batch_link": (
+            f"/projects/{batch['project_id']}/assessment-batches/{batch['batch_id']}"
+        ),
+    }
+
+
+def test_terminal_batch_notification_failure_does_not_roll_back_completion(
+    batch_builder,
+    monkeypatch,
+    caplog,
+):
+    batch = batch_builder()
+    _make_batch_child_active(batch, run_id="run-batch-notification-failure")
+    monkeypatch.setattr(
+        "services.assessments.batch.notifications.dispatcher.enqueue",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("delivery store down")),
+    )
+
+    settled = finalize_assessment_batch_run("run-batch-notification-failure", 0)
+
+    assert settled is not None
+    parent = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert parent is not None and parent["status"] == "completed"
+    record = next(
+        item
+        for item in caplog.records
+        if item.getMessage() == "ASSESSMENT_BATCH_NOTIFICATION_ERROR"
+    )
+    assert record.batch_id == batch["batch_id"]
 
 
 def _make_batch_child_active(batch: dict[str, str], *, run_id: str) -> None:
@@ -919,6 +1027,7 @@ def test_runtime_bootstrap_runs_batch_recovery_after_workflow_recovery(monkeypat
 
 def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_builder):
     batch = batch_builder(2, parallel=2)
+    _add_batch_notification_channels(batch)
     signaled: list[str] = []
 
     first = cancel_assessment_batch(
@@ -943,6 +1052,9 @@ def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_b
         "canceling",
         "canceled",
     ]
+    deliveries = _batch_notification_events(batch)
+    assert len(deliveries) == 1
+    assert deliveries[0]["assessment_batch"]["status"] == "canceled"
 
 
 def test_running_batch_cancellation_waits_for_the_bound_run_without_retry(batch_builder):

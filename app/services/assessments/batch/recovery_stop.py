@@ -19,6 +19,7 @@ from services.assessments.batch.events import append_batch_event_on_conn
 from services.assessments.batch.lifecycle_events import (
     record_batch_child_settled_on_conn,
 )
+from services.assessments.batch.notifications import enqueue_terminal_batch_summary
 from services.runs.cancellation import request_active_run_cancellation
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 from services.workflows.fanout_checkpoint import FanoutCheckpoint
@@ -290,6 +291,8 @@ def stop_assessment_batch_for_recovery(
             team_id=str(parent["team_id"] or ""),
             cancel_run_fn=cancel_run_fn,
         )
+    if result.get("status") == "failed":
+        enqueue_terminal_batch_summary(str(batch_id))
     return result
 
 

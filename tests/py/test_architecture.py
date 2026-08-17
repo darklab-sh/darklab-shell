@@ -1054,6 +1054,9 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/batch/lifecycle_events.py", 82, "split-package-ratchet"
     ),
     ModuleSizeBudget(
+        "app/services/assessments/batch/notifications.py", 140, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/batch/lifecycle_guard.py",
         143,
         "split-package-ratchet",

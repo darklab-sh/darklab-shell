@@ -4879,6 +4879,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from services.assessments.base_action_catalog import ACTIONS
     from services.assessments.probe_runtime import ProbePlanningRuntime
     from services.assessments.batch.claim import claim_next_batch_item
+    from services.assessments.batch.notifications import enqueue_terminal_batch_summary
     from services.assessments.batch.retention import prune_terminal_assessment_batches
     from services.assessments.batch.start import start_assessment_batch
     from services.assessments.coverage import reconcile_run_evidence_on_conn
@@ -5047,7 +5048,26 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         "UPDATE workflow_executions SET status = 'failed' WHERE id = %s",
         (started_batch["batch_id"],),
     )
+    conn.execute(
+        "INSERT INTO notification_channels "
+        "(id, session_token, team_id, kind, label, secrets_json, config_json, "
+        "triggers_json, muted, created, updated) VALUES "
+        "('ntc_postgres_batch', %s, '', 'webhook', 'Assessment batch', "
+        "'{}'::jsonb, '{}'::jsonb, '[\"run_complete\"]'::jsonb, false, %s, %s)",
+        (session_id, "2026-08-17 12:00:00", "2026-08-17 12:00:00"),
+    )
     conn.commit()
+    postgres_batch_notification = enqueue_terminal_batch_summary(
+        str(started_batch["batch_id"])
+    )
+    replayed_postgres_batch_notification = enqueue_terminal_batch_summary(
+        str(started_batch["batch_id"])
+    )
+    postgres_batch_notification_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM notification_events "
+        "WHERE channel_id = 'ntc_postgres_batch' AND run_id = %s",
+        (started_batch["batch_id"],),
+    ).fetchone()["n"]
     retry_preview_resp = client.post(
         f"/api/v1/projects/{project['id']}/assessment-batches/"
         f"{started_batch['batch_id']}/retry-previews",
@@ -5299,6 +5319,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert replayed_batch["batch_id"] == started_batch["batch_id"]
     assert claimed_batch_item["status"] == "claimed"
     assert claimed_batch_item["item"]["display_command"]
+    assert postgres_batch_notification == replayed_postgres_batch_notification
+    assert int(postgres_batch_notification_count) == 1
     assert retry_preview_resp.status_code == 201
     assert retry_preview["source_batch_id"] == started_batch["batch_id"]
     assert 1 <= retry_preview["selected_item_count"] <= started_batch["item_count"]

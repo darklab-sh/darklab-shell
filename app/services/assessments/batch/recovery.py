@@ -19,6 +19,7 @@ from services.assessments.batch.cancellation_settlement import (
     finalize_canceling_batch_run,
 )
 from services.assessments.batch.finalization import finalize_assessment_batch_run
+from services.assessments.batch.notifications import enqueue_terminal_batch_summary
 from services.assessments.batch.recovery_snapshot import (
     BatchRecoverySnapshotError,
     load_batch_recovery_snapshot,
@@ -179,6 +180,8 @@ def _recover_runnable(
         execution_kind=ASSESSMENT_BATCH_EXECUTION_KIND,
     )
     if not current or str(current.get("status") or "") not in storage.ACTIVE_EXECUTION_STATUSES:
+        if current:
+            enqueue_terminal_batch_summary(batch_id)
         return "recovered" if recovered else "ignored"
     launched = launch_assessment_batch(batch_id)
     if int(launched.get("launched") or 0):

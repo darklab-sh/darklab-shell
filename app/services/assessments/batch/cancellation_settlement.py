@@ -24,6 +24,7 @@ from services.assessments.batch.events import append_batch_event_on_conn
 from services.assessments.batch.lifecycle_events import (
     record_batch_child_settled_on_conn,
 )
+from services.assessments.batch.notifications import enqueue_terminal_batch_summary
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 from services.workflows.fanout_checkpoint import checkpoint_from_payload
 
@@ -138,12 +139,14 @@ def finalize_canceling_batch_run(
                 reason_code=chunk_reason,
                 created=finished,
             )
-        terminalize_batch_cancellation_on_conn(
+        terminalized = terminalize_batch_cancellation_on_conn(
             conn,
             str(row["execution_id"]),
             finished=finished,
         )
         conn.commit()
+    if terminalized:
+        enqueue_terminal_batch_summary(str(row["execution_id"]))
     return {
         "execution_id": str(row["execution_id"]),
         "step_id": str(row["step_id"]),

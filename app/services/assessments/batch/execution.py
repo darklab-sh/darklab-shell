@@ -15,6 +15,7 @@ from services.assessments.batch.contracts import (
     BATCH_MAX_ATTEMPTS,
 )
 from services.assessments.batch.events import append_batch_event
+from services.assessments.batch.notifications import enqueue_terminal_batch_summary
 from services.assessments.batch.revalidation import build_batch_child_launch_spec
 from services.assessments.batch.recovery_stop import (
     stop_assessment_batch_for_recovery,
@@ -156,8 +157,11 @@ def launch_assessment_batch(batch_id: str) -> dict[str, object]:
             status_code=409,
         )
     refreshed = _execution(str(batch_id)) or {}
+    refreshed_status = str(refreshed.get("status") or "not_found")
+    if refreshed_status in {"completed", "failed", "canceled"}:
+        enqueue_terminal_batch_summary(str(batch_id))
     return {
-        "status": str(refreshed.get("status") or "not_found"),
+        "status": refreshed_status,
         "batch_id": str(batch_id),
         "launched": launched,
         "reason_code": reason_code,

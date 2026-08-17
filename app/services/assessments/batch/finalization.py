@@ -8,10 +8,9 @@ from __future__ import annotations
 import logging
 
 from core.helpers import get_log_session_id
-from services.assessments.batch.cancellation_settlement import (
-    finalize_canceling_batch_run,
-)
+from services.assessments.batch.cancellation_settlement import finalize_canceling_batch_run
 from services.assessments.batch.execution import launch_assessment_batch
+from services.assessments.batch.notifications import enqueue_terminal_batch_summary
 from services.workflows import storage
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 from services.workflows.fanout_child_lifecycle import finalize_fanout_child_run
@@ -21,10 +20,7 @@ from services.workflows.fanout_child_queries import fanout_child_for_run
 log = logging.getLogger("shell")
 
 
-def finalize_assessment_batch_run(
-    run_id: str,
-    exit_code: int,
-) -> dict[str, object] | None:
+def finalize_assessment_batch_run(run_id: str, exit_code: int) -> dict[str, object] | None:
     """Settle one saved child exactly once, then refill available launch slots."""
     child = fanout_child_for_run(run_id)
     if (
@@ -38,6 +34,9 @@ def finalize_assessment_batch_run(
     finalized = finalize_fanout_child_run(run_id, int(exit_code))
     if not finalized:
         return None
+    transition = finalized.get("parent_transition")
+    if isinstance(transition, dict) and transition.get("terminal"):
+        enqueue_terminal_batch_summary(str(child.get("execution_id") or ""))
     launch_assessment_batch(str(child.get("execution_id") or ""))
     return finalized
 
@@ -58,12 +57,14 @@ def finalize_assessment_batch_run_safely(
                 batch_id,
                 execution_kind=ASSESSMENT_BATCH_EXECUTION_KIND,
             ) or {}
-            storage.fail_execution(
+            failed = storage.fail_execution(
                 batch_id,
                 "finalization_hook_failed",
                 "The assessment batch couldn't advance after its run was saved.",
                 step_id=str(execution.get("current_step_id") or ""),
             )
+            if failed:
+                enqueue_terminal_batch_summary(batch_id)
         log.error(
             "ASSESSMENT_BATCH_FINALIZE_ERROR",
             exc_info=True,

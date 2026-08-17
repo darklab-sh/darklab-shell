@@ -26,6 +26,7 @@ from services.assessments.batch.cancellation_events import (
     record_batch_child_canceled_on_conn,
 )
 from services.assessments.batch.events import append_batch_event_on_conn
+from services.assessments.batch.notifications import enqueue_terminal_batch_summary
 from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.batch.claim_fairness import lock_batch_claim_gate
 from services.projects.scope import shared_owner_where
@@ -279,6 +280,7 @@ def cancel_assessment_batch(
         team_id=team_id,
         cancel_run_fn=cancel_run_fn,
     )
+    enqueue_terminal_batch_summary(batch_id)
     batch = get_batch_parent(session_id, batch_id, team_id=team_id)
     return {
         "batch": batch or {},
